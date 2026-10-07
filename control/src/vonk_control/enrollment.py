@@ -20,11 +20,15 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import EnrollmentGrantState
+from vonk_agent_protocol import (
+    CertificateCode,
+    EnrollmentGrantState,
+    InvalidRequestError,
+)
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, EnrollmentEvidence
 
 from .ca_issuance_contract import CertificateIssuanceBinding
@@ -60,10 +64,10 @@ class EnrollmentIssuanceUncertain(EnrollmentDenied):
     """Provider evidence is unknown; reconcile the durable exact request on retry."""
 
 
-class CertificateResponseCapacityRefused(RuntimeError):
+class CertificateResponseCapacityRefused(InvalidRequestError):
     """The provider refused representability before committing any certificate."""
 
-    reason_code = "certificate.response_unrepresentable"
+    reason_code = CertificateCode.RESPONSE_UNREPRESENTABLE
 
 
 class RemoteRevocationUncertain(EnrollmentDenied):
@@ -466,8 +470,7 @@ class EnrollmentService:
             grant = session.get(AgentEnrollmentGrant, accepted.grant_id)
             if grant is None or grant.revoked_at is not None:
                 raise EnrollmentDenied("enrollment grant is revoked or missing")
-            if _issuance_binding(accepted.provider_request) != claim.provider_request:
-                raise EnrollmentDenied("enrollment issuance binding changed")
+            _require_issuance_binding(accepted.provider_request, claim.provider_request)
             node = session.get(AgentNode, claim.node_id)
             if node is not None and (
                 node.state != "active" or node.revoked_at is not None
@@ -514,11 +517,9 @@ class EnrollmentService:
         try:
             with self._transaction() as session:
                 enrollment = _locked_enrollment(session, claim.enrollment_id)
-                if (
-                    _issuance_binding(enrollment.provider_request)
-                    != claim.provider_request
-                ):
-                    raise EnrollmentDenied("enrollment issuance binding changed")
+                _require_issuance_binding(
+                    enrollment.provider_request, claim.provider_request
+                )
                 if enrollment.state == "certificate_issued":
                     return _issued(enrollment)
                 if enrollment.state != "issuing":
@@ -595,11 +596,11 @@ class EnrollmentService:
             )
         if isinstance(claim, IssuedCertificate):
             return claim
-        if not claim.owner and claim.provider_request is None:
-            if claim.state == "manual-recovery":
-                raise RenewalIssuanceUncertain(
-                    "certificate rotation requires manual recovery"
-                )
+        if (
+            not claim.owner
+            and claim.provider_request is None
+            and claim.state != "manual-recovery"
+        ):
             raise RenewalInProgress("certificate rotation issuance is in progress")
         return self._issue_rotation_claim(claim, now)
 
@@ -1738,7 +1739,7 @@ def _stored_utc(value: datetime) -> datetime:
 
 
 def _issuance_binding(
-    value: dict[str, object] | None,
+    value: JsonValue | None,
 ) -> CertificateIssuanceBinding | None:
     if value is None:
         return None
@@ -1760,3 +1761,11 @@ def _validate_issued_binding(
         raise EnrollmentDenied(
             "certificate authority result differs from accepted issuance binding"
         )
+
+
+def _require_issuance_binding(
+    stored: JsonValue | None, expected: CertificateIssuanceBinding
+) -> None:
+    """The same exact accepted binding fences admission and result adoption."""
+    if _issuance_binding(stored) != expected:
+        raise EnrollmentDenied("enrollment issuance binding changed")

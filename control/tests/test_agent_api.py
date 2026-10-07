@@ -212,7 +212,7 @@ class Jobs:
         targets: Sequence[str],
         payload: Mapping[str, object],
         *,
-        request: CertificateIssuanceBinding,
+        request_id: str,
     ) -> object:
         raise AssertionError
 
@@ -2453,8 +2453,15 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
     client, services, _, _ = agent_system
     calls = 0
 
-    def fail_issue(*_args: object, **_kwargs: object) -> IssuedCertificate:
+    def fail_issue(
+        _node_id: str,
+        _csr: bytes,
+        _now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
+    ) -> IssuedCertificate:
         nonlocal calls
+        services.enrollment._authority._begin(request)
         calls += 1
         raise RuntimeError("provider response lost")
 
@@ -2593,15 +2600,20 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
+    with services.enrollment._sessions.begin() as session:
+        source = session.get(AgentCertificate, "serial-a")
+        assert source is not None
+        source.serial = "101"
+        source.fingerprint = "fingerprint-101"
     csr = _csr_for(NODE_A)
     first = client.post(
         "/agent/renew",
-        headers=agent_headers(NODE_A, "serial-a"),
+        headers=agent_headers(NODE_A, "101"),
         json={"node_id": NODE_A, "csr": csr.decode()},
     )
     replay = client.post(
         "/agent/renew",
-        headers=agent_headers(NODE_A, "serial-a"),
+        headers=agent_headers(NODE_A, "101"),
         json={"node_id": NODE_A, "csr": csr.decode()},
     )
     assert first.status_code == replay.status_code == 200
@@ -2653,14 +2665,12 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
         == 204
     )
     assert (
-        client.post(
-            "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
-        ).status_code
+        client.post("/agent/claim", headers=agent_headers(NODE_A, "101")).status_code
         == 401
     )
     assert client.post("/agent/claim", headers=staged_headers).status_code == 204
     with services.sessions() as session:
-        old = session.get(AgentCertificate, "serial-a")
+        old = session.get(AgentCertificate, "101")
         new = session.get(AgentCertificate, issued["serial"])
         assert old is not None and old.state == "revoked" and old.revoked_at is not None
         assert new is not None and new.state == "active" and new.revoked_at is None
@@ -2679,9 +2689,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         "a" * 64,
         STOP_PAYLOAD,
     )
-    claim = client.post(
-        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
-    ).json()
+    claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "101")).json()
     result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
         "result": {"status": "failed", "error_code": "stop_failed"},
@@ -2701,7 +2709,7 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         result["result"]["diagnostics"] = diagnostics
 
     response = client.post(
-        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
+        "/agent/result", headers=agent_headers(NODE_A, "101"), json=result
     )
 
     assert response.status_code == 204
@@ -2756,16 +2764,14 @@ def test_failed_result_error_code_obeys_the_shared_contract_rule(
         "a" * 64,
         STOP_PAYLOAD,
     )
-    claim = client.post(
-        "/agent/claim", headers=agent_headers(NODE_A, "serial-a")
-    ).json()
+    claim = client.post("/agent/claim", headers=agent_headers(NODE_A, "101")).json()
     result = {key: claim[key] for key in ("fence",)} | {
         "state": "failed",
         "result": failure,
     }
 
     response = client.post(
-        "/agent/result", headers=agent_headers(NODE_A, "serial-a"), json=result
+        "/agent/result", headers=agent_headers(NODE_A, "101"), json=result
     )
 
     assert response.status_code == expected_status

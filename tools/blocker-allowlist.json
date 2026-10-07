@@ -58,7 +58,7 @@
   "max_debt": 0,
   "debt_ceiling": {
     "total": 59,
-    "unaudited": 241,
+    "unaudited": 240,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
@@ -1233,8 +1233,7 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
       "sites": [
-        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1],
-        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._renew_locked", "certificate-rotation-issuance-is-in-progress", 1]
+        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1]
       ]
     },
     {
@@ -1252,7 +1251,6 @@
         ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._issue_rotation_claim", "certificate-rotation-is-uncertain-retry-exact-request-obser", 1],
         ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._issue_rotation_claim", "historical-certificate-rotation-has-no-exact-journal-binding", 1],
         ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._prepare_rotation_recovery", "certificate-rotation-requires-manual-recovery", 1],
-        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._renew_locked", "certificate-rotation-requires-manual-recovery", 1],
         ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._revoke_denied_rotation", "issued-certificate-is-denied-locally-remote-revocation-requ", 1]
       ]
     },
@@ -1261,10 +1259,6 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
       "sites": [
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._activate_locked", "certificate-generation-does-not-match", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._activate_locked", "certificate-is-not-staged-for-activation", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._activate_locked", "certificate-serial-does-not-identify-node", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._activate_locked", "node-identity-is-retired-or-revoked", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-in-progress", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-staged", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-active", 1],
@@ -1276,7 +1270,6 @@
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-generation-was-not-persisted", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-issuance-state-changed-manual-recovery-required", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "enrollment-issuance-binding-changed", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-already-exists", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-is-retired-or-revoked", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_rotation_claim", "node-identity-retired-during-certificate-rotation-issued-ce", 1],
@@ -3653,6 +3646,52 @@
       "reason": "Exact CA issue/observe pending is handed to the same binding through EnrollmentService._issue_enrollment_claim and _issue_rotation_claim. The provider never synthesizes another request; pending rotation is HTTP503 so the authenticated agent retries its persisted CSR, and the CA epoch fence decides whether issuance can resume. Connected lost-response and SQL-persistence recovery tests preserve the same serial and request identity.",
       "sites": [
         ["control/src/vonk_control/step_ca.py", "StepCAIssuancePending", "StepCertificateAuthority._sign", "certificate.issuance_in_progress", 1]
+      ]
+    },
+    {
+      "family": "enrollment.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
+      "sites": [
+        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService.renew", "certificate-rotation-issuance-is-in-progress", 1]
+      ]
+    },
+    {
+      "family": "enrollment.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CertificateResponseCapacityRefused is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/enrollment.py", "CertificateResponseCapacityRefused", "EnrollmentService._issue_enrollment_claim", "certificate-response-exceeds-the-supported-wire-budget", 1],
+        ["control/src/vonk_control/enrollment.py", "CertificateResponseCapacityRefused", "EnrollmentService._issue_rotation_claim", "certificate-response-exceeds-the-supported-wire-budget", 1]
+      ]
+    },
+    {
+      "family": "enrollment.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
+      "sites": [
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-generation-does-not-match", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-is-not-staged-for-activation", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-serial-does-not-identify-node", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "node-identity-is-retired-or-revoked", 1]
+      ]
+    },
+    {
+      "family": "step_ca.input-validation",
+      "category": "input-validation",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class StepCAResponseCapacityRefused is of the input-validation error type.",
+      "sites": [
+        ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "configured-ca-sign-response-reader-cannot-accept-the", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "issued-response-cannot-fit", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "issued-response-metadata-cannot-fit-the-enrollment-contract", 1]
+      ]
+    },
+    {
+      "family": "enrollment.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
+      "sites": [
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_require_issuance_binding", "enrollment-issuance-binding-changed", 1]
       ]
     }
   ]

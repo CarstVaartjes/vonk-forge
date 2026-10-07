@@ -126,6 +126,10 @@ def test_production_and_development_render_the_same_resolved_runtime_model(
             "ghcr.io/carstvaartjes/vonk-forge-worker:dev": "ghcr.io/carstvaartjes/vonk-forge-worker:latest",
             "ghcr.io/carstvaartjes/vonk-forge-hermes:dev": "ghcr.io/carstvaartjes/vonk-forge-hermes:latest",
             "ghcr.io/carstvaartjes/vonk-forge-litellm:dev": "ghcr.io/carstvaartjes/vonk-forge-litellm:latest",
+            "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-"
+            + "b" * 40
+            + "@sha256:"
+            + DIGEST: "ghcr.io/carstvaartjes/vonk-forge-ca:v1.2.3@sha256:" + "a" * 64,
         },
     )
 

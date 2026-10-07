@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare immutable Smallstep sources; compilation belongs to hosted CI."""
+"""Immutable Smallstep source verification for hosted compilation."""
 
 from __future__ import annotations
 

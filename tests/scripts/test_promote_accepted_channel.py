@@ -37,7 +37,7 @@ echo stable-authority >> "$LOG"
         scripts / "promote-image-aliases": """#!/usr/bin/env bash
 echo "aliases:$5" >> "$LOG"
 [[ $5 == "$EXPECTED_ALIAS" ]]
-shift 9
+shift 11
 [[ $1 == --commit ]]
 shift
 "$@"

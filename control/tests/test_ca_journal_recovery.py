@@ -28,7 +28,7 @@ from vonk_control.models import (
 from vonk_control.step_ca import StepCAError
 
 from .test_enrollment import csr, evidence
-from .test_step_ca import NODE_ID, NOW, _provider, _success_response
+from .test_step_ca import NODE_ID, NOW, _Material, _provider, _success_response
 
 
 class StoredProvider:
@@ -41,7 +41,7 @@ class StoredProvider:
 
     def __init__(self, path: Path):
         self.path = path
-        self.material = None
+        self.material: _Material | None = None
         self.issue_calls = 0
         self.tokens: list[str] = []
         self.lose_response = False
@@ -69,6 +69,7 @@ class StoredProvider:
                 json={"state": "absent", "request": binding.model_dump(mode="json")},
             )
         self.issue_calls += 1
+        assert self.material is not None
         response = _success_response(request, self.material, [])
         stored = CertificateIssuedReply.model_validate(response.json())
         self.path.write_text(stored.model_dump_json())
@@ -99,6 +100,7 @@ def test_lost_enrollment_response_restarts_and_observes_identical_certificate(tm
         service.submit(grant.token, request, evidence(request))
     with sessions() as session:
         accepted = session.scalar(select(AgentEnrollment))
+        assert accepted is not None
         binding = CertificateIssuanceBinding.model_validate(accepted.provider_request)
         assert accepted.state == "issuing"
     restarted = EnrollmentService(sessions, provider, clock=clock)
@@ -157,8 +159,10 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
     with pytest.raises(RenewalIssuanceUncertain):
         service.renew(NODE_ID, source.serial, rotation_csr)
     with sessions() as session:
-        assert session.get(AgentCertificate, source.serial).state == "active"
+        certificate = session.get(AgentCertificate, source.serial)
+        assert certificate is not None and certificate.state == "active"
         accepted = session.get(AgentCertificateRotation, NODE_ID)
+        assert accepted is not None
         binding = CertificateIssuanceBinding.model_validate(accepted.provider_request)
     restarted = EnrollmentService(sessions, provider, clock=clock)
     issued = restarted.renew(NODE_ID, source.serial, rotation_csr)
@@ -166,8 +170,10 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
     assert issued.generation == 2
     assert transport.issue_calls == 2
     with sessions() as session:
-        assert session.get(AgentCertificate, source.serial).state == "active"
-        assert session.get(AgentCertificate, issued.serial).state == "staged"
+        certificate = session.get(AgentCertificate, source.serial)
+        assert certificate is not None and certificate.state == "active"
+        certificate = session.get(AgentCertificate, issued.serial)
+        assert certificate is not None and certificate.state == "staged"
 
 
 def test_historical_unbound_enrollment_remains_unknown_without_provider_effect(
@@ -182,6 +188,7 @@ def test_historical_unbound_enrollment_remains_unknown_without_provider_effect(
         service.submit(grant.token, request, evidence(request))
     with sessions.begin() as session:
         accepted = session.scalar(select(AgentEnrollment))
+        assert accepted is not None
         accepted.provider_request = None
     calls = len(transport.tokens)
     with pytest.raises(EnrollmentIssuanceUncertain, match="historical"):

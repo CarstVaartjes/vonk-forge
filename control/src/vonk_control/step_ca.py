@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 from pydantic import BaseModel, ConfigDict, ValidationError
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import CertificateCode, InvalidRequestError, canonical_message
 from vonk_agent_protocol.enrollment import (
     MAX_ENROLLMENT_RESPONSE_BYTES,
     IssuedCertificateResponse,
@@ -105,6 +105,14 @@ class StepCAError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.reason_code = reason_code
+
+
+class StepCAResponseCapacityRefused(InvalidRequestError, StepCAError):
+    """An owned representability policy refuses before issuance transport."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.reason_code = CertificateCode.RESPONSE_UNREPRESENTABLE
 
 
 class StepCAIssuancePending(StepCAError):
@@ -648,11 +656,10 @@ class StepCertificateAuthority(CertificateAuthority):
         # refuse before observe/issue HTTP rather than lose its committed reply.
         # Other endpoints (including CRL) retain their independent reader limit.
         if self._max_response_bytes < MAX_ENROLLMENT_RESPONSE_BYTES:
-            raise StepCAError(
+            raise StepCAResponseCapacityRefused(
                 "configured CA sign response reader cannot accept the "
                 f"{MAX_ENROLLMENT_RESPONSE_BYTES}-byte issuance contract "
                 f"(configured {self._max_response_bytes} bytes)",
-                reason_code="certificate.response_unrepresentable",
             )
         # The CA's committed reply includes each PEM twice (crt/ca and
         # certChain). A complete sign reply bounded to 64 KiB therefore spends
@@ -671,18 +678,16 @@ class StepCertificateAuthority(CertificateAuthority):
                 generation=request.generation,
             )
         except ValidationError as error:
-            raise StepCAError(
+            raise StepCAResponseCapacityRefused(
                 "issued response metadata cannot fit the enrollment contract",
-                reason_code="certificate.response_unrepresentable",
             ) from error
         maximum_response = (
             len(canonical_message(metadata)) - 2 + MAX_ENROLLMENT_RESPONSE_BYTES // 2
         )
         if maximum_response > MAX_ENROLLMENT_RESPONSE_BYTES:
-            raise StepCAError(
+            raise StepCAResponseCapacityRefused(
                 f"issued response cannot fit {MAX_ENROLLMENT_RESPONSE_BYTES} bytes "
                 f"(upper bound {maximum_response})",
-                reason_code="certificate.response_unrepresentable",
             )
 
     def _request(

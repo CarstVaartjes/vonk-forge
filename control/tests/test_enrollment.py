@@ -1537,7 +1537,10 @@ def test_enrollment_persistence_failure_stays_recoverable_without_reissuing(
     request = csr()
     grant = enrollment.create(NODE_ID, "admin", 600)
 
-    with pytest.raises(EnrollmentDenied, match="uncertain"):
+    with pytest.raises(
+        EnrollmentDenied,
+        match="certificate persistence failed; retry exact request observation",
+    ):
         enrollment.submit(grant.token, request, evidence(request))
 
     assert len(authority.calls) == 1
@@ -1566,6 +1569,7 @@ def test_historical_provider_failure_does_not_invent_journal_authority(
         enrollment.submit(grant.token, request, evidence(request))
     with sessions.begin() as session:
         stored = session.scalar(select(AgentEnrollment))
+        assert stored is not None
         stored.provider_request = None
     with pytest.raises(EnrollmentDenied, match="historical"):
         enrollment.submit(grant.token, request, evidence(request))

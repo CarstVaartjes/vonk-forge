@@ -483,7 +483,13 @@ jobs:
         uses: ./.github/actions/python-env
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres caddy step-ca tailscale
+      - name: Build the exact candidate managed CA runtime
+        run: >-
+          docker build --file deploy/compose/step-ca/Dockerfile
+          --target runtime --tag vonk-ca-compose-test:${{ github.sha }} .
       - name: Run the complete Compose suite
+        env:
+          VONK_JOURNAL_CA_TEST_IMAGE: vonk-ca-compose-test:${{ github.sha }}
         run: scripts/test compose
 
   nas-install:

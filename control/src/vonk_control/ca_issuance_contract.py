@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, model_validator
+from vonk_agent_protocol import CertificateCode
 
 from .strict_json import StrictJSONModel
 
@@ -92,7 +93,7 @@ CertificateRefusalReason = Literal[
     "certificate.attempt_superseded",
     "certificate.issuance_revoked",
     "certificate.rotation_source_revoked",
-    "certificate.response_unrepresentable",
+    CertificateCode.RESPONSE_UNREPRESENTABLE,
 ]
 
 

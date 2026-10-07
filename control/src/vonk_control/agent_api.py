@@ -919,10 +919,10 @@ def install_agent_routes(
                 submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
         except CertificateResponseCapacityRefused as error:
-            raise HTTPException(
+            return _json_response(
+                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
                 status_code=422,
-                detail={"reason_code": error.reason_code, "message": str(error)},
-            ) from None
+            )
         except EnrollmentIssuanceUncertain as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
@@ -1544,10 +1544,10 @@ def install_agent_routes(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
         except CertificateResponseCapacityRefused as error:
-            raise HTTPException(
+            return _json_response(
+                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
                 status_code=422,
-                detail={"reason_code": error.reason_code, "message": str(error)},
-            ) from None
+            )
         except (RenewalInProgress, RenewalIssuanceUncertain) as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
@@ -1575,10 +1575,10 @@ def install_agent_routes(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
         except CertificateResponseCapacityRefused as error:
-            raise HTTPException(
+            return _json_response(
+                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
                 status_code=422,
-                detail={"reason_code": error.reason_code, "message": str(error)},
-            ) from None
+            )
         except (RenewalInProgress, RenewalIssuanceUncertain) as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
