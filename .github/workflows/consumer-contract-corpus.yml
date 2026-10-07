@@ -55,7 +55,7 @@ jobs:
       - name: Exercise bounded enrollment response recovery over real TCP
         run: cargo test --locked -p vonk-agent --lib pair::tests
       - name: Exercise original numeric object shape at the native wire boundary
-        run: cargo test --locked -p vonk-agent-protocol --lib generated_tail_rejects_private_number_objects_at_raw_json_boundary
+        run: cargo test --locked -p vonk-agent-protocol --lib raw_integer_shape_tests
       - name: Emit canonical corpus and source provenance
         run: |
           uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
