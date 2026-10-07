@@ -11,6 +11,7 @@ on:
       - control/src/vonk_control/step_ca.py
       - control/src/vonk_control/enrollment.py
       - control/tests/test_ca_claims_postgres.py
+      - control/tests/test_ca_image_controller_postgres.py
   workflow_dispatch:
     inputs:
       bootstrap_lock:
@@ -116,6 +117,7 @@ jobs:
           control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
           control/tests/test_ca_journal_recovery.py
           control/tests/test_ca_claims_postgres.py
+          control/tests/test_ca_image_controller_postgres.py
           --junitxml=artifacts/ca-proof/controller-provider.xml
       - name: Record exact source and artifact provenance
         if: ${{ steps.mode.outputs.bootstrap != 'true' }}
