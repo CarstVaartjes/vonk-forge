@@ -1,6 +1,10 @@
 import type {LibraryViewModel, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, ModelLibrary, RecipeDetail, RecipeLibrary} from "../api/types";
 
-const digest = (seed: string): string => seed.repeat(64).slice(0, 64);
+// Stable fixture identities must satisfy the same hex digest contract as HTTP.
+const digest = (seed: string): string => {
+  const hex = Array.from(seed, character => character.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+  return hex.repeat(Math.ceil(64 / hex.length)).slice(0, 64);
+};
 const revisionId = (index: number): string => `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 

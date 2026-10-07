@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 10
     env:
       VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
-      VONK_STARTUP_REPAIR_PROOF_OUTPUT: ${{ github.workspace }}/.startup-bookkeeping-proof
+      VONK_STARTUP_REPAIR_PROOF_OUTPUT: ${{ github.workspace }}/startup-bookkeeping-proof-output
       VONK_PROOF_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Check out the exact authored source
@@ -65,6 +65,6 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: startup-bookkeeping-proof-${{ github.event.pull_request.head.sha || github.sha }}
-          path: ${{ github.workspace }}/.startup-bookkeeping-proof
+          path: ${{ github.workspace }}/startup-bookkeeping-proof-output
           if-no-files-found: error
           retention-days: 7
