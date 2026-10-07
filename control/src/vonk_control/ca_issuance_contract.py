@@ -92,6 +92,7 @@ CertificateRefusalReason = Literal[
     "certificate.attempt_superseded",
     "certificate.issuance_revoked",
     "certificate.rotation_source_revoked",
+    "certificate.response_unrepresentable",
 ]
 
 
