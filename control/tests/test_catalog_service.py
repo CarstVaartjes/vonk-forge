@@ -78,9 +78,11 @@ def test_import_binds_captured_published_documents_before_sql(
     client, item = _item(tmp_path)
     recipe = copy.deepcopy(dict(item.document))
     dependencies = [copy.deepcopy(dict(value)) for value in item.dependencies]
-    # Published readers explicitly allow unknown minor fields. Their original
-    # presence, including null, still belongs to the published content digest.
-    recipe["next_minor_annotation"] = None
+    # An explicitly present canonical null belongs to the published digest;
+    # normalizing through a model must not erase its source presence.
+    metadata = recipe["metadata"]
+    assert isinstance(metadata, dict)
+    metadata["alignment"] = None
     captured_recipe = copy.deepcopy(recipe)
     captured_dependencies = copy.deepcopy(dependencies)
     expected_digest = document_sha256(captured_recipe)
