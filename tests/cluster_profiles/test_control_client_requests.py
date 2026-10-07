@@ -719,7 +719,7 @@ def test_generated_transport_rejects_malformed_raw_response(
         opener=lambda *_args, **_kwargs: _fleet_transfer_peer(payload),
     )
 
-    with pytest.raises(ControlMalformedResponse, match="OpenAPI schema"):
+    with pytest.raises(ControlMalformedResponse, match="canonical FleetSnapshot contract"):
         client.fleet()
 
 
