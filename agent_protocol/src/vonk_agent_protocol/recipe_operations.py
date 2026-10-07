@@ -14,7 +14,7 @@ from .contracts import (
     canonical_message,
 )
 from .host_helper import RecipeReconciliationIdentity
-from .wire_model import WireModel
+from .wire_model import MAX_RUN_GENERATION, WireModel
 
 RECIPE_OPERATIONS = frozenset(
     {
@@ -33,7 +33,7 @@ _UUID_PATTERN = (
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 CanonicalUuid = Annotated[str, Field(pattern=f"^{_UUID_PATTERN}$")]
 ByteCount = Annotated[int, Field(ge=0, le=16 * 1024**4)]
-RunGeneration = Annotated[int, Field(ge=1, le=2**31 - 1, strict=True)]
+RunGeneration = Annotated[int, Field(ge=1, le=MAX_RUN_GENERATION, strict=True)]
 
 
 class _StrictPayload(WireModel):

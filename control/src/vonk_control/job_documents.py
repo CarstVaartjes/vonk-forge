@@ -38,6 +38,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_forge_contracts import RecipeDefinition
 
 from .distribution_assignment import NodeDistributionAssignment
+from .integer_domains import MAX_DATABASE_INTEGER
 from .mapping_parameters import EngineArgumentValue
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure
@@ -140,7 +141,7 @@ class DistributedRecoveryMarker(_Document):
     """What a recovery Stop remembers so the Start it interrupted can be re-issued."""
 
     schema_version: Literal[1]
-    failed_rank: int = Field(ge=0)
+    failed_rank: int = Field(ge=0, le=MAX_DATABASE_INTEGER)
     # Request identities bind the timestamp spelling as well as its instant.
     # JSON's date-time format does not authorize rewriting a persisted string.
     deadline: Annotated[str, Field(json_schema_extra={"format": "date-time"})]
@@ -159,7 +160,9 @@ class _RecipeParent(_Document):
     owner_kind: Literal["installation", "run", "recipe-build", "artifact-job"]
     owner_id: str = Field(min_length=1, max_length=128)
     plan_digest: DigestText
-    workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    workload_intent_ordinal: int | None = Field(
+        le=MAX_DATABASE_INTEGER, default=None, ge=1
+    )
     execution_mode: Literal["one-shot-jobs"] | None = None
 
 
@@ -263,7 +266,9 @@ class RunSwitchJobPayload(_Document):
     plan: RunSwitchPlan
     intent: RunSwitchIntent | None = None
     progress: RunSwitchOperationResult
-    workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    workload_intent_ordinal: int | None = Field(
+        le=MAX_DATABASE_INTEGER, default=None, ge=1
+    )
     retry_of: UuidText | None = None
 
 
@@ -408,7 +413,9 @@ class DistributionJobPayload(_Document):
     """One target-copy child: the plan it serves and what each Spark must receive."""
 
     plan_digest: DigestText
-    workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    workload_intent_ordinal: int | None = Field(
+        le=MAX_DATABASE_INTEGER, default=None, ge=1
+    )
     phase: RunSwitchPhaseKind
     progress: DistributionTransferProgress
     cached_nodes: list[NodeText]

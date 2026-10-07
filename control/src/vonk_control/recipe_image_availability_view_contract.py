@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import ConfigDict, Field
 from vonk_agent_protocol import OperationProgress
 
+from .integer_domains import MAX_DATABASE_INTEGER
 from .job_documents import AvailabilityJobResult, AvailabilityModelChild
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure
@@ -23,7 +24,7 @@ class RecipeImageAvailabilityView(StrictJSONModel):
     request: RecipeAvailabilityIntent | None
     kind: str
     state: str
-    attempt: int
+    attempt: int = Field(ge=0, le=MAX_DATABASE_INTEGER)
     recipe_revision_id: str | None
     recipe_content_sha256: str | None
     model_digest: str | None

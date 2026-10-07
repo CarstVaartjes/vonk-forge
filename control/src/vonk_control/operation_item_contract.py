@@ -38,6 +38,7 @@ from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 
 from . import agent_operation_states
 from .fleet_profile_contract import FleetProfileApplicationCancellationView
+from .integer_domains import MAX_DATABASE_INTEGER
 from .operation_blockers import OperationBlocker, read_blockers
 from .operation_contract import (
     AvailabilityOperationFailure,
@@ -200,7 +201,7 @@ class OperationItem(BaseModel):
     node_ids: list[str] = Field(default_factory=list)
     kind: str
     state: str
-    attempt: int
+    attempt: int = Field(ge=0, le=MAX_DATABASE_INTEGER)
     progress: OperationProgress | None = None
     created_at: str | None = None
     updated_at: str | None = None

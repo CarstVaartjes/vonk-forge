@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .endpoint_contract import EndpointResponse
+from .integer_domains import MAX_DATABASE_INTEGER
 from .model_cache_contract import CachedResourceEstimate
 from .operation_blockers import OperationBlocker
 from .preparation_contract import (
@@ -247,7 +248,7 @@ class FleetProfileEndpointAssignmentView(StrictModel):
 
 
 class FleetProfileEndpointsView(StrictModel):
-    number: int = Field(ge=1)
+    number: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     profile_id: UuidId | None = None
     application_id: UuidId | None = None
     application_state: FleetProfileOperationState | None = None
@@ -477,7 +478,7 @@ class FleetProfileDefinition(StrictModel):
 class FleetProfileInput(FleetProfileDefinition):
     # Zero means create only: an absent profile read cannot authorize replacing
     # somebody else's intervening first save.
-    expected_revision: int = Field(default=0, ge=0)
+    expected_revision: int = Field(le=MAX_DATABASE_INTEGER, default=0, ge=0)
 
 
 class SavedProfileProjectionIssue(StrictModel):
@@ -492,8 +493,8 @@ class SavedProfileProjectionIssue(StrictModel):
 
 class FleetProfileDefinitionView(StrictModel):
     id: UuidId | None
-    number: int = Field(ge=1)
-    revision: int = Field(ge=0)
+    number: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
+    revision: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     definition: FleetProfileDefinition | None
     projection_issue: SavedProfileProjectionIssue | None = None
 
@@ -512,10 +513,10 @@ class FleetProfileDefinitionView(StrictModel):
 
 class FleetProfileView(StrictModel):
     id: UuidId
-    number: int = Field(ge=1)
+    number: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     # Zero until the first save, matching the definition view and PUT's
     # expected_revision for an uncreated profile.
-    revision: int = Field(ge=0)
+    revision: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     name: Name
     description: Description
     installation_policy: FleetProfileInstallationPolicy
@@ -525,7 +526,7 @@ class FleetProfileView(StrictModel):
     assignments: list[FleetProfileAssignmentView]
     fleet: list[FleetNodeView] = Field(default_factory=list)
     status: str = "draft"
-    loaded_revision: int | None = Field(default=None, ge=1)
+    loaded_revision: int | None = Field(le=MAX_DATABASE_INTEGER, default=None, ge=1)
     cache_summary: FleetCacheSummary = Field(default_factory=FleetCacheSummary)
     warnings: list[str] = Field(default_factory=list, max_length=MAX_PROFILE_WARNINGS)
     next_actions: list[str] = Field(default_factory=list, max_length=32)
@@ -539,8 +540,8 @@ class UnavailableFleetProfileView(StrictModel):
     """Keep an authorized saved identity visible without inventing its contents."""
 
     id: UuidId
-    number: int = Field(ge=1)
-    revision: int = Field(ge=1)
+    number: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
+    revision: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     status: Literal["unavailable"] = "unavailable"
     definition: None = None
     projection_issue: SavedProfileProjectionIssue
@@ -827,7 +828,7 @@ class FleetProfileAdoptedApplicationEffect(StrictModel):
 
     application_id: UuidId
     plan_digest: Digest
-    workload_intent_ordinal: int = Field(ge=1)
+    workload_intent_ordinal: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     assignment_ids: list[UuidId] = Field(default_factory=list, max_length=64)
     # No cleanup adoption has the same canonical wire as before this optional
@@ -1069,7 +1070,9 @@ class FleetProfileApplicationCancellationIntent(StrictModel):
     state: FleetProfileCancellationState = LifecycleState.OBSERVING
     cause: Literal["operator", "superseded"]
     successor_application_id: UuidId | None = None
-    workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    workload_intent_ordinal: int | None = Field(
+        le=MAX_DATABASE_INTEGER, default=None, ge=1
+    )
     pending_operation_ids: list[UuidId] = Field(default_factory=list, max_length=128)
     observation_due_at: datetime | None = None
     observation_deadline_at: datetime | None = None
@@ -1138,7 +1141,9 @@ class FleetProfileApplicationProgress(StrictModel):
     #: the wait is bounded, then the load ends with a typed refusal.
     storage_wait_since: datetime | None = None
     intended_profile: FleetProfileIntendedConfiguration | None = None
-    workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    workload_intent_ordinal: int | None = Field(
+        le=MAX_DATABASE_INTEGER, default=None, ge=1
+    )
     operation_kind: FleetProfileOperationKind | None = None
     completed_steps: int = Field(default=0, ge=0, le=1024)
     total_steps: int = Field(default=0, ge=0, le=1024)
@@ -1279,7 +1284,7 @@ class FleetProfileReviewedDecision(StrictModel):
     profile_id: UuidId
     profile_name: Name
     profile_digest: Digest
-    profile_revision: int | None = Field(ge=1)
+    profile_revision: int | None = Field(le=MAX_DATABASE_INTEGER, ge=1)
     profile_definition: FleetProfileDefinition | None
     allowed: bool
     scope: FleetProfileScopePreview
@@ -1331,7 +1336,7 @@ class FleetProfileLoadRequest(StrictModel):
 
 
 class FleetProfileApplicationCancelRequest(StrictModel):
-    profile_number: int = Field(ge=1)
+    profile_number: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     request_key: UuidId
 
 

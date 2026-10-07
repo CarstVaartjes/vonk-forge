@@ -86,6 +86,7 @@ from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
 )
+from .integer_domains import MAX_DATABASE_BIGINT
 from .inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -293,7 +294,9 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     start_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     stop_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    run_generation: int | None = Field(default=None, ge=1, le=2**31 - 1, strict=True)
+    run_generation: int | None = Field(
+        default=None, ge=1, le=MAX_DATABASE_BIGINT, strict=True
+    )
     runtime_run_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     runtime_target_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     runtime_installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)

@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
+from .integer_domains import MAX_DATABASE_INTEGER
 from .strict_json import StrictJSONModel
 
 
@@ -35,7 +36,7 @@ class RecipeInstallationPayload(_FleetEventModel):
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     recipe_revision_id: Annotated[str, Field(min_length=1)]
     mapping_id: Annotated[str, Field(min_length=1)]
-    mapping_generation: int = Field(strict=True, ge=1)
+    mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=1)
     state: Annotated[str, Field(min_length=1)]
 
 
@@ -44,7 +45,7 @@ class InstallationNodePayload(_FleetEventModel):
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     installation_id: Annotated[str, Field(min_length=1)]
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
-    rank: int = Field(strict=True, ge=0)
+    rank: int = Field(strict=True, ge=0, le=MAX_DATABASE_INTEGER)
     role: Annotated[str, Field(min_length=1)]
     state: Annotated[str, Field(min_length=1)]
     installed_bytes: int = Field(strict=True, ge=0)
@@ -56,7 +57,7 @@ class RecipeRunPayload(_FleetEventModel):
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     installation_id: Annotated[str, Field(min_length=1)]
     mapping_id: Annotated[str, Field(min_length=1)]
-    mapping_generation: int = Field(strict=True, ge=1)
+    mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=1)
     alias: Annotated[str, Field(min_length=1)]
     state: Annotated[str, Field(min_length=1)]
     route_state: Annotated[str, Field(min_length=1)]
@@ -67,7 +68,7 @@ class RunNodePayload(_FleetEventModel):
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     run_id: Annotated[str, Field(min_length=1)]
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
-    rank: int = Field(strict=True, ge=0)
+    rank: int = Field(strict=True, ge=0, le=MAX_DATABASE_INTEGER)
     role: Annotated[str, Field(min_length=1)]
     state: Annotated[str, Field(min_length=1)]
     reserved_memory_bytes: int = Field(strict=True, ge=0)
@@ -89,7 +90,7 @@ class AgentOperationPayload(_FleetEventModel):
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     kind: Annotated[str, Field(min_length=1)]
     state: Annotated[str, Field(min_length=1)]
-    attempt: int = Field(strict=True, ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=0)
 
 
 type _FleetEntityPayload = (

@@ -59,6 +59,7 @@ from .fleet_profile_contract import (
     FleetProfileEndpointState,
     FleetProfileEndpointsView,
 )
+from .integer_domains import MAX_DATABASE_INTEGER
 from .lifecycle.agent_operation import retry_scheduled
 from .lifecycle.job import JobAdapter
 from .logging import redact_text
@@ -276,7 +277,7 @@ class JobOperationResponse(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
-    attempt: int = Field(ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     progress: JobOperationProgress | None = None
     updated_at: str | None = None
     failure: OperationFailure | None = None
@@ -298,7 +299,7 @@ class OperationDetailResponse(StrictModel):
     node_ids: list[NodeIdentifier] = Field(max_length=1024)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
-    attempt: int = Field(ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     progress: JobOperationProgress | None = None
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str | None = None
@@ -383,7 +384,7 @@ class JobDetailResponse(StrictModel):
     targets: list[BoundedIdentifier] = Field(max_length=100)
     target_next_cursor: str | None = Field(default=None, max_length=512)
     target_total: int = Field(ge=0)
-    current_attempt: int = Field(ge=0)
+    current_attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     status_reason: str | None = Field(default=None, max_length=1024)
     operations: list[JobOperationResponse] | None = Field(max_length=100)
     operation_next_cursor: str | None = Field(default=None, max_length=512)

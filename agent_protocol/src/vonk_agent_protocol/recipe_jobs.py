@@ -18,7 +18,7 @@ from pydantic import (
 from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import AgentProtocolError, canonical_message
 from .failure_evidence import FailureDiagnostics
-from .wire_model import WireModel
+from .wire_model import MAX_RUN_GENERATION, WireModel
 
 if TYPE_CHECKING:
     from .job_inputs import RecipeJobInputManifest
@@ -253,7 +253,7 @@ class RecipeJobRunRequest(_RecipeJobModel):
     run_id: CanonicalUUID
     installation_id: CanonicalUUID
     mapping_id: CanonicalUUID
-    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
+    run_generation: int = Field(ge=1, le=MAX_RUN_GENERATION, strict=True)
     recipe_revision_id: CanonicalUUID
     plan_digest: Digest
     input_manifest_sha256: Digest

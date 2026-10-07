@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
+from .integer_domains import MAX_DATABASE_INTEGER
 from .strict_json import StrictModel
 
 
@@ -18,9 +19,9 @@ class ClaimFacts(StrictModel):
 
     kind: str | None = Field(default=None, max_length=128)
     state: str | None = Field(default=None, max_length=64)
-    operation_intent: int | None = Field(default=None, ge=0)
-    node_intent: int | None = Field(default=None, ge=0)
-    attempt: int | None = Field(default=None, ge=0)
+    operation_intent: int | None = Field(le=MAX_DATABASE_INTEGER, default=None, ge=0)
+    node_intent: int | None = Field(le=MAX_DATABASE_INTEGER, default=None, ge=0)
+    attempt: int | None = Field(le=MAX_DATABASE_INTEGER, default=None, ge=0)
     attempt_state: str | None = Field(default=None, max_length=64)
     lease_deadline: str | None = Field(default=None, max_length=64)
     retry_due_at: str | None = Field(default=None, max_length=64)

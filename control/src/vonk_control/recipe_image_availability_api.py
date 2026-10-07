@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
 from .auth import MUTATION_ROLES
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
+from .integer_domains import MAX_DATABASE_INTEGER
 from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
 from .operation_api import bounded_error_responses
@@ -125,7 +126,7 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
     request: RecipeAvailabilityIntent | None
     kind: RecipeImageAvailabilityKind
     state: RecipeImageAvailabilityState
-    attempt: int = Field(ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     recipe_revision_id: str | None
     recipe_content_sha256: str | None
     progress: OperationProgress | None

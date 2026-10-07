@@ -19,7 +19,7 @@ from .contracts import (
     canonical_message,
 )
 from .package_upgrade import PackageRollbackAuthority
-from .wire_model import WireModel
+from .wire_model import MAX_RUN_GENERATION, WireModel
 
 HOST_HELPER_AUTHORITY = "vonk.host-maintenance-helper"
 HOST_HELPER_GRANT_DOMAIN = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\x00"
@@ -91,7 +91,7 @@ class HostRuntimeRequest(WireModel):
     run_generation: int | None = Field(
         default=None,
         ge=1,
-        le=2**31 - 1,
+        le=MAX_RUN_GENERATION,
         strict=True,
         exclude_if=lambda value: value is None,
     )
@@ -220,7 +220,7 @@ class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     run_generation: int | None = Field(
         default=None,
         ge=1,
-        le=2**31 - 1,
+        le=MAX_RUN_GENERATION,
         strict=True,
         exclude_if=lambda value: value is None,
     )
