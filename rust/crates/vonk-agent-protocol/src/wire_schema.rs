@@ -162,6 +162,84 @@ fn pointer_component(value: &str) -> String {
     value.replace('~', "~0").replace('/', "~1")
 }
 
+/// Only reject object candidates whose canonical root shape cannot accept the
+/// input. This is not validation or branch selection: every surviving candidate
+/// still runs original-kind decoding and its complete named-schema boundary.
+pub(crate) fn may_match_wire_model_shape(name: &str, object_keys: Option<&[&str]>) -> bool {
+    may_match_object_shape(&format!("#/$defs/{name}"), object_keys)
+}
+
+fn may_match_object_shape(pointer: &str, object_keys: Option<&[&str]>) -> bool {
+    let Some(keys) = object_keys else {
+        return true;
+    };
+    let Some(schema) = SCHEMA.pointer(pointer.trim_start_matches('#')) else {
+        return true;
+    };
+    let schema = if let Some(reference) = schema.get("$ref") {
+        // Canonical direct local references only. Sibling constraints and
+        // unresolved/chained references stay on the unchanged full path.
+        if schema.as_object().is_none_or(|object| object.len() != 1) {
+            return true;
+        }
+        let Some(resolved) = reference
+            .as_str()
+            .and_then(|reference| reference.strip_prefix('#'))
+            .and_then(|pointer| SCHEMA.pointer(pointer))
+        else {
+            return true;
+        };
+        resolved
+    } else {
+        schema
+    };
+    if schema.get("type").and_then(|value| value.as_str()) != Some("object")
+        || schema
+            .get("additionalProperties")
+            .and_then(|value| value.as_bool())
+            != Some(false)
+        || [
+            "$ref",
+            "$dynamicRef",
+            "allOf",
+            "anyOf",
+            "oneOf",
+            "if",
+            "then",
+            "else",
+            "not",
+            "patternProperties",
+            "dependentSchemas",
+            "dependentRequired",
+            "unevaluatedProperties",
+        ]
+        .iter()
+        .any(|key| schema.get(*key).is_some())
+    {
+        return true;
+    }
+    let (Some(properties), Some(required)) = (
+        schema.get("properties").and_then(|value| value.as_object()),
+        schema.get("required").and_then(|value| value.as_array()),
+    ) else {
+        return true;
+    };
+    if required.iter().any(|key| !key.is_string()) {
+        return true;
+    }
+    if required
+        .iter()
+        .any(|key| !keys.contains(&key.as_str().unwrap()))
+    {
+        return false;
+    }
+    schema
+        .get("x-vonk-ignore-unknown")
+        .and_then(|value| value.as_bool())
+        == Some(true)
+        || keys.iter().all(|key| properties.contains_key(*key))
+}
+
 fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
     // Exact schema validation already checked nonnumeric scalar leaves. Only
     // numbers and containers can contain the strict numeric token distinctions
@@ -199,8 +277,14 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
                 }
                 return Err("integer wire value is outside its declared range".into());
             }
+            let object_keys = value
+                .as_object()
+                .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
             for (index, _) in variants.iter().enumerate() {
                 let branch = format!("{pointer}/{keyword}/{index}");
+                if !may_match_object_shape(&branch, object_keys.as_deref()) {
+                    continue;
+                }
                 if validator(&branch)?.is_valid(value) && strict_numbers(&branch, value).is_ok() {
                     return Ok(());
                 }
@@ -284,8 +368,14 @@ fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), Str
                 // rejection of an out-of-range token instead of float fallback.
                 return Ok(());
             }
+            let object_keys = value
+                .as_object()
+                .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
             for (index, _) in variants.iter().enumerate() {
                 let branch = format!("{pointer}/{keyword}/{index}");
+                if !may_match_object_shape(&branch, object_keys.as_deref()) {
+                    continue;
+                }
                 let mut candidate = value.clone();
                 if materialize_float_numbers(&branch, &mut candidate).is_ok()
                     && validator(&branch)?.is_valid(&candidate)
@@ -423,6 +513,33 @@ fn validate_and_materialize(name: &str, value: &mut Value) -> Result<(), String>
 #[cfg(test)]
 mod raw_integer_shape_tests {
     use crate::generated::FailureLogTail;
+
+    #[test]
+    fn union_shape_does_not_replace_named_authority_or_select_a_branch() {
+        use crate::generated::{AgentClaimPayload, SparkApplyOperation};
+        let valid = br#"{"installation_id":"11111111-1111-4111-8111-111111111111","plan_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#;
+        assert!(matches!(
+            crate::parse_strict::<AgentClaimPayload>(valid).unwrap(),
+            AgentClaimPayload::RecipeReconcilePayload(_)
+        ));
+        // A missing required key cannot be supplied by an unrelated union
+        // member's defaults. Forbidden extras cannot choose a tolerant member.
+        let missing = br#"{"installation_id":"11111111-1111-4111-8111-111111111111"}"#;
+        let extra = br#"{"installation_id":"11111111-1111-4111-8111-111111111111","plan_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","unexpected":true}"#;
+        assert!(crate::parse_strict::<AgentClaimPayload>(missing).is_err());
+        assert!(crate::parse_strict::<AgentClaimPayload>(extra).is_err());
+        // Recover and Upgrade have identical root key shape. Full canonical
+        // const validation, not a first surviving shape, owns the decision.
+        let upgrade =
+            crate::parse_strict::<SparkApplyOperation>(br#"{"operation":"upgrade"}"#).unwrap();
+        assert_eq!(
+            serde_json::to_value(upgrade).unwrap(),
+            serde_json::json!({"operation":"upgrade"})
+        );
+        assert!(
+            crate::parse_strict::<SparkApplyOperation>(br#"{"operation":"invented"}"#).is_err()
+        );
+    }
 
     #[test]
     fn generated_tail_rejects_private_number_objects_at_raw_json_boundary() {
