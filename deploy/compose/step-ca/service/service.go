@@ -118,42 +118,44 @@ func (s *Service) sign(w http.ResponseWriter, r *http.Request) {
 		jsonReply(w, 403, map[string]string{"reason_code": "certificate.binding_refused"})
 		return
 	}
-	if binding.SourceSerial != nil {
-		revoked, err := s.Journal.IsRevoked(*binding.SourceSerial)
-		if err != nil {
-			failReply(w, err)
-			return
-		}
-		if revoked {
-			jsonReply(w, 403, map[string]string{"reason_code": "certificate.source_revoked"})
-			return
-		}
-		source, err := s.Journal.GetCertificate(*binding.SourceSerial)
-		if err != nil || source.Subject.CommonName != binding.NodeID || len(source.URIs) != 1 || source.URIs[0].String() != "spiffe://vonk-forge.local/node/"+binding.NodeID || source.CheckSignatureFrom(s.Policy.Issuer) != nil {
-			jsonReply(w, 403, map[string]string{"reason_code": "certificate.source_identity_refused"})
-			return
-		}
+	// Read the durable effect before mutable source admission. Revoking the old
+	// certificate after rotation must not hide its valid replacement.
+	receipt, err := s.Journal.Observe(binding)
+	if err != nil {
+		failReply(w, err)
+		return
 	}
 	var attempt *Attempt
-	var receipt *Receipt
-	if body.Mode == "observe" {
-		receipt, err = s.Journal.Observe(binding)
-		if err != nil {
-			failReply(w, err)
-			return
-		}
-		if receipt == nil {
-			jsonReply(w, 200, absentReply{"absent", binding})
-			return
-		}
-		if len(receipt.Chain) > 0 {
-			attempt = &Attempt{binding, receipt.Epoch, receipt.Owner}
-		}
+	if receipt != nil && len(receipt.Chain) > 0 {
+		attempt = &Attempt{binding, receipt.Epoch, receipt.Owner}
 	} else {
-		attempt, receipt, err = s.Journal.Claim(binding)
-		if err != nil {
-			failReply(w, err)
-			return
+		if binding.SourceSerial != nil {
+			revoked, err := s.Journal.IsRevoked(*binding.SourceSerial)
+			if err != nil {
+				failReply(w, err)
+				return
+			}
+			if revoked {
+				jsonReply(w, 403, map[string]string{"reason_code": "certificate.source_revoked"})
+				return
+			}
+			source, err := s.Journal.GetCertificate(*binding.SourceSerial)
+			if err != nil || source.Subject.CommonName != binding.NodeID || len(source.URIs) != 1 || source.URIs[0].String() != "spiffe://vonk-forge.local/node/"+binding.NodeID || source.CheckSignatureFrom(s.Policy.Issuer) != nil {
+				jsonReply(w, 403, map[string]string{"reason_code": "certificate.source_identity_refused"})
+				return
+			}
+		}
+		if body.Mode == "observe" {
+			if receipt == nil {
+				jsonReply(w, 200, absentReply{"absent", binding})
+				return
+			}
+		} else {
+			attempt, receipt, err = s.Journal.Claim(binding)
+			if err != nil {
+				failReply(w, err)
+				return
+			}
 		}
 	}
 	if attempt == nil {
