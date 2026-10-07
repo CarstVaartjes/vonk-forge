@@ -148,6 +148,124 @@ def test_retained_compensated_member_is_observed_without_rewriting_history(tmp_p
     assert aggregate["smoothed_bytes_per_second"] == 7.0
     assert document["progress"]["completed"] == 1
     assert document["progress"]["running"] == 1
+    active = next(
+        member for member in document["operations"] if member["id"] == operation_ids[1]
+    )
+    assert active["progress"]["bytes_per_second"] == 7.0
+    assert active["progress"]["smoothed_bytes_per_second"] == 7.0
     assert retained_rows() == original
+
+    # Reopen the real SQL store and recreate the owner/API at each exact
+    # freshness boundary. Reads retain both original attempt snapshots.
+    for elapsed, fresh in (
+        (timedelta(seconds=45, microseconds=-1), True),
+        (timedelta(seconds=45), False),
+    ):
+        snapshot_at = now + elapsed
+        reopened = create_engine(f"sqlite:///{tmp_path / 'retained-history.sqlite'}")
+        restarted_sessions = sessionmaker(reopened, expire_on_commit=False)
+        clock_reads = []
+
+        def observation_clock(snapshot_at=snapshot_at, reads=clock_reads):
+            reads.append(snapshot_at)
+            return snapshot_at
+
+        restarted_services = durable_operation_services(
+            restarted_sessions,
+            tmp_path / "routes",
+            clock=observation_clock,
+            cursors=codec.cursor_codec(),
+        )
+        restarted_app = create_app(
+            jobs=JobService(
+                restarted_sessions, clock=lambda snapshot_at=snapshot_at: snapshot_at
+            ),
+            operations=restarted_services,
+            tokens=codec,
+            now=lambda: 10,
+        )
+        try:
+            with TestClient(restarted_app) as client:
+                response = client.get(
+                    f"/api/jobs/{job.id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                assert response.status_code == 200
+                snapshot = response.json()
+                assert len(clock_reads) == 1
+                response = client.get(
+                    "/api/operations",
+                    params={"request_id": job.request_id},
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                assert response.status_code == 200
+                activity_members = response.json()["operations"]
+                assert len(clock_reads) == 2
+                details = []
+                for index, operation_id in enumerate(operation_ids, 3):
+                    response = client.get(
+                        f"/api/operations/{operation_id}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    assert response.status_code == 200
+                    details.append(response.json())
+                    assert len(clock_reads) == index
+        finally:
+            reopened.dispose()
+        aggregate = snapshot["progress"]["operation"]
+        assert aggregate["completed_bytes"] == 125
+        active = next(
+            member
+            for member in snapshot["operations"]
+            if member["id"] == operation_ids[1]
+        )
+        historical = next(
+            member
+            for member in snapshot["operations"]
+            if member["id"] == operation_ids[0]
+        )
+        assert historical["state"] == "compensated"
+        assert historical["progress"]["completed_bytes"] == 100
+        for field in (
+            "activity",
+            "bytes_per_second",
+            "smoothed_bytes_per_second",
+            "eta_seconds",
+        ):
+            assert field not in historical["progress"]
+        for field in ("bytes_per_second", "smoothed_bytes_per_second"):
+            if fresh:
+                assert aggregate[field] == 7.0
+                assert active["progress"][field] == 7.0
+            else:
+                assert field not in aggregate
+                assert field not in active["progress"]
+        # Generic Activity/list/detail serializers share each read's same
+        # owner cutoff, without changing legacy one-argument provider getters.
+        for members in (activity_members, details):
+            assert {member["id"] for member in members} == set(operation_ids)
+            for member in members:
+                assert "projected_at" not in member
+                progress = member["progress"]
+                if member["id"] == operation_ids[0]:
+                    assert member["state"] == "compensated"
+                    assert progress["completed_bytes"] == 100
+                    for field in (
+                        "activity",
+                        "bytes_per_second",
+                        "smoothed_bytes_per_second",
+                        "eta_seconds",
+                    ):
+                        assert field not in progress
+                else:
+                    assert member["state"] == "running"
+                    assert progress["completed_bytes"] == 25
+                    for field in ("bytes_per_second", "smoothed_bytes_per_second"):
+                        if fresh:
+                            assert progress[field] == 7.0
+                        else:
+                            assert field not in progress
+        assert "projected_at" not in snapshot
+        assert retained_rows() == original
     with pytest.raises(ValueError):
         LifecycleState("compensated")
