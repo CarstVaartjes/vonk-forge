@@ -524,6 +524,7 @@ def assemble_production_worker(
         order_reconcile=agent_jobs.reconcile_orders,
         build_cleanup=lifecycle.reconcile_cancelled_builds,
         retirement_cleanup=lifecycle.reconcile_retired_operations,
+        stop_admission_cleanup=lifecycle.reconcile_pending_service_stops,
         residue_cleanup=AttemptResidueReconciler(
             sessions,
             abandon_never_installed=lifecycle.abandon_never_installed,

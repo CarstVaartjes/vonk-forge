@@ -2877,15 +2877,27 @@ def test_stop_state_and_queue_creation_roll_back_together(tmp_path: Path) -> Non
 
     with sessions() as session:
         assert _required(session.get(RecipeRun, start.owner_id)).state == "running"
+        accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c"))
+        assert accepted is not None and accepted.state == "running"
+        assert accepted.payload["plan_digest"] == plan.plan_digest
+        assert accepted.payload["service_stop_review"]["stage"] == "withdrawal-claimed"
+        assert accepted.payload.get("phases") is None
         assert (
-            session.scalar(select(Job).where(Job.request_id == "1" * 35 + "c")) is None
+            session.scalar(
+                select(AgentOperation.id).where(
+                    AgentOperation.parent_job_id == accepted.id
+                )
+            )
+            is None
         )
-    # The route was withdrawn first, with no transaction open; only the Stop's
-    # own state and queue write rolled back, so the retry dispatches it.
+    # Dispatch rolled back without erasing the reviewed owner. The exact same
+    # accepted Stop resumes after its queue dependency recovers.
     assert withdrawn == [start.owner_id]
 
 
-def test_stop_withdrawal_failure_rolls_back_job_and_run_state(tmp_path: Path) -> None:
+def test_stop_withdrawal_failure_retains_accepted_job_and_run_state(
+    tmp_path: Path,
+) -> None:
     withdrawn: list[str] = []
 
     def fail_withdrawal(run_id: str) -> None:
@@ -2924,12 +2936,22 @@ def test_stop_withdrawal_failure_rolls_back_job_and_run_state(tmp_path: Path) ->
         stored = session.get(RecipeRun, run.owner_id)
         assert stored is not None
         assert (stored.state, stored.route_state) == ("running", "published")
+        accepted = session.scalar(select(Job).where(Job.request_id == "1" * 35 + "f"))
+        assert accepted is not None and accepted.state == "running"
+        assert accepted.payload["plan_digest"] == plan.plan_digest
+        assert accepted.payload["service_stop_review"]["stage"] == "withdrawal-claimed"
+        assert accepted.payload.get("phases") is None
         assert (
-            session.scalar(select(Job).where(Job.request_id == "1" * 35 + "f")) is None
+            session.scalar(
+                select(AgentOperation.id).where(
+                    AgentOperation.parent_job_id == accepted.id
+                )
+            )
+            is None
         )
 
 
-def test_stop_commit_failure_after_publication_is_safe_side(tmp_path: Path) -> None:
+def test_stop_admission_commit_failure_prevents_publication(tmp_path: Path) -> None:
     withdrawn: list[str] = []
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, route_withdrawer=withdrawn.append
@@ -2972,7 +2994,7 @@ def test_stop_commit_failure_after_publication_is_safe_side(tmp_path: Path) -> N
     finally:
         event.remove(sessions.class_, "before_commit", fail_commit)
 
-    assert withdrawn == [run.owner_id]
+    assert withdrawn == []
     with sessions() as session:
         stored = session.get(RecipeRun, run.owner_id)
         assert stored is not None

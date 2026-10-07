@@ -16,6 +16,7 @@ from vonk_agent_protocol import AgentResult, LifecycleState, canonical_message
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
+    FleetProfilePreview,
     profile_switch_child_request_key,
 )
 from vonk_control.fleet_profiles import (
@@ -66,6 +67,17 @@ def _claims(sessions, node_id):
 
 @pytest.fixture
 def pending_stop(postgres_engine, tmp_path, monkeypatch):
+    return _pending_stop(postgres_engine, tmp_path, monkeypatch)
+
+
+def _pending_stop(
+    postgres_engine,
+    tmp_path,
+    monkeypatch,
+    *,
+    lifecycle_before_dispatch=None,
+    issue_grant=True,
+):
     sessions, fixture_lifecycle, _queue, mapping, build, nodes = setup_services(
         tmp_path, engine=postgres_engine
     )
@@ -88,6 +100,8 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
         agent_jobs=jobs,
         clock=lambda: clock[0],
     )
+    if lifecycle_before_dispatch is not None:
+        lifecycle_before_dispatch(sessions, lifecycle, clock, run.owner_id)
     jobs.set_result_consumer(lifecycle.consume_agent_result)
     with sessions.begin() as session:
         session.add(
@@ -194,9 +208,13 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
                 select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
             )
         )
-        assert len(native) == 1
-        assert native[0].payload["run_id"] == run.owner_id
-        native_id = native[0].id
+        if issue_grant:
+            assert len(native) == 1
+            assert native[0].payload["run_id"] == run.owner_id
+            native_id = native[0].id
+        else:
+            assert not native
+            native_id = None
         original_row = session.get(FleetProfileApplication, original.id)
         assert original_row is not None
         original_plan_digest = original_row.plan_digest
@@ -204,16 +222,18 @@ def pending_stop(postgres_engine, tmp_path, monkeypatch):
             original_row
         ).workload_intent_ordinal
     assert len(healthy_dispatches) == 1
-    claim, stop_plan, _grant = _issue_exact_stop_grant(
-        sessions,
-        node_id=nodes[0],
-        certificate_serial="serial-0",
-    )
-    assert stop_plan.run_id == run.owner_id
-    assert stop_plan.target_runtime_id == run.owner_id
+    claim = None
+    if issue_grant:
+        claim, stop_plan, _grant = _issue_exact_stop_grant(
+            sessions,
+            node_id=nodes[0],
+            certificate_serial="serial-0",
+        )
+        assert stop_plan.run_id == run.owner_id
+        assert stop_plan.target_runtime_id == run.owner_id
 
-    assert claim is not None and claim.operation.value == "recipe.stop"
-    assert fenced_operation(sessions, claim).id == native_id
+        assert claim is not None and claim.operation.value == "recipe.stop"
+        assert fenced_operation(sessions, claim).id == native_id
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
@@ -297,6 +317,7 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
             assert row is not None and selected_row is not None
             assert profiles._adopted_application_scope(session, row) == (nodes[0],)
             bound = _persisted_profile_plan(selected_row)
+            assert isinstance(bound, FleetProfilePreview), bound
             assert bound.effects.adopted == review.effects.adopted
             assert session.get(AgentNode, nodes[0]).workload_intent_ordinal == ordinal
         restarted_core = _service(

@@ -1710,14 +1710,9 @@ class RecipeLifecyclePhaseExecutor:
                     )
                 stop_digest = fresh.plan_digest
             profile_application_id = _string_or_none(progress.profile_application_id)
-            child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{target.run_id}"))
-            if profile_application_id is not None:
-                child_key = str(
-                    uuid.uuid5(
-                        uuid.UUID(child_key),
-                        f"profile-stop:{profile_application_id}",
-                    )
-                )
+            child_key = _stop_child_request_key(
+                request_key, target.run_id, profile_application_id
+            )
             try:
                 value = self._lifecycle.stop(
                     target.run_id,
@@ -9883,6 +9878,18 @@ def _plan_blockers_are_waitable(plan: RunSwitchPlan) -> bool:
     return bool(plan.blockers) and not any(
         is_security_failure(reason.code) for reason in plan.blockers
     )
+
+
+def _stop_child_request_key(
+    request_key: str, run_id: str, profile_application_id: str | None
+) -> str:
+    """The one request identity for this exact run Stop and accepted profile."""
+    child_key = str(uuid.uuid5(uuid.UUID(request_key), f"stop:{run_id}"))
+    if profile_application_id is not None:
+        child_key = str(
+            uuid.uuid5(uuid.UUID(child_key), f"profile-stop:{profile_application_id}")
+        )
+    return child_key
 
 
 def _phase_request_key(

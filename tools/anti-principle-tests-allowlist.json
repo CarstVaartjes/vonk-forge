@@ -580,12 +580,6 @@
     },
     {
       "path": "control/tests/test_build_consumer_ownership.py",
-      "function": "test_new_availability_consumer_committing_before_cancellation_keeps_shared_build",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_build_consumer_ownership.py",
       "function": "test_profile_protects_its_build_before_the_execution_child_exists",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -2092,12 +2086,6 @@
     },
     {
       "path": "control/tests/test_recipe_operations.py",
-      "function": "test_stop_commit_failure_after_publication_is_safe_side",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
       "function": "test_stop_preview_blocks_nonexact_reservation_authority",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -2123,12 +2111,6 @@
     {
       "path": "control/tests/test_recipe_operations.py",
       "function": "test_stop_state_and_queue_creation_roll_back_together",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_operations.py",
-      "function": "test_stop_withdrawal_failure_rolls_back_job_and_run_state",
       "kind": "ending-without-fresh-request",
       "count": 1
     },
@@ -2755,6 +2737,62 @@
       "count": 1,
       "reason": "input-validation",
       "justification": "Pure canonical Stop payload and role-order parser test; calls only payload construction and _role_phases, with no operation execution, ending, effect acknowledgement, capacity release or fresh-admission claim."
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_admission_commit_failure_prevents_publication",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Failure before exact native Stop dispatch must preserve the original runtime claims and reviewed owner, or roll back admission before publication. Neither test claims a terminal Stop or capacity release; hosted service Stop recovery separately proves exact receipt and fresh native Start."
+    },
+    {
+      "path": "control/tests/test_recipe_operations.py",
+      "function": "test_stop_withdrawal_failure_retains_accepted_job_and_run_state",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Failure before exact native Stop dispatch must preserve the original runtime claims and reviewed owner, or roll back admission before publication. Neither test claims a terminal Stop or capacity release; hosted service Stop recovery separately proves exact receipt and fresh native Start."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_unreviewed_service_stop_has_no_publication_or_admission_effect",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_accepted_service_stop_resumes_same_review_after_withdrawal_restart",
+      "kind": "observation-withdrawal-assertion",
+      "count": 2,
+      "reason": "security-edge",
+      "justification": "The withdrawal is an explicitly reviewed Stop effect, not a reaction to observation uncertainty. Fresh exact observations and expired grace must not republish that run while its same accepted destructive owner awaits native dispatch."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_accepted_service_stop_resumes_same_review_after_withdrawal_restart",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_pending_service_stop_cannot_resume_under_changed_authority",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start."
+    },
+    {
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "function": "test_profile_adopts_exact_accepted_stop_before_native_dispatch",
+      "kind": "observation-withdrawal-assertion",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "The withdrawal is an explicitly reviewed Stop effect, not a reaction to observation uncertainty. Fresh exact observations and expired grace must not republish that run while its same accepted destructive owner awaits native dispatch."
     }
   ]
 }
