@@ -100,8 +100,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("state") => {
             let claim: AgentClaim = parse_strict(&raw)?;
             let path = PathBuf::from(args.get(1).ok_or("missing state path")?);
+            // The caller issues a fresh live claim; each real state admission
+            // observes wall time, including admission after reopening the store.
+            let now = chrono::Utc::now();
             let mut state = StateStore::open(&path, "spk_11111111111111111111111111111111")?;
-            assert!(matches!(state.begin(&claim)?, BeginDecision::Execute));
+            assert!(matches!(state.begin(&claim, now)?, BeginDecision::Execute));
             let produced = state.finish(
                 &claim,
                 ExecutionResult::failed("consumer corpus stop failure"),
@@ -111,7 +114,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let pending = restarted.pending_results()?;
             assert_eq!(pending.len(), 1);
             assert_eq!(canonical_json(&pending[0].1)?, canonical_json(&produced)?);
-            let BeginDecision::Replay(replayed) = restarted.begin(&claim)? else {
+            let BeginDecision::Replay(replayed) = restarted.begin(&claim, chrono::Utc::now())?
+            else {
                 return Err("restart did not replay".into());
             };
             assert_eq!(canonical_json(&*replayed)?, canonical_json(&produced)?);
