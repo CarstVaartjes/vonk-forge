@@ -362,7 +362,7 @@ def test_development_images_enable_arm64_emulation_before_building() -> None:
         "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0" in qemu
     )
     assert "platforms: arm64" in qemu
-    assert publisher.count("docker/build-push-action@") == 4
+    assert publisher.count("docker/build-push-action@") == 5
 
 
 def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> None:
@@ -377,7 +377,7 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
         if value.get("permissions", {}).get("packages") == "write"
     ]
     assert jobs_with_package_write == ["publish-development-images"]
-    assert publisher.count("scripts/accept-development-image-archive") == 4
+    assert publisher.count("scripts/accept-development-image-archive") == 5
     for role in ("api", "worker", "hermes", "litellm", "ca"):
         assert f"vonk-forge-{role}.oci.tar" in publisher
         assert f"development-role-receipt-{role}-${{{{ github.sha }}}}" in publisher
@@ -1373,6 +1373,7 @@ def test_manifest_receives_digests_only_through_environment() -> None:
         ("CONTROL_WORKER_DIGEST", "worker_digest"),
         ("HERMES_AGENT_DIGEST", "hermes_digest"),
         ("LITELLM_DIGEST", "litellm_digest"),
+        ("STEP_CA_DIGEST", "ca_digest"),
     ):
         assert f"{name}: ${{{{ needs.publish-images.outputs.{output} }}}}" in step
         assert f"needs.publish-images.outputs.{output}" not in run
@@ -1427,6 +1428,8 @@ def test_manifest_rejects_invalid_digests_before_creating_assets(
                 "CONTROL_WORKER_DIGEST": digests[1],
                 "HERMES_AGENT_DIGEST": digests[2],
                 "LITELLM_DIGEST": digests[3],
+                "STEP_CA_DIGEST": valid,
+                "STEP_CA_IMAGE": "ghcr.io/example/ca:1.2.3",
             },
             check=False,
             capture_output=True,
@@ -1458,6 +1461,8 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
             "CONTROL_WORKER_DIGEST": digest,
             "HERMES_AGENT_DIGEST": digest,
             "LITELLM_DIGEST": digest,
+            "STEP_CA_DIGEST": digest,
+            "STEP_CA_IMAGE": "ghcr.io/example/ca:1.2.3",
         },
         check=False,
         capture_output=True,
@@ -1470,6 +1475,7 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
         f"CONTROL_WORKER_IMAGE=ghcr.io/example/worker:1.2.3@{digest}\n"
         f"HERMES_AGENT_IMAGE=ghcr.io/example/hermes:1.2.3@{digest}\n"
         f"LITELLM_IMAGE=ghcr.io/example/litellm:1.2.3@{digest}\n"
+        f"STEP_CA_IMAGE=ghcr.io/example/ca:1.2.3@{digest}\n"
     )
     checksum = subprocess.run(
         ["sha256sum", "--check", "vonk-forge-images.env.sha256"],

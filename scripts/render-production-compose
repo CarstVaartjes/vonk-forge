@@ -45,7 +45,10 @@ def _validate_image(image: str, role: str) -> None:
         ):
             raise ValueError("CA image must bind an immutable production digest")
         return
-    match = IMAGE_PATTERN.fullmatch(image)
+    bare, separator, digest = image.partition("@")
+    if separator and re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+        raise ValueError("production image digest is invalid")
+    match = IMAGE_PATTERN.fullmatch(bare)
     if match is None or match.group("role") != role:
         raise ValueError(
             f"{role} image must use an immutable production semantic version tag"
