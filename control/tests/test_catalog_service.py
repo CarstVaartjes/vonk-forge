@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import CatalogCode
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService, CatalogValidationError
 from vonk_control.models import Base, CatalogDocumentRevision
@@ -114,6 +115,15 @@ def test_import_binds_captured_published_documents_before_sql(
             document=recipe,
             expected_content_sha256=expected_digest,
             dependency_documents=dependencies,
+        )
+    except CatalogValidationError as error:
+        if error.code != CatalogCode.MODEL_REFERENCE_MISSING:
+            raise
+        assert mutated
+        assert dependencies[0]["identity"] != captured_dependencies[0]["identity"]
+        pytest.fail(
+            "Captured catalog identity changed after validation: caller mutation "
+            "made the original pinned model reference unavailable"
         )
     finally:
         event.remove(engine, "before_cursor_execute", mutate_caller)
