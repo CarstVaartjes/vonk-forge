@@ -1355,7 +1355,8 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
     )
     _field("State", payload.get("state"))
     if noun == "model" and (
-        payload.get("cancellation") is not None or payload.get("state") == "cancelled"
+        payload.get("cancellation") is not None
+        or payload.get("state") == cli_states.CANCELLED
     ):
         cancellation = _optional(payload.get("cancellation"), "model cancellation")
         observation = _optional(
