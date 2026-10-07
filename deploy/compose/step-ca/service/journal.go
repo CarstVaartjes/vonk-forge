@@ -147,7 +147,12 @@ func (j *JournalDB) StoreCertificateChain(p provisioner.Interface, chain ...*x50
  id,err:=j.Get(serialsTable,[]byte(chain[0].SerialNumber.String())); if err!=nil { return err }
  raw,err:=j.Get(requestsTable,id); if err!=nil { return err }
  var r Receipt; if err:=json.Unmarshal(raw,&r); err!=nil { return err }
- if len(r.Chain)==0 || !bytes.Equal(r.Chain[0],chain[0].Raw) || r.Binding.ProvisionerName!=p.GetName() { return errors.New("uncommitted certificate store") }
+ if len(r.Chain)!=len(chain) || r.Binding.ProvisionerName!=p.GetName() { return errors.New("uncommitted certificate store") }
+ for i,cert:=range chain { if !bytes.Equal(r.Chain[i],cert.Raw) { return errors.New("committed certificate chain changed") } }
+ rawMetadata,err:=j.Get(certsDataTable,[]byte(r.Binding.Serial)); if err!=nil { return err }
+ var metadata db.CertificateData
+ if err:=json.Unmarshal(rawMetadata,&metadata);err!=nil { return err }
+ if metadata.Provisioner==nil || metadata.Provisioner.ID!=p.GetID() || metadata.Provisioner.Name!=p.GetName() || metadata.Provisioner.Type!=p.GetType().String() { return errors.New("committed provisioner authority changed") }
  return nil
 }
 func (j *JournalDB) StoreCertificate(cert *x509.Certificate) error { return errors.New("unbound certificate store") }
