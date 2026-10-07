@@ -35,6 +35,7 @@ from vonk_control.fleet_profiles import RunSwitchFleetProfileAdapter
 from vonk_control.models import AgentOperation, Job
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .profile_stop_readmission_support import start_on_released_gang
 from .subprocess_environment import install_cli_wheel, isolated_environment
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
@@ -411,6 +412,14 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
                     select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
                 )
             } == {native_id}
+        start_on_released_gang(
+            sessions,
+            lifecycle,
+            pending["stop_effect"]["run_id"],
+            nodes,
+            clock=lambda: clock[0],
+            request_id="00000000-0000-4000-8000-000000018730",
+        )
         assert any(
             method == "GET" and endpoint == path for method, endpoint, _ in peer.calls
         )

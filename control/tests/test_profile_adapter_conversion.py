@@ -7,6 +7,14 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import Engine, Table, select, update
+from vonk_agent_protocol import (
+    AgentResult,
+    AgentResultState,
+    OutcomeDone,
+    OutcomeKind,
+    RecipeStopResult,
+)
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.db import initialize_database
 from vonk_control.fleet_profile_adapter_conversion import (
     conversion_observation,
@@ -20,6 +28,7 @@ from vonk_control.fleet_profiles import (
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
     _persisted_profile_progress,
+    build_production_fleet_profile_service,
 )
 from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.models import (
@@ -29,12 +38,19 @@ from vonk_control.models import (
     ResourceReservation,
 )
 
+from .agent_fences import fenced_operation
+from .profile_stop_readmission_support import start_on_released_gang
 from .test_fleet_profiles import NOW, _uuid
 from .test_profile_continuity_postgres import (
     _assessment_with_promises,
     _SQLCancellationAdapter,
 )
-from .test_recipe_operations import installed_recipe, setup_services, started_recipe
+from .test_recipe_operations import (
+    _issue_exact_stop_grant,
+    installed_recipe,
+    setup_services,
+    started_recipe,
+)
 from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 
@@ -56,6 +72,7 @@ def _retained_stop(tmp_path, engine: Engine | None = None):
     run = started_recipe(
         sessions, lifecycle, installation.owner_id, nodes, request_id=_uuid(18801)
     )
+    lifecycle._clock = lambda: NOW
     profiles = FleetProfileService(
         sessions,
         clock=lambda: NOW,
@@ -174,7 +191,7 @@ def test_retained_unknown_projection_preserves_outer_metadata_and_original_journ
 
 def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp_path):
     """Catches assigning terminal receipts by list order or losing their result."""
-    sessions, lifecycle, switches, app, _run, stop_id, _original, _claims = (
+    sessions, lifecycle, switches, app, run, stop_id, _original, _claims = (
         _retained_stop(tmp_path)
     )
     with sessions.begin() as session:
@@ -182,6 +199,12 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
         assert row is not None
         assert try_convert_application(session, row, NOW).state == "converted"
     adapter = RunSwitchFleetProfileAdapter(sessions, switches)
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=lambda: NOW, run_switch_operations=switches
+    )
+    jobs = AgentJobService(
+        sessions, clock=lambda: NOW, result_consumer=lifecycle.consume_agent_result
+    )
     completed = set()
     for _ in range(12):
         switches.tick()
@@ -193,11 +216,25 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
             )
         for effect in effects:
             if effect.id not in completed:
-                lifecycle.record_node_result(
-                    effect.parent_job_id, effect.node_id, succeeded=True, evidence={}
+                claim, _plan, _grant = _issue_exact_stop_grant(
+                    sessions,
+                    node_id=effect.node_id,
+                    certificate_serial="serial-0",
+                    grant_now=NOW,
+                )
+                assert fenced_operation(sessions, claim).id == effect.id
+                jobs.record_result(
+                    AgentResult(
+                        fence=claim.fence,
+                        state=AgentResultState.SUCCEEDED,
+                        result=OutcomeDone(
+                            kind=OutcomeKind.DONE, result=RecipeStopResult()
+                        ),
+                    )
                 )
                 completed.add(effect.id)
         adapter.advance(app.id)
+        profiles.tick()
         with sessions() as session:
             row = session.get(FleetProfileApplication, app.id)
             assert row is not None
@@ -228,6 +265,14 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
         current = _persisted_profile_progress(row).switch_adapter
         assert current is not None and current.children == [receipt]
         assert current.result == state.result
+    start_on_released_gang(
+        sessions,
+        lifecycle,
+        run.owner_id,
+        lifecycle.get(stop_id).nodes,
+        clock=lambda: NOW,
+        request_id=_uuid(18805),
+    )
 
 
 @pytest.mark.parametrize(

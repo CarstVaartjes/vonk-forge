@@ -90,6 +90,8 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
     )
     failed = service.get(original.id)
     assert failed.state == "failed"
+    assert failed.failure_evidence is not None
+    assert failed.failure_evidence.code == RecipeImageCode.NOT_RETRYABLE
     with sessions.begin() as session:
         changed = recipe.model_copy(
             update={
