@@ -44,25 +44,37 @@ jobs:
         with:
           go-version: '1.25.8'
           cache: false
+      - name: Select dependency bootstrap or locked proof
+        id: mode
+        shell: bash
+        env:
+          EXPLICIT_BOOTSTRAP: ${{ inputs.bootstrap_lock }}
+        run: |
+          set -euo pipefail
+          if [ "$EXPLICIT_BOOTSTRAP" = true ] || [ ! -f deploy/compose/step-ca/service/go.sum ]; then
+            echo bootstrap=true >> "$GITHUB_OUTPUT"
+          else
+            echo bootstrap=false >> "$GITHUB_OUTPUT"
+          fi
       - name: Generate dependency locks for source review
-        if: ${{ inputs.bootstrap_lock }}
+        if: ${{ steps.mode.outputs.bootstrap == 'true' }}
         run: scripts/build-journal-ca lock
       - name: Prove real signing, crash recovery and epoch fencing
-        if: ${{ !inputs.bootstrap_lock }}
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifacts/ca-proof
           scripts/build-journal-ca proof 2>&1 | tee artifacts/ca-proof/connected-proof.log
       - name: Build the journal CA binary from proven source
-        if: ${{ !inputs.bootstrap_lock }}
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         working-directory: deploy/compose/step-ca/service
         env:
           CGO_ENABLED: '0'
           GOTOOLCHAIN: local
         run: go build -mod=readonly -trimpath -buildvcs=false -o ../../../../artifacts/ca-proof/vonk-step-ca .
       - name: Build OCI runtime with existing CA trust and database layout
-        if: ${{ !inputs.bootstrap_lock }}
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -71,10 +83,10 @@ jobs:
           docker save vonk-ca-proof:"$GITHUB_SHA" --output artifacts/ca-proof/ca-image.tar
           docker image inspect vonk-ca-proof:"$GITHUB_SHA" > artifacts/ca-proof/image-inspect.json
       - name: Prepare the locked Controller environment
-        if: ${{ !inputs.bootstrap_lock }}
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         uses: ./.github/actions/python-env
       - name: Prove the real Controller provider against the journal CA image
-        if: ${{ !inputs.bootstrap_lock }}
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         env:
           VONK_JOURNAL_CA_TEST_IMAGE: vonk-ca-proof:${{ github.sha }}
         run: >-
@@ -82,7 +94,7 @@ jobs:
           control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
           --junitxml=artifacts/ca-proof/controller-provider.xml
       - name: Record exact source and artifact provenance
-        if: ${{ !inputs.bootstrap_lock }}
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -106,7 +118,7 @@ jobs:
           (root / 'manifest.json').write_text(json.dumps(manifest, sort_keys=True, indent=2) + '\n')
           PY
       - name: Attest hosted binary and OCI archive
-        if: ${{ !inputs.bootstrap_lock }}
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         uses: actions/attest-build-provenance@8beda2b7ed98355c0e97c0a63bec38ae472e66c4 # v4
         with:
           subject-path: |
@@ -124,3 +136,8 @@ jobs:
             deploy/compose/step-ca/service/*.go
           if-no-files-found: error
           retention-days: 7
+      - name: Require signed adoption of hosted dependency locks
+        if: ${{ steps.mode.outputs.bootstrap == 'true' }}
+        run: |
+          echo 'Dependency bootstrap is evidence only. Adopt reviewed Go locks and formatted sources in a signed commit, then rerun the locked proof.' >&2
+          exit 1
