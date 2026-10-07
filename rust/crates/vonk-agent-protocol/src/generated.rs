@@ -182,7 +182,7 @@ pub struct AgentClaim {
     pub operation: AgentOperation,
     pub payload: AgentClaimPayload,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -583,7 +583,7 @@ pub struct AgentResult {
     pub result: AgentResultResult,
     pub state: AgentResultState,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -2330,7 +2330,7 @@ pub struct EnrollmentSubmitRequest {
 pub struct ErrorCatalog {
     pub error: ErrorCatalogError,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -6549,7 +6549,7 @@ impl ::std::convert::TryFrom<::std::string::String> for OperatorSurface {
 pub struct OutcomeCatalog {
     pub outcome: OutcomeCatalogOutcome,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -6626,7 +6626,7 @@ impl ::std::convert::TryFrom<::std::string::String> for OutcomeDoneKind {
         value.parse()
     }
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -7806,7 +7806,7 @@ pub struct RecipeBuildEnvironmentArgument {
     pub name: ::std::string::String,
     pub value: RecipeBuildEnvironmentArgumentValue,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -8487,7 +8487,7 @@ pub struct RecipeOperationRequest {
     pub operation: AgentOperation,
     pub payload: RecipeOperationRequestPayload,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -8957,7 +8957,7 @@ pub struct RequestValidationIssue {
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -14077,6 +14077,50 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for AgentClaimPayload {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightRequest>(value.clone()) {
+            return Ok(Self::RuntimePreflightRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradePayload>(value.clone()) {
+            return Ok(Self::AgentUpgradePayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionPayload>(value.clone())
+        {
+            return Ok(Self::ArtifactDistributionPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildRequest>(value.clone()) {
+            return Ok(Self::RecipeBuildRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupRequest>(value.clone()) {
+            return Ok(Self::RecipeBuildCleanupRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunRequest>(value.clone()) {
+            return Ok(Self::RecipeJobRunRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeInstallPayload>(value.clone()) {
+            return Ok(Self::RecipeInstallPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStartPayload>(value.clone()) {
+            return Ok(Self::RecipeStartPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStopPayload>(value.clone()) {
+            return Ok(Self::RecipeStopPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcilePayload>(value.clone()) {
+            return Ok(Self::RecipeReconcilePayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallPayload>(value.clone()) {
+            return Ok(Self::RecipeUninstallPayload(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(AgentClaimPayload)
+        )))
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for AgentDirective {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
@@ -14585,6 +14629,61 @@ impl<'de> ::serde::Deserialize<'de> for AgentResult {
             result: raw.result,
             state: raw.state,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentResultResult {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightResult>(value.clone()) {
+            return Ok(Self::RuntimePreflightResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentInstallResult>(value.clone()) {
+            return Ok(Self::AgentInstallResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStartResult>(value.clone()) {
+            return Ok(Self::RecipeStartResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStopResult>(value.clone()) {
+            return Ok(Self::RecipeStopResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcileResult>(value.clone()) {
+            return Ok(Self::RecipeReconcileResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallResult>(value.clone()) {
+            return Ok(Self::RecipeUninstallResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildEvidence>(value.clone()) {
+            return Ok(Self::RecipeBuildEvidence(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupEvidence>(value.clone()) {
+            return Ok(Self::RecipeBuildCleanupEvidence(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunResult>(value.clone()) {
+            return Ok(Self::RecipeJobRunResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionResult>(value.clone()) {
+            return Ok(Self::ArtifactDistributionResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentFailureResult>(value.clone()) {
+            return Ok(Self::AgentFailureResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradeResult>(value.clone()) {
+            return Ok(Self::AgentUpgradeResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeDone>(value.clone()) {
+            return Ok(Self::OutcomeDone(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeFailed>(value.clone()) {
+            return Ok(Self::OutcomeFailed(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeUnknown>(value.clone()) {
+            return Ok(Self::OutcomeUnknown(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(AgentResultResult)
+        )))
     }
 }
 impl AgentResultState {
@@ -16874,6 +16973,25 @@ impl<'de> ::serde::Deserialize<'de> for ErrorCatalog {
         Ok(Self { error: raw.error })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for ErrorCatalogError {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<SecurityRefusal>(value.clone()) {
+            return Ok(Self::SecurityRefusal(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<InvalidRequest>(value.clone()) {
+            return Ok(Self::InvalidRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<UnknownError>(value.clone()) {
+            return Ok(Self::UnknownError(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(ErrorCatalogError)
+        )))
+    }
+}
 impl ErrorCategory {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -18221,29 +18339,27 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperSignature {
 }
 impl<'de> ::serde::Deserialize<'de> for HostOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
         let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostOperation", &mut value)
             .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(untagged)]
-        #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
-        #[derive(Eq)]
-        enum Raw {
-            InstallVonkDebOperation(InstallVonkDebOperation),
-            ConfirmPackageActivationOperation(ConfirmPackageActivationOperation),
-            ExecuteContainerRuntimeRequestOperation(ExecuteContainerRuntimeRequestOperation),
+        if let Ok(payload) = ::serde_json::from_value::<InstallVonkDebOperation>(value.clone()) {
+            return Ok(Self::InstallVonkDebOperation(payload));
         }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(match raw {
-            Raw::InstallVonkDebOperation(value0) => Self::InstallVonkDebOperation(value0),
-            Raw::ConfirmPackageActivationOperation(value0) => {
-                Self::ConfirmPackageActivationOperation(value0)
-            }
-            Raw::ExecuteContainerRuntimeRequestOperation(value0) => {
-                Self::ExecuteContainerRuntimeRequestOperation(value0)
-            }
-        })
+        if let Ok(payload) =
+            ::serde_json::from_value::<ConfirmPackageActivationOperation>(value.clone())
+        {
+            return Ok(Self::ConfirmPackageActivationOperation(payload));
+        }
+        if let Ok(payload) =
+            ::serde_json::from_value::<ExecuteContainerRuntimeRequestOperation>(value.clone())
+        {
+            return Ok(Self::ExecuteContainerRuntimeRequestOperation(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(HostOperation)
+        )))
     }
 }
 impl<'de> ::serde::Deserialize<'de> for HostOperationOutcome {
@@ -19354,23 +19470,22 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerReleaseManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
         let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerReleaseManifest", &mut value)
             .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(untagged)]
-        #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
-        #[derive(Eq)]
-        enum Raw {
-            CandidateRelease(InstallerCandidateRelease),
-            AcceptanceBaselineRelease(InstallerAcceptanceBaselineRelease),
+        if let Ok(payload) = ::serde_json::from_value::<InstallerCandidateRelease>(value.clone()) {
+            return Ok(Self::CandidateRelease(payload));
         }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(match raw {
-            Raw::CandidateRelease(value0) => Self::CandidateRelease(value0),
-            Raw::AcceptanceBaselineRelease(value0) => Self::AcceptanceBaselineRelease(value0),
-        })
+        if let Ok(payload) =
+            ::serde_json::from_value::<InstallerAcceptanceBaselineRelease>(value.clone())
+        {
+            return Ok(Self::AcceptanceBaselineRelease(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(InstallerReleaseManifest)
+        )))
     }
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerReleaseObject {
@@ -21873,6 +21988,25 @@ impl<'de> ::serde::Deserialize<'de> for OutcomeCatalog {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for OutcomeCatalogOutcome {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeDone>(value.clone()) {
+            return Ok(Self::Done(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeFailed>(value.clone()) {
+            return Ok(Self::Failed(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeUnknown>(value.clone()) {
+            return Ok(Self::Unknown(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(OutcomeCatalogOutcome)
+        )))
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for OutcomeDone {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
@@ -21914,6 +22048,49 @@ impl ::std::cmp::PartialEq<str> for OutcomeDoneKind {
 impl ::std::cmp::PartialEq<&str> for OutcomeDoneKind {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OutcomeDoneResult {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightResult>(value.clone()) {
+            return Ok(Self::RuntimePreflightResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentInstallResult>(value.clone()) {
+            return Ok(Self::AgentInstallResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStartResult>(value.clone()) {
+            return Ok(Self::RecipeStartResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStopResult>(value.clone()) {
+            return Ok(Self::RecipeStopResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcileResult>(value.clone()) {
+            return Ok(Self::RecipeReconcileResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallResult>(value.clone()) {
+            return Ok(Self::RecipeUninstallResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildEvidence>(value.clone()) {
+            return Ok(Self::RecipeBuildEvidence(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupEvidence>(value.clone()) {
+            return Ok(Self::RecipeBuildCleanupEvidence(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunResult>(value.clone()) {
+            return Ok(Self::RecipeJobRunResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionResult>(value.clone()) {
+            return Ok(Self::ArtifactDistributionResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradeResult>(value.clone()) {
+            return Ok(Self::AgentUpgradeResult(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(OutcomeDoneResult)
+        )))
     }
 }
 impl<'de> ::serde::Deserialize<'de> for OutcomeEvidence {
@@ -23377,6 +23554,25 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgument {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgumentValue {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<::std::string::String>(value.clone()) {
+            return Ok(Self::String(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<crate::integer::Integer>(value.clone()) {
+            return Ok(Self::VonkInteger(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<bool>(value.clone()) {
+            return Ok(Self::Boolean(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(RecipeBuildEnvironmentArgumentValue)
+        )))
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildEvidence {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
@@ -24259,6 +24455,31 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequest {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequestPayload {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<RecipeInstallPayload>(value.clone()) {
+            return Ok(Self::InstallPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStartPayload>(value.clone()) {
+            return Ok(Self::StartPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStopPayload>(value.clone()) {
+            return Ok(Self::StopPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallPayload>(value.clone()) {
+            return Ok(Self::UninstallPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcilePayload>(value.clone()) {
+            return Ok(Self::ReconcilePayload(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(RecipeOperationRequestPayload)
+        )))
+    }
+}
 impl RecipePackageCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -24890,6 +25111,22 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationIssue {
             msg: raw.msg,
             type_: raw.type_,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RequestValidationIssueLocItem {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<::std::string::String>(value.clone()) {
+            return Ok(Self::String(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<crate::integer::Integer>(value.clone()) {
+            return Ok(Self::VonkInteger(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(RequestValidationIssueLocItem)
+        )))
     }
 }
 impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
@@ -28782,29 +29019,29 @@ impl ::std::cmp::PartialEq<&str> for SparkApplyFreshOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
         let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkApplyOperation", &mut value)
             .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(untagged)]
-        #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
-        #[derive(Eq)]
-        enum Raw {
-            Fresh(SparkApplyFresh),
-            Pair(SparkApplyPair),
-            Reenroll(SparkApplyReenroll),
-            Recover(SparkApplyRecover),
-            Upgrade(SparkApplyUpgrade),
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyFresh>(value.clone()) {
+            return Ok(Self::Fresh(payload));
         }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(match raw {
-            Raw::Fresh(value0) => Self::Fresh(value0),
-            Raw::Pair(value0) => Self::Pair(value0),
-            Raw::Reenroll(value0) => Self::Reenroll(value0),
-            Raw::Recover(value0) => Self::Recover(value0),
-            Raw::Upgrade(value0) => Self::Upgrade(value0),
-        })
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyPair>(value.clone()) {
+            return Ok(Self::Pair(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyReenroll>(value.clone()) {
+            return Ok(Self::Reenroll(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyRecover>(value.clone()) {
+            return Ok(Self::Recover(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyUpgrade>(value.clone()) {
+            return Ok(Self::Upgrade(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(SparkApplyOperation)
+        )))
     }
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyPair {
