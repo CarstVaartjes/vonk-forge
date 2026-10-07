@@ -9488,6 +9488,9 @@ def _progress_int(value: object) -> int | None:
 
 
 def _progress_state(value: object) -> RunSwitchMemberState | None:
+    # A canonical unissued recipe role is pending in the switch projection.
+    if value == LifecycleState.QUEUED:
+        return "pending"
     try:
         return _MEMBER_STATE_ADAPTER.validate_python(value, strict=True)
     except ValidationError:

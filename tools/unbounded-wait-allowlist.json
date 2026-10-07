@@ -1221,6 +1221,22 @@
       "count": 1,
       "reason": "resource-bound",
       "justification": "Pure fragment encoding of an immutable finite UTF-8 JSON token, not polling or an external wait. offset starts at zero and advances by min(available - len(pending), len(raw) - offset); pending is strictly below available on entry, and a full fragment yields then clears pending before the next iteration. Nonpositive available fails closed. allocation derives the actual 2 MiB per-record envelope including ordinal; no total snapshot byte/time cap is implied. The real large FleetSnapshot roundtrip checks every record bound and original full document, and the PostgreSQL slow-ASGI proof checks SQL release and threadpool encoding. Each emitted fragment yields to the transport; this classification does not claim CPU preemption or physical-worker coverage."
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "function": "drop",
+      "kind": "rust-wait-without-deadline",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "Only the inspection-test Gate cleanup joins its exact owned std::thread::JoinHandle after observing that same handle is_finished. The shared absolute cleanup deadline bounds prior completion polling; unfinished workers are not joined and their fixture is retained. Task abortion and semaphore return are separately checked before cleanup may claim completion. This is a completed-thread reap, not an external wait or evidence that an unresolved native effect ended."
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "function": "request_root_publication_has_no_permissive_intermediate_state",
+      "kind": "rust-wait-without-deadline",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "The actual separate writer owns a cloned fixture path and reports its result over recv_timeout using one unchanged absolute 30-second budget. Its exact JoinHandle is joined only after that same handle is_finished; deadline/error paths retain the fixture rather than removing files under an unresolved writer. The isolated parent has the same total elapsed budget, reserves its last second for exact-child kill/try_wait reaping, and reports an unreaped child as failure. No scoped-thread implicit join or unconditional child wait remains; all unsafe-intermediate and atomic publication assertions remain."
     }
   ]
 }

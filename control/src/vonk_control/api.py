@@ -1062,7 +1062,10 @@ def create_app(
     )
 
     def activity_detail(
-        row: OperationRow, *, tolerate_unreadable: bool = False
+        row: OperationRow,
+        *,
+        tolerate_unreadable: bool = False,
+        projected_at: datetime | None = None,
     ) -> OperationDetailResponse:
         """Expose recovery only when its family route is installed."""
         try:
@@ -1074,7 +1077,9 @@ def create_app(
                 if item.supported_actions and "resume" in item.supported_actions
                 else ()
             )
-            return operation_detail_response(item, available_actions=available_actions)
+            return operation_detail_response(
+                item, available_actions=available_actions, now=projected_at
+            )
         except (BoundedJSONError, OSError, RuntimeError, TypeError, ValueError):
             if not tolerate_unreadable:
                 raise
@@ -1151,8 +1156,15 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             )
         try:
+            projected_at = operations.clock()
             page = _global_list_operations(
-                operations, cursor, limit, operation_state, node_id, request_id
+                operations,
+                cursor,
+                limit,
+                operation_state,
+                node_id,
+                request_id,
+                now=projected_at,
             )
         except CursorError:
             raise HTTPException(
@@ -1168,7 +1180,10 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
-        items = [activity_detail(item, tolerate_unreadable=True) for item in page.items]
+        items = [
+            activity_detail(item, tolerate_unreadable=True, projected_at=projected_at)
+            for item in page.items
+        ]
         try:
             return bounded_operations_response(
                 page,
@@ -1197,7 +1212,8 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             )
         try:
-            item = _global_get_operation(operations, operation_id)
+            projected_at = operations.clock()
+            item = _global_get_operation(operations, operation_id, now=projected_at)
         except KeyError:
             raise HTTPException(status_code=404, detail="operation not found") from None
         except (RuntimeError, TypeError, ValueError):
@@ -1206,7 +1222,9 @@ def create_app(
             ) from None
         try:
             return bounded_operation_detail(
-                activity_detail(item, tolerate_unreadable=True)
+                activity_detail(
+                    item, tolerate_unreadable=True, projected_at=projected_at
+                )
             )
         except _OperationResponseTooLarge as error:
             raise HTTPException(status_code=503, detail=str(error)) from None

@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import IO
+from typing import IO, Literal
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -18,7 +18,9 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_forge_contracts import (
+    ModelDefinition,
     RecipeDefinition,
+    canonical_json,
     document_sha256,
     read_model,
     read_recipe,
@@ -57,6 +59,28 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _RELEASE_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$")
+
+
+@dataclass(frozen=True, slots=True)
+class _CatalogImportDocument:
+    """One invocation's validated definition and exact captured source bytes."""
+
+    document_json: bytes
+    definition: ModelDefinition | RecipeDefinition
+    content_digest: str
+
+
+def _capture_import_document(
+    document: Mapping[str, object],
+    kind: Literal["model", "recipe"],
+) -> _CatalogImportDocument:
+    # Never pair a parsed model with the caller's subsequently mutable mapping.
+    # Preserve published spelling/default presence for its identity; normalization
+    # through model_dump would change the source document that recipes bind.
+    captured_json = canonical_json(dict(document))
+    captured = json.loads(captured_json)
+    definition = read_model(captured) if kind == "model" else read_recipe(captured)
+    return _CatalogImportDocument(captured_json, definition, document_sha256(captured))
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,17 +328,18 @@ class CatalogService:
     ) -> int:
         actor = _actor(actor)
         try:
-            for value in documents:
-                read_model(value)
+            captured = tuple(
+                _capture_import_document(value, "model") for value in documents
+            )
         except (TypeError, ValueError) as error:
             raise CatalogValidationError(
                 CatalogCode.MODEL_DOCUMENT_INVALID,
                 "catalog index model documents are invalid",
             ) from error
         with self._sessions.begin() as session:
-            for value in documents:
+            for value in captured:
                 self._upsert_canonical_document(session, value, actor=actor)
-        return len(documents)
+        return len(captured)
 
     def refresh_build_policy(self) -> None:
         CatalogEntityService(self._sessions, clock=self._clock).refresh_build_policy()
@@ -343,15 +368,17 @@ class CatalogService:
     ) -> RecipeRevisionView:
         actor = _actor(actor)
         try:
-            read_recipe(document)
-            for value in dependency_documents:
-                read_model(value)
+            captured = _capture_import_document(document, "recipe")
+            dependencies = tuple(
+                _capture_import_document(value, "model")
+                for value in dependency_documents
+            )
         except (TypeError, ValueError) as error:
             raise CatalogValidationError(
                 CatalogCode.DOCUMENT_INVALID_,
                 "recipe library package must contain a canonical recipe and model snapshots",
             ) from error
-        if document_sha256(document) != expected_content_sha256:
+        if captured.content_digest != expected_content_sha256:
             raise CatalogValidationError(
                 CatalogCode.HASH_MISMATCH,
                 "recipe content does not match the supplied digest",
@@ -387,9 +414,9 @@ class CatalogService:
             )
         actor = _actor(actor)
         with self._sessions.begin() as session:
-            for value in dependency_documents:
+            for value in dependencies:
                 self._upsert_canonical_document(session, value, actor=actor)
-            revision = self._upsert_canonical_document(session, document, actor=actor)
+            revision = self._upsert_canonical_document(session, captured, actor=actor)
             self._select_imported_recipe_head(session, revision)
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
@@ -466,15 +493,12 @@ class CatalogService:
         root.updated_at = self._clock()
 
     def _upsert_canonical_document(
-        self, session: Session, document: Mapping[str, object], *, actor: str
+        self, session: Session, captured: _CatalogImportDocument, *, actor: str
     ) -> CatalogDocumentRevision:
-        parsed = (
-            read_model(document)
-            if document.get("kind") == "model"
-            else read_recipe(document)
-        )
+        document = json.loads(captured.document_json)
+        parsed = captured.definition
         kind = str(parsed.kind)
-        digest = document_sha256(document)
+        digest = captured.content_digest
         identity = parsed.identity
         existing = session.scalar(
             select(CatalogDocumentRevision).where(

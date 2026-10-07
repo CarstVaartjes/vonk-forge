@@ -959,6 +959,9 @@ mod tests {
                 .spawn()
                 .unwrap();
             let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            // Reserve one second inside the existing total budget to reap
+            // this exact child; killing is not itself proof of completion.
+            let work_deadline = deadline - Duration::from_secs(1);
             loop {
                 if let Some(status) = child.try_wait().unwrap() {
                     assert!(
@@ -967,14 +970,26 @@ mod tests {
                     );
                     return;
                 }
-                if std::time::Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    panic!("request root publication counterproof exceeded its elapsed budget");
+                if std::time::Instant::now() >= work_deadline {
+                    let kill_error = child.kill().err();
+                    while std::time::Instant::now() < deadline {
+                        if child.try_wait().unwrap().is_some() {
+                            panic!(
+                                "request root publication counterproof exceeded its elapsed budget; exact child reaped"
+                            );
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    panic!(
+                        "request root publication child {} remains unreaped after its elapsed budget; kill error: {:?}",
+                        child.id(),
+                        kill_error
+                    );
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         let temp = tempfile::tempdir().unwrap();
         let old_root = temp.path().join("two-phase");
         // Pause the old real two-phase publisher after mkdir, before chmod.
@@ -984,13 +999,39 @@ mod tests {
             fs::metadata(&old_root).unwrap().permissions().mode() & 0o777,
             0o755
         );
-        let old_error = std::thread::scope(|scope| {
-            scope
-                .spawn(|| write_request(&old_root, &"a".repeat(64), b"{}"))
-                .join()
-                .unwrap()
-                .expect_err("another writer must refuse the unsafe intermediate directory")
+        let (result_sender, result_receiver) = std::sync::mpsc::channel();
+        let writer_root = old_root.clone();
+        let writer = std::thread::spawn(move || {
+            let result = write_request(&writer_root, &"a".repeat(64), b"{}");
+            let _ = result_sender.send(result);
         });
+        let result = match result_receiver
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let retained = temp.keep();
+                panic!(
+                    "request root writer outcome unresolved ({error}); owned fixture retained at {}",
+                    retained.display()
+                );
+            }
+        };
+        while !writer.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if !writer.is_finished() {
+            let retained = temp.keep();
+            panic!(
+                "request root writer completion unresolved; owned fixture retained at {}",
+                retained.display()
+            );
+        }
+        // The same owned handle was observed finished. Joining only surfaces
+        // its panic; it cannot wait for further writer work or fixture cleanup.
+        writer.join().unwrap();
+        let old_error =
+            result.expect_err("another writer must refuse the unsafe intermediate directory");
         assert_eq!(old_error.preflight_code(), "helper_request_storage_invalid");
         fs::set_permissions(&old_root, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(write_request(&old_root, &"a".repeat(64), b"{}").is_ok());
