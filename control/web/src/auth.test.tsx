@@ -22,6 +22,7 @@ type TestApi = ControlApi & BrowserAuthApi;
 
 function controlApi(overrides: Partial<TestApi> = {}): TestApi {
   return {
+    fleetEvents: () => { const events = new EventTarget(); return {url: "/api/fleet/stream", close: () => undefined, addEventListener: events.addEventListener.bind(events), removeEventListener: events.removeEventListener.bind(events)}; },
     visualFleet: async () => ({event_cursor: 0, generated_at: "2026-08-15T12:00:00Z", authority_revision: "a".repeat(64), nodes: []}),
     session: async () => { throw new AuthenticationRequired(); },
     login: async () => session,

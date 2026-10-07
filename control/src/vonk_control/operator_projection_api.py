@@ -20,6 +20,7 @@ from pydantic import ConfigDict, Field, model_serializer
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import Response
 from vonk_agent_protocol import (
     ControllerErrorCode,
     ObservationCause,
@@ -58,8 +59,18 @@ from .fleet_projection import (
 from .library_projection import LibrarySelectorAmbiguous
 from .logging import current_request_id, log_event, redact_text
 from .models import AgentOperation, AgentOperationAttempt
+from .observation_transfer import (
+    ObservationTransferRecord,
+    ObservationTransferResponse,
+    observation_openapi,
+    observation_response,
+)
 from .operation_api import bounded_error_responses
 from .operation_item_contract import OperationResultFacts
+from .platform_observation_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
+)
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
 
@@ -804,6 +815,8 @@ def install_operator_projection_routes(
             return fleet().read()
         except HTTPException:
             raise
+        except SQLAlchemyError as error:
+            raise ObservationCaptureUnavailable(phase="database-capture") from error
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
@@ -815,12 +828,25 @@ def install_operator_projection_routes(
 
     @app.get(
         "/api/fleet",
-        response_model=FleetSnapshot,
-        responses=bounded_error_responses(401, 503),
+        response_class=ObservationTransferResponse,
+        response_model=None,
+        responses={
+            200: {"model": ObservationTransferRecord},
+            **bounded_error_responses(401, 503),
+        },
+        openapi_extra=observation_openapi("FleetSnapshot"),
         operation_id="getFleetStatus",
     )
-    def fleet_status(_actor: Actor = authenticated) -> FleetSnapshot:
-        return snapshot()
+    def fleet_status(
+        _actor: Actor = authenticated,
+    ) -> ObservationTransferResponse | Response:
+        try:
+            captured = snapshot()
+        except ObservationCaptureUnavailable as error:
+            return observation_capture_unavailable_response(
+                error, operation="getFleetStatus", endpoint="/api/fleet"
+            )
+        return observation_response(captured, resource="fleet")
 
     @app.get(
         "/api/fleet/locks",

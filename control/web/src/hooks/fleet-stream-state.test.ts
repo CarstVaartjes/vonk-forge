@@ -77,7 +77,8 @@ test("authoritative cursor-ahead reset clears the old sparse timeline", () => {
   const current = fleetStreamReducer(initialFleetStreamState, {type: "requested-snapshot", snapshot: snapshot(10)});
   const required = fleetStreamReducer(current, {type: "projection-refresh", cursor: 100});
 
-  const reset = fleetStreamReducer(required, {type: "reset-snapshot", snapshot: snapshot(20, 20), reason: "cursor-ahead"});
+  const notice = fleetStreamReducer(required, {type: "refresh-notice", cursor: 20, reason: "cursor-ahead"});
+  const reset = fleetStreamReducer(notice, {type: "reset-snapshot", snapshot: snapshot(20, 20), reason: "cursor-ahead"});
   const nextTimeline = fleetStreamReducer(reset, {
     type: "node-telemetry",
     cursor: 21,
@@ -184,8 +185,10 @@ test("only clears a sparse refresh requirement after a qualifying snapshot appli
 
   expect(insufficient.snapshot?.event_cursor).toBe(21);
   expect(insufficient.requiredRefreshCursor).toBe(22);
-  expect(staleRest).toBe(telemetryAhead);
-  expect(staleRest.requiredRefreshCursor).toBe(22);
+  expect(telemetryAhead.snapshot?.event_cursor).toBe(21);
+  expect(telemetryAhead.requiredRefreshCursor).toBe(24);
+  expect(staleRest.snapshot?.event_cursor).toBe(22);
+  expect(staleRest.requiredRefreshCursor).toBe(24);
   expect(reconciled.snapshot?.event_cursor).toBe(24);
   expect(reconciled.snapshot?.nodes[0].telemetry?.sample.gpu_utilization_percent).toBe(84);
   expect(reconciled.requiredRefreshCursor).toBeNull();

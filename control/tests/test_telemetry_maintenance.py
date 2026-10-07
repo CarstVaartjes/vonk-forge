@@ -228,7 +228,6 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
     stream = FleetStream(
         events,
         telemetry,
-        projection,
         clock=lambda: NOW,
     )
 
@@ -249,11 +248,14 @@ def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
     }
     data = json.loads(fields["data"])
     assert fields["id"] == "1"
-    assert fields["event"] == "fleet-snapshot"
+    assert fields["event"] == "fleet-refresh"
     assert data["reset_reason"] == "missing-telemetry-sample"
-    assert data["snapshot"]["event_cursor"] == 1
-    assert [node["id"] for node in data["snapshot"]["nodes"]] == [NODE_A]
-    assert data["snapshot"]["nodes"][0]["telemetry"] is None
+    assert data["event_cursor"] == 1
+    assert "snapshot" not in data
+    captured = projection.read()
+    assert captured.event_cursor == 1
+    assert [node.id for node in captured.nodes] == [NODE_A]
+    assert captured.nodes[0].telemetry is None
 
 
 def test_inventory_history_keeps_a_day_and_always_each_nodes_newest_row(

@@ -312,6 +312,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
     def _acceptance_caddyfile(self) -> str | None:
         return self._current_release().caddyfile
 
+    def _controller_observation_contract(self) -> ControllerContract:
+        return self._current_release().contract
+
     def _controller_request_guard(self):
         # The harness is newer than both Controllers it drives: every request
         # must be one the Controller in front of it accepts (#1086).
@@ -512,6 +515,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             hostname=self.control_hostname,
             port=self._local_browser_port(),
             request_guard=self._controller_request_guard(),
+            observation_contract=self._controller_observation_contract,
         )
         password = self._read_secret("admin-password")
         control = browser.login(password, timeout=30)

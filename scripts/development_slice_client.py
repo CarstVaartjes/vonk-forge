@@ -11,6 +11,9 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024
+ObservationTransport = Callable[
+    [str, dict[str, str], float], tuple[int, dict[str, object]]
+]
 Transport = Callable[[str, str, bytes | None, dict[str, str], float], tuple[int, bytes]]
 
 
@@ -52,6 +55,7 @@ class Client:
         timeout: float,
         headers: Mapping[str, str] | None = None,
         transport: Transport | None = None,
+        observation_transport: ObservationTransport | None = None,
     ) -> None:
         fixed_headers = {} if headers is None else dict(headers)
         if (
@@ -78,6 +82,7 @@ class Client:
         )
         self.timeout = timeout
         self._transport = transport
+        self._observation_transport = observation_transport
 
     def request(
         self,
@@ -105,6 +110,21 @@ class Client:
             "Content-Type": content_type,
             **self._headers,
         }
+        if (
+            method == "GET"
+            and path in {"/api/fleet", "/api/platform"}
+            and self._observation_transport is not None
+        ):
+            if data is not None or query:
+                raise SliceError("whole observation request is invalid")
+            status, document = self._observation_transport(
+                path, request_headers, self.timeout
+            )
+            if status not in allowed:
+                raise SliceError(
+                    f"request failed: {method} {path} returned HTTP {status}"
+                )
+            return status, document
         if self._transport is not None:
             try:
                 status, body = self._transport(

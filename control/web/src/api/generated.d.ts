@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 8fac8e57519ac36fcc3e22d329c5a8a80fb2efffbdadd6784fc7fe34e59eb108. Do not edit.
+// Generated from canonical OpenAPI SHA256 984b9196a059d06b9faa4d19ed63f62631bdec19f0aeb99f44c9348eaf2731d2. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -4173,7 +4173,6 @@ export interface components {
             original_operation_id?: string | null;
             /** Plan Digest */
             plan_digest: string;
-            progress?: components["schemas"]["RunSwitchProgress"] | null;
             /** Queue Index */
             queue_index: number | ExactNumber;
             /** Request Key */
