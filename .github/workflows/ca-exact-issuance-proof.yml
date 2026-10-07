@@ -70,6 +70,17 @@ jobs:
             --tag vonk-ca-proof:"$GITHUB_SHA" .
           docker save vonk-ca-proof:"$GITHUB_SHA" --output artifacts/ca-proof/ca-image.tar
           docker image inspect vonk-ca-proof:"$GITHUB_SHA" > artifacts/ca-proof/image-inspect.json
+      - name: Prepare the locked Controller environment
+        if: ${{ !inputs.bootstrap_lock }}
+        uses: ./.github/actions/python-env
+      - name: Prove the real Controller provider against the journal CA image
+        if: ${{ !inputs.bootstrap_lock }}
+        env:
+          VONK_JOURNAL_CA_TEST_IMAGE: vonk-ca-proof:${{ github.sha }}
+        run: >-
+          uv run --project control --frozen pytest -q
+          control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
+          --junitxml=artifacts/ca-proof/controller-provider.xml
       - name: Record exact source and artifact provenance
         if: ${{ !inputs.bootstrap_lock }}
         shell: bash

@@ -883,14 +883,20 @@ def test_tracked_step_ca_template_is_public_only_and_matches_provider_validation
     }
 
 
-# Slow by design: it runs the exact pinned step-ca image twice (fixture PKI,
-# then the CA itself) and waits for the server to become healthy.
+# Slow by design: fixture PKI uses the pinned step CLI, then the candidate
+# journal CA serves the existing keys and persistent database.
 @pytest.mark.slow(30)
 @pytest.mark.lane  # Starts the pinned step-ca container.
 def test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Exercise the tracked public config against the exact production image."""
+    """Exercise the tracked config against the built journal CA runtime."""
+    journal_image = os.environ.get("VONK_JOURNAL_CA_TEST_IMAGE")
+    if not journal_image:
+        reason = "the built journal CA image is required for the CA integration test"
+        if os.environ.get("CI"):
+            pytest.fail(reason)
+        pytest.skip(reason)
     if (
         shutil.which("docker") is None
         or subprocess.run(
@@ -998,8 +1004,9 @@ step crypto jwk thumbprint < agent-ca-public.jwk
             "-v",
             f"{database}:/home/step/db",
             "--entrypoint",
-            "step-ca",
-            STEP_CA_IMAGE,
+            "vonk-step-ca",
+            journal_image,
+            "--config",
             "/home/step/config/ca.json",
             "--password-file",
             "/run/vonk-normalized-secrets/step-ca/password",
