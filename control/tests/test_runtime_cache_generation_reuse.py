@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -21,7 +20,7 @@ from vonk_control.runtime_image_preparation import (
 
 from .test_oci_image_store import _docker_archive, _layer
 
-pytestmark = pytest.mark.lane
+pytestmark = pytest.mark.needs_skopeo
 
 BUILD_INPUT = "a" * 64
 RUNTIME = {"architecture": "linux/arm64", "interface": "vonk.runtime.v1"}
@@ -32,11 +31,8 @@ def image_generations(
     tmp_path: Path,
 ) -> tuple[FilesystemRuntimeImageStorage, RuntimeImageReceipt, RuntimeImageReceipt]:
     skopeo = shutil.which("skopeo")
-    if skopeo is None:
-        if os.environ.get("VONK_CI_RUNTIME_CACHE_PROOF") == "1":
-            pytest.fail("the runtime cache proof lane must provide skopeo")
-        pytest.skip("requires the Controller image ingress tool skopeo")
     storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
+    assert skopeo is not None
     storage.layout = OciImageStore(tmp_path / "artifacts", skopeo=skopeo)
     recipe = json.loads(
         files("vonk_forge_contracts")

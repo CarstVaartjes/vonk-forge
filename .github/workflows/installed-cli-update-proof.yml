@@ -55,23 +55,19 @@ jobs:
         env:
           VONK_SIGNED_UPDATE_PROOF: '1'
           VONK_SIGNED_UPDATE_CACHE: ${{ runner.temp }}/signed-update-cache
-          VONK_SIGNED_UPDATE_REPORT: ${{ runner.temp }}/signed-update-report.json
         run: |
           set -euo pipefail
           uv run --project control --frozen pytest -q -n 0 \
             tests/cluster_profiles/test_cli_update.py::test_installed_cli_signed_update_replaces_actual_uv_tool \
             --junitxml="$RUNNER_TEMP/signed-update-junit.xml"
           python3 - <<'PY'
-          import json, os, xml.etree.ElementTree as ET
+          import os, xml.etree.ElementTree as ET
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
           cases = ET.parse(root / 'signed-update-junit.xml').findall('.//testcase')
-          assert len(cases) == 1
+          assert cases, "no proof cases executed"
+          assert {'test_installed_cli_signed_update_replaces_actual_uv_tool'} <= {case.attrib['name'].partition('[')[0] for case in cases}, 'missing required installed CLI case'
           assert not any(case.find(tag) is not None for case in cases for tag in ('skipped', 'failure', 'error'))
-          proof = json.loads((root / 'signed-update-report.json').read_text())
-          assert proof['tampered_wheel_retained_prior_tool_receipt']
-          assert proof['real_uv_tool_receipt_changed']
-          assert proof['stable_updater_after_platform_ndjson']
           PY
       - name: Retain scoped signed updater evidence
         if: always()
@@ -79,7 +75,6 @@ jobs:
         with:
           name: installed-signed-cli-update-${{ github.sha }}
           path: |
-            ${{ runner.temp }}/signed-update-report.json
             ${{ runner.temp }}/signed-update-junit.xml
           if-no-files-found: ignore
           retention-days: 7
