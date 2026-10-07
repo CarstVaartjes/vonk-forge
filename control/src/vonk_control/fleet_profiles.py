@@ -2001,11 +2001,11 @@ class RunSwitchFleetProfileAdapter:
                     queue_index=pending.queue_index,
                     operation_id=child.operation_id,
                     kind=pending.kind,
-                    state="succeeded"
+                    state=LifecycleState.SUCCEEDED
                     if child.state == "succeeded"
-                    else "failed"
+                    else LifecycleState.FAILED
                     if child.state == "failed"
-                    else "cancelled",
+                    else LifecycleState.CANCELLED,
                     result=receipt,
                     original_operation_id=pending.original_operation_id,
                 )
@@ -9193,7 +9193,7 @@ class FleetProfileService:
                         )
                         if (
                             completed is None
-                            or completed.state != "succeeded"
+                            or completed.state != LifecycleState.SUCCEEDED
                             or completed.result is None
                             or not any(
                                 isinstance(receipt, RunSwitchStopResult)
@@ -11428,7 +11428,7 @@ class FleetProfileService:
                     "cancelled",
                     "unknown",
                 ] = (
-                    closed.state
+                    closed.state.value
                     if closed
                     else "pending"
                     if active
@@ -11451,7 +11451,7 @@ class FleetProfileService:
                 if (
                     stop is not None
                     and closed is not None
-                    and closed.state == "succeeded"
+                    and closed.state == LifecycleState.SUCCEEDED
                     and (
                         closed.result is None
                         or not any(
