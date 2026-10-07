@@ -790,3 +790,23 @@ test("recognizes an uploaded byte receipt by exact numeric value", async () => {
   expect(client.uploadArtifactJobInput).toHaveBeenCalledTimes(1);
   expect(await screen.findByText("Succeeded")).toBeInTheDocument();
 });
+
+test("checks browser input bytes against the Controller's exact declared transport limit", async () => {
+  const user = userEvent.setup();
+  const client = api();
+  const capabilities = await client.artifactJobCapabilities();
+  client.artifactJobCapabilities.mockResolvedValue({...capabilities,
+    transport: {...capabilities.transport, max_input_file_bytes: new LosslessNumber("2")},
+  });
+  render(<ArtifactJobWorkspace api={client as unknown as LibraryApi} detail={detail()}/>);
+  await screen.findByText("No artifact jobs yet");
+  const prompt = screen.getByRole("textbox", {name: "Prompt"});
+  await user.type(prompt, "abc");
+  expect(screen.getByRole("button", {name: "Submit artifact job"})).toBeDisabled();
+  expect(client.createArtifactJob).not.toHaveBeenCalled();
+  await user.clear(prompt);
+  await user.type(prompt, "a");
+  await user.click(screen.getByRole("button", {name: "Submit artifact job"}));
+  await waitFor(() => expect(client.submitArtifactJob).toHaveBeenCalled());
+  expect(client.createArtifactJob.mock.calls[0][1].inputs[0].size_bytes).toBe(1);
+});
