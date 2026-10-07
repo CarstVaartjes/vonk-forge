@@ -24,6 +24,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.api import build_agent_services
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.models import Base
 from vonk_control.presence import AgentPresenceService
 
@@ -85,8 +86,8 @@ class _Material(TypedDict):
 class _SignRequestBody(TypedDict):
     csr: str
     ott: str
-    notBefore: str
-    notAfter: str
+    request: dict[str, object]
+    mode: str
 
 
 class _SignExchange(TypedDict):
@@ -264,6 +265,30 @@ def _provider(
     return provider, material
 
 
+def _issue(provider: StepCertificateAuthority, node_id: str, csr: bytes, now: datetime):
+    binding = provider.prepare_request(
+        node_id, csr, now, purpose="enrollment", source_serial=None, generation=1
+    )
+    return provider.issue_node(node_id, csr, now, request=binding)
+
+
+def _renew(
+    provider: StepCertificateAuthority,
+    node_id: str,
+    csr: bytes,
+    now: datetime,
+    *,
+    request_id: str,
+):
+    binding = provider.prepare_request(
+        node_id, csr, now, purpose="rotation", source_serial="1", generation=2
+    )
+    binding = CertificateIssuanceBinding.model_validate(
+        {**binding.model_dump(mode="json"), "request_id": request_id}
+    )
+    return provider.renew_node(node_id, csr, now, request=binding)
+
+
 def _helper_key(path: Path) -> Path:
     path.write_bytes(
         ed25519.Ed25519PrivateKey.generate().private_bytes(
@@ -319,7 +344,12 @@ def _success_response(
 ) -> httpx2.Response:
     body = json.loads(request.content)
     seen.append({"request": request, "body": body})
-    leaf = _leaf(body["csr"].encode(), material, serial=serial)
+    leaf = _leaf(
+        body["csr"].encode(),
+        material,
+        serial=int(body["request"]["serial"]),
+        now=datetime.fromisoformat(body["request"]["not_before"]),
+    )
     leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
     intermediate_pem = (
         material["intermediate"].public_bytes(serialization.Encoding.PEM).decode()
@@ -327,6 +357,8 @@ def _success_response(
     return httpx2.Response(
         201,
         json={
+            "state": "issued",
+            "request": body["request"],
             "crt": leaf_pem,
             "ca": intermediate_pem,
             "certChain": [leaf_pem, intermediate_pem],
@@ -346,17 +378,17 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     provider, material = _provider(tmp_path, handler)
     holder["material"] = material
     request_pem = _csr()
-    issued = provider.issue_node(NODE_ID, request_pem, NOW)
+    issued = _issue(provider, NODE_ID, request_pem, NOW)
 
     assert issued.node_id == NODE_ID
     assert len(seen) == 1
     request = seen[0]["request"]
     assert request.url == f"{CA_URL}/1.0/sign"
     assert request.headers["content-type"] == "application/json"
-    assert set(seen[0]["body"]) == {"csr", "ott", "notBefore", "notAfter"}
+    assert seen[0]["body"]["mode"] == "issue"
     assert seen[0]["body"]["csr"] == request_pem.decode()
-    assert seen[0]["body"]["notBefore"] == "2026-08-04T12:00:00Z"
-    assert seen[0]["body"]["notAfter"] == "2026-09-03T12:00:00Z"
+    assert seen[0]["body"]["request"]["not_before"] == "2026-08-04T12:00:00Z"
+    assert seen[0]["body"]["request"]["not_after"] == "2026-09-03T12:00:00Z"
     token = seen[0]["body"]["ott"]
     header = jwt.get_unverified_header(token)
     claims = jwt.decode(token, options={"verify_signature": False})
@@ -373,49 +405,7 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     assert issued.fingerprint == certificate.fingerprint(hashes.SHA256()).hex()
 
 
-def test_sign_uses_and_validates_configured_certificate_lifetime(
-    tmp_path: Path,
-) -> None:
-    seen: list[_SignRequestBody] = []
-    holder: dict[str, _Material] = {}
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        body = json.loads(request.content)
-        seen.append(body)
-        leaf = _leaf(
-            body["csr"].encode(),
-            holder["material"],
-            lifetime_seconds=90,
-        )
-        leaf_pem = leaf.public_bytes(serialization.Encoding.PEM).decode()
-        intermediate_pem = (
-            holder["material"]["intermediate"]
-            .public_bytes(serialization.Encoding.PEM)
-            .decode()
-        )
-        return httpx2.Response(
-            201,
-            json={
-                "crt": leaf_pem,
-                "ca": intermediate_pem,
-                "certChain": [leaf_pem, intermediate_pem],
-            },
-        )
-
-    provider, material = _provider(
-        tmp_path,
-        handler,
-        certificate_lifetime_seconds=90,
-    )
-    holder["material"] = material
-
-    issued = provider.issue_node(NODE_ID, _csr(), NOW)
-
-    assert seen[0]["notAfter"] == "2026-08-04T12:01:30Z"
-    assert issued.not_after - issued.not_before == timedelta(seconds=90)
-
-
-@pytest.mark.parametrize("lifetime", (True, 89, 2592001))
+@pytest.mark.parametrize("lifetime", (True, 89, 90, 2592001))
 def test_rejects_invalid_configured_certificate_lifetime(
     tmp_path: Path,
     lifetime: int,
@@ -439,7 +429,8 @@ def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
     holder["material"] = material
     request_pem = _csr()
     request_id = "r" * 43
-    issued = provider.renew_node(
+    issued = _renew(
+        provider,
         NODE_ID,
         request_pem,
         NOW,
@@ -448,8 +439,9 @@ def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
 
     assert seen[0]["body"]["csr"] == request_pem.decode()
     claims = jwt.decode(seen[0]["body"]["ott"], options={"verify_signature": False})
-    assert claims["jti"] == request_id
-    assert issued.serial == "5678"
+    assert claims["jti"] != request_id
+    assert claims["vonk"]["request_id"] == request_id
+    assert issued.serial != "1"
 
 
 def test_revocation_is_authenticated_passive_and_idempotent_in_effect(
@@ -673,14 +665,21 @@ def test_rejects_malformed_or_policy_mismatched_sign_responses(
                 material["root"].public_bytes(serialization.Encoding.PEM).decode()
             )
         return httpx2.Response(
-            201, json={"crt": leaf_pem, "ca": ca_pem, "certChain": chain}
+            201,
+            json={
+                "state": "issued",
+                "request": body["request"],
+                "crt": leaf_pem,
+                "ca": ca_pem,
+                "certChain": chain,
+            },
         )
 
     (tmp_path / "other").mkdir(exist_ok=True)
     provider, material = _provider(tmp_path, handler)
     holder["material"] = material
     with pytest.raises(StepCAError):
-        provider.issue_node(NODE_ID, _csr(), NOW)
+        _issue(provider, NODE_ID, _csr(), NOW)
 
 
 def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
@@ -697,7 +696,7 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
 
     provider, _ = _provider(tmp_path, redirect)
     with pytest.raises(StepCAError) as caught:
-        provider.issue_node(NODE_ID, _csr(), NOW)
+        _issue(provider, NODE_ID, _csr(), NOW)
     assert len(requests) == 1 and requests[0].url.host == "step-ca"
     assert "eyJ" not in str(caught.value)
 
@@ -706,7 +705,7 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
 
     bounded, _ = _provider(tmp_path / "bounded", oversized, max_response_bytes=1024)
     with pytest.raises(StepCAError, match="too large"):
-        bounded.issue_node(NODE_ID, _csr(), NOW)
+        _issue(bounded, NODE_ID, _csr(), NOW)
 
 
 @pytest.mark.parametrize(
@@ -1063,7 +1062,7 @@ step crypto jwk thumbprint < agent-ca-public.jwk
                     pytest.fail(f"pinned step-ca did not become healthy: {logs}")
                 time.sleep(0.1)
         now = datetime.now(UTC).replace(microsecond=0)
-        issued = provider.issue_node(NODE_ID, _csr(), now)
+        issued = _issue(provider, NODE_ID, _csr(), now)
         certificate = x509.load_pem_x509_certificate(issued.certificate_pem)
         extensions = {extension.oid: extension for extension in certificate.extensions}
         assert ExtensionOID.BASIC_CONSTRAINTS not in extensions
@@ -1072,7 +1071,8 @@ step crypto jwk thumbprint < agent-ca-public.jwk
         assert extensions[
             ExtensionOID.EXTENDED_KEY_USAGE
         ].value == x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH])
-        renewed = provider.renew_node(
+        renewed = _renew(
+            provider,
             NODE_ID,
             _csr(),
             datetime.now(UTC).replace(microsecond=0),

@@ -51,6 +51,7 @@ from vonk_control.agent_api import (
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, AgentSource, TokenCodec
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
 from vonk_control.host_helper_authority import (
@@ -75,12 +76,13 @@ from vonk_control.models import (
     RecipeSourceBundle,
     RunNode,
 )
-from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.pki import IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .ca_test_authority import FixtureCertificateAuthority
 from .stored_documents_support import valid_policy_report
 
 NODE_A = "spk_" + "a" * 32
@@ -210,7 +212,7 @@ class Jobs:
         targets: Sequence[str],
         payload: Mapping[str, object],
         *,
-        request_id: str,
+        request: CertificateIssuanceBinding,
     ) -> object:
         raise AssertionError
 
@@ -254,21 +256,27 @@ class CopyBoundedChunk(bytes):
         raise AssertionError("an incoming ASGI chunk must never be concatenated whole")
 
 
-class Authority(CertificateAuthority):
+class Authority(FixtureCertificateAuthority):
     def __init__(self) -> None:
         self.fail_revoke = False
 
     def issue_node(
-        self, node_id: str, public_key_pem: bytes, now: datetime
+        self,
+        node_id: str,
+        public_key_pem: bytes,
+        now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         return IssuedCertificate(
             node_id,
             b"certificate",
             b"chain",
-            "issued-serial",
+            "1",
             "e" * 64,
-            now,
-            now + timedelta(days=1),
+            datetime.fromisoformat(request.not_before),
+            datetime.fromisoformat(request.not_after),
+            generation=request.generation,
         )
 
     def renew_node(
@@ -277,9 +285,9 @@ class Authority(CertificateAuthority):
         public_key_pem: bytes,
         now: datetime,
         *,
-        request_id: str,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
-        return self.issue_node(node_id, public_key_pem, now)
+        return self.issue_node(node_id, public_key_pem, now, request=request)
 
     def revocation_bundle(self, now: datetime) -> bytes:
         return b""
@@ -2451,7 +2459,6 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
         raise RuntimeError("provider response lost")
 
     monkeypatch.setattr(services.enrollment._authority, "issue_node", fail_issue)
-    monkeypatch.setattr(services.enrollment, "_issuance_replay_wait_seconds", 0)
     body = json.loads(valid_enrollment_body(enrollment_grant(services)))
 
     first = client.post("/agent/enroll", json=body)

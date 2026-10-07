@@ -5,11 +5,11 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import json
 import logging
 import re
 import secrets
 import threading
-import time
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import EnrollmentGrantState
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, EnrollmentEvidence
 
+from .ca_issuance_contract import CertificateIssuanceBinding
 from .enrollment_contract import ENROLLMENT_ID_PATTERN, EnrollmentGrantStatus
 from .models import (
     AgentCertificate,
@@ -40,6 +41,7 @@ from .models import (
     Job,
 )
 from .pki import CertificateAuthority, IssuedCertificate
+from .step_ca import StepCAIssuancePending
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ class EnrollmentDenied(RuntimeError):
 
 
 class EnrollmentIssuanceUncertain(EnrollmentDenied):
-    """A provider write may have succeeded and must never be retried automatically."""
+    """Provider evidence is unknown; reconcile the durable exact request on retry."""
 
 
 class RemoteRevocationUncertain(EnrollmentDenied):
@@ -66,7 +68,7 @@ class RenewalInProgress(RuntimeError):
 
 
 class RenewalIssuanceUncertain(EnrollmentDenied):
-    """Renewal issuance is terminal until an operator reconciles the intent."""
+    """Exact renewal evidence is temporarily unavailable or historically unknown."""
 
 
 class RenewalConflictRevocationUncertain(EnrollmentDenied):
@@ -88,6 +90,7 @@ class _IssuanceClaim:
     node_id: str
     csr_pem: bytes
     purpose: str
+    provider_request: CertificateIssuanceBinding | None
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,7 @@ class _RotationClaim:
     csr_pem: bytes
     csr_public_key_fingerprint: str
     provider_request_id: str
+    provider_request: CertificateIssuanceBinding | None
     state: str
     owner: bool
 
@@ -115,14 +119,10 @@ class EnrollmentService:
         authority: CertificateAuthority,
         *,
         clock: Callable[[], datetime],
-        issuance_replay_wait_seconds: float = 5.0,
     ) -> None:
-        if not 0 <= issuance_replay_wait_seconds <= 30:
-            raise ValueError("issuance replay wait must be between zero and 30 seconds")
         self._sessions = sessions
         self._authority = authority
         self._clock = clock
-        self._issuance_replay_wait_seconds = issuance_replay_wait_seconds
         # SQLite ignores row locks. PostgreSQL correctness comes from the
         # locked grant row; this preserves the same behavior in local tests.
         self._submit_lock = threading.RLock()
@@ -405,12 +405,31 @@ class EnrollmentService:
                     grant.node_id = node_id
                     grant.consumed_at = now
                     if failure is None:
+                        generation = (
+                            session.scalar(
+                                select(AgentCertificate.generation)
+                                .where(AgentCertificate.node_id == node_id)
+                                .order_by(AgentCertificate.generation.desc())
+                                .limit(1)
+                            )
+                            or 0
+                        ) + 1
+                        binding = self._authority.prepare_request(
+                            node_id,
+                            csr_pem,
+                            now,
+                            purpose="enrollment",
+                            source_serial=None,
+                            generation=generation,
+                        )
+                        enrollment.provider_request = binding.model_dump(mode="json")
                         session.add(enrollment)
                         claim = _IssuanceClaim(
                             enrollment.id,
                             node_id,
                             csr_pem,
                             grant.purpose,
+                            binding,
                         )
                 else:
                     grant.consumed_at = now
@@ -421,9 +440,47 @@ class EnrollmentService:
         if wait_for_enrollment_id is not None:
             return self._wait_for_issuance(wait_for_enrollment_id)
         assert claim is not None
+        return self._issue_enrollment_claim(claim, now)
+
+    def _issue_enrollment_claim(
+        self, claim: _IssuanceClaim, now: datetime
+    ) -> IssuedCertificate:
+        if claim.provider_request is None:
+            raise EnrollmentIssuanceUncertain(
+                "historical certificate issuance has no exact journal binding"
+            )
         with self._issuance_lock:
+            with self._sessions.begin() as session:
+                accepted = _locked_enrollment(session, claim.enrollment_id)
+                grant = session.get(AgentEnrollmentGrant, accepted.grant_id)
+                if grant is None or grant.revoked_at is not None:
+                    raise EnrollmentDenied("enrollment grant is revoked or missing")
+                if (
+                    _issuance_binding(accepted.provider_request)
+                    != claim.provider_request
+                ):
+                    raise EnrollmentDenied("enrollment issuance binding changed")
+                node = session.get(AgentNode, claim.node_id)
+                if node is not None and (
+                    node.state != "active" or node.revoked_at is not None
+                ):
+                    raise EnrollmentDenied("node identity is retired or revoked")
+                if accepted.state == "certificate_issued":
+                    return _issued(accepted)
             try:
-                issued = self._authority.issue_node(claim.node_id, claim.csr_pem, now)
+                try:
+                    issued = self._authority.observe_node(
+                        claim.csr_pem, now, request=claim.provider_request
+                    )
+                except StepCAIssuancePending:
+                    issued = None
+                if issued is None:
+                    issued = self._authority.issue_node(
+                        claim.node_id,
+                        claim.csr_pem,
+                        now,
+                        request=claim.provider_request,
+                    )
             except Exception as error:
                 # The client only learns that issuance is uncertain.  Operators
                 # still need the provider cause and traceback to reconcile a
@@ -436,15 +493,14 @@ class EnrollmentService:
                     extra={"failure_type": type(error).__name__},
                 )
                 raise EnrollmentIssuanceUncertain(
-                    "certificate issuance is uncertain; manual recovery required"
+                    "certificate issuance is uncertain; retry exact request observation"
                 ) from error
-            if issued.node_id != claim.node_id:
-                raise EnrollmentIssuanceUncertain(
-                    "certificate issuance is uncertain; manual recovery required"
-                )
+            _validate_issued_binding(issued, claim.provider_request)
             try:
                 with self._sessions.begin() as session:
                     enrollment = _locked_enrollment(session, claim.enrollment_id)
+                    if enrollment.state == "certificate_issued":
+                        return _issued(enrollment)
                     if enrollment.state != "issuing":
                         raise EnrollmentDenied(
                             "certificate issuance state changed; manual recovery required"
@@ -468,30 +524,34 @@ class EnrollmentService:
                     issued = replace(
                         issued, generation=enrollment.certificate_generation
                     )
-            except IntegrityError as error:
+            except SQLAlchemyError as error:
                 # The durable issuing state was committed before the provider
-                # call.  Never retry automatically after an uncertain write:
-                # the provider may already have created this certificate.
+                # call. Retry observes that exact provider journal entry before
+                # a same-binding issue can resume through the CA epoch fence.
                 raise EnrollmentIssuanceUncertain(
-                    "certificate persistence failed; manual recovery required"
+                    "certificate persistence failed; retry exact request observation"
                 ) from error
             return issued
 
     def _wait_for_issuance(self, enrollment_id: str) -> IssuedCertificate:
-        deadline = time.monotonic() + self._issuance_replay_wait_seconds
-        while time.monotonic() < deadline:
-            with self._sessions() as session:
-                enrollment = session.get(AgentEnrollment, enrollment_id)
-                if enrollment is None:
-                    raise EnrollmentDenied("enrollment state is invalid")
-                if enrollment.state == "certificate_issued":
-                    return _issued(enrollment)
-                if enrollment.state != "issuing":
-                    raise EnrollmentDenied("enrollment state is invalid")
-            time.sleep(0.01)
-        raise EnrollmentIssuanceUncertain(
-            "certificate issuance is uncertain; manual recovery required"
-        )
+        now = _utc(self._clock())
+        with self._sessions.begin() as session:
+            enrollment = _locked_enrollment(session, enrollment_id)
+            grant = session.get(AgentEnrollmentGrant, enrollment.grant_id)
+            if grant is None or grant.revoked_at is not None:
+                raise EnrollmentDenied("enrollment grant is revoked or missing")
+            if enrollment.state == "certificate_issued":
+                return _issued(enrollment)
+            if enrollment.state != "issuing":
+                raise EnrollmentDenied("enrollment state is invalid")
+            claim = _IssuanceClaim(
+                enrollment.id,
+                enrollment.node_id,
+                enrollment.csr_pem.encode("ascii"),
+                grant.purpose,
+                _issuance_binding(enrollment.provider_request),
+            )
+        return self._issue_enrollment_claim(claim, now)
 
     def renew(self, node_id: str, serial: str, csr: bytes) -> IssuedCertificate:
         with self._rotation_lock:
@@ -523,7 +583,7 @@ class EnrollmentService:
             )
         if isinstance(claim, IssuedCertificate):
             return claim
-        if not claim.owner:
+        if not claim.owner and claim.provider_request is None:
             if claim.state == "manual-recovery":
                 raise RenewalIssuanceUncertain(
                     "certificate rotation requires manual recovery"
@@ -675,6 +735,16 @@ class EnrollmentService:
                 created_at=now,
                 updated_at=now,
             )
+            binding = self._authority.prepare_request(
+                node_id,
+                normalized_csr,
+                now,
+                purpose="rotation",
+                source_serial=serial,
+                generation=intent.generation,
+            )
+            intent.provider_request = binding.model_dump(mode="json")
+            intent.provider_request_id = binding.request_id
             session.add(intent)
             session.flush()
             return _RotationRecoveryClaim(
@@ -730,18 +800,34 @@ class EnrollmentService:
         self, claim: _RotationClaim, now: datetime
     ) -> IssuedCertificate:
         try:
-            issued = self._authority.renew_node(
-                claim.node_id,
-                claim.csr_pem,
-                now,
-                request_id=claim.provider_request_id,
-            )
+            if claim.provider_request is None:
+                raise RenewalIssuanceUncertain(
+                    "historical certificate rotation has no exact journal binding"
+                )
+            try:
+                issued = self._authority.observe_node(
+                    claim.csr_pem, now, request=claim.provider_request
+                )
+            except StepCAIssuancePending:
+                issued = None
+            if issued is None:
+                issued = self._authority.renew_node(
+                    claim.node_id,
+                    claim.csr_pem,
+                    now,
+                    request=claim.provider_request,
+                )
+            _validate_issued_binding(issued, claim.provider_request)
             self._validate_renewal_result(issued, claim)
             disposition = self._persist_rotation(issued, claim)
+        except StepCAIssuancePending as error:
+            raise RenewalInProgress(
+                "certificate rotation issuance is in progress"
+            ) from error
         except Exception as error:
             self._mark_rotation_uncertain(claim, now)
             raise RenewalIssuanceUncertain(
-                "certificate rotation requires manual recovery"
+                "certificate rotation is uncertain; retry exact request observation"
             ) from error
         if disposition == "revocation-pending":
             self._revoke_denied_rotation(issued.serial, claim, now)
@@ -828,11 +914,17 @@ class EnrollmentService:
                     )
                 if (
                     intent.state == "issuing"
+                    and intent.provider_request is None
                     and now - _stored_utc(intent.updated_at)
                     >= _ROTATION_ISSUANCE_TIMEOUT
                 ):
                     intent.state = "manual-recovery"
                     intent.updated_at = now
+                if (
+                    intent.provider_request is not None
+                    and intent.state == "manual-recovery"
+                ):
+                    intent.state = "issuing"
                 if intent.state not in {"issuing", "manual-recovery"}:
                     raise EnrollmentDenied("certificate rotation state is invalid")
                 return _rotation_claim(intent, owner=False)
@@ -854,6 +946,16 @@ class EnrollmentService:
                 created_at=now,
                 updated_at=now,
             )
+            binding = self._authority.prepare_request(
+                node_id,
+                normalized_csr,
+                now,
+                purpose="rotation",
+                source_serial=serial,
+                generation=generation,
+            )
+            intent.provider_request = binding.model_dump(mode="json")
+            intent.provider_request_id = binding.request_id
             session.add(intent)
             return _rotation_claim(intent, owner=True)
 
@@ -913,7 +1015,27 @@ class EnrollmentService:
                 )
                 .with_for_update(of=AgentCertificateRotation)
             )
-            if intent is None or intent.state != "issuing":
+            if intent is None:
+                committed = next(
+                    (
+                        candidate
+                        for candidate in certificates
+                        if candidate.serial == issued.serial
+                        and candidate.generation == claim.generation
+                        and candidate.csr_public_key_fingerprint
+                        == claim.csr_public_key_fingerprint
+                        and candidate.state in {"staged", "active"}
+                        and candidate.revoked_at is None
+                    ),
+                    None,
+                )
+                if committed is not None:
+                    return "staged"
+            if (
+                intent is None
+                or intent.state != "issuing"
+                or _issuance_binding(intent.provider_request) != claim.provider_request
+            ):
                 raise EnrollmentDenied(
                     "certificate rotation issuance state changed; manual recovery required"
                 )
@@ -1041,11 +1163,13 @@ class EnrollmentService:
                     .with_for_update(of=AgentCertificateRotation)
                 )
                 if intent is not None and intent.state == "issuing":
-                    intent.state = "manual-recovery"
+                    if intent.provider_request is None:
+                        intent.state = "manual-recovery"
                     intent.updated_at = now
         except SQLAlchemyError:
             # The committed issuing row remains authoritative when the
-            # follow-up annotation cannot be stored. It still forbids a call.
+            # follow-up annotation cannot be stored. Its exact binding still
+            # permits provider observation without inventing another effect.
             pass
 
     def activate(self, node_id: str, serial: str, generation: int) -> None:
@@ -1293,8 +1417,8 @@ def _persist_issued_enrollment(
             "certificate authority returned non-PEM certificate material"
         ) from error
     grant = session.get(AgentEnrollmentGrant, enrollment.grant_id)
-    if grant is None:
-        raise EnrollmentDenied("enrollment grant does not exist")
+    if grant is None or grant.revoked_at is not None:
+        raise EnrollmentDenied("enrollment grant is revoked or missing")
     node = session.scalar(
         select(AgentNode)
         .where(AgentNode.node_id == enrollment.node_id)
@@ -1304,6 +1428,7 @@ def _persist_issued_enrollment(
         raise EnrollmentDenied("enrollment purpose is invalid")
     if purpose == "new-node" and node is not None:
         raise EnrollmentDenied("node identity already exists")
+    certificates: list[AgentCertificate] = []
     if node is None:
         node = AgentNode(
             node_id=enrollment.node_id,
@@ -1348,10 +1473,14 @@ def _persist_issued_enrollment(
         if not certificates:
             raise EnrollmentDenied("node identity has no certificate history")
         generation = max(certificate.generation for certificate in certificates) + 1
-        for certificate in certificates:
-            if certificate.state in {"active", "staged"}:
-                certificate.state = "revoked"
-                certificate.revoked_at = certificate.revoked_at or now
+    if generation != issued.generation:
+        raise EnrollmentDenied(
+            "enrollment generation changed from accepted issuance binding"
+        )
+    for certificate in certificates:
+        if certificate.state in {"active", "staged"}:
+            certificate.state = "revoked"
+            certificate.revoked_at = certificate.revoked_at or now
     session.add(
         AgentCertificate(
             serial=issued.serial,
@@ -1478,6 +1607,7 @@ def _rotation_claim(
         csr_pem=rotation.csr_pem.encode("ascii"),
         csr_public_key_fingerprint=rotation.csr_public_key_fingerprint,
         provider_request_id=rotation.provider_request_id,
+        provider_request=_issuance_binding(rotation.provider_request),
         state=rotation.state,
         owner=owner,
     )
@@ -1591,3 +1721,28 @@ def _utc(value: datetime) -> datetime:
 def _stored_utc(value: datetime) -> datetime:
     """Normalize database timestamps; SQLite does not round-trip tzinfo."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _issuance_binding(
+    value: dict[str, object] | None,
+) -> CertificateIssuanceBinding | None:
+    if value is None:
+        return None
+    return CertificateIssuanceBinding.model_validate_json(
+        json.dumps(value, allow_nan=False)
+    )
+
+
+def _validate_issued_binding(
+    issued: IssuedCertificate, binding: CertificateIssuanceBinding
+) -> None:
+    if (
+        issued.node_id != binding.node_id
+        or issued.serial != binding.serial
+        or _utc(issued.not_before) != datetime.fromisoformat(binding.not_before)
+        or _utc(issued.not_after) != datetime.fromisoformat(binding.not_after)
+        or issued.generation != binding.generation
+    ):
+        raise EnrollmentDenied(
+            "certificate authority result differs from accepted issuance binding"
+        )

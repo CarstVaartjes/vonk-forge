@@ -79,6 +79,7 @@ from .enrollment import (
     EnrollmentIssuanceUncertain,
     EnrollmentService,
     RenewalInProgress,
+    RenewalIssuanceUncertain,
 )
 from .enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
 from .enrollment_contract import EnrollmentId
@@ -1536,7 +1537,7 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        except RenewalInProgress as error:
+        except (RenewalInProgress, RenewalIssuanceUncertain) as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
@@ -1562,7 +1563,7 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        except RenewalInProgress as error:
+        except (RenewalInProgress, RenewalIssuanceUncertain) as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
