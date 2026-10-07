@@ -2167,7 +2167,8 @@ def test_distributed_start_with_missing_run_generation_records_the_rank_unproven
         launch.payload = payload
 
     # A start whose order no longer parses cannot prove the rank started: the
-    # rank is recorded with a typed unproven marker, never refused.
+    # rank is recorded with a typed unproven marker, never refused. Its phase
+    # cannot be inferred from a payload that failed the canonical contract.
     view = service.record_node_result(
         start.id,
         launch.node_id,
@@ -2176,7 +2177,7 @@ def test_distributed_start_with_missing_run_generation_records_the_rank_unproven
     )
     recorded = _required(view.result)
     marker = require_mapping(
-        require_mapping(recorded["launch_evidence"], "launch evidence")[launch.node_id],
+        require_mapping(recorded["node_evidence"], "node evidence")[launch.node_id],
         "evidence",
     )
     assert marker["code"] == "recipe.evidence_unproven"
@@ -3852,7 +3853,9 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
         revision = session.get(CatalogDocumentRevision, stored.recipe_revision_id)
         assert revision is not None
         assert first.installation_authority_digest == revision.content_digest
-        assert first.recipe_content == revision.document
+        assert first.recipe_content == RecipeDefinition.model_validate(
+            revision.document
+        )
 
 
 @pytest.mark.parametrize("corruption", [None, "schema", "path", "permissions"])

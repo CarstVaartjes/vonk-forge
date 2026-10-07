@@ -159,6 +159,17 @@ class _Resolver:
     def __init__(self, tree: ast.Module, aliases: dict[str, str], path: str) -> None:
         self.aliases = aliases
         self.hints = NAME_HINTS.get(path, {})
+        self.other_models = {
+            imported.asname or imported.name
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom)
+            and node.module is not None
+            and (node.module == "models" or node.module.endswith(".models"))
+            and node.level in (0, 1)
+            for imported in node.names
+            if imported.name not in LIFECYCLE_MODELS
+        }
+        self.other_returns: set[str] = set()
         self.returns: dict[str, str] = {}
         self.tuple_returns: dict[str, list[str | None]] = {}
         for node in ast.walk(tree):
@@ -178,6 +189,8 @@ class _Resolver:
                 model = self.model_in_annotation(returned)
                 if model is not None:
                     self.returns.setdefault(node.name, model)
+                elif set(_annotation_names(returned)) & self.other_models:
+                    self.other_returns.add(node.name)
 
     def model_in_annotation(self, node: ast.AST | None) -> str | None:
         found = {
@@ -203,12 +216,23 @@ class _Resolver:
             )
             if isinstance(func, ast.Name) and func.id in self.aliases:
                 return self.aliases[func.id]
+            if isinstance(func, ast.Name) and func.id in self.other_models:
+                return None
             if tail in _QUERY_BUILDERS or tail in _ROW_GETTERS:
                 for argument in node.args[:1]:
                     if isinstance(argument, ast.Name) and argument.id in self.aliases:
                         return self.aliases[argument.id]
+                    if (
+                        isinstance(argument, ast.Name)
+                        and argument.id in self.other_models
+                    ):
+                        return None
             if tail in self.returns:
                 return self.returns[tail]
+            if tail in self.other_returns:
+                # A Job argument does not make an explicitly returned run,
+                # installation or build into the Job lifecycle subject.
+                return None
             # ``session.scalars(select(Model)...).first()``: look through.
             for child in [*node.args, *(k.value for k in node.keywords)]:
                 found = self.model_of(child, env)

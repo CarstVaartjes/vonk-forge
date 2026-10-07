@@ -26,8 +26,11 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
+    RecipeStopResult,
     WaitReason,
 )
+from vonk_agent_protocol.contracts import AgentResultPayload
+from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs import AgentJobService, _safe_retry_failure
 from vonk_control.agent_operation_facts import aware, operation_start_deadline
 from vonk_control.agent_outcome import agent_outcome, stored_report
@@ -167,7 +170,7 @@ def test_a_legacy_body_is_stored_with_its_adopted_state(
 
 
 def _old_report_event(
-    operation: Any, fence: str, parent: Any, state: str, result: dict[str, Any]
+    operation: Any, fence: str, parent: Any, state: str, result: AgentResultPayload
 ) -> Reported:
     """The event derivation before the typed contract, verbatim, as the oracle."""
 
@@ -244,7 +247,7 @@ def test_the_lifecycle_event_equals_the_one_derived_before_the_typed_contract(
     )
     message = _message(state, body)
     stored, outcome = stored_report(operation_kind, message)
-    result = {k: v for k, v in dict(stored.result).items() if v is not None}
+    result = stored.result
 
     event = AgentJobService._report_event(
         operation, attempt, parent, outcome, result, NOW
@@ -314,7 +317,7 @@ def test_a_typed_report_derives_the_event_its_stored_legacy_twin_derives(
     # and the legacy adapter reads it back as the same kind of outcome.
     legacy_outcome = agent_outcome(operation_kind, state, stored.result)
     assert type(legacy_outcome) is type(outcome)
-    result = {k: v for k, v in dict(stored.result).items() if v is not None}
+    result = stored.result
     typed_event = AgentJobService._report_event(
         operation, attempt, parent, outcome, result, NOW
     )
@@ -368,7 +371,7 @@ def test_a_foreign_container_refusal_is_retried_visibly_and_never_blocks() -> No
     assert body["error_code"] == "retained_container_foreign"
     assert body["failure_kind"] == "resource-prerequisite"
     assert body["diagnostic"] == "container=vonk-x"
-    assert _safe_retry_failure("recipe.start", "failed", body)
+    assert _safe_retry_failure("recipe.start", "failed", stored.result)
 
 
 def test_an_outcome_that_contradicts_its_state_is_refused() -> None:
@@ -389,3 +392,37 @@ def test_an_outcome_that_contradicts_its_state_is_refused() -> None:
 def test_a_legacy_body_that_is_no_valid_failure_is_refused() -> None:
     with pytest.raises(AgentProtocolError):
         agent_outcome("recipe.stop", "failed", {"unexpected": True})
+
+
+@pytest.mark.parametrize("refusals", (1, 3))
+def test_typed_success_receipt_retries_bounded_admission_refusal(
+    monkeypatch: pytest.MonkeyPatch, refusals: int
+) -> None:
+    receipt = RecipeStopResult.model_validate({})
+    busy = AdmissionLockBusy("result persistence is contended")
+    calls = 0
+
+    def finish(
+        self: AgentJobService, fence: object, state: str, **kwargs: object
+    ) -> None:
+        nonlocal calls
+        calls += 1
+        assert fence == FENCE
+        assert state == "succeeded"
+        assert kwargs["result"] is receipt
+        if calls <= refusals:
+            raise busy
+
+    monkeypatch.setattr(AgentJobService, "_finish", finish)
+    monkeypatch.setattr(
+        "vonk_control.agent_jobs.admission_attempts", lambda: iter(range(3))
+    )
+    service = object.__new__(AgentJobService)
+    if refusals == 3:
+        with pytest.raises(AdmissionLockBusy) as failure:
+            service.succeed(FENCE, receipt)
+        assert failure.value is busy
+        assert calls == 3
+    else:
+        service.succeed(FENCE, receipt)
+        assert calls == 2

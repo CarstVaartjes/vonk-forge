@@ -16,6 +16,7 @@ from vonk_agent_protocol import LifecycleState
 from vonk_control.auth import Actor
 from vonk_control.model_cache import ModelCacheConflict, ModelCacheService
 from vonk_control.model_cache_api import install_model_operator_routes
+from vonk_control.model_cache_contract import ModelCacheDownloadResult
 from vonk_control.models import Base
 
 OPERATION_REQUEST = "00000000-0000-4000-8000-000000000041"
@@ -180,11 +181,11 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
         assert not restarted._object_path(str(artifact["sha256"])).exists()
         restarted._finish_succeeded(
             operation.id,
-            {
-                "schema_version": 2,
-                "artifact_set_sha256": str(operation.artifact_set_sha256),
-                "coverage": "complete",
-            },
+            ModelCacheDownloadResult(
+                schema_version=2,
+                artifact_set_sha256=str(operation.artifact_set_sha256),
+                coverage="complete",
+            ),
         )
         assert restarted.get_operation(operation.id).state == "cancelled"
 

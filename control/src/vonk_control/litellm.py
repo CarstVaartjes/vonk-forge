@@ -6,6 +6,11 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import Field
+
+from .strict_json import StrictModel
 
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 
@@ -115,33 +120,74 @@ PROMETHEUS_EXCLUDE_METRICS = (
 )
 
 
-def _document(model_list: list[dict[str, object]]) -> bytes:
-    document = {
-        "general_settings": {
-            "database_url": "os.environ/LITELLM_DATABASE_URL",
-            "disable_admin_ui": False,
-            "master_key": "os.environ/LITELLM_MASTER_KEY",
-            "store_model_in_db": False,
-        },
-        "litellm_settings": {
-            "drop_params": True,
-            "failure_callback": ["prometheus"],
-            # Bounded inference metrics for Prometheus. The scrape path is a
-            # dedicated internal network and Caddy never routes /metrics, so
-            # no credential is handed to Prometheus. Identity-bearing or
-            # unbounded labels and unused metric families are dropped.
-            "prometheus_exclude_labels": list(PROMETHEUS_EXCLUDE_LABELS),
-            "prometheus_exclude_metrics": list(PROMETHEUS_EXCLUDE_METRICS),
-            "require_auth_for_metrics_endpoint": False,
-            "set_verbose": False,
-            "success_callback": ["prometheus"],
-        },
-        "model_list": model_list,
-        "router_settings": {
-            "enable_pre_call_checks": True,
-            "routing_strategy": "simple-shuffle",
-        },
-    }
+class _ConfigModel(StrictModel):
+    """The LiteLLM configuration the Controller renders: our own document."""
+
+
+class LiteLlmGeneralSettings(_ConfigModel):
+    database_url: Literal["os.environ/LITELLM_DATABASE_URL"] = (
+        "os.environ/LITELLM_DATABASE_URL"
+    )
+    disable_admin_ui: bool = False
+    master_key: Literal["os.environ/LITELLM_MASTER_KEY"] = (
+        "os.environ/LITELLM_MASTER_KEY"
+    )
+    store_model_in_db: bool = False
+
+
+class LiteLlmSettings(_ConfigModel):
+    drop_params: bool = True
+    failure_callback: list[Literal["prometheus"]] = Field(
+        default_factory=lambda: ["prometheus"]
+    )
+    # Bounded inference metrics for Prometheus. The scrape path is a
+    # dedicated internal network and Caddy never routes /metrics, so
+    # no credential is handed to Prometheus. Identity-bearing or
+    # unbounded labels and unused metric families are dropped.
+    prometheus_exclude_labels: list[str] = Field(
+        default_factory=lambda: list(PROMETHEUS_EXCLUDE_LABELS)
+    )
+    prometheus_exclude_metrics: list[str] = Field(
+        default_factory=lambda: list(PROMETHEUS_EXCLUDE_METRICS)
+    )
+    require_auth_for_metrics_endpoint: bool = False
+    set_verbose: bool = False
+    success_callback: list[Literal["prometheus"]] = Field(
+        default_factory=lambda: ["prometheus"]
+    )
+
+
+class LiteLlmUpstreamParams(_ConfigModel):
+    model: str
+    api_base: str
+    api_key: Literal["os.environ/LITELLM_UPSTREAM_KEY"] = (
+        "os.environ/LITELLM_UPSTREAM_KEY"
+    )
+    rpm: int = Field(ge=1, le=100_000)
+    tpm: int = Field(ge=1, le=100_000_000)
+
+
+class LiteLlmModelEntry(_ConfigModel):
+    model_name: str
+    litellm_params: LiteLlmUpstreamParams
+
+
+class LiteLlmRouterSettings(_ConfigModel):
+    enable_pre_call_checks: bool = True
+    routing_strategy: Literal["simple-shuffle"] = "simple-shuffle"
+
+
+class LiteLlmConfig(_ConfigModel):
+    """The whole rendered file; LiteLLM reads it, nothing else does."""
+
+    general_settings: LiteLlmGeneralSettings = LiteLlmGeneralSettings()
+    litellm_settings: LiteLlmSettings = LiteLlmSettings()
+    model_list: list[LiteLlmModelEntry]
+    router_settings: LiteLlmRouterSettings = LiteLlmRouterSettings()
+
+
+def _document(model_list: list[LiteLlmModelEntry]) -> bytes:
+    document = LiteLlmConfig(model_list=model_list).model_dump(mode="json")
     return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
@@ -161,7 +207,7 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
         )
     if not models:
         raise LiteLlmPolicyError("LiteLLM policy must publish at least one model")
-    model_list: list[dict[str, object]] = []
+    model_list: list[LiteLlmModelEntry] = []
     for alias in sorted(models):
         quota = dict(models[alias])
         required = {"requests_per_minute", "tokens_per_minute"}
@@ -183,16 +229,15 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
         ):
             raise LiteLlmPolicyError("LiteLLM model quotas are outside allowed bounds")
         model_list.append(
-            {
-                "model_name": alias,
-                "litellm_params": {
-                    "model": f"openai/{upstream_model}",
-                    "api_base": routes.aliases[alias].rstrip("/"),
-                    "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
-                    "rpm": rpm,
-                    "tpm": tpm,
-                },
-            }
+            LiteLlmModelEntry(
+                model_name=alias,
+                litellm_params=LiteLlmUpstreamParams(
+                    model=f"openai/{upstream_model}",
+                    api_base=routes.aliases[alias].rstrip("/"),
+                    rpm=rpm,
+                    tpm=tpm,
+                ),
+            )
         )
     return _document(model_list)
 
