@@ -888,6 +888,13 @@ jobs:
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres step-ca python
+      - name: Attribute fresh PostgreSQL catalog phase costs
+        if: matrix.shard.index == 2
+        env:
+          VONK_CATALOG_TIMINGS: "1"
+        run: >-
+          uv run --project control --frozen pytest -s -q -n 0
+          control/tests/test_fresh_launch_catalog_postgres_acceptance.py::test_fresh_postgres_imports_typed_canonical_model_recipe_api
       - name: Run complete control suite
         shell: bash
         env:
