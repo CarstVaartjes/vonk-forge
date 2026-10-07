@@ -10,7 +10,7 @@
     "control/src/vonk_control/distributed_recovery.py": 1881,
     "control/src/vonk_control/distribution_executor.py": 1640,
     "control/src/vonk_control/enrollment.py": 1771,
-    "control/src/vonk_control/fleet_profiles.py": 11759,
+    "control/src/vonk_control/fleet_profiles.py": 11720,
     "control/src/vonk_control/fleet_projection.py": 1656,
     "control/src/vonk_control/library_projection.py": 1811,
     "control/src/vonk_control/model_cache.py": 11014,

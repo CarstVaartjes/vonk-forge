@@ -89,7 +89,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 275,
+    "total": 274,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -1278,14 +1278,14 @@
       "sites": [
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "runtime-image-receipt-does-not-match-the-compiled-runtime-im", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "verified-oci-archive-receipt-is-unavailable-for-the-selected", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "verified-runtime-image-receipt-is-invalid", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-build-receipt-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-revision-digest-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "verified-model-artifact-set-receipt-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_build_package", "successful-controller-build-receipt-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_image_digest", "compiled-runtime-image-digest-is-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_placement", "compiled-runtime-endpoint-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_receipt_mapping", "runtime-image-receipt-is-invalid", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_image_receipt", "runtime-image-receipt-is-invalid", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_image_receipt", "verified-runtime-image-receipt-is-invalid", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "compiled-runtime-job-settings-are-unavailable", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-build-receipt-is-unavailable", 1]
       ]
@@ -1549,7 +1549,6 @@
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
         ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "profile-stop-target-is-ambiguous", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "profile-jobrun-stop-authority-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_check_operation_target", "lifecycle-plan-node-identity-differs", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_job_run_authority", "artifact-jobrun-owner-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_service_run_authority", "service-start-owner-is-invalid", 1],
@@ -1560,7 +1559,8 @@
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_validate_recovery_start_generation", "distributed-recovery-stop-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_validate_recovery_start_generation", "recovery-stop-actor-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_validate_recovery_start_generation", "singleton-recovery-stop-is-invalid", 1],
-        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "lifecycle-plan-owner-does-not-match-action", 1]
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "lifecycle-plan-owner-does-not-match-action", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "profile-jobrun-stop-authority-is-invalid", 1]
       ]
     },
     {
@@ -1815,18 +1815,18 @@
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_stale", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.network_capability_missing", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._check_source_once", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.contract_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.node_unknown", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._resolve_once", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.check_source", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.plan_invalid", 4],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.runtime_changed", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.node_unknown", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.prepare_plan", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.resolve", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_canonical_recipe_document", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 2],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_source_bundle_handle", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_validate_builder", "build.node_incompatible", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "canonical_build", "build.contract_invalid", 1]
@@ -1839,12 +1839,17 @@
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "InvalidType", "_canonical_model_build_inputs", "model-build-inputs-require-canonical-path-sha256-and-size", 1],
         ["control/src/vonk_control/recipe_builds.py", "InvalidType", "_canonical_recipe_document", "stored-recipe-is-not-a-json-object", 1],
-        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.check_source", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.prepare_plan", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService._check_source_once", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService._prepare_plan_once", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService._resolve_once", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.record_success", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "MissingRecord", "RecipeBuildService.resolve", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService.prepare_plan", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService.resolve", "message", 1]
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._check_source_once", "build.recipe_unresolved", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._prepare_plan_once", "build.recipe_unresolved", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._prepare_plan_once", "build.source_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._resolve_once", "build.recipe_unresolved", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService._resolve_once", "build.source_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService._prepare_plan_once", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeSourcePolicyError", "RecipeBuildService._resolve_once", "message", 1]
       ]
     },
     {
@@ -2513,7 +2518,6 @@
       "reason": "Exact-identity fence and ingress check: a build result is accepted only for the exact inputs it was planned under and never over different or failed evidence (digest formats are verified at ingress), and a reservation or resolution is accepted only while the recipe revision still has the content digest it was planned for. A changed identity refuses instead of substituting a different recipe or image into a bound plan; the next request replans.",
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._reserve_in_session", "build.dependencies_stale", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService.prepare_plan", "build.resolution_stale", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService.record_success", "build.evidence_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService.record_success", "build.input_mismatch", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService.record_success", "build.result_conflict", 1],
@@ -2521,22 +2525,10 @@
       ]
     },
     {
-      "family": "recipe_builds.recipe-request",
-      "category": "input-validation",
-      "reason": "Rejects a request that names a revision which is not an active recipe (nothing resolved to check or build) before any effect; the caller names the current revision and asks again.",
-      "sites": [
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.check_source", "build.recipe_unresolved", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.prepare_plan", "build.recipe_unresolved", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.resolve", "build.recipe_unresolved", 1]
-      ]
-    },
-    {
       "family": "recipe_builds.recipe-contract",
       "category": "input-validation",
       "reason": "Validates what the recipe declares against the build contract before any effect: declared build resources and security, the per-node image size, the Dockerfile the verified source bundle must carry, the runtime adapter for its engine and topology. Retrying cannot change the answer; only a new recipe revision does.",
       "sites": [
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.prepare_plan", "build.source_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "RecipeBuildService.resolve", "build.source_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "_canonical_build_resources", "build.resources_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "_canonical_build_resources", "build.security_invalid", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildInvalid", "_declared_image_bytes", "build.image_size_invalid", 1],
@@ -3445,6 +3437,7 @@
       "reason": "Explicit source storage permission denial is propagated as a typed build refusal, never a source miss, regeneration request, or automatic repair.",
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._heal_source_bundle", "message", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._prepare_plan_once", "build.resolution_stale", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "RecipeBuildService._verified_bundle.read", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildRefused", "rederive_source_bundle_from_closure", "permission-denied", 1]
       ]
@@ -3498,14 +3491,6 @@
       ]
     },
     {
-      "family": "enrollment.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1]
-      ]
-    },
-    {
       "family": "enrollment.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
@@ -3521,60 +3506,6 @@
         ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._issue_rotation_claim", "historical-certificate-rotation-has-no-exact-journal-binding", 1],
         ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._prepare_rotation_recovery", "certificate-rotation-requires-manual-recovery", 1],
         ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._revoke_denied_rotation", "issued-certificate-is-denied-locally-remote-revocation-requ", 1]
-      ]
-    },
-    {
-      "family": "enrollment.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-in-progress", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-staged", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-active", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-currently-valid", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-rotation-state-is-invalid", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-serial-does-not-identify-node", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._create", "enrollment-grant-identity-already-exists-inspect-its-status", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-generation-was-not-persisted", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-issuance-state-changed-manual-recovery-required", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-already-exists", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_rotation_claim", "node-identity-retired-during-certificate-rotation-issued-ce", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._persist_rotation", "certificate-rotation-issuance-state-changed-manual-recovery", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "certificate-rotation-state-is-invalid", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "certificate-serial-does-not-identify-node", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._record_orphan_revocation", "issued-certificate-revocation-evidence-conflicts-manual-rec", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-returned-a-mismatched-node-identity", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-returned-non-pem-certificate-material", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-reused-renewal-serial", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._wait_for_issuance", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._wait_for_issuance", "enrollment-state-is-invalid", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_grant", "enrollment-grant-is-consumed-inspect-the-enrolled-spark", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_node", "node-identity-does-not-exist", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "csr-is-too-large", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "message", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_decode_token", "invalid-enrollment-grant", 3],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-must-be-valid-pem", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-must-contain-only-the-node-uri-san-extension", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-node-uri-san-does-not-match-enrollment-node", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-node-uri-san-is-required", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-public-key-must-be-ed25519", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-signature-is-invalid", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-subject-does-not-match-enrollment-node", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-subject-must-contain-a-canonical-node-id", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_locked_enrollment", "unknown-enrollment", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-authority-returned-non-pem-certificate-material", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-rotation-is-in-progress", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-generation-changed-from-accepted-issuance-binding", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-purpose-is-invalid", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-already-exists", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-has-no-certificate-history", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1]
       ]
     },
     {
@@ -3632,6 +3563,7 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
       "sites": [
+        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1],
         ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService.renew", "certificate-rotation-issuance-is-in-progress", 1]
       ]
     },
@@ -3642,17 +3574,6 @@
       "sites": [
         ["control/src/vonk_control/enrollment.py", "CertificateResponseCapacityRefused", "EnrollmentService._issue_enrollment_claim", "certificate-response-exceeds-the-supported-wire-budget", 1],
         ["control/src/vonk_control/enrollment.py", "CertificateResponseCapacityRefused", "EnrollmentService._issue_rotation_claim", "certificate-response-exceeds-the-supported-wire-budget", 1]
-      ]
-    },
-    {
-      "family": "enrollment.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-generation-does-not-match", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-is-not-staged-for-activation", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-serial-does-not-identify-node", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "node-identity-is-retired-or-revoked", 1]
       ]
     },
     {
@@ -3670,7 +3591,58 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
       "sites": [
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_require_issuance_binding", "enrollment-issuance-binding-changed", 1]
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-in-progress", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-staged", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-active", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-currently-valid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-rotation-state-is-invalid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-serial-does-not-identify-node", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._create", "enrollment-grant-identity-already-exists-inspect-its-status", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-generation-was-not-persisted", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-issuance-state-changed-manual-recovery-required", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "enrollment-grant-is-revoked-or-missing", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-already-exists", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_rotation_claim", "node-identity-retired-during-certificate-rotation-issued-ce", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._persist_rotation", "certificate-rotation-issuance-state-changed-manual-recovery", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "certificate-rotation-state-is-invalid", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "certificate-serial-does-not-identify-node", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._record_orphan_revocation", "issued-certificate-revocation-evidence-conflicts-manual-rec", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-returned-a-mismatched-node-identity", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-returned-non-pem-certificate-material", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-reused-renewal-serial", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._wait_for_issuance", "enrollment-grant-is-revoked-or-missing", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._wait_for_issuance", "enrollment-state-is-invalid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-generation-does-not-match", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-is-not-staged-for-activation", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-serial-does-not-identify-node", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_grant", "enrollment-grant-is-consumed-inspect-the-enrolled-spark", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_node", "node-identity-does-not-exist", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "csr-is-too-large", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "message", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_decode_token", "invalid-enrollment-grant", 3],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-must-be-valid-pem", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-must-contain-only-the-node-uri-san-extension", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-node-uri-san-does-not-match-enrollment-node", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-node-uri-san-is-required", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-public-key-must-be-ed25519", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-signature-is-invalid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-subject-does-not-match-enrollment-node", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-subject-must-contain-a-canonical-node-id", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_locked_enrollment", "unknown-enrollment", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-authority-returned-non-pem-certificate-material", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-rotation-is-in-progress", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-generation-changed-from-accepted-issuance-binding", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-grant-is-revoked-or-missing", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-purpose-is-invalid", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-already-exists", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-has-no-certificate-history", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_require_issuance_binding", "enrollment-issuance-binding-changed", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1]
       ]
     },
     {
@@ -3714,13 +3686,6 @@
       "category": "security-edge",
       "reason": "Exact destructive-effect consent and target fences: reject changed profile intent, generation, reviewed plan, child identity or ambiguous source authority before issuing Stop. Historical launch history is handled separately by durable run ownership; these checks remain fail closed.",
       "sites": [
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-replacement-does-not-own-this-current-stop-phase", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-replacement-stop-phase-is-inconsistent", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-installation-disappeared", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-identity-changed", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-is-unreadable", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-scope-changed", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-queue-request-binding-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-child-set-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "ProfileJobRunStopJob.model_validate_parent", "profile-jobrun-stop-parent-identity-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_jobrun_stop_target", "issued-profile-stop-child-changed", 1],
@@ -3731,13 +3696,20 @@
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-identity-is-stale", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-owner-is-unavailable", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-progress-is-inconsistent", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-replacement-does-not-own-this-current-stop-phase", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-replacement-stop-phase-is-inconsistent", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-exceeds-its-adopted-assignment-scope", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-fleet-intent-changed", 2],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-has-no-saved-profile-owner", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-installation-disappeared", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-is-not-the-active-reviewed-child", 2],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-lifecycle-binding-is-stale", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-identity-changed", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-is-unreadable", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-linked-child-scope-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-parent-operation-kind-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-parent-payload-digest-changed", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-queue-request-binding-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-reviewed-plan-digest-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-run-generation-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "profile-stop-run-membership-changed", 1],
@@ -3823,28 +3795,28 @@
       "category": "security-edge",
       "reason": "Exact destructive Stop authority rejects substituted runtime generation, immutable payload, missing owner, changed execution order, or unproven absence; deferred accepted requests retain claims and original evidence for bounded worker retry.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._defer_accepted_service_stop", "accepted-stop-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-child-action-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._stop_service_run_once.claim_withdrawal", "accepted-stop-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-does-not-match-its-immutable-binding", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-is-unreadable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-owner-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-is-no-longer-awaiting-withdrawal", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-already-has-issued-work", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-generation-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-absence-only-stop-no-longer-has-exact-absence-evide", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-payload-authority-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._dispatch_stop_after_withdrawal", "accepted-stop-disappeared", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-profile-stop-owner-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-already-has-issued-work", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-is-no-longer-awaiting-withdrawal", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-profile-binding-is-inconsistent", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-owner-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-generation-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-payload-authority-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._defer_accepted_service_stop", "accepted-stop-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._dispatch_stop_after_withdrawal", "accepted-stop-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-is-unreadable", 2],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-child-action-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-child-is-ambiguous", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-installation-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-owner-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-parent-binding-changed", 2],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-phase-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-request-does-not-name-its-exact-phase", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-installation-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-is-unreadable", 2]
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-does-not-match-its-immutable-binding", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-is-unreadable", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-owner-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._stop_service_run_once.claim_withdrawal", "accepted-stop-disappeared", 1]
       ]
     },
     {
@@ -3852,11 +3824,11 @@
       "category": "input-validation",
       "reason": "Reject a changed caller preview, request key binding, or reviewed Stop effects before publication or native execution; own verified withdrawal alone preserves the originally reviewed route state.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_service_run_once", "the-run-s-route-withdrawal-was-superseded-retry-the-stop", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._service_stop_pending", "request-key-was-already-used-differently", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._check_service_stop", "reviewed-stop-route-state-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._accept_service_stop", "stop-plan-is-stale-or-blocked", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._check_service_stop", "reviewed-stop-effects-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._accept_service_stop", "stop-plan-is-stale-or-blocked", 1]
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._check_service_stop", "reviewed-stop-route-state-changed", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._service_stop_pending", "request-key-was-already-used-differently", 1],
+        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_service_run_once", "the-run-s-route-withdrawal-was-superseded-retry-the-stop", 1]
       ]
     },
     {
@@ -3864,8 +3836,8 @@
       "category": "input-validation",
       "reason": "The canonical exact Stop scope checks unique complete rank membership and transient target identity before destructive effects. Unreadable stored authority remains typed uncertainty for its owner; no malformed scope grants a default or broader command.",
       "sites": [
-        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "RunStopScope.membership_is_exact", "stop-run-membership-is-ambiguous", 1],
-        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "JobRunStopScope.targets_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1]
+        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "JobRunStopScope.targets_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1],
+        ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "RunStopScope.membership_is_exact", "stop-run-membership-is-ambiguous", 1]
       ]
     },
     {

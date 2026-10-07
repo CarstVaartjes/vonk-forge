@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import re
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
@@ -46,10 +47,8 @@ from .catalog_revision_contract import (
     BuildModelArtifactProjection,
     BuildResourcesProjection,
     BuildSecurityProjection,
-    CatalogRevisionContractError,
     PrebuiltImage,
     RecipeRevisionProjection,
-    read_catalog_projection,
 )
 from .categorized_errors import InvalidType, MissingRecord
 from .categorized_faults import security_reason
@@ -75,6 +74,12 @@ from .prebuilt_images import (
     prebuilt_failed,
 )
 from .profile_capacity import profile_build_memory_claims
+from .recipe_build_receipts import (
+    BuildCandidate,
+    CompletedRecipeBuild,
+    PreparedBuildLookup,
+    PreparedBuildReceipt,
+)
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -105,6 +110,7 @@ from .source_policy import (
     inspect_build_source_policy,
 )
 from .storage_demands import StorageDemands, spark_scope
+from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 _OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -123,6 +129,7 @@ BUILD_INPUT_IDENTITY_SCHEMA_VERSION = 2
 _BUILD_RUNTIME_PLATFORM = "linux/arm64"
 _BUILD_RUNTIME_INTERFACE = "vonk.runtime.v1"
 _RECIPE_SETTINGS = TypeAdapter(RecipeSettings)
+_BUILD_OBSERVATION_DELAYS = (0.0, 0.1, 0.2)
 
 
 def derive_build_input_identity(
@@ -507,14 +514,7 @@ class RecipeBuildAdmissionBusy(UnknownOutcomeError, RecipeBuildError):
 def _read_recipe_projection(
     revision: CatalogDocumentRevision,
 ) -> RecipeRevisionProjection:
-    try:
-        projected = read_catalog_projection(revision)
-    except CatalogRevisionContractError as error:
-        raise RecipeBuildUnknown(
-            RecipeBuildCode.CONTRACT_INVALID,
-            "stored recipe catalog projection is invalid",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
+    projected = read_row_column(revision, "projected")
     if not isinstance(projected, RecipeRevisionProjection):
         raise RecipeBuildUnknown(
             RecipeBuildCode.CONTRACT_INVALID,
@@ -583,60 +583,6 @@ class RecipeBuildResolution:
         return _digest(self.input_intent | {"builder_binary_digest": binary_digest})
 
 
-@dataclass(frozen=True, slots=True)
-class CompletedRecipeBuild:
-    build_id: str
-    image_digest: str
-    oci_layout_sha256: str
-    image_bytes: int
-
-
-@dataclass(frozen=True, slots=True)
-class _BuildCandidate:
-    """Plain snapshot of one succeeded build row, safe to use after commit.
-
-    Managed storage is consulted only after the reading transaction has ended,
-    so a candidate carries the values that decision needs instead of keeping an
-    ORM instance alive across storage I/O.
-    """
-
-    build_id: str
-    builder_node_id: str
-    build_input_sha256: str
-    builder_binary_digest: str
-    image_digest: str
-    oci_layout_sha256: str
-    image_bytes: int
-
-
-class PreparedBuildReceipt(Protocol):
-    """Verified filesystem identity of one prepared Controller build."""
-
-    build_id: str
-    build_input_sha256: str | None
-    image_digest: str
-    oci_archive_sha256: str
-    image_bytes: int
-
-
-class PreparedBuildLookup(Protocol):
-    """Answer whether exact build bytes are already prepared on disk.
-
-    The lookup is keyed by the executable build input identity the receipt
-    recorded beside the archive. It is the reuse owner, so it never consults the
-    SQL build index and never falls back to a weaker key.
-    """
-
-    def __call__(
-        self,
-        build_input_sha256: str,
-        *,
-        expected_architecture: str,
-        expected_runtime_interface: str,
-        expected_archive_sha256: str | None = None,
-    ) -> PreparedBuildReceipt | None: ...
-
-
 class SourceBundleRederiver(Protocol):
     """Produce a source bundle's archive again from the evidence the Controller kept.
 
@@ -698,8 +644,10 @@ class RecipeBuildService:
         build_archive_available: Callable[[str, int], bool] | None = None,
         prepared_builds: PreparedBuildLookup | None = None,
         source_rederiver: SourceBundleRederiver = rederive_source_bundle_from_closure,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self._sessions = sessions
+        self._sleep = sleep
         self._bundles = bundles
         self._source_rederiver = source_rederiver
         self._inventory = InventoryRepository(sessions)
@@ -812,6 +760,23 @@ class RecipeBuildService:
         return True
 
     def check_source(self, recipe_revision_id: str) -> SourcePolicyReport:
+        """Re-observe uncertain build facts after releasing each reading session.
+        Unknown outcomes are re-observed with a fixed attempt budget and bounded
+        backoff and exact inputs. Security/input refusals escape immediately;
+        exhaustion preserves the typed cause and releases resources.
+        """
+        last_error: UnknownOutcomeError | None = None
+        for delay in _BUILD_OBSERVATION_DELAYS:
+            if delay:
+                self._sleep(delay)
+            try:
+                return self._check_source_once(recipe_revision_id)
+            except UnknownOutcomeError as error:
+                last_error = error
+        assert last_error is not None
+        raise last_error
+
+    def _check_source_once(self, recipe_revision_id: str) -> SourcePolicyReport:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
             if revision is None:
@@ -837,6 +802,19 @@ class RecipeBuildService:
         )
 
     def resolve(self, recipe_revision_id: str) -> RecipeBuildResolution:
+        """Re-observe with the bounded, resource-free policy in ``check_source``."""
+        last_error: UnknownOutcomeError | None = None
+        for delay in _BUILD_OBSERVATION_DELAYS:
+            if delay:
+                self._sleep(delay)
+            try:
+                return self._resolve_once(recipe_revision_id)
+            except UnknownOutcomeError as error:
+                last_error = error
+        assert last_error is not None
+        raise last_error
+
+    def _resolve_once(self, recipe_revision_id: str) -> RecipeBuildResolution:
         """Resolve immutable source-build inputs and an exact cached receipt.
 
         This method intentionally performs no builder lookup, inventory read,
@@ -916,7 +894,7 @@ class RecipeBuildService:
 
         # Read a bounded snapshot and commit before touching managed storage:
         # a database transaction contains database work only.
-        candidates: list[_BuildCandidate] = []
+        candidates: list[BuildCandidate] = []
         with self._sessions() as session:
             rows = session.scalars(
                 select(RecipeBuild)
@@ -956,7 +934,7 @@ class RecipeBuildService:
                 assert candidate.oci_layout_sha256 is not None
                 assert candidate.image_bytes is not None
                 candidates.append(
-                    _BuildCandidate(
+                    BuildCandidate(
                         build_id=candidate.id,
                         builder_node_id=candidate.builder_node_id,
                         build_input_sha256=candidate.build_input_sha256,
@@ -967,7 +945,7 @@ class RecipeBuildService:
                     )
                 )
 
-        cached: _BuildCandidate | None = None
+        cached: BuildCandidate | None = None
         prepared: PreparedBuildReceipt | None = None
         receipt_pending = False
         stale_receipt = False
@@ -1172,6 +1150,28 @@ class RecipeBuildService:
         return image, decision
 
     def prepare_plan(
+        self,
+        recipe_revision_id: str,
+        builder_node_id: str,
+        *,
+        now: datetime,
+        resolution: RecipeBuildResolution | None = None,
+    ) -> RecipeBuildPlan:
+        """Re-observe with the bounded, resource-free policy in ``check_source``."""
+        last_error: UnknownOutcomeError | None = None
+        for delay in _BUILD_OBSERVATION_DELAYS:
+            if delay:
+                self._sleep(delay)
+            try:
+                return self._prepare_plan_once(
+                    recipe_revision_id, builder_node_id, now=now, resolution=resolution
+                )
+            except UnknownOutcomeError as error:
+                last_error = error
+        assert last_error is not None
+        raise last_error
+
+    def _prepare_plan_once(
         self,
         recipe_revision_id: str,
         builder_node_id: str,

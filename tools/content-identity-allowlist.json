@@ -612,7 +612,7 @@
     },
     {
       "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService.prepare_plan",
+      "function": "RecipeBuildService._prepare_plan_once",
       "kind": "provenance_comparison",
       "expression": "resolution.recipe_revision_id != revision.id",
       "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."

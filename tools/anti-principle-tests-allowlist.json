@@ -1299,12 +1299,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_profile_capacity_admission.py",
-      "function": "test_pending_admission_refuses_revoked_actor_before_fencing_workloads",
-      "kind": "transient-failed-assertion",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_profile_claim_selfheal.py",
       "function": "test_a_resumed_load_reserves_what_its_transient_failure_released",
       "kind": "transient-failed-assertion",
