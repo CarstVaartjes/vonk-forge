@@ -683,14 +683,23 @@ def verify_deployed_controller_identity(bundle: Path) -> None:
 import json, time, urllib.request
 from dataclasses import asdict
 from cluster_profiles.runtime_identity import packaged_runtime_identity
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from cluster_profiles.observation_transfer_reader import receive_observation
+from vonk_control.observation_transfer import OBSERVATION_MEDIA_TYPE, ObservationTransferRecord
+from vonk_control.platform_observation import PlatformObservation
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.settings import Settings
 identity = packaged_runtime_identity()
 token = TokenCodec(Settings.from_env_and_secrets().token_signing_key).issue(Actor("acceptance-runtime", "viewer"), ttl_seconds=30, now=int(time.time()))
-request = urllib.request.Request("http://127.0.0.1:8000/api/platform", headers={"Authorization": "Bearer " + token})
+request = urllib.request.Request("http://127.0.0.1:8000/api/platform", headers={"Authorization": "Bearer " + token, "Accept": OBSERVATION_MEDIA_TYPE})
+def validate_record(value):
+    ObservationTransferRecord.model_validate(value)
+def validate_payload(value):
+    return PlatformObservation.model_validate_json(json.dumps(value)).model_dump(mode="json")
 with urllib.request.urlopen(request, timeout=10) as response:
     assert response.status == 200
-    observation = json.loads(response.read(2000000))
+    assert response.headers.get_content_type() == OBSERVATION_MEDIA_TYPE
+    observation = receive_observation(response, resource="platform", record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES, validate_record=validate_record, validate_payload=validate_payload)
 print(json.dumps({"package": asdict(identity), "observation": observation}))
 """
     result = run(
