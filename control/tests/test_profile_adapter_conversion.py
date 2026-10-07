@@ -21,6 +21,7 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     _persisted_profile_progress,
 )
+from vonk_control.lifecycle.evidence import BookkeepingReason
 from vonk_control.models import (
     AgentOperation,
     FleetProfileApplication,
@@ -118,10 +119,12 @@ def test_retained_exact_stop_conversion_reconnects_without_another_request(tmp_p
         converted = deepcopy(row.progress)
         current = _persisted_profile_progress(row).switch_adapter
         assert current is not None
+        original_adapter = original["switch_adapter"]
+        assert isinstance(original_adapter, dict)
         assert [
             (child.queue_index, child.operation_id, child.kind)
             for child in current.pending_children
-        ] == [(original["switch_adapter"]["position"], stop_id, "stop")]
+        ] == [(original_adapter["position"], stop_id, "stop")]
         assert try_convert_application(session, row, NOW).state == "current"
         assert row.progress == converted
     restarted = RunSwitchFleetProfileAdapter(sessions, switches)
@@ -247,7 +250,7 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
     tmp_path, damage
 ):
     """Catches inventing a queue binding, accepting a stale fence or retiring evidence."""
-    sessions, _lifecycle, _switches, application, _run, stop_id, original, _claims = (
+    sessions, _lifecycle, _switches, application, _run, stop_id, original, claims = (
         _retained_stop(tmp_path)
     )
     with sessions.begin() as session:
@@ -264,7 +267,9 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
             from vonk_control.run_switch_operations import _digest
 
             payload = deepcopy(job.payload)
-            payload["workload_intent_ordinal"] += 1
+            ordinal = payload["workload_intent_ordinal"]
+            assert isinstance(ordinal, int)
+            payload["workload_intent_ordinal"] = ordinal + 1
             job.payload = payload
             job.payload_digest = _digest(payload)
         elif damage == "malformed-child-payload":
@@ -278,16 +283,18 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
             job.targets = ["spk_" + "2" * 32]
         else:
             progress = deepcopy(row.progress)
+            retained_adapter = progress["switch_adapter"]
+            assert isinstance(retained_adapter, dict)
             if damage == "mixed-encoding":
-                progress["switch_adapter"]["pending_children"] = []
+                retained_adapter["pending_children"] = []
             else:
-                progress["switch_adapter"]["position"] = 1
-                progress["switch_adapter"]["active_operation_id"] = None
-                progress["switch_adapter"]["active_kind"] = None
+                retained_adapter["position"] = 1
+                retained_adapter["active_operation_id"] = None
+                retained_adapter["active_kind"] = None
                 if damage == "foreign-closed-receipt":
                     foreign_id = session.scalar(select(Job.id).where(Job.id != stop_id))
                     assert foreign_id is not None
-                    progress["switch_adapter"]["children"] = [
+                    retained_adapter["children"] = [
                         {
                             "operation_id": foreign_id,
                             "kind": "stop",
@@ -300,11 +307,28 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
         session.flush()
         result = try_convert_application(session, row, NOW)
         assert result.state == "deferred"
+        assert result.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
         assert result.next_attempt_at is not None and result.next_attempt_at > NOW
         assert row.progress == original
         assert row.id == application.id and row.state == application.state
         assert needs_conversion(row)
         assert conversion_observation(row) == result
+        assert {
+            claim.id
+            for claim in session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == application.id
+                )
+            )
+        } == claims
+
+        retried = try_convert_application(session, row, NOW + timedelta(seconds=31))
+        assert retried.state == "deferred"
+        assert retried.reason == BookkeepingReason.PERSISTED_STATE_DAMAGED
+        assert retried.next_attempt_at is not None
+        assert retried.next_attempt_at > NOW + timedelta(seconds=31)
+        assert row.progress == original
+        assert row.id == application.id
 
 
 def test_postgres_startup_converts_real_stop_and_continuation_is_idempotent(

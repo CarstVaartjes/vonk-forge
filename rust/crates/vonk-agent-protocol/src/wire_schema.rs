@@ -221,6 +221,83 @@ fn strict_numbers(pointer: &str, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
+// A canonical float owner validates the finite IEEE754 value produced by its
+// parser, not the mathematical value of an arbitrary-precision JSON lexeme.
+// Integer owners keep exact tokens and bounds; no machine cap is introduced.
+fn materialize_float_numbers(pointer: &str, value: &mut Value) -> Result<(), String> {
+    let schema = SCHEMA
+        .pointer(pointer.trim_start_matches('#'))
+        .ok_or("unknown wire schema path")?;
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        return materialize_float_numbers(reference, value);
+    }
+    for keyword in ["anyOf", "oneOf"] {
+        if let Some(variants) = schema.get(keyword).and_then(Value::as_array) {
+            let integer_token = value
+                .as_number()
+                .is_some_and(|number| !number.to_string().contains(['.', 'e', 'E']));
+            let integer_branches: Vec<_> = variants
+                .iter()
+                .enumerate()
+                .filter(|(_, variant)| {
+                    variant.get("type").and_then(Value::as_str) == Some("integer")
+                })
+                .map(|(index, _)| index)
+                .collect();
+            if integer_token && !integer_branches.is_empty() {
+                // Preserve the canonical strict integer branch, including
+                // rejection of an out-of-range token instead of float fallback.
+                return Ok(());
+            }
+            for (index, _) in variants.iter().enumerate() {
+                let branch = format!("{pointer}/{keyword}/{index}");
+                let mut candidate = value.clone();
+                if materialize_float_numbers(&branch, &mut candidate).is_ok()
+                    && validator(&branch)?.is_valid(&candidate)
+                {
+                    *value = candidate;
+                    return Ok(());
+                }
+            }
+            return Ok(());
+        }
+    }
+    if schema.get("type").and_then(Value::as_str) == Some("number") && value.is_number() {
+        let float = value
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .ok_or("floating wire value must be finite")?;
+        *value = Value::Number(
+            serde_json::Number::from_f64(float).ok_or("floating wire value must be finite")?,
+        );
+        return Ok(());
+    }
+    if let Some(object) = value.as_object_mut() {
+        let properties = schema.get("properties").and_then(Value::as_object);
+        for (name, child) in object {
+            if properties.is_some_and(|properties| properties.contains_key(name)) {
+                materialize_float_numbers(
+                    &format!("{pointer}/properties/{}", pointer_component(name)),
+                    child,
+                )?;
+            } else if schema
+                .get("additionalProperties")
+                .is_some_and(Value::is_object)
+            {
+                materialize_float_numbers(&format!("{pointer}/additionalProperties"), child)?;
+            }
+        }
+    }
+    if schema.get("items").is_some()
+        && let Some(array) = value.as_array_mut()
+    {
+        for child in array {
+            materialize_float_numbers(&format!("{pointer}/items"), child)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SchemaTransform {
     ReadAliases,
@@ -293,6 +370,7 @@ pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<
     {
         object.retain(|key, _| properties.contains_key(key));
     }
+    materialize_float_numbers(&pointer, value)?;
     let validator = validator(&pointer)?;
     if let Err(error) = validator.validate(&*value) {
         // Only the model and structural path are exposed, never the instance

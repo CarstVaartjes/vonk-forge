@@ -93,6 +93,14 @@ fn prepare(value: &mut Value) {
                     "vonk-integer"
                 } else if object.get("format").and_then(Value::as_str) == Some("int64") {
                     "int64"
+                } else if object.get("format").and_then(Value::as_str) == Some("uint8")
+                    && object.get("minimum").and_then(Value::as_u64).is_some()
+                    && object
+                        .get("maximum")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|maximum| maximum <= u8::MAX as u64)
+                {
+                    "uint8"
                 } else if object
                     .get("const")
                     .and_then(Value::as_u64)
@@ -390,6 +398,85 @@ fn equality_types(items: &[Item]) -> std::collections::BTreeSet<String> {
         }
     }
     eligible
+}
+
+// Serde's derived untagged enum buffers Content, which cannot represent
+// arbitrary-precision integers or preserve RawValue through nested models.
+// Try the generated payload types directly from the original-kind Value instead.
+fn untagged_deserialize_impl(item: &mut syn::ItemEnum, schema_name: Option<&str>) -> Item {
+    let ident = &item.ident;
+    let branches = item.variants.iter().map(|variant| {
+        let name = &variant.ident;
+        match &variant.fields {
+            syn::Fields::Unit => quote! {
+                if ::serde_json::from_value::<()>(value.clone()).is_ok() {
+                    return Ok(Self::#name);
+                }
+            },
+            syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                let payload = &fields.unnamed.first().unwrap().ty;
+                quote! {
+                    if let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
+                        return Ok(Self::#name(payload));
+                    }
+                }
+            }
+            syn::Fields::Unnamed(fields) => {
+                let types: Vec<_> = fields.unnamed.iter().map(|field| &field.ty).collect();
+                let names: Vec<_> = (0..types.len()).map(|index| format_ident!("value{index}")).collect();
+                quote! {
+                    if let Ok((#(#names),*)) = ::serde_json::from_value::<(#(#types),*)>(value.clone()) {
+                        return Ok(Self::#name(#(#names),*));
+                    }
+                }
+            }
+            syn::Fields::Named(fields) => {
+                let helper = format_ident!("Raw{name}");
+                let names: Vec<_> = fields.named.iter().map(|field| field.ident.as_ref().unwrap()).collect();
+                quote! {
+                    #[derive(::serde::Deserialize)]
+                    struct #helper #fields
+                    if let Ok(payload) = ::serde_json::from_value::<#helper>(value.clone()) {
+                        return Ok(Self::#name { #(#names: payload.#names),* });
+                    }
+                }
+            }
+        }
+    });
+    let validation = schema_name.map(|schema_name| {
+        quote! {
+            crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
+                .map_err(::serde::de::Error::custom)?;
+        }
+    });
+    let implementation = parse_quote! {
+        impl<'de> ::serde::Deserialize<'de> for #ident {
+            fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                #[allow(unused_mut)]
+                let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+                #validation
+                #(#branches)*
+                Err(::serde::de::Error::custom(concat!("invalid canonical union ", stringify!(#ident))))
+            }
+        }
+    };
+    for attr in item
+        .attrs
+        .iter_mut()
+        .filter(|attr| attr.path().is_ident("derive"))
+    {
+        let paths = attr
+            .parse_args_with(
+                syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+            )
+            .unwrap();
+        let retained: Vec<_> = paths
+            .into_iter()
+            .filter(|path| path.segments.last().unwrap().ident != "Deserialize")
+            .collect();
+        *attr = parse_quote!(#[derive(#(#retained),*)]);
+    }
+    implementation
 }
 
 fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
@@ -726,7 +813,17 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 attrs.push(parse_quote!(#[derive(Eq)]));
             }
         }
-        if let Some(schema_name) = names.get(&name)
+        if let Item::Enum(enumeration) = item
+            && enumeration.attrs.iter().any(|attr| {
+                attr.path().is_ident("serde")
+                    && attr.meta.to_token_stream().to_string().contains("untagged")
+            })
+        {
+            validation.push(untagged_deserialize_impl(
+                enumeration,
+                names.get(&name).map(String::as_str),
+            ));
+        } else if let Some(schema_name) = names.get(&name)
             && let Some(implementation) = deserialize_impl(item, schema_name)
         {
             validation.push(implementation);
@@ -841,6 +938,22 @@ mod tests {
         let mut scalar = json!({"type":"integer","minimum":i64::MIN,"maximum":i64::MAX});
         prepare(&mut scalar);
         assert_eq!(scalar, json!({"type":"integer","format":"int64"}));
+    }
+
+    #[test]
+    fn byte_representation_requires_canonical_byte_bounds() {
+        let mut byte = json!({"type":"integer","format":"uint8","minimum":0,"maximum":255});
+        prepare(&mut byte);
+        assert_eq!(byte, json!({"type":"integer","format":"uint8"}));
+        let mut wide = json!({"type":"integer","format":"uint8","minimum":0,"maximum":256});
+        prepare(&mut wide);
+        assert_eq!(wide, json!({"type":"integer","format":"uint32"}));
+        let mut signed = json!({"type":"integer","format":"uint8","minimum":-1,"maximum":255});
+        prepare(&mut signed);
+        assert_eq!(signed, json!({"type":"integer","format":"int64"}));
+        let mut unbounded = json!({"type":"integer","format":"uint8","minimum":0});
+        prepare(&mut unbounded);
+        assert_eq!(unbounded, json!({"type":"integer","format":"vonk-integer"}));
     }
 
     #[test]

@@ -614,6 +614,122 @@ fn sixty_five_native_starts_survive_durable_pagination_and_restart() {
     assert_eq!(observed, expected);
 }
 
+/// Reopen the existing SQL key with its original UTC JSON spelling. Reading
+/// must not rewrite the retained bytes, and the native witness must still let
+/// the next page continue the exact producer-created runs without replay.
+#[test]
+fn legacy_checkpoint_json_reopens_without_rewrite_and_resumes_native_scan() {
+    use std::collections::BTreeSet;
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let mut expected = BTreeSet::new();
+    for _ in 0..9 {
+        let id = uuid::Uuid::new_v4();
+        runtime
+            .prepare_start_with_inspection_identity(
+                &plan,
+                INSTALLATION,
+                &id.to_string(),
+                &placement(&plan),
+                &identity(&plan),
+            )
+            .unwrap();
+        expected.insert(id);
+    }
+    let first = runtime.recipe_run_inspection_page(None).unwrap();
+    assert!(!first.complete);
+    assert!(!first.plans.is_empty());
+    assert!(first.failures.is_empty());
+    let mut checkpoint = first.checkpoint.clone().unwrap();
+    assert!(checkpoint.witness.is_some());
+    // This exact nine-digit UTC spelling was emitted by the preceding native
+    // chrono owner; its final 789ns must survive the canonical reader.
+    checkpoint.started_at = "2026-10-07T00:00:00.123456789Z".to_owned();
+    let database = root.path().join("agent-state.sqlite");
+    let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+    state
+        .save_observation_checkpoint(Some(&checkpoint))
+        .unwrap();
+    drop(state);
+
+    // This fixture uses the actual native producer's record, with the spelling
+    // emitted by the preceding DateTime<Utc> checkpoint owner. No alternate
+    // reader or checkpoint migration is introduced in production.
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let stored: String = connection
+        .query_row(
+            "SELECT value FROM metadata WHERE key='recipe_observation_scan_v1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let legacy: Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(
+        legacy["started_at"],
+        json!("2026-10-07T00:00:00.123456789Z")
+    );
+    assert!(legacy.as_object().unwrap().contains_key("metadata_stamp"));
+    assert!(legacy.as_object().unwrap().contains_key("witness"));
+    let legacy_bytes = serde_json::to_string(&legacy).unwrap();
+    assert!(legacy_bytes.len() <= 16 * 1024);
+    connection
+        .execute(
+            "UPDATE metadata SET value=?1 WHERE key='recipe_observation_scan_v1'",
+            [&legacy_bytes],
+        )
+        .unwrap();
+    drop(connection);
+
+    let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+    let reopened = state.observation_checkpoint().unwrap().unwrap();
+    assert_eq!(reopened, checkpoint);
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let unchanged: String = connection
+        .query_row(
+            "SELECT value FROM metadata WHERE key='recipe_observation_scan_v1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unchanged, legacy_bytes);
+    drop(connection);
+    let mut observed: BTreeSet<_> = first.plans.iter().map(|plan| plan.run_id).collect();
+    let mut retained = Some(reopened);
+    let mut pages = 0;
+    loop {
+        let page = runtime
+            .recipe_run_inspection_page(retained.as_ref())
+            .unwrap();
+        assert!(page.failures.is_empty());
+        assert!(!page.empty_snapshot_safe);
+        for plan in &page.plans {
+            assert_eq!(plan.run_generation, 2);
+            assert!(
+                observed.insert(plan.run_id),
+                "retained witness must not replay delivered runs"
+            );
+        }
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        retained = state.observation_checkpoint().unwrap();
+        pages += 1;
+        if page.complete {
+            break;
+        }
+        assert!(pages < 12);
+        drop(state);
+        state = StateStore::open(&database, "observation-test-node").unwrap();
+    }
+    assert_eq!(observed, expected);
+    assert!(retained.is_none());
+}
+
 fn historical_runs(root: &Path, count: usize) {
     for _ in 0..count {
         fs::create_dir_all(root.join("runs").join(uuid::Uuid::new_v4().to_string())).unwrap();
