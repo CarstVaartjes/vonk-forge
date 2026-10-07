@@ -778,7 +778,7 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
 
     def names_locked_owner(value: object) -> bool:
         if isinstance(value, str):
-            return value == locked_id
+            return value == pending.id
         if isinstance(value, Mapping):
             return any(names_locked_owner(item) for item in value.values())
         if isinstance(value, tuple | list):
@@ -790,6 +790,10 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
             statement.startswith(prefix)
             and "FOR UPDATE" in statement
             and names_locked_owner(parameters)
+            and (
+                locked_model is Job
+                or f"{locked_model.__tablename__}.parent_job_id IN" in statement
+            )
         ):
             # Capture parameterless SQL and the exact requesting backend. A
             # failure must identify the wait rather than guess from its owner.
@@ -808,7 +812,12 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
         )
     )
     assert locked_id is not None
-    assert locker.get(locked_model, locked_id, with_for_update=True) is not None
+    locked_owner = locker.get(locked_model, locked_id, with_for_update=True)
+    assert locked_owner is not None
+    if isinstance(locked_owner, AgentOperation):
+        assert locked_owner.parent_job_id == pending.id
+    # The canonical child lock declares the complete exact parent scope, not
+    # individual child IDs. Its bound parent includes this verified locked row.
     event.listen(postgres_engine, "before_cursor_execute", before_lock)
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
