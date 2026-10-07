@@ -220,7 +220,7 @@ export function materialize(value: unknown): unknown {
       if (!Number.isFinite(number)) throw new Error("Non-finite contract number");
       return number;
     }
-    return Number.isSafeInteger(number) ? number : value;
+    return Number.isSafeInteger(number) ? (number === 0 ? 0 : number) : value;
   }
   if (Array.isArray(value)) return value.map(materialize);
   if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, materialize(item)]));
