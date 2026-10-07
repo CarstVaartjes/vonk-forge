@@ -9001,7 +9001,11 @@ class FleetProfileService:
                     )
                 except FleetProfilePermissionDenied as error:
                     self._defer_exact_step(
-                        row, _persisted_profile_progress(row), str(error), now
+                        row,
+                        _persisted_profile_progress(row),
+                        str(error),
+                        now,
+                        code=ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE,
                     )
                     return True
                 except UnknownOutcomeError as error:
@@ -9308,6 +9312,11 @@ class FleetProfileService:
                                 failed_progress,
                                 str(error),
                                 _aware(self._clock()),
+                                code=(
+                                    ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE
+                                    if isinstance(error, FleetProfilePermissionDenied)
+                                    else ProfileReasonCode.RETRY_CONFLICT
+                                ),
                             )
                         else:
                             self._lifecycle.supersede(
@@ -9387,15 +9396,15 @@ class FleetProfileService:
         progress: FleetProfileApplicationProgress,
         reason: str,
         now: datetime,
+        *,
+        code: ProfileReasonCode = ProfileReasonCode.RETRY_CONFLICT,
     ) -> None:
         """Retry the same accepted queue/child identity without replacement admission."""
         progress.attempt += 1
         progress.retry_due_at = FleetProfileAdapter.next_retry(
             row.id, progress.attempt, now
         )
-        progress.blockers = bound_blockers(
-            [make_blocker(ProfileReasonCode.RETRY_CONFLICT, reason)]
-        )
+        progress.blockers = bound_blockers([make_blocker(code, reason)])
         row.progress = progress.model_dump(mode="json")
         row.status_reason = f"Waiting for exact accepted effect ({reason}); next attempt at {progress.retry_due_at.isoformat()}"[
             :512
