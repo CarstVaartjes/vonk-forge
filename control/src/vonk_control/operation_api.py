@@ -456,7 +456,6 @@ class OperationApiServices:
         Callable[[int, str | None, str], FleetProfileEndpointsView] | None
     ) = None
     clock: Callable[[], datetime] = lambda: datetime.now(UTC)
-    get_operation_at: Callable[[str, datetime], OperationRow] | None = None
 
 
 @dataclass(frozen=True)
@@ -894,8 +893,6 @@ def _global_get_operation(
         return get_operation_from_providers(
             services.operation_providers, operation_id, now=now
         )
-    if now is not None and services.get_operation_at is not None:
-        return operation_item(services.get_operation_at(operation_id, now))
     if services.get_operation is None:
         raise OperationProjectionError("operation projection unavailable")
     return operation_item(services.get_operation(operation_id))
@@ -2312,9 +2309,6 @@ def durable_operation_services(
 
     return OperationApiServices(
         clock=clock,
-        get_operation_at=lambda operation_id, now: projection.get_operation(
-            operation_id, now=now
-        ),
         agents=projection.agents,
         job_operations=projection.job_operations,
         resume_job=resume_job,
