@@ -100,6 +100,26 @@ def conversion_observation(
     )
 
 
+def conversion_progress(
+    row: FleetProfileApplication,
+) -> FleetProfileApplicationProgress | None:
+    """Read current outer metadata for an explicitly unknown retained journal.
+
+    This projection cannot supply execution authority or interpret the retired
+    children. The worker must convert the complete journal before using it.
+    """
+    if not needs_conversion(row):
+        return None
+    raw = copy.deepcopy(row.progress)
+    raw["switch_adapter"] = None
+    try:
+        return FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(raw), strict=True
+        )
+    except (ValidationError, AgentProtocolError):
+        return None
+
+
 def _job_proof(
     session: Session,
     row: FleetProfileApplication,
