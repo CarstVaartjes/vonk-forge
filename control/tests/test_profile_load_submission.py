@@ -16,7 +16,10 @@ from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileInput,
+    FleetProfileSwitchQueueItem,
+)
 from vonk_control.fleet_profiles import (
     FleetProfileAdmissionBusy,
     FleetProfileConflict,
@@ -725,7 +728,7 @@ def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(
     with pytest.raises(FleetProfileConflict, match="unreviewed"):
         adapter._start_child(
             accepted.id,
-            {"kind": "run", "id": assignment.id},
+            FleetProfileSwitchQueueItem(kind="run", id=assignment.id),
             (assignment,),
             tuple(nodes),
             "admin",
