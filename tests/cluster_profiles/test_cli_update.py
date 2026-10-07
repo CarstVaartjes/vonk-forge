@@ -591,6 +591,8 @@ def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
         pytest.skip("run the designated hosted signed CLI update proof lane")
     cache = Path(os.environ["VONK_SIGNED_UPDATE_CACHE"])
     assert cache.is_dir() and any(cache.iterdir()), "locked resolver cache is absent"
+    interpreters = Path(os.environ["UV_PYTHON_INSTALL_DIR"])
+    assert interpreters.is_dir(), "the hosted managed interpreter directory is absent"
     uv = shutil.which("uv")
     if uv is None or sys.version_info[:2] != (3, 14):
         message = "installed update proof requires uv and Python 3.14"
@@ -613,6 +615,7 @@ def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
         "UV_TOOL_BIN_DIR": str(workspace / "bin"),
         "UV_OFFLINE": "1",
         "UV_PYTHON_DOWNLOADS": "never",
+        "UV_PYTHON_INSTALL_DIR": str(interpreters),
         "VONK_CLI_UPDATE_NOTICES": "0",
         "NO_PROXY": "127.0.0.1,localhost",
         "UV_CACHE_DIR": str(cache),
