@@ -61,6 +61,7 @@ import sys
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from pathlib import Path
+from typing import get_args
 
 from vonk_agent_protocol import (
     LEGACY_WAIT_STATE,
@@ -72,6 +73,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleEventKind,
     LifecycleState,
+    OperationMemberProgress,
     OperatorActionName,
     ProgressPhase,
     ResourceBlockerCode,
@@ -432,12 +434,85 @@ def _flag_keys(tree: ast.Module) -> set[int]:
     }
 
 
+def _activity_result_literals(tree: ast.Module) -> set[int]:
+    """Resolve result leaves of the canonical progress activity field only."""
+    imports = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom)
+        and node.level == 0
+        and node.module == "vonk_agent_protocol"
+        for alias in node.names
+        if alias.name == "OperationMemberProgress"
+    ]
+    if len(imports) != 1:
+        return set()
+    imported = imports[0]
+    name = next(
+        alias.asname or alias.name
+        for alias in imported.names
+        if alias.name == "OperationMemberProgress"
+    )
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and node.id == name
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+        ):
+            return set()
+        if isinstance(node, ast.arg) and node.arg == name:
+            return set()
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and node.name == name
+        ):
+            return set()
+        if isinstance(node, ast.ExceptHandler) and node.name == name:
+            return set()
+        if (
+            isinstance(node, (ast.Import, ast.ImportFrom))
+            and node is not imported
+            and any(
+                alias.name == "*" or (alias.asname or alias.name) == name
+                for alias in node.names
+            )
+        ):
+            return set()
+    activity_words = {
+        word
+        for alternative in get_args(
+            OperationMemberProgress.model_fields["activity"].annotation
+        )
+        for word in get_args(alternative)
+        if isinstance(word, str)
+    }
+
+    def leaves(value: ast.expr) -> Iterator[ast.Constant]:
+        if isinstance(value, ast.Constant) and value.value in activity_words:
+            yield value
+        elif isinstance(value, ast.IfExp):
+            yield from leaves(value.body)
+            yield from leaves(value.orelse)
+
+    return {
+        id(leaf)
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == name
+        for keyword in call.keywords
+        if keyword.arg == "activity"
+        for leaf in leaves(keyword.value)
+    }
+
+
 def _state_literals(
     tree: ast.Module, docstrings: set[int], words: frozenset[str]
 ) -> Iterator[ast.Constant]:
     """Literals of ``words`` in a statement that names a state."""
 
     flags = _flag_keys(tree)
+    activity = _activity_result_literals(tree)
     for statement in ast.walk(tree):
         if not isinstance(statement, ast.stmt) or not _names_a_state(statement):
             continue
@@ -449,6 +524,7 @@ def _state_literals(
                     and node.value in words
                     and id(node) not in docstrings
                     and id(node) not in flags
+                    and id(node) not in activity
                 ):
                     yield node
 

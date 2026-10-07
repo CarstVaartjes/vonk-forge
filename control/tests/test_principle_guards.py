@@ -295,7 +295,7 @@ def test_builtin_raise_inventory_is_report_only_and_excludes_custom_classes():
 def test_resource_read_refusal_requires_canonical_owner_handler():
     """A resource exception cannot hide a generic damaged-row refusal."""
     source = (
-        "from .operation_api import OperationResponseTooLarge as TooLarge\n"
+        "from .operation_api import _OperationResponseTooLarge as TooLarge\n"
         "@router.get('/operations')\n"
         "def observe():\n"
         "    try:\n        project()\n"
@@ -353,3 +353,61 @@ def test_compose_embedded_shell_requires_a_bound_in_the_executed_loop():
         'do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then exit 1; fi; sleep 1; done',
     )
     assert not scan_compose_shell(bounded, path="compose.yaml")
+
+
+def test_observation_loop_requires_resolved_unswallowed_absolute_deadline():
+    path = "src/cluster_profiles/observation_transfer_reader.py"
+    guard = (
+        "import math\nimport time\n"
+        "class ObservationTransferInvalid(ValueError): pass\n"
+        "def check_observation_deadline(deadline):\n"
+        "    if not math.isfinite(deadline):\n"
+        "        raise ObservationTransferInvalid('invalid')\n"
+        "    if time.monotonic() >= deadline:\n"
+        "        raise TimeoutError('elapsed')\n"
+    )
+    receiver = (
+        "def receive_observation(*, deadline):\n"
+        "    while True:\n"
+        "        check_observation_deadline(deadline)\n"
+        "        consume()\n"
+    )
+    source = guard + receiver
+    assert not scan_source(source, path=path, mode="waits")
+    swallowed = (
+        "def receive_observation(*, deadline):\n"
+        "    try:\n"
+        "        while True:\n"
+        "            check_observation_deadline(deadline)\n"
+        "            consume()\n"
+        "    except TimeoutError:\n"
+        "        pass\n"
+    )
+    for changed in (
+        source.replace("        check_observation_deadline(deadline)\n", ""),
+        guard
+        + receiver.replace(
+            "check_observation_deadline(deadline)", "different_guard(deadline)"
+        ),
+        source.replace("raise TimeoutError('elapsed')", "return"),
+        source.replace(
+            "def receive_observation(*, deadline):",
+            "def receive_observation(*, deadline, check_observation_deadline):",
+        ),
+        source.replace(
+            "        consume()", "        deadline += 10\n        consume()"
+        ),
+        guard + swallowed,
+        source.replace("import time", "import replacement as time"),
+        source.replace(
+            "        consume()",
+            "        import replacement as deadline\n        consume()",
+        ),
+        source.replace(
+            "        consume()", "        from replacement import *\n        consume()"
+        ),
+    ):
+        assert [
+            site.kind for site in scan_source(changed, path=path, mode="waits")
+        ] == ["loop-without-deadline"]
+    assert scan_source(source, path="unrelated_reader.py", mode="waits")

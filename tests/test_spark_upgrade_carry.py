@@ -233,6 +233,14 @@ def _historical_cleanup() -> tuple[carry.UpgradeCarryLifecycle, dict]:
         version="1.0.0",
         package_version="1.0.0",
         contract=contract,
+        # Both verified historical sources publish these four image roles;
+        # their stock step-ca service is not the current signed CA image role.
+        compose_image_roles={
+            "api": "control-api",
+            "worker": "control-worker",
+            "hermes": "hermes-agent",
+            "litellm": "litellm",
+        },
     )
     lane = _lane([])
     lane.baseline = release

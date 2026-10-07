@@ -804,6 +804,46 @@ def test_committed_manifest_is_the_monotonic_high_water_without_latest(
         state.prepare_candidate(private, older)
 
 
+@pytest.mark.parametrize("object_kind", ["versioned-commit", "latest-pointer"])
+@pytest.mark.parametrize(
+    ("raw", "category"),
+    [
+        (b'{"private-secret": invalid}', "json-decode"),
+        (b"\xffprivate-secret", "unicode-decode"),
+        (b'{ "private-secret" : 1 }\n', "noncanonical"),
+    ],
+)
+def test_prepare_private_json_refusal_identifies_object_without_values_or_mutation(
+    object_kind: str, raw: bytes, category: str
+) -> None:
+    state = load_state_module()
+    publication = receipt()
+    key = (
+        f"arm64/versions/{publication['version']}/commit.json"
+        if object_kind == "versioned-commit"
+        else "latest.json"
+    )
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    private.objects[key] = raw
+    before = dict(private.objects)
+
+    with pytest.raises(state.StateError) as raised:
+        state.prepare_candidate(private, publication)
+
+    message = str(raised.value)
+    assert "phase=canonical-json-validation" in message
+    assert f"object_kind={object_kind}" in message
+    assert f"key_sha256={hashlib.sha256(key.encode()).hexdigest()}" in message
+    assert f"bytes={len(raw)}" in message
+    assert f"sha256={hashlib.sha256(raw).hexdigest()}" in message
+    assert f"parse_category={category}" in message
+    assert "private-secret" not in message
+    assert key not in message
+    assert private.objects == before
+    assert not any(":write:" in operation for operation in operations)
+
+
 def test_new_arm64_epoch_ignores_legacy_state_objects() -> None:
     state = load_state_module()
     operations: list[str] = []

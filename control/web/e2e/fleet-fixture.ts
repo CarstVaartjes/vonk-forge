@@ -6,7 +6,7 @@ import {stringifyContractJson} from "../src/api/contract-numeric";
 /** A complete typed transfer, consumed by the real browser NDJSON reader. */
 export async function serveEmptyFleet(page: Page) {
   const snapshot: components["schemas"]["FleetSnapshot"] = {
-    event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: "a".repeat(40), nodes: [],
+    event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: "a".repeat(64), nodes: [],
   };
   const bytes = Buffer.from(stringifyContractJson(snapshot), "utf8");
   const transfer_id = "00000000-0000-4000-8000-000000000001";

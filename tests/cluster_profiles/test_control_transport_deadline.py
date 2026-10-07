@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import ipaddress
 import json
@@ -25,6 +27,15 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from test_control_client_requests import _artifact_job_response
+from vonk_control.observation_transfer import (
+    OBSERVATION_MEDIA_TYPE,
+    ObservationTransferChunk,
+    ObservationTransferComplete,
+    ObservationTransferStart,
+    _record,
+    observation_response,
+)
+from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import (
@@ -32,6 +43,7 @@ from cluster_profiles.control_client import (
     ControlClientError,
     ControlTransportError,
 )
+from control.tests.test_observation_transfer import _large_snapshot
 
 KEY = "11111111-1111-4111-8111-111111111111"
 
@@ -126,6 +138,17 @@ def https_peer(tmp_path, monkeypatch):
                 if state["stage"] == "fast":
                     self.wfile.write(headers + body)
                     self.wfile.flush()
+                    return
+                if state["stage"] == "records":
+                    self.wfile.write(headers)
+                    self.wfile.flush()
+                    state["started"].set()
+                    for record in body.splitlines(keepends=True):
+                        self.wfile.write(record)
+                        self.wfile.flush()
+                        state["records_sent"] += 1
+                        if stop.wait(0.005):
+                            break
                     return
                 if state["stage"] == "headers":
                     data = headers + body
@@ -507,3 +530,76 @@ def test_a_cleanup_failure_with_nothing_in_flight_is_still_reported(monkeypatch)
     response = transport.HTTPSResponse(request, 1)
     with pytest.raises(RuntimeError, match="Event loop stopped"):
         response.close()
+
+
+@pytest.mark.slow(20)
+def test_continuous_valid_observation_progress_cannot_extend_attempt(
+    https_peer, tmp_path: Path
+) -> None:
+    client, state = https_peer
+    snapshot = _large_snapshot(tmp_path)
+    frozen = serialize_json_value(snapshot)
+    response = observation_response(snapshot, resource="fleet")
+
+    async def collect() -> bytes:
+        parts: list[bytes] = []
+        async for part in response.body_iterator:
+            parts.append(part.encode() if isinstance(part, str) else bytes(part))
+        return b"".join(parts)
+
+    original = asyncio.run(collect()).splitlines()
+    start = ObservationTransferStart.model_validate_json(original[0], strict=True)
+    raw = b"".join(
+        base64.b64decode(
+            ObservationTransferChunk.model_validate_json(line, strict=True).data,
+            validate=True,
+        )
+        for line in original[1:-1]
+    )
+    # Smaller legal fragments expose repeated record progress during one
+    # attempt; this fixture packet size is not a domain or transfer-size cap.
+    fragments = [raw[offset : offset + 4096] for offset in range(0, len(raw), 4096)]
+    records = [
+        start,
+        *(
+            ObservationTransferChunk(
+                type="chunk",
+                transfer_id=start.transfer_id,
+                ordinal=ordinal,
+                data=base64.b64encode(fragment).decode("ascii"),
+            )
+            for ordinal, fragment in enumerate(fragments)
+        ),
+        ObservationTransferComplete(
+            type="complete",
+            transfer_id=start.transfer_id,
+            chunks=len(fragments),
+            bytes=len(raw),
+            sha256=hashlib.sha256(raw).hexdigest(),
+        ),
+    ]
+    body = b"".join(_record(record) for record in records)
+    state.update(
+        status=200,
+        stage="records",
+        body=body,
+        media_type=OBSERVATION_MEDIA_TYPE,
+        records_sent=0,
+    )
+    started = time.monotonic()
+    with pytest.raises(ControlTransportError) as failure:
+        client.fleet()
+    assert time.monotonic() - started < 0.75
+    context = failure.value.context
+    assert context is not None and context.transport == "timeout"
+    assert context.http_status == 200 and context.request_id == "deadline-fixture"
+    assert failure.value.retry_after_seconds == 120
+    assert state["records_sent"] > 2, "no repeated valid-record progress was exercised"
+    assert len(state["calls"]) == 1
+    assert state["closed"].wait(1), "expired observation left the connection open"
+    # A fresh read-only attempt gets its own normal caller budget, then adopts
+    # the same complete frozen document, without partial membership or reapply.
+    state.update(stage="fast")
+    repaired = ControlClient(state["url"], Path(state["token"]))
+    assert repaired.request("GET", "/api/fleet") == frozen
+    assert len(state["calls"]) == 2

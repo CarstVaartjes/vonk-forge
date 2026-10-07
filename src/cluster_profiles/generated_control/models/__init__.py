@@ -102,6 +102,9 @@ from .catalog_code import CatalogCode
 from .catalog_problem import CatalogProblem
 from .catalog_sync_code import CatalogSyncCode
 from .catalog_sync_state import CatalogSyncState
+from .certificate_code import CertificateCode
+from .certificate_issuance_binding import CertificateIssuanceBinding
+from .certificate_issuance_binding_purpose import CertificateIssuanceBindingPurpose
 from .certificate_state import CertificateState
 from .cli_token_download import CliTokenDownload
 from .cli_update_contract import CliUpdateContract
@@ -386,8 +389,6 @@ from .model_artifact_preparation_completeness import ModelArtifactPreparationCom
 from .model_cache_access_recheck import ModelCacheAccessRecheck
 from .model_cache_blocker_code import ModelCacheBlockerCode
 from .model_cache_cancellation import ModelCacheCancellation
-from .model_cache_cancellation_observation import ModelCacheCancellationObservation
-from .model_cache_cancellation_observation_effect import ModelCacheCancellationObservationEffect
 from .model_cache_cancellation_request import ModelCacheCancellationRequest
 from .model_cache_claim import ModelCacheClaim
 from .model_cache_code import ModelCacheCode
@@ -962,6 +963,9 @@ __all__ = (
     "CatalogProblem",
     "CatalogSyncCode",
     "CatalogSyncState",
+    "CertificateCode",
+    "CertificateIssuanceBinding",
+    "CertificateIssuanceBindingPurpose",
     "CertificateState",
     "CliTokenDownload",
     "CliUpdateContract",
@@ -1246,8 +1250,6 @@ __all__ = (
     "ModelCacheAccessRecheck",
     "ModelCacheBlockerCode",
     "ModelCacheCancellation",
-    "ModelCacheCancellationObservation",
-    "ModelCacheCancellationObservationEffect",
     "ModelCacheCancellationRequest",
     "ModelCacheClaim",
     "ModelCacheCode",

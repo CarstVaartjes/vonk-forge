@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 9f23ddfe905989235221156a343536206e591f9d0ac1210f829fbf350cb423ab. Do not edit.
+// Generated from canonical OpenAPI SHA256 48ee1ec4d8676c3b657a147d7f443c92d7dd25fd9a62d3a51f11107ce409360e. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -2587,6 +2587,44 @@ export interface components {
          * @enum {string}
          */
         CatalogSyncState: "syncing" | "current" | "partial" | "failed";
+        /**
+         * CertificateCode
+         * @description Owned certificate issuance admission refusals.
+         * @enum {string}
+         */
+        CertificateCode: "certificate.response_unrepresentable";
+        /** CertificateIssuanceBinding */
+        CertificateIssuanceBinding: {
+            /** Csr Sha256 */
+            csr_sha256: string;
+            /** Generation */
+            generation: number | ExactNumber;
+            /** Issuer Fingerprint */
+            issuer_fingerprint: string;
+            /** Node Id */
+            node_id: string;
+            /** Not After */
+            not_after: string;
+            /** Not Before */
+            not_before: string;
+            /** Policy Sha256 */
+            policy_sha256: string;
+            /** Provisioner Kid */
+            provisioner_kid: string;
+            /** Provisioner Name */
+            provisioner_name: string;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "enrollment" | "rotation";
+            /** Request Id */
+            request_id: string;
+            /** Serial */
+            serial: string;
+            /** Source Serial */
+            source_serial: string | null;
+        };
         /**
          * CertificateState
          * @description The standing of a node's client certificate, as the fleet projection shows it.
@@ -5973,28 +6011,12 @@ export interface components {
         ModelCacheCancellation: {
             /** Actor */
             actor: string;
-            observation?: components["schemas"]["ModelCacheCancellationObservation"] | null;
             /** Reason */
             reason: string;
             /** Request Key */
             request_key: string;
             /** Requested At */
             requested_at: string;
-        };
-        /**
-         * ModelCacheCancellationObservation
-         * @description The lifecycle owner's actual terminal cancellation evidence.
-         */
-        ModelCacheCancellationObservation: {
-            /** Detail */
-            detail: string;
-            /**
-             * Effect
-             * @enum {string}
-             */
-            effect: "unknown" | "none" | "stopped";
-            /** Observed At */
-            observed_at: string;
         };
         /**
          * ModelCacheCancellationRequest
@@ -6934,7 +6956,6 @@ export interface components {
             id: string;
             /** Kind */
             kind: string;
-            model_cache_cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** Next Attempt At */
             next_attempt_at?: string | null;
             /** Node Ids */
@@ -7562,6 +7583,7 @@ export interface components {
             cache_reference_reason: components["schemas"]["CacheReferenceReason"];
             catalog_code: components["schemas"]["CatalogCode"];
             catalog_sync_code: components["schemas"]["CatalogSyncCode"];
+            certificate_code: components["schemas"]["CertificateCode"];
             cluster_mapping_code: components["schemas"]["ClusterMappingCode"];
             controller_error_code: components["schemas"]["ControllerErrorCode"];
             distribution_code: components["schemas"]["DistributionCode"];

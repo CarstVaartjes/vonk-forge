@@ -22,6 +22,8 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
@@ -139,6 +141,7 @@ COMPOSE_IMAGE_ROLES = {
     "worker": "control-worker",
     "hermes": "hermes-agent",
     "litellm": "litellm",
+    "ca": "step-ca",
 }
 
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
@@ -1034,24 +1037,43 @@ class LocalBrowserController:
             for name, value in request_headers.items()
         ):
             raise LifecycleError("local browser observation request is invalid")
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        from cluster_profiles.control_transport import HTTPSResponse, open_https
+
+        # This acceptance boundary deliberately targets the local Caddy HTTP
+        # listener with its original virtual Host and administrator credentials.
+        # Reuse the cancellable facade; production ControlClient still requires
+        # an HTTPS origin. One budget covers opening and the complete receipt.
+        deadline = time.monotonic() + timeout
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            headers={"Host": self.hostname, **request_headers},
+        )
         try:
-            connection.request(
-                "GET", path, headers={"Host": self.hostname, **request_headers}
-            )
-            response = connection.getresponse()
-            document = selected.decode(
-                response,
-                status=response.status,
-                media_type=response.getheader("Content-Type", ""),
-            )
-            return response.status, document
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("observation attempt deadline elapsed")
+            response: HTTPSResponse | urllib.error.HTTPError
+            try:
+                response = open_https(request, timeout=remaining, trust_env=False)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                status = (
+                    response.code
+                    if isinstance(response, urllib.error.HTTPError)
+                    else response.status
+                )
+                document = selected.decode(
+                    response,
+                    status=status,
+                    media_type=response.headers.get("Content-Type", ""),
+                    deadline=deadline,
+                )
+                return status, document
         except (OSError, http.client.HTTPException, ValueError, ContractSkew) as error:
             raise LifecycleError(
                 "complete source-bound observation is unavailable; retry observation"
             ) from error
-        finally:
-            connection.close()
 
     def raw_request(
         self,
@@ -2196,6 +2218,9 @@ class SparkLifecycle:
         if containers or volumes:
             raise LifecycleError("isolated Compose project is not empty")
 
+    def _compose_image_roles(self) -> dict[str, str]:
+        return COMPOSE_IMAGE_ROLES
+
     def _assert_compose_image_graph(self) -> None:
         assert self.bundle is not None
         candidate = _read_canonical_document(
@@ -2244,12 +2269,12 @@ class SparkLifecycle:
                 image, self.arguments.channel
             ):
                 raise LifecycleError("base Compose image does not follow its channel")
-        for role, service in COMPOSE_IMAGE_ROLES.items():
+        for role, service in self._compose_image_roles().items():
             configured_service = services.get(service)
             expected_image = str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[
                 0
             ] + (":dev" if self.arguments.channel == "dev" else ":latest")
-            if os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+            if role == "ca" or os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
                 expected_image = str(images.get(role))
             if (
                 not isinstance(configured_service, dict)
@@ -2294,7 +2319,7 @@ class SparkLifecycle:
             "candidate release object",
         )
         images = _object(candidate.get("images"), "candidate image graph")
-        for role, service in COMPOSE_IMAGE_ROLES.items():
+        for role, service in self._compose_image_roles().items():
             if service not in LOCAL_CONTROLLER_SERVICES:
                 continue
             container = self._run_command(

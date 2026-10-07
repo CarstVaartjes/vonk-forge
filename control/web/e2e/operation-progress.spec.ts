@@ -22,9 +22,23 @@ for (const width of [1440, 390]) {
     await page.route("**/api/jobs/transfer-1?*", route => route.fulfill({json: detail}));
     await page.goto("/activity");
     await page.getByText("View operation progress").click();
-    await expect(page.getByRole("progressbar", {name: "Copying transfer"})).toHaveAttribute("aria-valuenow", "42000000");
-    await expect(page.getByRole("progressbar", {name: "Verifying transfer"})).not.toHaveAttribute("aria-valuenow");
-    await expect(page.getByText("Waiting for progress")).toBeVisible();
+    const copying = page.getByRole("region", {name: "Copying progress"});
+    const verifying = page.getByRole("region", {name: "Verifying progress"});
+    await expect(copying.locator("strong")).toHaveText("Copying");
+    await expect(verifying.locator("strong")).toHaveText("Verifying");
+    const copyingBar = copying.getByRole("progressbar", {name: "Copying transfer"});
+    // 42,000,000 of 168,000,000 bytes is one quarter. ARIA exposes the
+    // normalized percentage while its value text retains the byte quantities.
+    await expect(copyingBar).toHaveAttribute("aria-valuemin", "0");
+    await expect(copyingBar).toHaveAttribute("aria-valuemax", "100");
+    await expect(copyingBar).toHaveAttribute("aria-valuenow", "25");
+    await expect(copyingBar).toHaveAttribute("aria-valuetext", "40.1 MiB / 160.2 MiB");
+    const verifyingBar = verifying.getByRole("progressbar", {name: "Verifying transfer"});
+    await expect(verifyingBar).not.toHaveAttribute("aria-valuenow");
+    await expect(verifyingBar).not.toHaveAttribute("aria-valuemax");
+    await expect(verifyingBar).toHaveAttribute("aria-valuetext", "40.1 MiB / 160.2 MiB");
+    await expect(verifying.getByText("Waiting for progress")).toBeVisible();
+    await expect(copying.getByText("Waiting for progress")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const result = await new AxeBuilder({page}).withTags(["wcag2a", "wcag2aa"]).analyze();
     expect(result.violations).toEqual([]);

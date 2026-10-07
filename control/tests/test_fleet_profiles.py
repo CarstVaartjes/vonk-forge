@@ -218,7 +218,10 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
     adapter_result = FleetProfileSwitchAdapterResult(
         children=[
             FleetProfileSwitchChildState(
-                queue_index=0, operation_id=operation_id, kind="run", state="succeeded"
+                queue_index=0,
+                operation_id=operation_id,
+                kind="run",
+                state=LifecycleState.SUCCEEDED,
             )
         ],
         assignment_ids=[],

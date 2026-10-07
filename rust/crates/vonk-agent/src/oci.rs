@@ -161,6 +161,9 @@ pub struct RecipeRunInspectionPage {
     pub observed_at: chrono::DateTime<chrono::Utc>,
     pub complete: bool,
     pub empty_snapshot_safe: bool,
+    /// Local enumeration restarted instead of resuming its retained witness.
+    /// This is page-local evidence, not a stored checkpoint or wire field.
+    pub scan_restarted: bool,
 }
 
 fn observation_directory_stamp(path: &Path) -> Result<Option<ObservationDirectoryStamp>, OciError> {
@@ -1198,18 +1201,74 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
     }
 
-    pub fn recipe_run_inspection_plans(&self) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
+    /// Compatibility callers own a finite aggregate budget. Production scans
+    /// persist one bounded page at a time instead of awaiting a whole history.
+    pub fn recipe_run_inspection_plans(
+        &self,
+        deadline: Instant,
+    ) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
+        let runs = self.data_root.join("runs");
+        let metadata_root = self.data_root.join("run-metadata");
+        let runs_stamp = observation_directory_stamp(&runs)?;
+        let metadata_stamp = observation_directory_stamp(&metadata_root)?;
         let mut plans = Vec::new();
         let mut checkpoint = None;
         let mut failure = None;
         loop {
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "run inspection aggregate budget expired",
+                )
+                .into());
+            }
             let page = self.recipe_run_inspection_page(checkpoint.as_ref())?;
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "run inspection aggregate budget expired",
+                )
+                .into());
+            }
+            if page.scan_restarted {
+                if plans.is_empty() && page.plans.is_empty() {
+                    if let Some(error) = failure.take() {
+                        return Err(error);
+                    }
+                    if let Some(fault) = page.failures.into_iter().next() {
+                        return Err(fault.error);
+                    }
+                }
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "run inspection enumeration restarted during collection",
+                )
+                .into());
+            }
             plans.extend(page.plans);
             for fault in page.failures {
                 failure.get_or_insert(fault.error);
             }
             checkpoint = page.checkpoint;
             if page.complete {
+                // This is a collection of individually validated positive
+                // plans: malformed neighbors remain isolated, not authoritative
+                // absence. Changed enumeration authority cannot be accepted.
+                if plans.is_empty()
+                    && let Some(error) = failure.take()
+                {
+                    return Err(error);
+                }
+                if observation_directory_stamp(&runs)? != runs_stamp
+                    || observation_directory_stamp(&metadata_root)? != metadata_stamp
+                    || (plans.is_empty() && !page.empty_snapshot_safe)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WouldBlock,
+                        "run inspection coverage changed during collection",
+                    )
+                    .into());
+                }
                 break;
             }
         }
@@ -1240,6 +1299,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 observed_at,
                 complete: true,
                 empty_snapshot_safe: checkpoint.is_none(),
+                scan_restarted: checkpoint.is_some(),
             });
         };
         let file = OpenOptions::new()
@@ -1251,6 +1311,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         let mut directory = rustix::fs::Dir::new(file).map_err(std::io::Error::from)?;
         let metadata_stamp = observation_directory_stamp(&metadata_root)?;
+        let mut scan_restarted = checkpoint.is_some_and(|old| {
+            Path::new(&old.root) != runs || !same_observation_directory(&old.runs_stamp, &stamp)
+        });
         let mut progress = match checkpoint {
             Some(old)
                 if Path::new(&old.root) == runs
@@ -1284,6 +1347,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 directory.seek(0).map_err(std::io::Error::from)?;
                 progress.witness = None;
                 progress.had_failures = true;
+                scan_restarted = true;
             }
         }
         let mut plans = Vec::new();
@@ -1364,6 +1428,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             checkpoint: if complete { None } else { Some(progress) },
             complete,
             empty_snapshot_safe,
+            scan_restarted,
         })
     }
 
@@ -4189,6 +4254,147 @@ mod tests {
         let object = fs::metadata(&store[0]).unwrap();
         assert_ne!(copy.ino(), object.ino());
         assert_eq!((copy.nlink(), object.nlink()), (1, 1));
+    }
+
+    // This uses a hosted, owned bind mount: distribution/models is real tmpfs,
+    // installations is the runner filesystem. No fake link function or link=false.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires the hosted owned cross-device model-store fixture"]
+    fn real_cross_device_link_failure_logs_cause_copies_and_recovers() {
+        const ROOT: &str = "VONK_OCI_CROSS_DEVICE_ROOT";
+        const PHASE: &str = "VONK_OCI_CROSS_DEVICE_PHASE";
+        const TEST: &str =
+            "oci::tests::real_cross_device_link_failure_logs_cause_copies_and_recovers";
+        let data = PathBuf::from(std::env::var_os(ROOT).expect("hosted fixture root"));
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        let model_root = data.join("distribution/models");
+        assert_ne!(
+            fs::metadata(&model_root).unwrap().dev(),
+            fs::metadata(&data).unwrap().dev(),
+            "the test must reach the real cross-device hard-link error"
+        );
+        if let Ok(phase) = std::env::var(PHASE) {
+            if phase == "first" {
+                stock_store(&data, &plan);
+            }
+            let runner = NoProcess;
+            // A new process and runtime reopen the actual persisted installation.
+            let instance = runtime(&data, &runner);
+            let mut reports = Vec::new();
+            instance
+                .install_unlocked(
+                    &plan,
+                    FIRST,
+                    &plan.identity.recipe_revision_sha256,
+                    &mut |done, total| reports.push((done, total)),
+                )
+                .unwrap();
+            instance.verify_installation(FIRST).unwrap();
+            let total: u64 = plan
+                .artifacts
+                .iter()
+                .map(|artifact| artifact.size_bytes)
+                .sum();
+            assert_eq!(reports.last(), Some(&(total, total)));
+            for (artifact, bytes) in plan
+                .artifacts
+                .iter()
+                .zip([b"primary".as_slice(), b"secondary".as_slice()])
+            {
+                let destination = data
+                    .join("installations")
+                    .join(FIRST)
+                    .join("models")
+                    .join(&artifact.selection_id)
+                    .join(&artifact.path);
+                let actual = fs::read(&destination).unwrap();
+                assert_eq!(actual, bytes);
+                assert_eq!(vonk_agent_protocol::hex_sha256(&actual), artifact.sha256);
+                let stored = fs::metadata(model_root.join(&artifact.sha256)).unwrap();
+                let copied = fs::metadata(&destination).unwrap();
+                assert_ne!((copied.dev(), copied.ino()), (stored.dev(), stored.ino()));
+                assert_eq!((copied.nlink(), stored.nlink()), (1, 1));
+            }
+            return;
+        }
+        let execute = |phase: &str| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([TEST, "--exact", "--ignored", "--nocapture"])
+                .env(PHASE, phase)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stderr).unwrap()
+        };
+        let cause = std::io::Error::from_raw_os_error(18).to_string(); // Linux EXDEV.
+        let assert_fallbacks =
+            |stderr: &str, artifacts: &[crate::workloads::CompiledModelArtifact]| {
+                let logs = stderr
+                    .lines()
+                    .filter(|line| line.contains("model.materialization_copy_fallback"))
+                    .collect::<Vec<_>>();
+                assert_eq!(logs.len(), artifacts.len(), "{stderr}");
+                for artifact in artifacts {
+                    let expected = format!(
+                        "vonk-agent: model.materialization_copy_fallback sha256={} bytes={} cause={cause}",
+                        artifact.sha256, artifact.size_bytes
+                    );
+                    assert!(
+                        logs.contains(&expected.as_str()),
+                        "missing safe cause: {stderr}"
+                    );
+                }
+                assert!(
+                    !stderr.contains(data.to_str().unwrap()),
+                    "owned paths must not leak in the cause log"
+                );
+            };
+        let first = execute("first");
+        assert_fallbacks(&first, &plan.artifacts);
+        // Preserve the captured production cause in the hosted proof log.
+        eprint!("{first}");
+        let model = data
+            .join("installations")
+            .join(FIRST)
+            .join("models/primary/config.json");
+        let before = fs::metadata(&model).unwrap();
+        let reused = execute("reuse");
+        assert_fallbacks(&reused, &[]);
+        let after = fs::metadata(&model).unwrap();
+        assert_eq!(
+            (before.dev(), before.ino(), before.ctime_nsec()),
+            (after.dev(), after.ino(), after.ctime_nsec())
+        );
+        // A stale private copy is recovered through the same normal materializer.
+        // Same-size damage prevents a length-only check from accidentally passing.
+        fs::write(&model, b"damaged").unwrap();
+        let recovered = execute("recover");
+        assert_fallbacks(&recovered, &plan.artifacts[..1]);
+        eprint!("{recovered}");
+        assert_eq!(fs::read(&model).unwrap(), b"primary");
+        assert_ne!(fs::metadata(&model).unwrap().ino(), after.ino());
+        let installation = data.join("installations").join(FIRST);
+        assert!(
+            installation
+                .join(super::INSTALLATION_METADATA_FILE)
+                .is_file()
+        );
+        assert!(
+            !fs::read_dir(model.parent().unwrap())
+                .unwrap()
+                .any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".partial"))
+        );
     }
 
     #[test]

@@ -1,0 +1,75 @@
+--- a/authority/tls.go
++++ b/authority/tls.go
+@@ -299,13 +299,19 @@
+ 	// Sign certificate
+ 	lifetime := leaf.NotAfter.Sub(leaf.NotBefore.Add(signOpts.Backdate))
+ 
+-	resp, err := a.x509CAService.CreateCertificate(&casapi.CreateCertificateRequest{
++	request := &casapi.CreateCertificateRequest{
+ 		Template:    leaf,
+ 		CSR:         csr,
+ 		Lifetime:    lifetime,
+ 		Backdate:    signOpts.Backdate,
+ 		Provisioner: pInfo,
+-	})
++	}
++	var resp *casapi.CreateCertificateResponse
++	if signer, ok := a.x509CAService.(casapi.CertificateAuthorityServiceWithContext); ok {
++		resp, err = signer.CreateCertificateWithContext(ctx, request)
++	} else {
++		resp, err = a.x509CAService.CreateCertificate(request)
++	}
+ 	if err != nil {
+ 		return nil, prov, errs.Wrap(http.StatusInternalServerError, err, "authority.Sign; error creating certificate", opts...)
+ 	}
+@@ -947,13 +953,19 @@
+ 		lifetime = 24 * time.Hour
+ 	}
+ 
+-	resp, err := a.x509CAService.CreateCertificate(&casapi.CreateCertificateRequest{
++	request := &casapi.CreateCertificateRequest{
+ 		Template:       certTpl,
+ 		CSR:            cr,
+ 		Lifetime:       lifetime,
+ 		Backdate:       1 * time.Minute,
+ 		IsCAServerCert: true,
+-	})
++	}
++	var resp *casapi.CreateCertificateResponse
++	if signer, ok := a.x509CAService.(casapi.CAServerCertificateCreator); ok {
++		resp, err = signer.CreateCAServerCertificate(request)
++	} else {
++		resp, err = a.x509CAService.CreateCertificate(request)
++	}
+ 	if err != nil {
+ 		return fatal(err)
+ 	}
+--- a/cas/apiv1/services.go
++++ b/cas/apiv1/services.go
+@@ -1,6 +1,7 @@
+ package apiv1
+ 
+ import (
++	"context"
+ 	"crypto"
+ 	"crypto/x509"
+ 	"net/http"
+@@ -13,6 +14,18 @@
+ 	CreateCertificate(req *CreateCertificateRequest) (*CreateCertificateResponse, error)
+ 	RenewCertificate(req *RenewCertificateRequest) (*RenewCertificateResponse, error)
+ 	RevokeCertificate(req *RevokeCertificateRequest) (*RevokeCertificateResponse, error)
++}
++
++// CertificateAuthorityServiceWithContext preserves request context during signing.
++// Implementations may use it to bind a durable issuance attempt.
++type CertificateAuthorityServiceWithContext interface {
++	CreateCertificateWithContext(context.Context, *CreateCertificateRequest) (*CreateCertificateResponse, error)
++}
++
++// CAServerCertificateCreator separates internal CA TLS issuance from client issuance.
++// The authority invokes this only for its internally generated TLS certificate.
++type CAServerCertificateCreator interface {
++	CreateCAServerCertificate(*CreateCertificateRequest) (*CreateCertificateResponse, error)
+ }
+ 
+ // CertificateAuthorityCRLGenerator is an optional interface implemented by CertificateAuthorityService

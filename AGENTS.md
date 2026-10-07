@@ -406,16 +406,19 @@ commands and release evidence. Its lifecycle is required:
 - Open the scoped PR against remote `main`. Inspect status, run relevant checks,
   and review `git diff --check` before each commit.
 - When merging is authorized and the PR is eligible, enable auto-merge while
-  retaining required checks and reviews. Arm only one PR at a time. A
-  schema-changing PR requires an explicit operator merge decision; see below.
+  retaining required checks and reviews. Independently reviewed PRs with
+  nonoverlapping changes may be armed concurrently. Account for shared source
+  and generated outputs before merging overlapping work. A schema-changing PR
+  requires an explicit operator merge decision; see below.
 - If the PR is blocked because its branch is out of date, fetch and merge
   `origin/main` into its worktree branch, deliberately resolve conflicts,
   regenerate affected outputs, rerun affected checks, and push. Continue until
   the authorized merge completes or report the concrete remaining blocker.
-- For a build-producing merge, wait for accepted publication containing that
-  merge before arming the next PR. Verify workflow path filters and artifact
-  provenance; a documentation-only merge does not imply a new image exists and
-  must not wait for a build that will never run.
+- Accepted publication is required before deployment, not before arming or
+  merging the next independent PR. Verify that the accepted generation contains
+  the intended changes; verify workflow path filters and artifact provenance.
+  A documentation-only merge does not imply a new image exists and must not wait
+  for a build that will never run.
 - After merge, verify GitHub's merged result and that the branch's final work is
   accounted for (including squash merges). Stop its agents, inspect tracked,
   untracked, and valuable ignored files, and remove the clean, inactive task

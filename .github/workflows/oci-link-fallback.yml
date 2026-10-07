@@ -1,0 +1,87 @@
+name: Actual OCI cross-device copy recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/oci-link-fallback.yml
+      - rust/crates/vonk-agent/src/oci.rs
+      - rust/crates/vonk-agent/src/workloads.rs
+      - rust/crates/vonk-agent-protocol/**
+      - agent_protocol/**
+      - Cargo.toml
+      - Cargo.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vonk-oci-link-fallback-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross-device:
+    name: Actual EXDEV, safe cause, receipt reuse and recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: "1"
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Prepare locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Install pinned Rust toolchain
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
+      - name: Restore read-only Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Generate canonical wire and compile the exact test
+        run: |
+          scripts/retry-dependency-fetch cargo fetch --locked
+          uv run --project control --frozen python scripts/generate-agent-wire
+          cargo test --locked --package vonk-agent --lib --no-run
+      - name: Mount only the owned model-store fixture and exercise production fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          data_root=$(mktemp -d "$RUNNER_TEMP/vonk-oci-exdev.XXXXXXXX")
+          source_root=$(mktemp -d /dev/shm/vonk-oci-exdev.XXXXXXXX)
+          target="$data_root/distribution/models"
+          mounted=false
+          owned=false
+          cleanup() {
+            status=$?
+            if [ "$mounted" = true ]; then
+              sudo umount "$target" || exit 1
+            fi
+            if [ "$owned" = true ]; then
+              rm -rf -- "$data_root" "$source_root"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          # Both paths were newly created for this job. Never mount or clean a
+          # repository, agent cache, shared data path or pre-existing directory.
+          case "$data_root" in "$RUNNER_TEMP"/vonk-oci-exdev.*) ;; *) exit 1 ;; esac
+          case "$source_root" in /dev/shm/vonk-oci-exdev.*) ;; *) exit 1 ;; esac
+          test -d "$data_root" && test ! -L "$data_root"
+          test -d "$source_root" && test ! -L "$source_root"
+          owned=true
+          mkdir -p "$target"
+          sudo mount --bind "$source_root" "$target"
+          mounted=true
+          test "$(stat -c %d "$target")" != "$(stat -c %d "$data_root")"
+          export VONK_OCI_CROSS_DEVICE_ROOT="$data_root"
+          cargo test --locked --package vonk-agent --lib \
+            oci::tests::real_cross_device_link_failure_logs_cause_copies_and_recovers \
+            -- --exact --ignored --nocapture --test-threads=1

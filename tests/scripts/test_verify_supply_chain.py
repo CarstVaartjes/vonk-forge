@@ -38,6 +38,9 @@ def _copy(tmp_path: Path) -> Path:
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    # Use the managed CA's real source, locks and patch as its build context;
+    # the stock Smallstep image is only a pinned runtime build base now.
+    shutil.copytree(ROOT / "deploy/compose/step-ca", target / "deploy/compose/step-ca")
     (target / "deploy/compose/litellm").mkdir(parents=True, exist_ok=True)
     return target
 
@@ -166,7 +169,7 @@ def test_reviewed_third_party_contract_wheel_pin_fails_closed(
     assert "public contract" in " ".join(_errors(result))
 
 
-@pytest.mark.parametrize("image", ("caddy", "postgres", "step-ca", "tailscale"))
+@pytest.mark.parametrize("image", ("caddy", "postgres", "tailscale"))
 def test_image_lock_rejects_floating_runtime_references(
     tmp_path: Path, image: str
 ) -> None:
@@ -201,7 +204,9 @@ def test_platform_version_tags_without_digests_are_refused(tmp_path: Path) -> No
     )
 
 
-@pytest.mark.parametrize("name", ("hermes", "litellm", "node", "python"))
+@pytest.mark.parametrize(
+    "name", ("hermes", "litellm", "node", "python", "step-ca", "ca-go")
+)
 def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> None:
     repository = _copy(tmp_path)
     lock_path = repository / "deploy/compose/images.lock.json"

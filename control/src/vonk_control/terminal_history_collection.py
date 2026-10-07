@@ -78,6 +78,10 @@ class TerminalHistoryCollector:
         self._batch = batch
         self._due_at: datetime | None = None
         self._after: dict[str, tuple[datetime, str]] = {}
+        # Disposable observations only: never retain a Session, row lock or
+        # permission to delete across passes. A restart inventories them again.
+        self._table_index = 0
+        self._pending: tuple[tuple[str, datetime], ...] = ()
 
     def tick(self) -> bool:
         now = self._clock()
@@ -160,7 +164,11 @@ class TerminalHistoryCollector:
                 RecipeRun.state.in_((RunState.STOPPED.value, RunState.FAILED.value)),
             ),
         )
-        for model, stamp, ended in specs:
+        while self._table_index < len(specs):
+            if time.monotonic() >= deadline:
+                self._due_at = now
+                return +removed
+            model, stamp, ended = specs[self._table_index]
             statement = select(model.id, stamp).where(stamp <= cutoff, ended)
             boundary = self._after.get(model.__tablename__)
             if boundary is not None:
@@ -168,24 +176,30 @@ class TerminalHistoryCollector:
                 statement = statement.where(
                     or_(stamp > at, and_(stamp == at, model.id > identity))
                 )
-            with self._sessions() as session:
-                candidates = tuple(
-                    session.execute(
-                        statement.order_by(stamp, model.id).limit(self._batch)
+            if not self._pending:
+                with self._sessions() as session:
+                    candidates = tuple(
+                        session.execute(
+                            statement.order_by(stamp, model.id).limit(self._batch)
+                        )
                     )
+                # Save successful inventory before checking the elapsed budget.
+                # Otherwise a slow query can consume every pass without ever
+                # reaching its first candidate. No absence is inferred on error.
+                self._pending = tuple(
+                    (identity, observed_at)
+                    for identity, observed_at in candidates
+                    if observed_at is not None
                 )
-            if not candidates:
-                self._after.pop(model.__tablename__, None)
-            elif len(candidates) >= self._batch:
-                self._due_at = now
-            for identity, observed_at in candidates:
-                if observed_at is None:
-                    # Nullable completion timestamps cannot prove the grace
-                    # period elapsed or establish a continuation boundary.
-                    continue
+                if not candidates:
+                    self._after.pop(model.__tablename__, None)
+                elif len(candidates) >= self._batch:
+                    self._due_at = now
+            for identity, observed_at in self._pending:
                 if time.monotonic() >= deadline:
                     self._due_at = now
                     return +removed
+                self._pending = self._pending[1:]
                 # Retained and contended rows cannot starve unrelated history.
                 # Restarting loses only this observation cursor, not authority.
                 self._after[model.__tablename__] = (observed_at, identity)
@@ -206,6 +220,7 @@ class TerminalHistoryCollector:
                                 self._after.pop(model.__tablename__, None)
                             else:
                                 self._after[model.__tablename__] = boundary
+                            self._pending = ((identity, observed_at), *self._pending)
                             return +removed
                         if not unused:
                             continue
@@ -276,6 +291,11 @@ class TerminalHistoryCollector:
                         row_id=identity,
                         code=type(error).__name__,
                     )
+            self._table_index += 1
+        if time.monotonic() >= deadline:
+            self._due_at = now
+            return +removed
+        self._table_index = 0
         removed["route_publications"] += self._publications(cutoff)
         return +removed
 

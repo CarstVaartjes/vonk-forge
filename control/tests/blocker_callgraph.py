@@ -652,9 +652,45 @@ class CallGraph:
             for cls in classes:
                 if cls is protocol or cls.is_protocol:
                     continue
-                if all(self.find_method(cls, name) is not None for name in wanted):
+                if all(
+                    (candidate := self.find_method(cls, name)) is not None
+                    and self._possible_protocol_return(
+                        self.find_method(protocol, name), candidate
+                    )
+                    for name in wanted
+                ):
                     found.append(cls)
         return found
+
+    def _possible_protocol_return(
+        self, expected: Function | None, candidate: Function
+    ) -> bool:
+        """Reject only a proven incompatible local nominal return annotation.
+
+        Missing, generic, external and structural annotations remain uncertain
+        and retain their caller edge. This is not a general type checker.
+        """
+        if expected is None:
+            return True
+        annotations = []
+        for function in (expected, candidate):
+            node = function.node
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                return True
+            if not isinstance(node.returns, ast.Name):
+                return True
+            module = self._module_of(function)
+            if (
+                node.returns.id not in module.classes
+                and node.returns.id not in module.imports
+            ):
+                return True
+            classes = self._classes_named(module, node.returns.id)
+            if len(classes) != 1 or classes[0].is_protocol:
+                return True
+            annotations.append(classes[0])
+        required, actual = annotations
+        return required in self.mro(actual)
 
     def dispatch(self, cls: ClassInfo, method: str) -> frozenset[Function]:
         """Every function a call of ``method`` on a ``cls`` can run."""
@@ -1677,7 +1713,12 @@ class _Walker:
         refs: set[Function] = set()
         forward = None
         classes: list[ClassInfo] = []
-        if isinstance(node, ast.Name | ast.Attribute):
+        if isinstance(node, ast.IfExp):
+            # Both possible callback values fill the same parameter; only the
+            # value references are bound. The condition is walked normally.
+            self.argument(site, node.body, index, keyword)
+            self.argument(site, node.orelse, index, keyword)
+        elif isinstance(node, ast.Name | ast.Attribute):
             refs, forward, classes = self.refs(node)
             for cls in classes:
                 refs = refs | self.graph._constructors(cls)
