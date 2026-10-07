@@ -23,6 +23,7 @@ from vonk_agent_protocol.compiled_execution_plan import COMPILED_PLAN_STORAGE_CO
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .content_identity import ImageContent, same_image
+from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
 from .library_contract import Digest, ImageDigest, NodeId, Text64, UuidId
 from .platform_ports import serving_port
 from .strict_json import StrictJSONModel
@@ -62,7 +63,7 @@ class StoredAdmissionReason(_PersistedModel):
 
 class StoredInstallNodePlan(_PersistedModel):
     node_id: NodeId
-    rank: int = Field(ge=0)
+    rank: int = Field(ge=0, le=MAX_DATABASE_INTEGER)
     role: Text64
     allowed: bool
     # These nullable fields are required: their null is an observation, not
@@ -95,7 +96,7 @@ class StoredInstallNodePlan(_PersistedModel):
 class StoredInstallationPlan(_PersistedModel):
     schema_version: Literal[1]
     mapping_id: UuidId
-    mapping_generation: int = Field(ge=1)
+    mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     recipe_build_id: UuidId | None
     image_digest: ImageDigest
     recipe_revision_id: UuidId
@@ -117,7 +118,7 @@ class StoredInstallationPlan(_PersistedModel):
 
 class StoredRunNodePlan(_PersistedModel):
     node_id: NodeId
-    rank: int = Field(ge=0)
+    rank: int = Field(ge=0, le=MAX_DATABASE_INTEGER)
     role: Text64
     endpoint_owner: bool
     port: int = Field(ge=1, le=65535)
@@ -132,7 +133,7 @@ class StoredRunNodePlan(_PersistedModel):
     memory_floor_bytes: int = Field(ge=0)
     fabric_address: str | None
     fabric_bandwidth_mbps: int | None
-    rendezvous_port: int | None
+    rendezvous_port: int | None = Field(ge=1, le=65535)
     blockers: list[StoredAdmissionReason]
     warnings: list[StoredAdmissionReason]
 
@@ -147,11 +148,11 @@ class StoredRunNodePlan(_PersistedModel):
 class StoredRunPlan(_PersistedModel):
     schema_version: Literal[1]
     observation_schema_version: Literal[2]
-    run_generation: int = Field(ge=1)
+    run_generation: int = Field(le=MAX_DATABASE_BIGINT, ge=1)
     installation_id: UuidId
     alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     mapping_id: UuidId
-    mapping_generation: int = Field(ge=1)
+    mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     recipe_revision_id: UuidId
     plan_digest: Digest
     nodes: list[StoredRunNodePlan]

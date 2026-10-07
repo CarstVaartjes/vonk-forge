@@ -1,3 +1,4 @@
+import {addWire, compareWire, formatWire, multiplyWire, type WireNumber} from "../api/contract-numeric";
 import {useEffect, useRef} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import type {ControlApi, LibrarySort, LibraryViewModel, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, VisualFleetSnapshot} from "../api/types";
@@ -81,7 +82,7 @@ export type LibraryRecipeRecord = {
   modelKey: string;
   modelTitle: string;
   modelFiles: LibraryViewModel["model_document"]["files"];
-  modelBytes: number;
+  modelBytes: WireNumber;
   modelCached: boolean;
   capabilities: string[];
 };
@@ -118,8 +119,8 @@ export function recipeCreator(recipe: LibraryViewRecipe): string | undefined {
   return recipe.creator ?? undefined;
 }
 
-export function sparkLabel(count: number): string {
-  return `${count} Spark${count === 1 ? "" : "s"}`;
+export function sparkLabel(count: WireNumber): string {
+  return `${formatWire(count)} Spark${compareWire(count, 1) === 0 ? "" : "s"}`;
 }
 
 /** Engine, creator and Spark count as compact badges. */
@@ -142,7 +143,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
     const key = modelKey(model.model);
     const title = modelTitle(model);
     const files = model.model_document.files;
-    const bytes = files.reduce((total, file) => total + file.size_bytes, 0);
+    const bytes = files.reduce<WireNumber>((total, file) => addWire(total, file.size_bytes), 0);
     const capabilities = model.model_capabilities ?? [];
     const modelCached = isModelCached(model);
     if (model.recipes.length === 0) return [{key: `model:${key}`, title, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, modelCached, capabilities}];
@@ -242,7 +243,7 @@ export function LibraryWorkcell({api, detail: _detail, fleet: _fleet, filters, o
       <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>
       <div className="library-paired-panes">
         <div className="library-model-pane" aria-label="Models"><ul>{models.map(model => <li key={model.modelKey}><NavigateLink current={model.modelKey === selectedModelKey} href={modelLibraryPath(model.modelKey)} onNavigate={onNavigate}><span className={model.modelKey === selectedModelKey ? "is-selected" : undefined}><strong>{model.modelTitle}</strong><small>{model.model?.publisher}/{model.model?.slug}</small><small>{model.modelFiles.length} files · {formatBytes(model.modelBytes)}</small><em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em></span></NavigateLink></li>)}</ul>{models.length === 0 && <EmptyLibrary noun="recipes" filters={filters} query={query} onRefresh={refresh} onClear={() => { onFiltersChange(EMPTY_LIBRARY_WORKCELL_FILTERS); onQueryChange(""); }}/>}</div>
-        <div className="library-recipe-pane" aria-label="Recipes matching selected Model" ref={recipePaneRef} tabIndex={-1}>{selectedModel && <div className="library-selected-model-context"><strong>{selectedModel.modelTitle}</strong><span>{selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)} · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}</span></div>}<ul>{selectedRecipes.map(record => { const document = record.recipe!.recipe_document; const roleBytes = document.topology.roles.reduce((sum, role) => sum + role.count * role.resources.disk.image_bytes + role.count * role.resources.disk.artifact_bytes, 0); return <li key={record.key}><NavigateLink href={recipeLibraryPath(record.recipe!.recipe_id)} onNavigate={onNavigate}><strong>{record.title}</strong><RecipeBadges recipe={record.recipe!}/><small>{recipeAttribution(document)} · release {document.release.version}</small><small>{document.topology.roles.map(role => `${role.name}: ${formatBytes(role.resources.memory.peak_bytes)} peak`).join(" · ")}</small><small>{formatBytes(roleBytes)} image + artifact envelope</small></NavigateLink><LibraryRecipeDownloadAction api={api} missingModels={missingModelsFor(record.recipe!)} onDownloaded={refresh} selector={canonicalRecipeSelector(record.recipe!)} /><LibraryRecipeRemoveAction api={api} onRemoved={refresh} selector={canonicalRecipeSelector(record.recipe!)} /></li>; })}</ul>{selectedModel && selectedRecipes.length === 0 && <div className="library-empty-recipe"><strong>No Recipe linked</strong><span>This exact Model is available for cache management but has no runnable Recipe.</span></div>}{!selectedModel && <p className="library-empty-state">Select a Model to see matching Recipes.</p>}</div>
+        <div className="library-recipe-pane" aria-label="Recipes matching selected Model" ref={recipePaneRef} tabIndex={-1}>{selectedModel && <div className="library-selected-model-context"><strong>{selectedModel.modelTitle}</strong><span>{selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)} · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}</span></div>}<ul>{selectedRecipes.map(record => { const document = record.recipe!.recipe_document; const roleBytes = document.topology.roles.reduce<WireNumber>((sum, role) => addWire(sum, multiplyWire(role.count, addWire(role.resources.disk.image_bytes, role.resources.disk.artifact_bytes))), 0); return <li key={record.key}><NavigateLink href={recipeLibraryPath(record.recipe!.recipe_id)} onNavigate={onNavigate}><strong>{record.title}</strong><RecipeBadges recipe={record.recipe!}/><small>{recipeAttribution(document)} · release {document.release.version}</small><small>{document.topology.roles.map(role => `${role.name}: ${formatBytes(role.resources.memory.peak_bytes)} peak`).join(" · ")}</small><small>{formatBytes(roleBytes)} image + artifact envelope</small></NavigateLink><LibraryRecipeDownloadAction api={api} missingModels={missingModelsFor(record.recipe!)} onDownloaded={refresh} selector={canonicalRecipeSelector(record.recipe!)} /><LibraryRecipeRemoveAction api={api} onRemoved={refresh} selector={canonicalRecipeSelector(record.recipe!)} /></li>; })}</ul>{selectedModel && selectedRecipes.length === 0 && <div className="library-empty-recipe"><strong>No Recipe linked</strong><span>This exact Model is available for cache management but has no runnable Recipe.</span></div>}{!selectedModel && <p className="library-empty-state">Select a Model to see matching Recipes.</p>}</div>
       </div>
     </div>
   </section>;

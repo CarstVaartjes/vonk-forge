@@ -44,6 +44,13 @@ pub enum PairingError {
     Rejected,
     #[error("controller pairing response is invalid")]
     Response,
+    #[error(
+        "controller pairing response exceeds {maximum_bytes} bytes (observed {observed_bytes})"
+    )]
+    ResponseTooLarge {
+        maximum_bytes: usize,
+        observed_bytes: u64,
+    },
     #[error("controller pairing returned unexpected HTTP status {0}")]
     Status(u16),
     #[error("issued certificate is not bound to this node and key")]
@@ -110,16 +117,7 @@ pub async fn pair(
         .send()
         .await?;
     let status = response.status().as_u16();
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-    {
-        return Err(PairingError::Response);
-    }
-    let body = response.bytes().await?;
-    if body.len() > MAX_RESPONSE_BYTES {
-        return Err(PairingError::Response);
-    }
+    let body = bounded_pairing_body(response).await?;
     let issued = validate_enrollment_response(status, &body, &config.node_id)?;
     validate_issued(&issued, &pending, &config.node_id)?;
     persist_paired_identity(
@@ -131,10 +129,36 @@ pub async fn pair(
             chain_pem: issued.chain_pem.into_bytes(),
             serial: issued.serial,
             fingerprint: issued.fingerprint,
-            generation: issued.generation,
+            generation: u64::from(issued.generation),
         },
     )?;
     Ok(())
+}
+
+async fn bounded_pairing_body(mut response: reqwest::Response) -> Result<Vec<u8>, PairingError> {
+    if let Some(length) = response.content_length()
+        && length > MAX_RESPONSE_BYTES as u64
+    {
+        return Err(PairingError::ResponseTooLarge {
+            maximum_bytes: MAX_RESPONSE_BYTES,
+            observed_bytes: length,
+        });
+    }
+    // Reserve this physical body budget once. Geometric Vec growth from an
+    // arbitrary first chunk could otherwise reserve beyond the byte ceiling.
+    let mut body = Vec::with_capacity(MAX_RESPONSE_BYTES);
+    while let Some(chunk) = response.chunk().await? {
+        // The declared length is only an early refusal. Check actual bytes
+        // before growing the retained body, including chunked responses.
+        if chunk.len() > MAX_RESPONSE_BYTES - body.len() {
+            return Err(PairingError::ResponseTooLarge {
+                maximum_bytes: MAX_RESPONSE_BYTES,
+                observed_bytes: (body.len() as u64).saturating_add(chunk.len() as u64),
+            });
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 pub fn validate_enrollment_response(
@@ -281,6 +305,158 @@ pub fn validate_issued(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn read_request_headers(socket: &mut tokio::net::TcpStream) {
+        let mut request = [0; 4096];
+        let mut received = 0;
+        while !request[..received].ends_with(b"\r\n\r\n") {
+            assert!(received < request.len(), "test request headers exceed allocation");
+            let amount = socket.read(&mut request[received..]).await.unwrap();
+            assert!(amount > 0, "test request ended before complete headers");
+            received += amount;
+        }
+        assert!(request[..received].starts_with(b"GET "));
+    }
+
+    // Keep the peer open after the supplied bytes. An oversized response must
+    // be refused before EOF; a whole-body reader would wait for the timeout.
+    async fn streaming_response(
+        headers: &str,
+        body: Vec<u8>,
+    ) -> (reqwest::Response, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let headers = headers.to_owned();
+        let peer = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request_headers(&mut socket).await;
+            socket.write_all(headers.as_bytes()).await.unwrap();
+            let _ = socket.write_all(&body).await;
+            std::future::pending::<()>().await;
+        });
+        let response = Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/agent/enroll"))
+            .send()
+            .await
+            .unwrap();
+        (response, peer)
+    }
+
+    #[tokio::test]
+    async fn pairing_declared_oversize_refuses_before_body_arrives() {
+        let headers = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
+            MAX_RESPONSE_BYTES + 1
+        );
+        let (response, peer) = streaming_response(&headers, Vec::new()).await;
+        let result =
+            tokio::time::timeout(Duration::from_secs(1), bounded_pairing_body(response)).await;
+        peer.abort();
+        assert!(matches!(
+            result,
+            Ok(Err(PairingError::ResponseTooLarge {
+                maximum_bytes: MAX_RESPONSE_BYTES,
+                ..
+            }))
+        ));
+    }
+
+    #[tokio::test]
+    async fn pairing_chunked_oversize_refuses_before_eof_and_recovers() {
+        let headers = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let mut chunks = format!("{:x}\r\n", MAX_RESPONSE_BYTES).into_bytes();
+        chunks.extend(vec![b' '; MAX_RESPONSE_BYTES]);
+        chunks.extend_from_slice(b"\r\n1\r\nx\r\n");
+        let (response, peer) = streaming_response(headers, chunks).await;
+        let result =
+            tokio::time::timeout(Duration::from_secs(1), bounded_pairing_body(response)).await;
+        peer.abort();
+        assert!(matches!(
+            result,
+            Ok(Err(PairingError::ResponseTooLarge {
+                maximum_bytes: MAX_RESPONSE_BYTES,
+                ..
+            }))
+        ));
+        // A fresh response after the fault clears uses the same reader and
+        // accepts the complete exact-boundary JSON without truncation.
+        let node = "spk_0123456789abcdef0123456789abcdef";
+        let mut body = serde_json::to_vec(&serde_json::json!({
+            "node_id":node,"certificate_pem":"certificate","chain_pem":"chain",
+            "serial":"123","fingerprint":"a".repeat(64),
+            "not_before":"2026-10-07T00:00:00Z","not_after":"2026-11-06T00:00:00Z","generation":1
+        }))
+        .unwrap();
+        body.resize(MAX_RESPONSE_BYTES, b' ');
+        let mut chunks = format!("{:x}\r\n", body.len()).into_bytes();
+        chunks.extend_from_slice(&body);
+        chunks.extend_from_slice(b"\r\n0\r\n\r\n");
+        let (response, peer) = streaming_response(headers, chunks).await;
+        let recovered = bounded_pairing_body(response).await.unwrap();
+        peer.abort();
+        assert_eq!(recovered, body);
+        assert!(recovered.capacity() <= MAX_RESPONSE_BYTES);
+        assert_eq!(
+            validate_enrollment_response(200, &recovered, node)
+                .unwrap()
+                .serial,
+            "123"
+        );
+    }
+
+    #[tokio::test]
+    async fn pairing_reader_cancellation_releases_incomplete_response() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (closed, observed_close) = tokio::sync::oneshot::channel();
+        let peer = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            read_request_headers(&mut socket).await;
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n{")
+                .await
+                .unwrap();
+            let mut byte = [0];
+            let result = socket.read(&mut byte).await;
+            let _ = closed.send(matches!(result, Ok(0)) || result.is_err());
+        });
+        let response = Client::new()
+            .get(format!("http://{address}/agent/enroll"))
+            .send()
+            .await
+            .unwrap();
+        let reader = tokio::spawn(bounded_pairing_body(response));
+        tokio::task::yield_now().await;
+        reader.abort();
+        assert!(reader.await.unwrap_err().is_cancelled());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), observed_close)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        peer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pairing_stream_timeout_preserves_transport_cause() {
+        let (response, peer) = streaming_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n",
+            b"{ ".to_vec(),
+        )
+        .await;
+        let result = bounded_pairing_body(response).await;
+        peer.abort();
+        match result {
+            Err(PairingError::Transport(error)) => assert!(error.is_timeout()),
+            other => panic!("stream timeout lost transport cause: {other:?}"),
+        }
+    }
 
     #[test]
     fn enrollment_evidence_uses_native_machine_evidence_without_ssh() {

@@ -120,7 +120,7 @@ const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
 #[derive(Debug, Clone)]
 pub struct RecipeRunInspectionPlan {
     pub run_id: uuid::Uuid,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub arguments: Vec<String>,
     pub endpoint_address: Option<IpAddr>,
     pub endpoint_port: u16,
@@ -131,7 +131,7 @@ type LoadedRunLifecycle = (
     CompiledExecutionPlan,
     String,
     CompiledRuntimePlacement,
-    Option<u32>,
+    Option<u64>,
 );
 
 /// The Controller run generation a service start is launched for; it is
@@ -956,9 +956,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
         let run_generation = identity
             .map(|identity| {
-                u32::try_from(identity.run_generation)
-                    .ok()
-                    .filter(|generation| *generation != 0)
+                (1..=i64::MAX as u64)
+                    .contains(&identity.run_generation)
+                    .then_some(identity.run_generation)
                     .ok_or(OciError::Artifact)
             })
             .transpose()
@@ -1063,7 +1063,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let Some((_, _, _, Some(run_generation))) = self.load_run_lifecycle(run_id)? else {
             return Err(OciError::Runtime);
         };
-        if u64::from(run_generation) != identity.run_generation {
+        if run_generation != identity.run_generation {
             return Err(OciError::Runtime);
         }
         Ok(plan)
@@ -1364,6 +1364,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         let record: RunLifecycle = serde_json::from_slice(&read_regular_file(path, 16 * 1024)?)?;
+        if record
+            .run_generation
+            .is_some_and(|generation| generation > i64::MAX as u64)
+        {
+            return Err(OciError::Artifact);
+        }
         Ok(Some(record))
     }
 
@@ -3145,37 +3151,45 @@ mod tests {
     }
 
     #[test]
-    fn service_start_persists_its_run_generation_for_observation() {
+    fn service_start_persists_its_full_controller_generation_for_restart_observation() {
         let data = tempdir().unwrap();
         let (installation_id, installation, plan) = persisted_installation(data.path());
         authorize_installation(&installation, &"9".repeat(64));
-        let run_id = Uuid::new_v4().to_string();
         let placement = plan.runtime.placement.clone();
-        let identity = super::RecipeRunStartIdentity { run_generation: 7 };
         let runner = NoProcess;
-        let runtime = runtime(data.path(), &runner);
-
-        runtime
-            .prepare_start_with_inspection_identity(
-                &plan,
-                &installation_id,
-                &run_id,
-                &placement,
-                &identity,
-            )
-            .unwrap();
-
-        let lifecycle: Value = serde_json::from_slice(
-            &fs::read(
-                data.path()
-                    .join("run-metadata")
-                    .join(&run_id)
-                    .join("lifecycle.json"),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(lifecycle["run_generation"], 7);
+        for generation in [u64::from(u32::MAX) + 1, i64::MAX as u64] {
+            let run_id = Uuid::new_v4().to_string();
+            let identity = super::RecipeRunStartIdentity {
+                run_generation: generation,
+            };
+            runtime(data.path(), &runner)
+                .prepare_start_with_inspection_identity(
+                    &plan,
+                    &installation_id,
+                    &run_id,
+                    &placement,
+                    &identity,
+                )
+                .expect("legal Controller generations must not narrow at local persistence");
+            let lifecycle_path = data
+                .path()
+                .join("run-metadata")
+                .join(&run_id)
+                .join("lifecycle.json");
+            let lifecycle: Value =
+                serde_json::from_slice(&fs::read(&lifecycle_path).unwrap()).unwrap();
+            assert_eq!(lifecycle["run_generation"], generation);
+            let restarted = runtime(data.path(), &runner);
+            let (_, _, _, retained) = restarted.load_run_lifecycle(&run_id).unwrap().unwrap();
+            assert_eq!(retained, Some(generation));
+            let mut invalid = lifecycle;
+            invalid["run_generation"] = serde_json::json!(i64::MAX as u64 + 1);
+            fs::write(&lifecycle_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            assert!(matches!(
+                restarted.read_run_lifecycle(&lifecycle_path),
+                Err(OciError::Json(_))
+            ));
+        }
     }
 
     #[test]

@@ -19,6 +19,7 @@ import datetime
 if TYPE_CHECKING:
   from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView
   from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
+  from ..models.fleet_profile_application_projection_issue import FleetProfileApplicationProjectionIssue
   from ..models.fleet_profile_application_result import FleetProfileApplicationResult
   from ..models.operation_blocker import OperationBlocker
 
@@ -52,6 +53,7 @@ class FleetProfileApplicationView:
             blockers (list[OperationBlocker] | Unset):
             cancellation (FleetProfileApplicationCancellationView | None | Unset):
             next_attempt_at (datetime.datetime | None | Unset):
+            projection_issue (FleetProfileApplicationProjectionIssue | None | Unset):
             reason_code (None | SupersedeCode | Unset):
             retry_of_application_id (None | str | Unset):
             superseded_by (None | str | Unset):
@@ -75,6 +77,7 @@ class FleetProfileApplicationView:
     blockers: list[OperationBlocker] | Unset = UNSET
     cancellation: FleetProfileApplicationCancellationView | None | Unset = UNSET
     next_attempt_at: datetime.datetime | None | Unset = UNSET
+    projection_issue: FleetProfileApplicationProjectionIssue | None | Unset = UNSET
     reason_code: None | SupersedeCode | Unset = UNSET
     retry_of_application_id: None | str | Unset = UNSET
     superseded_by: None | str | Unset = UNSET
@@ -86,6 +89,7 @@ class FleetProfileApplicationView:
     def to_dict(self) -> dict[str, Any]:
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
         from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress # noqa: PLC0415
+        from ..models.fleet_profile_application_projection_issue import FleetProfileApplicationProjectionIssue # noqa: PLC0415
         from ..models.fleet_profile_application_result import FleetProfileApplicationResult # noqa: PLC0415
         from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         created_at = self.created_at.isoformat()
@@ -149,6 +153,14 @@ class FleetProfileApplicationView:
         else:
             next_attempt_at = self.next_attempt_at
 
+        projection_issue: dict[str, Any] | None | Unset
+        if isinstance(self.projection_issue, Unset):
+            projection_issue = UNSET
+        elif isinstance(self.projection_issue, FleetProfileApplicationProjectionIssue):
+            projection_issue = self.projection_issue.to_dict()
+        else:
+            projection_issue = self.projection_issue
+
         reason_code: None | str | Unset
         if isinstance(self.reason_code, Unset):
             reason_code = UNSET
@@ -196,6 +208,8 @@ class FleetProfileApplicationView:
             field_dict["cancellation"] = cancellation
         if next_attempt_at is not UNSET:
             field_dict["next_attempt_at"] = next_attempt_at
+        if projection_issue is not UNSET:
+            field_dict["projection_issue"] = projection_issue
         if reason_code is not UNSET:
             field_dict["reason_code"] = reason_code
         if retry_of_application_id is not UNSET:
@@ -211,6 +225,7 @@ class FleetProfileApplicationView:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.fleet_profile_application_cancellation_view import FleetProfileApplicationCancellationView # noqa: PLC0415
         from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress # noqa: PLC0415
+        from ..models.fleet_profile_application_projection_issue import FleetProfileApplicationProjectionIssue # noqa: PLC0415
         from ..models.fleet_profile_application_result import FleetProfileApplicationResult # noqa: PLC0415
         from ..models.operation_blocker import OperationBlocker # noqa: PLC0415
         d = dict(src_dict)
@@ -336,6 +351,26 @@ class FleetProfileApplicationView:
         next_attempt_at = _parse_next_attempt_at(d.pop("next_attempt_at", UNSET))
 
 
+        def _parse_projection_issue(data: object) -> FleetProfileApplicationProjectionIssue | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                projection_issue_type_0 = FleetProfileApplicationProjectionIssue.from_dict(data)
+
+
+
+                return projection_issue_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(FleetProfileApplicationProjectionIssue | None | Unset, data)
+
+        projection_issue = _parse_projection_issue(d.pop("projection_issue", UNSET))
+
+
         def _parse_reason_code(data: object) -> None | SupersedeCode | Unset:
             if data is None:
                 return data
@@ -395,6 +430,7 @@ class FleetProfileApplicationView:
             blockers=blockers,
             cancellation=cancellation,
             next_attempt_at=next_attempt_at,
+            projection_issue=projection_issue,
             reason_code=reason_code,
             retry_of_application_id=retry_of_application_id,
             superseded_by=superseded_by,

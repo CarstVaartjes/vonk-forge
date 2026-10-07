@@ -22,7 +22,6 @@ from pydantic import (
 from sqlalchemy import String, and_, cast, false, func, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
-from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     EndpointState,
     GatewayRouteState,
@@ -31,9 +30,7 @@ from vonk_agent_protocol import (
     OperationFailureCode,
     OperationMemberProgress,
     OperationProgress,
-    RecipeJobRunResult,
     canonical_message,
-    validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
 from vonk_agent_protocol.route_activation import ActivationMarker
@@ -45,6 +42,7 @@ from .agent_jobs import (
     operator_resume_eligible_operations_in_session,
     retire_exhausted_operations_in_session,
 )
+from .agent_upgrade_contract import AgentUpgradePackage
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
@@ -52,7 +50,7 @@ from .agent_upgrade_status import (
     operator_agent_upgrade_reason,
 )
 from .auth import CursorCodec, CursorError
-from .bounded_json import BoundedJSONError, mapping, require_integer, require_sequence
+from .bounded_json import BoundedJSONError, mapping, require_sequence
 from .endpoint_contract import EndpointResponse
 from .fleet_profile_contract import (
     FleetProfileApplicationCancellationView,
@@ -61,6 +59,7 @@ from .fleet_profile_contract import (
     FleetProfileEndpointState,
     FleetProfileEndpointsView,
 )
+from .integer_domains import MAX_DATABASE_INTEGER
 from .lifecycle.agent_operation import retry_scheduled
 from .lifecycle.job import JobAdapter
 from .logging import redact_text
@@ -76,16 +75,24 @@ from .models import (
 )
 from .operation_blockers import OperationBlocker, read_blockers
 from .operation_contract import (
-    AvailabilityOperationFailure,
     OperationEvidenceDownload,
     OperationFailure,
     OperationFailureEvidence,
     OperationRecovery,
     OperationRecoveryAction,
     recovery_for_operation,
-    sanitize_failure_evidence,
+)
+from .operation_item_contract import (
+    AGENT_OPERATION_KINDS,
+    OperationItem,
+    OperationOwnerReference,
+    OperationResultFacts,
+    OperationRow,
+    agent_receipt_for,
+    operation_item,
 )
 from .operation_progress import aggregate_progress, project_progress
+from .route_bundle_contract import RouteBundleDocument, RouteEndpointDocument
 from .route_runtime import recipe_route_run_id, verify_active_route_bundle
 from .state_filters import state_filter
 from .strict_json import (
@@ -100,6 +107,8 @@ IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,62}$"
 NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _ACTIVE_PUBLICATION_STATES = frozenset({"completed"})
 _ADMIN_OPERATION_IDS = {
+    ("get", "/api/cli/contract"): "getCliUpdateContract",
+    ("get", "/api/platform"): "getPlatformObservation",
     ("get", "/api/fleet"): "getFleetStatus",
     ("get", "/api/operations/{operation_id}/evidence"): "getOperationEvidence",
     ("get", "/api/fleet/stream"): "streamFleetEvents",
@@ -152,7 +161,7 @@ class OperationProjectionError(RuntimeError):
 
 @dataclass(frozen=True)
 class _ActiveRouteSnapshot:
-    marker: Mapping[str, object]
+    marker: ActivationMarker
     marker_digest: str
     route_digest: str
     litellm_digest: str | None
@@ -269,7 +278,7 @@ class JobOperationResponse(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
-    attempt: int = Field(ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     progress: JobOperationProgress | None = None
     updated_at: str | None = None
     failure: OperationFailure | None = None
@@ -285,28 +294,13 @@ class JobOperationResponse(StrictModel):
         return document
 
 
-class OperationOwnerReference(StrictModel):
-    """Exact durable owner and original request identity for Activity."""
-
-    kind: str = Field(pattern=r"^[a-z][a-z0-9-]{0,63}$")
-    id: str = Field(min_length=1, max_length=128)
-    request_id: str | None = Field(
-        default=None,
-        pattern=(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        ),
-        max_length=36,
-    )
-
-
 class OperationDetailResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
     parent_id: str | None = Field(default=None, max_length=128)
     node_ids: list[NodeIdentifier] = Field(max_length=1024)
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
-    attempt: int = Field(ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     progress: JobOperationProgress | None = None
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str | None = None
@@ -391,7 +385,7 @@ class JobDetailResponse(StrictModel):
     targets: list[BoundedIdentifier] = Field(max_length=100)
     target_next_cursor: str | None = Field(default=None, max_length=512)
     target_total: int = Field(ge=0)
-    current_attempt: int = Field(ge=0)
+    current_attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     status_reason: str | None = Field(default=None, max_length=1024)
     operations: list[JobOperationResponse] | None = Field(max_length=100)
     operation_next_cursor: str | None = Field(default=None, max_length=512)
@@ -432,7 +426,7 @@ class OperationApiServices:
         ]
         | None
     ) = None
-    get_operation: Callable[[str], Mapping[str, object]] | None = None
+    get_operation: Callable[[str], OperationRow] | None = None
     operation_providers: tuple[OperationProviderProtocol, ...] = ()
     cursor_codec: CursorCodec | None = None
     retire_job: Callable[[str], None] | None = None
@@ -443,16 +437,16 @@ class OperationApiServices:
 
 @dataclass(frozen=True)
 class OperationPage:
-    items: Sequence[Mapping[str, object]]
+    items: Sequence[OperationRow]
     next_cursor: str | None
     progress: JobProgress
-    agent_upgrade_diagnostics: Mapping[str, object] | None = None
+    agent_upgrade_diagnostics: AgentUpgradeDiagnosticsResponse | None = None
     recovery_actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class OperationListPage:
-    items: Sequence[Mapping[str, object]]
+    items: Sequence[OperationRow]
     next_cursor: str | None
     total: int
 
@@ -474,7 +468,7 @@ class OperationProvider:
 
     family: str
     list_operations: Callable[[OperationQuery], OperationListPage]
-    get_operation: Callable[[str], Mapping[str, object]]
+    get_operation: Callable[[str], OperationRow]
     represented_job_kinds: frozenset[str] = frozenset()
 
 
@@ -494,24 +488,22 @@ class OperationProviderProtocol(Protocol):
     def list_operations(self) -> Callable[[OperationQuery], OperationListPage]: ...
 
     @property
-    def get_operation(self) -> Callable[[str], Mapping[str, object]]: ...
+    def get_operation(self) -> Callable[[str], OperationRow]: ...
 
     @property
     def represented_job_kinds(self) -> frozenset[str]: ...
 
 
-def _operation_boundary(item: Mapping[str, object]) -> tuple[datetime, str]:
-    created_at = item.get("created_at")
-    if not isinstance(created_at, str):
+def _operation_boundary(item: OperationItem) -> tuple[datetime, str]:
+    if item.created_at is None:
         raise OperationProjectionError("operation created_at is invalid")
     try:
-        parsed = datetime.fromisoformat(created_at)
+        parsed = datetime.fromisoformat(item.created_at)
     except ValueError:
         raise OperationProjectionError("operation created_at is invalid") from None
-    operation_id = item.get("id")
-    if not isinstance(operation_id, str) or not operation_id:
+    if not item.id:
         raise OperationProjectionError("operation id is invalid")
-    return _aware(parsed), operation_id
+    return _aware(parsed), item.id
 
 
 def merge_operation_providers(
@@ -554,18 +546,16 @@ def merge_operation_providers(
         node_id=node_id,
         request_id=request_id,
     )
-    rows: list[Mapping[str, object]] = []
+    rows: list[OperationItem] = []
     total = 0
     seen: set[str] = set()
     for provider in providers:
         page = provider.list_operations(query)
         total += page.total
-        for item in page.items:
-            node_ids = item.get("node_ids")
-            if not isinstance(node_ids, (list, tuple)) or not all(
-                isinstance(node, str) and re.fullmatch(NODE_PATTERN, node)
-                for node in node_ids
-            ):
+        for row in page.items:
+            item = operation_item(row)
+            node_ids = item.node_ids
+            if not all(re.fullmatch(NODE_PATTERN, node) for node in node_ids):
                 raise OperationProjectionError(
                     f"{provider.family} provider returned invalid node_ids"
                 )
@@ -598,10 +588,10 @@ def merge_operation_providers(
 
 def get_operation_from_providers(
     providers: Sequence[OperationProviderProtocol], operation_id: str
-) -> Mapping[str, object]:
+) -> OperationItem:
     """Resolve one operation without coupling the Controller to provider modules."""
 
-    match: Mapping[str, object] | None = None
+    match: OperationItem | None = None
     for provider in providers:
         try:
             item = provider.get_operation(operation_id)
@@ -609,7 +599,7 @@ def get_operation_from_providers(
             continue
         if match is not None:
             raise OperationProjectionError("operation ids are not globally unique")
-        match = item
+        match = operation_item(item)
     if match is None:
         raise KeyError(operation_id)
     _operation_boundary(match)
@@ -739,7 +729,7 @@ class _StandaloneJobActivityProjection:
                 tuple(self._item(job) for job in jobs), None, total
             )
 
-    def get_operation(self, operation_id: str) -> Mapping[str, object]:
+    def get_operation(self, operation_id: str) -> OperationItem:
         if not operation_id.startswith(_JOB_ACTIVITY_PREFIX):
             raise KeyError(operation_id)
         owner_id = operation_id[len(_JOB_ACTIVITY_PREFIX) :]
@@ -761,7 +751,7 @@ class _StandaloneJobActivityProjection:
             is None
         )
 
-    def _item(self, job: Job) -> Mapping[str, object]:
+    def _item(self, job: Job) -> OperationItem:
         activity_id = f"{_JOB_ACTIVITY_PREFIX}{job.id}"
         request_id = _activity_owner_request_id(job.request_id)
         try:
@@ -788,50 +778,45 @@ class _StandaloneJobActivityProjection:
         except (AttributeError, TypeError, ValueError, ValidationError):
             warn_unreadable_once("job", job.id)
             return self._unreadable_item(job, activity_id, request_id)
-        return {
-            "id": activity_id,
-            "job_id": job.id,
-            "parent_id": None,
-            "owner": {"kind": "job", "id": job.id, "request_id": request_id},
-            "node_ids": node_ids,
-            "kind": job.kind,
-            "state": job.state,
-            "attempt": job.current_attempt,
-            "progress": None,
-            "created_at": _aware(job.created_at).isoformat(),
-            "updated_at": _aware(job.updated_at).isoformat(),
-            "supported_actions": [],
-            "status_reason": status_reason,
-            "blockers": (
-                job.payload.get("blockers")
+        return OperationItem(
+            id=activity_id,
+            job_id=job.id,
+            owner=OperationOwnerReference(kind="job", id=job.id, request_id=request_id),
+            node_ids=node_ids,
+            kind=job.kind,
+            state=job.state,
+            attempt=job.current_attempt,
+            created_at=_aware(job.created_at).isoformat(),
+            updated_at=_aware(job.updated_at).isoformat(),
+            supported_actions=[],
+            status_reason=status_reason,
+            blockers=(
+                read_blockers(job.payload.get("blockers"))
                 if isinstance(job.payload, Mapping)
                 else None
             ),
-            "next_attempt_at": (
-                job.payload.get("retry_after_at")
+            next_attempt_at=(
+                _text_or_none(job.payload.get("retry_after_at"))
                 if isinstance(job.payload, Mapping) and job.state == "queued"
                 else None
             ),
-        }
+        )
 
     def _unreadable_item(
         self, job: Job, activity_id: str, request_id: str | None
-    ) -> Mapping[str, object]:
-        return {
-            "id": activity_id,
-            "job_id": job.id,
-            "parent_id": None,
-            "owner": {"kind": "job", "id": job.id, "request_id": request_id},
-            "node_ids": [],
-            "kind": "job-history-unreadable",
-            "state": "unavailable",
-            "attempt": 0,
-            "progress": None,
-            "created_at": _aware(job.created_at).isoformat(),
-            "updated_at": _aware(job.updated_at).isoformat(),
-            "supported_actions": [],
-            "status_reason": "Stored job history is unreadable.",
-        }
+    ) -> OperationItem:
+        return OperationItem(
+            id=activity_id,
+            job_id=job.id,
+            owner=OperationOwnerReference(kind="job", id=job.id, request_id=request_id),
+            kind="job-history-unreadable",
+            state="unavailable",
+            attempt=0,
+            created_at=_aware(job.created_at).isoformat(),
+            updated_at=_aware(job.updated_at).isoformat(),
+            supported_actions=[],
+            status_reason="Stored job history is unreadable.",
+        )
 
 
 def _global_list_operations(
@@ -861,12 +846,12 @@ def _global_list_operations(
 
 def _global_get_operation(
     services: OperationApiServices, operation_id: str
-) -> Mapping[str, object]:
+) -> OperationItem:
     if services.operation_providers:
         return get_operation_from_providers(services.operation_providers, operation_id)
     if services.get_operation is None:
         raise OperationProjectionError("operation projection unavailable")
-    return services.get_operation(operation_id)
+    return operation_item(services.get_operation(operation_id))
 
 
 def _required_text(value: object, detail: str) -> str:
@@ -900,31 +885,30 @@ def _required_node_ids(value: object) -> list[NodeIdentifier]:
     ]
 
 
-def _job_operation_response(item: Mapping[str, object]) -> JobOperationResponse:
-    """Project one durable job operation member from its decoded JSON row."""
+def _result_uncertain(item: OperationItem) -> bool:
+    return item.result_unreadable or (
+        item.result is not None and item.result.is_uncertain
+    )
 
-    state = _required_text(item["state"], "operation state is invalid")
-    result = item.get("result")
-    operation_id = _required_text(item["id"], "operation id is invalid")
+
+def _job_operation_response(item: OperationItem) -> JobOperationResponse:
+    """Project one durable job operation member."""
+
     return JobOperationResponse(
-        id=operation_id,
-        node_id=_required_text(item["node_id"], "operation node id is invalid"),
-        kind=_required_text(item["kind"], "operation kind is invalid"),
-        state=state,
-        attempt=require_integer(item["attempt"], "operation attempt is invalid"),
-        progress=_progress_projection(item.get("progress"), state),
-        updated_at=_optional_text(
-            item.get("updated_at"), "operation updated_at is invalid"
-        ),
+        id=item.id,
+        node_id=_required_text(item.node_id, "operation node id is invalid"),
+        kind=item.kind,
+        state=item.state,
+        attempt=item.attempt,
+        progress=_progress_projection(item.progress, item.state),
+        updated_at=item.updated_at,
         failure=_item_failure(item),
-        evidence_download=_evidence_download_projection(item, operation_id),
+        evidence_download=item.evidence_download,
         recovery=recovery_for_operation(
-            state,
-            supported_actions=item.get("supported_actions"),
+            item.state,
+            supported_actions=item.supported_actions,
             available_actions=(OperationRecoveryAction.RESUME,),
-            uncertain=bool(
-                isinstance(result, Mapping) and result.get("uncertain") is True
-            ),
+            uncertain=_result_uncertain(item),
         ),
     )
 
@@ -936,17 +920,14 @@ def job_response(
     target_cursor: int,
     limit: int,
     cursors: CursorCodec,
-    evidence_decorator: Callable[[Mapping[str, object]], Mapping[str, object]]
-    | None = None,
+    evidence_decorator: Callable[[OperationItem], OperationItem] | None = None,
 ) -> JobDetailResponse:
     projected = None
     if operation_page is not None:
         try:
-            items = (
-                [evidence_decorator(item) for item in operation_page.items]
-                if evidence_decorator is not None
-                else operation_page.items
-            )
+            items = [operation_item(row) for row in operation_page.items]
+            if evidence_decorator is not None:
+                items = [evidence_decorator(item) for item in items]
             projected = [_job_operation_response(item) for item in items]
         except (OSError, RuntimeError, TypeError, ValueError):
             warn_unreadable_once("job operations", job.id)
@@ -965,9 +946,7 @@ def job_response(
     diagnostics = (
         None if operation_page is None else operation_page.agent_upgrade_diagnostics
     )
-    operator_summary = (
-        None if diagnostics is None else diagnostics.get("operator_summary")
-    )
+    operator_summary = None if diagnostics is None else diagnostics.operator_summary
     return JobDetailResponse(
         id=job.id,
         state=job.state,
@@ -993,11 +972,7 @@ def job_response(
             if operation_page is None
             else None
         ),
-        agent_upgrade_diagnostics=(
-            None
-            if diagnostics is None
-            else AgentUpgradeDiagnosticsResponse.model_validate(diagnostics)
-        ),
+        agent_upgrade_diagnostics=diagnostics,
         recovery=recovery_for_operation(
             job.state,
             supported_actions=()
@@ -1045,7 +1020,9 @@ def _progress_projection(
     if value is None:
         return None
     projected = project_progress(
-        read_stored_model(JobOperationProgress, value, strict=True)
+        value
+        if isinstance(value, JobOperationProgress)
+        else read_stored_model(JobOperationProgress, value, strict=True)
     )
     if state in {
         "succeeded",
@@ -1066,67 +1043,35 @@ def _progress_projection(
     return projected
 
 
-def _progress_document(value: object, state: object = None) -> dict[str, object] | None:
-    """Project one durable progress value with a single canonical parse."""
+def _failure_projection(
+    result: OperationResultFacts | None,
+) -> OperationFailureEvidence | None:
+    """Project a family's stored result into its bounded failure model."""
 
-    projected = _progress_projection(value, state)
-    return None if projected is None else projected.model_dump(mode="json")
-
-
-def _failure_projection(value: object) -> OperationFailureEvidence | None:
-    """Project Controller-owned result metadata into its bounded failure model."""
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        raise TypeError("operation result must be a JSON object")
-    raw = value.get("failure", value)
-    if not isinstance(raw, Mapping):
-        raise TypeError("operation failure must be a JSON object")
-    if "error_code" not in raw:
-        return None
-    safe = sanitize_failure_evidence(raw)
-    summary = safe.get("summary") or safe.get("reason") or safe["error_code"]
-    return OperationFailureEvidence(
-        error_code=_required_text(safe["error_code"], "failure error code is invalid"),
-        summary=_required_text(summary, "failure summary is invalid")[:256],
-        detail=_optional_text(safe.get("detail"), "failure detail is invalid"),
-        retryable=_required_bool(
-            safe.get("retryable", False), "failure retryable is invalid"
-        ),
-        uncertain=_required_bool(
-            safe.get("uncertain", False), "failure uncertain is invalid"
-        ),
-    )
+    return None if result is None else result.failure_evidence()
 
 
-def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
+def _item_failure(item: OperationItem) -> OperationFailure | None:
     """Select the authoritative contract by producer, before union egress."""
-    if "failure" in item:
-        value = item["failure"]
-        if value is None:
+    if item.failure_recorded:
+        return item.failure
+    if item.kind in AGENT_OPERATION_KINDS:
+        if item.state not in {"failed", *agent_operation_states.PARKED}:
             return None
-        kind = _required_text(item["kind"], "operation kind is invalid")
-        if kind.startswith("model-cache.") or kind == "recipe.cache.update.v2":
-            return read_stored_model(AvailabilityOperationFailure, value)
-        return read_stored_model(OperationFailureEvidence, value, strict=True)
-    kind = _required_text(item["kind"], "operation kind is invalid")
-    state = _required_text(item["state"], "operation state is invalid")
-    if kind in {operation.value for operation in ProtocolAgentOperation}:
-        if (
-            state not in {"failed", *agent_operation_states.PARKED}
-            or item.get("result") is None
-        ):
+        if item.result_unreadable:
+            return OperationFailureEvidence(
+                error_code=OperationFailureCode.STORED_RESULT_UNREADABLE,
+                summary="Stored operation result is unreadable",
+                detail="The durable operation identity and state remain known; its failure receipt cannot be verified.",
+                uncertain=True,
+            )
+        parsed = item.agent_receipt
+        if parsed is None:
             return None
-        value = item["result"]
-        if not isinstance(value, Mapping):
-            raise ValueError("agent result must be a JSON object")
-        parsed = validate_result_for_operation(kind, dict(value), state=state)
         if isinstance(parsed, AgentFailureResult):
             return parsed
         # A job process receipt has its own canonical result contract. Its
         # complete manifest remains on the artifact-job result endpoint.
-        if not isinstance(parsed, RecipeJobRunResult):
-            raise ValueError("agent result is not a failure receipt")
         reason = (
             parsed.reason or f"Artifact process exited with code {parsed.exit_code}"
         )
@@ -1135,129 +1080,94 @@ def _item_failure(item: Mapping[str, object]) -> OperationFailure | None:
             summary=reason[:256],
             detail=reason,
         )
-    return _failure_projection(item.get("result"))
+    return _failure_projection(item.result)
 
 
-def _evidence_download_projection(
-    value: object, operation_id: str
-) -> OperationEvidenceDownload | None:
-    """Project the evidence download the failure-evidence service attached.
+def _text_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
 
-    A missing key or an explicit ``null`` means no download was attached. A
-    present value that is not the canonical document fails loudly, naming the
-    operation, because the route that reports it serves a whole list.
-    """
 
-    if not isinstance(value, Mapping) or "evidence_download" not in value:
-        return None
-    stored = value["evidence_download"]
-    if stored is None:
-        return None
-    detail = f"evidence download for operation {operation_id} is invalid"
-    if not isinstance(stored, Mapping):
-        raise BoundedJSONError(detail)
-    try:
-        return read_stored_model(OperationEvidenceDownload, stored, strict=True)
-    except ValidationError as error:
-        raise BoundedJSONError(detail) from error
+def _advertised_actions(value: object) -> list[str] | None:
+    """The actions a worker advertised; anything but a list of words is none."""
+
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return list(value)
+    return None
 
 
 def _operation_item(
     operation: AgentOperation, attempt: AgentOperationAttempt | None
-) -> dict[str, object]:
+) -> OperationItem:
     """Project one durable operation without exposing its unbounded payload."""
 
     progress = None
     result = None
+    status_reason = operation.status_reason
     if attempt is not None:
-        projected = _progress_projection(attempt.progress, operation.state)
-        progress = None if projected is None else projected.model_dump(mode="json")
+        try:
+            progress = _progress_projection(attempt.progress, operation.state)
+        except (TypeError, ValueError):
+            progress_issue = "Stored progress evidence is unreadable; operation identity and state remain known."
+            if status_reason is None:
+                status_reason = progress_issue
         result = attempt.result
-    return {
-        "attempt": operation.current_attempt,
-        "id": operation.id,
-        "kind": operation.kind,
-        "node_ids": [operation.node_id],
-        "parent_id": operation.parent_job_id,
-        "progress": progress,
-        "result": result,
-        "supported_actions": (
-            operation.payload.get("supported_actions")
+    receipt, unreadable = agent_receipt_for(operation.kind, operation.state, result)
+    return OperationItem(
+        attempt=operation.current_attempt,
+        id=operation.id,
+        kind=operation.kind,
+        node_ids=[operation.node_id],
+        parent_id=operation.parent_job_id,
+        progress=progress,
+        result=(
+            None
+            if result is None or unreadable
+            else OperationResultFacts.model_validate(result)
+        ),
+        agent_receipt=receipt,
+        result_unreadable=unreadable,
+        supported_actions=(
+            _advertised_actions(operation.payload.get("supported_actions"))
             if isinstance(operation.payload, Mapping)
             else None
         ),
-        "state": operation.state,
-        "status_reason": operation.status_reason,
-        "updated_at": _aware(operation.updated_at).isoformat(),
-    }
+        state=operation.state,
+        status_reason=status_reason,
+        updated_at=_aware(operation.updated_at).isoformat(),
+    )
 
 
 def operation_detail_response(
-    item: Mapping[str, object], *, available_actions: object = ()
+    row: OperationRow, *, available_actions: object = ()
 ) -> OperationDetailResponse:
     """Build the bounded generic read representation from a durable projection."""
 
+    item = operation_item(row)
     failure = _item_failure(item)
-    state = _required_text(item["state"], "operation state is invalid")
-    result = item.get("result")
-    operation_id = _required_text(item["id"], "operation id is invalid")
-    cancellation = None
-    raw_cancellation = item.get("cancellation")
-    if raw_cancellation is not None:
-        try:
-            cancellation = read_stored_model(
-                FleetProfileApplicationCancellationView,
-                canonical_message(raw_cancellation),
-                strict=True,
-                from_json=True,
-            )
-        except (TypeError, ValueError, ValidationError) as error:
-            raise BoundedJSONError(
-                f"profile cancellation receipt for operation {operation_id} is invalid"
-            ) from error
-    owner: OperationOwnerReference | None = None
-    raw_owner = item.get("owner")
-    if isinstance(raw_owner, Mapping):
-        try:
-            owner = read_stored_model(OperationOwnerReference, raw_owner)
-        except ValidationError:
-            # Keep one damaged historical owner visible without turning the
-            # rest of the canonical page into an unavailable response.
-            owner = None
     return OperationDetailResponse(
-        id=operation_id,
-        parent_id=_optional_text(
-            item.get("parent_id"), "operation parent id is invalid"
-        ),
-        node_ids=_required_node_ids(item["node_ids"]),
-        kind=_required_text(item["kind"], "operation kind is invalid"),
-        state=state,
-        attempt=require_integer(item["attempt"], "operation attempt is invalid"),
-        progress=_progress_projection(item.get("progress"), state),
-        created_at=_required_text(
-            item["created_at"], "operation created_at is invalid"
-        ),
-        updated_at=_optional_text(
-            item.get("updated_at"), "operation updated_at is invalid"
-        ),
+        id=item.id,
+        parent_id=item.parent_id,
+        node_ids=item.node_ids,
+        kind=item.kind,
+        state=item.state,
+        attempt=item.attempt,
+        progress=_progress_projection(item.progress, item.state),
+        created_at=_required_text(item.created_at, "operation created_at is invalid"),
+        updated_at=item.updated_at,
         failure=failure,
-        evidence_download=_evidence_download_projection(item, operation_id),
-        cancellation=cancellation,
-        status_reason=_optional_text(
-            item.get("status_reason"), "operation status reason is invalid"
-        ),
+        evidence_download=item.evidence_download,
+        cancellation=item.cancellation,
+        status_reason=item.status_reason,
         recovery=recovery_for_operation(
-            state,
-            supported_actions=item.get("supported_actions"),
+            item.state,
+            supported_actions=item.supported_actions,
             available_actions=available_actions,
             uncertain=bool(failure is not None and getattr(failure, "uncertain", False))
-            or bool(isinstance(result, Mapping) and result.get("uncertain") is True),
+            or _result_uncertain(item),
         ),
-        owner=owner,
-        blockers=read_blockers(item.get("blockers")),
-        next_attempt_at=_optional_text(
-            item.get("next_attempt_at"), "operation next attempt is invalid"
-        ),
+        owner=item.owner,
+        blockers=item.blockers or [],
+        next_attempt_at=item.next_attempt_at,
     )
 
 
@@ -1267,7 +1177,7 @@ def _aware(value: datetime) -> datetime:
 
 def _agent_upgrade_diagnostics(
     session: Session, job_id: str
-) -> Mapping[str, object] | None:
+) -> AgentUpgradeDiagnosticsResponse | None:
     job = session.get(Job, job_id)
     if job is None or job.kind != "agent-upgrade":
         return None
@@ -1280,9 +1190,12 @@ def _agent_upgrade_diagnostics(
         # An upgrade that carries no package document simply has no
         # diagnostics to project; only a present but unreadable one fails.
         return None
-    package = payload["package"]
-    if not isinstance(package, Mapping):
-        raise BoundedJSONError(f"agent upgrade job {job_id} package payload is invalid")
+    try:
+        package = read_stored_model(AgentUpgradePackage, payload["package"])
+    except (TypeError, ValueError):
+        raise BoundedJSONError(
+            f"agent upgrade job {job_id} package payload is invalid"
+        ) from None
     operations = list(
         session.scalars(
             select(AgentOperation)
@@ -1317,9 +1230,7 @@ def _agent_upgrade_diagnostics(
             select(AgentNode).where(AgentNode.node_id.in_(job.targets))
         )
     }
-    expected_binary = package.get("target_binary_digest")
-    expected_build = package.get("target_build_digest")
-    targets: list[dict[str, object]] = []
+    targets: list[AgentUpgradeTargetDiagnosticsResponse] = []
     failure_details_unavailable = False
     retry_queued_any = False
     operator_summary = None
@@ -1357,7 +1268,7 @@ def _agent_upgrade_diagnostics(
             operator_summary = operator_agent_upgrade_reason(
                 node_id=node_id,
                 attempt_count=(0 if operation is None else operation.current_attempt),
-                package=package,
+                package=package.model_dump(mode="json"),
                 observed_semantic_version=(
                     None if node is None else node.semantic_version
                 ),
@@ -1367,44 +1278,44 @@ def _agent_upgrade_diagnostics(
                 retry_queued=retry_queued,
             )
         targets.append(
-            {
-                "node_id": node_id,
-                "state": "not-started" if operation is None else operation.state,
-                "attempts": 0 if operation is None else operation.current_attempt,
-                "target_proven": target_proven,
-                "observed_identity": {
-                    "version": None if node is None else node.semantic_version,
-                    "binary_digest": None if node is None else node.binary_digest,
-                    "build_digest": None if node is None else node.build_digest,
-                },
-                "raw_reason": raw_reason,
-                "retry_not_before": retry_not_before,
-                "retry_queued": retry_queued,
-            }
+            AgentUpgradeTargetDiagnosticsResponse(
+                node_id=node_id,
+                state="not-started" if operation is None else operation.state,
+                attempts=0 if operation is None else operation.current_attempt,
+                target_proven=target_proven,
+                observed_identity=AgentUpgradeIdentityResponse(
+                    version=None if node is None else node.semantic_version,
+                    binary_digest=None if node is None else node.binary_digest,
+                    build_digest=None if node is None else node.build_digest,
+                ),
+                raw_reason=raw_reason,
+                retry_not_before=retry_not_before,
+                retry_queued=retry_queued,
+            )
         )
-    return {
-        "expected_identity": {
-            "version": package.get("package_version"),
-            "binary_digest": expected_binary,
-            "build_digest": expected_build,
-        },
-        "targets": targets,
-        "failure_details_unavailable": failure_details_unavailable,
-        "next_action": (
+    return AgentUpgradeDiagnosticsResponse(
+        expected_identity=AgentUpgradeIdentityResponse(
+            version=package.package_version,
+            binary_digest=package.target_binary_digest,
+            build_digest=package.target_build_digest,
+        ),
+        targets=targets,
+        failure_details_unavailable=failure_details_unavailable,
+        next_action=(
             agent_upgrade_next_action(retry_queued=retry_queued_any)
             if any(
-                not target["target_proven"]
-                and target["attempts"]
+                not target.target_proven
+                and target.attempts
                 and (
-                    target["state"] in agent_operation_states.PARKED
-                    or target["raw_reason"] in RECOVERABLE_AGENT_UPGRADE_REASONS
+                    target.state in agent_operation_states.PARKED
+                    or target.raw_reason in RECOVERABLE_AGENT_UPGRADE_REASONS
                 )
                 for target in targets
             )
             else None
         ),
-        "operator_summary": operator_summary,
-    }
+        operator_summary=operator_summary,
+    )
 
 
 class _DurableOperationProjection:
@@ -1456,7 +1367,7 @@ class _DurableOperationProjection:
             or publication.bundle_digest is None
         ):
             raise RuntimeError("active publication is unavailable")
-        marker = _stored_activation_marker(publication.activation_marker).model_dump()
+        marker = _stored_activation_marker(publication.activation_marker)
         return _ActiveRouteSnapshot(
             marker=marker,
             marker_digest=publication.activation_marker_digest,
@@ -1471,11 +1382,11 @@ class _DurableOperationProjection:
 
     def _verified_routes(
         self, snapshot: _ActiveRouteSnapshot
-    ) -> tuple[Mapping[str, object], Mapping[str, object]]:
+    ) -> tuple[ActivationMarker, RouteBundleDocument]:
         bundle = verify_active_route_bundle(self._route_root)
         active_marker = bundle.marker
         if (
-            active_marker.model_dump() != snapshot.marker
+            active_marker != snapshot.marker
             or active_marker.digest != snapshot.marker_digest
             or active_marker.state != GatewayRouteState.PUBLISHED
             or active_marker.authority_id != snapshot.authority_id
@@ -1489,58 +1400,38 @@ class _DurableOperationProjection:
         ):
             raise RuntimeError("activation marker does not match durable state")
         routes = bundle.routes
-        route_document = routes.get("routes")
         if (
-            routes.get("generation") != snapshot.publication_generation
-            or routes.get("state") != GatewayRouteState.PUBLISHED
-            or not isinstance(route_document, Mapping)
+            routes is None
+            or routes.generation != snapshot.publication_generation
+            or routes.state != GatewayRouteState.PUBLISHED
         ):
             raise RuntimeError("active route state does not match publication")
-        return active_marker.model_dump(), route_document
+        return active_marker, routes
 
     @staticmethod
     def _endpoint_payload(
         alias: str,
-        raw: Mapping[str, object],
-        active_marker: Mapping[str, object],
+        raw: RouteEndpointDocument,
+        active_marker: ActivationMarker,
         gateway_api_base: str,
     ) -> EndpointResponse:
-        scheme = raw.get("scheme")
-        address = raw.get("address")
-        port = raw.get("port")
-        path = raw.get("path")
-        node_id = raw.get("node_id")
-        observed_at = raw.get("observed_at")
-        if (
-            scheme not in {"http", "https"}
-            or not isinstance(address, str)
-            or not isinstance(port, int)
-            or isinstance(port, bool)
-            or not 1 <= port <= 65535
-            or not isinstance(path, str)
-            or not path.startswith("/")
-            or not isinstance(node_id, str)
-            or re.fullmatch(NODE_PATTERN, node_id) is None
-            or not isinstance(observed_at, str)
-        ):
+        if re.fullmatch(NODE_PATTERN, raw.node_id) is None:
             raise RuntimeError("active endpoint is invalid")
-        generation = active_marker.get("generation")
-        plan_digest = active_marker.get("plan_digest")
-        if not isinstance(generation, int) or not isinstance(plan_digest, str):
-            raise TypeError("active endpoint marker is invalid")
         return EndpointResponse(
             alias=alias,
             api_base=gateway_api_base,
-            backend_api_base=f"{scheme}://{address}:{port}{path.rstrip('/')}",
-            generation=generation,
-            node_id=node_id,
-            observed_at=observed_at,
-            plan_digest=plan_digest,
+            backend_api_base=(
+                f"{raw.scheme}://{raw.address}:{raw.port}{raw.path.rstrip('/')}"
+            ),
+            generation=active_marker.generation,
+            node_id=raw.node_id,
+            observed_at=raw.observed_at,
+            plan_digest=active_marker.plan_digest,
         )
 
     @staticmethod
-    def _route_run_id(raw: Mapping[str, object]) -> str | None:
-        return recipe_route_run_id(raw.get("operation_id"))
+    def _route_run_id(raw: RouteEndpointDocument) -> str | None:
+        return recipe_route_run_id(raw.operation_id)
 
     def profile_endpoint(
         self, number: int, alias: str | None, gateway_api_base: str
@@ -1599,8 +1490,8 @@ class _DurableOperationProjection:
                 for item in assignments:
                     if item.expected_run_id is None or item.alias is None:
                         continue
-                    raw = route_document.get(item.alias)
-                    if not isinstance(raw, Mapping):
+                    raw = route_document.routes.get(item.alias)
+                    if raw is None:
                         states[item.assignment_id] = EndpointState.WITHDRAWN
                         continue
                     route_run_id = self._route_run_id(raw)
@@ -1826,31 +1717,19 @@ class _DurableOperationProjection:
                 )
             }
         items = [
-            {
-                "attempt": operation.current_attempt,
-                "id": operation.id,
-                "kind": operation.kind,
-                "node_id": operation.node_id,
-                "progress": (
-                    None
-                    if attempts.get(operation.id) is None
-                    else _progress_document(
-                        attempts[operation.id].progress, operation.state
-                    )
-                ),
-                "result": (
-                    None
-                    if attempts.get(operation.id) is None
-                    else attempts[operation.id].result
-                ),
-                "supported_actions": self._activity_actions(
-                    operation,
-                    attempts.get(operation.id),
-                    resume=operation.id in resume_operation_ids,
-                ),
-                "state": operation.state,
-                "updated_at": _aware(operation.updated_at).isoformat(),
-            }
+            _operation_item(operation, attempts.get(operation.id)).model_copy(
+                update={
+                    "node_ids": [],
+                    "parent_id": None,
+                    "status_reason": None,
+                    "node_id": operation.node_id,
+                    "supported_actions": self._activity_actions(
+                        operation,
+                        attempts.get(operation.id),
+                        resume=operation.id in resume_operation_ids,
+                    ),
+                }
+            )
             for operation in operations
         ]
         next_cursor = None
@@ -1987,21 +1866,12 @@ class _DurableOperationProjection:
                 )
             }
         items = [
-            {
-                **_operation_item(row, attempts.get(row.id)),
-                "created_at": _aware(row.created_at).isoformat(),
-                "job_id": row.parent_job_id,
-                "supported_actions": self._activity_actions(
-                    row,
-                    attempts.get(row.id),
-                    resume=row.id in resume_operation_ids,
-                ),
-                "owner": {
-                    "kind": "job",
-                    "id": row.parent_job_id,
-                    "request_id": owners.get(row.parent_job_id),
-                },
-            }
+            self._activity_item(
+                row,
+                attempts.get(row.id),
+                request_id=owners.get(row.parent_job_id),
+                resume=row.id in resume_operation_ids,
+            )
             for row in rows
         ]
         next_cursor = None
@@ -2098,28 +1968,19 @@ class _DurableOperationProjection:
             }
         return OperationListPage(
             items=[
-                {
-                    **_operation_item(row, attempts.get(row.id)),
-                    "created_at": _aware(row.created_at).isoformat(),
-                    "job_id": row.parent_job_id,
-                    "supported_actions": self._activity_actions(
-                        row,
-                        attempts.get(row.id),
-                        resume=row.id in resume_operation_ids,
-                    ),
-                    "owner": {
-                        "kind": "job",
-                        "id": row.parent_job_id,
-                        "request_id": owners.get(row.parent_job_id),
-                    },
-                }
+                self._activity_item(
+                    row,
+                    attempts.get(row.id),
+                    request_id=owners.get(row.parent_job_id),
+                    resume=row.id in resume_operation_ids,
+                )
                 for row in rows
             ],
             next_cursor=None,
             total=total,
         )
 
-    def get_operation(self, operation_id: str) -> Mapping[str, object]:
+    def get_operation(self, operation_id: str) -> OperationItem:
         with self._sessions() as session:
             operation = session.get(AgentOperation, operation_id)
             if operation is None:
@@ -2136,23 +1997,37 @@ class _DurableOperationProjection:
                     session, operation.parent_job_id, self._clock()
                 )
             }
-            return {
-                **_operation_item(operation, attempt),
+            job = session.get(Job, operation.parent_job_id)
+            return self._activity_item(
+                operation,
+                attempt,
+                request_id=None if job is None else job.request_id,
+                resume=resume,
+            )
+
+    @classmethod
+    def _activity_item(
+        cls,
+        operation: AgentOperation,
+        attempt: AgentOperationAttempt | None,
+        *,
+        request_id: str | None,
+        resume: bool,
+    ) -> OperationItem:
+        """One agent operation as a global Activity row, owned by its job."""
+
+        return _operation_item(operation, attempt).model_copy(
+            update={
                 "created_at": _aware(operation.created_at).isoformat(),
                 "job_id": operation.parent_job_id,
-                "supported_actions": self._activity_actions(
+                "supported_actions": cls._activity_actions(
                     operation, attempt, resume=resume
                 ),
-                "owner": {
-                    "kind": "job",
-                    "id": operation.parent_job_id,
-                    "request_id": (
-                        None
-                        if (job := session.get(Job, operation.parent_job_id)) is None
-                        else job.request_id
-                    ),
-                },
+                "owner": OperationOwnerReference(
+                    kind="job", id=operation.parent_job_id, request_id=request_id
+                ),
             }
+        )
 
     @staticmethod
     def _activity_actions(
@@ -2161,7 +2036,7 @@ class _DurableOperationProjection:
         *,
         resume: bool,
     ) -> list[str] | None:
-        raw = _operation_item(operation, attempt).get("supported_actions")
+        raw = _operation_item(operation, attempt).supported_actions
         actions = (
             [action for action in raw if isinstance(action, str) and action != "resume"]
             if isinstance(raw, list)

@@ -1,7 +1,9 @@
+import {parseContractJson, materialize, type WireNumber} from "../api/contract-numeric";
 import type {VisualFleetNode} from "../api/types";
 import {
   formatBytes,
   nodeDisplayName,
+  nodeMemory,
   nodeRecipeUpdates,
   nodeSecondaryName,
   nodeStatus,
@@ -160,4 +162,17 @@ describe("recipe update notices", () => {
   it("lists nothing for a run on the newest revision", () => {
     expect(nodeRecipeUpdates(node({loaded: [{...run, recipe_update: null} as VisualFleetNode["loaded"][number]]}))).toEqual([]);
   });
+});
+
+function wireInteger(token: string): WireNumber {
+  return materialize(parseContractJson(token)) as WireNumber;
+}
+
+test("retains wide memory counters while deriving only a presentation ratio", () => {
+  const total = wireInteger("18446744073709551615");
+  const free = wireInteger("9223372036854775807");
+  const observed = node({inventory: {host_memory_total_bytes: total, host_memory_free_bytes: free} as VisualFleetNode["inventory"]});
+  expect(nodeMemory(observed)).toEqual({usedPercent: 50, totalBytes: total});
+  expect(formatBytes(total)).toBe("17179869184.0 GiB");
+  expect(formatBytes(wireInteger("1" + "0".repeat(400)))).toBe("1" + "0".repeat(400) + " B");
 });

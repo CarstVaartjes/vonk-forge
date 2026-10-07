@@ -24,7 +24,7 @@ fn claim() -> AgentClaim {
     let run_id = Uuid::parse_str("00000000-0000-4000-8000-000000000003").unwrap();
     let payload = RecipeStopPayload {
         cancel_pending_start: false,
-        rank: compiled_execution_plan.runtime.placement.rank,
+        rank: compiled_execution_plan.runtime.placement.rank.clone(),
         role: compiled_execution_plan.runtime.placement.role.clone(),
         recipe_content_sha256: compiled_execution_plan
             .identity

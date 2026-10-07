@@ -23,6 +23,7 @@ from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
 from . import job_states
 from .categorized_errors import BookkeepingUnknown
+from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
 from .models import (
     AgentNode,
     AgentOperation,
@@ -76,10 +77,10 @@ class ProfileJobRunStopAuthorization(StrictJSONModel):
     installation_id: str = Field(min_length=36, max_length=36, pattern=_UUID.pattern)
     recipe_revision_id: str = Field(min_length=36, max_length=36, pattern=_UUID.pattern)
     mapping_id: str = Field(min_length=36, max_length=36, pattern=_UUID.pattern)
-    mapping_generation: int = Field(ge=1)
-    run_generation: int = Field(ge=1)
+    mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
+    run_generation: int = Field(le=MAX_DATABASE_BIGINT, ge=1)
     plan_digest: str = Field(min_length=64, max_length=64, pattern=_SHA256.pattern)
-    workload_intent_ordinal: int = Field(ge=1)
+    workload_intent_ordinal: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     run_node_ids: list[str] = Field(min_length=1, max_length=32)
     reachable_node_ids: list[str] = Field(min_length=1, max_length=32)
     missing_node_ids: list[str] = Field(default_factory=list, max_length=31)
@@ -126,7 +127,7 @@ class ProfileJobRunStopJob(StrictJSONModel):
     owner_kind: Literal["run"]
     owner_id: str = Field(min_length=36, max_length=36, pattern=_UUID.pattern)
     plan_digest: str = Field(min_length=64, max_length=64, pattern=_SHA256.pattern)
-    workload_intent_ordinal: int = Field(ge=1)
+    workload_intent_ordinal: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     execution_mode: Literal["profile-jobrun-stop"]
     profile_application_id: str = Field(
         min_length=36, max_length=36, pattern=_UUID.pattern
@@ -287,8 +288,10 @@ def validate_profile_stop_owner(
     if (
         switch_adapter is None
         or switch_adapter.child_id != application.id
-        or switch_adapter.active_kind != "stop"
-        or switch_adapter.active_operation_id != profile_operation.id
+        or not any(
+            child.kind == "stop" and child.operation_id == profile_operation.id
+            for child in switch_adapter.pending_children
+        )
     ):
         raise ProfileStopAuthorityError("profile Stop is not the active reviewed child")
 

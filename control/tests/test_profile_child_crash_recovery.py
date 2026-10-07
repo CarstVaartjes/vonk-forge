@@ -100,7 +100,7 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
         crashed = [False]
 
         def crash_after_child(session, row, state):
-            if isinstance(state.get("active_operation_id"), str) and not crashed[0]:
+            if bool(state.pending_children) and not crashed[0]:
                 crashed[0] = True
                 raise SystemExit("worker died after child commit")
             return write_state(session, row, state)
@@ -156,7 +156,10 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
             if (
                 child_disposition == "running"
                 and adapter_progress is not None
-                and adapter_progress.active_operation_id == child_id
+                and any(
+                    child.operation_id == child_id
+                    for child in adapter_progress.pending_children
+                )
             ):
                 break
             if child_disposition.startswith("wrong-") and resumed.state == "failed":
@@ -170,7 +173,10 @@ def test_postgres_profile_adopts_child_committed_before_parent_checkpoint(
         if child_disposition == "completed":
             assert resumed.state == "succeeded", resumed.status_reason
         elif child_disposition == "running":
-            assert resumed.progress.switch_adapter.active_operation_id == child_id
+            assert (
+                resumed.progress.switch_adapter.pending_children[0].operation_id
+                == child_id
+            )
         else:
             assert resumed.state == "queued"  # failed; the Controller retries it
             assert resumed.status_reason is not None
@@ -234,7 +240,7 @@ def test_postgres_completed_cleanup_child_is_adopted_after_checkpoint_crash(
         write_state = adapter._write_state
 
         def crash_after_child(session, row, state):
-            if isinstance(state.get("active_operation_id"), str):
+            if bool(state.pending_children):
                 raise SystemExit("worker died after cleanup child commit")
             return write_state(session, row, state)
 

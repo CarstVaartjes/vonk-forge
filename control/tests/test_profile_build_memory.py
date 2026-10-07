@@ -29,7 +29,7 @@ from vonk_control.recipe_builds import (
 )
 from vonk_control.recipe_execution_contract import run_plan_document
 from vonk_control.run_admission import _node_document
-from vonk_control.run_switch_contract import RunSwitchPlan
+from vonk_control.run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
@@ -167,7 +167,9 @@ def test_build_adoption_checks_input_identity_before_cached_or_active_result(
         )
         parent_key = parent.request_id
         parent_actor = parent.actor
-        progress = deepcopy(parent.result)
+        progress = RunSwitchOperationResult.model_validate_json(
+            canonical_message(parent.result), strict=True
+        )
         if state == "succeeded":
             build.state = state
             build.image_digest = "sha256:" + "1" * 64

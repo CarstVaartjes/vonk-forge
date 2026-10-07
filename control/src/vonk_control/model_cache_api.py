@@ -36,6 +36,11 @@ from .operation_api import (
     bounded_error_responses,
 )
 from .operation_contract import AvailabilityOperationFailure
+from .operation_item_contract import (
+    OperationItem,
+    OperationOwnerReference,
+    OperationResultFacts,
+)
 from .strict_json import read_stored_model
 
 MODEL_CACHE_OPERATION_IDS = {
@@ -340,7 +345,7 @@ class ModelCacheOperationProvider:
             )
         raise OperationProjectionError("operation cursor projection unavailable")
 
-    def get_operation(self, operation_id: str) -> dict[str, object]:
+    def get_operation(self, operation_id: str) -> OperationItem:
         try:
             operation = self._service.get_operation(operation_id)
         except ModelCacheNotFound:
@@ -349,35 +354,28 @@ class ModelCacheOperationProvider:
             raise KeyError(operation_id) from None
         return self._summary(operation)
 
-    def _summary(self, operation: Any) -> dict[str, object]:
+    def _summary(self, operation: Any) -> OperationItem:
         progress = dict(operation.progress)
-        result = (
-            None
-            if operation.result is None
-            else operation.result.model_dump(mode="json")
-        )
         retryable = operation.state == "failed" and operation.retryable
-        return {
-            "id": operation.id,
-            "parent_id": None,
-            "node_ids": [],
-            "kind": f"model-cache.{operation.kind}",
-            "state": operation.state,
-            "attempt": operation.attempt,
-            "progress": self._progress(progress),
-            "created_at": operation.created_at,
-            "updated_at": operation.updated_at,
-            "supported_actions": ["retry"] if retryable else [],
-            "result": result,
-            "failure": operation.failure,
-            "blockers": [item.model_dump(mode="json") for item in operation.blockers],
-            "next_attempt_at": operation.next_attempt_at,
-            "owner": {
-                "kind": "model-cache-operation",
-                "id": operation.id,
-                "request_id": operation.request_key,
-            },
-        }
+        return OperationItem(
+            id=operation.id,
+            kind=f"model-cache.{operation.kind}",
+            state=operation.state,
+            attempt=operation.attempt,
+            progress=OperationProgress.model_validate(self._progress(progress)),
+            created_at=operation.created_at,
+            updated_at=operation.updated_at,
+            supported_actions=["retry"] if retryable else [],
+            result=OperationResultFacts.of(operation.result),
+            failure=operation.failure,
+            blockers=list(operation.blockers),
+            next_attempt_at=operation.next_attempt_at,
+            owner=OperationOwnerReference(
+                kind="model-cache-operation",
+                id=operation.id,
+                request_id=operation.request_key,
+            ),
+        )
 
     @staticmethod
     def _progress(value: Mapping[str, object]) -> dict[str, object]:

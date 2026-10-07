@@ -206,11 +206,13 @@ PY
     [ "$(wc -c <"$wheel" | tr -d ' ')" = "$cli_size" ] || fail "the CLI wheel size is invalid"
     [ "$(sha256 "$wheel")" = "$cli_digest" ] || fail "the CLI wheel digest is invalid"
     python3 - "$wheel" "$cli_version" "$cli_source" <<'PY' || fail "the CLI wheel identity is invalid"
-import json, sys, zipfile
+import sys, zipfile
+# The wheel has already passed signed-descriptor digest and size verification.
+# Use its pure standard-library validator, shared with native signed updates.
+sys.path.insert(0, sys.argv[1])
+from cluster_profiles.runtime_identity import verified_wheel_identity
 with zipfile.ZipFile(sys.argv[1]) as archive:
-    identity = json.loads(archive.read("cluster_profiles/build-identity.json"))
-if identity != {"schema_version": 1, "release_version": sys.argv[2], "source_sha": sys.argv[3]}:
-    raise SystemExit(1)
+    verified_wheel_identity(archive, version=sys.argv[2], source_sha=sys.argv[3])
 PY
     uv tool install --force --python 3.14 "$wheel" || fail "uv could not install the verified CLI wheel"
     printf '%s\n' "vonkctl $cli_version is installed. Run 'vonkctl --version' to confirm."

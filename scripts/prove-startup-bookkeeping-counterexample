@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Hosted test-only counterexample: restoring startup's old fail-closed behavior.
+
+The exact checked-out source is restored even on failure. No wheel, generated
+contract, release artifact or production commit is built from the mutation.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import subprocess
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+
+def main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    output = Path(os.environ["VONK_STARTUP_REPAIR_PROOF_OUTPUT"])
+    output.mkdir(parents=True, exist_ok=True)
+    source = root / "control/src/vonk_control/db.py"
+    original = source.read_bytes()
+    marker = """                            except SQLAlchemyError:
+                                _LOGGER.exception(
+                                    "Lifecycle bookkeeping adoption deferred; "
+                                    "current schema remains available"
+                                )
+"""
+    text = original.decode()
+    if text.count(marker) != 1:
+        raise RuntimeError(
+            "exact startup bookkeeping catch is unavailable or ambiguous"
+        )
+    mutated = text.replace(
+        marker,
+        "                            except SQLAlchemyError:\n                                raise\n",
+        1,
+    )
+    report = output / "before-wrong-startup.xml"
+    try:
+        source.write_text(mutated, encoding="utf-8")
+        completed = subprocess.run(
+            [
+                "uv",
+                "run",
+                "--project",
+                "control",
+                "--frozen",
+                "pytest",
+                "-q",
+                "-n",
+                "0",
+                "control/tests/test_startup_retained_repair_postgres.py",
+                "--tb=short",
+                f"--junitxml={report}",
+            ],
+            cwd=root,
+            check=False,
+            timeout=180,
+        )
+    finally:
+        source.write_bytes(original)
+    if source.read_bytes() != original:
+        raise RuntimeError("the exact authored startup source was not restored")
+    cases = ET.parse(report).getroot().findall(".//testcase")
+    if completed.returncode != 1 or len(cases) != 1:
+        raise RuntimeError(
+            "counterexample did not fail exactly the connected startup test"
+        )
+    case = cases[0]
+    failure = case.find("failure")
+    if (
+        case.find("skipped") is not None
+        or case.find("error") is not None
+        or failure is None
+    ):
+        raise RuntimeError(
+            "counterexample skipped or failed outside the tested startup boundary"
+        )
+    detail = (failure.text or "") + failure.get("message", "")
+    if not all(
+        word in detail
+        for word in (
+            "Controller startup schema reconciliation failed",
+            "lock timeout",
+            "legacy_states.py",
+        )
+    ):
+        raise RuntimeError(
+            "counterexample did not hit the real legacy-state adoption lock fault"
+        )
+    (output / "before-wrong-startup.json").write_text(
+        json.dumps(
+            {
+                "source_sha": os.environ.get("VONK_PROOF_SOURCE_SHA"),
+                "mutation": "test-only rethrow of the exact startup bookkeeping SQL catch",
+                "authored_db_sha256": hashlib.sha256(original).hexdigest(),
+                "mutated_db_sha256": hashlib.sha256(mutated.encode()).hexdigest(),
+                "restored_db_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                "tests": 1,
+                "expected_failures": 1,
+                "unexpected_skips": 0,
+                "fault_owner": "legacy_states",
+                "fault": "actual row-lock timeout",
+            },
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+if __name__ == "__main__":
+    main()

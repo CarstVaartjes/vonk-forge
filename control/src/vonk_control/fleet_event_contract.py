@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 
+from .integer_domains import MAX_DATABASE_INTEGER
 from .strict_json import StrictJSONModel
 
 
@@ -36,7 +36,7 @@ class RecipeInstallationPayload(_FleetEventModel):
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     recipe_revision_id: Annotated[str, Field(min_length=1)]
     mapping_id: Annotated[str, Field(min_length=1)]
-    mapping_generation: int = Field(strict=True, ge=1)
+    mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=1)
     state: Annotated[str, Field(min_length=1)]
 
 
@@ -45,7 +45,7 @@ class InstallationNodePayload(_FleetEventModel):
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     installation_id: Annotated[str, Field(min_length=1)]
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
-    rank: int = Field(strict=True, ge=0)
+    rank: int = Field(strict=True, ge=0, le=MAX_DATABASE_INTEGER)
     role: Annotated[str, Field(min_length=1)]
     state: Annotated[str, Field(min_length=1)]
     installed_bytes: int = Field(strict=True, ge=0)
@@ -57,7 +57,7 @@ class RecipeRunPayload(_FleetEventModel):
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     installation_id: Annotated[str, Field(min_length=1)]
     mapping_id: Annotated[str, Field(min_length=1)]
-    mapping_generation: int = Field(strict=True, ge=1)
+    mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=1)
     alias: Annotated[str, Field(min_length=1)]
     state: Annotated[str, Field(min_length=1)]
     route_state: Annotated[str, Field(min_length=1)]
@@ -68,7 +68,7 @@ class RunNodePayload(_FleetEventModel):
     entity_id: Annotated[str, Field(min_length=1, max_length=256)]
     run_id: Annotated[str, Field(min_length=1)]
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
-    rank: int = Field(strict=True, ge=0)
+    rank: int = Field(strict=True, ge=0, le=MAX_DATABASE_INTEGER)
     role: Annotated[str, Field(min_length=1)]
     state: Annotated[str, Field(min_length=1)]
     reserved_memory_bytes: int = Field(strict=True, ge=0)
@@ -90,7 +90,7 @@ class AgentOperationPayload(_FleetEventModel):
     node_id: Annotated[str, Field(min_length=1, max_length=128)]
     kind: Annotated[str, Field(min_length=1)]
     state: Annotated[str, Field(min_length=1)]
-    attempt: int = Field(strict=True, ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=0)
 
 
 type _FleetEntityPayload = (
@@ -105,14 +105,24 @@ type _FleetEntityPayload = (
 type FleetEventPayload = NodeProfilePayload | NodeTelemetryPayload | _FleetEntityPayload
 
 
+def _as_model[T: _FleetEventModel](model: type[T], payload: object) -> T:
+    if isinstance(payload, model):
+        return payload
+    return model.model_validate(payload)
+
+
 def validate_fleet_event_payload(
     event_type: str,
     entity_kind: str,
     entity_id: str,
     node_id: str | None,
-    payload: Mapping[str, object],
+    payload: object,
 ) -> FleetEventPayload:
-    """Validate one outbox payload against its producer/source identity."""
+    """Validate one outbox payload against its producer/source identity.
+
+    ``payload`` is the typed payload a producer built or the stored document a
+    reader decoded; either way the value returned is the contract model.
+    """
 
     allowed_kinds: dict[str, frozenset[str]] = {
         "node-profile": frozenset({"node-profile"}),
@@ -130,12 +140,12 @@ def validate_fleet_event_payload(
     if entity_kind not in allowed_kinds.get(event_type, frozenset()):
         raise ValueError("Fleet event source kind does not match event type")
     if event_type == "node-profile":
-        value = NodeProfilePayload.model_validate(payload)
+        value = _as_model(NodeProfilePayload, payload)
         if value.node_id != entity_id or value.node_id != node_id:
             raise ValueError("node profile event identity is inconsistent")
         return value
     if event_type == "node-telemetry":
-        value = NodeTelemetryPayload.model_validate(payload)
+        value = _as_model(NodeTelemetryPayload, payload)
         if value.node_id != entity_id or value.node_id != node_id:
             raise ValueError("node telemetry event identity is inconsistent")
         return value
@@ -150,7 +160,7 @@ def validate_fleet_event_payload(
     model = classes.get(entity_kind)
     if model is None:
         raise ValueError("Fleet event source kind is invalid")
-    value = model.model_validate(payload)
+    value = _as_model(model, payload)
     if value.entity_kind != entity_kind or value.entity_id != entity_id:
         raise ValueError("Fleet event entity identity is inconsistent")
     if getattr(value, "node_id", None) != node_id and entity_kind in {
