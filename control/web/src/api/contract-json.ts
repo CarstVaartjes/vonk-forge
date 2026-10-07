@@ -54,14 +54,12 @@ export async function readControlResponse(response: Response, method: string, pa
 }
 /** openapi-fetch must consume the validated value instead of calling JSON.parse. */
 export class ContractResponse extends Response {
-  constructor(response: Response, private readonly value: unknown, text: string) {
-    super(text, {status: response.status, statusText: response.statusText, headers: response.headers});
+  constructor(response: Response, private readonly value: unknown, private readonly sourceText: string) {
+    super(sourceText, {status: response.status, statusText: response.statusText, headers: response.headers});
     for (const key of ["url", "redirected", "type"] as const) Object.defineProperty(this, key, {value: response[key]});
   }
   override async json(): Promise<unknown> { await this.text(); return this.value; }
   override clone(): Response {
-    const response = super.clone();
-    Object.defineProperty(response, "json", {value: async () => { await response.text(); return this.value; }});
-    return response;
+    return new ContractResponse(super.clone(), this.value, this.sourceText);
   }
 }

@@ -47,11 +47,13 @@ describe("canonical numeric boundary", () => {
   test("generated transport response consumes once and retains metadata", async () => {
     const source = new Response('{"counter":9007199254740993}', {status: 200, headers: {"x-request-id": "example"}});
     const text = await source.text(), value = parseContractJson(text);
-    const response = new ContractResponse(source, value, text), clone = response.clone();
+    const response = new ContractResponse(source, value, text), clone = response.clone(), secondClone = clone.clone();
     expect(response.headers.get("x-request-id")).toBe("example");
     expect(stringifyContractJson(await response.json())).toBe(text);
     expect(response.bodyUsed).toBe(true);
     await expect(response.json()).rejects.toThrow();
     expect(stringifyContractJson(await clone.json())).toBe(text);
+    expect(stringifyContractJson(await secondClone.json())).toBe(text);
+    expect(() => response.clone()).toThrow();
   });
 });
