@@ -7282,11 +7282,19 @@ class RecipeOperationService:
                 BookkeepingReason.PERSISTED_STATE_DAMAGED,
                 f"current profile Stop progress is invalid: {error}",
             )
-        profile_operation = (
-            session.get(Job, switch_adapter.active_operation_id)
+        matching_children = (
+            [
+                child
+                for child in switch_adapter.pending_children
+                if child.kind == "stop"
+                and switch_adapter.queue[child.queue_index].id == run.id
+            ]
             if switch_adapter is not None
-            and switch_adapter.active_kind == "stop"
-            and switch_adapter.active_operation_id is not None
+            else []
+        )
+        profile_operation = (
+            session.get(Job, matching_children[0].operation_id)
+            if len(matching_children) == 1
             else None
         )
         if application is None or profile_operation is None:

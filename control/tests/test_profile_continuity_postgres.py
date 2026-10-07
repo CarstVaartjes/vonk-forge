@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import AgentResult, LifecycleState
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -269,7 +269,7 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
                 queue=[FleetProfileSwitchQueueItem(kind="run", id=assignment.id)],
                 actor="admin",
                 request_id=_uuid(18302),
-                state="queued",
+                state=LifecycleState.QUEUED,
             ),
         )
     dispatched = []

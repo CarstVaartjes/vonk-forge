@@ -118,7 +118,7 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
             ],
             actor="admin",
             request_id=_uuid(18103),
-            state="running",
+            state=LifecycleState.RUNNING,
         )
         adapter._write_state(session, row, state)
     child = _running_child(active_id, _node_id(1))

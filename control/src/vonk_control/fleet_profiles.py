@@ -74,6 +74,12 @@ from .categorized_errors import (
 )
 from .cluster_mappings import mapping_option_choices
 from .failure_classification import error_code, is_security_failure
+from .fleet_profile_adapter_conversion import (
+    conversion_observation,
+    conversion_progress,
+    convert_due_retained_applications,
+    needs_conversion,
+)
 from .fleet_profile_contract import (
     MAX_PROFILE_WARNINGS,
     FleetAssignmentModelView,
@@ -88,6 +94,7 @@ from .fleet_profile_contract import (
     FleetProfileApplicationCancellationView,
     FleetProfileApplicationEffect,
     FleetProfileApplicationProgress,
+    FleetProfileApplicationProjectionIssue,
     FleetProfileApplicationResult,
     FleetProfileApplicationView,
     FleetProfileAssignment,
@@ -2033,7 +2040,7 @@ class RunSwitchFleetProfileAdapter:
         self._write_state(session, application, state)
         if cancelling:
             if state.pending_children:
-                doc_state(state, "running")
+                doc_state(state, LifecycleState.RUNNING)
                 self._write_state(session, application, state)
                 return view or self._view_from_state(application, state)
             waiting = self._observe_superseded_agent_effects(
@@ -2056,7 +2063,7 @@ class RunSwitchFleetProfileAdapter:
                 continue
             nodes = self._queue_item_nodes(application, item)
             if not nodes:
-                doc_state(state, "running")
+                doc_state(state, LifecycleState.RUNNING)
                 state.status_reason = (
                     "Waiting for the exact reviewed queue target evidence"
                 )
@@ -2138,7 +2145,7 @@ class RunSwitchFleetProfileAdapter:
                     else None,
                 )
             )
-            doc_state(state, "running")
+            doc_state(state, LifecycleState.RUNNING)
             state.child_progress = self._view_from_child(
                 application_id, state, operation
             ).progress
@@ -2151,7 +2158,7 @@ class RunSwitchFleetProfileAdapter:
             state.position += 1
         self._write_state(session, application, state)
         if state.pending_children or state.position < len(state.queue):
-            doc_state(state, "running")
+            doc_state(state, LifecycleState.RUNNING)
             self._write_state(session, application, state)
             return view or self._view_from_state(application, state)
         waiting = self._observe_superseded_agent_effects(session, application, state)
@@ -2189,7 +2196,7 @@ class RunSwitchFleetProfileAdapter:
         )
         doc_state(
             state,
-            "failed"
+            LifecycleState.FAILED
             if relevant_failures or incomplete
             else _stored_state(
                 FleetProfileAdapter.recorded_aggregate(relevant_children)
@@ -2362,7 +2369,7 @@ class RunSwitchFleetProfileAdapter:
             min(effect.observe_due_at for effect in effects),
             FleetProfileAdapter.next_retry(application.id, attempt, now),
         )
-        doc_state(state, "running")
+        doc_state(state, LifecycleState.RUNNING)
         state.status_reason = (
             "Reissuing Stop and observing older issued workload cancellation: "
             + ", ".join(sorted(effect.operation_id for effect in effects))
@@ -2384,7 +2391,7 @@ class RunSwitchFleetProfileAdapter:
         application: FleetProfileApplication,
         state: FleetProfileSwitchAdapterState,
     ) -> FleetProfileChildOperation:
-        doc_state(state, "cancelled")
+        doc_state(state, LifecycleState.CANCELLED)
         state.status_reason = "Profile effects were reconciled after cancellation"
         state.result = FleetProfileSwitchAdapterResult(
             children=state.children, assignment_ids=state.assignment_ids
@@ -2392,7 +2399,7 @@ class RunSwitchFleetProfileAdapter:
         self._write_state(session, application, state)
         progress = _persisted_profile_progress(application)
         if progress.cancellation is not None:
-            cancellation_state(progress, "cancelled")
+            cancellation_state(progress, LifecycleState.CANCELLED)
             application.progress = progress.model_dump(mode="json")
         session.flush()
         return self._view_from_state(application, state)
@@ -2905,7 +2912,7 @@ class RunSwitchFleetProfileAdapter:
         state: FleetProfileSwitchAdapterState,
         reason: str,
     ) -> FleetProfileChildOperation:
-        doc_state(state, "failed")
+        doc_state(state, LifecycleState.FAILED)
         state.status_reason = reason[:512]
         self._write_state(session, application, state)
         session.flush()
@@ -4005,9 +4012,7 @@ class FleetProfileService:
                     option_choices=option_choices,
                     recipe_id=document.id,
                     recipe_title=document.title,
-                    model_title=self._model_title(
-                        session, read_recipe(revision.document)
-                    ),
+                    model_title=self._model_title(session, revision.document),
                 )
             )
         return tuple(result)
@@ -5647,10 +5652,14 @@ class FleetProfileService:
             )
             if existing_adopted_scope:
                 effect_nodes &= set(existing_adopted_scope)
+            repeating_assignments = {
+                item.id: item for item in progress.intended_profile.assignments
+            } == desired
             equivalent = [
                 item
                 for item in progress.intended_profile.assignments
-                if item == desired.get(item.id)
+                if not repeating_assignments
+                and item == desired.get(item.id)
                 and {node.node_id for node in item.nodes} <= target_nodes
                 and {node.node_id for node in item.nodes} <= effect_nodes
             ]
@@ -8099,6 +8108,25 @@ class FleetProfileService:
         usable.
         """
 
+        if needs_conversion(row):
+            observed = conversion_observation(row)
+            item = cls._unreadable_operation_item(row)
+            item.status_reason = observed.detail
+            item.next_attempt_at = (
+                observed.next_attempt_at.isoformat()
+                if observed.next_attempt_at
+                else None
+            )
+            item.blockers = bound_blockers(
+                [
+                    make_blocker(
+                        ProfileReasonCode.RETRY_CONFLICT,
+                        observed.detail
+                        or "Exact retained child evidence is being reconciled",
+                    )
+                ]
+            )
+            return item
         try:
             typed_progress = _canonical_progress(row.progress)
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
@@ -8560,7 +8588,7 @@ class FleetProfileService:
                 )
                 .limit(1)
             )
-            if candidate is None:
+            if candidate is None or needs_conversion(candidate):
                 return False
             application_id = candidate.id
             try:
@@ -8581,7 +8609,7 @@ class FleetProfileService:
                 .with_for_update(skip_locked=True)
                 .limit(1)
             )
-            if row is None:
+            if row is None or needs_conversion(row):
                 return False
             plan = _persisted_profile_plan(row)
             current = _stored_progress(row)
@@ -8739,12 +8767,13 @@ class FleetProfileService:
     def tick(self) -> bool:
         """Observe one due cancellation, then advance one ordinary work item."""
 
-        if self._switch_adapter is None:
-            return False
         now = _aware(self._clock())
+        converted = bool(convert_due_retained_applications(self._sessions, now))
+        if self._switch_adapter is None:
+            return converted
         if self._reconcile_selected_roster(now):
             return True
-        pending_admission_observed = self._observe_pending_admissions(now)
+        pending_admission_observed = self._observe_pending_admissions(now) or converted
         parked_observed = self._heal_legacy_applications(now)
         recovery_deferred = False
         cancellation_observed = self._observe_pending_cancellation(now)
@@ -8888,6 +8917,13 @@ class FleetProfileService:
                     or recovery_deferred
                 )
             self._ordinary_cursor = row.id
+            if needs_conversion(row):
+                return (
+                    pending_admission_observed
+                    or cancellation_observed
+                    or parked_observed
+                    or recovery_deferred
+                )
             plan = _persisted_profile_plan(row)
             stored = _stored_progress(row)
             if isinstance(plan, Residue) or isinstance(stored, Residue):
@@ -9058,30 +9094,17 @@ class FleetProfileService:
                         session=session,
                     )
                     return True
-                progress_data = progress.model_dump(mode="json")
-                results = dict(progress_data.get("step_results", {}))
-                # The receipt names the *plan* step it completed.  Copying the
-                # child's own kind recorded "recipe.uninstall" for an
-                # "uninstall" step and nothing at all for a switch-adapter
-                # child, so no reader could match a receipt to its plan step.
-                completed_step = steps[row.current_step]
-                child_result = FleetProfileStepResult(
+                # This worker dispatches reviewed switch steps only. Preserve
+                # the exact native receipt under its immutable plan index.
+                progress.step_results[str(row.current_step)] = FleetProfileStepResult(
                     operation_id=child.id,
-                    kind=completed_step.kind,
+                    kind="switch",
                     result=child.result,
                 )
-                results[str(row.current_step)] = child_result.model_dump(mode="json")
-                progress_data["step_results"] = results
-                progress = read_stored_model(
-                    FleetProfileApplicationProgress,
-                    canonical_message(progress_data),
-                    strict=True,
-                    from_json=True,
-                )
-                row.progress = progress.model_dump(mode="json")
                 progress.retry_due_at = None
                 row.progress = progress.model_dump(mode="json")
                 row.current_operation_id = None
+
                 row.current_step += 1
             if row.current_step >= len(steps):
                 waiting_for_adopted = False
@@ -9858,6 +9881,8 @@ class FleetProfileService:
                 )
             )
             for row in rows:
+                if needs_conversion(row):
+                    continue
                 self._lifecycle.heal(row, now, session=session)
             legacy = tuple(
                 session.scalars(
@@ -9879,7 +9904,11 @@ class FleetProfileService:
                     .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
                 )
             )
-            relabelled = [self._lifecycle.heal_superseded(row, now) for row in legacy]
+            relabelled = [
+                self._lifecycle.heal_superseded(row, now)
+                for row in legacy
+                if not needs_conversion(row)
+            ]
             return bool(rows) or any(relabelled)
 
     @staticmethod
@@ -9897,16 +9926,8 @@ class FleetProfileService:
         due = _aware(due_at) if due_at is not None else None
         if due is None or due <= now:
             due = now + timedelta(seconds=_CANCELLATION_OBSERVATION_SECONDS)
-        progress_data = progress.model_dump(mode="json")
-        cancellation_data = dict(progress_data["cancellation"])
-        cancellation_data["observation_due_at"] = due.isoformat()
-        progress_data["cancellation"] = cancellation_data
-        row.progress = read_stored_model(
-            FleetProfileApplicationProgress,
-            canonical_message(progress_data),
-            strict=True,
-            from_json=True,
-        ).model_dump(mode="json")
+        progress.cancellation.observation_due_at = due
+        row.progress = progress.model_dump(mode="json")
 
     def _advance_cancellation_in_session(
         self,
@@ -10169,14 +10190,14 @@ class FleetProfileService:
             cancellation.observation_deadline_at = None
             if not residue:
                 cancellation.pending_operation_ids = []
-        cancellation_state(progress, "cancelled")
+        cancellation_state(progress, LifecycleState.CANCELLED)
         document = progress.switch_adapter
         if document is not None and document.state not in {
             "succeeded",
             "failed",
             "cancelled",
         }:
-            doc_state(document, "cancelled")
+            doc_state(document, LifecycleState.CANCELLED)
             # Retain pending child identities even at cancellation expiry: a
             # terminal parent does not establish the child's physical effect.
         row.progress = progress.model_dump(mode="json")
@@ -11330,7 +11351,13 @@ class FleetProfileService:
         progress: FleetProfileApplicationProgress,
     ) -> list[FleetProfileEffectProgress]:
         effects: list[FleetProfileEffectProgress] = []
-        owners = [(row, progress, None)]
+        owners: list[
+            tuple[
+                FleetProfileApplication,
+                FleetProfileApplicationProgress,
+                set[str] | None,
+            ]
+        ] = [(row, progress, None)]
         for binding in plan.effects.adopted:
             owner = session.get(FleetProfileApplication, binding.application_id)
             if owner is not None:
@@ -11431,6 +11458,56 @@ class FleetProfileService:
         # cannot be read shows the step count the progress recorded and no
         # cancellation projection; damaged progress and result are rebuilt from the
         # receipt the row itself carries.
+        if needs_conversion(row):
+            observed = conversion_observation(row)
+            plan = _persisted_profile_plan(row)
+            total = row.current_step if isinstance(plan, Residue) else len(plan.steps)
+            blockers = bound_blockers(
+                [
+                    make_blocker(
+                        ProfileReasonCode.RETRY_CONFLICT,
+                        observed.detail
+                        or "Exact retained child evidence is being reconciled",
+                    )
+                ]
+            )
+            outer_progress = conversion_progress(row)
+            progress = outer_progress or _progress_from_receipt(row)
+            progress.total_steps = total
+            progress.current_label = "Reconciling exact retained cleanup journal"
+            progress.retry_due_at = observed.next_attempt_at
+            progress.blockers = blockers
+            state = _operation_state(row.state, default=LifecycleState.RUNNING)
+            return FleetProfileApplicationView(
+                id=row.id,
+                request_key=row.request_key,
+                profile_id=row.profile_id,
+                profile_digest=row.profile_digest,
+                plan_digest=row.plan_digest,
+                state=state,
+                attempt=progress.attempt,
+                retry_of_application_id=progress.retry_of_application_id,
+                superseded_by=progress.superseded_by if state == "superseded" else None,
+                reason_code=progress.supersede_code if state == "superseded" else None,
+                current_step=row.current_step,
+                total_steps=total,
+                current_operation_id=row.current_operation_id,
+                status_reason=None if state == "succeeded" else observed.detail,
+                progress=progress,
+                result=_persisted_profile_result(row),
+                projection_issue=(
+                    FleetProfileApplicationProjectionIssue(
+                        code=ProfileReasonCode.APPLICATION_INTENT_INVALID,
+                        detail="Retained outer metadata cannot be verified; historical state and exact child evidence remain unchanged",
+                    )
+                    if outer_progress is None
+                    else None
+                ),
+                blockers=blockers,
+                next_attempt_at=observed.next_attempt_at,
+                created_at=_aware(row.created_at),
+                updated_at=_aware(row.updated_at),
+            )
         plan = _persisted_profile_plan(row)
         progress = _persisted_profile_progress(row)
         if (
