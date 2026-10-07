@@ -361,8 +361,10 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   if (!jobInterface) return null;
   const adapter = jobInterface.adapter;
 
+  const controllerFileLimit = capabilities?.transport.max_input_file_bytes ?? CONTROLLER_FILE_LIMIT;
+  const controllerTotalLimit = capabilities?.transport.max_input_total_bytes ?? CONTROLLER_TOTAL_LIMIT;
   const allowsPromptFile = textSlot !== undefined;
-  const promptLimit = wireMinimum(textSlot?.max_file_bytes ?? CONTROLLER_FILE_LIMIT, CONTROLLER_FILE_LIMIT);
+  const promptLimit = wireMinimum(textSlot?.max_file_bytes ?? controllerFileLimit, controllerFileLimit);
   const selectedFiles = inputSlots.flatMap(slot => (filesBySlot[slot.id] ?? []).map(file => ({slot, file})));
   const parameterErrors = parameters.flatMap(parameter => {
     const error = parameterError(parameter, values[parameter.name] ?? parameter.default);
@@ -379,14 +381,13 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
     const total = slotFiles.reduce((sum, file) => sum + file.size, 0) + (promptCount ? promptBytes : 0);
     if (compareWire(count, slot.min_files) < 0) inputErrors.push(`${slot.label}: add at least ${formatWire(slot.min_files)} file${compareWire(slot.min_files, 1) === 0 ? "" : "s"}.`);
     if (compareWire(count, slot.max_files) > 0) inputErrors.push(`${slot.label}: use no more than ${formatWire(slot.max_files)} file${compareWire(slot.max_files, 1) === 0 ? "" : "s"}.`);
-    if (slotFiles.some(file => compareWire(file.size, wireMinimum(slot.max_file_bytes, CONTROLLER_FILE_LIMIT)) > 0)) inputErrors.push(`${slot.label}: every file must be ${formatBytes(wireMinimum(slot.max_file_bytes, CONTROLLER_FILE_LIMIT))} or smaller.`);
+    if (slotFiles.some(file => compareWire(file.size, wireMinimum(slot.max_file_bytes, controllerFileLimit)) > 0)) inputErrors.push(`${slot.label}: every file must be ${formatBytes(wireMinimum(slot.max_file_bytes, controllerFileLimit))} or smaller.`);
     if (slotFiles.some(file => !slot.media_types.includes(fileMediaType(slot, file)))) inputErrors.push(`${slot.label}: every file must use an allowed media type.`);
     if (slot.extensions.length > 0 && slotFiles.some(file => !slot.extensions.some(extension => file.name.toLowerCase().endsWith(extension.toLowerCase())))) inputErrors.push(`${slot.label}: every filename must end in ${slot.extensions.join(" or ")}.`);
-    if (compareWire(total, wireMinimum(slot.max_total_bytes, CONTROLLER_TOTAL_LIMIT)) > 0) inputErrors.push(`${slot.label}: combined files must be ${formatBytes(wireMinimum(slot.max_total_bytes, CONTROLLER_TOTAL_LIMIT))} or smaller.`);
+    if (compareWire(total, wireMinimum(slot.max_total_bytes, controllerTotalLimit)) > 0) inputErrors.push(`${slot.label}: combined files must be ${formatBytes(wireMinimum(slot.max_total_bytes, controllerTotalLimit))} or smaller.`);
   }
   if (compareWire(inputCount, capabilities?.transport.max_input_files ?? 32) > 0) inputErrors.push(`Use no more than ${formatWire(capabilities?.transport.max_input_files ?? 32)} inputs across all slots.`);
   if (compareWire(promptBytes, promptLimit) > 0) inputErrors.push(`Prompt exceeds the ${formatBytes(promptLimit)} input limit.`);
-  const controllerTotalLimit = capabilities?.transport.max_input_total_bytes ?? CONTROLLER_TOTAL_LIMIT;
   if (compareWire(promptBytes + fileBytes, controllerTotalLimit) > 0) inputErrors.push(`Combined inputs must be ${formatBytes(controllerTotalLimit)} or smaller.`);
   if (capabilities && compareWire(promptBytes + fileBytes, capabilities.storage.remaining_bytes) > 0) inputErrors.push(`Artifact storage has only ${formatBytes(capabilities.storage.remaining_bytes)} remaining.`);
   const normalizedNames = selectedFiles.map(item => filename(item.file.name)).concat(textSlot && prompt.trim() ? ["prompt.txt"] : []);
@@ -789,7 +790,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
           const fieldErrors = inputErrors.filter(error => error.startsWith(`${slot.label}:`));
           const helpId = `${id}-help`;
           const errorId = `${id}-error`;
-          return <label htmlFor={id} key={slot.id}><span>{slot.label}{compareWire(slot.min_files, 0) > 0 && slot.id !== textSlot?.id ? "" : " (optional)"}</span><input id={id} type="file" multiple={compareWire(slot.max_files, 1) > 0} required={compareWire(slot.min_files, 0) > 0 && slot.id !== textSlot?.id} accept={[...fileMedia, ...slot.extensions].join(",")} aria-label={slot.label} aria-invalid={fieldErrors.length > 0 || undefined} aria-describedby={`${helpId}${fieldErrors.length ? ` ${errorId}` : ""}`} onChange={event => setFilesBySlot(current => ({...current, [slot.id]: Array.from(event.target.files ?? [])}))}/><small id={helpId}>{slot.description} {fileMedia.join(" · ")} · {formatWire(slot.min_files)}–{formatWire(slot.max_files)} files · {formatBytes(wireMinimum(slot.max_file_bytes, CONTROLLER_FILE_LIMIT))} each · {formatBytes(wireMinimum(slot.max_total_bytes, CONTROLLER_TOTAL_LIMIT))} total</small>{fieldErrors.length > 0 && <small className="artifact-job-field-error" id={errorId}>{fieldErrors.join(" ")}</small>}</label>;
+          return <label htmlFor={id} key={slot.id}><span>{slot.label}{compareWire(slot.min_files, 0) > 0 && slot.id !== textSlot?.id ? "" : " (optional)"}</span><input id={id} type="file" multiple={compareWire(slot.max_files, 1) > 0} required={compareWire(slot.min_files, 0) > 0 && slot.id !== textSlot?.id} accept={[...fileMedia, ...slot.extensions].join(",")} aria-label={slot.label} aria-invalid={fieldErrors.length > 0 || undefined} aria-describedby={`${helpId}${fieldErrors.length ? ` ${errorId}` : ""}`} onChange={event => setFilesBySlot(current => ({...current, [slot.id]: Array.from(event.target.files ?? [])}))}/><small id={helpId}>{slot.description} {fileMedia.join(" · ")} · {formatWire(slot.min_files)}–{formatWire(slot.max_files)} files · {formatBytes(wireMinimum(slot.max_file_bytes, controllerFileLimit))} each · {formatBytes(wireMinimum(slot.max_total_bytes, controllerTotalLimit))} total</small>{fieldErrors.length > 0 && <small className="artifact-job-field-error" id={errorId}>{fieldErrors.join(" ")}</small>}</label>;
         })}
         {selectedFiles.length > 0 && <ul className="artifact-input-list" aria-label="Selected input files">{selectedFiles.map(({slot, file}) => <li key={`${slot.id}:${file.name}:${file.lastModified}`}><span>{file.name}</span><small>{slot.label} · {file.type || "Unknown media type"} · {formatBytes(file.size)}</small></li>)}</ul>}
         <label htmlFor="artifact-job-timeout"><span>Maximum run time</span><input id="artifact-job-timeout" type="number" min={1} max={formatWire(maximumTimeout)} value={typeof timeoutSeconds === "string" ? timeoutSeconds : formatWire(timeoutSeconds)} aria-label="Maximum run time" onChange={event => setTimeoutSeconds(integerInput(event.target.value))}/><small>Seconds · the controller stops this job after at most {formatWire(maximumTimeout)} seconds.</small></label>
