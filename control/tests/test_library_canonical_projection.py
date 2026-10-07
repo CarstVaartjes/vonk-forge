@@ -31,6 +31,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.strict_json import ControllerAPIRoute
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -348,6 +349,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert both == one | two
 
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -857,6 +859,7 @@ def test_cached_download_progress_preserves_exact_totals_and_reads_negative_as_u
             )
         )
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -966,6 +969,7 @@ def test_model_detail_resolves_every_model_cache_selector_form(tmp_path: Path) -
         expected_digest = revision.content_digest
 
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -1018,6 +1022,7 @@ def test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit(
     )
     cursors = TokenCodec(b"b" * 32).cursor_codec()
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -1118,6 +1123,7 @@ def test_model_library_pages_by_wire_bytes_without_losing_entries(
         description="é" * 4000,
     )
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
@@ -1159,11 +1165,13 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
     sessions = sessionmaker(engine, expire_on_commit=False)
     _insert_canonical_rows(sessions, kind="recipe", template=template, count=1)
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
         projection=LibraryProjection(
             sessions,
+            clock=lambda: datetime(2026, 10, 7, tzinfo=UTC),
             cursors=TokenCodec(b"p" * 32).cursor_codec(),
         ),
     )
@@ -1218,6 +1226,7 @@ def test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably(
         runtime_arguments=arguments,
     )
     app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
     install_library_routes(
         app,
         actor_dependency=Depends(lambda: Actor("test", "viewer")),
