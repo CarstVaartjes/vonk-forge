@@ -327,6 +327,9 @@ func (c *JournalCAS) CreateCertificateWithContext(ctx context.Context, req *casa
 	if !bytes.Equal(req.CSR.RawSubject, req.Template.RawSubject) && req.Template.RawSubject != nil {
 		return nil, errors.New("certificate subject changed")
 	}
+	if err := validateProjectedResponse(a.Binding, req.Template, c.Policy.Issuer, req.Template.PublicKey); err != nil {
+		return nil, err
+	}
 	if c.BeforeSign != nil {
 		c.BeforeSign()
 	}

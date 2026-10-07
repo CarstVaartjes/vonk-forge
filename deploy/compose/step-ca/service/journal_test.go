@@ -341,11 +341,15 @@ func TestUnrepresentableIssuedResponseCannotCommitCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	signerEntered := false
+	f.c.BeforeSign = func() { signerEntered = true }
 	response, err := f.c.CreateCertificateWithContext(withAttempt(context.Background(), *attempt), f.request())
 	var cause *fault
 	if response != nil || !errors.As(err, &cause) || cause.code != "certificate.response_unrepresentable" {
 		t.Fatalf("oversized actual certificate response did not fail before commit: %v", err)
 	}
+	if signerEntered { t.Fatal("unrepresentable request invoked private signer") }
+	if err := validateStartupResponseBudget(f.c.Policy); err == nil { t.Fatal("startup admitted unrepresentable issuer") }
 	if _, err := f.j.Get(certsTable, []byte(f.binding.Serial)); !nosql.IsErrNotFound(err) {
 		t.Fatalf("unrepresentable response committed usable leaf: %v", err)
 	}
@@ -438,4 +442,16 @@ func TestJournalProcessDeathBeforeAndAfterCommit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPublicSizingMatchesActualSoftCASCertificate(t *testing.T) {
+ f := newJournalFixture(t)
+ request := f.request()
+ projected, err := projectedCertificate(request.Template, f.c.Policy.Issuer, request.Template.PublicKey)
+ if err != nil { t.Fatal(err) }
+ actual, err := f.c.Soft.CreateCertificate(request)
+ if err != nil { t.Fatal(err) }
+ if len(projected.Raw) != len(actual.Certificate.Raw) { t.Fatalf("public sizing diverged: %d != %d",len(projected.Raw),len(actual.Certificate.Raw)) }
+ if projected.CheckSignatureFrom(f.c.Policy.Issuer) == nil { t.Fatal("public sizing projection became usable authority") }
+ if err := validateStartupResponseBudget(f.c.Policy); err != nil { t.Fatal(err) }
 }
