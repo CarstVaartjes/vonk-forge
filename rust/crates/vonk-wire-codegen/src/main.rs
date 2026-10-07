@@ -93,6 +93,14 @@ fn prepare(value: &mut Value) {
                     "vonk-integer"
                 } else if object.get("format").and_then(Value::as_str) == Some("int64") {
                     "int64"
+                } else if object.get("format").and_then(Value::as_str) == Some("uint8")
+                    && object.get("minimum").and_then(Value::as_u64).is_some()
+                    && object
+                        .get("maximum")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|maximum| maximum <= u8::MAX as u64)
+                {
+                    "uint8"
                 } else if object
                     .get("const")
                     .and_then(Value::as_u64)
@@ -930,6 +938,22 @@ mod tests {
         let mut scalar = json!({"type":"integer","minimum":i64::MIN,"maximum":i64::MAX});
         prepare(&mut scalar);
         assert_eq!(scalar, json!({"type":"integer","format":"int64"}));
+    }
+
+    #[test]
+    fn byte_representation_requires_canonical_byte_bounds() {
+        let mut byte = json!({"type":"integer","format":"uint8","minimum":0,"maximum":255});
+        prepare(&mut byte);
+        assert_eq!(byte, json!({"type":"integer","format":"uint8"}));
+        let mut wide = json!({"type":"integer","format":"uint8","minimum":0,"maximum":256});
+        prepare(&mut wide);
+        assert_eq!(wide, json!({"type":"integer","format":"uint32"}));
+        let mut signed = json!({"type":"integer","format":"uint8","minimum":-1,"maximum":255});
+        prepare(&mut signed);
+        assert_eq!(signed, json!({"type":"integer","format":"int64"}));
+        let mut unbounded = json!({"type":"integer","format":"uint8","minimum":0});
+        prepare(&mut unbounded);
+        assert_eq!(unbounded, json!({"type":"integer","format":"vonk-integer"}));
     }
 
     #[test]
