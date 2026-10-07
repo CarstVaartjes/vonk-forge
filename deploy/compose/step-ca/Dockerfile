@@ -14,6 +14,10 @@ RUN go mod download && go mod verify \
 # Preserve the existing step health CLI, UID, home, trust mounts and Badger
 # volume. Only the CA executable changes; this is the existing CA service.
 FROM smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270 AS runtime
+USER 0:0
+RUN rm /usr/local/bin/step-ca /entrypoint.sh
 COPY --from=builder --chmod=0555 /out/vonk-step-ca /usr/local/bin/vonk-step-ca
 USER 1000:1000
 ENTRYPOINT ["vonk-step-ca"]
+CMD ["--config", "/run/vonk-normalized-secrets/step-ca/ca.json", "--password-file", "/run/vonk-normalized-secrets/step-ca/password"]
+HEALTHCHECK CMD step ca health --ca-url https://step-ca:9000 --root /run/vonk-normalized-secrets/step-ca/root-certificate
