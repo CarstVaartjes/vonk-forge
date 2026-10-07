@@ -1060,18 +1060,6 @@
     },
     {
       "path": "scripts/install-release-publication",
-      "function": "_rclone_bytes",
-      "kind": "wait-without-timeout",
-      "count": 2
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_rclone_digest",
-      "kind": "wait-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
       "function": "_safe_bytes",
       "kind": "loop-without-deadline",
       "count": 1

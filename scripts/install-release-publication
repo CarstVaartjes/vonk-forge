@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import re
+import selectors
 import shutil
 import stat
 import subprocess
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -1395,29 +1397,60 @@ def _rclone_object_exists(remote: str, key: str) -> bool:
     )
 
 
-def _rclone_digest(remote: str, key: str) -> str | None:
-    if not _rclone_object_exists(remote, key):
-        return None
+def _rclone_read(command: list[str], consume: Callable[[bytes], None]) -> int:
+    """Bound the owning process even when the transfer tool stops producing bytes."""
     process = subprocess.Popen(
-        [
-            "rclone",
-            "cat",
-            f"{remote}/{key}",
-            "--contimeout",
-            "30s",
-            "--timeout",
-            "30s",
-            "--max-duration",
-            f"{RCLONE_TRANSFER_TIMEOUT:g}s",
-        ],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     )
     assert process.stdout is not None
+    deadline = time.monotonic() + RCLONE_TRANSFER_TIMEOUT
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(command, RCLONE_TRANSFER_TIMEOUT)
+                for key, _events in selector.select(timeout=remaining):
+                    chunk = os.read(key.fd, 64 * 1024)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                    else:
+                        consume(chunk)
+        return process.wait(timeout=max(0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired as error:
+        raise PublicationError(
+            f"R2 read exceeded {RCLONE_TRANSFER_TIMEOUT:g}s; "
+            "incomplete remote observation discarded"
+        ) from error
+    finally:
+        if process.returncode is None:
+            process.kill()
+            process.wait(timeout=5)
+        process.stdout.close()
+
+
+def _rclone_read_command(remote: str, key: str) -> list[str]:
+    return [
+        "rclone",
+        "cat",
+        f"{remote}/{key}",
+        "--contimeout",
+        "30s",
+        "--timeout",
+        "30s",
+        "--max-duration",
+        f"{RCLONE_TRANSFER_TIMEOUT:g}s",
+    ]
+
+
+def _rclone_digest(remote: str, key: str) -> str | None:
+    if not _rclone_object_exists(remote, key):
+        return None
     digest = hashlib.sha256()
-    for chunk in iter(lambda: process.stdout.read(1024 * 1024), b""):
-        digest.update(chunk)
-    if process.wait() != 0:
+    if _rclone_read(_rclone_read_command(remote, key), digest.update) != 0:
         return None
     return digest.hexdigest()
 
@@ -1425,32 +1458,18 @@ def _rclone_digest(remote: str, key: str) -> str | None:
 def _rclone_bytes(remote: str, key: str, maximum: int) -> bytes | None:
     if not _rclone_object_exists(remote, key):
         return None
-    process = subprocess.Popen(
-        [
-            "rclone",
-            "cat",
-            f"{remote}/{key}",
-            "--contimeout",
-            "30s",
-            "--timeout",
-            "30s",
-            "--max-duration",
-            f"{RCLONE_TRANSFER_TIMEOUT:g}s",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    assert process.stdout is not None
-    content = process.stdout.read(maximum + 1)
-    if len(content) > maximum:
-        process.kill()
-        process.wait()
-        raise PublicationError("published channel manifest is invalid")
-    if process.wait() != 0:
+    content = bytearray()
+
+    def consume(chunk: bytes) -> None:
+        if len(content) + len(chunk) > maximum:
+            raise PublicationError("published channel manifest is invalid")
+        content.extend(chunk)
+
+    if _rclone_read(_rclone_read_command(remote, key), consume) != 0:
         return None
     if not content:
         raise PublicationError("published channel manifest is invalid")
-    return content
+    return bytes(content)
 
 
 def _verification_delay(attempt: int) -> float:
