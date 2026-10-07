@@ -11,6 +11,7 @@ on:
       - control/src/vonk_control/model_cache_api.py
       - control/web/src/components/model-cache-cancellation-consumer.test.tsx
       - control/tests/test_model_cache_unknown_expiry_recovery.py
+      - control/tests/test_model_manifest_composition.py
   workflow_dispatch:
 
 permissions:
@@ -43,10 +44,11 @@ jobs:
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Pull pinned disposable PostgreSQL
         run: scripts/pull-test-images postgres
-      - name: Prove unknown expiry and fresh admission without orphaned holds
+      - name: Prove shared manifest identity and unknown expiry through fresh admission
         run: >-
           uv run --project control --frozen pytest -q -n 0
           control/tests/test_model_cache_unknown_expiry_recovery.py
+          control/tests/test_model_manifest_composition.py
           --tb=short
       - name: Prepare pinned browser consumer toolchain
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
