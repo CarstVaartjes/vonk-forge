@@ -72,6 +72,7 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
+    ClusterMapping,
     InstallationNode,
     Job,
     NodeArtifact,
@@ -358,6 +359,7 @@ def setup_services(
     tmp_path: Path,
     *,
     nodes: int = 1,
+    mapping_node_count: int | None = None,
     endpoint_owner_rank_one: bool = False,
     distributed_lifecycle: bool = False,
     start_order: tuple[str, ...] | None = None,
@@ -369,6 +371,8 @@ def setup_services(
     distributed_start_timeout_seconds: int = 60,
     model_artifact: bool = False,
 ):
+    placement_count = nodes if mapping_node_count is None else mapping_node_count
+    assert 1 <= placement_count <= nodes
     engine = engine or create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
         connect_args={"check_same_thread": False},
@@ -457,18 +461,20 @@ def setup_services(
         },
         "memory": {"peak_bytes": 225, "reserve_bytes": 0},
     }
-    if nodes > 1:
+    if placement_count > 1:
         worker = json.loads(json.dumps(role))
-        worker.update({"name": "worker", "count": nodes - 1, "endpoint_owner": False})
+        worker.update(
+            {"name": "worker", "count": placement_count - 1, "endpoint_owner": False}
+        )
         roles = [role, worker]
         if endpoint_owner_rank_one:
             roles = [worker, role]
         document["topology"] = {
             **document["topology"],
-            "name": f"nodes_{nodes}",
-            "node_count": nodes,
+            "name": f"nodes_{placement_count}",
+            "node_count": placement_count,
             "parallelism": {
-                "tensor": nodes,
+                "tensor": placement_count,
                 "pipeline": 1,
                 "data": 1,
                 "backend": "tcp",
@@ -561,7 +567,9 @@ def setup_services(
         )
         session.flush()
     mappings = ClusterMappingService(sessions)
-    mapping_plan = mappings.preview(revision.id, node_ids, {}, "admin")
+    mapping_plan = mappings.preview(
+        revision.id, node_ids[:placement_count], {}, "admin"
+    )
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=NOW)
     image_archive = b"canonical-runtime-image-archive"[:30]
     image_archive_sha256 = hashlib.sha256(image_archive).hexdigest()
@@ -5730,24 +5738,41 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
 ) -> None:
     Base.metadata.drop_all(postgres_engine)
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, engine=postgres_engine
+        tmp_path, nodes=4, mapping_node_count=2, engine=postgres_engine
     )
+    first_nodes, second_nodes = tuple(nodes[:2]), tuple(nodes[2:])
+    assert set(first_nodes).isdisjoint(second_nodes)
     installation = installed_recipe(
-        service, mapping_id, build_id, nodes, request_id="e" * 35 + "1"
+        service, mapping_id, build_id, first_nodes, request_id="e" * 35 + "1"
     )
     first = started_recipe(
         sessions,
         service,
         installation.owner_id,
-        nodes,
+        first_nodes,
         request_id="e" * 35 + "2",
         alias="first",
     )
-    second_run_id = clone_running_run(sessions, first.owner_id, alias="second")
-    with sessions.begin() as session:
-        for run_id in (first.owner_id, second_run_id):
-            run = _required(session.get(RecipeRun, run_id))
-            run.plan = {**run.plan, "observation_schema_version": 2}
+    with sessions() as session:
+        first_mapping = session.get(ClusterMapping, mapping_id)
+        assert first_mapping is not None
+        revision_id = first_mapping.recipe_revision_id
+    mappings = ClusterMappingService(sessions)
+    second_mapping = mappings.preview(revision_id, second_nodes, {}, "admin")
+    second_mapping_id = mappings.materialize(second_mapping, actor="admin", now=NOW)
+    second_installation = installed_recipe(
+        service, second_mapping_id, build_id, second_nodes, request_id="e" * 35 + "5"
+    )
+    second = started_recipe(
+        sessions,
+        service,
+        second_installation.owner_id,
+        second_nodes,
+        request_id="e" * 35 + "6",
+        alias="second",
+    )
+    second_run_id = second.owner_id
+    expected_members = {first.owner_id: first_nodes, second_run_id: second_nodes}
     mark_current_exact_observations(sessions, first.owner_id, NOW)
     mark_current_exact_observations(sessions, second_run_id, NOW)
     publisher = ConcurrentPublisher()
@@ -5794,7 +5819,42 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
         for stop_job in stop_jobs:
             stop_payloads = _typed_stop_payloads(stop_job.payload)
             run_id = stop_job.payload["owner_id"]
-            assert len(stop_payloads) == len(nodes)
+            assert len(stop_payloads) == len(expected_members[run_id])
+            assert tuple(stop_job.targets) == expected_members[run_id]
+            members = tuple(
+                session.scalars(
+                    select(RunNode)
+                    .where(RunNode.run_id == run_id)
+                    .order_by(RunNode.rank)
+                )
+            )
+            assert [(row.node_id, row.rank, row.role) for row in members] == [
+                (expected_members[run_id][0], 0, "entrypoint"),
+                (expected_members[run_id][1], 1, "worker"),
+            ]
+            assert {
+                row.workload_intent_ordinal
+                for row in session.scalars(
+                    select(AgentNode).where(
+                        AgentNode.node_id.in_(expected_members[run_id])
+                    )
+                )
+            } == {stop_job.payload["workload_intent_ordinal"]}
+            retained_run = _required(session.get(RecipeRun, run_id))
+            assert sorted((stop.rank, stop.role) for stop in stop_payloads) == [
+                (0, "entrypoint"),
+                (1, "worker"),
+            ]
+            assert {
+                (stop.installation_id, stop.run_generation, stop.plan_digest)
+                for stop in stop_payloads
+            } == {
+                (
+                    retained_run.installation_id,
+                    retained_run.run_generation,
+                    retained_run.plan_digest,
+                )
+            }
             assert {stop.run_id for stop in stop_payloads} == {run_id}
             assert {stop.target_runtime_id for stop in stop_payloads} == {run_id}
             assert all(stop.cancel_pending_start for stop in stop_payloads)
