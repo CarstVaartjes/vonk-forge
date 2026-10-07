@@ -1,9 +1,11 @@
 """Emit canonical numeric schema values through FastAPI's OpenAPI assembler.
 
 FastAPI0.141.1's final OpenAPI model coerces JSON Schema numeric keywords into
-float. The pinned assembler below is upstream get_openapi (MIT, FastAPI
-contributors), with only its final return adapted. Pydantic remains the schema
-owner; FastAPI still owns route construction and document validation.
+float. The assembler derives from pinned upstream get_openapi (MIT, FastAPI
+contributors). It preserves numeric keywords, registers complete observation
+payload graphs, and retains explicitly declared stream record and JSON error
+models. Pydantic remains the schema owner; FastAPI still owns route construction
+and document validation.
 Upstream source SHA256:41a50551f99619f9333ac64edf7cd397b64f721244b89a82916c69f233239def.
 """
 
@@ -176,6 +178,31 @@ def canonical_openapi(
                                 "content"
                             ].values():
                                 media["schema"] = deepcopy(record_schema)
+                            # Error responses remain canonical JSON even when
+                            # the success class emits NDJSON or SSE. Restore
+                            # only explicitly declared media, using the same
+                            # owning response model rather than the inferred
+                            # streaming success media.
+                            for status, field in api_route.response_fields.items():
+                                if not str(status).isdigit() or int(status) < 400:
+                                    continue
+                                declared_content = api_route.responses[status].get(
+                                    "content"
+                                )
+                                if not declared_content:
+                                    continue
+                                error_content = deepcopy(declared_content)
+                                error_schema = get_schema_from_model_field(
+                                    field=field,
+                                    model_name_map=model_name_map,
+                                    field_mapping=field_mapping,
+                                    separate_input_output_schemas=separate_input_output_schemas,
+                                )
+                                for media in error_content.values():
+                                    media["schema"] = deepcopy(error_schema)
+                                operation["responses"][str(status)]["content"] = (
+                                    error_content
+                                )
                     paths.setdefault(api_route.path_format, {}).update(path)
                 if security_schemes:
                     components.setdefault("securitySchemes", {}).update(

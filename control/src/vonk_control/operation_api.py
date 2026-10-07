@@ -243,7 +243,8 @@ def bounded_error_responses(*status_codes: int) -> dict[int | str, dict[str, Any
         status_code: {
             "model": RequestValidationProblem
             if status_code == 422
-            else BoundedErrorResponse
+            else BoundedErrorResponse,
+            "content": {"application/json": {}},
         }
         for status_code in status_codes
     }

@@ -579,7 +579,7 @@ def create_app(
         version="1.0",
         docs_url=None,
         redoc_url=None,
-        responses={422: {"model": RequestValidationProblem}},
+        responses=bounded_error_responses(422),
         lifespan=lifespan,
     )
     app.router.route_class = ControllerAPIRoute

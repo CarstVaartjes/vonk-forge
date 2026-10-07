@@ -35,7 +35,10 @@ from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles.control_client import (
     ControlClient,
+    ControlHTTPError,
     ControlMalformedResponse,
+    ControlUnauthorized,
+    ControlUnavailable,
     source_schema_validator,
 )
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -315,3 +318,73 @@ def test_stream_response_schema_validates_its_actual_canonical_record(
     record = serialize_json_value(model)
     assert validator.is_valid(record)
     assert not validator.is_valid(json.dumps(record))
+
+
+@pytest.mark.parametrize("path", ["/api/fleet", "/api/platform", "/api/fleet/stream"])
+def test_stream_authentication_error_retains_declared_json_media(tmp_path, path):
+    with _peer(_large_snapshot(tmp_path)) as peer:
+        graph = peer.app.openapi()
+        response = peer.get(path, headers={"Authorization": "Bearer invalid"})
+    assert response.status_code == 401
+    assert response.headers["content-type"].partition(";")[0] == "application/json"
+    content = graph["paths"][path]["get"]["responses"]["401"]["content"]
+    assert set(content) == {"application/json"}
+    validation_content = graph["paths"][path]["get"]["responses"]["422"]["content"]
+    assert set(validation_content) == {"application/json"}
+    validator = source_schema_validator(
+        {"components": graph["components"], **content["application/json"]["schema"]}
+    )
+    assert validator.is_valid(response.json())
+    with pytest.raises(ControlUnauthorized):
+        _client(tmp_path, response).request("GET", path)
+
+
+def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp_path):
+    with _peer(_large_snapshot(tmp_path)) as peer:
+
+        @peer.app.get("/api/observation-validation-fixture")
+        def validation_fixture(value: int) -> dict[str, int]:
+            return {"value": value}
+
+        # Exercise the real global validation renderer. Fleet/platform have no
+        # query input to invalidate today, but inherit this exact 422 contract.
+        response = peer.get("/api/observation-validation-fixture?value=not-an-integer")
+        graph = peer.app.openapi()
+    assert response.status_code == 422
+    assert response.headers["content-type"].partition(";")[0] == "application/json"
+    schema = graph["paths"]["/api/platform"]["get"]["responses"]["422"]["content"][
+        "application/json"
+    ]["schema"]
+    assert source_schema_validator(
+        {"components": graph["components"], **schema}
+    ).is_valid(response.json())
+    with pytest.raises(ControlHTTPError) as refused:
+        _client(tmp_path, response).request("GET", "/api/platform")
+    assert refused.value.status_code == 422
+
+
+def test_platform_capture_failure_bytes_preserve_retry_through_cli(
+    tmp_path, monkeypatch
+):
+    from vonk_control import api
+    from vonk_control.platform_observation_errors import ObservationCaptureUnavailable
+
+    def unreadable_capture():
+        raise ObservationCaptureUnavailable(phase="stored-worker-validation")
+
+    monkeypatch.setattr(api, "api_only_observation", unreadable_capture)
+    with _peer(_large_snapshot(tmp_path)) as peer:
+        response = peer.get("/api/platform")
+        graph = peer.app.openapi()
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "5"
+    assert response.headers["content-type"].partition(";")[0] == "application/json"
+    content = graph["paths"]["/api/platform"]["get"]["responses"]["503"]["content"]
+    assert set(content) == {"application/json"}
+    assert source_schema_validator(
+        {"components": graph["components"], **content["application/json"]["schema"]}
+    ).is_valid(response.json())
+    with pytest.raises(ControlUnavailable) as unavailable:
+        _client(tmp_path, response).request("GET", "/api/platform")
+    assert unavailable.value.retry_after_seconds == 5
+    assert unavailable.value.code == "observation-unavailable"
