@@ -522,6 +522,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "One oldest due accepted Stop per worker pass retries its exact durable request. A deferred row retains original bytes, claims and meaningful cause and advances its next-attempt clock, releasing transactions before publication and allowing other due rows to advance."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_journal_repair.py",
+      "function": "_try_repair_once",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Exact repair evidence is observed again through the durable pending deadline and capped backoff; test_unproven_repair_ends_without_blocking_fresh_same_spark proves expiry releases holds and immediately admits a new request."
     }
   ],
   "call_edges": [
@@ -876,8 +884,6 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.apply_cleanup", "run-switch.plan_blocked", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.apply_profile_stop", "run-switch.plan_blocked", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.apply_stop", "run-switch.plan_blocked", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.cancel", "run-switch-cancellation-request-was-already-used-differently", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.cancel", "run-switch-operation-is-not-cancellable", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.recheck_resources_in_session", "run-switch.recipe_unresolved", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "run-switch-operation-is-not-retryable", 3],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "run-switch-request-key-was-already-used", 1],
@@ -963,7 +969,6 @@
       "sites": [
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService._apply_plan", "message", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService._apply_plan", "run-switch-target-spark-scope-changed", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.cancel", "message", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.preview_stop", "run-switch.profile_stop_scope_changed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "message", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "run-switch-retry-runtime-image-reference-is-invalid", 2],

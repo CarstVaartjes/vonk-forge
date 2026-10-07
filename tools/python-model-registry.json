@@ -390,6 +390,10 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/run_switch_journal_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/run_switch_observation_contract.py",
       "kind": "controller-contract",
       "reason": "Canonical observations and retained identities for restart-safe run-switch recovery."

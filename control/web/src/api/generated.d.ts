@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 504d9c6b820e2c8c4f818ea5c173ee6ddac886f22ad310947221ca5d582d8e1e. Do not edit.
+// Generated from canonical OpenAPI SHA256 b7038af8aeaedd40bf0c99f702bed7ab96588945455d4e22f1aeb08ebd1b74a0. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5443,6 +5443,11 @@ export interface components {
             workload_intent_ordinal: number;
         };
         /**
+         * JournalRepairPurpose
+         * @enum {string}
+         */
+        JournalRepairPurpose: "measurement" | "cancellation" | "owner_observation";
+        /**
          * LibraryAssessmentCode
          * @description Why a library entry is not assessed runnable on the current fleet.
          * @enum {string}
@@ -6762,6 +6767,28 @@ export interface components {
             denied_jurisdictions: string[];
             /** Notice */
             notice: string;
+        };
+        /** NativeProgressWitness */
+        NativeProgressWitness: {
+            /** Attempt Id */
+            attempt_id: string;
+            /** Certificate Serial */
+            certificate_serial: string;
+            /** Fence */
+            fence: string;
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            /** Payload Digest */
+            payload_digest: string;
+            /** @default null */
+            sample: components["schemas"]["OperationProgress"] | null;
+            /**
+             * Sample Digest
+             * @default null
+             */
+            sample_digest: string | null;
         };
         /**
          * NetworkInterface
@@ -10802,6 +10829,88 @@ export interface components {
              * @default null
              */
             workload_intent_ordinal: number | null;
+        };
+        /**
+         * RunSwitchJournalRepairEndEvidence
+         * @description An ended observation retains the original journal and cancel request.
+         */
+        RunSwitchJournalRepairEndEvidence: {
+            /** @default null */
+            cancellation: components["schemas"]["RunSwitchCancellation"] | null;
+            /**
+             * Code
+             * @constant
+             */
+            code: "run-switch.journal-repair-exhausted";
+            /** Operation Id */
+            operation_id: string;
+            /** Original Digest */
+            original_digest: string;
+            /** Original Document */
+            original_document: string;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Request Key */
+            request_key: string;
+        };
+        /**
+         * RunSwitchJournalRepairEvidence
+         * @description Historical evidence only: no runnable state, clock, or alternate intent.
+         */
+        RunSwitchJournalRepairEvidence: {
+            /**
+             * Algorithm
+             * @constant
+             */
+            algorithm: "zero-transfer-native-install-v1";
+            /** Corrected Digest */
+            corrected_digest: string;
+            /** Native Samples */
+            native_samples: components["schemas"]["NativeProgressWitness"][];
+            /** Operation Id */
+            operation_id: string;
+            /** Original Digest */
+            original_digest: string;
+            /** Original Document */
+            original_document: string;
+            /** Payload Digest */
+            payload_digest: string;
+            /** Plan Digest */
+            plan_digest: string;
+            purpose: components["schemas"]["JournalRepairPurpose"];
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Request Key */
+            request_key: string;
+        };
+        /**
+         * RunSwitchJournalRepairPendingState
+         * @description Durable observation and cancellation while Job.result remains untouched.
+         */
+        RunSwitchJournalRepairPendingState: {
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number | ExactNumber;
+            /** @default null */
+            cancellation: components["schemas"]["RunSwitchCancellation"] | null;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /**
+             * Next Attempt At
+             * Format: date-time
+             */
+            next_attempt_at: string;
         };
         /** RunSwitchMemberProgress */
         RunSwitchMemberProgress: {

@@ -225,6 +225,21 @@ class TerminalHistoryCollector:
                         if not unused:
                             continue
                         if model is Job:
+                            from .models import (
+                                RunSwitchJournalRepair,
+                                RunSwitchJournalRepairPending,
+                            )
+
+                            session.execute(
+                                delete(RunSwitchJournalRepair).where(
+                                    RunSwitchJournalRepair.job_id == identity
+                                )
+                            )
+                            session.execute(
+                                delete(RunSwitchJournalRepairPending).where(
+                                    RunSwitchJournalRepairPending.job_id == identity
+                                )
+                            )
                             session.execute(
                                 delete(JobAttempt).where(JobAttempt.job_id == identity)
                             )
