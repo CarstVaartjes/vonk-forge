@@ -73,7 +73,7 @@
   "max_debt": 0,
   "debt_ceiling": {
     "total": 59,
-    "unaudited": 219,
+    "unaudited": 201,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
