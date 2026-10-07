@@ -70,7 +70,11 @@ class PlatformObserver:
                 source_sha=_readable_source(row.source_sha),
                 worker_contract_sha256=_readable_digest(row.worker_contract_sha256),
                 loop_sequence=row.loop_sequence,
-                completed_at=row.completed_at,
+                completed_at=(
+                    row.completed_at.replace(tzinfo=UTC)
+                    if row.completed_at.tzinfo is None
+                    else row.completed_at.astimezone(UTC)
+                ),
             )
             for row in rows
             if row.completed_at is not None
