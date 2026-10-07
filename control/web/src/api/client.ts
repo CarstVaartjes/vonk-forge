@@ -1,6 +1,6 @@
 import createClient, {createQuerySerializer} from "openapi-fetch";
 import {ContractResponse, readControlResponse, serializeControlBody, validateControlBody, validateControlParameters} from "./contract-json";
-import {stringifyContractJson, parseContractJson, isWireNumber, formatWire, type WireNumber} from "./contract-numeric";
+import {stringifyContractJson, parseContractJson, isWireNumber, formatWire} from "./contract-numeric";
 import {AuthenticationRequired} from "../auth";
 import type {paths} from "./generated";
 import type {
@@ -12,6 +12,7 @@ import type {
   FleetProfileEndpoints,
   FleetProfilePreview,
   FleetProfile,
+  FleetProfileNumber,
   FleetProfileRead,
   FleetProfileApplicationView,
   FleetProfileLoadInput,
@@ -330,14 +331,14 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/profile", {signal}));
   }
 
-  async profile(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileRead> {
+  async profile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileRead> {
     return resultData(await this.generated.GET("/api/profile/{number}", {
       params: {path: {number}},
       signal,
     }));
   }
 
-  async autosaveProfile(number: WireNumber, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
+  async autosaveProfile(number: FleetProfileNumber, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile> {
     return resultData(await this.generated.PUT("/api/profile/{number}", {
       params: {path: {number}},
       body: input,
@@ -345,14 +346,14 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async previewProfile(number: WireNumber, signal?: AbortSignal): Promise<FleetProfilePreview> {
+  async previewProfile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfilePreview> {
     return resultData(await this.generated.POST("/api/profile/{number}/preview", {
       params: {path: {number}},
       signal,
     }));
   }
 
-  async loadProfile(number: WireNumber, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async loadProfile(number: FleetProfileNumber, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.POST("/api/profile/{number}/load", {
       params: {path: {number}},
       body: input,
@@ -360,21 +361,21 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async profileApplicationByRequest(number: WireNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async profileApplicationByRequest(number: FleetProfileNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.GET("/api/profile/{number}/requests/{request_key}", {
       params: {path: {number, request_key: requestKey}},
       signal,
     }));
   }
 
-  async profileProgress(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async profileProgress(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.GET("/api/profile/{number}/progress", {
       params: {path: {number}},
       signal,
     }));
   }
 
-  async profileEndpoints(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileEndpoints> {
+  async profileEndpoints(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileEndpoints> {
     return resultData(await this.generated.GET("/api/profile/{number}/endpoints", {
       params: {path: {number}},
       signal,
@@ -416,13 +417,13 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async profileDefinition(number: WireNumber, signal?: AbortSignal): Promise<ProfileDefinition> {
+  async profileDefinition(number: FleetProfileNumber, signal?: AbortSignal): Promise<ProfileDefinition> {
     return resultData(await this.generated.GET("/api/profile/{number}/definition", {
       params: {path: {number}}, signal,
     }));
   }
 
-  async cancelProfileApplication(applicationId: string, profileNumber: WireNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
+  async cancelProfileApplication(applicationId: string, profileNumber: FleetProfileNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView> {
     return resultData(await this.generated.POST("/api/profile/applications/{application_id}/cancel", {
       params: {path: {application_id: applicationId}},
       body: {profile_number: profileNumber, request_key: requestKey},

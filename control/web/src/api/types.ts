@@ -122,6 +122,7 @@ export type ArtifactJobList = components["schemas"]["ArtifactJobListResponse"];
 export type ArtifactJobCapabilities = components["schemas"]["ArtifactJobCapabilitiesResponse"];
 export type ArtifactTransferProgress = {loaded: number; total: number};
 export type FleetProfile = components["schemas"]["FleetProfileView"];
+export type FleetProfileNumber = FleetProfile["number"];
 export type FleetProfileRead = FleetProfile | components["schemas"]["UnavailableFleetProfileView"];
 export function readableProfile(profile: FleetProfileRead): profile is FleetProfile {
   return !("projection_issue" in profile);
@@ -170,15 +171,15 @@ export interface LibraryApi {
 export interface ControlApi extends LibraryApi {
   downloadCliToken(): Promise<CliTokenDownload>;
   profiles(signal?: AbortSignal): Promise<FleetProfileList>;
-  profile(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileRead>;
-  autosaveProfile(number: WireNumber, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
-  previewProfile(number: WireNumber, signal?: AbortSignal): Promise<FleetProfilePreview>;
-  loadProfile(number: WireNumber, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
-  profileApplicationByRequest(number: WireNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
-  profileProgress(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
-  profileEndpoints(number: WireNumber, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
-  profileDefinition(number: WireNumber, signal?: AbortSignal): Promise<ProfileDefinition>;
-  cancelProfileApplication(applicationId: string, profileNumber: WireNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileRead>;
+  autosaveProfile(number: FleetProfileNumber, input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
+  previewProfile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfilePreview>;
+  loadProfile(number: FleetProfileNumber, input: FleetProfileLoadInput, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profileApplicationByRequest(number: FleetProfileNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profileProgress(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
+  profileEndpoints(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileEndpoints>;
+  profileDefinition(number: FleetProfileNumber, signal?: AbortSignal): Promise<ProfileDefinition>;
+  cancelProfileApplication(applicationId: string, profileNumber: FleetProfileNumber, requestKey: string, signal?: AbortSignal): Promise<FleetProfileApplicationView>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal): Promise<components["schemas"]["FleetActionResponse"]>;
   fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode>;
