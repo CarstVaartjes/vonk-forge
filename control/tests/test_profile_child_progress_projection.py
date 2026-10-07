@@ -31,8 +31,11 @@ from vonk_control.operation_progress import aggregate_progress, member_progress
 from vonk_control.recipe_operations import RecipeOperationService, _stored_phases
 from vonk_control.stored_json import write_guard_mode
 
+from cluster_profiles.control_client import validate_control_document
+
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, claim_agent
+from .test_fleet_profile_api import _client, _headers
 from .test_profile_installed_execution import (
     _apply,
     _drive_to_job,
@@ -243,6 +246,19 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     ]
     assert len(effects) == 1 and effects[0].progress is not None
     assert effects[0].progress.operation == profile_progress.operation
+    # Exercise the actual authenticated HTTP response and canonical CLI schema
+    # reader, rather than validating a second hand-built progress document.
+    api, codec = _client(sessions, profiles=service)
+    response = api.get(
+        f"/api/profile/applications/{application.id}",
+        headers=_headers(codec, "administrator"),
+    )
+    assert response.status_code == 200, response.text
+    document = validate_control_document("FleetProfileApplicationView", response.json())
+    public = document["progress"]["effects"][0]["progress"]["operation"]
+    assert public["completed_bytes"] == 48
+    assert public["members"][0]["observed_at"] == observed_at
+    assert {member["member_id"] for member in public["members"]} == set(nodes)
 
 
 def test_disjoint_child_samples_remain_distinct_after_restart(
