@@ -30198,3 +30198,26 @@ impl From<&SourceBundleManifest> for SourceBundleDigestManifest {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Integer(::serde_json::Number);
+impl Integer {
+    pub(crate) fn number(&self) -> &::serde_json::Number {
+        &self.0
+    }
+    pub(crate) fn from_i64(value: i64) -> Self {
+        Self(value.into())
+    }
+    pub(crate) fn from_u64(value: u64) -> Self {
+        Self(value.into())
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for Integer {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        crate::wire_schema::deserialize_integer_number(deserializer).map(Self)
+    }
+}
+impl ::serde::Serialize for Integer {
+    fn serialize<S: ::serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        ::serde::Serialize::serialize(&self.0, serializer)
+    }
+}
