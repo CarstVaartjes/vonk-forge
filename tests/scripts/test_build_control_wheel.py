@@ -6,6 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/build-control-wheel"
 WHEEL_NAME = "vonk_agent_protocol-4.1.0-py3-none-any.whl"
@@ -13,6 +15,12 @@ WHEEL_NAME = "vonk_agent_protocol-4.1.0-py3-none-any.whl"
 # project, or scripts/test, which always does.
 CONTROL_UV_COMMAND = re.compile(
     r"uv\s+(?:sync|run).*--project\s+(?:control|\.vonk-forge/control)|\bscripts/test\s"
+)
+PROTOCOL_WHEEL_BUILD = re.compile(
+    r"(?m)^[ \t]*uv build --project agent_protocol --wheel --out-dir inventory/wheels[ \t]*$"
+)
+PROTOCOL_WHEEL_LOCK_REFRESH = re.compile(
+    r"(?m)^[ \t]*python3 scripts/refresh-protocol-wheel-lock[ \t]*$"
 )
 
 
@@ -87,15 +95,70 @@ def _prepares_protocol_wheel(step: dict[str, object], same_step: bool) -> bool:
     if step.get("uses") in _PREPARING_ACTIONS:
         return True
     run = step.get("run")
-    if not isinstance(run, str) or "scripts/build-control-wheel" not in run:
+    if not isinstance(run, str):
         return False
-    if not same_step:
+    if same_step:
+        control = CONTROL_UV_COMMAND.search(run)
+        if control is None:
+            return False
+        run = run[: control.start()]
+    if "scripts/build-control-wheel" in run:
         return True
-    control = CONTROL_UV_COMMAND.search(run)
-    return (
-        control is not None
-        and run.index("scripts/build-control-wheel") < control.start()
-    )
+    # Artifact producers intentionally refresh the candidate pin. Recognize
+    # their exact build plus lock-refresh sequence, never an unverified build.
+    build = PROTOCOL_WHEEL_BUILD.search(run)
+    refresh = PROTOCOL_WHEEL_LOCK_REFRESH.search(run)
+    return build is not None and refresh is not None and build.end() <= refresh.start()
+
+
+@pytest.mark.parametrize(
+    ("run", "same_step", "expected"),
+    [
+        (
+            (
+                "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n"
+                "python3 scripts/refresh-protocol-wheel-lock\n"
+            ),
+            False,
+            True,
+        ),
+        (
+            (
+                "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n"
+                "python3 scripts/refresh-protocol-wheel-lock\n"
+                "uv sync --project control --frozen\n"
+            ),
+            True,
+            True,
+        ),
+        (
+            "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n",
+            False,
+            False,
+        ),
+        (
+            (
+                "python3 scripts/refresh-protocol-wheel-lock\n"
+                "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n"
+            ),
+            False,
+            False,
+        ),
+        (
+            (
+                "uv build --project agent_protocol --wheel --out-dir inventory/wheels\n"
+                "uv sync --project control --frozen\n"
+                "python3 scripts/refresh-protocol-wheel-lock\n"
+            ),
+            True,
+            False,
+        ),
+    ],
+)
+def test_artifact_wheel_preparation_requires_build_then_pin_before_control(
+    run: str, same_step: bool, expected: bool
+) -> None:
+    assert _prepares_protocol_wheel({"run": run}, same_step) is expected
 
 
 def test_build_script_verifies_the_frozen_wheel_digest(tmp_path: Path) -> None:
