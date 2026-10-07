@@ -100,7 +100,10 @@ export function displayRatio(a: WireNumber, b: WireNumber): number {
   const shiftText = signedAdd(x.magnitude, y.magnitude.startsWith("-") ? y.magnitude.slice(1) : `-${y.magnitude}`);
   const shift = signedCompare(shiftText, "309") > 0 ? 309 : signedCompare(shiftText, "-325") < 0 ? -325 : Number(shiftText);
   const coefficient = (digits: string) => Number(digits.slice(0, 16)) / 10 ** (Math.min(digits.length, 16) - 1);
-  return coefficient(x.digits) / coefficient(y.digits) * 10 ** shift * (x.negative !== y.negative ? -1 : 1);
+  const ratio = coefficient(x.digits) / coefficient(y.digits) * 10 ** shift * (x.negative !== y.negative ? -1 : 1);
+  // The mantissas are a bounded display approximation. Round away their
+  // binary arithmetic noise; authority and exported values retain raw tokens.
+  return Number.isFinite(ratio) ? Number(ratio.toPrecision(15)) : ratio;
 }
 export function contractType(value: unknown, types: string[], strictIntegerTokens = true, finiteNumbers = true): boolean {
   return types.some(type => {

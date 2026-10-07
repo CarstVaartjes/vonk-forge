@@ -266,12 +266,18 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
         assert (
             session.scalar(select(Job.id).where(Job.request_id == child_key)) == stop_id
         )
-    followup = restarted.create(
+    fresh_profiles = FleetProfileService(
+        sessions,
+        clock=lambda: due,
+        switch_adapter=adapter,
+        assessment_provider=adapter.assess,
+    )
+    followup = fresh_profiles.create(
         FleetProfileInput(name="Fresh authorized Idle"), actor="admin"
     )
-    reviewed = restarted.preview(followup.id)
+    reviewed = fresh_profiles.preview(followup.id)
     assert reviewed.allowed, reviewed.reasons
-    fresh = restarted.apply(followup.id, request_key=_uuid(19802), actor="admin")
+    fresh = fresh_profiles.apply(followup.id, request_key=_uuid(19802), actor="admin")
     assert fresh.id != accepted.id and fresh.request_key == _uuid(19802)
     assert not fresh.progress.admission_pending
     if output := os.environ.get("VONK_STARTUP_REPAIR_PROOF_OUTPUT"):
