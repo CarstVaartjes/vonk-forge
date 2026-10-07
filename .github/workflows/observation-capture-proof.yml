@@ -1,0 +1,87 @@
+name: Observation capture proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/observation-capture-proof.yml
+      - control/tests/test_observation_capture_postgres.py
+      - control/src/vonk_control/observation_capture.py
+      - control/src/vonk_control/observation_transfer.py
+      - control/src/vonk_control/fleet_projection.py
+      - control/src/vonk_control/platform_observation.py
+      - control/src/vonk_control/operator_projection_api.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observation-capture-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    name: SQL capture, slow-stream release and same-read repair
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+    steps:
+      - name: Check out exact current observation producer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Provide canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare locked Python dependencies
+        uses: ./.github/actions/python-env
+      - name: Build canonical recipe library index
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Pull pinned disposable PostgreSQL
+        run: scripts/pull-test-images postgres
+      - name: Verify that mixed SQL generations fail at the real boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          source=control/src/vonk_control/fleet_projection.py
+          saved=$(mktemp)
+          cp "$source" "$saved"
+          trap 'cp "$saved" "$source"; rm -f "$saved"' EXIT
+          python - <<'PYTHON'
+          from pathlib import Path
+          path = Path("control/src/vonk_control/fleet_projection.py")
+          source = path.read_text()
+          needle = "            begin_observation_capture(session)"
+          assert source.count(needle) == 1
+          path.write_text(source.replace(needle, "            pass  # hosted snapshot-isolation counterexample"))
+          PYTHON
+          set +e
+          uv run --project control --frozen pytest -q -n 0 \
+            control/tests/test_observation_capture_postgres.py::test_fleet_cursor_and_membership_are_one_real_sql_snapshot \
+            --tb=short > /tmp/observation-capture-counterexample.log 2>&1
+          result=$?
+          set -e
+          cat /tmp/observation-capture-counterexample.log
+          test "$result" -eq 1
+          python - <<'PYTHON'
+          from pathlib import Path
+          assert "capture mixed SQL generations" in Path("/tmp/observation-capture-counterexample.log").read_text()
+          PYTHON
+          cp "$saved" "$source"
+          cmp "$saved" "$source"
+      - name: Prove real capture, release and repaired retry
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_observation_capture_postgres.py --tb=short
+          --junitxml=/tmp/observation-capture.xml
+      - name: Require five real executed positive cases
+        shell: bash
+        run: |
+          python - <<'PYTHON'
+          import xml.etree.ElementTree as ET
+          cases = ET.parse("/tmp/observation-capture.xml").findall(".//testcase")
+          assert len(cases) == 5, "all five capture cases must execute"
+          assert all(case.find("skipped") is None and case.find("failure") is None and case.find("error") is None for case in cases), "no skipped or failed capture evidence"
+          PYTHON
