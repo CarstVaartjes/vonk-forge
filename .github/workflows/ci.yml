@@ -124,9 +124,11 @@ jobs:
               echo "No changed Python files; skipping Ruff"
             else
               uv run --project control --frozen ruff check --force-exclude "${changed_python[@]}"
+              uv run --project control --frozen ruff format --check --force-exclude "${changed_python[@]}"
             fi
           else
             uv run --project control --frozen ruff check .
+            uv run --project control --frozen ruff format --check .
           fi
       - name: Check Python types
         shell: bash
