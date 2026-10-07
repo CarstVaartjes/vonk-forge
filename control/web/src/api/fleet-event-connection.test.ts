@@ -12,7 +12,19 @@ function response(body: string) {
 }
 const notice = {reset_reason: "initial", event_cursor: 5};
 const frame = `id: 5\nevent: fleet-refresh\ndata: ${stringifyContractJson(notice)}\n\n`;
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+const connections = new Set<FleetEventConnection>();
+function connectionFor(...args: ConstructorParameters<typeof FleetEventConnection>): FleetEventConnection {
+  const connection = new FleetEventConnection(...args);
+  connections.add(connection);
+  return connection;
+}
+afterEach(() => {
+  // Disposal must run even when an assertion fails: a previous live owner
+  // must never call a later test's replacement fetch or consume its clock.
+  for (const connection of connections) connection.close();
+  connections.clear();
+  vi.useRealTimers(); vi.unstubAllGlobals();
+});
 
 test("reads SSE BOM, CRLF/CR/LF, multiline data, retry, persistent IDs and empty ID reset", async () => {
   const events: MessageEvent<string>[] = [], retries: bigint[] = [];
@@ -41,7 +53,11 @@ test("schema-validates actual streamed refresh data before it can request snapsh
   expect(received).toEqual([notice]);
 });
 
-async function flush() { for (let index = 0; index < 8; index += 1) await Promise.resolve(); }
+async function flush() {
+  // Drain the finite byte-at-a-time reader promise chain without advancing
+  // elapsed time or its server-owned reconnect deadline.
+  await vi.advanceTimersByTimeAsync(0);
+}
 
 test("reconnects one request at a time using only the applied cursor and server retry delay", async () => {
   vi.useFakeTimers();
@@ -55,7 +71,7 @@ test("reconnects one request at a time using only the applied cursor and server 
   });
   vi.stubGlobal("fetch", fetcher);
   let applied = "5";
-  const connection = new FleetEventConnection(() => applied);
+  const connection = connectionFor(() => applied);
   const received = vi.fn();
   connection.addEventListener("fleet-refresh", received);
   await flush();
@@ -83,7 +99,7 @@ test("204 closes permanently and 401 invokes the existing authentication owner w
     const authorize = vi.fn((reply: Response) => { if (reply.status === 401) throw new Error("Authentication required"); });
     const fetcher = vi.fn().mockResolvedValue(new Response(null, {status}));
     vi.stubGlobal("fetch", fetcher);
-    const connection = new FleetEventConnection(() => "", authorize);
+    const connection = connectionFor(() => "", authorize);
     const error = vi.fn(); connection.addEventListener("error", error);
     await flush();
     expect(error).toHaveBeenCalledTimes(1);
@@ -117,7 +133,7 @@ test("rejects canonical payload/header mismatch before dispatch and reconnects f
     return new Response(new ReadableStream({start() { /* live */ }}), {headers: {"Content-Type": "text/event-stream"}});
   });
   vi.stubGlobal("fetch", fetcher);
-  const connection = new FleetEventConnection(() => "5");
+  const connection = connectionFor(() => "5");
   const received = vi.fn(), unavailable = vi.fn();
   connection.addEventListener("fleet-refresh", received);
   connection.addEventListener("unavailable", unavailable);
@@ -134,7 +150,7 @@ test("retries service unavailable without claiming malformed event authority", a
   vi.useFakeTimers();
   const fetcher = vi.fn().mockResolvedValue(new Response(null, {status: 503}));
   vi.stubGlobal("fetch", fetcher);
-  const connection = new FleetEventConnection(() => "5");
+  const connection = connectionFor(() => "5");
   const unavailable = vi.fn(), error = vi.fn();
   connection.addEventListener("unavailable", unavailable);
   connection.addEventListener("error", error);
@@ -158,7 +174,7 @@ test("502 repair resumes the same connection from applied cursor without adoptin
       {headers: {"Content-Type": "text/event-stream"}});
   });
   vi.stubGlobal("fetch", fetcher);
-  const connection = new FleetEventConnection(() => "5");
+  const connection = connectionFor(() => "5");
   const received = vi.fn(), unavailable = vi.fn(), error = vi.fn();
   connection.addEventListener("fleet-refresh", received);
   connection.addEventListener("unavailable", unavailable);
@@ -182,7 +198,7 @@ test.each([403, 404])("explicit HTTP%s refusal stops rather than retrying", asyn
   vi.useFakeTimers();
   const fetcher = vi.fn().mockResolvedValue(new Response(null, {status}));
   vi.stubGlobal("fetch", fetcher);
-  const connection = new FleetEventConnection(() => "5");
+  const connection = connectionFor(() => "5");
   const error = vi.fn(); connection.addEventListener("error", error);
   await flush();
   expect(error).toHaveBeenCalledTimes(1);
