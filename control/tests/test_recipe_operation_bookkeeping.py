@@ -69,6 +69,7 @@ from .test_recipe_builds import setup as build_setup
 from .test_recipe_operations import (
     NOW,
     _required,
+    complete_started_recipe,
     installed_recipe,
     setup_services,
     start_evidence,
@@ -1223,3 +1224,127 @@ def test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run(tmp_path):
         request_id=str(uuid.uuid4()),
     )
     assert accepted.owner_id != started.owner_id
+
+
+def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_path):
+    from vonk_agent_protocol import ContainerRuntimeAction, RecipeStopPayload
+    from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
+    from vonk_control.models import ResourceReservation
+
+    sessions, service, _queue, installed, started, nodes = _running_recipe(
+        tmp_path, nodes=2
+    )
+    with sessions.begin() as session:
+        installation = _required(session.get(RecipeInstallation, installed.owner_id))
+        mapping, build = installation.mapping_id, installation.recipe_build_id
+        for child in session.scalars(
+            select(AgentOperation).where(AgentOperation.parent_job_id == installed.id)
+        ):
+            session.delete(child)
+        session.delete(_required(session.get(Job, installed.id)))
+    stop_plan = service.preview_stop(started.owner_id)
+    stop = service.stop(
+        started.owner_id,
+        plan_digest=stop_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    observed_nodes: set[str] = set()
+    # Role phases issue one exact child at a time. Validate the actual signed
+    # helper binding for each produced child before recording its receipt.
+    for _ in nodes:
+        with sessions() as session:
+            parent = _required(session.get(Job, stop.id))
+            children = tuple(
+                session.scalars(
+                    select(AgentOperation).where(
+                        AgentOperation.parent_job_id == stop.id,
+                        AgentOperation.state.not_in(
+                            ["succeeded", "failed", "cancelled"]
+                        ),
+                    )
+                )
+            )
+            assert children
+            for child in children:
+                payload = RecipeStopPayload.model_validate(child.payload)
+                assert payload.run_id == started.owner_id
+                assert payload.installation_id == installed.owner_id
+                binding = derive_runtime_plan_binding(
+                    session,
+                    parent=parent,
+                    operation=child,
+                    node_id=child.node_id,
+                    action=ContainerRuntimeAction.STOP,
+                    cancellation_requested=False,
+                    now=NOW,
+                )
+                assert binding.runtime_run_id == started.owner_id
+                assert (
+                    binding.stop_plan_sha256
+                    == hashlib.sha256(canonical_message(payload)).hexdigest()
+                )
+        for child in children:
+            observed_nodes.add(child.node_id)
+            service.record_node_result(
+                stop.id, child.node_id, succeeded=True, evidence={}
+            )
+        if service.get(stop.id).state == "succeeded":
+            break
+    assert observed_nodes == set(nodes)
+    assert service.get(stop.id).state == "succeeded"
+    uninstall_plan = service.preview_uninstall(installed.owner_id)
+    assert uninstall_plan.allowed
+    uninstall = service.uninstall(
+        installed.owner_id,
+        plan_digest=uninstall_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    for node in nodes:
+        service.record_node_result(uninstall.id, node, succeeded=True, evidence={})
+    assert service.get(uninstall.id).state == "succeeded"
+    with sessions() as session:
+        assert _required(session.get(RecipeRun, started.owner_id)).state == "stopped"
+        assert (
+            _required(session.get(RecipeInstallation, installed.owner_id)).state
+            == "uninstalled"
+        )
+        assert (
+            session.scalar(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id.in_(
+                        [started.owner_id, installed.owner_id]
+                    ),
+                    ResourceReservation.state == "active",
+                )
+            )
+            is None
+        )
+    fresh = service.preview_install(mapping, build)
+    assert fresh.allowed
+    accepted = service.install(
+        fresh,
+        plan_digest=fresh.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert accepted.owner_id != installed.owner_id
+    for node in nodes:
+        service.record_node_result(
+            accepted.id, node, succeeded=True, evidence={"installed_bytes": 120}
+        )
+    assert service.get(accepted.id).state == "succeeded"
+    # Complete a fresh physical run too: cleanup must free its exact port and
+    # memory ownership, not merely make another installation row admissible.
+    fresh_run_plan = service.preview_run(accepted.owner_id, "fresh-after-cleanup")
+    assert fresh_run_plan.allowed
+    fresh_run = service.start(
+        fresh_run_plan,
+        plan_digest=fresh_run_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh_run.owner_id != started.owner_id
+    complete_started_recipe(sessions, service, fresh_run.id)
+    assert service.get(fresh_run.id).state == "succeeded"

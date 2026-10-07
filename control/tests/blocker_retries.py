@@ -12,11 +12,11 @@ The proof has two reviewed parts and one mechanical part:
   exceptions whose handler there retries or observes): the lifecycle tick, the
   observe pass or the claim loop that re-runs the work.  A loop is declared by a
   person, with the reason it retries.
-* ``route_guards`` lists the functions that stand between the framework and
-  *every* route (``ControllerAPIRoute``'s endpoint wrapper), each with the
-  exceptions it answers with a typed retryable response without re-raising: a
-  route entry reached by such a class is looped there.  A guard is checked to
-  hold a handler for each name it lists.
+* ``route_guards`` lists typed retryable observation boundaries. A registered
+  route handler protects only its own named catch. Non-route guards stand
+  between the framework and every route (``ControllerAPIRoute``'s endpoint
+  wrapper), and protect otherwise unhandled route entries. Each guard must hold
+  a handler for every exception name it declares.
 * ``call_edges`` declares where a call the code cannot name goes (a ``getattr``
   with a computed name), ``{"path", "function", "calls", "reason"}``; the edge
   keeps the ``try`` context of the dynamic call, so it can be looped.
@@ -199,7 +199,8 @@ class Prover:
             if name not in TOO_BROAD
         }
         for guard, caught in self.guards.items():
-            if caught & exact:
+            # A route handler cannot protect unrelated route entries.
+            if guard not in self.graph.route_functions and caught & exact:
                 return guard
         return None
 
@@ -216,7 +217,11 @@ class Prover:
             # but it is no evidence that a loop retries the raise.
             nonlocal loop
             outcome = graph.classify_try(
-                tries, exception_class, self.loops.get(where), TOO_BROAD
+                tries,
+                exception_class,
+                self.loops.get(where)
+                or (self.guards.get(where) if where in graph.route_functions else None),
+                TOO_BROAD,
             )
             if outcome == "loop":
                 if not guessed:

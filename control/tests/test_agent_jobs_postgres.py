@@ -17,6 +17,7 @@ from vonk_control import agent_operation_states as aos
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import TokenCodec
+from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentService
 from vonk_control.models import (
     AgentCertificate,
@@ -27,9 +28,10 @@ from vonk_control.models import (
     Job,
 )
 from vonk_control.operation_api import durable_operation_services
-from vonk_control.pki import CertificateAuthority, IssuedCertificate
+from vonk_control.pki import IssuedCertificate
 
 from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
+from .ca_test_authority import FixtureCertificateAuthority
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import exercise_upgrade_reconnect
@@ -52,9 +54,14 @@ class Clock:
         self.now += timedelta(seconds=seconds)
 
 
-class RevokingAuthority(CertificateAuthority):
+class RevokingAuthority(FixtureCertificateAuthority):
     def issue_node(
-        self, node_id: str, csr_pem: bytes, now: datetime
+        self,
+        node_id: str,
+        csr_pem: bytes,
+        now: datetime,
+        *,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         raise NotImplementedError
 
@@ -64,7 +71,7 @@ class RevokingAuthority(CertificateAuthority):
         csr_pem: bytes,
         now: datetime,
         *,
-        request_id: str,
+        request: CertificateIssuanceBinding,
     ) -> IssuedCertificate:
         raise NotImplementedError
 

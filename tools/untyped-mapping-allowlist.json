@@ -252,6 +252,27 @@
       "annotation": "dict[str, object]",
       "count": 1,
       "reason": "Generic canonical-JSON digest utility over a document the caller built from typed values."
+    },
+    {
+      "path": "src/cluster_profiles/control_client.py",
+      "function": "source_schema_validator",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "The generic JSON Schema validator receives the explicit external OpenAPI/JSON Schema graph selected by the caller, including a verified historical release graph. It does not invent or decode an application payload model, select another schema after refusal, or fall back to the current bundled graph."
+    },
+    {
+      "path": "src/cluster_profiles/observation_transfer_reader.py",
+      "function": "_unique_members",
+      "annotation": "dict[str, object]",
+      "count": 2,
+      "reason": "Generic json.load/json.loads object-pairs hook checks duplicate JSON keys before any owning payload decoder. Both the result accumulator and return are the external JSON object format; the schema-selected owning callback validates the complete application document separately."
+    },
+    {
+      "path": "scripts/development_slice_client.py",
+      "function": "<module>",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "ObservationTransport is the acceptance bridge for a verified historical Controller release: LocalBrowserController.observation_request captures one ControllerContract before I/O and decodes records plus the full document through that exact release schema. This boundary forwards the original external source document unchanged, without trial decoders, current-contract fallback, or an independently authored application shape. The existing require_object application-read debt remains recorded separately."
     }
   ],
   "debt": [

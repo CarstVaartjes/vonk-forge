@@ -129,6 +129,135 @@ def bounded_loop(node: ast.While) -> bool:
     )
 
 
+def _observation_deadline_guard(tree: ast.Module, path: str) -> bool:
+    """Resolve the sole owned finite monotonic guard, rather than its name alone."""
+    if path != "src/cluster_profiles/observation_transfer_reader.py":
+        return False
+    guards = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "check_observation_deadline"
+    ]
+    if len(guards) != 1 or guards[0] not in tree.body:
+        return False
+    guard = guards[0]
+    if (
+        not isinstance(guard, ast.FunctionDef)
+        or guard.decorator_list
+        or [arg.arg for arg in guard.args.args] != ["deadline"]
+        or guard.args.posonlyargs
+        or guard.args.kwonlyargs
+        or guard.args.vararg
+        or guard.args.kwarg
+        or guard.args.defaults
+    ):
+        return False
+    imported = {
+        alias.asname or alias.name: alias.name
+        for node in tree.body
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    if imported.get("time") != "time" or imported.get("math") != "math":
+        return False
+    protected = {"time", "math", "TimeoutError", "check_observation_deadline"}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            and node.id in protected
+        ):
+            return False
+        if isinstance(node, ast.arg) and node.arg in protected:
+            return False
+        if (
+            isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name in protected
+            and node is not guard
+        ):
+            return False
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.ctx, ast.Store)
+            and ast.unparse(node).split(".")[0] in protected
+        ):
+            return False
+        if isinstance(node, ast.Import) and any(
+            (a.asname or a.name) in protected
+            and (node not in tree.body or a.name not in {"time", "math"})
+            for a in node.names
+        ):
+            return False
+        if isinstance(node, ast.ImportFrom) and any(
+            a.name == "*" or (a.asname or a.name) in protected for a in node.names
+        ):
+            return False
+        if isinstance(node, ast.ExceptHandler) and node.name in protected:
+            return False
+    if len(guard.body) != 2:
+        return False
+    finite, expiry = guard.body
+    if not isinstance(finite, ast.If) or not isinstance(expiry, ast.If):
+        return False
+    return (
+        ast.unparse(finite.test) == "not math.isfinite(deadline)"
+        and len(finite.body) == 1
+        and isinstance(finite.body[0], ast.Raise)
+        and not finite.orelse
+        and ast.unparse(expiry.test) == "time.monotonic() >= deadline"
+        and len(expiry.body) == 1
+        and isinstance(expiry.body[0], ast.Raise)
+        and isinstance(expiry.body[0].exc, ast.Call)
+        and isinstance(expiry.body[0].exc.func, ast.Name)
+        and expiry.body[0].exc.func.id == "TimeoutError"
+        and not expiry.orelse
+    )
+
+
+def _calls_observation_deadline(
+    node: ast.While, receiver: ast.FunctionDef | None
+) -> bool:
+    if receiver is None or receiver.name != "receive_observation" or not node.body:
+        return False
+    keyword_arguments = [arg.arg for arg in receiver.args.kwonlyargs]
+    if (
+        "deadline" not in keyword_arguments
+        or receiver.args.kw_defaults[keyword_arguments.index("deadline")] is not None
+    ):
+        return False
+    for part in ast.walk(receiver):
+        if (
+            isinstance(part, ast.Name)
+            and isinstance(part.ctx, (ast.Store, ast.Del))
+            and part.id == "deadline"
+        ):
+            return False
+        if isinstance(part, (ast.Import, ast.ImportFrom)) and any(
+            (a.asname or a.name) == "deadline" for a in part.names
+        ):
+            return False
+        if isinstance(part, ast.ExceptHandler) and part.name == "deadline":
+            return False
+        if (
+            isinstance(part, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and part is not receiver
+            and part.name == "deadline"
+        ):
+            return False
+    first = node.body[0]
+    return (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Call)
+        and isinstance(first.value.func, ast.Name)
+        and first.value.func.id == "check_observation_deadline"
+        and not first.value.keywords
+        and len(first.value.args) == 1
+        and isinstance(first.value.args[0], ast.Name)
+        and first.value.args[0].id == "deadline"
+    )
+
+
 def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
@@ -143,6 +272,7 @@ def scan_source(
     tree = ast.parse(source) if tree is None else tree
     sites: list[Site] = []
     lines = source.splitlines()
+    observation_deadline = _observation_deadline_guard(tree, path)
     aliases: dict[str, str] = {}
     instrumentation: dict[str, str] = {}
     for imported in tree.body:
@@ -187,7 +317,7 @@ def scan_source(
         and imported.module == "operation_api"
         and imported.level == 1
         for alias in imported.names
-        if alias.name == "OperationResponseTooLarge"
+        if alias.name == "_OperationResponseTooLarge"
     }
     # An unrelated local class or assignment cannot borrow the owner's name.
     resource_errors -= (
@@ -227,6 +357,8 @@ def scan_source(
             self.scope.pop()
 
         def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef):
+            old_receiver = self.receiver
+            self.receiver = node if isinstance(node, ast.FunctionDef) else None
             old_get, old_context = self.get, self.context
             self.scope.append(node.name)
             self.get = any(
@@ -295,6 +427,7 @@ def scan_source(
                         self.add(node, "ending-without-fresh-request")
             self.scope.pop()
             self.get, self.context = old_get, old_context
+            self.receiver = old_receiver
 
         visit_AsyncFunctionDef = visit_FunctionDef
 
@@ -329,8 +462,25 @@ def scan_source(
                 self.add(node, "builtin-or-http-raise")
             self.generic_visit(node)
 
+        receiver: ast.FunctionDef | None = None
+        deadline_caught = False
+
+        def visit_Try(self, node: ast.Try | ast.TryStar):
+            old = self.deadline_caught
+            # Conservative: no handler surrounding this loop may swallow expiry.
+            self.deadline_caught = old or bool(node.handlers)
+            self.generic_visit(node)
+            self.deadline_caught = old
+
+        visit_TryStar = visit_Try
+
         def visit_While(self, node: ast.While):
-            if mode == "waits" and not bounded_loop(node):
+            helper_bound = (
+                observation_deadline
+                and not self.deadline_caught
+                and _calls_observation_deadline(node, self.receiver)
+            )
+            if mode == "waits" and not bounded_loop(node) and not helper_bound:
                 self.add(node, "loop-without-deadline")
             self.generic_visit(node)
 

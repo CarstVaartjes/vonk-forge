@@ -262,7 +262,7 @@ def run_update(
     apply: bool,
     public_key: Path | None = None,
     download: Callable[[str, int], bytes] = _download,
-    compatibility_observation: Callable[[], dict[str, object]] | None = None,
+    compatibility_observation: Callable[[], object] | None = None,
 ) -> dict[str, object]:
     release, base = _signed_release(
         channel=channel,
@@ -332,33 +332,38 @@ def run_update(
         )
         schema_fingerprint = contract_fingerprint(installed_schema)
         Draft202012Validator(installed_schema).validate(deployed)
-    except (OSError, ValueError, ValidationError):
+        # The canonical raw schema owns ingress before the generated decoder.
+        # Keep the validated original document for output, never dump this model.
+        if not isinstance(deployed, dict):
+            raise TypeError("controller compatibility document is not an object")
+        from .generated_control.models.cli_update_contract import CliUpdateContract
+
+        observed = CliUpdateContract.from_dict(deployed)
+    except (OSError, KeyError, TypeError, ValueError, ValidationError):
         result["compatibility"] = "controller-contract-unavailable-or-different"
         return result
     if (
         contract_fingerprint(compatibility_schema) != schema_fingerprint
-        or deployed.get("compatibility_schema_sha256") != schema_fingerprint
+        or observed.compatibility_schema_sha256 != schema_fingerprint
     ):
         result["compatibility"] = "controller-contract-unavailable-or-different"
         return result
-    api = deployed.get("api")
-    source = api.get("source_sha") if isinstance(api, dict) else None
-    fingerprint = api.get("control_contract_sha256") if isinstance(api, dict) else None
+    source = observed.api.source_sha
+    fingerprint = observed.api.control_contract_sha256
     result["controller"] = deployed
     if (
         not isinstance(source, str)
         or _SOURCE.fullmatch(source) is None
         or fingerprint != identity.control_contract_sha256
-        or deployed.get("worker_compatibility") != "compatible"
-        or deployed.get("worker_issue") is not None
-        or type(deployed.get("worker_count")) is not int
-        or cast(int, deployed["worker_count"]) < 1
-        or not isinstance(deployed.get("worker_source_sha"), str)
-        or _SOURCE.fullmatch(cast(str, deployed["worker_source_sha"])) is None
+        or observed.worker_compatibility != "compatible"
+        or observed.worker_issue is not None
+        or type(observed.worker_count) is not int
+        or observed.worker_count < 1
+        or not isinstance(observed.worker_source_sha, str)
+        or _SOURCE.fullmatch(observed.worker_source_sha) is None
         or identity.worker_contract_sha256 is None
-        or deployed.get("expected_worker_contract_sha256")
-        != identity.worker_contract_sha256
-        or deployed.get("worker_contract_sha256") != identity.worker_contract_sha256
+        or observed.expected_worker_contract_sha256 != identity.worker_contract_sha256
+        or observed.worker_contract_sha256 != identity.worker_contract_sha256
     ):
         result["compatibility"] = "controller-contract-unavailable-or-different"
         return result

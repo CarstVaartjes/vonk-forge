@@ -102,6 +102,9 @@ from .catalog_code import CatalogCode
 from .catalog_problem import CatalogProblem
 from .catalog_sync_code import CatalogSyncCode
 from .catalog_sync_state import CatalogSyncState
+from .certificate_code import CertificateCode
+from .certificate_issuance_binding import CertificateIssuanceBinding
+from .certificate_issuance_binding_purpose import CertificateIssuanceBindingPurpose
 from .certificate_state import CertificateState
 from .cli_token_download import CliTokenDownload
 from .cli_update_contract import CliUpdateContract
@@ -960,6 +963,9 @@ __all__ = (
     "CatalogProblem",
     "CatalogSyncCode",
     "CatalogSyncState",
+    "CertificateCode",
+    "CertificateIssuanceBinding",
+    "CertificateIssuanceBindingPurpose",
     "CertificateState",
     "CliTokenDownload",
     "CliUpdateContract",

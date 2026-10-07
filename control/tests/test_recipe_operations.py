@@ -771,11 +771,16 @@ def _issue_exact_stop_grant(
         "architecture": "linux-arm64",
     }
     queue = AgentJobService(sessions, clock=lambda: grant_now)
+    with sessions() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        fingerprint = node.preflight_fingerprint
     claim = claim_agent(
         queue,
         node_id,
         certificate_serial,
         runtime_identity=runtime_identity,
+        preflight_fingerprint=fingerprint,
     )
     assert claim is not None and claim.operation.value == "recipe.stop"
     stop = RecipeStopPayload.model_validate_json(

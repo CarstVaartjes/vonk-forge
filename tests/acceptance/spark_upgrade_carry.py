@@ -22,6 +22,7 @@ carry; the lane says so with a visible notice and a "skipped" report.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import itertools
 import json
@@ -36,6 +37,8 @@ import urllib.request
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
@@ -127,6 +130,7 @@ class ReleaseInput:
     package_version: str
     # The request contract this release's Controller publishes with its source.
     contract: ControllerContract
+    compose_image_roles: dict[str, str]
 
 
 @dataclass
@@ -164,11 +168,58 @@ def resolve_release(
     _fetch(f"{base}/release.json", release)
     _fetch(f"{base}/release.sig", signature)
     overlay = directory / "accepted-compose-overlay.yml"
-    # The renderer verifies the release signature before pinning its images.
+    # Authenticate the immutable source identity before executing its renderer.
+    raw = release.read_bytes()
+    try:
+        document = json.loads(raw)
+        signed = base64.b64decode(signature.read_bytes().strip(), validate=True)
+    except (ValueError, TypeError) as error:
+        raise LifecycleError("release signature document is invalid") from error
+    if (
+        not isinstance(document, dict)
+        or raw
+        != (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        or document.get("schema_version") != 2
+        or document.get("channel") != channel
+        or document.get("generation") != generation
+    ):
+        raise LifecycleError("signed release identity is invalid")
+    detached = directory / "release-signature.bin"
+    detached.write_bytes(signed)
+    public_key = REPOSITORY_ROOT / "install/installer-release-public.pem"
+    verified = subprocess.run(
+        [
+            "openssl",
+            "dgst",
+            "-sha256",
+            "-verify",
+            os.fspath(public_key),
+            "-signature",
+            os.fspath(detached),
+            os.fspath(release),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if verified.returncode != 0:
+        raise LifecycleError("release signature is invalid")
+    source_sha = document.get("source_sha")
+    if not isinstance(source_sha, str) or SOURCE_SHA.fullmatch(source_sha) is None:
+        raise LifecycleError(f"release {generation} names no source commit")
+    renderer = directory / "render-accepted-compose-overlay"
+    _fetch(
+        "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
+        f"{source_sha}/scripts/render-accepted-compose-overlay",
+        renderer,
+    )
+    # Each signed publication consumes its own required image graph. Current
+    # publication validation remains strict; no historical role is synthesized.
     rendered = subprocess.run(
         [
             sys.executable,
-            os.fspath(REPOSITORY_ROOT / "scripts/render-accepted-compose-overlay"),
+            os.fspath(renderer),
             "--release",
             os.fspath(release),
             "--signature",
@@ -192,7 +243,42 @@ def resolve_release(
             f"release {generation} is not an accepted release: "
             f"{(rendered.stderr or rendered.stdout).strip()[-400:]}"
         )
-    document = json.loads(release.read_text(encoding="utf-8"))
+    overlay_document = require_object(
+        yaml.safe_load(overlay.read_text(encoding="utf-8")),
+        "source-bound image overlay",
+    )
+    image_services = require_object(
+        overlay_document.get("services"), "rendered services"
+    )
+    from tests.acceptance.test_spark_lifecycle import COMPOSE_IMAGE_ROLES
+
+    compose_image_roles = {
+        role: service
+        for role, service in COMPOSE_IMAGE_ROLES.items()
+        if service in image_services
+    }
+    images = require_object(document.get("images"), "signed release images")
+    if set(compose_image_roles) != set(images):
+        raise LifecycleError(
+            "source-bound renderer image roles differ from publication"
+        )
+    if set(image_services) != set(compose_image_roles.values()) | {
+        "hermes-litellm-key-provisioner"
+    }:
+        raise LifecycleError("source-bound renderer adds an unbound service")
+    provisioner = require_object(
+        image_services["hermes-litellm-key-provisioner"], "rendered key provisioner"
+    )
+    if provisioner.get("image") != images.get("litellm"):
+        raise LifecycleError(
+            "source-bound key provisioner image differs from publication"
+        )
+    for role, service in compose_image_roles.items():
+        rendered_service = require_object(
+            image_services[service], "rendered image service"
+        )
+        if rendered_service.get("image") != images[role]:
+            raise LifecycleError("source-bound renderer image differs from publication")
     package = require_object(
         require_object(document.get("artifacts"), "release artifacts").get(
             "agent-package-linux-arm64"
@@ -234,6 +320,7 @@ def resolve_release(
         version=str(document.get("version")),
         package_version=str(package.get("package_version")),
         contract=contract,
+        compose_image_roles=compose_image_roles,
     )
 
 
@@ -387,6 +474,9 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             if self.controller_generation == self.candidate.generation
             else self.baseline
         )
+
+    def _compose_image_roles(self) -> dict[str, str]:
+        return self._current_release().compose_image_roles
 
     def _acceptance_caddyfile(self) -> str | None:
         return self._current_release().caddyfile

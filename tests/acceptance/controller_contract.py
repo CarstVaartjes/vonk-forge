@@ -27,6 +27,7 @@ from pydantic import JsonValue, TypeAdapter
 from cluster_profiles.control_client import source_schema_validator
 from cluster_profiles.observation_transfer_reader import (
     ObservationStream,
+    check_observation_deadline,
     receive_observation,
 )
 
@@ -73,8 +74,14 @@ class ObservationResponseContract:
         return {key: item for key, item in value.items()}
 
     def decode(
-        self, stream: ObservationStream, *, status: int, media_type: str
+        self,
+        stream: ObservationStream,
+        *,
+        status: int,
+        media_type: str,
+        deadline: float,
     ) -> dict[str, object]:
+        check_observation_deadline(deadline)
         if status != 200 or media_type.partition(";")[0].strip() != self.media_type:
             raise ContractSkew(f"{self.label} observation status or media differs")
         if self.media_type == "application/json":
@@ -82,11 +89,14 @@ class ObservationResponseContract:
             from scripts.development_slice_client import MAXIMUM_RESPONSE_BYTES
 
             body = stream.read(MAXIMUM_RESPONSE_BYTES + 1)
+            check_observation_deadline(deadline)
             if len(body) > MAXIMUM_RESPONSE_BYTES:
                 raise ContractSkew(
                     f"{self.label} historical JSON observation is too large"
                 )
-            return self._payload(json.loads(body))
+            result = self._payload(json.loads(body))
+            check_observation_deadline(deadline)
+            return result
         record_schema = self.record_schema
         allocation = self.record_max_bytes
         if record_schema is None or allocation is None:
@@ -95,6 +105,7 @@ class ObservationResponseContract:
             stream,
             resource=self.resource,
             record_max_bytes=allocation,
+            deadline=deadline,
             validate_record=lambda record: self._validate(record, record_schema),
             validate_payload=self._payload,
         )

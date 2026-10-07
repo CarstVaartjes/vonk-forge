@@ -148,7 +148,10 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
         state.pending_children = []
         state.children = [
             FleetProfileSwitchChildState(
-                queue_index=0, operation_id=active_id, kind="run", state="succeeded"
+                queue_index=0,
+                operation_id=active_id,
+                kind="run",
+                state=LifecycleState.SUCCEEDED,
             )
         ]
         adapter._write_state(session, row, state)
@@ -180,7 +183,10 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
         state.pending_children = []
         state.children.append(
             FleetProfileSwitchChildState(
-                queue_index=2, operation_id=_uuid(18104), kind="run", state="succeeded"
+                queue_index=2,
+                operation_id=_uuid(18104),
+                kind="run",
+                state=LifecycleState.SUCCEEDED,
             )
         )
         restarted._write_state(session, row, state)

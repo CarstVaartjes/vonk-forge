@@ -10,6 +10,11 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 INPUTS = (
+    "scripts/prepare-journal-ca.py",
+    "deploy/compose/step-ca/source.lock.json",
+    "deploy/compose/step-ca/Dockerfile",
+    "deploy/compose/step-ca/service",
+    "deploy/compose/step-ca/upstream/context-signing.patch",
     "pyproject.toml",
     "src/cluster_profiles",
     "control/Dockerfile",

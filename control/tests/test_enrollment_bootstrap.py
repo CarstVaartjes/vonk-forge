@@ -206,3 +206,45 @@ def test_from_paths_rejects_ca_material_with_a_private_key(tmp_path: Path) -> No
             enrollment_endpoint="https://enroll.example.test:8443",
             controller_ca_path=controller_ca,
         )
+
+
+def test_bootstrap_configuration_refuses_unrepresentable_full_envelope_before_serving() -> (
+    None
+):
+    key = ed25519.Ed25519PrivateKey.generate()
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "controller-ca")])
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2026, 8, 19, tzinfo=UTC))
+        .not_valid_after(datetime(2027, 8, 19, tzinfo=UTC))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .add_extension(
+            x509.UnrecognizedExtension(
+                x509.ObjectIdentifier("1.2.3.4.5"), b"x" * 47000
+            ),
+            critical=False,
+        )
+        .sign(key, algorithm=None)
+    )
+    pem = certificate.public_bytes(serialization.Encoding.PEM)
+    assert len(pem) < 64 * 1024
+    hostname = ".".join(("a" * 63, "b" * 63, "c" * 63, "d" * 61))
+    with pytest.raises(ValueError, match="enrollment response exceeds"):
+        EnrollmentBootstrapConfig(
+            controller_endpoint=f"https://{hostname}",
+            enrollment_endpoint=f"https://{hostname}:8443",
+            ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+            ca_pem=pem.decode("ascii"),
+        )
+    repaired, repaired_pem = _controller_ca()
+    accepted = EnrollmentBootstrapConfig(
+        controller_endpoint="https://agents.example.test",
+        enrollment_endpoint="https://enroll.example.test",
+        ca_fingerprint=repaired.fingerprint(hashes.SHA256()).hex(),
+        ca_pem=repaired_pem.decode("ascii"),
+    )
+    assert accepted.ca_pem.encode("ascii") == repaired_pem

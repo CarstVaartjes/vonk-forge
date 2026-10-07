@@ -10,7 +10,7 @@ import pytest
 from httpx2 import Response
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationView,
@@ -101,7 +101,7 @@ class _PairedReceiptAdapter(_SwitchAdapter):
                     queue_index=item_index,
                     operation_id=operation_id,
                     kind="run",
-                    state="succeeded",
+                    state=LifecycleState.SUCCEEDED,
                     result=FleetProfileSwitchChildResult(
                         run_switch_operation_id=operation_id,
                         run_switch=run_switch,
@@ -332,7 +332,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     observed_lanes: set[tuple[str, str]] = set()
     receipt_ids: set[str] = set()
     for child in result.children:
-        assert child.state == "succeeded"
+        assert child.state == LifecycleState.SUCCEEDED
         assert child.result is not None
         receipt = child.result
         assert isinstance(receipt, FleetProfileSwitchChildResult)

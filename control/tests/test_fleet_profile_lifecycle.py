@@ -451,13 +451,13 @@ def test_the_loads_state_is_the_aggregate_of_its_children(tmp_path) -> None:
         queue_index=0,
         operation_id=world.child_id(),
         kind="run",
-        state="succeeded",
+        state=LifecycleState.SUCCEEDED,
     )
     other = FleetProfileSwitchChildState(
         queue_index=1,
         operation_id=str(uuid.uuid4()),
         kind="run",
-        state="succeeded",
+        state=LifecycleState.SUCCEEDED,
     )
     assert done.queue_index != other.queue_index
     assert done.operation_id != other.operation_id

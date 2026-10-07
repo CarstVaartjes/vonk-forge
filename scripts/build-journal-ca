@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Hosted build entry point. Never called by local hooks or local test discovery.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+python3 "$root/scripts/prepare-journal-ca.py"
+cd "$root/deploy/compose/step-ca/service"
+export GOTOOLCHAIN=local
+export CGO_ENABLED=0
+case "${1:-}" in
+  lock)
+    # Bootstrap only: CI returns these locks as reviewable artifacts.
+    go mod tidy
+    gofmt -w .
+    ;;
+  proof)
+    export CGO_ENABLED=1
+    go mod verify
+    test -z "$(gofmt -l .)"
+    proof_log=$(mktemp)
+    trap 'rm -f "$proof_log"' EXIT
+    go test -mod=readonly -race -json -count=1 -timeout=180s ./... | tee "$proof_log"
+    python3 - "$proof_log" <<'PY'
+import json, pathlib, sys
+events = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().splitlines()]
+passed = [event["Test"] for event in events if event.get("Action") == "pass" and "Test" in event]
+if not passed:
+    raise SystemExit("CA connected proof did not execute any tests")
+print("CA executed proofs: " + ", ".join(passed))
+PY
+    ;;
+  build)
+    go mod verify
+    go build -mod=readonly -trimpath -buildvcs=false -o "$root/vonk-step-ca" .
+    ;;
+  *) echo 'usage: build-journal-ca lock|proof|build' >&2; exit 64 ;;
+esac

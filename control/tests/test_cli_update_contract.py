@@ -7,11 +7,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol import canonical_message
 from vonk_control import platform_observation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.models import Base, ControlProcessHeartbeat
-from vonk_control.platform_observation import PlatformObserver
+from vonk_control.platform_observation import PlatformObservation, PlatformObserver
 from vonk_control.worker import WorkerHeartbeatRecorder
 
 from cluster_profiles import runtime_identity
@@ -129,6 +130,19 @@ def test_authenticated_contract_complete_membership_fault_recovery(
             .values(process_instance_id=original_identity)
         )
     assert read()["worker_compatibility"] == "compatible"
+    repaired_platform = peer.get(
+        "/api/platform", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert repaired_platform.status_code == 200
+    # The same failed observation re-captures its complete membership after the
+    # exact stored-row repair; a healthy sibling route is not repair evidence.
+    from tests.observation_transfer_peer import observation_document
+
+    repaired_observation = PlatformObservation.model_validate_json(
+        canonical_message(observation_document(repaired_platform)), strict=True
+    )
+    assert repaired_observation.workers is not None
+    assert len(repaired_observation.workers) == 257
     worker_identity[0] = RuntimeBuildIdentity("e" * 40, "c" * 64, "d" * 64)
     mixed_process = WorkerHeartbeatRecorder(
         sessions, process_instance_id=f"{257:064x}", clock=lambda: clock[0]

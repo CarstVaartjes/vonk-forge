@@ -10,7 +10,9 @@ import base64
 import hashlib
 import io
 import json
+import math
 import tempfile
+import time
 from collections.abc import Callable
 from typing import Protocol
 
@@ -39,21 +41,35 @@ def _unique_members(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def receive_observation(
+def check_observation_deadline(deadline: float) -> None:
+    if not math.isfinite(deadline):
+        raise ObservationTransferInvalid("observation attempt deadline is invalid")
+    if time.monotonic() >= deadline:
+        raise TimeoutError("observation attempt deadline elapsed")
+
+
+def receive_observation[Receipt](
     stream: ObservationStream,
     *,
     resource: str,
     record_max_bytes: int,
+    deadline: float,
     validate_record: Callable[[object], None],
-    validate_payload: Callable[[object], dict[str, object]],
-) -> dict[str, object]:
+    validate_payload: Callable[[object], Receipt],
+) -> Receipt:
     """Return the original full payload only after verified receipt and EOF.
 
     Callers validate status/media against their explicit source contract before
     this function. Every record is validated through that contract, including
     canonical UUID/base64/numeric/presence rules. No parallel field schema lives
     here: checks below own transfer ordering and observed completeness only.
+    The caller supplies one finite monotonic deadline captured before opening
+    the response. Its native transport must interrupt blocking I/O at that same
+    deadline; these checkpoints additionally refuse late buffered records and
+    late validation results. They do not preempt synchronous parsing or claim
+    a process memory bound.
     """
+    check_observation_deadline(deadline)
     if type(record_max_bytes) is not int or record_max_bytes < 1:
         raise ObservationTransferInvalid("observation reader allocation is invalid")
     transfer_id: str | None = None
@@ -64,11 +80,13 @@ def receive_observation(
     pending = bytearray()
     with tempfile.TemporaryFile(mode="w+b") as spool:
         while True:
+            check_observation_deadline(deadline)
             if len(pending) >= record_max_bytes:
                 raise ObservationTransferInvalid(
                     "observation record exceeds reader allocation"
                 )
             incoming = stream.read(min(65536, record_max_bytes - len(pending)))
+            check_observation_deadline(deadline)
             if not incoming:
                 break
             if len(incoming) > record_max_bytes - len(pending):
@@ -77,6 +95,7 @@ def receive_observation(
                 )
             pending.extend(incoming)
             while b"\n" in pending:
+                check_observation_deadline(deadline)
                 line, remainder = pending.split(b"\n", 1)
                 pending = bytearray(remainder)
                 if complete:
@@ -88,6 +107,7 @@ def receive_observation(
                     object_pairs_hook=_unique_members,
                 )
                 validate_record(record)
+                check_observation_deadline(deadline)
                 if not isinstance(record, dict):
                     raise ObservationTransferInvalid(
                         "observation record is not an object"
@@ -151,7 +171,11 @@ def receive_observation(
             raise ObservationTransferInvalid(
                 "observation ended without a complete final receipt"
             )
+        check_observation_deadline(deadline)
         spool.seek(0)
         with io.TextIOWrapper(spool, encoding="utf-8", errors="strict") as document:
             decoded = json.load(document, object_pairs_hook=_unique_members)
-            return validate_payload(decoded)
+            check_observation_deadline(deadline)
+            result = validate_payload(decoded)
+            check_observation_deadline(deadline)
+            return result
