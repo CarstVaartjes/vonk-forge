@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from copy import deepcopy
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -407,8 +407,8 @@ def test_postgres_unknown_old_start_is_reviewed_but_only_exact_stop_releases_gan
                     ).model_dump(mode="json")
                 )
                 session.connection().execute(
-                    AgentOperationAttempt.__table__.update()
-                    .where(AgentOperationAttempt.__table__.c.id == attempt.id)
+                    update(AgentOperationAttempt)
+                    .where(AgentOperationAttempt.id == attempt.id)
                     .values(result=value)
                 )
                 session.expire(attempt)
