@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
+from vonk_agent_protocol import EnrollmentBootstrapResponse
 
 # The published installer channels. The response contract and the bootstrap
 # configuration both use this one set, and the runtime check derives from it.
@@ -117,6 +118,18 @@ class EnrollmentBootstrapConfig:
             }
             if not endpoint_hostnames.issubset(hostnames):
                 raise ValueError("service hostnames must include both agent endpoints")
+        # Validate the complete outgoing body at configuration admission. The
+        # real helper key is always exactly 64 lowercase hexadecimal bytes, so
+        # this placeholder has its identical JSON allocation cost.
+        EnrollmentBootstrapResponse(
+            controller_endpoint=controller_endpoint,
+            enrollment_endpoint=enrollment_endpoint,
+            ca_fingerprint=fingerprint,
+            ca_pem=canonical_pem.decode("ascii"),
+            controller_address=address,
+            service_hostnames=list(hostnames),
+            host_helper_authority_public_key="0" * 64,
+        )
         object.__setattr__(self, "controller_endpoint", controller_endpoint)
         object.__setattr__(self, "enrollment_endpoint", enrollment_endpoint)
         object.__setattr__(self, "ca_pem", canonical_pem.decode("ascii"))
