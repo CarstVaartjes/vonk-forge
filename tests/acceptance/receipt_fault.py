@@ -13,6 +13,12 @@ import re
 from pathlib import Path
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from vonk_agent_protocol import (
+    AgentResult,
+    OutcomeDone,
+    RecipeStartResult,
+    outcome_body,
+)
 
 _FENCE = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z")
 _MAXIMUM_BYTES = 64 * 1024
@@ -37,22 +43,20 @@ def _read(path: Path) -> dict[str, object]:
 
 def _start_receipt(raw: bytes) -> dict[str, str] | None:
     try:
-        document = json.loads(raw)
+        document = AgentResult.model_validate_json(raw, strict=True)
     except (UnicodeError, ValueError):
         return None
-    if not isinstance(document, dict) or document.get("state") != "succeeded":
+    if not isinstance(document.result, OutcomeDone):
         return None
-    fence, result = document.get("fence"), document.get("result")
+    result = outcome_body(document.result)
     if (
-        not isinstance(fence, str)
-        or _FENCE.fullmatch(fence) is None
-        or not isinstance(result, dict)
-        or set(result) != {"endpoint"}
-        or not isinstance(result["endpoint"], str)
-        or not 1 <= len(result["endpoint"]) <= 512
+        not isinstance(result, RecipeStartResult)
+        or _FENCE.fullmatch(document.fence) is None
+        or result.endpoint is None
+        or not 1 <= len(result.endpoint) <= 512
     ):
         return None
-    return {"fence": fence, "endpoint": result["endpoint"]}
+    return {"fence": document.fence, "endpoint": result.endpoint}
 
 
 class LostStartReceipt:
