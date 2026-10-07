@@ -36,6 +36,22 @@ fn main() {
     match &grant.claims.operation {
         vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
+                action: ContainerRuntimeAction::Stop,
+                stop_plan_sha256: Some(_),
+                run_generation: Some(_),
+                runtime_run_id: Some(_),
+                runtime_target_id: Some(_),
+                runtime_installation_id: Some(_),
+                ..
+            },
+        ) => {
+            println!(
+                "{}",
+                String::from_utf8(canonical_json(&grant).unwrap()).unwrap()
+            );
+        }
+        vonk_agent_protocol::HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
+            vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 action: ContainerRuntimeAction::RunInspect,
                 ..
             },
@@ -58,6 +74,6 @@ fn main() {
                 String::from_utf8(canonical_json(&grant).unwrap()).unwrap()
             );
         }
-        _ => panic!("probe input is not a bound run inspection or reconciliation grant"),
+        _ => panic!("probe input is not a bound run inspection, Stop or reconciliation grant"),
     }
 }
