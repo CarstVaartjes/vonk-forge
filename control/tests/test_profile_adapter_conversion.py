@@ -163,7 +163,7 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
             effects = tuple(
                 session.scalars(
                     select(AgentOperation).where(
-                        AgentOperation.operation == "recipe.stop"
+                        AgentOperation.kind == "recipe.stop"
                     )
                 )
             )
