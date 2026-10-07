@@ -63,7 +63,7 @@
     "control/src/vonk_control/recipe_image_removal_contract.py": 1,
     "control/src/vonk_control/recipe_lifecycle_contract.py": 4,
     "control/src/vonk_control/recipe_operation_worker.py": 1,
-    "control/src/vonk_control/recipe_operations.py": 75,
+    "control/src/vonk_control/recipe_operations.py": 73,
     "control/src/vonk_control/recipe_routes.py": 2,
     "control/src/vonk_control/recipe_update_batches.py": 13,
     "control/src/vonk_control/reservation_owners.py": 2,
