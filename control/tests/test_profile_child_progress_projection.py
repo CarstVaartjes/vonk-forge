@@ -282,7 +282,7 @@ def _assert_plain_install_measurement(
     plan: RunSwitchPlan, phase: RunSwitchPhase, now
 ) -> None:
     """Rejects both cross-budget counting and dropping plain phase samples."""
-    assert phase.kind == "prepare" and phase.subphase == "runtime-plan"
+    assert phase.kind == "prepare" and phase.subphase == "runtime-install"
     progress = RunSwitchOperationResult(total_bytes=0, total_bytes_known=True)
     for completed, observed in ((32, now - timedelta(seconds=2)), (48, now)):
         _merge_progress_evidence(
