@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -30,7 +30,12 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
-from vonk_control.models import AgentOperation, Job, RecipeRun, ResourceReservation
+from vonk_control.models import (
+    AgentOperation,
+    Job,
+    RecipeRun,
+    ResourceReservation,
+)
 from vonk_control.recipe_operations import RecipeRetryLater
 
 from .runtime_identity_support import claim_agent
@@ -38,8 +43,10 @@ from .test_artifact_job_lifecycle import CANCEL_KEY, _drive, _issued_job
 from .test_artifact_jobs import cancellation_result, submitted_artifact_job
 
 
+@pytest.mark.parametrize("damaged_evidence", [False, True])
 def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     tmp_path,
+    damaged_evidence,
     grant_observer: Callable[[SignedHostHelperGrant, datetime], None] | None = None,
 ):
     """Logical Stop must dispatch cleanup instead of blessing an unknown effect."""
@@ -65,6 +72,22 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     ended = artifacts.get(job.id)
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
+
+    if damaged_evidence:
+        with sessions.begin() as session:
+            # Corrupt the persisted observation below the strict writer guard;
+            # a normal producer must never be permitted to write this value.
+            session.execute(
+                text(
+                    "UPDATE artifact_jobs SET result_evidence = :document WHERE id = :id"
+                ),
+                {
+                    "document": canonical_message(
+                        {"elapsed_milliseconds": "damaged"}
+                    ).decode(),
+                    "id": job.id,
+                },
+            )
 
     with sessions() as session:
         held = tuple(
@@ -209,6 +232,10 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     resolved = artifacts.get(job.id)
     assert resolved.result_evidence is not None
     assert resolved.result_evidence.active_scope_may_remain is False
+    assert resolved.result_evidence.residue_resolved_by == "exact-stop"
+    if damaged_evidence:
+        assert resolved.result_evidence.elapsed_milliseconds is None
+        assert resolved.result_evidence.peak_memory_bytes is None
     with sessions() as session:
         assert not tuple(
             session.scalars(

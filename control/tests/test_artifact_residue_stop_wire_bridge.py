@@ -18,7 +18,7 @@ def test_ordinary_job_target_grant_is_accepted_by_rust_helper(tmp_path):
     probe = prebuilt_probe("VONK_HOST_HELPER_WIRE_PROBE")
     observed: list[tuple[SignedHostHelperGrant, datetime]] = []
     _ordinary_job_target_recovery(
-        tmp_path, grant_observer=lambda grant, now: observed.append((grant, now))
+        tmp_path, False, grant_observer=lambda grant, now: observed.append((grant, now))
     )
     assert len(observed) == 1
     grant, now = observed[0]

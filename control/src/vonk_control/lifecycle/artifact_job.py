@@ -606,7 +606,14 @@ class ArtifactJobAdapter:
             )
             return True
         evidence = read_result_evidence(job.result_evidence)
-        if evidence is None or evidence.active_scope_may_remain is not True:
+        if evidence is None:
+            if job.result_evidence is None:
+                return False
+            # The caller has validated an exact Stop receipt. That observation
+            # rebuilds the physical-effect fact; unreadable metrics are retired,
+            # never reconstructed as measurements.
+            evidence = ArtifactJobResultEvidence()
+        elif evidence.active_scope_may_remain is not True:
             return False
         job.state = ajs.CANCELLED
         job.status_reason = reason[:_MAX_REASON]
