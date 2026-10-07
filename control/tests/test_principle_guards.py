@@ -259,6 +259,29 @@ def test_ending_inventory_requires_a_later_fresh_operation():
     assert not scan_source(helper, path="test_service.py", mode="tests")
 
 
+def test_sqlalchemy_hook_cleanup_is_not_a_service_lifecycle_ending():
+    for imported, call in (
+        ("from sqlalchemy import event", "event.remove"),
+        ("from sqlalchemy import event as hooks", "hooks.remove"),
+        ("import sqlalchemy as sa", "sa.event.remove"),
+        ("from sqlalchemy.event import remove", "remove"),
+    ):
+        source = f"{imported}\ndef test_hook():\n    {call}(engine, 'before_cursor_execute', deny)"
+        assert not scan_source(source, path="test_hook.py", mode="tests")
+        assert scan_source(
+            source + "\n    service.remove(operation)",
+            path="test_hook.py",
+            mode="tests",
+        )
+    for source in (
+        "def test_hook():\n    event.remove(operation)",
+        "from sqlalchemy import event\ndef test_hook(event):\n    event.remove(operation)",
+        "from sqlalchemy import event\ndef test_hook():\n    event = service\n    event.remove(operation)",
+        "from sqlalchemy import event\nevent = service\ndef test_hook():\n    event.remove(operation)",
+    ):
+        assert scan_source(source, path="test_hook.py", mode="tests")
+
+
 def test_builtin_raise_inventory_is_report_only_and_excludes_custom_classes():
     assert scan_source(
         "raise RuntimeError('lost response')", path="owner.py", mode="raises"

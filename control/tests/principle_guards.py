@@ -143,7 +143,29 @@ def scan_source(
     sites: list[Site] = []
     lines = source.splitlines()
     aliases: dict[str, str] = {}
+    instrumentation: dict[str, str] = {}
     for imported in tree.body:
+        if isinstance(imported, ast.ImportFrom) and imported.module in {
+            "sqlalchemy",
+            "sqlalchemy.event",
+        }:
+            instrumentation.update(
+                {
+                    a.asname or a.name: f"{imported.module}.{a.name}"
+                    for a in imported.names
+                    if a.name != "*"
+                }
+            )
+        elif isinstance(imported, ast.Import):
+            instrumentation.update(
+                {
+                    a.asname or a.name.split(".")[0]: (
+                        a.name if a.asname else a.name.split(".")[0]
+                    )
+                    for a in imported.names
+                    if a.name in {"sqlalchemy", "sqlalchemy.event"}
+                }
+            )
         if isinstance(imported, ast.ImportFrom) and imported.module in {
             "subprocess",
             "urllib.request",
@@ -206,7 +228,35 @@ def scan_source(
                 fresh = re.compile(
                     r"(?:^|_)(start|load|apply|prepare|request|create|enqueue|admit)(?:_|$)"
                 )
-                ends = [n for n in calls if ending.search(name(n.func))]
+                shadowed = {
+                    n.id
+                    for n in local_nodes(node)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+                } | {n.arg for n in ast.walk(node.args) if isinstance(n, ast.arg)}
+                shadowed.update(
+                    n.id
+                    for statement in tree.body
+                    if isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+                    for n in ast.walk(statement)
+                    if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store)
+                )
+
+                def is_instrumentation(call: ast.Call) -> bool:
+                    head, dot, tail = ast.unparse(call.func).partition(".")
+                    canonical = instrumentation.get(head, head) + (
+                        dot + tail if dot else ""
+                    )
+                    return (
+                        head in instrumentation
+                        and head not in shadowed
+                        and canonical == "sqlalchemy.event.remove"
+                    )
+
+                ends = [
+                    n
+                    for n in calls
+                    if ending.search(name(n.func)) and not is_instrumentation(n)
+                ]
                 if ends and not any(
                     name(n.func) == "assert_ended_without_blocking" for n in calls
                 ):
