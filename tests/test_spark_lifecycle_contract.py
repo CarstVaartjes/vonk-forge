@@ -598,7 +598,7 @@ def test_run_owns_observation_validation_cleanup_and_report_emission(
 
 
 @pytest.mark.linux_only
-def test_run_failure_removes_controller_volumes_without_emitting_report(
+def test_run_failure_reports_before_removing_controller_volumes(
     tmp_path: Path,
 ) -> None:
     acceptance = _acceptance_module()
@@ -616,6 +616,9 @@ def test_run_failure_removes_controller_volumes_without_emitting_report(
             raise acceptance.LifecycleError("observed lifecycle failed")
 
         def __exit__(self, *_error: object) -> None:
+            failed = json.loads(report.read_text())
+            assert failed["status"] == "failed"
+            assert failed["failure"]["cause"]
             events.append("controller-removed-with-volumes")
 
     with pytest.raises(acceptance.LifecycleError, match="observed lifecycle failed"):
@@ -629,4 +632,4 @@ def test_run_failure_removes_controller_volumes_without_emitting_report(
         "lifecycle-failed",
         "controller-removed-with-volumes",
     ]
-    assert not report.exists()
+    assert json.loads(report.read_text())["status"] == "failed"
