@@ -625,6 +625,16 @@ fn history_beyond_4096_keeps_cursor_progress_during_new_arrivals_and_restart() {
     use vonk_agent::state::StateStore;
     let root = tempdir().unwrap();
     historical_runs(root.path(), 4097);
+    // Choose the actual filesystem iteration tail, rather than assuming a
+    // newly created UUID sorts last in getdents order.
+    let tail_id = fs::read_dir(root.path().join("runs"))
+        .unwrap()
+        .nth(4096)
+        .unwrap()
+        .unwrap()
+        .file_name()
+        .into_string()
+        .unwrap();
     let plan = native_observation_plan(root.path());
     let runtime = OciRuntime {
         runner: &NoProcess,
@@ -634,7 +644,7 @@ fn history_beyond_4096_keeps_cursor_progress_during_new_arrivals_and_restart() {
         .prepare_start_with_inspection_identity(
             &plan,
             INSTALLATION,
-            RUN,
+            &tail_id,
             &placement(&plan),
             &identity(&plan),
         )
@@ -652,7 +662,10 @@ fn history_beyond_4096_keeps_cursor_progress_during_new_arrivals_and_restart() {
         let page = runtime
             .recipe_run_inspection_page(checkpoint.as_ref())
             .unwrap();
-        found |= page.plans.iter().any(|plan| plan.run_id.to_string() == RUN);
+        found |= page
+            .plans
+            .iter()
+            .any(|plan| plan.run_id.to_string() == tail_id);
         assert!(!page.empty_snapshot_safe);
         state
             .save_observation_checkpoint(page.checkpoint.as_ref())
