@@ -23,7 +23,7 @@ from .fleet_event_contract import (
     RecipeRunPayload,
     RunNodePayload,
 )
-from .fleet_projection import FleetSnapshot, TelemetryPoint
+from .fleet_projection import TelemetryPoint
 from .strict_json import StrictJSONModel
 
 
@@ -31,9 +31,11 @@ class _FleetStreamModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
-class FleetSnapshotEvent(_FleetStreamModel):
-    reset_reason: Annotated[str, Field(min_length=1, max_length=64)]
-    snapshot: FleetSnapshot
+class FleetRefreshEvent(_FleetStreamModel):
+    reset_reason: Literal[
+        "initial", "cursor-ahead", "retention-gap", "missing-telemetry-sample"
+    ]
+    event_cursor: Annotated[int, Field(ge=0, le=9_223_372_036_854_775_807)]
 
 
 class FleetTelemetryEvent(_FleetStreamModel):
@@ -127,7 +129,7 @@ class FleetChangeEvent(_FleetStreamModel):
 
 
 class FleetStreamEvent(
-    RootModel[FleetSnapshotEvent | FleetTelemetryEvent | FleetChangeEvent]
+    RootModel[FleetRefreshEvent | FleetTelemetryEvent | FleetChangeEvent]
 ):
     """OpenAPI union for the JSON payload carried by one SSE frame."""
 
@@ -136,7 +138,7 @@ __all__ = [
     "FleetChange",
     "FleetChangeAdapter",
     "FleetChangeEvent",
-    "FleetSnapshotEvent",
+    "FleetRefreshEvent",
     "FleetStreamEvent",
     "FleetTelemetryEvent",
 ]

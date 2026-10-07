@@ -7,16 +7,17 @@ import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
 from .fleet_event_contract import NodeTelemetryPayload, validate_fleet_event_payload
 from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
-from .fleet_projection import FleetProjection, FleetSnapshot, telemetry_point
+from .fleet_projection import telemetry_point
 from .fleet_stream_contract import (
     FleetChangeAdapter,
     FleetChangeEvent,
-    FleetSnapshotEvent,
+    FleetRefreshEvent,
     FleetTelemetryEvent,
 )
 from .strict_json import serialize_json_value
@@ -82,10 +83,6 @@ def _keepalive_frame(now: datetime, *, retry: bool) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def _snapshot_data(snapshot: FleetSnapshot, reason: str) -> FleetSnapshotEvent:
-    return FleetSnapshotEvent(reset_reason=reason, snapshot=snapshot)
-
-
 class FleetStream:
     """Replay the durable outbox without holding resources across suspension."""
 
@@ -93,7 +90,6 @@ class FleetStream:
         self,
         events: FleetEventRepository,
         telemetry: TelemetryRepository,
-        projection: FleetProjection,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
@@ -101,7 +97,6 @@ class FleetStream:
     ) -> None:
         self._events = events
         self._telemetry = telemetry
-        self._projection = projection
         self._clock = clock
         self._monotonic = monotonic
         self._sleep = sleep
@@ -112,11 +107,12 @@ class FleetStream:
         try:
             if last_event_id is None:
                 current_cursor = self._events.high_watermark()
-                snapshot = self._projection.read_at(current_cursor)
                 yield _event_frame(
                     current_cursor,
-                    "fleet-snapshot",
-                    _snapshot_data(snapshot, "initial"),
+                    "fleet-refresh",
+                    FleetRefreshEvent(
+                        reset_reason="initial", event_cursor=current_cursor
+                    ),
                     retry=retry,
                 )
                 retry = False
@@ -136,11 +132,12 @@ class FleetStream:
                 reset_reason = self._reset_reason(current_cursor, replay)
                 if reset_reason is not None:
                     current_cursor = replay.high_watermark
-                    snapshot = self._projection.read_at(current_cursor)
                     yield _event_frame(
                         current_cursor,
-                        "fleet-snapshot",
-                        _snapshot_data(snapshot, reset_reason),
+                        "fleet-refresh",
+                        FleetRefreshEvent(
+                            reset_reason=reset_reason, event_cursor=current_cursor
+                        ),
                         retry=retry,
                     )
                     retry = False
@@ -151,11 +148,13 @@ class FleetStream:
                     samples = self._hydrate_telemetry(replay.events)
                     if samples is None:
                         current_cursor = replay.high_watermark
-                        snapshot = self._projection.read_at(current_cursor)
                         yield _event_frame(
                             current_cursor,
-                            "fleet-snapshot",
-                            _snapshot_data(snapshot, "missing-telemetry-sample"),
+                            "fleet-refresh",
+                            FleetRefreshEvent(
+                                reset_reason="missing-telemetry-sample",
+                                event_cursor=current_cursor,
+                            ),
                             retry=retry,
                         )
                         retry = False
@@ -183,7 +182,9 @@ class FleetStream:
             pass
 
     @staticmethod
-    def _reset_reason(last_event_id: int, window: FleetReplayBatch) -> str | None:
+    def _reset_reason(
+        last_event_id: int, window: FleetReplayBatch
+    ) -> Literal["cursor-ahead", "retention-gap"] | None:
         if last_event_id > window.high_watermark:
             return "cursor-ahead"
         if window.first_retained_id is None:

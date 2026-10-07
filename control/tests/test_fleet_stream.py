@@ -39,7 +39,7 @@ from vonk_control.fleet_projection import FleetProjection, FleetSnapshot
 from vonk_control.fleet_stream import FleetStream, parse_last_event_id
 from vonk_control.fleet_stream_contract import (
     FleetChangeEvent,
-    FleetSnapshotEvent,
+    FleetRefreshEvent,
     FleetTelemetryEvent,
 )
 from vonk_control.models import (
@@ -68,7 +68,8 @@ class Projection(FleetProjection):
     def __init__(self) -> None:
         self.cursors: list[int] = []
 
-    def read_at(self, cursor: int) -> FleetSnapshot:
+    def read(self) -> FleetSnapshot:
+        cursor = 0
         self.cursors.append(cursor)
         return FleetSnapshot(
             event_cursor=cursor,
@@ -350,13 +351,11 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
         first_retained_id=1,
         batches=[(telemetry_event, recipe_event)],
     )
-    projection = Projection()
     telemetry = Telemetry({SAMPLE_ID: _sample()})
     timing = Timing()
     stream = FleetStream(
         events,
         telemetry,
-        projection,
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -412,10 +411,9 @@ def test_resume_replays_ordered_events_with_one_hydration_and_refresh_semantics(
     }
     assert events.replay_calls == [(5, NOW, 128)]
     assert telemetry.calls == [(SAMPLE_ID,)]
-    assert projection.cursors == []
 
 
-def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
+def test_initial_refresh_notice_uses_watermark_then_replays_later_event() -> None:
     operation_event = _event(
         6,
         "operation-state",
@@ -433,12 +431,10 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
         first_retained_id=1,
         batches=[(operation_event,)],
     )
-    projection = Projection()
     timing = Timing()
     stream = FleetStream(
         events,
         Telemetry(),
-        projection,
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -458,24 +454,17 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
     assert snapshot_fields == {
         "retry": "2000",
         "id": "5",
-        "event": "fleet-snapshot",
+        "event": "fleet-refresh",
     }
     assert snapshot_data == {
         "reset_reason": "initial",
-        "snapshot": {
-            "event_cursor": 5,
-            "generated_at": "2026-08-15T12:00:00Z",
-            "nodes": [],
-            "authority_revision": COMMIT,
-        },
+        "event_cursor": 5,
     }
     assert replay_fields == {"id": "6", "event": "operation-state"}
     assert isinstance(replay_data, dict)
     assert replay_data["projection_refresh_required"] is True
     assert (
-        FleetSnapshotEvent.model_validate_json(
-            json.dumps(snapshot_data)
-        ).snapshot.event_cursor
+        FleetRefreshEvent.model_validate_json(json.dumps(snapshot_data)).event_cursor
         == 5
     )
     assert (
@@ -483,7 +472,6 @@ def test_initial_snapshot_uses_watermark_then_replays_later_event() -> None:
         == "entity-6"
     )
     assert events.high_watermark_calls == 1
-    assert projection.cursors == [5]
     assert events.replay_calls == [(5, NOW, 128)]
 
 
@@ -530,7 +518,6 @@ def test_stream_rejects_event_type_and_source_kind_mismatch() -> None:
     stream = FleetStream(
         Events(high_watermark=8, first_retained_id=1),
         Telemetry(),
-        Projection(),
     )
 
     with pytest.raises(ValueError, match="does not match event type"):
@@ -545,7 +532,7 @@ def test_stream_rejects_event_type_and_source_kind_mismatch() -> None:
         (11, 10, 5, "cursor-ahead"),
     ],
 )
-def test_invalid_resume_window_resets_to_current_snapshot(
+def test_invalid_resume_window_requests_complete_current_observation(
     cursor: int,
     high_watermark: int,
     first_retained: int | None,
@@ -555,12 +542,10 @@ def test_invalid_resume_window_resets_to_current_snapshot(
         high_watermark=high_watermark,
         first_retained_id=first_retained,
     )
-    projection = Projection()
     timing = Timing()
     stream = FleetStream(
         events,
         Telemetry(),
-        projection,
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -579,16 +564,15 @@ def test_invalid_resume_window_resets_to_current_snapshot(
     assert fields == {
         "retry": "2000",
         "id": str(high_watermark),
-        "event": "fleet-snapshot",
+        "event": "fleet-refresh",
     }
     assert isinstance(data, dict)
     assert data["reset_reason"] == reason
-    assert data["snapshot"]["event_cursor"] == high_watermark
-    assert projection.cursors == [high_watermark]
+    assert data["event_cursor"] == high_watermark
     assert events.replay_calls == [(cursor, NOW, 128)]
 
 
-def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
+def test_missing_telemetry_reference_requests_complete_observation() -> None:
     events = Events(
         high_watermark=9,
         first_retained_id=1,
@@ -608,12 +592,10 @@ def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
             )
         ],
     )
-    projection = Projection()
     timing = Timing()
     stream = FleetStream(
         events,
         Telemetry(),
-        projection,
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -631,12 +613,11 @@ def test_missing_telemetry_reference_forces_snapshot_reset() -> None:
     assert fields == {
         "retry": "2000",
         "id": "9",
-        "event": "fleet-snapshot",
+        "event": "fleet-refresh",
     }
     assert isinstance(data, dict)
     assert data["reset_reason"] == "missing-telemetry-sample"
-    assert data["snapshot"]["event_cursor"] == 9
-    assert projection.cursors == [9]
+    assert data["event_cursor"] == 9
 
 
 def test_midstream_retention_loss_resets_before_delivering_later_event() -> None:
@@ -668,12 +649,10 @@ def test_midstream_retention_loss_resets_before_delivering_later_event() -> None
             ),
         ],
     )
-    projection = Projection()
     timing = Timing()
     stream = FleetStream(
         events,
         Telemetry(),
-        projection,
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -691,12 +670,11 @@ def test_midstream_retention_loss_resets_before_delivering_later_event() -> None
     assert fields == {
         "retry": "2000",
         "id": "6",
-        "event": "fleet-snapshot",
+        "event": "fleet-refresh",
     }
     assert isinstance(data, dict)
     assert data["reset_reason"] == "retention-gap"
-    assert data["snapshot"]["event_cursor"] == 6
-    assert projection.cursors == [6]
+    assert data["event_cursor"] == 6
     assert events.replay_calls == [
         (4, NOW, 128),
         (4, NOW + timedelta(seconds=1), 128),
@@ -711,7 +689,6 @@ def test_empty_stream_polls_once_per_second_and_keeps_alive_by_fifteen_seconds()
     stream = FleetStream(
         events,
         Telemetry(),
-        Projection(),
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -748,7 +725,6 @@ def test_database_failure_terminates_without_emitting_or_advancing() -> None:
     stream = FleetStream(
         events,
         Telemetry(),
-        Projection(),
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -813,7 +789,6 @@ def test_production_repositories_bound_queries_and_release_before_orderly_close(
     stream = FleetStream(
         repository,
         TelemetryRepository(sessions, clock=lambda: NOW),
-        Projection(),
         clock=lambda: NOW,
     )
 
@@ -863,7 +838,6 @@ def test_production_stream_cancellation_during_poll_await_leaves_no_resources() 
         stream = FleetStream(
             repository,
             TelemetryRepository(sessions, clock=lambda: NOW),
-            Projection(),
             clock=lambda: NOW,
             sleep=blocked_sleep,
         )
@@ -928,7 +902,6 @@ def test_production_replay_advances_cursor_only_after_yield_resumes() -> None:
     stream = FleetStream(
         RecordingRepository(),
         TelemetryRepository(sessions, clock=timing.clock),
-        Projection(),
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -963,7 +936,6 @@ def test_production_replay_db_failure_terminates_and_releases_connection() -> No
     stream = FleetStream(
         repository,
         TelemetryRepository(sessions, clock=timing.clock),
-        Projection(),
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=timing.sleep,
@@ -1038,11 +1010,9 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
             )
             session.execute(update(FleetEventCursor).values(last_id=6))
 
-    projection = Projection()
     stream = FleetStream(
         repository,
         TelemetryRepository(sessions, clock=timing.clock),
-        projection,
         clock=timing.clock,
         monotonic=timing.monotonic,
         sleep=sleep_and_insert,
@@ -1056,10 +1026,9 @@ def test_production_replay_resets_when_event_expires_while_connected() -> None:
             await generator.aclose()
 
     fields, data = _parsed_frame(asyncio.run(read_reset()))
-    assert fields == {"retry": "2000", "id": "6", "event": "fleet-snapshot"}
+    assert fields == {"retry": "2000", "id": "6", "event": "fleet-refresh"}
     assert isinstance(data, dict)
     assert data["reset_reason"] == "retention-gap"
-    assert projection.cursors == [6]
     assert probe.active == 0
 
 
@@ -1092,7 +1061,7 @@ class ApiStream:
 
     async def events(self, last_event_id: int | None):
         self.calls.append(last_event_id)
-        yield "retry: 2000\nid: 12\nevent: fleet-snapshot\ndata: {}\n\n"
+        yield 'retry: 2000\nid: 12\nevent: fleet-refresh\ndata: {"reset_reason":"initial","event_cursor":12}\n\n'
 
 
 def _opaque(byte: int) -> str:
@@ -1169,7 +1138,9 @@ def test_sse_route_accepts_shared_auth_and_sets_exact_headers() -> None:
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert response.headers["cache-control"] == "no-cache, no-transform"
     assert response.headers["x-accel-buffering"] == "no"
-    assert response.text == ("retry: 2000\nid: 12\nevent: fleet-snapshot\ndata: {}\n\n")
+    assert response.text == (
+        'retry: 2000\nid: 12\nevent: fleet-refresh\ndata: {"reset_reason":"initial","event_cursor":12}\n\n'
+    )
     assert stream.calls == [0]
 
     client.cookies.clear()
