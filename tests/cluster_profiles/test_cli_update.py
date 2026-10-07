@@ -994,7 +994,9 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     # The real server executes the exact reviewed root whose identity the build
     # stamps. A candidate's expected identity alone cannot bless foreign code.
     for module in (api_module, platform_observation, worker_module):
-        assert Path(module.__file__).resolve().is_relative_to(root / "control/src")
+        module_file = module.__file__
+        assert isinstance(module_file, str)
+        assert Path(module_file).resolve().is_relative_to(root / "control/src")
     assert Path(runtime_identity.__file__).resolve().is_relative_to(root / "src")
     [old_wheel] = (workspace / "old").glob("*.whl")
     with zipfile.ZipFile(old_wheel) as archive:
