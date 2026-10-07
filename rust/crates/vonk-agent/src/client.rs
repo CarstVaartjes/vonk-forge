@@ -2026,11 +2026,23 @@ fn controller_rejection_digest(body: &[u8]) -> Option<String> {
 
 /// Render one reported location segment as bounded, sanitized text.
 fn render_rejection_location(segment: &RequestValidationIssueLocItem) -> String {
-    let text = segment.to_string();
-    sanitize_text(&text)
-        .chars()
-        .take(MAX_REJECTION_LOCATION_CHARS)
-        .collect()
+    match segment {
+        RequestValidationIssueLocItem::String(text) => sanitize_text(text)
+            .chars()
+            .take(MAX_REJECTION_LOCATION_CHARS)
+            .collect(),
+        RequestValidationIssueLocItem::VonkInteger(index) => {
+            // A validated integer is path authority, not an opaque credential.
+            // Brackets distinguish it from string members and retain the final
+            // digest sanitizer without hiding an otherwise valid wide index.
+            let bounded: String = index
+                .to_string()
+                .chars()
+                .take(MAX_REJECTION_LOCATION_CHARS - 2)
+                .collect();
+            format!("[{bounded}]")
+        }
+    }
 }
 
 fn controller_error(
@@ -2426,9 +2438,10 @@ mod tests {
 
     use super::{
         AgentHttpClient, AgentResult, ClientError, ControllerError, DISTRIBUTION_CONCURRENCY,
-        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement, StreamGovernor,
-        WriteBehind, clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
-        open_trusted_partial, partial_path, preallocate, range_end, valid_reported_hostname,
+        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement,
+        RecipeRunDisposition, StreamGovernor, WriteBehind, clamp_inventory_request,
+        controller_rejection_digest, is_rotation_conflict, open_trusted_partial, partial_path,
+        preallocate, range_end, valid_reported_hostname,
     };
     use crate::{
         oci::OciRuntime,

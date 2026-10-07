@@ -1,14 +1,18 @@
 import {useEffect, useMemo, useState} from "react";
 import {addWire, compareWire, formatWire} from "../api/contract-numeric";
 import type {WireNumber} from "../api/contract-numeric";
+import {validateControlParameters} from "../api/contract-json";
 import {canonicalRecipeSelector, readableProfile} from "../api/types";
-import type {ControlApi, FleetProfile, FleetProfileRead, FleetProfileInput, LibraryViewRecipeDetail} from "../api/types";
+import type {ControlApi, FleetProfile, FleetProfileNumber, FleetProfileRead, FleetProfileInput, LibraryViewRecipeDetail} from "../api/types";
 import {useLibraryNodeName} from "./library-node-names";
 import {RecipeOptionSelects, effectiveChoices} from "./recipe-option-selects";
 import type {OptionChoices} from "./recipe-option-selects";
 
-function nextProfileNumber(profiles: FleetProfileRead[]): WireNumber {
-  return addWire(profiles.reduce<WireNumber>((largest, profile) => compareWire(profile.number, largest) > 0 ? profile.number : largest, 0), 1);
+function nextProfileNumber(profiles: FleetProfileRead[]): FleetProfileNumber {
+  const number = addWire(profiles.reduce<WireNumber>((largest, profile) => compareWire(profile.number, largest) > 0 ? profile.number : largest, 0), 1);
+  validateControlParameters("PUT", `/api/profile/${formatWire(number)}`, {path: {number}});
+  if (typeof number !== "number") throw new Error("The next profile number cannot be represented by the profile contract.");
+  return number;
 }
 
 function inputFromProfile(profile: FleetProfile): FleetProfileInput {

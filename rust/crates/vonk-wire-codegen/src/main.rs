@@ -392,6 +392,85 @@ fn equality_types(items: &[Item]) -> std::collections::BTreeSet<String> {
     eligible
 }
 
+// Serde's derived untagged enum buffers Content, which cannot represent
+// arbitrary-precision integers or preserve RawValue through nested models.
+// Try the generated payload types directly from the original-kind Value instead.
+fn untagged_deserialize_impl(item: &mut syn::ItemEnum, schema_name: Option<&str>) -> Item {
+    let ident = &item.ident;
+    let branches = item.variants.iter().map(|variant| {
+        let name = &variant.ident;
+        match &variant.fields {
+            syn::Fields::Unit => quote! {
+                if ::serde_json::from_value::<()>(value.clone()).is_ok() {
+                    return Ok(Self::#name);
+                }
+            },
+            syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                let payload = &fields.unnamed.first().unwrap().ty;
+                quote! {
+                    if let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
+                        return Ok(Self::#name(payload));
+                    }
+                }
+            }
+            syn::Fields::Unnamed(fields) => {
+                let types: Vec<_> = fields.unnamed.iter().map(|field| &field.ty).collect();
+                let names: Vec<_> = (0..types.len()).map(|index| format_ident!("value{index}")).collect();
+                quote! {
+                    if let Ok((#(#names),*)) = ::serde_json::from_value::<(#(#types),*)>(value.clone()) {
+                        return Ok(Self::#name(#(#names),*));
+                    }
+                }
+            }
+            syn::Fields::Named(fields) => {
+                let helper = format_ident!("Raw{name}");
+                let names: Vec<_> = fields.named.iter().map(|field| field.ident.as_ref().unwrap()).collect();
+                quote! {
+                    #[derive(::serde::Deserialize)]
+                    struct #helper #fields
+                    if let Ok(payload) = ::serde_json::from_value::<#helper>(value.clone()) {
+                        return Ok(Self::#name { #(#names: payload.#names),* });
+                    }
+                }
+            }
+        }
+    });
+    let validation = schema_name.map(|schema_name| {
+        quote! {
+            crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
+                .map_err(::serde::de::Error::custom)?;
+        }
+    });
+    let implementation = parse_quote! {
+        impl<'de> ::serde::Deserialize<'de> for #ident {
+            fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                #[allow(unused_mut)]
+                let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+                #validation
+                #(#branches)*
+                Err(::serde::de::Error::custom(concat!("invalid canonical union ", stringify!(#ident))))
+            }
+        }
+    };
+    for attr in item
+        .attrs
+        .iter_mut()
+        .filter(|attr| attr.path().is_ident("derive"))
+    {
+        let paths = attr
+            .parse_args_with(
+                syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+            )
+            .unwrap();
+        let retained: Vec<_> = paths
+            .into_iter()
+            .filter(|path| path.segments.last().unwrap().ident != "Deserialize")
+            .collect();
+        *attr = parse_quote!(#[derive(#(#retained),*)]);
+    }
+    implementation
+}
+
 fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
     let (ident, fields, attrs, raw, construction) = match item {
         Item::Struct(item) if matches!(item.fields, syn::Fields::Named(_)) => {
@@ -466,7 +545,7 @@ fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
     Some(parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+                let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
                 crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
                     .map_err(::serde::de::Error::custom)?;
                 #raw
@@ -726,7 +805,17 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 attrs.push(parse_quote!(#[derive(Eq)]));
             }
         }
-        if let Some(schema_name) = names.get(&name)
+        if let Item::Enum(enumeration) = item
+            && enumeration.attrs.iter().any(|attr| {
+                attr.path().is_ident("serde")
+                    && attr.meta.to_token_stream().to_string().contains("untagged")
+            })
+        {
+            validation.push(untagged_deserialize_impl(
+                enumeration,
+                names.get(&name).map(String::as_str),
+            ));
+        } else if let Some(schema_name) = names.get(&name)
             && let Some(implementation) = deserialize_impl(item, schema_name)
         {
             validation.push(implementation);

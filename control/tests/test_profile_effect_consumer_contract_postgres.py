@@ -14,28 +14,32 @@ import os
 import shutil
 import subprocess
 import sys
+from datetime import timedelta
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
 from zipfile import ZipFile
 
 import pytest
-from fastapi import FastAPI, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.testclient import TestClient
 from sqlalchemy import select
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
     OutcomeDone,
+    OutcomeKind,
     RecipeStopResult,
 )
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.fleet_profiles import RunSwitchFleetProfileAdapter
 from vonk_control.models import AgentOperation, Job
 
+from .agent_fences import fenced_attempt, fenced_operation
 from .subprocess_environment import install_cli_wheel, isolated_environment
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 from .test_profile_stop_effect_adoption_postgres import _claims
+from .test_recipe_operations import _issue_exact_stop_grant
 from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 pytest_plugins = ("tests.test_profile_stop_effect_adoption_postgres",)
@@ -145,7 +149,7 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         clock,
         original,
         lifecycle,
-        jobs,
+        _jobs,
         nodes,
         stop_id,
         request_key,
@@ -176,30 +180,67 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
     path = f"/api/profile/applications/{original.id}"
     corrupt_projection = [False]
 
-    @cast(FastAPI, api.app).middleware("http")
-    async def schema_fault(request: Request, call_next):
-        response = await call_next(request)
-        if corrupt_projection[0] and request.url.path == path:
-            assert isinstance(response, StreamingResponse)
-            body = b"".join([chunk async for chunk in response.body_iterator])
-            document = json.loads(body)
-            effect = next(
-                item
-                for item in document["progress"]["effects"]
-                if item["kind"] == "stop"
-            )
-            del effect["request_key"]
-            altered = json.dumps(document).encode()
-            response_headers = dict(response.headers)
-            response_headers.pop("content-length", None)
-            response_headers["X-Content-SHA256"] = hashlib.sha256(altered).hexdigest()
-            return Response(
-                altered,
-                status_code=response.status_code,
-                headers=response_headers,
-                media_type="application/json",
-            )
-        return response
+    injected_responses: list[tuple[int, bytes]] = []
+
+    class SchemaFaultPeer:
+        """Alter complete ASGI bytes, independent of middleware response classes."""
+
+        def __init__(self, app: ASGIApp) -> None:
+            self.app = app
+
+        async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+            if not (
+                corrupt_projection[0]
+                and scope["type"] == "http"
+                and scope["path"] == path
+            ):
+                await self.app(scope, receive, send)
+                return
+            starts: list[Message] = []
+            body = bytearray()
+
+            async def fault_send(message: Message) -> None:
+                if message["type"] == "http.response.start":
+                    starts.append(message)
+                elif message["type"] == "http.response.body":
+                    body.extend(message.get("body", b""))
+                    assert len(body) <= 1_048_576
+                    if message.get("more_body", False):
+                        return
+                    [start] = starts
+                    assert start["status"] == 200
+                    document = json.loads(body)
+                    effect = next(
+                        item
+                        for item in document["progress"]["effects"]
+                        if item["kind"] == "stop"
+                    )
+                    assert effect["request_key"] == request_key
+                    del effect["request_key"]
+                    altered = json.dumps(document).encode()
+                    headers = [
+                        (name, value)
+                        for name, value in start["headers"]
+                        if name.lower() not in {b"content-length", b"x-content-sha256"}
+                    ]
+                    headers.extend(
+                        [
+                            (b"content-length", str(len(altered)).encode()),
+                            (
+                                b"x-content-sha256",
+                                hashlib.sha256(altered).hexdigest().encode(),
+                            ),
+                        ]
+                    )
+                    injected_responses.append((start["status"], altered))
+                    await send({**start, "headers": headers})
+                    await send({"type": "http.response.body", "body": altered})
+                else:
+                    await send(message)
+
+            await self.app(scope, receive, fault_send)
+
+    api = TestClient(SchemaFaultPeer(api.app))
 
     with _https_api_peer(tmp_path, api, headers) as (url, certificate, peer):
         environment = _process_environment(tmp_path, url, certificate, headers)
@@ -267,17 +308,72 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         corrupt_projection[0] = True
         malformed = run("profile", "progress", "--application", original.id, "--json")
         assert malformed.returncode != 0
-        assert not malformed.stdout.strip()
-        assert "schema" in malformed.stderr.lower()
+        [injected] = injected_responses
+        assert injected[0] == 200
+        bad_document = json.loads(injected[1])
+        bad_effect = next(
+            item
+            for item in bad_document["progress"]["effects"]
+            if item["kind"] == "stop"
+        )
+        assert "request_key" not in bad_effect
+        problem = json.loads(malformed.stdout)
+        assert problem["code"] == "controller.protocol_invalid"
+        assert problem["source"] == "protocol"
+        assert problem["decision"] == "exit"
+        assert "OpenAPI schema" in problem["detail"]
+        assert "request_key" in problem["detail"]
+        assert "progress" not in problem and "id" not in problem
+        assert cleanup.stop_effects(problem) is None
         corrupt_projection[0] = False
         assert _claims(sessions, nodes[0]) == before_claims
 
-        # The real fenced receipt establishes Stop. Neither absence nor a
-        # successful unrelated load is sufficient for the consumer decision.
-        receipt = AgentResult(
+        # Reconnect the offline lane through transport reconciliation and the
+        # exact-plan signer. The retained request/native operation stay fixed;
+        # an expired receipt cannot release their original capacity claims.
+        clock[0] += timedelta(hours=1)
+        jobs = AgentJobService(sessions, clock=lambda: clock[0])
+        jobs.set_result_consumer(lifecycle.consume_agent_result)
+        jobs.reconcile_orders()
+        with sessions() as session:
+            native = session.get(AgentOperation, native_id)
+            assert native is not None
+            if native.next_action_at is not None:
+                clock[0] = max(clock[0], native.next_action_at)
+        fresh, exact_stop, _grant = _issue_exact_stop_grant(
+            sessions,
+            node_id=nodes[0],
+            certificate_serial="serial-0",
+            grant_now=clock[0],
+        )
+        assert fresh.fence != claim.fence
+        assert fresh.payload == claim.payload
+        assert fenced_operation(sessions, fresh).id == native_id
+        assert (
+            fenced_attempt(sessions, fresh).attempt
+            > fenced_attempt(sessions, claim).attempt
+        )
+        assert exact_stop.run_id == pending["stop_effect"]["run_id"]
+        stale_receipt = AgentResult(
             fence=claim.fence,
             state=AgentResultState.SUCCEEDED,
-            result=OutcomeDone(result=RecipeStopResult()),
+            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
+        )
+        assert jobs.record_late_result(
+            AgentResult.model_validate_json(stale_receipt.model_dump_json())
+        )
+        assert fenced_operation(sessions, fresh).state == "running"
+        assert _claims(sessions, nodes[0]) == before_claims
+        still_pending = cleanup.stop_effects(observe())
+        assert still_pending is not None and len(still_pending) == 1
+        assert cleanup.same_effect(pending, still_pending[0])
+        assert not cleanup.stopped(still_pending[0])
+
+        # Only the fresh canonical receipt establishes Stop.
+        receipt = AgentResult(
+            fence=fresh.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
         )
         jobs.record_result(AgentResult.model_validate_json(receipt.model_dump_json()))
         coordinator = _service(

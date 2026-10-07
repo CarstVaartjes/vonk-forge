@@ -272,9 +272,14 @@ and query parameters use the same generated contracts. SSE frames validate
 their canonical event component before updating the retained Fleet snapshot.
 A malformed frame or response is not evidence of a completed remote operation.
 
-The browser decoder retains numeric tokens with pinned lossless-json. Strict
+The browser decoder uses native JSON.parse source-context revivers (ES2025)
+to retain numeric tokens in the pinned lossless-json numeric wrapper. Node 26
+and the hosted Chromium consumer exercise this capability. A browser without
+numeric source context fails with an explicit update-browser cause, rather than
+misreporting a valid network document as invalid. Own JSON keys, including
+`__proto__`, remain data through parsing and normalization. Strict
 integer fields accept integer tokens, not `1.0` or `1e0`. Integers outside the
-JavaScript safe range remain `ExactInteger` values, an alias of that library's
+JavaScript safe range remain `ExactNumber` values, an alias of that library's
 single `LosslessNumber` representation. Bounds are compared exactly without
 expanding exponent tokens. Arithmetic, selection identity, copy and JSON export
 preserve integer values; display ratios alone use an explicit approximation.
@@ -283,7 +288,10 @@ its float token fails a strict integer field; use an exact integer value instead
 
 Canonical float branches use finite IEEE materialization, including permitted
 underflow and signed zero, before checking their float bounds. The successful
-compiled union branch also owns normalization. A mathematical JSON Schema
+compiled union branch also owns normalization. When a canonical scalar union
+distinguishes integers from floats, an integral float keeps its float token
+through export and request serialization using the same numeric wrapper;
+`1000.0` cannot silently become the integer `1000`. A mathematical JSON Schema
 integer is a different rule from the production strict integer token rule;
 the pinned official semantics corpus exercises that distinction explicitly.
 Neither path permits non-finite float materialization. Numeric token wrappers

@@ -1,5 +1,5 @@
 import * as generated from "./runtime.generated.js";
-import {parseContractJson, stringifyContractJson} from "./contract-numeric";
+import {parseContractJson, stringifyContractJson, UnsupportedContractRuntime} from "./contract-numeric";
 
 export class ContractViolation extends Error {
   readonly path: string;
@@ -22,7 +22,10 @@ export function validateControlBody(method: string, path: string, status: number
   const validator = responses?.[media.split(";")[0].trim().toLowerCase()];
   if (!validator) throw new ContractViolation(method, path, status);
   let value: unknown;
-  try { value = parseContractJson(text); } catch { throw new ContractViolation(method, path, status); }
+  try { value = parseContractJson(text); } catch (cause) {
+    if (cause instanceof UnsupportedContractRuntime) throw cause;
+    throw new ContractViolation(method, path, status);
+  }
   if (!validator(value)) throw new ContractViolation(method, path, status);
   return validator.normalize(value);
 }
@@ -56,7 +59,12 @@ export async function readControlResponse(response: Response, method: string, pa
 /** openapi-fetch must consume the validated value instead of calling JSON.parse. */
 export class ContractResponse extends Response {
   constructor(response: Response, private readonly value: unknown, private readonly sourceText: string) {
-    super(sourceText, {status: response.status, statusText: response.statusText, headers: response.headers});
+    const headers = new Headers(response.headers);
+    // openapi-fetch 0.16 reparses text with JSON.parse when length is absent.
+    // This adapter owns a new UTF-8 body; advertise its actual byte length so
+    // the library consumes the already validated value through json().
+    headers.set("Content-Length", String(new TextEncoder().encode(sourceText).byteLength));
+    super(sourceText, {status: response.status, statusText: response.statusText, headers});
     for (const key of ["url", "redirected", "type"] as const) Object.defineProperty(this, key, {value: response[key]});
   }
   override async json(): Promise<unknown> { await this.text(); return this.value; }

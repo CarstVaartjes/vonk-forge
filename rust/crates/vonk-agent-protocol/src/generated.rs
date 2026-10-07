@@ -3,7 +3,7 @@
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct ActivateRequest {
-    pub generation: u64,
+    pub generation: u32,
     pub node_id: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -182,7 +182,7 @@ pub struct AgentClaim {
     pub operation: AgentOperation,
     pub payload: AgentClaimPayload,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -583,7 +583,7 @@ pub struct AgentResult {
     pub result: AgentResultResult,
     pub state: AgentResultState,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -1763,10 +1763,10 @@ pub struct CompiledPlacement {
     pub memory_floor_bytes: u64,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub port: ::std::option::Option<u16>,
-    pub rank: u64,
+    pub rank: crate::integer::Integer,
     pub reserved_memory_bytes: u64,
     pub role: ::std::string::String,
-    pub world_size: u64,
+    pub world_size: crate::integer::Integer,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1917,7 +1917,7 @@ impl ::std::convert::TryFrom<::std::string::String> for CompiledSecurityNetworkM
 #[derive(Eq)]
 pub struct CompiledTopology {
     pub name: ::std::string::String,
-    pub node_count: u64,
+    pub node_count: crate::integer::Integer,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -2330,7 +2330,7 @@ pub struct EnrollmentSubmitRequest {
 pub struct ErrorCatalog {
     pub error: ErrorCatalogError,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -2541,7 +2541,7 @@ pub struct ExecuteContainerRuntimeRequestOperation {
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u32>,
+    pub run_generation: ::std::option::Option<u64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -3636,7 +3636,7 @@ pub struct HostRuntimeGrantRequest {
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u32>,
+    pub run_generation: ::std::option::Option<u64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -3741,7 +3741,7 @@ pub struct HostRuntimeRequest {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u32>,
+    pub run_generation: ::std::option::Option<u64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub start_plan: ::std::option::Option<RecipeStartPayload>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -4778,7 +4778,7 @@ pub struct IssuedCertificateResponse {
     pub certificate_pem: ::std::string::String,
     pub chain_pem: ::std::string::String,
     pub fingerprint: ::std::string::String,
-    pub generation: u64,
+    pub generation: u32,
     pub node_id: ::std::string::String,
     pub not_after: ::std::string::String,
     pub not_before: ::std::string::String,
@@ -6224,7 +6224,7 @@ pub struct OperationCheckpoint {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub digest: ::std::option::Option<::std::string::String>,
     pub key: ::std::string::String,
-    pub sequence: u64,
+    pub sequence: crate::integer::Integer,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum OperationFailureCode {
@@ -6232,12 +6232,17 @@ pub enum OperationFailureCode {
     FleetProfileApplicationFailed,
     #[serde(rename = "artifact_process_failed")]
     ArtifactProcessFailed,
+    #[serde(rename = "stored_operation_result_unreadable")]
+    StoredOperationResultUnreadable,
 }
 impl ::std::fmt::Display for OperationFailureCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::FleetProfileApplicationFailed => f.write_str("fleet_profile_application_failed"),
             Self::ArtifactProcessFailed => f.write_str("artifact_process_failed"),
+            Self::StoredOperationResultUnreadable => {
+                f.write_str("stored_operation_result_unreadable")
+            }
         }
     }
 }
@@ -6247,6 +6252,7 @@ impl ::std::str::FromStr for OperationFailureCode {
         match value {
             "fleet_profile_application_failed" => Ok(Self::FleetProfileApplicationFailed),
             "artifact_process_failed" => Ok(Self::ArtifactProcessFailed),
+            "stored_operation_result_unreadable" => Ok(Self::StoredOperationResultUnreadable),
             _ => Err("invalid value".into()),
         }
     }
@@ -6272,9 +6278,9 @@ pub struct OperationMemberProgress {
     pub activity: ::std::option::Option<OperationMemberProgressActivity>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub bytes_per_second: ::std::option::Option<f64>,
-    pub completed_bytes: u64,
+    pub completed_bytes: crate::integer::Integer,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub completed_items: ::std::option::Option<u64>,
+    pub completed_items: ::std::option::Option<crate::integer::Integer>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub elapsed_seconds: ::std::option::Option<f64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -6293,9 +6299,9 @@ pub struct OperationMemberProgress {
     pub smoothed_bytes_per_second: ::std::option::Option<f64>,
     pub state: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub total_bytes: ::std::option::Option<u64>,
+    pub total_bytes: ::std::option::Option<crate::integer::Integer>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub total_items: ::std::option::Option<u64>,
+    pub total_items: ::std::option::Option<crate::integer::Integer>,
 }
 #[derive(
     ::serde::Deserialize,
@@ -6360,9 +6366,9 @@ pub struct OperationProgress {
     pub bytes_per_second: ::std::option::Option<f64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub checkpoint: ::std::option::Option<OperationCheckpoint>,
-    pub completed_bytes: u64,
+    pub completed_bytes: crate::integer::Integer,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub completed_items: ::std::option::Option<u64>,
+    pub completed_items: ::std::option::Option<crate::integer::Integer>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub elapsed_seconds: ::std::option::Option<f64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -6380,10 +6386,10 @@ pub struct OperationProgress {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub smoothed_bytes_per_second: ::std::option::Option<f64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub total_bytes: ::std::option::Option<u64>,
+    pub total_bytes: ::std::option::Option<crate::integer::Integer>,
     pub total_bytes_known: bool,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub total_items: ::std::option::Option<u64>,
+    pub total_items: ::std::option::Option<crate::integer::Integer>,
 }
 #[derive(
     ::serde::Deserialize,
@@ -6543,7 +6549,7 @@ impl ::std::convert::TryFrom<::std::string::String> for OperatorSurface {
 pub struct OutcomeCatalog {
     pub outcome: OutcomeCatalogOutcome,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -6620,7 +6626,7 @@ impl ::std::convert::TryFrom<::std::string::String> for OutcomeDoneKind {
         value.parse()
     }
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -7800,27 +7806,27 @@ pub struct RecipeBuildEnvironmentArgument {
     pub name: ::std::string::String,
     pub value: RecipeBuildEnvironmentArgumentValue,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum RecipeBuildEnvironmentArgumentValue {
     String(::std::string::String),
-    Int64(i64),
+    VonkInteger(crate::integer::Integer),
     Boolean(bool),
 }
 impl ::std::fmt::Display for RecipeBuildEnvironmentArgumentValue {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match self {
             Self::String(x) => x.fmt(f),
-            Self::Int64(x) => x.fmt(f),
+            Self::VonkInteger(x) => x.fmt(f),
             Self::Boolean(x) => x.fmt(f),
         }
     }
 }
-impl ::std::convert::From<i64> for RecipeBuildEnvironmentArgumentValue {
-    fn from(value: i64) -> Self {
-        Self::Int64(value)
+impl ::std::convert::From<crate::integer::Integer> for RecipeBuildEnvironmentArgumentValue {
+    fn from(value: crate::integer::Integer) -> Self {
+        Self::VonkInteger(value)
     }
 }
 impl ::std::convert::From<bool> for RecipeBuildEnvironmentArgumentValue {
@@ -8418,7 +8424,7 @@ pub struct RecipeJobRunRequest {
     pub output_mappings: ::std::vec::Vec<RecipeJobOutputMapping>,
     pub plan_digest: ::std::string::String,
     pub recipe_revision_id: ::uuid::Uuid,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -8481,7 +8487,7 @@ pub struct RecipeOperationRequest {
     pub operation: AgentOperation,
     pub payload: RecipeOperationRequestPayload,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
@@ -8649,7 +8655,7 @@ pub struct RecipeRunObservationWire {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub endpoint_ready: ::std::option::Option<bool>,
     pub process_running: bool,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -8674,7 +8680,7 @@ pub struct RecipeStartPayload {
     pub phase: ::std::option::Option<RecipeStartPayloadPhase>,
     pub plan_digest: ::std::string::String,
     pub recipe_revision_id: ::uuid::Uuid,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub start_deadline: ::std::option::Option<::std::string::String>,
@@ -8744,11 +8750,11 @@ pub struct RecipeStopPayload {
     pub installation_id: ::uuid::Uuid,
     pub mapping_id: ::uuid::Uuid,
     pub plan_digest: ::std::string::String,
-    pub rank: u64,
+    pub rank: crate::integer::Integer,
     pub recipe_content_sha256: ::std::string::String,
     pub recipe_revision_id: ::uuid::Uuid,
     pub role: ::std::string::String,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
     pub stop_timeout_seconds: u32,
     pub target_runtime_id: ::uuid::Uuid,
@@ -8951,25 +8957,25 @@ pub struct RequestValidationIssue {
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
 }
-#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
 #[derive(Eq)]
 pub enum RequestValidationIssueLocItem {
     String(::std::string::String),
-    Int64(i64),
+    VonkInteger(crate::integer::Integer),
 }
 impl ::std::fmt::Display for RequestValidationIssueLocItem {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match self {
             Self::String(x) => x.fmt(f),
-            Self::Int64(x) => x.fmt(f),
+            Self::VonkInteger(x) => x.fmt(f),
         }
     }
 }
-impl ::std::convert::From<i64> for RequestValidationIssueLocItem {
-    fn from(value: i64) -> Self {
-        Self::Int64(value)
+impl ::std::convert::From<crate::integer::Integer> for RequestValidationIssueLocItem {
+    fn from(value: crate::integer::Integer) -> Self {
+        Self::VonkInteger(value)
     }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -9594,7 +9600,7 @@ pub struct RunLifecycleRecord {
     pub installation_id: ::std::string::String,
     pub placement: CompiledPlacement,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub run_generation: ::std::option::Option<u32>,
+    pub run_generation: ::std::option::Option<u64>,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum RunState {
@@ -10970,7 +10976,7 @@ impl ::std::convert::TryFrom<::std::string::String> for RunSwitchCode {
 #[derive(Eq)]
 pub struct RuntimeGenerationFence {
     pub cancelled: bool,
-    pub highest_generation: u32,
+    pub highest_generation: u64,
     pub installation_id: ::uuid::Uuid,
     pub runtime_id: ::uuid::Uuid,
     pub schema_version: u8,
@@ -13412,7 +13418,7 @@ impl ::std::convert::TryFrom<::std::string::String> for SupersedeCode {
 pub struct SupervisorAcknowledgement {
     pub acknowledged_at: ::std::string::String,
     pub activation_sha256: ::std::string::String,
-    pub child_pid: u64,
+    pub child_pid: u32,
     pub generation: u64,
     pub litellm_sha256: ::std::string::String,
     pub schema_version: u8,
@@ -13858,14 +13864,14 @@ pub mod error {
 }
 impl<'de> ::serde::Deserialize<'de> for ActivateRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ActivateRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub generation: u64,
+            pub generation: u32,
             pub node_id: ::std::string::String,
         }
         #[allow(unused_variables)]
@@ -13878,7 +13884,7 @@ impl<'de> ::serde::Deserialize<'de> for ActivateRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for ActivationManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ActivationManifest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -13934,7 +13940,7 @@ impl ::std::cmp::PartialEq<&str> for ActivationManifestState {
 }
 impl<'de> ::serde::Deserialize<'de> for ActivationMarker {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ActivationMarker", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14017,7 +14023,7 @@ impl ::std::cmp::PartialEq<&str> for AdmissionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for AdmissionCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AdmissionCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -14045,7 +14051,7 @@ impl<'de> ::serde::Deserialize<'de> for AdmissionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentClaim {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentClaim", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14071,9 +14077,53 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for AgentClaimPayload {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightRequest>(value.clone()) {
+            return Ok(Self::RuntimePreflightRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradePayload>(value.clone()) {
+            return Ok(Self::AgentUpgradePayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionPayload>(value.clone())
+        {
+            return Ok(Self::ArtifactDistributionPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildRequest>(value.clone()) {
+            return Ok(Self::RecipeBuildRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupRequest>(value.clone()) {
+            return Ok(Self::RecipeBuildCleanupRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunRequest>(value.clone()) {
+            return Ok(Self::RecipeJobRunRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeInstallPayload>(value.clone()) {
+            return Ok(Self::RecipeInstallPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStartPayload>(value.clone()) {
+            return Ok(Self::RecipeStartPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStopPayload>(value.clone()) {
+            return Ok(Self::RecipeStopPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcilePayload>(value.clone()) {
+            return Ok(Self::RecipeReconcilePayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallPayload>(value.clone()) {
+            return Ok(Self::RecipeUninstallPayload(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(AgentClaimPayload)
+        )))
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for AgentDirective {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentDirective", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14139,7 +14189,7 @@ impl ::std::cmp::PartialEq<&str> for AgentEvidenceCode {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentEvidenceCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentEvidenceCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -14223,7 +14273,7 @@ impl ::std::cmp::PartialEq<&str> for AgentFailureKind {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentFailureKind {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentFailureKind", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -14266,7 +14316,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureKind {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentFailureResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -14330,7 +14380,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentFailureResult {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentGenerationPointer {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentGenerationPointer", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14348,7 +14398,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentGenerationPointer {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentIdentityMetadata {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentIdentityMetadata", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14372,7 +14422,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentIdentityMetadata {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentInstallResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentInstallResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14423,7 +14473,7 @@ impl ::std::cmp::PartialEq<&str> for AgentOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentOperation", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -14481,7 +14531,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentPackageSource {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentPackageSource", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14509,7 +14559,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentPackageSource {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentProgress {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentProgress", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14529,7 +14579,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentProgress {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentReadinessReceipt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentReadinessReceipt", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14561,7 +14611,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentReadinessReceipt {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14579,6 +14629,61 @@ impl<'de> ::serde::Deserialize<'de> for AgentResult {
             result: raw.result,
             state: raw.state,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentResultResult {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightResult>(value.clone()) {
+            return Ok(Self::RuntimePreflightResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentInstallResult>(value.clone()) {
+            return Ok(Self::AgentInstallResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStartResult>(value.clone()) {
+            return Ok(Self::RecipeStartResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStopResult>(value.clone()) {
+            return Ok(Self::RecipeStopResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcileResult>(value.clone()) {
+            return Ok(Self::RecipeReconcileResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallResult>(value.clone()) {
+            return Ok(Self::RecipeUninstallResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildEvidence>(value.clone()) {
+            return Ok(Self::RecipeBuildEvidence(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupEvidence>(value.clone()) {
+            return Ok(Self::RecipeBuildCleanupEvidence(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunResult>(value.clone()) {
+            return Ok(Self::RecipeJobRunResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionResult>(value.clone()) {
+            return Ok(Self::ArtifactDistributionResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentFailureResult>(value.clone()) {
+            return Ok(Self::AgentFailureResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradeResult>(value.clone()) {
+            return Ok(Self::AgentUpgradeResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeDone>(value.clone()) {
+            return Ok(Self::OutcomeDone(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeFailed>(value.clone()) {
+            return Ok(Self::OutcomeFailed(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeUnknown>(value.clone()) {
+            return Ok(Self::OutcomeUnknown(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(AgentResultResult)
+        )))
     }
 }
 impl AgentResultState {
@@ -14609,7 +14714,7 @@ impl ::std::cmp::PartialEq<&str> for AgentResultState {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentResultState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentResultState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -14647,7 +14752,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentResultState {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentRuntimeIdentity {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentRuntimeIdentity", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14698,7 +14803,7 @@ impl ::std::cmp::PartialEq<&str> for AgentRuntimeIdentityArchitecture {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentUpgradeGrantRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentUpgradeGrantRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14722,7 +14827,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentUpgradeGrantRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentUpgradePayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentUpgradePayload", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14762,7 +14867,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentUpgradePayload {
 }
 impl<'de> ::serde::Deserialize<'de> for AgentUpgradeResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AgentUpgradeResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14792,7 +14897,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentUpgradeResult {
 }
 impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionPayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ArtifactDistributionPayload", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14810,7 +14915,7 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionPayload {
 }
 impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ArtifactDistributionResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -14863,7 +14968,7 @@ impl ::std::cmp::PartialEq<&str> for ArtifactLifecycleCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ArtifactLifecycleCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ArtifactLifecycleCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -14952,7 +15057,7 @@ impl ::std::cmp::PartialEq<&str> for ArtifactPreparation {
 }
 impl<'de> ::serde::Deserialize<'de> for ArtifactPreparation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ArtifactPreparation", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15009,7 +15114,7 @@ impl ::std::cmp::PartialEq<&str> for AssetAvailability {
 }
 impl<'de> ::serde::Deserialize<'de> for AssetAvailability {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("AssetAvailability", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15072,7 +15177,7 @@ impl ::std::cmp::PartialEq<&str> for BlockerCategory {
 }
 impl<'de> ::serde::Deserialize<'de> for BlockerCategory {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("BlockerCategory", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15109,7 +15214,7 @@ impl<'de> ::serde::Deserialize<'de> for BlockerCategory {
 }
 impl<'de> ::serde::Deserialize<'de> for BoundedErrorResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("BoundedErrorResponse", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15155,7 +15260,7 @@ impl ::std::cmp::PartialEq<&str> for CacheReferenceReason {
 }
 impl<'de> ::serde::Deserialize<'de> for CacheReferenceReason {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CacheReferenceReason", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15241,7 +15346,7 @@ impl ::std::cmp::PartialEq<&str> for CatalogCode {
 }
 impl<'de> ::serde::Deserialize<'de> for CatalogCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CatalogCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15397,7 +15502,7 @@ impl ::std::cmp::PartialEq<&str> for CatalogSyncCode {
 }
 impl<'de> ::serde::Deserialize<'de> for CatalogSyncCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CatalogSyncCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15505,7 +15610,7 @@ impl ::std::cmp::PartialEq<&str> for CatalogSyncState {
 }
 impl<'de> ::serde::Deserialize<'de> for CatalogSyncState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CatalogSyncState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15570,7 +15675,7 @@ impl ::std::cmp::PartialEq<&str> for CertificateState {
 }
 impl<'de> ::serde::Deserialize<'de> for CertificateState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CertificateState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15613,7 +15718,7 @@ impl<'de> ::serde::Deserialize<'de> for CertificateState {
 }
 impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ClaimRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15678,7 +15783,7 @@ impl ::std::cmp::PartialEq<&str> for ClusterMappingCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ClusterMappingCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ClusterMappingCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -15749,7 +15854,7 @@ impl<'de> ::serde::Deserialize<'de> for ClusterMappingCode {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledArtifact {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledArtifact", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15781,7 +15886,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledArtifact {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledArtifactMount {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledArtifactMount", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15797,7 +15902,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledArtifactMount {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledEndpoint {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledEndpoint", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15819,7 +15924,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledEndpoint {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledEnvironmentEntry {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledEnvironmentEntry", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15839,7 +15944,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledEnvironmentEntry {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledExecutionPlan {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledExecutionPlan", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15875,7 +15980,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledExecutionPlan {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledIdentity {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledIdentity", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15895,7 +16000,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledIdentity {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledJob {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledJob", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15918,7 +16023,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledJob {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledJobInput {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledJobInput", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -15943,7 +16048,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledJobInput {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledJobInputSlot {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledJobInputSlot", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16004,7 +16109,7 @@ impl ::std::cmp::PartialEq<&str> for CompiledJobInterface {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledLifecycle {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledLifecycle", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16022,7 +16127,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledLifecycle {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledModelIdentity {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledModelIdentity", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16044,7 +16149,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledModelIdentity {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledPlacement", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16062,10 +16167,10 @@ impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
             pub memory_floor_bytes: u64,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub port: ::std::option::Option<u16>,
-            pub rank: u64,
+            pub rank: crate::integer::Integer,
             pub reserved_memory_bytes: u64,
             pub role: ::std::string::String,
-            pub world_size: u64,
+            pub world_size: crate::integer::Integer,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -16085,7 +16190,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledPlacement {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledRuntime {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledRuntime", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16109,7 +16214,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledRuntime {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledRuntimeImage {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledRuntimeImage", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16137,7 +16242,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledRuntimeImage {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledSecurity {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledSecurity", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16161,7 +16266,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledSecurity {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledSecurityMount {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledSecurityMount", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16231,7 +16336,7 @@ impl ::std::cmp::PartialEq<&str> for CompiledSecurityNetworkMode {
 }
 impl<'de> ::serde::Deserialize<'de> for CompiledTopology {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("CompiledTopology", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16239,7 +16344,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledTopology {
         #[derive(Eq)]
         struct Raw {
             pub name: ::std::string::String,
-            pub node_count: u64,
+            pub node_count: crate::integer::Integer,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -16251,7 +16356,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledTopology {
 }
 impl<'de> ::serde::Deserialize<'de> for ConfirmPackageActivationOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize(
             "ConfirmPackageActivationOperation",
             &mut value,
@@ -16310,7 +16415,7 @@ impl ::std::cmp::PartialEq<&str> for ControllerErrorCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ControllerErrorCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -16369,7 +16474,7 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ControllerRefusalBody {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ControllerRefusalBody", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -16415,7 +16520,7 @@ impl ::std::cmp::PartialEq<&str> for DesiredAssignmentState {
 }
 impl<'de> ::serde::Deserialize<'de> for DesiredAssignmentState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("DesiredAssignmentState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -16446,7 +16551,7 @@ impl<'de> ::serde::Deserialize<'de> for DesiredAssignmentState {
 }
 impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("DistributionAssignment", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16493,7 +16598,7 @@ impl ::std::cmp::PartialEq<&str> for DistributionAssignmentState {
 }
 impl<'de> ::serde::Deserialize<'de> for DistributionAssignmentState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("DistributionAssignmentState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -16560,7 +16665,7 @@ impl ::std::cmp::PartialEq<&str> for DistributionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for DistributionCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("DistributionCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -16615,7 +16720,7 @@ impl<'de> ::serde::Deserialize<'de> for DistributionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for DistributionObject {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("DistributionObject", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16667,7 +16772,7 @@ impl ::std::cmp::PartialEq<&str> for EndpointState {
 }
 impl<'de> ::serde::Deserialize<'de> for EndpointState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("EndpointState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -16710,7 +16815,7 @@ impl<'de> ::serde::Deserialize<'de> for EndpointState {
 }
 impl<'de> ::serde::Deserialize<'de> for EnrollmentBootstrapResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("EnrollmentBootstrapResponse", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16741,7 +16846,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentBootstrapResponse {
 }
 impl<'de> ::serde::Deserialize<'de> for EnrollmentEvidence {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("EnrollmentEvidence", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16795,7 +16900,7 @@ impl ::std::cmp::PartialEq<&str> for EnrollmentGrantState {
 }
 impl<'de> ::serde::Deserialize<'de> for EnrollmentGrantState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("EnrollmentGrantState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -16832,7 +16937,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentGrantState {
 }
 impl<'de> ::serde::Deserialize<'de> for EnrollmentSubmitRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("EnrollmentSubmitRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16854,7 +16959,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentSubmitRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for ErrorCatalog {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ErrorCatalog", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -16866,6 +16971,25 @@ impl<'de> ::serde::Deserialize<'de> for ErrorCatalog {
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self { error: raw.error })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ErrorCatalogError {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<SecurityRefusal>(value.clone()) {
+            return Ok(Self::SecurityRefusal(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<InvalidRequest>(value.clone()) {
+            return Ok(Self::InvalidRequest(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<UnknownError>(value.clone()) {
+            return Ok(Self::UnknownError(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(ErrorCatalogError)
+        )))
     }
 }
 impl ErrorCategory {
@@ -16895,7 +17019,7 @@ impl ::std::cmp::PartialEq<&str> for ErrorCategory {
 }
 impl<'de> ::serde::Deserialize<'de> for ErrorCategory {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ErrorCategory", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -16929,7 +17053,7 @@ impl<'de> ::serde::Deserialize<'de> for ErrorCategory {
 }
 impl<'de> ::serde::Deserialize<'de> for ErrorContextResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ErrorContextResponse", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -17016,7 +17140,7 @@ impl ::std::cmp::PartialEq<&str> for ErrorContextResponseSource {
 }
 impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize(
             "ExecuteContainerRuntimeRequestOperation",
             &mut value,
@@ -17034,7 +17158,7 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u32>,
+            pub run_generation: ::std::option::Option<u64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -17135,7 +17259,7 @@ impl ::std::cmp::PartialEq<&str> for FailureCode {
 }
 impl<'de> ::serde::Deserialize<'de> for FailureCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("FailureCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -17204,7 +17328,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
 }
 impl<'de> ::serde::Deserialize<'de> for FailureDiagnostics {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("FailureDiagnostics", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -17271,7 +17395,7 @@ impl ::std::cmp::PartialEq<&str> for FailureDiagnosticsCategory {
 }
 impl<'de> ::serde::Deserialize<'de> for FailureLogTail {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("FailureLogTail", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -17297,7 +17421,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureLogTail {
 }
 impl<'de> ::serde::Deserialize<'de> for FailureProperty {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("FailureProperty", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -17384,7 +17508,7 @@ impl ::std::cmp::PartialEq<&str> for FailureStage {
 }
 impl<'de> ::serde::Deserialize<'de> for FailureStage {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("FailureStage", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -17569,7 +17693,7 @@ impl ::std::cmp::PartialEq<&str> for GatewayRouteState {
 }
 impl<'de> ::serde::Deserialize<'de> for GatewayRouteState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("GatewayRouteState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -17710,7 +17834,7 @@ impl ::std::cmp::PartialEq<&str> for HelperErrorCode {
 }
 impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HelperErrorCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -17960,7 +18084,7 @@ impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
 }
 impl<'de> ::serde::Deserialize<'de> for HostArchiveIdentity {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostArchiveIdentity", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -17990,7 +18114,7 @@ impl<'de> ::serde::Deserialize<'de> for HostArchiveIdentity {
 }
 impl<'de> ::serde::Deserialize<'de> for HostArchiveRuntimeImageReceipt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostArchiveRuntimeImageReceipt", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
@@ -18022,7 +18146,7 @@ impl<'de> ::serde::Deserialize<'de> for HostArchiveRuntimeImageReceipt {
 }
 impl<'de> ::serde::Deserialize<'de> for HostHelperGrantClaims {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostHelperGrantClaims", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18052,7 +18176,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperGrantClaims {
 }
 impl<'de> ::serde::Deserialize<'de> for HostHelperGrantResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostHelperGrantResponse", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18068,7 +18192,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperGrantResponse {
 }
 impl<'de> ::serde::Deserialize<'de> for HostHelperProcessLogs {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostHelperProcessLogs", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18088,7 +18212,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperProcessLogs {
 }
 impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostHelperResponse", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18153,7 +18277,7 @@ impl ::std::cmp::PartialEq<&str> for HostHelperResponseStatus {
 }
 impl<'de> ::serde::Deserialize<'de> for HostHelperResponseStatus {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostHelperResponseStatus", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -18193,7 +18317,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponseStatus {
 }
 impl<'de> ::serde::Deserialize<'de> for HostHelperSignature {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostHelperSignature", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18215,34 +18339,32 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperSignature {
 }
 impl<'de> ::serde::Deserialize<'de> for HostOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostOperation", &mut value)
             .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(untagged)]
-        #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
-        #[derive(Eq)]
-        enum Raw {
-            InstallVonkDebOperation(InstallVonkDebOperation),
-            ConfirmPackageActivationOperation(ConfirmPackageActivationOperation),
-            ExecuteContainerRuntimeRequestOperation(ExecuteContainerRuntimeRequestOperation),
+        if let Ok(payload) = ::serde_json::from_value::<InstallVonkDebOperation>(value.clone()) {
+            return Ok(Self::InstallVonkDebOperation(payload));
         }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(match raw {
-            Raw::InstallVonkDebOperation(value0) => Self::InstallVonkDebOperation(value0),
-            Raw::ConfirmPackageActivationOperation(value0) => {
-                Self::ConfirmPackageActivationOperation(value0)
-            }
-            Raw::ExecuteContainerRuntimeRequestOperation(value0) => {
-                Self::ExecuteContainerRuntimeRequestOperation(value0)
-            }
-        })
+        if let Ok(payload) =
+            ::serde_json::from_value::<ConfirmPackageActivationOperation>(value.clone())
+        {
+            return Ok(Self::ConfirmPackageActivationOperation(payload));
+        }
+        if let Ok(payload) =
+            ::serde_json::from_value::<ExecuteContainerRuntimeRequestOperation>(value.clone())
+        {
+            return Ok(Self::ExecuteContainerRuntimeRequestOperation(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(HostOperation)
+        )))
     }
 }
 impl<'de> ::serde::Deserialize<'de> for HostOperationOutcome {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostOperationOutcome", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18271,7 +18393,7 @@ impl<'de> ::serde::Deserialize<'de> for HostOperationOutcome {
 }
 impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostRuntimeGrantRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18287,7 +18409,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u32>,
+            pub run_generation: ::std::option::Option<u64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub runtime_installation_id: ::std::option::Option<::uuid::Uuid>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -18348,7 +18470,7 @@ impl ::std::cmp::PartialEq<&str> for HostRuntimeGrantRequestAction {
 }
 impl<'de> ::serde::Deserialize<'de> for HostRuntimeImageReceipt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostRuntimeImageReceipt", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18372,7 +18494,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeImageReceipt {
 }
 impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("HostRuntimeRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18389,7 +18511,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u32>,
+            pub run_generation: ::std::option::Option<u64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub start_plan: ::std::option::Option<RecipeStartPayload>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -18476,7 +18598,7 @@ impl ::std::cmp::PartialEq<&str> for ImageStoreCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ImageStoreCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ImageStoreCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -18577,7 +18699,7 @@ impl ::std::cmp::PartialEq<&str> for InstallAdmissionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallAdmissionCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallAdmissionCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -18675,7 +18797,7 @@ impl ::std::cmp::PartialEq<&str> for InstallDegradedReason {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallDegradedReason {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallDegradedReason", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -18724,7 +18846,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallDegradedReason {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallVonkDebOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallVonkDebOperation", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18749,7 +18871,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallVonkDebOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallationMetadataEntry {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallationMetadataEntry", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18781,7 +18903,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallationMetadataEntry {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallationMetadataReceipt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallationMetadataReceipt", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -18827,7 +18949,7 @@ impl ::std::cmp::PartialEq<&str> for InstallationNodeState {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallationNodeState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallationNodeState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -18864,7 +18986,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallationNodeState {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallationReconciliationCheckpoint {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize(
             "InstallationReconciliationCheckpoint",
             &mut value,
@@ -18918,7 +19040,7 @@ impl ::std::cmp::PartialEq<&str> for InstallationReconciliationCheckpointState {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallationReconciliationReceipt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize(
             "InstallationReconciliationReceipt",
             &mut value,
@@ -18973,7 +19095,7 @@ impl ::std::cmp::PartialEq<&str> for InstallationState {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallationState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallationState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -19016,7 +19138,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallationState {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerAcceptanceBaselineRelease {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize(
             "InstallerAcceptanceBaselineRelease",
             &mut value,
@@ -19077,7 +19199,7 @@ impl ::std::cmp::PartialEq<&str> for InstallerAcceptanceBaselineReleaseChannel {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerBaselineArtifacts {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerBaselineArtifacts", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19102,7 +19224,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerBaselineArtifacts {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerBaselineBootstraps {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerBaselineBootstraps", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19118,7 +19240,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerBaselineBootstraps {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerCandidateArtifacts {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerCandidateArtifacts", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19164,7 +19286,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateArtifacts {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerCandidateBootstraps {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerCandidateBootstraps", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19184,7 +19306,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateBootstraps {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerCandidateRelease {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerCandidateRelease", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19240,7 +19362,7 @@ impl ::std::cmp::PartialEq<&str> for InstallerCandidateReleaseChannel {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerPackageArtifact {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerPackageArtifact", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19272,7 +19394,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerPackageArtifact {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerReleaseIdentity {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerReleaseIdentity", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19324,7 +19446,7 @@ impl ::std::cmp::PartialEq<&str> for InstallerReleaseIdentityChannel {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerReleaseImages", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19348,28 +19470,27 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerReleaseManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerReleaseManifest", &mut value)
             .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(untagged)]
-        #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
-        #[derive(Eq)]
-        enum Raw {
-            CandidateRelease(InstallerCandidateRelease),
-            AcceptanceBaselineRelease(InstallerAcceptanceBaselineRelease),
+        if let Ok(payload) = ::serde_json::from_value::<InstallerCandidateRelease>(value.clone()) {
+            return Ok(Self::CandidateRelease(payload));
         }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(match raw {
-            Raw::CandidateRelease(value0) => Self::CandidateRelease(value0),
-            Raw::AcceptanceBaselineRelease(value0) => Self::AcceptanceBaselineRelease(value0),
-        })
+        if let Ok(payload) =
+            ::serde_json::from_value::<InstallerAcceptanceBaselineRelease>(value.clone())
+        {
+            return Ok(Self::AcceptanceBaselineRelease(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(InstallerReleaseManifest)
+        )))
     }
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerReleaseObject {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InstallerReleaseObject", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19391,7 +19512,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseObject {
 }
 impl<'de> ::serde::Deserialize<'de> for InvalidRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InvalidRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19471,7 +19592,7 @@ impl ::std::cmp::PartialEq<&str> for InvalidRequestReason {
 }
 impl<'de> ::serde::Deserialize<'de> for InvalidRequestReason {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InvalidRequestReason", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -19532,7 +19653,7 @@ impl<'de> ::serde::Deserialize<'de> for InvalidRequestReason {
 }
 impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("InventoryRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19616,7 +19737,7 @@ impl ::std::cmp::PartialEq<&str> for InventoryRequestMemoryPool {
 }
 impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("IssuedCertificateResponse", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -19626,7 +19747,7 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             pub certificate_pem: ::std::string::String,
             pub chain_pem: ::std::string::String,
             pub fingerprint: ::std::string::String,
-            pub generation: u64,
+            pub generation: u32,
             pub node_id: ::std::string::String,
             pub not_after: ::std::string::String,
             pub not_before: ::std::string::String,
@@ -19674,7 +19795,7 @@ impl ::std::cmp::PartialEq<&str> for LibraryAssessmentCode {
 }
 impl<'de> ::serde::Deserialize<'de> for LibraryAssessmentCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("LibraryAssessmentCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -19736,7 +19857,7 @@ impl ::std::cmp::PartialEq<&str> for LibraryProjectionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for LibraryProjectionCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("LibraryProjectionCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -19794,7 +19915,7 @@ impl ::std::cmp::PartialEq<&str> for LifecycleEffect {
 }
 impl<'de> ::serde::Deserialize<'de> for LifecycleEffect {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("LifecycleEffect", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -19865,7 +19986,7 @@ impl ::std::cmp::PartialEq<&str> for LifecycleEventKind {
 }
 impl<'de> ::serde::Deserialize<'de> for LifecycleEventKind {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("LifecycleEventKind", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -19948,7 +20069,7 @@ impl ::std::cmp::PartialEq<&str> for LifecycleState {
 }
 impl<'de> ::serde::Deserialize<'de> for LifecycleState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("LifecycleState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -20029,7 +20150,7 @@ impl ::std::cmp::PartialEq<&str> for LifecycleSubject {
 }
 impl<'de> ::serde::Deserialize<'de> for LifecycleSubject {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("LifecycleSubject", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -20068,7 +20189,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleSubject {
 }
 impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("LifecycleVocabulary", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -20202,7 +20323,7 @@ impl ::std::cmp::PartialEq<&str> for MigrationStep {
 }
 impl<'de> ::serde::Deserialize<'de> for MigrationStep {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("MigrationStep", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -20270,7 +20391,7 @@ impl ::std::cmp::PartialEq<&str> for ModelCacheBlockerCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ModelCacheBlockerCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ModelCacheBlockerCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -20422,7 +20543,7 @@ impl ::std::cmp::PartialEq<&str> for ModelCacheCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ModelCacheCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ModelCacheCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -20745,7 +20866,7 @@ impl ::std::cmp::PartialEq<&str> for ModelCacheOperatorStatus {
 }
 impl<'de> ::serde::Deserialize<'de> for ModelCacheOperatorStatus {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ModelCacheOperatorStatus", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -20799,7 +20920,7 @@ impl ::std::cmp::PartialEq<&str> for ModelFileState {
 }
 impl<'de> ::serde::Deserialize<'de> for ModelFileState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ModelFileState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -20836,7 +20957,7 @@ impl<'de> ::serde::Deserialize<'de> for ModelFileState {
 }
 impl<'de> ::serde::Deserialize<'de> for NasEd25519KeyRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasEd25519KeyRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -20852,7 +20973,7 @@ impl<'de> ::serde::Deserialize<'de> for NasEd25519KeyRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for NasGeneratedSecrets {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasGeneratedSecrets", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -20874,7 +20995,7 @@ impl<'de> ::serde::Deserialize<'de> for NasGeneratedSecrets {
 }
 impl<'de> ::serde::Deserialize<'de> for NasGroupReadableSecrets {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasGroupReadableSecrets", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -20894,7 +21015,7 @@ impl<'de> ::serde::Deserialize<'de> for NasGroupReadableSecrets {
 }
 impl<'de> ::serde::Deserialize<'de> for NasHermesPrompt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasHermesPrompt", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -20918,7 +21039,7 @@ impl<'de> ::serde::Deserialize<'de> for NasHermesPrompt {
 }
 impl<'de> ::serde::Deserialize<'de> for NasInstallModes {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasInstallModes", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -20944,7 +21065,7 @@ impl<'de> ::serde::Deserialize<'de> for NasInstallModes {
 }
 impl<'de> ::serde::Deserialize<'de> for NasInstallTemplate {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasInstallTemplate", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -20989,7 +21110,7 @@ impl<'de> ::serde::Deserialize<'de> for NasInstallTemplate {
 }
 impl<'de> ::serde::Deserialize<'de> for NasInternalValue {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasInternalValue", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21009,7 +21130,7 @@ impl<'de> ::serde::Deserialize<'de> for NasInternalValue {
 }
 impl<'de> ::serde::Deserialize<'de> for NasPostgresUrlRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasPostgresUrlRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21039,7 +21160,7 @@ impl<'de> ::serde::Deserialize<'de> for NasPostgresUrlRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for NasRandomTextRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasRandomTextRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21062,7 +21183,7 @@ impl<'de> ::serde::Deserialize<'de> for NasRandomTextRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for NasRequiredValuePrompt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasRequiredValuePrompt", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21114,7 +21235,7 @@ impl ::std::cmp::PartialEq<&str> for NasRequiredValuePromptValidation {
 }
 impl<'de> ::serde::Deserialize<'de> for NasSecretPrompt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasSecretPrompt", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21138,7 +21259,7 @@ impl<'de> ::serde::Deserialize<'de> for NasSecretPrompt {
 }
 impl<'de> ::serde::Deserialize<'de> for NasStepCaControllerFiles {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasStepCaControllerFiles", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21172,7 +21293,7 @@ impl<'de> ::serde::Deserialize<'de> for NasStepCaControllerFiles {
 }
 impl<'de> ::serde::Deserialize<'de> for NasStepCaControllerRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NasStepCaControllerRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21196,7 +21317,7 @@ impl<'de> ::serde::Deserialize<'de> for NasStepCaControllerRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for NetworkInterface {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NetworkInterface", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21281,7 +21402,7 @@ impl ::std::cmp::PartialEq<&str> for NodeOfflineReason {
 }
 impl<'de> ::serde::Deserialize<'de> for NodeOfflineReason {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("NodeOfflineReason", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -21363,7 +21484,7 @@ impl ::std::cmp::PartialEq<&str> for ObservationCause {
 }
 impl<'de> ::serde::Deserialize<'de> for ObservationCause {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ObservationCause", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -21422,7 +21543,7 @@ impl ::std::cmp::PartialEq<&str> for ObservedAssignmentState {
 }
 impl<'de> ::serde::Deserialize<'de> for ObservedAssignmentState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ObservedAssignmentState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -21465,7 +21586,7 @@ impl<'de> ::serde::Deserialize<'de> for ObservedAssignmentState {
 }
 impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OperationCheckpoint", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21477,7 +21598,7 @@ impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub digest: ::std::option::Option<::std::string::String>,
             pub key: ::std::string::String,
-            pub sequence: u64,
+            pub sequence: crate::integer::Integer,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -21494,6 +21615,7 @@ impl OperationFailureCode {
         match self {
             Self::FleetProfileApplicationFailed => "fleet_profile_application_failed",
             Self::ArtifactProcessFailed => "artifact_process_failed",
+            Self::StoredOperationResultUnreadable => "stored_operation_result_unreadable",
         }
     }
 }
@@ -21515,7 +21637,7 @@ impl ::std::cmp::PartialEq<&str> for OperationFailureCode {
 }
 impl<'de> ::serde::Deserialize<'de> for OperationFailureCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OperationFailureCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -21535,18 +21657,21 @@ impl<'de> ::serde::Deserialize<'de> for OperationFailureCode {
             FleetProfileApplicationFailed,
             #[serde(rename = "artifact_process_failed")]
             ArtifactProcessFailed,
+            #[serde(rename = "stored_operation_result_unreadable")]
+            StoredOperationResultUnreadable,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::FleetProfileApplicationFailed => Self::FleetProfileApplicationFailed,
             Raw::ArtifactProcessFailed => Self::ArtifactProcessFailed,
+            Raw::StoredOperationResultUnreadable => Self::StoredOperationResultUnreadable,
         })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for OperationMemberProgress {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OperationMemberProgress", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21556,9 +21681,9 @@ impl<'de> ::serde::Deserialize<'de> for OperationMemberProgress {
             pub activity: ::std::option::Option<OperationMemberProgressActivity>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub bytes_per_second: ::std::option::Option<f64>,
-            pub completed_bytes: u64,
+            pub completed_bytes: crate::integer::Integer,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub completed_items: ::std::option::Option<u64>,
+            pub completed_items: ::std::option::Option<crate::integer::Integer>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub elapsed_seconds: ::std::option::Option<f64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -21577,9 +21702,9 @@ impl<'de> ::serde::Deserialize<'de> for OperationMemberProgress {
             pub smoothed_bytes_per_second: ::std::option::Option<f64>,
             pub state: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub total_bytes: ::std::option::Option<u64>,
+            pub total_bytes: ::std::option::Option<crate::integer::Integer>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub total_items: ::std::option::Option<u64>,
+            pub total_items: ::std::option::Option<crate::integer::Integer>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -21630,7 +21755,7 @@ impl ::std::cmp::PartialEq<&str> for OperationMemberProgressActivity {
 }
 impl<'de> ::serde::Deserialize<'de> for OperationProgress {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OperationProgress", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21642,9 +21767,9 @@ impl<'de> ::serde::Deserialize<'de> for OperationProgress {
             pub bytes_per_second: ::std::option::Option<f64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub checkpoint: ::std::option::Option<OperationCheckpoint>,
-            pub completed_bytes: u64,
+            pub completed_bytes: crate::integer::Integer,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub completed_items: ::std::option::Option<u64>,
+            pub completed_items: ::std::option::Option<crate::integer::Integer>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub elapsed_seconds: ::std::option::Option<f64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -21662,10 +21787,10 @@ impl<'de> ::serde::Deserialize<'de> for OperationProgress {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub smoothed_bytes_per_second: ::std::option::Option<f64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub total_bytes: ::std::option::Option<u64>,
+            pub total_bytes: ::std::option::Option<crate::integer::Integer>,
             pub total_bytes_known: bool,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub total_items: ::std::option::Option<u64>,
+            pub total_items: ::std::option::Option<crate::integer::Integer>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -21743,7 +21868,7 @@ impl ::std::cmp::PartialEq<&str> for OperatorActionName {
 }
 impl<'de> ::serde::Deserialize<'de> for OperatorActionName {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OperatorActionName", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -21807,7 +21932,7 @@ impl ::std::cmp::PartialEq<&str> for OperatorSurface {
 }
 impl<'de> ::serde::Deserialize<'de> for OperatorSurface {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OperatorSurface", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -21847,7 +21972,7 @@ impl<'de> ::serde::Deserialize<'de> for OperatorSurface {
 }
 impl<'de> ::serde::Deserialize<'de> for OutcomeCatalog {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OutcomeCatalog", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21863,9 +21988,28 @@ impl<'de> ::serde::Deserialize<'de> for OutcomeCatalog {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for OutcomeCatalogOutcome {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeDone>(value.clone()) {
+            return Ok(Self::Done(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeFailed>(value.clone()) {
+            return Ok(Self::Failed(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<OutcomeUnknown>(value.clone()) {
+            return Ok(Self::Unknown(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(OutcomeCatalogOutcome)
+        )))
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for OutcomeDone {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OutcomeDone", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -21906,9 +22050,52 @@ impl ::std::cmp::PartialEq<&str> for OutcomeDoneKind {
         self.as_str() == *other
     }
 }
+impl<'de> ::serde::Deserialize<'de> for OutcomeDoneResult {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightResult>(value.clone()) {
+            return Ok(Self::RuntimePreflightResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentInstallResult>(value.clone()) {
+            return Ok(Self::AgentInstallResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStartResult>(value.clone()) {
+            return Ok(Self::RecipeStartResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStopResult>(value.clone()) {
+            return Ok(Self::RecipeStopResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcileResult>(value.clone()) {
+            return Ok(Self::RecipeReconcileResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallResult>(value.clone()) {
+            return Ok(Self::RecipeUninstallResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildEvidence>(value.clone()) {
+            return Ok(Self::RecipeBuildEvidence(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupEvidence>(value.clone()) {
+            return Ok(Self::RecipeBuildCleanupEvidence(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunResult>(value.clone()) {
+            return Ok(Self::RecipeJobRunResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionResult>(value.clone()) {
+            return Ok(Self::ArtifactDistributionResult(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradeResult>(value.clone()) {
+            return Ok(Self::AgentUpgradeResult(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(OutcomeDoneResult)
+        )))
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for OutcomeEvidence {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OutcomeEvidence", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -21942,7 +22129,7 @@ impl<'de> ::serde::Deserialize<'de> for OutcomeEvidence {
 }
 impl<'de> ::serde::Deserialize<'de> for OutcomeFailed {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OutcomeFailed", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -22025,7 +22212,7 @@ impl ::std::cmp::PartialEq<&str> for OutcomeKind {
 }
 impl<'de> ::serde::Deserialize<'de> for OutcomeKind {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OutcomeKind", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -22062,7 +22249,7 @@ impl<'de> ::serde::Deserialize<'de> for OutcomeKind {
 }
 impl<'de> ::serde::Deserialize<'de> for OutcomeUnknown {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("OutcomeUnknown", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -22116,7 +22303,7 @@ impl ::std::cmp::PartialEq<&str> for OutcomeUnknownKind {
 }
 impl<'de> ::serde::Deserialize<'de> for PackageActivationGrantRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PackageActivationGrantRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
@@ -22162,7 +22349,7 @@ impl ::std::cmp::PartialEq<&str> for PackageActivationPhase {
 }
 impl<'de> ::serde::Deserialize<'de> for PackageActivationPhase {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PackageActivationPhase", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -22205,7 +22392,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageActivationPhase {
 }
 impl<'de> ::serde::Deserialize<'de> for PackageActivationReceipt {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PackageActivationReceipt", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -22247,7 +22434,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageActivationReceipt {
 }
 impl<'de> ::serde::Deserialize<'de> for PackageRollbackAuthority {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PackageRollbackAuthority", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -22269,7 +22456,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageRollbackAuthority {
 }
 impl<'de> ::serde::Deserialize<'de> for PackageRollbackSource {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PackageRollbackSource", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -22295,7 +22482,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageRollbackSource {
 }
 impl<'de> ::serde::Deserialize<'de> for PackageRollbackTransaction {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PackageRollbackTransaction", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -22359,7 +22546,7 @@ impl ::std::cmp::PartialEq<&str> for PlacementInstallState {
 }
 impl<'de> ::serde::Deserialize<'de> for PlacementInstallState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PlacementInstallState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -22421,7 +22608,7 @@ impl ::std::cmp::PartialEq<&str> for PlacementLoadState {
 }
 impl<'de> ::serde::Deserialize<'de> for PlacementLoadState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PlacementLoadState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -22481,7 +22668,7 @@ impl ::std::cmp::PartialEq<&str> for PrebuiltImageCode {
 }
 impl<'de> ::serde::Deserialize<'de> for PrebuiltImageCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("PrebuiltImageCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -22578,7 +22765,7 @@ impl ::std::cmp::PartialEq<&str> for ProfileReasonCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ProfileReasonCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -22760,7 +22947,7 @@ impl ::std::cmp::PartialEq<&str> for ProgressPhase {
 }
 impl<'de> ::serde::Deserialize<'de> for ProgressPhase {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ProgressPhase", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -22890,7 +23077,7 @@ impl ::std::cmp::PartialEq<&str> for ProjectionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ProjectionCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ProjectionCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -22957,7 +23144,7 @@ impl<'de> ::serde::Deserialize<'de> for ProjectionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ReasonCodeVocabulary", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23059,7 +23246,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapter {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildAdapter", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23079,7 +23266,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapter {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapterDefinition {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildAdapterDefinition", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23103,7 +23290,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdapterDefinition {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdditionalContext {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildAdditionalContext", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23123,7 +23310,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildAdditionalContext {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildBaseImage {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildBaseImage", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23143,7 +23330,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildBaseImage {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupEvidence {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildCleanupEvidence", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -23157,7 +23344,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupEvidence {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildCleanupRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23230,7 +23417,7 @@ impl ::std::cmp::PartialEq<&str> for RecipeBuildCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -23349,7 +23536,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgument {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildEnvironmentArgument", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23367,9 +23554,28 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgument {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RecipeBuildEnvironmentArgumentValue {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<::std::string::String>(value.clone()) {
+            return Ok(Self::String(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<crate::integer::Integer>(value.clone()) {
+            return Ok(Self::VonkInteger(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<bool>(value.clone()) {
+            return Ok(Self::Boolean(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(RecipeBuildEnvironmentArgumentValue)
+        )))
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildEvidence {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildEvidence", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23391,7 +23597,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildEvidence {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildLimits {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildLimits", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23419,7 +23625,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildLimits {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildMetadata {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildMetadata", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23439,7 +23645,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildMetadata {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildNetwork {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildNetwork", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23455,7 +23661,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildNetwork {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildOptions {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildOptions", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23591,7 +23797,7 @@ impl ::std::cmp::PartialEq<&str> for RecipeBuildOptionsSquash {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeBuildRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeBuildRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23713,7 +23919,7 @@ impl ::std::cmp::PartialEq<&str> for RecipeImageCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeImageCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeImageCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -23893,7 +24099,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeImageCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeInstallPayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeInstallPayload", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23917,7 +24123,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeInstallPayload {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobEvidence {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobEvidence", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23938,7 +24144,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobEvidence {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobFile {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobFile", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23962,7 +24168,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobFile {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobInputFile {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobInputFile", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -23988,7 +24194,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobInputFile {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobInputManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobInputManifest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24010,7 +24216,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobInputManifest {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputLimits {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobOutputLimits", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24034,7 +24240,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputLimits {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobOutputManifest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24058,7 +24264,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputManifest {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputManifestContent {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobOutputManifestContent", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24080,7 +24286,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputManifestContent {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputMapping {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobOutputMapping", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24102,7 +24308,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobOutputMapping {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobRunRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24120,7 +24326,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
             pub output_mappings: ::std::vec::Vec<RecipeJobOutputMapping>,
             pub plan_digest: ::std::string::String,
             pub recipe_revision_id: ::uuid::Uuid,
-            pub run_generation: u32,
+            pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
         }
         #[allow(unused_variables)]
@@ -24144,7 +24350,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeJobRunResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeJobRunResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24200,7 +24406,7 @@ impl ::std::cmp::PartialEq<&str> for RecipeOperationCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeOperationCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeOperationCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -24231,7 +24437,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeOperationRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24247,6 +24453,31 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequest {
             operation: raw.operation,
             payload: raw.payload,
         })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequestPayload {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<RecipeInstallPayload>(value.clone()) {
+            return Ok(Self::InstallPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStartPayload>(value.clone()) {
+            return Ok(Self::StartPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeStopPayload>(value.clone()) {
+            return Ok(Self::StopPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallPayload>(value.clone()) {
+            return Ok(Self::UninstallPayload(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcilePayload>(value.clone()) {
+            return Ok(Self::ReconcilePayload(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(RecipeOperationRequestPayload)
+        )))
     }
 }
 impl RecipePackageCode {
@@ -24288,7 +24519,7 @@ impl ::std::cmp::PartialEq<&str> for RecipePackageCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipePackageCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipePackageCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -24359,7 +24590,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipePackageCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeReconcilePayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeReconcilePayload", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24379,7 +24610,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeReconcilePayload {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeReconcileResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeReconcileResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -24393,7 +24624,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeReconcileResult {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeReconciliationIdentity {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeReconciliationIdentity", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24413,7 +24644,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeReconciliationIdentity {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeRunInspectionRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeRunInspectionRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24436,7 +24667,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunInspectionRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeRunObservationWire", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24446,7 +24677,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub endpoint_ready: ::std::option::Option<bool>,
             pub process_running: bool,
-            pub run_generation: u32,
+            pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
         }
         #[allow(unused_variables)]
@@ -24461,7 +24692,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationsWire {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeRunObservationsWire", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24485,7 +24716,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationsWire {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeStartPayload", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24499,7 +24730,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
             pub phase: ::std::option::Option<RecipeStartPayloadPhase>,
             pub plan_digest: ::std::string::String,
             pub recipe_revision_id: ::uuid::Uuid,
-            pub run_generation: u32,
+            pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub start_deadline: ::std::option::Option<::std::string::String>,
@@ -24545,7 +24776,7 @@ impl ::std::cmp::PartialEq<&str> for RecipeStartPayloadPhase {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeStartResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeStartResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -24564,7 +24795,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartResult {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeStopPayload", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24575,11 +24806,11 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
             pub installation_id: ::uuid::Uuid,
             pub mapping_id: ::uuid::Uuid,
             pub plan_digest: ::std::string::String,
-            pub rank: u64,
+            pub rank: crate::integer::Integer,
             pub recipe_content_sha256: ::std::string::String,
             pub recipe_revision_id: ::uuid::Uuid,
             pub role: ::std::string::String,
-            pub run_generation: u32,
+            pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
             pub stop_timeout_seconds: u32,
             pub target_runtime_id: ::uuid::Uuid,
@@ -24604,7 +24835,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopPayload {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeStopResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeStopResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -24618,7 +24849,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStopResult {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeUninstallPayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeUninstallPayload", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24643,7 +24874,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeUninstallPayload {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeUninstallResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeUninstallResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
@@ -24685,7 +24916,7 @@ impl ::std::cmp::PartialEq<&str> for RecipeUpdateCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RecipeUpdateCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RecipeUpdateCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -24770,7 +25001,7 @@ impl ::std::cmp::PartialEq<&str> for ReconcileCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ReconcileCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ReconcileCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -24841,7 +25072,7 @@ impl<'de> ::serde::Deserialize<'de> for ReconcileCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RenewRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RenewRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24861,7 +25092,7 @@ impl<'de> ::serde::Deserialize<'de> for RenewRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for RequestValidationIssue {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RequestValidationIssue", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24882,9 +25113,25 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationIssue {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RequestValidationIssueLocItem {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
+        if let Ok(payload) = ::serde_json::from_value::<::std::string::String>(value.clone()) {
+            return Ok(Self::String(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<crate::integer::Integer>(value.clone()) {
+            return Ok(Self::VonkInteger(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(RequestValidationIssueLocItem)
+        )))
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RequestValidationProblem", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -24936,7 +25183,7 @@ impl ::std::cmp::PartialEq<&str> for ReservationState {
 }
 impl<'de> ::serde::Deserialize<'de> for ReservationState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ReservationState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25005,7 +25252,7 @@ impl ::std::cmp::PartialEq<&str> for ResourceBlockerCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ResourceBlockerCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ResourceBlockerCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25101,7 +25348,7 @@ impl ::std::cmp::PartialEq<&str> for ResourcePlanningCode {
 }
 impl<'de> ::serde::Deserialize<'de> for ResourcePlanningCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ResourcePlanningCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25230,7 +25477,7 @@ impl ::std::cmp::PartialEq<&str> for ResourceTerm {
 }
 impl<'de> ::serde::Deserialize<'de> for ResourceTerm {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ResourceTerm", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25290,7 +25537,7 @@ impl ::std::cmp::PartialEq<&str> for ResourceTermProblem {
 }
 impl<'de> ::serde::Deserialize<'de> for ResourceTermProblem {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("ResourceTermProblem", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25354,7 +25601,7 @@ impl ::std::cmp::PartialEq<&str> for RoutePublicationState {
 }
 impl<'de> ::serde::Deserialize<'de> for RoutePublicationState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RoutePublicationState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25420,7 +25667,7 @@ impl ::std::cmp::PartialEq<&str> for RouteState {
 }
 impl<'de> ::serde::Deserialize<'de> for RouteState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RouteState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25494,7 +25741,7 @@ impl ::std::cmp::PartialEq<&str> for RunAdmissionCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RunAdmissionCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RunAdmissionCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25596,7 +25843,7 @@ impl ::std::cmp::PartialEq<&str> for RunDegradedReason {
 }
 impl<'de> ::serde::Deserialize<'de> for RunDegradedReason {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RunDegradedReason", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -25648,7 +25895,7 @@ impl<'de> ::serde::Deserialize<'de> for RunDegradedReason {
 }
 impl<'de> ::serde::Deserialize<'de> for RunLifecycleRecord {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RunLifecycleRecord", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
@@ -25656,7 +25903,7 @@ impl<'de> ::serde::Deserialize<'de> for RunLifecycleRecord {
             pub installation_id: ::std::string::String,
             pub placement: CompiledPlacement,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub run_generation: ::std::option::Option<u32>,
+            pub run_generation: ::std::option::Option<u64>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -25698,7 +25945,7 @@ impl ::std::cmp::PartialEq<&str> for RunState {
 }
 impl<'de> ::serde::Deserialize<'de> for RunState {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RunState", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -26118,7 +26365,7 @@ impl ::std::cmp::PartialEq<&str> for RunSwitchCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RunSwitchCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RunSwitchCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -26862,7 +27109,7 @@ impl<'de> ::serde::Deserialize<'de> for RunSwitchCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RuntimeGenerationFence {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RuntimeGenerationFence", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -26870,7 +27117,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimeGenerationFence {
         #[derive(Eq)]
         struct Raw {
             pub cancelled: bool,
-            pub highest_generation: u32,
+            pub highest_generation: u64,
             pub installation_id: ::uuid::Uuid,
             pub runtime_id: ::uuid::Uuid,
             pub schema_version: u8,
@@ -26952,7 +27199,7 @@ impl ::std::cmp::PartialEq<&str> for RuntimeImageCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RuntimeImageCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RuntimeImageCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -27132,7 +27379,7 @@ impl ::std::cmp::PartialEq<&str> for RuntimePreflightCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RuntimePreflightCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RuntimePreflightCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -27197,7 +27444,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RuntimePreflightFinding {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RuntimePreflightFinding", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -27468,7 +27715,7 @@ impl ::std::cmp::PartialEq<&str> for RuntimePreflightFindingCode {
 }
 impl<'de> ::serde::Deserialize<'de> for RuntimePreflightFindingCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RuntimePreflightFindingCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -27912,7 +28159,7 @@ impl ::std::cmp::PartialEq<&str> for RuntimePreflightFindingStatus {
 }
 impl<'de> ::serde::Deserialize<'de> for RuntimePreflightRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RuntimePreflightRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -27960,7 +28207,7 @@ impl ::std::cmp::PartialEq<&str> for RuntimePreflightRequestFabricConnectivity {
 }
 impl<'de> ::serde::Deserialize<'de> for RuntimePreflightResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("RuntimePreflightResult", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -27982,7 +28229,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightResult {
 }
 impl<'de> ::serde::Deserialize<'de> for SecurityRefusal {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SecurityRefusal", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28106,7 +28353,7 @@ impl ::std::cmp::PartialEq<&str> for SecurityRefusalReason {
 }
 impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SecurityRefusalReason", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -28286,7 +28533,7 @@ impl<'de> ::serde::Deserialize<'de> for SecurityRefusalReason {
 }
 impl<'de> ::serde::Deserialize<'de> for SignedHostHelperGrant {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SignedHostHelperGrant", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28308,7 +28555,7 @@ impl<'de> ::serde::Deserialize<'de> for SignedHostHelperGrant {
 }
 impl<'de> ::serde::Deserialize<'de> for SitePorts {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SitePorts", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28374,7 +28621,7 @@ impl ::std::cmp::PartialEq<&str> for SourceBundleCode {
 }
 impl<'de> ::serde::Deserialize<'de> for SourceBundleCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SourceBundleCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -28465,7 +28712,7 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleCode {
 }
 impl<'de> ::serde::Deserialize<'de> for SourceBundleDigestManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SourceBundleDigestManifest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28487,7 +28734,7 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleDigestManifest {
 }
 impl<'de> ::serde::Deserialize<'de> for SourceBundleFile {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SourceBundleFile", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28511,7 +28758,7 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleFile {
 }
 impl<'de> ::serde::Deserialize<'de> for SourceBundleManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SourceBundleManifest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28583,7 +28830,7 @@ impl ::std::cmp::PartialEq<&str> for SourcePolicyCode {
 }
 impl<'de> ::serde::Deserialize<'de> for SourcePolicyCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SourcePolicyCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -28686,7 +28933,7 @@ impl<'de> ::serde::Deserialize<'de> for SourcePolicyCode {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyEnvelope {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkApplyEnvelope", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28712,7 +28959,7 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyEnvelope {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyFresh {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkApplyFresh", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28772,34 +29019,34 @@ impl ::std::cmp::PartialEq<&str> for SparkApplyFreshOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        #[allow(unused_mut)]
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkApplyOperation", &mut value)
             .map_err(::serde::de::Error::custom)?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(untagged)]
-        #[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
-        #[derive(Eq)]
-        enum Raw {
-            Fresh(SparkApplyFresh),
-            Pair(SparkApplyPair),
-            Reenroll(SparkApplyReenroll),
-            Recover(SparkApplyRecover),
-            Upgrade(SparkApplyUpgrade),
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyFresh>(value.clone()) {
+            return Ok(Self::Fresh(payload));
         }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(match raw {
-            Raw::Fresh(value0) => Self::Fresh(value0),
-            Raw::Pair(value0) => Self::Pair(value0),
-            Raw::Reenroll(value0) => Self::Reenroll(value0),
-            Raw::Recover(value0) => Self::Recover(value0),
-            Raw::Upgrade(value0) => Self::Upgrade(value0),
-        })
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyPair>(value.clone()) {
+            return Ok(Self::Pair(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyReenroll>(value.clone()) {
+            return Ok(Self::Reenroll(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyRecover>(value.clone()) {
+            return Ok(Self::Recover(payload));
+        }
+        if let Ok(payload) = ::serde_json::from_value::<SparkApplyUpgrade>(value.clone()) {
+            return Ok(Self::Upgrade(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(SparkApplyOperation)
+        )))
     }
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyPair {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkApplyPair", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28846,7 +29093,7 @@ impl ::std::cmp::PartialEq<&str> for SparkApplyPairOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyRecover {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkApplyRecover", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28887,7 +29134,7 @@ impl ::std::cmp::PartialEq<&str> for SparkApplyRecoverOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyReenroll {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkApplyReenroll", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28934,7 +29181,7 @@ impl ::std::cmp::PartialEq<&str> for SparkApplyReenrollOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkApplyUpgrade {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkApplyUpgrade", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -28975,7 +29222,7 @@ impl ::std::cmp::PartialEq<&str> for SparkApplyUpgradeOperation {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkFirewallConfig {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkFirewallConfig", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -29007,7 +29254,7 @@ impl<'de> ::serde::Deserialize<'de> for SparkFirewallConfig {
 }
 impl<'de> ::serde::Deserialize<'de> for SparkHostMapping {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SparkHostMapping", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -29054,7 +29301,7 @@ impl ::std::cmp::PartialEq<&str> for StateAlias {
 }
 impl<'de> ::serde::Deserialize<'de> for StateAlias {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("StateAlias", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29121,7 +29368,7 @@ impl ::std::cmp::PartialEq<&str> for StateWriteKind {
 }
 impl<'de> ::serde::Deserialize<'de> for StateWriteKind {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("StateWriteKind", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29185,7 +29432,7 @@ impl ::std::cmp::PartialEq<&str> for StopOutcome {
 }
 impl<'de> ::serde::Deserialize<'de> for StopOutcome {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("StopOutcome", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29243,7 +29490,7 @@ impl ::std::cmp::PartialEq<&str> for StopPlanCode {
 }
 impl<'de> ::serde::Deserialize<'de> for StopPlanCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("StopPlanCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29309,7 +29556,7 @@ impl ::std::cmp::PartialEq<&str> for StorageDemandCode {
 }
 impl<'de> ::serde::Deserialize<'de> for StorageDemandCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("StorageDemandCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29369,7 +29616,7 @@ impl ::std::cmp::PartialEq<&str> for SupersedeCode {
 }
 impl<'de> ::serde::Deserialize<'de> for SupersedeCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SupersedeCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29403,7 +29650,7 @@ impl<'de> ::serde::Deserialize<'de> for SupersedeCode {
 }
 impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("SupervisorAcknowledgement", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -29412,7 +29659,7 @@ impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
         struct Raw {
             pub acknowledged_at: ::std::string::String,
             pub activation_sha256: ::std::string::String,
-            pub child_pid: u64,
+            pub child_pid: u32,
             pub generation: u64,
             pub litellm_sha256: ::std::string::String,
             pub schema_version: u8,
@@ -29457,7 +29704,7 @@ impl ::std::cmp::PartialEq<&str> for SupervisorAcknowledgementState {
 }
 impl<'de> ::serde::Deserialize<'de> for TelemetryRequest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("TelemetryRequest", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -29474,7 +29721,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetryRequest {
 }
 impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("TelemetrySample", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -29557,7 +29804,7 @@ impl ::std::cmp::PartialEq<&str> for TopologyCode {
 }
 impl<'de> ::serde::Deserialize<'de> for TopologyCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("TopologyCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29629,7 +29876,7 @@ impl ::std::cmp::PartialEq<&str> for UninstallPlanCode {
 }
 impl<'de> ::serde::Deserialize<'de> for UninstallPlanCode {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("UninstallPlanCode", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29678,7 +29925,7 @@ impl<'de> ::serde::Deserialize<'de> for UninstallPlanCode {
 }
 impl<'de> ::serde::Deserialize<'de> for UnknownError {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("UnknownError", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
@@ -29761,7 +30008,7 @@ impl ::std::cmp::PartialEq<&str> for WaitReason {
 }
 impl<'de> ::serde::Deserialize<'de> for WaitReason {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("WaitReason", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(
@@ -29866,7 +30113,7 @@ impl ::std::cmp::PartialEq<&str> for WaitVerdict {
 }
 impl<'de> ::serde::Deserialize<'de> for WaitVerdict {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
+        let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
         crate::wire_schema::validate_and_materialize("WaitVerdict", &mut value)
             .map_err(::serde::de::Error::custom)?;
         #[derive(

@@ -1,8 +1,9 @@
-import {LosslessNumber, parse} from "lossless-json";
+import {LosslessNumber} from "lossless-json";
 
 /** The raw numeric token is retained until its canonical schema accepts it. */
-export type ExactInteger = LosslessNumber;
-export type WireNumber = number | ExactInteger;
+export type ExactNumber = LosslessNumber;
+export type ExactInteger = ExactNumber;
+export type WireNumber = number | ExactNumber;
 
 function unsignedCompare(a: string, b: string): number {
   a = a.replace(/^0+/, "") || "0"; b = b.replace(/^0+/, "") || "0";
@@ -161,9 +162,22 @@ export function numericMultiple(value: unknown, divisor: string): boolean {
 }
 // Ordinary Controller/CLI JSON ingress uses last-key wins. Duplicate rejection
 // belongs to an explicitly stricter owning boundary, not this browser parser.
-export function parseContractJson(text: string): unknown { return parse(text, undefined, {onDuplicateKey: ({newValue}) => newValue}); }
+export class UnsupportedContractRuntime extends Error {
+  constructor() {
+    super("This browser cannot preserve JSON numeric source tokens. Update your browser to use the Control API.");
+    this.name = "UnsupportedContractRuntime";
+  }
+}
+export function parseContractJson(text: string): unknown {
+  return JSON.parse(text, (_key: string, value: unknown, context?: {source?: string}) => {
+    if (typeof value !== "number") return value;
+    if (typeof context?.source !== "string") throw new UnsupportedContractRuntime();
+    return new LosslessNumber(context.source);
+  });
+}
 export interface NormalizationShape {
   type?: string | string[];
+  preserveIntegerFloat?: boolean;
   ref?: string;
   alternatives?: {validate: (value: unknown) => boolean; shape: NormalizationShape}[];
   allOf?: NormalizationShape[];
@@ -190,6 +204,10 @@ export function normalizeValidated(value: unknown, shape: NormalizationShape, de
     if (types.includes("number")) {
       const number = Number(value.value);
       if (!Number.isFinite(number)) throw new Error("Non-finite contract number");
+      if (Number.isInteger(number) && shapes.some(item => item.preserveIntegerFloat)) {
+        const token = Object.is(number, -0) ? "-0.0" : String(number);
+        return new LosslessNumber(/[.eE]/.test(token) ? token : `${token}.0`);
+      }
       return number;
     }
     return materialize(value);
@@ -200,7 +218,7 @@ export function normalizeValidated(value: unknown, shape: NormalizationShape, de
   }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => {
-      const properties = shapes.map(candidate => candidate.properties?.[key]).filter((candidate): candidate is NormalizationShape => candidate !== undefined);
+      const properties = shapes.map(candidate => candidate.properties && Object.hasOwn(candidate.properties, key) ? candidate.properties[key] : undefined).filter((candidate): candidate is NormalizationShape => candidate !== undefined);
       const additional = shapes.map(candidate => candidate.additionalProperties).filter((candidate): candidate is NormalizationShape => candidate !== undefined);
       return [key, normalizeValidated(item, {allOf: properties.length ? properties : additional}, definitions)];
     }));
@@ -214,7 +232,7 @@ export function materialize(value: unknown): unknown {
       if (!Number.isFinite(number)) throw new Error("Non-finite contract number");
       return number;
     }
-    return Number.isSafeInteger(number) ? number : value;
+    return Number.isSafeInteger(number) ? (number === 0 ? 0 : number) : value;
   }
   if (Array.isArray(value)) return value.map(materialize);
   if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, materialize(item)]));

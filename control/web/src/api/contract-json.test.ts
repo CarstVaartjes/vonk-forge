@@ -1,9 +1,24 @@
-import {describe, expect, test} from "vitest";
+import {describe, expect, test, vi} from "vitest";
 import {LosslessNumber} from "lossless-json";
 import {ContractResponse, validateComponent, validateControlBody} from "./contract-json";
-import {compareNumeric, contractEqual, contractType, numericMultiple, parseContractJson, stringifyContractJson} from "./contract-numeric";
+import {UnsupportedContractRuntime, compareNumeric, contractEqual, contractType, numericMultiple, parseContractJson, stringifyContractJson} from "./contract-numeric";
 
 describe("canonical numeric boundary", () => {
+  test("native parsing and normalization preserve own prototype keys", () => {
+    const text = '{"__proto__":{"private":true},"value":9007199254740993}';
+    const parsed = parseContractJson(text);
+    expect(stringifyContractJson(parsed)).toBe(text);
+    expect(() => validateComponent("BoundedErrorResponse", '{"detail":"retry","__proto__":{"private":true}}')).toThrow();
+  });
+  test("unsupported source-context engines report a runtime capability cause", () => {
+    const nativeParse = JSON.parse;
+    const replacement: typeof JSON.parse = (text, reviver) => nativeParse(text, reviver ? (key, value) => reviver(key, value) : undefined);
+    const spy = vi.spyOn(JSON, "parse").mockImplementation(replacement);
+    try {
+      expect(() => parseContractJson("1")).toThrow(UnsupportedContractRuntime);
+      expect(() => validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":1}')).toThrow(UnsupportedContractRuntime);
+    } finally { spy.mockRestore(); }
+  });
   test.each(["9007199254740993", "18446744073709551615"])("retains permitted integer %s", token => {
     const text = `{"text":"","truncated":false,"dropped_bytes":${token},"dropped_lines":null}`;
     const value = validateComponent("FailureLogTail", text);
@@ -44,6 +59,16 @@ describe("canonical numeric boundary", () => {
     expect(validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":"retry"}')).toEqual({detail: "retry"});
     expect(() => validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":"retry","private":true}')).toThrow();
   });
+  test("an integer negative-zero token retains canonical integer zero", () => {
+    const value = validateComponent("RecipeSetting", '{"value":-0,"change_effect":"restart"}');
+    expect(stringifyContractJson(value)).toBe('{"value":0,"change_effect":"restart"}');
+  });
+  test.each(["1000.0", "-0.0", "1.00000000000000001", "-1e-400"])("scalar export retains its canonical float branch: %s", token => {
+    const result = validateComponent("RecipeSetting", `{"value":${token},"change_effect":"restart"}`);
+    const exported = stringifyContractJson(result);
+    expect(exported).toMatch(/"value":(?:1000\.0|-0\.0|1\.0)/);
+    expect(() => validateComponent("RecipeSetting", exported)).not.toThrow();
+  });
   test("only a declared bodyless response accepts an empty document", () => {
     expect(validateControlBody("POST", "/api/auth/logout", 204, "", "")).toBeUndefined();
     expect(() => validateControlBody("GET", "/api/jobs/known", 204, "", "")).toThrow();
@@ -54,6 +79,7 @@ describe("canonical numeric boundary", () => {
     const text = await source.text(), value = parseContractJson(text);
     const response = new ContractResponse(source, value, text), clone = response.clone(), secondClone = clone.clone();
     expect(response.headers.get("x-request-id")).toBe("example");
+    expect(response.headers.get("content-length")).toBe(String(new TextEncoder().encode(text).byteLength));
     expect(stringifyContractJson(await response.json())).toBe(text);
     expect(response.bodyUsed).toBe(true);
     await expect(response.json()).rejects.toThrow();

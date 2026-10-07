@@ -1,10 +1,10 @@
-import {formatWire, stringifyContractJson, type WireNumber} from "../api/contract-numeric";
-import type {ControlApi} from "../api/types";
+import {formatWire, stringifyContractJson} from "../api/contract-numeric";
+import type {ControlApi, FleetProfileNumber} from "../api/types";
 import {safeErrorText} from "../lib/error-display";
 import {useToast} from "./toast";
 
 /** Download the exact saved profile definition, as `vonkctl profile export` writes it. */
-export function ProfileExport({api, number}: {api: Pick<ControlApi, "profileDefinition">; number: WireNumber}) {
+export function ProfileExport({api, number}: {api: Pick<ControlApi, "profileDefinition">; number: FleetProfileNumber}) {
   const toast = useToast();
   async function download() {
     try {

@@ -308,6 +308,18 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    async fn read_request_headers(socket: &mut tokio::net::TcpStream) {
+        let mut request = [0; 4096];
+        let mut received = 0;
+        while !request[..received].ends_with(b"\r\n\r\n") {
+            assert!(received < request.len(), "test request headers exceed allocation");
+            let amount = socket.read(&mut request[received..]).await.unwrap();
+            assert!(amount > 0, "test request ended before complete headers");
+            received += amount;
+        }
+        assert!(request[..received].starts_with(b"GET "));
+    }
+
     // Keep the peer open after the supplied bytes. An oversized response must
     // be refused before EOF; a whole-body reader would wait for the timeout.
     async fn streaming_response(
@@ -319,8 +331,7 @@ mod tests {
         let headers = headers.to_owned();
         let peer = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = [0; 4096];
-            socket.read(&mut request).await.unwrap();
+            read_request_headers(&mut socket).await;
             socket.write_all(headers.as_bytes()).await.unwrap();
             let _ = socket.write_all(&body).await;
             std::future::pending::<()>().await;
@@ -389,6 +400,7 @@ mod tests {
         let recovered = bounded_pairing_body(response).await.unwrap();
         peer.abort();
         assert_eq!(recovered, body);
+        assert!(recovered.capacity() <= MAX_RESPONSE_BYTES);
         assert_eq!(
             validate_enrollment_response(200, &recovered, node)
                 .unwrap()
@@ -404,8 +416,7 @@ mod tests {
         let (closed, observed_close) = tokio::sync::oneshot::channel();
         let peer = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
-            let mut request = [0; 4096];
-            socket.read(&mut request).await.unwrap();
+            read_request_headers(&mut socket).await;
             socket
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n{")
                 .await

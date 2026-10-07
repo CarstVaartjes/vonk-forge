@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import threading
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from email.message import Message
@@ -15,6 +16,7 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -771,9 +773,34 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
         "request_key": str(uuid4()),
     }
     prefix = f"SELECT {locked_model.__tablename__}."
+    lock_statements: list[str] = []
+    request_backend: list[int] = []
 
-    def before_lock(_connection, _cursor, statement, _parameters, _context, _many):
-        if statement.startswith(prefix) and "FOR UPDATE" in statement:
+    def names_locked_owner(value: object) -> bool:
+        if isinstance(value, str):
+            return value == pending.id
+        if isinstance(value, Mapping):
+            return any(names_locked_owner(item) for item in value.values())
+        if isinstance(value, tuple | list):
+            return any(names_locked_owner(item) for item in value)
+        return False
+
+    def before_lock(connection, _cursor, statement, parameters, _context, _many):
+        if (
+            statement.startswith(prefix)
+            and "FOR UPDATE" in statement
+            and names_locked_owner(parameters)
+            and (
+                locked_model is Job
+                or f"{locked_model.__tablename__}.parent_job_id IN" in statement
+            )
+        ):
+            # Capture parameterless SQL and the exact requesting backend. A
+            # failure must identify the wait rather than guess from its owner.
+            lock_statements.append(statement[:512])
+            request_backend[:] = [
+                connection.connection.driver_connection.info.backend_pid
+            ]
             attempted.set()
 
     locker = sessions()
@@ -785,7 +812,12 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
         )
     )
     assert locked_id is not None
-    assert locker.get(locked_model, locked_id, with_for_update=True) is not None
+    locked_owner = locker.get(locked_model, locked_id, with_for_update=True)
+    assert locked_owner is not None
+    if isinstance(locked_owner, AgentOperation):
+        assert locked_owner.parent_job_id == pending.id
+    # The canonical child lock declares the complete exact parent scope, not
+    # individual child IDs. Its bound parent includes this verified locked row.
     event.listen(postgres_engine, "before_cursor_execute", before_lock)
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -800,9 +832,48 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
                 # The lock is still held. Admission must park the reviewed
                 # intent now, not wait for the worker whose effects it is
                 # trying to supersede.
-                response = future.result(timeout=1)
+                try:
+                    response = future.result(timeout=1)
+                except TimeoutError:
+                    with postgres_engine.connect() as diagnostic:
+                        wait = diagnostic.execute(
+                            text(
+                                "SELECT wait_event_type, wait_event, pg_blocking_pids(pid) "
+                                "FROM pg_stat_activity WHERE pid = :pid"
+                            ),
+                            {"pid": request_backend[0]},
+                        ).one_or_none()
+                    pytest.fail(
+                        f"admission waited while {locked_model.__name__} stayed locked; "
+                        f"SQL={lock_statements!r}; backend_wait={wait!r}"
+                    )
                 assert response.status_code == 202, response.text
+                # Lost-response replay reconnects to the same parked intent
+                # while its exact superseded owner is still locked.
+                replay = pool.submit(
+                    api.post,
+                    f"/api/profile/{profile.number}/load",
+                    headers=headers,
+                    json=request_body,
+                ).result(timeout=1)
+                assert replay.status_code == 202, replay.text
+                assert replay.json()["id"] == response.json()["id"]
+                assert replay.json()["request_key"] == request_body["request_key"]
+                with sessions.begin() as admission:
+                    scope = tuple(admission.scalars(select(AgentNode.node_id)))
+                    # This independent SQL transaction can take every node
+                    # gate before the locker rolls back: the HTTP request
+                    # retained its receipt, not its admission transaction.
+                    acquire_admission_keys(
+                        admission,
+                        tuple(node_admission_key(node_id) for node_id in scope),
+                        holder="profile-contention-proof",
+                    )
                 with sessions() as session:
+                    assert (
+                        len(tuple(session.scalars(select(FleetProfileApplication))))
+                        == 1
+                    )
                     parked = session.scalar(select(FleetProfileApplication))
                     assert parked is not None
                     assert parked.state == "queued"
