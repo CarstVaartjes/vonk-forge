@@ -625,49 +625,49 @@
       "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._fail",
+      "path": "control/src/vonk_control/recipe_image_availability/failure_projection.py",
+      "function": "_fail",
       "kind": "provenance_comparison",
       "expression": "str(dependency.operation_id) == settled_build_id",
       "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._read_removal_owner",
+      "path": "control/src/vonk_control/recipe_image_availability/persistence.py",
+      "function": "_read_removal_owner",
       "kind": "provenance_comparison",
       "expression": "operation.authority_revision != intent.recipe_revision_id",
       "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._start_request",
+      "path": "control/src/vonk_control/recipe_image_availability/requests.py",
+      "function": "_start_request",
       "kind": "provenance_comparison",
       "expression": "current_revision_id != recipe_revision_id",
       "reason": "A recipe selector means the current head: after a metadata refresh that published a newer head the request follows the head instead of reporting staleness."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._stored_removal_result",
+      "path": "control/src/vonk_control/recipe_image_availability/persistence.py",
+      "function": "_stored_removal_result",
       "kind": "provenance_comparison",
       "expression": "result.recipe_revision_id != intent.recipe_revision_id",
       "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService.list_page",
+      "path": "control/src/vonk_control/recipe_image_availability/projection.py",
+      "function": "list_page",
       "kind": "provenance_comparison",
       "expression": "Job.authority_revision == recipe_revision_id",
       "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "path": "control/src/vonk_control/recipe_image_availability/contracts.py",
       "function": "RecipeImageAvailabilityService.reconcile_requested_removals.validate",
       "kind": "provenance_comparison",
       "expression": "requester.authority_revision == payload.recipe_revision_id",
       "reason": "Security and ownership edge: before cancelling an older remover, prove the durable accepted request row names the same exact authority and target as its canonical stored payload. This does not decide image reuse or content equivalence; a damaged request leaves the removal fence intact."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
+      "path": "control/src/vonk_control/recipe_image_availability/contracts.py",
       "function": "RecipeImageAvailabilityService.reconcile_requested_removals.validate",
       "kind": "provenance_comparison",
       "expression": "requester.targets == [payload.recipe_revision_id]",
