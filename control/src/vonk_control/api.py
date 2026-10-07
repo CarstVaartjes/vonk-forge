@@ -1357,7 +1357,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     visual_fleet_stream = FleetStream(
         fleet_event_repository,
         telemetry_repository,
-        visual_fleet,
         clock=clock,
     )
     metrics = MetricsRegistry()
