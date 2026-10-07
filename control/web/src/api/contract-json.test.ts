@@ -44,6 +44,10 @@ describe("canonical numeric boundary", () => {
     expect(validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":"retry"}')).toEqual({detail: "retry"});
     expect(() => validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":"retry","private":true}')).toThrow();
   });
+  test("an integer negative-zero token retains canonical integer zero", () => {
+    const value = validateComponent("RecipeSetting", '{"value":-0,"change_effect":"restart"}');
+    expect(stringifyContractJson(value)).toBe('{"value":0,"change_effect":"restart"}');
+  });
   test.each(["1000.0", "-0.0", "1.00000000000000001", "-1e-400"])("scalar export retains its canonical float branch: %s", token => {
     const result = validateComponent("RecipeSetting", `{"value":${token},"change_effect":"restart"}`);
     const exported = stringifyContractJson(result);
