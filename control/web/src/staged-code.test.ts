@@ -13,7 +13,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
     const web = join(root, "control/web");
     mkdirSync(join(root, "scripts"), { recursive: true });
     mkdirSync(join(web, "src/api"), { recursive: true });
-    for (const script of ["check-staged-code", "check-staged-python"]) {
+    for (const script of ["check-staged-code", "check-staged-python", "check_environment.py"]) {
       copyFileSync(join(workspace, "scripts", script), join(root, "scripts", script));
     }
     copyFileSync(join(process.cwd(), "biome.json"), join(web, "biome.json"));

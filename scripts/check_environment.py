@@ -131,23 +131,26 @@ def ensure_control(root: Path, environment: Path) -> None:
 
 def ensure_web(root: Path) -> None:
     directory = root / "control/web"
+    inputs = [
+        directory / name
+        for name in ("package.json", "package-lock.json")
+        if (directory / name).is_file()
+    ]
     fingerprint = hashlib.sha256(
-        b"".join(
-            (directory / name).read_bytes()
-            for name in ("package.json", "package-lock.json")
-        )
+        b"".join(path.read_bytes() for path in inputs)
     ).hexdigest()
     stamp = directory / "node_modules/.commit-check-inputs"
+    locked = (directory / "package-lock.json").is_file()
 
     def ready() -> bool:
-        return (
-            all(
-                (directory / "node_modules/.bin" / name).exists()
-                for name in ("biome", "tsc")
-            )
-            and stamp.is_file()
-            and stamp.read_text() == fingerprint
+        tools = all(
+            (directory / "node_modules/.bin" / name).exists()
+            for name in ("biome", "tsc")
         )
+        if not locked:
+            # Nothing to install from: tools that are present are the environment.
+            return tools
+        return tools and stamp.is_file() and stamp.read_text() == fingerprint
 
     prepare(
         root,
