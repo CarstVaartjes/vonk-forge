@@ -1975,7 +1975,12 @@ class RunSwitchFleetProfileAdapter:
             if child is None:
                 # Re-enter exactly the same queue index/request after lost SQL
                 # bookkeeping. No changed preview or new effect identity is used.
-                if cancelling:
+                if cancelling or (
+                    adopted_scope is not None and not set(nodes) <= set(adopted_scope)
+                ):
+                    # An issued child outside the continuing selection is
+                    # still unknown. Retain its one pending queue identity;
+                    # neither skipping it nor issuing it again proves absence.
                     pending_scopes.append(set(nodes))
                     continue
                 lost_children[pending.queue_index] = pending
@@ -2053,8 +2058,14 @@ class RunSwitchFleetProfileAdapter:
             for child in (*state.pending_children, *state.children)
             if child.queue_index not in lost_children
         } | set(state.skipped_indices)
-        while state.position < len(state.queue) and state.position in occupied:
-            state.position += 1
+        state.position = next(
+            (
+                index
+                for index in range(state.position, len(state.queue))
+                if index not in occupied
+            ),
+            max(state.position, len(state.queue)),
+        )
         preceding: list[set[str]] = []
         for index, item in enumerate(state.queue):
             if index in occupied:
@@ -2155,8 +2166,14 @@ class RunSwitchFleetProfileAdapter:
             self._write_state(session, application, state)
             session.flush()
             return self._view_from_child(application_id, state, operation)
-        while state.position < len(state.queue) and state.position in occupied:
-            state.position += 1
+        state.position = next(
+            (
+                index
+                for index in range(state.position, len(state.queue))
+                if index not in occupied
+            ),
+            max(state.position, len(state.queue)),
+        )
         self._write_state(session, application, state)
         if state.pending_children or state.position < len(state.queue):
             doc_state(state, LifecycleState.RUNNING)
@@ -9397,7 +9414,7 @@ class FleetProfileService:
         *,
         code: ProfileReasonCode = ProfileReasonCode.RETRY_CONFLICT,
     ) -> None:
-        """Retry the same accepted queue/child identity without replacement admission."""
+        """Continue the same accepted queue/child identity without replacement admission."""
         progress.attempt += 1
         progress.retry_due_at = FleetProfileAdapter.next_retry(
             row.id, progress.attempt, now
@@ -11445,6 +11462,34 @@ class FleetProfileService:
                     )
                 ):
                     effect_state = "unknown"
+                record = closed or active
+                child_progress = None
+                if record is not None:
+                    child_job = session.get(Job, record.operation_id)
+                    expected_kind = (
+                        "recipe.stop.v2"
+                        if item.kind == "stop"
+                        else "recipe.cleanup.v2"
+                        if item.kind == "cleanup"
+                        else "recipe.run-switch.v2"
+                    )
+                    if (
+                        child_job is not None
+                        and child_job.kind == expected_kind
+                        and child_job.request_id
+                        == profile_switch_child_request_key(
+                            owner.id, index, item.kind, item.id
+                        )
+                        and sorted(child_job.targets) == sorted(nodes)
+                    ):
+                        try:
+                            child_progress = RunSwitchOperationService._operation_view(
+                                child_job
+                            ).progress
+                        except (TypeError, ValueError):
+                            # Damaged measurement is unavailable; queue identity,
+                            # exact effects, receipts and claims remain visible.
+                            child_progress = None
                 effects.append(
                     FleetProfileEffectProgress(
                         effect_id=f"{owner.id}:queue:{index}:{item.kind}:{item.id}",
@@ -11465,6 +11510,7 @@ class FleetProfileService:
                         else None,
                         state=effect_state,
                         result=closed.result if closed else None,
+                        progress=child_progress,
                         stop_effect=stop,
                         original_operation_id=closed.original_operation_id
                         if closed

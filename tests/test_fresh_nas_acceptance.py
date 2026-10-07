@@ -315,6 +315,13 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     acceptance = _acceptance_module()
     compose = ["docker", "compose"]
     calls: list[list[str]] = []
+    source = "a" * 40
+    monkeypatch.setenv("VONK_ACCEPTANCE_SOURCE_SHA", source)
+    package_identity = {
+        "source_sha": source,
+        "control_contract_sha256": "b" * 64,
+        "worker_contract_sha256": "c" * 64,
+    }
     healthy = json.dumps(
         [
             {
@@ -333,6 +340,19 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
             output = "example.invalid/image@sha256:" + "a" * 64 + "\n"
         elif command[-4:] == ["ps", "--all", "--format", "json"]:
             output = healthy
+        elif command[2:6] == ["exec", "-T", "control-api", "python"]:
+            output = json.dumps(
+                {
+                    "package": package_identity,
+                    "observation": {
+                        "api": package_identity,
+                        "workers": [package_identity],
+                        "worker_issue": None,
+                    },
+                }
+            )
+        elif command[2:6] == ["exec", "-T", "control-worker", "python"]:
+            output = json.dumps(package_identity)
         else:
             output = ""
         return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
@@ -375,6 +395,10 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     )
     assert not set(up) & acceptance.TAILSCALE_SERVICES
     assert observed["expected"] == acceptance.LOCAL_HERMES_SERVICES
+    assert {command[4] for command in calls if command[2:4] == ["exec", "-T"]} == {
+        "control-api",
+        "control-worker",
+    }
     assert any("down" in command for command in calls)
 
 

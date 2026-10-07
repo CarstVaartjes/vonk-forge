@@ -141,8 +141,10 @@ message says "budget". A forecast and an enforced limit have different meanings:
 
 Admission retains accepted capacity promises and existing reservations.
 Distinguish estimated recipe demand from the platform memory floor described
-below; changing an estimate's severity must not weaken actual resource limits. Derive caps from the resource
-they protect and report the observed value and limit. Structural counts need a
+below; changing an estimate's severity must not weaken actual resource limits.
+Do not add an arbitrary reserve or turn informational recipe `reserve_bytes`
+into another capacity claim. Derive caps from the resource they protect and
+report the observed value and limit. Structural counts need a
 resource basis too. All layers must agree on values the canonical plan permits;
 reject an invalid value at its owning compile/admission boundary before effects.
 
@@ -278,6 +280,8 @@ recipes reproducible rather than to restrict them.
 - Run admission follows the resource accounting policy above: recipe demand
   remains an estimate, the platform memory floor protects observed free
   capacity, and existing accepted reservations constrain co-location.
+  The recipe's `reserve_bytes` is informational and is not added to
+  `peak_bytes` or reserved separately.
 - The operator experience stays model-first: discovery starts from a model or
   task, and recipes are the exact ways to make it runnable on this fleet.
 - Labels and grouping metadata stay cross-cutting so filters, saved scopes, and

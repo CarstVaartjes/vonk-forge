@@ -93,6 +93,14 @@ fn prepare(value: &mut Value) {
                     "vonk-integer"
                 } else if object.get("format").and_then(Value::as_str) == Some("int64") {
                     "int64"
+                } else if object.get("format").and_then(Value::as_str) == Some("uint8")
+                    && object.get("minimum").and_then(Value::as_u64).is_some()
+                    && object
+                        .get("maximum")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|maximum| maximum <= u8::MAX as u64)
+                {
+                    "uint8"
                 } else if object
                     .get("const")
                     .and_then(Value::as_u64)
@@ -435,18 +443,14 @@ fn untagged_deserialize_impl(item: &mut syn::ItemEnum, schema_name: Option<&str>
             }
         }
     });
-    let validation = schema_name.map(|schema_name| {
-        quote! {
-            crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
-                .map_err(::serde::de::Error::custom)?;
-        }
-    });
+    let schema_owner = match schema_name {
+        Some(schema_name) => quote! { Some(#schema_name) },
+        None => quote! { None },
+    };
     let implementation = parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                #[allow(unused_mut)]
-                let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
-                #validation
+                let value = crate::wire_schema::deserialize_wire_value(deserializer, #schema_owner)?;
                 #(#branches)*
                 Err(::serde::de::Error::custom(concat!("invalid canonical union ", stringify!(#ident))))
             }
@@ -545,9 +549,7 @@ fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
     Some(parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let mut value = crate::wire_schema::deserialize_original_value(deserializer)?;
-                crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
-                    .map_err(::serde::de::Error::custom)?;
+                let value = crate::wire_schema::deserialize_wire_value(deserializer, Some(#schema_name))?;
                 #raw
                 // An empty message constructs itself without reading `raw`.
                 #[allow(unused_variables)]
@@ -969,6 +971,22 @@ mod tests {
         let mut scalar = json!({"type":"integer","minimum":i64::MIN,"maximum":i64::MAX});
         prepare(&mut scalar);
         assert_eq!(scalar, json!({"type":"integer","format":"int64"}));
+    }
+
+    #[test]
+    fn byte_representation_requires_canonical_byte_bounds() {
+        let mut byte = json!({"type":"integer","format":"uint8","minimum":0,"maximum":255});
+        prepare(&mut byte);
+        assert_eq!(byte, json!({"type":"integer","format":"uint8"}));
+        let mut wide = json!({"type":"integer","format":"uint8","minimum":0,"maximum":256});
+        prepare(&mut wide);
+        assert_eq!(wide, json!({"type":"integer","format":"uint32"}));
+        let mut signed = json!({"type":"integer","format":"uint8","minimum":-1,"maximum":255});
+        prepare(&mut signed);
+        assert_eq!(signed, json!({"type":"integer","format":"int64"}));
+        let mut unbounded = json!({"type":"integer","format":"uint8","minimum":0});
+        prepare(&mut unbounded);
+        assert_eq!(unbounded, json!({"type":"integer","format":"vonk-integer"}));
     }
 
     #[test]

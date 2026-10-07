@@ -91,6 +91,31 @@ pub async fn wait_ready_until(
     }
 }
 
+/// A cancellable, direct probe of the accepted literal address. It sends no
+/// Controller credentials, follows no redirects and retains the existing
+/// three-second transport bound. Unlike synchronous Curl it cannot block the
+/// observation-page deadline or other ready effect claims.
+pub(crate) async fn readiness_once(address: IpAddr, port: u16, path: &str) -> bool {
+    if port < 1024
+        || !path.starts_with('/')
+        || path.contains("..")
+        || path.contains(['?', '#', '\0'])
+    {
+        return false;
+    }
+    let Ok(client) = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(3))
+        .build()
+    else {
+        return false;
+    };
+    matches!(client.get(readiness_endpoint(address, port, path)).send().await,
+        Ok(response) if response.status().is_success() && response.content_length().is_none_or(|length| length <= 64 * 1024))
+}
+
 pub(crate) fn readiness_endpoint(address: IpAddr, port: u16, path: &str) -> String {
     match address {
         IpAddr::V4(address) => format!("http://{address}:{port}{path}"),

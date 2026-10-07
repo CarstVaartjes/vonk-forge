@@ -1,0 +1,4633 @@
+{
+  "openapi": {
+    "components": {
+      "schemas": {
+        "ArtifactVerificationEvidence": {
+          "additionalProperties": false,
+          "description": "One node's immutable artifact handoff evidence.",
+          "properties": {
+            "copied_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Copied Bytes"
+            },
+            "diagnostic": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Diagnostic"
+            },
+            "downloaded_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Downloaded Bytes"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9._-]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error Code"
+            },
+            "failure_kind": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9._-]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Failure Kind"
+            },
+            "node_id": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            },
+            "uncertain": {
+              "default": false,
+              "title": "Uncertain",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "node_id"
+          ],
+          "title": "ArtifactVerificationEvidence",
+          "type": "object"
+        },
+        "DesiredAssignmentState": {
+          "description": "What a fleet-profile assignment is asked to become on its Sparks.",
+          "enum": [
+            "installed",
+            "running"
+          ],
+          "title": "DesiredAssignmentState",
+          "type": "string"
+        },
+        "DistributionObject": {
+          "additionalProperties": false,
+          "description": "One model file referenced by an assignment.",
+          "properties": {
+            "bytes": {
+              "maximum": 17592186044416.0,
+              "minimum": 0.0,
+              "title": "Bytes",
+              "type": "integer"
+            },
+            "kind": {
+              "const": "model",
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Sha256",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "sha256",
+            "bytes",
+            "kind"
+          ],
+          "title": "DistributionObject",
+          "type": "object"
+        },
+        "FleetProfileApplicationCancellationIntent": {
+          "additionalProperties": false,
+          "description": "Durable identity and authority for an explicit or superseding cancel.",
+          "properties": {
+            "actor": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Actor",
+              "type": "string"
+            },
+            "cause": {
+              "enum": [
+                "operator",
+                "superseded"
+              ],
+              "title": "Cause",
+              "type": "string"
+            },
+            "observation_deadline_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observation Deadline At"
+            },
+            "observation_due_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observation Due At"
+            },
+            "pending_operation_ids": {
+              "items": {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "maxItems": 128,
+              "title": "Pending Operation Ids",
+              "type": "array"
+            },
+            "request_key": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Key",
+              "type": "string"
+            },
+            "requested_at": {
+              "format": "date-time",
+              "title": "Requested At",
+              "type": "string"
+            },
+            "state": {
+              "default": "observing",
+              "enum": [
+                "observing",
+                "cancelled"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "successor_application_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Successor Application Id"
+            },
+            "workload_intent_ordinal": {
+              "anyOf": [
+                {
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workload Intent Ordinal"
+            }
+          },
+          "required": [
+            "request_key",
+            "actor",
+            "requested_at",
+            "cause"
+          ],
+          "title": "FleetProfileApplicationCancellationIntent",
+          "type": "object"
+        },
+        "FleetProfileApplicationCancellationView": {
+          "additionalProperties": false,
+          "description": "Live projection of completed, pending, and unissued cancelled effects.",
+          "properties": {
+            "actor": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Actor",
+              "type": "string"
+            },
+            "cancelled_effects": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileApplicationEffect"
+              },
+              "maxItems": 1024,
+              "title": "Cancelled Effects",
+              "type": "array"
+            },
+            "cause": {
+              "enum": [
+                "operator",
+                "superseded"
+              ],
+              "title": "Cause",
+              "type": "string"
+            },
+            "completed_effects": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileApplicationEffect"
+              },
+              "maxItems": 1024,
+              "title": "Completed Effects",
+              "type": "array"
+            },
+            "deadline_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Deadline At"
+            },
+            "dependency": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dependency"
+            },
+            "owner": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner"
+            },
+            "pending_effects": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileApplicationEffect"
+              },
+              "maxItems": 1024,
+              "title": "Pending Effects",
+              "type": "array"
+            },
+            "request_key": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Key",
+              "type": "string"
+            },
+            "requested_at": {
+              "format": "date-time",
+              "title": "Requested At",
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "observing",
+                "cancelled"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_key",
+            "actor",
+            "requested_at",
+            "state",
+            "cause",
+            "completed_effects",
+            "pending_effects",
+            "cancelled_effects"
+          ],
+          "title": "FleetProfileApplicationCancellationView",
+          "type": "object"
+        },
+        "FleetProfileApplicationEffect": {
+          "additionalProperties": false,
+          "description": "One exact profile or child effect in the cancellation receipt.",
+          "properties": {
+            "effect_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Effect Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "profile-step",
+                "run",
+                "install",
+                "stop",
+                "cleanup",
+                "agent-operation"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 240,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "operation_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operation Id"
+            },
+            "outcome": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "cancelled",
+                "pending",
+                "not-issued"
+              ],
+              "title": "Outcome",
+              "type": "string"
+            }
+          },
+          "required": [
+            "effect_id",
+            "kind",
+            "label",
+            "outcome"
+          ],
+          "title": "FleetProfileApplicationEffect",
+          "type": "object"
+        },
+        "FleetProfileApplicationProgress": {
+          "additionalProperties": false,
+          "description": "Typed progress tree persisted with every profile application.",
+          "properties": {
+            "admission_attempt": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Admission Attempt",
+              "type": "integer"
+            },
+            "admission_pending": {
+              "default": false,
+              "title": "Admission Pending",
+              "type": "boolean"
+            },
+            "admission_retry_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Admission Retry At"
+            },
+            "attempt": {
+              "default": 1,
+              "minimum": 1.0,
+              "title": "Attempt",
+              "type": "integer"
+            },
+            "blockers": {
+              "items": {
+                "$ref": "#/components/schemas/OperationBlocker"
+              },
+              "maxItems": 16,
+              "title": "Blockers",
+              "type": "array"
+            },
+            "cancellation": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileApplicationCancellationIntent"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "child_progress": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileChildProgress"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "child_source": {
+              "anyOf": [
+                {
+                  "const": "switch-adapter",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Child Source"
+            },
+            "completed_steps": {
+              "default": 0,
+              "maximum": 1024.0,
+              "minimum": 0.0,
+              "title": "Completed Steps",
+              "type": "integer"
+            },
+            "current_label": {
+              "anyOf": [
+                {
+                  "maxLength": 240,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Current Label"
+            },
+            "intended_profile": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileIntendedConfiguration"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "operation_kind": {
+              "anyOf": [
+                {
+                  "const": "fleet-profile.apply",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operation Kind"
+            },
+            "retry_due_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Retry Due At"
+            },
+            "retry_of_application_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Retry Of Application Id"
+            },
+            "step_results": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/FleetProfileStepResult"
+              },
+              "title": "Step Results",
+              "type": "object"
+            },
+            "storage_wait_since": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Storage Wait Since"
+            },
+            "supersede_code": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupersedeCode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "superseded_by": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Superseded By"
+            },
+            "switch_adapter": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileSwitchAdapterState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "total_steps": {
+              "default": 0,
+              "maximum": 1024.0,
+              "minimum": 0.0,
+              "title": "Total Steps",
+              "type": "integer"
+            },
+            "workload_intent_ordinal": {
+              "anyOf": [
+                {
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workload Intent Ordinal"
+            }
+          },
+          "title": "FleetProfileApplicationProgress",
+          "type": "object"
+        },
+        "FleetProfileApplicationResult": {
+          "additionalProperties": false,
+          "description": "Terminal result for one profile application.",
+          "properties": {
+            "changed": {
+              "title": "Changed",
+              "type": "boolean"
+            },
+            "completed_steps": {
+              "maximum": 1024.0,
+              "minimum": 0.0,
+              "title": "Completed Steps",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "changed",
+            "completed_steps"
+          ],
+          "title": "FleetProfileApplicationResult",
+          "type": "object"
+        },
+        "FleetProfileApplicationView": {
+          "additionalProperties": false,
+          "properties": {
+            "attempt": {
+              "default": 1,
+              "minimum": 1.0,
+              "title": "Attempt",
+              "type": "integer"
+            },
+            "blockers": {
+              "items": {
+                "$ref": "#/components/schemas/OperationBlocker"
+              },
+              "maxItems": 16,
+              "title": "Blockers",
+              "type": "array"
+            },
+            "cancellation": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileApplicationCancellationView"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "current_operation_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Current Operation Id"
+            },
+            "current_step": {
+              "maximum": 1024.0,
+              "minimum": 0.0,
+              "title": "Current Step",
+              "type": "integer"
+            },
+            "id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Id",
+              "type": "string"
+            },
+            "next_attempt_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Attempt At"
+            },
+            "plan_digest": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Plan Digest",
+              "type": "string"
+            },
+            "profile_digest": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Profile Digest",
+              "type": "string"
+            },
+            "profile_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Profile Id",
+              "type": "string"
+            },
+            "progress": {
+              "$ref": "#/components/schemas/FleetProfileApplicationProgress"
+            },
+            "reason_code": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SupersedeCode"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "request_key": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Key",
+              "type": "string"
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileApplicationResult"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "retry_of_application_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Retry Of Application Id"
+            },
+            "state": {
+              "enum": [
+                "queued",
+                "running",
+                "needs-operator",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "superseded"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "status_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Reason"
+            },
+            "superseded_by": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Superseded By"
+            },
+            "total_steps": {
+              "maximum": 1024.0,
+              "minimum": 0.0,
+              "title": "Total Steps",
+              "type": "integer"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "request_key",
+            "profile_id",
+            "profile_digest",
+            "plan_digest",
+            "state",
+            "current_step",
+            "total_steps",
+            "current_operation_id",
+            "status_reason",
+            "progress",
+            "result",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "FleetProfileApplicationView",
+          "type": "object"
+        },
+        "FleetProfileAssignment": {
+          "additionalProperties": false,
+          "properties": {
+            "alias": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z0-9](?:[a-z0-9_.-]{0,126}[a-z0-9])?$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Alias"
+            },
+            "desired_state": {
+              "$ref": "#/components/schemas/DesiredAssignmentState"
+            },
+            "id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Id",
+              "type": "string"
+            },
+            "model_title": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Title"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileNode"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "option_choices": {
+              "maxProperties": 16,
+              "patternProperties": {
+                "^[a-z][a-z0-9_-]*$": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9_-]*$",
+                  "type": "string"
+                }
+              },
+              "propertyNames": {
+                "maxLength": 64,
+                "minLength": 1
+              },
+              "title": "Option Choices",
+              "type": "object"
+            },
+            "recipe_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Recipe Id",
+              "type": "string"
+            },
+            "recipe_revision_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Recipe Revision Id",
+              "type": "string"
+            },
+            "recipe_title": {
+              "maxLength": 120,
+              "minLength": 1,
+              "title": "Recipe Title",
+              "type": "string"
+            },
+            "topology_name": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Topology Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "recipe_revision_id",
+            "topology_name",
+            "desired_state",
+            "nodes",
+            "recipe_id",
+            "recipe_title"
+          ],
+          "title": "FleetProfileAssignment",
+          "type": "object"
+        },
+        "FleetProfileAssignmentFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "assignment_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assignment Id"
+            },
+            "operation_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operation Id"
+            },
+            "reason": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "terminal": {
+              "default": false,
+              "title": "Terminal",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "title": "FleetProfileAssignmentFailure",
+          "type": "object"
+        },
+        "FleetProfileChildProgress": {
+          "additionalProperties": false,
+          "description": "Typed progress emitted by the profile-owned Run switch adapter.",
+          "properties": {
+            "bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bytes"
+            },
+            "node_ids": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "operation": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OperationProgress"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "phase": {
+              "enum": [
+                "model-download",
+                "container-download",
+                "container-build",
+                "target-copy",
+                "runtime-install",
+                "start",
+                "final-verify",
+                "transfer",
+                "verify",
+                "prepare",
+                "cleanup",
+                "stop",
+                "uninstall",
+                "final_verify"
+              ],
+              "title": "Phase",
+              "type": "string"
+            },
+            "start_deadline": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Deadline"
+            },
+            "startup_budget_seconds": {
+              "anyOf": [
+                {
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startup Budget Seconds"
+            },
+            "total_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Bytes"
+            }
+          },
+          "required": [
+            "phase"
+          ],
+          "title": "FleetProfileChildProgress",
+          "type": "object"
+        },
+        "FleetProfileIntendedConfiguration": {
+          "additionalProperties": false,
+          "description": "Immutable desired configuration captured when execution is admitted.",
+          "properties": {
+            "assignments": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileAssignment"
+              },
+              "maxItems": 64,
+              "title": "Assignments",
+              "type": "array"
+            },
+            "installation_policy": {
+              "enum": [
+                "keep-cached",
+                "exact"
+              ],
+              "title": "Installation Policy",
+              "type": "string"
+            },
+            "profile_digest": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Profile Digest",
+              "type": "string"
+            },
+            "reviewed_application_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Reviewed Application Id",
+              "type": "string"
+            },
+            "reviewed_plan_digest": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Reviewed Plan Digest",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/components/schemas/FleetProfileScope"
+            }
+          },
+          "required": [
+            "profile_digest",
+            "reviewed_plan_digest",
+            "reviewed_application_id",
+            "installation_policy",
+            "scope",
+            "assignments"
+          ],
+          "title": "FleetProfileIntendedConfiguration",
+          "type": "object"
+        },
+        "FleetProfileNode": {
+          "additionalProperties": false,
+          "description": "One rank of a profile assignment, the same shape a Spark group names it.",
+          "properties": {
+            "endpoint_owner": {
+              "default": false,
+              "title": "Endpoint Owner",
+              "type": "boolean"
+            },
+            "node_id": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "rank": {
+              "maximum": 31.0,
+              "minimum": 0.0,
+              "title": "Rank",
+              "type": "integer"
+            },
+            "role": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Role",
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id",
+            "rank",
+            "role"
+          ],
+          "title": "FleetProfileNode",
+          "type": "object"
+        },
+        "FleetProfileScope": {
+          "additionalProperties": false,
+          "description": "Frozen complete fleet boundary for a single execution plan.\n\nUser profiles do not author this field.  It is captured from the enrolled\nroster when preview/load admits an operation and is retained so a running\noperation cannot silently expand or shrink with fleet membership changes.",
+          "properties": {
+            "node_ids": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "title": "Node Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "node_ids"
+          ],
+          "title": "FleetProfileScope",
+          "type": "object"
+        },
+        "FleetProfileStepResult": {
+          "additionalProperties": false,
+          "description": "Result receipt for one completed profile plan step.",
+          "properties": {
+            "kind": {
+              "const": "switch",
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Operation Id",
+              "type": "string"
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileSwitchChildResult"
+                },
+                {
+                  "$ref": "#/components/schemas/FleetProfileSwitchAdapterResult"
+                },
+                {
+                  "$ref": "#/components/schemas/FleetProfileVerificationResult"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Result"
+            }
+          },
+          "required": [
+            "operation_id",
+            "kind"
+          ],
+          "title": "FleetProfileStepResult",
+          "type": "object"
+        },
+        "FleetProfileSwitchAdapterResult": {
+          "additionalProperties": false,
+          "description": "Complete result of reconciling every assignment in a profile scope.",
+          "properties": {
+            "assignment_ids": {
+              "items": {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "title": "Assignment Ids",
+              "type": "array"
+            },
+            "children": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileSwitchChildState"
+              },
+              "maxItems": 128,
+              "title": "Children",
+              "type": "array"
+            }
+          },
+          "required": [
+            "children",
+            "assignment_ids"
+          ],
+          "title": "FleetProfileSwitchAdapterResult",
+          "type": "object"
+        },
+        "FleetProfileSwitchAdapterState": {
+          "additionalProperties": false,
+          "description": "Persisted state used to resume a profile switch after restart.",
+          "properties": {
+            "active_kind": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "install",
+                    "run",
+                    "stop",
+                    "cleanup"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active Kind"
+            },
+            "active_operation_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active Operation Id"
+            },
+            "actor": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Actor",
+              "type": "string"
+            },
+            "assignment_failures": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileAssignmentFailure"
+              },
+              "maxItems": 128,
+              "title": "Assignment Failures",
+              "type": "array"
+            },
+            "assignment_ids": {
+              "items": {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "maxItems": 64,
+              "title": "Assignment Ids",
+              "type": "array"
+            },
+            "assignments": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileAssignment"
+              },
+              "maxItems": 64,
+              "title": "Assignments",
+              "type": "array"
+            },
+            "child_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Child Id",
+              "type": "string"
+            },
+            "child_progress": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileChildProgress"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileSwitchChildState"
+              },
+              "maxItems": 128,
+              "title": "Children",
+              "type": "array"
+            },
+            "observation_deadline_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observation Deadline At"
+            },
+            "observation_due_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observation Due At"
+            },
+            "pending_operation_ids": {
+              "items": {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "maxItems": 128,
+              "title": "Pending Operation Ids",
+              "type": "array"
+            },
+            "position": {
+              "default": 0,
+              "maximum": 128.0,
+              "minimum": 0.0,
+              "title": "Position",
+              "type": "integer"
+            },
+            "queue": {
+              "items": {
+                "$ref": "#/components/schemas/FleetProfileSwitchQueueItem"
+              },
+              "maxItems": 128,
+              "title": "Queue",
+              "type": "array"
+            },
+            "request_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Id",
+              "type": "string"
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileSwitchAdapterResult"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "schema_version": {
+              "const": 2,
+              "default": 2,
+              "title": "Schema Version",
+              "type": "integer"
+            },
+            "scope_node_ids": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "title": "Scope Node Ids",
+              "type": "array"
+            },
+            "state": {
+              "default": "queued",
+              "enum": [
+                "queued",
+                "running",
+                "needs-operator",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "superseded"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "status_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Reason"
+            },
+            "stop_reissue_attempt": {
+              "default": 0,
+              "maximum": 32.0,
+              "minimum": 0.0,
+              "title": "Stop Reissue Attempt",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "child_id",
+            "scope_node_ids",
+            "assignment_ids",
+            "assignments",
+            "queue",
+            "actor",
+            "request_id"
+          ],
+          "title": "FleetProfileSwitchAdapterState",
+          "type": "object"
+        },
+        "FleetProfileSwitchChildResult": {
+          "additionalProperties": false,
+          "description": "Profile child receipt containing the public Run/Switch result tree.",
+          "properties": {
+            "run_switch": {
+              "$ref": "#/components/schemas/RunSwitchOperationResult"
+            },
+            "run_switch_operation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Run Switch Operation Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "run_switch_operation_id",
+            "run_switch"
+          ],
+          "title": "FleetProfileSwitchChildResult",
+          "type": "object"
+        },
+        "FleetProfileSwitchChildState": {
+          "additionalProperties": false,
+          "description": "Terminal receipt for a child already completed by the adapter.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "install",
+                "run",
+                "stop",
+                "cleanup"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Operation Id",
+              "type": "string"
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FleetProfileSwitchChildResult"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "state": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "cancelled"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation_id",
+            "kind",
+            "state"
+          ],
+          "title": "FleetProfileSwitchChildState",
+          "type": "object"
+        },
+        "FleetProfileSwitchQueueItem": {
+          "additionalProperties": false,
+          "description": "One durable Run/Switch child in the profile reconciliation queue.",
+          "properties": {
+            "id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "install",
+                "run",
+                "stop",
+                "cleanup"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "profile_stop_scope": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunSwitchProfileStopScope"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "title": "FleetProfileSwitchQueueItem",
+          "type": "object"
+        },
+        "FleetProfileVerificationResult": {
+          "additionalProperties": false,
+          "description": "Small result used by profile switch adapters that verify directly.",
+          "properties": {
+            "verified": {
+              "title": "Verified",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "verified"
+          ],
+          "title": "FleetProfileVerificationResult",
+          "type": "object"
+        },
+        "LifecyclePreflightCheckpoint": {
+          "additionalProperties": false,
+          "properties": {
+            "attempts": {
+              "maxProperties": 33,
+              "patternProperties": {
+                "^spk_[0-9a-f]{32}$": {
+                  "minimum": 1.0,
+                  "type": "integer"
+                }
+              },
+              "title": "Attempts",
+              "type": "object"
+            },
+            "last_failure_code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last Failure Code"
+            },
+            "last_failure_detail": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last Failure Detail"
+            },
+            "next_check_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Check At"
+            },
+            "pending_job_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pending Job Id"
+            },
+            "pending_node_id": {
+              "anyOf": [
+                {
+                  "pattern": "^spk_[0-9a-f]{32}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pending Node Id"
+            },
+            "phase_index": {
+              "maximum": 31.0,
+              "minimum": 0.0,
+              "title": "Phase Index",
+              "type": "integer"
+            },
+            "receipts": {
+              "maxProperties": 33,
+              "patternProperties": {
+                "^spk_[0-9a-f]{32}$": {
+                  "$ref": "#/components/schemas/RuntimePreflightResult"
+                }
+              },
+              "title": "Receipts",
+              "type": "object"
+            }
+          },
+          "required": [
+            "phase_index"
+          ],
+          "title": "LifecyclePreflightCheckpoint",
+          "type": "object"
+        },
+        "ModelCacheDownloadResult": {
+          "additionalProperties": false,
+          "properties": {
+            "artifact_set_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Artifact Set Sha256",
+              "type": "string"
+            },
+            "coverage": {
+              "const": "complete",
+              "title": "Coverage",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": 2,
+              "title": "Schema Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema_version",
+            "artifact_set_sha256",
+            "coverage"
+          ],
+          "title": "ModelCacheDownloadResult",
+          "type": "object"
+        },
+        "NodeDistributionAssignment": {
+          "additionalProperties": false,
+          "description": "A distribution grant scoped to one node, plan and model set.\n\nOnly the object set travels to the agent (``wire``); the scope fields stay\nwith the Controller, which authorizes every download against them.",
+          "properties": {
+            "assignment_id": {
+              "format": "uuid",
+              "title": "Assignment Id",
+              "type": "string"
+            },
+            "expires_at": {
+              "format": "date-time",
+              "title": "Expires At",
+              "type": "string"
+            },
+            "generation": {
+              "minimum": 1.0,
+              "title": "Generation",
+              "type": "integer"
+            },
+            "model_artifact_set_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Model Artifact Set Sha256",
+              "type": "string"
+            },
+            "node_id": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "objects": {
+              "items": {
+                "$ref": "#/components/schemas/DistributionObject"
+              },
+              "maxItems": 4096,
+              "minItems": 1,
+              "title": "Objects",
+              "type": "array"
+            },
+            "oci_archive_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Oci Archive Sha256",
+              "type": "string"
+            },
+            "oci_image_config_digest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "title": "Oci Image Config Digest",
+              "type": "string"
+            },
+            "oci_image_digest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "title": "Oci Image Digest",
+              "type": "string"
+            },
+            "plan_digest": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Plan Digest",
+              "type": "string"
+            }
+          },
+          "required": [
+            "objects",
+            "oci_image_digest",
+            "oci_image_config_digest",
+            "assignment_id",
+            "plan_digest",
+            "generation",
+            "node_id",
+            "expires_at",
+            "model_artifact_set_sha256",
+            "oci_archive_sha256"
+          ],
+          "title": "NodeDistributionAssignment",
+          "type": "object"
+        },
+        "OperationBlocker": {
+          "description": "One reason an operation is waiting or blocked, with the Sparks it concerns.",
+          "properties": {
+            "code": {
+              "maxLength": 96,
+              "minLength": 1,
+              "title": "Code",
+              "type": "string"
+            },
+            "detail": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Detail",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "severity": {
+              "enum": [
+                "info",
+                "warning",
+                "error"
+              ],
+              "title": "Severity",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "detail",
+            "severity"
+          ],
+          "title": "OperationBlocker",
+          "type": "object"
+        },
+        "OperationCheckpoint": {
+          "additionalProperties": false,
+          "description": "Restart-safe cursor identifying a durable operation unit.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "digest": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Digest"
+            },
+            "key": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Key",
+              "type": "string"
+            },
+            "sequence": {
+              "minimum": 0.0,
+              "title": "Sequence",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "key",
+            "sequence"
+          ],
+          "title": "OperationCheckpoint",
+          "type": "object"
+        },
+        "OperationMemberProgress": {
+          "additionalProperties": false,
+          "description": "Progress for one node, rank, shard, or other operation member.",
+          "properties": {
+            "activity": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "waiting",
+                    "possibly_stalled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Activity"
+            },
+            "bytes_per_second": {
+              "anyOf": [
+                {
+                  "maximum": 1000000000000000.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bytes Per Second"
+            },
+            "completed_bytes": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Completed Bytes",
+              "type": "integer"
+            },
+            "completed_items": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Completed Items"
+            },
+            "elapsed_seconds": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Elapsed Seconds"
+            },
+            "eta_seconds": {
+              "anyOf": [
+                {
+                  "maximum": 1000000000.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Eta Seconds"
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            },
+            "last_progress_at": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last Progress At"
+            },
+            "member_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Member Id",
+              "type": "string"
+            },
+            "object_sha256": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Object Sha256"
+            },
+            "observed_at": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observed At"
+            },
+            "phase": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Phase",
+              "type": "string"
+            },
+            "smoothed_bytes_per_second": {
+              "anyOf": [
+                {
+                  "maximum": 1000000000000000.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Smoothed Bytes Per Second"
+            },
+            "state": {
+              "default": "running",
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "State",
+              "type": "string"
+            },
+            "total_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Bytes"
+            },
+            "total_items": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Items"
+            }
+          },
+          "required": [
+            "member_id",
+            "phase"
+          ],
+          "title": "OperationMemberProgress",
+          "type": "object"
+        },
+        "OperationProgress": {
+          "additionalProperties": false,
+          "description": "Canonical durable progress payload shared by Controller and agents.",
+          "properties": {
+            "activity": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "waiting",
+                    "possibly_stalled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Activity"
+            },
+            "bytes_per_second": {
+              "anyOf": [
+                {
+                  "maximum": 1000000000000000.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bytes Per Second"
+            },
+            "checkpoint": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OperationCheckpoint"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "completed_bytes": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Completed Bytes",
+              "type": "integer"
+            },
+            "completed_items": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Completed Items"
+            },
+            "elapsed_seconds": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Elapsed Seconds"
+            },
+            "eta_seconds": {
+              "anyOf": [
+                {
+                  "maximum": 1000000000.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Eta Seconds"
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            },
+            "last_progress_at": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last Progress At"
+            },
+            "members": {
+              "items": {
+                "$ref": "#/components/schemas/OperationMemberProgress"
+              },
+              "maxItems": 1024,
+              "title": "Members",
+              "type": "array"
+            },
+            "object_sha256": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Object Sha256"
+            },
+            "observed_at": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observed At"
+            },
+            "phase": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Phase",
+              "type": "string"
+            },
+            "smoothed_bytes_per_second": {
+              "anyOf": [
+                {
+                  "maximum": 1000000000000000.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Smoothed Bytes Per Second"
+            },
+            "total_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Bytes"
+            },
+            "total_bytes_known": {
+              "default": false,
+              "title": "Total Bytes Known",
+              "type": "boolean"
+            },
+            "total_items": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Items"
+            }
+          },
+          "required": [
+            "phase"
+          ],
+          "title": "OperationProgress",
+          "type": "object"
+        },
+        "RunSwitchCachedTransferResult": {
+          "additionalProperties": false,
+          "properties": {
+            "cached_nodes": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "title": "Cached Nodes",
+              "type": "array"
+            },
+            "cached_target_totals": {
+              "patternProperties": {
+                "^spk_[0-9a-f]{32}$": {
+                  "type": "integer"
+                }
+              },
+              "title": "Cached Target Totals",
+              "type": "object"
+            },
+            "phase": {
+              "const": "transfer",
+              "title": "Phase",
+              "type": "string"
+            },
+            "skipped": {
+              "const": true,
+              "title": "Skipped",
+              "type": "boolean"
+            },
+            "subphase": {
+              "const": "target-copy",
+              "title": "Subphase",
+              "type": "string"
+            },
+            "verified": {
+              "const": false,
+              "title": "Verified",
+              "type": "boolean"
+            },
+            "verified_build_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Verified Build Id"
+            },
+            "verified_digests": {
+              "items": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "maxItems": 256,
+              "title": "Verified Digests",
+              "type": "array"
+            },
+            "verified_image_digest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "title": "Verified Image Digest",
+              "type": "string"
+            },
+            "verified_oci_layout_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Verified Oci Layout Sha256",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "skipped",
+            "verified",
+            "verified_digests",
+            "verified_build_id",
+            "verified_image_digest",
+            "verified_oci_layout_sha256",
+            "cached_nodes",
+            "cached_target_totals"
+          ],
+          "title": "RunSwitchCachedTransferResult",
+          "type": "object"
+        },
+        "RunSwitchCancellation": {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Actor",
+              "type": "string"
+            },
+            "reason": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "request_key": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Key",
+              "type": "string"
+            },
+            "requested_at": {
+              "format": "date-time",
+              "title": "Requested At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_key",
+            "actor",
+            "reason",
+            "requested_at"
+          ],
+          "title": "RunSwitchCancellation",
+          "type": "object"
+        },
+        "RunSwitchChildProgress": {
+          "additionalProperties": false,
+          "description": "Progress nested in a durable child receipt.",
+          "properties": {
+            "completed_bytes": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Completed Bytes",
+              "type": "integer"
+            },
+            "members": {
+              "items": {
+                "$ref": "#/components/schemas/RunSwitchMemberReceipt"
+              },
+              "maxItems": 32,
+              "title": "Members",
+              "type": "array"
+            },
+            "operation": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OperationProgress"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "phase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "transfer",
+                    "verify",
+                    "prepare",
+                    "cleanup",
+                    "stop",
+                    "start",
+                    "final_verify",
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Phase"
+            },
+            "total_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Bytes"
+            },
+            "total_bytes_known": {
+              "default": false,
+              "title": "Total Bytes Known",
+              "type": "boolean"
+            }
+          },
+          "title": "RunSwitchChildProgress",
+          "type": "object"
+        },
+        "RunSwitchCleanupResult": {
+          "additionalProperties": false,
+          "properties": {
+            "nas_evicted": {
+              "title": "Nas Evicted",
+              "type": "boolean"
+            },
+            "phase": {
+              "const": "cleanup",
+              "title": "Phase",
+              "type": "string"
+            },
+            "protected_digests": {
+              "items": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "maxItems": 256,
+              "title": "Protected Digests",
+              "type": "array"
+            },
+            "protected_referenced_bytes": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Protected Referenced Bytes",
+              "type": "integer"
+            },
+            "reclaimed_bytes": {
+              "minimum": 0.0,
+              "title": "Reclaimed Bytes",
+              "type": "integer"
+            },
+            "reclaimed_digests": {
+              "items": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "maxItems": 256,
+              "title": "Reclaimed Digests",
+              "type": "array"
+            },
+            "scope": {
+              "const": "spark-local",
+              "title": "Scope",
+              "type": "string"
+            },
+            "subphase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subphase"
+            }
+          },
+          "required": [
+            "phase",
+            "scope",
+            "reclaimed_bytes",
+            "nas_evicted"
+          ],
+          "title": "RunSwitchCleanupResult",
+          "type": "object"
+        },
+        "RunSwitchCleanupVerifyResult": {
+          "additionalProperties": false,
+          "description": "Observed removal of the installation, derived from durable state.",
+          "properties": {
+            "active_runs": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Active Runs",
+              "type": "integer"
+            },
+            "cleanup_mode": {
+              "default": "uninstall",
+              "enum": [
+                "uninstall",
+                "reconcile"
+              ],
+              "title": "Cleanup Mode",
+              "type": "string"
+            },
+            "final_verified": {
+              "title": "Final Verified",
+              "type": "boolean"
+            },
+            "installation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Installation Id",
+              "type": "string"
+            },
+            "installation_state": {
+              "anyOf": [
+                {
+                  "maxLength": 24,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Installation State"
+            },
+            "phase": {
+              "const": "final_verify",
+              "title": "Phase",
+              "type": "string"
+            },
+            "reconciliation_request_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reconciliation Request Id"
+            },
+            "removed": {
+              "title": "Removed",
+              "type": "boolean"
+            },
+            "subphase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subphase"
+            }
+          },
+          "required": [
+            "phase",
+            "final_verified",
+            "installation_id",
+            "removed"
+          ],
+          "title": "RunSwitchCleanupVerifyResult",
+          "type": "object"
+        },
+        "RunSwitchContainerBuildResult": {
+          "additionalProperties": false,
+          "properties": {
+            "build_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Build Id",
+              "type": "string"
+            },
+            "build_input_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Build Input Sha256",
+              "type": "string"
+            },
+            "image_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Image Bytes"
+            },
+            "image_digest": {
+              "anyOf": [
+                {
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Image Digest"
+            },
+            "oci_layout_sha256": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Oci Layout Sha256"
+            },
+            "phase": {
+              "const": "prepare",
+              "title": "Phase",
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "planned",
+                "building",
+                "succeeded",
+                "failed"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "subphase": {
+              "const": "container-build",
+              "title": "Subphase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "build_id",
+            "build_input_sha256",
+            "state"
+          ],
+          "title": "RunSwitchContainerBuildResult",
+          "type": "object"
+        },
+        "RunSwitchFinalVerifyResult": {
+          "additionalProperties": false,
+          "properties": {
+            "final_verified": {
+              "title": "Final Verified",
+              "type": "boolean"
+            },
+            "healthy": {
+              "title": "Healthy",
+              "type": "boolean"
+            },
+            "phase": {
+              "const": "final_verify",
+              "title": "Phase",
+              "type": "string"
+            },
+            "ranks": {
+              "items": {
+                "$ref": "#/components/schemas/RunSwitchRankReceipt"
+              },
+              "maxItems": 32,
+              "title": "Ranks",
+              "type": "array"
+            },
+            "route_state": {
+              "maxLength": 64,
+              "title": "Route State",
+              "type": "string"
+            },
+            "run_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Run Id",
+              "type": "string"
+            },
+            "state": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "State",
+              "type": "string"
+            },
+            "subphase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subphase"
+            }
+          },
+          "required": [
+            "phase",
+            "final_verified",
+            "run_id",
+            "state",
+            "route_state",
+            "healthy",
+            "ranks"
+          ],
+          "title": "RunSwitchFinalVerifyResult",
+          "type": "object"
+        },
+        "RunSwitchInstallationVerifyResult": {
+          "additionalProperties": false,
+          "description": "Exact installed membership observed without a serving workload.",
+          "properties": {
+            "active_runs": {
+              "minimum": 0.0,
+              "title": "Active Runs",
+              "type": "integer"
+            },
+            "final_verified": {
+              "title": "Final Verified",
+              "type": "boolean"
+            },
+            "installation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Installation Id",
+              "type": "string"
+            },
+            "installation_state": {
+              "maxLength": 24,
+              "minLength": 1,
+              "title": "Installation State",
+              "type": "string"
+            },
+            "phase": {
+              "const": "final_verify",
+              "title": "Phase",
+              "type": "string"
+            },
+            "ranks": {
+              "items": {
+                "$ref": "#/components/schemas/RunSwitchRankReceipt"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "title": "Ranks",
+              "type": "array"
+            },
+            "subphase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subphase"
+            },
+            "unwithdrawn_routes": {
+              "minimum": 0.0,
+              "title": "Unwithdrawn Routes",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "phase",
+            "final_verified",
+            "installation_id",
+            "installation_state",
+            "active_runs",
+            "unwithdrawn_routes",
+            "ranks"
+          ],
+          "title": "RunSwitchInstallationVerifyResult",
+          "type": "object"
+        },
+        "RunSwitchMemberReceipt": {
+          "additionalProperties": false,
+          "description": "Durable member projection emitted by a child distribution operation.",
+          "properties": {
+            "cached": {
+              "default": false,
+              "title": "Cached",
+              "type": "boolean"
+            },
+            "completed_bytes": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Completed Bytes",
+              "type": "integer"
+            },
+            "diagnostic": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Diagnostic"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9._-]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error Code"
+            },
+            "failure_kind": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "pattern": "^[a-z][a-z0-9._-]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Failure Kind"
+            },
+            "node_id": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "phase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "transfer",
+                    "verify",
+                    "prepare",
+                    "cleanup",
+                    "stop",
+                    "start",
+                    "uninstall",
+                    "final_verify"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Phase"
+            },
+            "state": {
+              "enum": [
+                "pending",
+                "running",
+                "succeeded",
+                "failed",
+                "unknown"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "total_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Bytes"
+            }
+          },
+          "required": [
+            "node_id",
+            "state"
+          ],
+          "title": "RunSwitchMemberReceipt",
+          "type": "object"
+        },
+        "RunSwitchModelDownloadPendingResult": {
+          "additionalProperties": false,
+          "properties": {
+            "artifact_set_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Artifact Set Sha256",
+              "type": "string"
+            },
+            "downloaded_bytes": {
+              "minimum": 0.0,
+              "title": "Downloaded Bytes",
+              "type": "integer"
+            },
+            "phase": {
+              "const": "transfer",
+              "title": "Phase",
+              "type": "string"
+            },
+            "progress": {
+              "$ref": "#/components/schemas/RunSwitchChildProgress"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            },
+            "schema_version": {
+              "const": 2,
+              "default": 2,
+              "title": "Schema Version",
+              "type": "integer"
+            },
+            "subphase": {
+              "const": "model-download",
+              "title": "Subphase",
+              "type": "string"
+            },
+            "total_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Bytes"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "artifact_set_sha256",
+            "downloaded_bytes",
+            "progress"
+          ],
+          "title": "RunSwitchModelDownloadPendingResult",
+          "type": "object"
+        },
+        "RunSwitchModelDownloadResult": {
+          "additionalProperties": false,
+          "properties": {
+            "artifact_set_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Artifact Set Sha256",
+              "type": "string"
+            },
+            "coverage": {
+              "const": "complete",
+              "title": "Coverage",
+              "type": "string"
+            },
+            "downloaded_bytes": {
+              "minimum": 0.0,
+              "title": "Downloaded Bytes",
+              "type": "integer"
+            },
+            "evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ModelCacheDownloadResult"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "phase": {
+              "const": "transfer",
+              "title": "Phase",
+              "type": "string"
+            },
+            "progress": {
+              "$ref": "#/components/schemas/RunSwitchChildProgress"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            },
+            "schema_version": {
+              "const": 2,
+              "title": "Schema Version",
+              "type": "integer"
+            },
+            "skipped": {
+              "const": true,
+              "default": true,
+              "title": "Skipped",
+              "type": "boolean"
+            },
+            "subphase": {
+              "const": "model-download",
+              "title": "Subphase",
+              "type": "string"
+            },
+            "total_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Bytes"
+            }
+          },
+          "required": [
+            "schema_version",
+            "artifact_set_sha256",
+            "coverage",
+            "phase",
+            "subphase",
+            "downloaded_bytes",
+            "progress"
+          ],
+          "title": "RunSwitchModelDownloadResult",
+          "type": "object"
+        },
+        "RunSwitchOperationResult": {
+          "additionalProperties": false,
+          "description": "Exact durable result tree stored in ``Job.result``.",
+          "properties": {
+            "blockers": {
+              "items": {
+                "$ref": "#/components/schemas/OperationBlocker"
+              },
+              "maxItems": 16,
+              "title": "Blockers",
+              "type": "array"
+            },
+            "cancellation": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunSwitchCancellation"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "child_operation_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Child Operation Id"
+            },
+            "completed_bytes": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Completed Bytes",
+              "type": "integer"
+            },
+            "completed_phases": {
+              "items": {
+                "enum": [
+                  "transfer",
+                  "verify",
+                  "prepare",
+                  "cleanup",
+                  "stop",
+                  "start",
+                  "uninstall",
+                  "final_verify"
+                ],
+                "type": "string"
+              },
+              "maxItems": 16,
+              "title": "Completed Phases",
+              "type": "array"
+            },
+            "failed_phase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "transfer",
+                    "verify",
+                    "prepare",
+                    "cleanup",
+                    "stop",
+                    "start",
+                    "uninstall",
+                    "final_verify"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Failed Phase"
+            },
+            "failure_code": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Failure Code"
+            },
+            "final_observation": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunSwitchContainerBuildResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchRuntimeImageResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchModelDownloadResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchModelDownloadPendingResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchTargetTransferResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchCachedTransferResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchTargetTransferEvidenceResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchVerifyResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchCleanupResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchRuntimePlanResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchPreparedResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchRuntimeInstallResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchStopResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchStartResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchUninstallResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchFinalVerifyResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchCleanupVerifyResult"
+                },
+                {
+                  "$ref": "#/components/schemas/RunSwitchInstallationVerifyResult"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Final Observation"
+            },
+            "final_verify_started_at": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Final Verify Started At"
+            },
+            "force_replan": {
+              "default": false,
+              "title": "Force Replan",
+              "type": "boolean"
+            },
+            "item_index": {
+              "default": 0,
+              "maximum": 31.0,
+              "minimum": 0.0,
+              "title": "Item Index",
+              "type": "integer"
+            },
+            "members": {
+              "items": {
+                "$ref": "#/components/schemas/RunSwitchMemberReceipt"
+              },
+              "maxItems": 32,
+              "title": "Members",
+              "type": "array"
+            },
+            "observation_deadline_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observation Deadline At"
+            },
+            "observation_due_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Observation Due At"
+            },
+            "operation": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/OperationProgress"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "operation_phase_index": {
+              "anyOf": [
+                {
+                  "maximum": 31.0,
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operation Phase Index"
+            },
+            "phase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "transfer",
+                    "verify",
+                    "prepare",
+                    "cleanup",
+                    "stop",
+                    "start",
+                    "uninstall",
+                    "final_verify"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Phase"
+            },
+            "phase_index": {
+              "default": 0,
+              "maximum": 31.0,
+              "minimum": 0.0,
+              "title": "Phase Index",
+              "type": "integer"
+            },
+            "phase_results": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RunSwitchContainerBuildResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchRuntimeImageResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchModelDownloadResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchModelDownloadPendingResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchTargetTransferResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchCachedTransferResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchTargetTransferEvidenceResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchVerifyResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchCleanupResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchRuntimePlanResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchPreparedResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchRuntimeInstallResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchStopResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchStartResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchUninstallResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchFinalVerifyResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchCleanupVerifyResult"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RunSwitchInstallationVerifyResult"
+                  }
+                ]
+              },
+              "title": "Phase Results",
+              "type": "array"
+            },
+            "phase_retry_generation": {
+              "default": 0,
+              "minimum": 0.0,
+              "title": "Phase Retry Generation",
+              "type": "integer"
+            },
+            "preflight": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LifecyclePreflightCheckpoint"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "profile_application_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile Application Id"
+            },
+            "retry_attempt": {
+              "anyOf": [
+                {
+                  "minimum": 2.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Retry Attempt"
+            },
+            "retry_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Retry Reason"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "runtime_image_reference_intent": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunSwitchRuntimeImageReferenceIntent"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start_deadline": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Deadline"
+            },
+            "startup_budget_seconds": {
+              "anyOf": [
+                {
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startup Budget Seconds"
+            },
+            "subphase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subphase"
+            },
+            "total_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Bytes"
+            },
+            "total_bytes_known": {
+              "default": false,
+              "title": "Total Bytes Known",
+              "type": "boolean"
+            },
+            "workload_intent_ordinal": {
+              "anyOf": [
+                {
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workload Intent Ordinal"
+            }
+          },
+          "title": "RunSwitchOperationResult",
+          "type": "object"
+        },
+        "RunSwitchPreparedResult": {
+          "additionalProperties": false,
+          "properties": {
+            "phase": {
+              "const": "prepare",
+              "title": "Phase",
+              "type": "string"
+            },
+            "prepared": {
+              "const": true,
+              "title": "Prepared",
+              "type": "boolean"
+            },
+            "subphase": {
+              "const": "runtime-plan",
+              "title": "Subphase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "prepared"
+          ],
+          "title": "RunSwitchPreparedResult",
+          "type": "object"
+        },
+        "RunSwitchProfileStopScope": {
+          "additionalProperties": false,
+          "description": "Reviewed profile-only cleanup of the reachable ranks in a lost group.\n\nThe full accepted topology remains visible even though only its reachable\nsubset is sent Stop work.  Missing ranks are explicit so a partial cleanup\ncan never be presented as a successful full-group stop.",
+          "properties": {
+            "missing_node_ids": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 31,
+              "minItems": 1,
+              "title": "Missing Node Ids",
+              "type": "array"
+            },
+            "original_group": {
+              "$ref": "#/components/schemas/SparkGroup"
+            },
+            "target_node_ids": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "title": "Target Node Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "original_group",
+            "target_node_ids",
+            "missing_node_ids"
+          ],
+          "title": "RunSwitchProfileStopScope",
+          "type": "object"
+        },
+        "RunSwitchRankReceipt": {
+          "additionalProperties": false,
+          "properties": {
+            "fresh": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fresh"
+            },
+            "node_id": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "rank": {
+              "maximum": 31.0,
+              "minimum": 0.0,
+              "title": "Rank",
+              "type": "integer"
+            },
+            "role": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Role",
+              "type": "string"
+            },
+            "state": {
+              "maxLength": 32,
+              "minLength": 1,
+              "title": "State",
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id",
+            "rank",
+            "role",
+            "state"
+          ],
+          "title": "RunSwitchRankReceipt",
+          "type": "object"
+        },
+        "RunSwitchRuntimeImageReferenceIntent": {
+          "additionalProperties": false,
+          "description": "Exact image bytes provisionally protected by a current RunSwitch job.",
+          "properties": {
+            "actor": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Actor",
+              "type": "string"
+            },
+            "archive_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Archive Sha256",
+              "type": "string"
+            },
+            "build_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Build Id",
+              "type": "string"
+            },
+            "build_input_sha256": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Build Input Sha256"
+            },
+            "execution_keys": {
+              "items": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "title": "Execution Keys",
+              "type": "array"
+            },
+            "image_bytes": {
+              "maximum": 17592186044416.0,
+              "minimum": 1.0,
+              "title": "Image Bytes",
+              "type": "integer"
+            },
+            "image_digest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "title": "Image Digest",
+              "type": "string"
+            },
+            "item_index": {
+              "maximum": 31.0,
+              "minimum": 0.0,
+              "title": "Item Index",
+              "type": "integer"
+            },
+            "operation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Operation Id",
+              "type": "string"
+            },
+            "owner_kind": {
+              "const": "run-switch-job",
+              "title": "Owner Kind",
+              "type": "string"
+            },
+            "phase_index": {
+              "maximum": 31.0,
+              "minimum": 0.0,
+              "title": "Phase Index",
+              "type": "integer"
+            },
+            "plan_digest": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Plan Digest",
+              "type": "string"
+            },
+            "profile_application_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile Application Id"
+            },
+            "recipe_revision_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Recipe Revision Id",
+              "type": "string"
+            },
+            "request_key": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Request Key",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": 2,
+              "default": 2,
+              "title": "Schema Version",
+              "type": "integer"
+            },
+            "workload_intent_ordinal": {
+              "minimum": 1.0,
+              "title": "Workload Intent Ordinal",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "owner_kind",
+            "operation_id",
+            "request_key",
+            "actor",
+            "plan_digest",
+            "phase_index",
+            "item_index",
+            "workload_intent_ordinal",
+            "recipe_revision_id",
+            "execution_keys",
+            "image_digest",
+            "archive_sha256",
+            "image_bytes",
+            "build_id"
+          ],
+          "title": "RunSwitchRuntimeImageReferenceIntent",
+          "type": "object"
+        },
+        "RunSwitchRuntimeImageResult": {
+          "additionalProperties": false,
+          "properties": {
+            "build_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Build Id"
+            },
+            "effective_execution_key": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Effective Execution Key"
+            },
+            "image_bytes": {
+              "minimum": 1.0,
+              "title": "Image Bytes",
+              "type": "integer"
+            },
+            "image_digest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "title": "Image Digest",
+              "type": "string"
+            },
+            "oci_layout_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Oci Layout Sha256",
+              "type": "string"
+            },
+            "phase": {
+              "const": "prepare",
+              "title": "Phase",
+              "type": "string"
+            },
+            "runtime_image": {
+              "$ref": "#/components/schemas/RuntimeImageReceipt"
+            },
+            "subphase": {
+              "const": "runtime-image",
+              "title": "Subphase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "runtime_image",
+            "image_digest",
+            "oci_layout_sha256",
+            "image_bytes"
+          ],
+          "title": "RunSwitchRuntimeImageResult",
+          "type": "object"
+        },
+        "RunSwitchRuntimeInstallResult": {
+          "additionalProperties": false,
+          "properties": {
+            "installation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Installation Id",
+              "type": "string"
+            },
+            "phase": {
+              "const": "prepare",
+              "title": "Phase",
+              "type": "string"
+            },
+            "subphase": {
+              "const": "runtime-install",
+              "title": "Subphase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "installation_id"
+          ],
+          "title": "RunSwitchRuntimeInstallResult",
+          "type": "object"
+        },
+        "RunSwitchRuntimePlanResult": {
+          "additionalProperties": false,
+          "properties": {
+            "compiled_plan_persisted": {
+              "const": true,
+              "title": "Compiled Plan Persisted",
+              "type": "boolean"
+            },
+            "install_plan_digest": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Install Plan Digest",
+              "type": "string"
+            },
+            "installation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Installation Id",
+              "type": "string"
+            },
+            "mapping_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Mapping Id",
+              "type": "string"
+            },
+            "model_artifact_set_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Artifact Set Bytes"
+            },
+            "model_artifact_set_sha256": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Model Artifact Set Sha256"
+            },
+            "phase": {
+              "const": "prepare",
+              "title": "Phase",
+              "type": "string"
+            },
+            "subphase": {
+              "const": "runtime-plan",
+              "title": "Subphase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "installation_id",
+            "mapping_id",
+            "install_plan_digest",
+            "compiled_plan_persisted"
+          ],
+          "title": "RunSwitchRuntimePlanResult",
+          "type": "object"
+        },
+        "RunSwitchStartResult": {
+          "additionalProperties": false,
+          "properties": {
+            "phase": {
+              "const": "start",
+              "title": "Phase",
+              "type": "string"
+            },
+            "run_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Run Id",
+              "type": "string"
+            },
+            "subphase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subphase"
+            }
+          },
+          "required": [
+            "phase",
+            "run_id"
+          ],
+          "title": "RunSwitchStartResult",
+          "type": "object"
+        },
+        "RunSwitchStopResult": {
+          "additionalProperties": false,
+          "properties": {
+            "phase": {
+              "const": "stop",
+              "title": "Phase",
+              "type": "string"
+            },
+            "run_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Run Id",
+              "type": "string"
+            },
+            "subphase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subphase"
+            }
+          },
+          "required": [
+            "phase",
+            "run_id"
+          ],
+          "title": "RunSwitchStopResult",
+          "type": "object"
+        },
+        "RunSwitchTargetTransferEvidenceResult": {
+          "additionalProperties": false,
+          "properties": {
+            "copied_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Copied Bytes"
+            },
+            "downloaded_bytes": {
+              "anyOf": [
+                {
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Downloaded Bytes"
+            },
+            "node_id": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "phase": {
+              "const": "transfer",
+              "title": "Phase",
+              "type": "string"
+            },
+            "subphase": {
+              "const": "target-copy",
+              "title": "Subphase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "node_id"
+          ],
+          "title": "RunSwitchTargetTransferEvidenceResult",
+          "type": "object"
+        },
+        "RunSwitchTargetTransferResult": {
+          "additionalProperties": false,
+          "properties": {
+            "assignments": {
+              "minProperties": 1,
+              "patternProperties": {
+                "^spk_[0-9a-f]{32}$": {
+                  "$ref": "#/components/schemas/NodeDistributionAssignment"
+                }
+              },
+              "title": "Assignments",
+              "type": "object"
+            },
+            "cached_nodes": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "title": "Cached Nodes",
+              "type": "array"
+            },
+            "phase": {
+              "const": "transfer",
+              "title": "Phase",
+              "type": "string"
+            },
+            "subphase": {
+              "const": "target-copy",
+              "title": "Subphase",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phase",
+            "subphase",
+            "assignments"
+          ],
+          "title": "RunSwitchTargetTransferResult",
+          "type": "object"
+        },
+        "RunSwitchUninstallResult": {
+          "additionalProperties": false,
+          "description": "The removal of one installation that is no longer desired.",
+          "properties": {
+            "disposition": {
+              "default": "uninstalled",
+              "enum": [
+                "uninstalled",
+                "abandoned"
+              ],
+              "title": "Disposition",
+              "type": "string"
+            },
+            "installation_id": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Installation Id",
+              "type": "string"
+            },
+            "phase": {
+              "const": "uninstall",
+              "title": "Phase",
+              "type": "string"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason"
+            },
+            "subphase": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "container-build",
+                    "model-download",
+                    "runtime-image",
+                    "runtime-plan",
+                    "target-copy",
+                    "runtime-install"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subphase"
+            }
+          },
+          "required": [
+            "phase",
+            "installation_id"
+          ],
+          "title": "RunSwitchUninstallResult",
+          "type": "object"
+        },
+        "RunSwitchVerifyResult": {
+          "additionalProperties": false,
+          "properties": {
+            "cached_nodes": {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 32,
+              "title": "Cached Nodes",
+              "type": "array"
+            },
+            "cached_target_totals": {
+              "patternProperties": {
+                "^spk_[0-9a-f]{32}$": {
+                  "type": "integer"
+                }
+              },
+              "title": "Cached Target Totals",
+              "type": "object"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/components/schemas/ArtifactVerificationEvidence"
+              },
+              "title": "Evidence",
+              "type": "array"
+            },
+            "phase": {
+              "const": "verify",
+              "title": "Phase",
+              "type": "string"
+            },
+            "skipped": {
+              "default": false,
+              "title": "Skipped",
+              "type": "boolean"
+            },
+            "subphase": {
+              "const": "target-copy",
+              "title": "Subphase",
+              "type": "string"
+            },
+            "verified": {
+              "const": true,
+              "title": "Verified",
+              "type": "boolean"
+            },
+            "verified_build_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Verified Build Id"
+            },
+            "verified_digests": {
+              "items": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "maxItems": 256,
+              "title": "Verified Digests",
+              "type": "array"
+            },
+            "verified_image_digest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "title": "Verified Image Digest",
+              "type": "string"
+            },
+            "verified_oci_layout_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Verified Oci Layout Sha256",
+              "type": "string"
+            }
+          },
+          "required": [
+            "verified",
+            "verified_digests",
+            "verified_build_id",
+            "verified_image_digest",
+            "verified_oci_layout_sha256",
+            "phase",
+            "subphase"
+          ],
+          "title": "RunSwitchVerifyResult",
+          "type": "object"
+        },
+        "RuntimeImageReceipt": {
+          "additionalProperties": false,
+          "description": "Strict schema-2 receipt persisted by the Controller image cache.\n\n``oci_archive_sha256`` is the established filesystem/SQL receipt field.\nThe compiled launch plan uses its own ``oci_layout_sha256`` field; the\nexecution-plan service performs that one explicit typed projection at the\nplan boundary.",
+          "properties": {
+            "architecture": {
+              "const": "linux-arm64",
+              "title": "Architecture",
+              "type": "string"
+            },
+            "archive_path": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "title": "Archive Path",
+              "type": "string"
+            },
+            "build_id": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Build Id",
+              "type": "string"
+            },
+            "build_input_sha256": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Build Input Sha256"
+            },
+            "distribution_content_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Distribution Content Sha256",
+              "type": "string"
+            },
+            "distribution_publisher": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Distribution Publisher",
+              "type": "string"
+            },
+            "distribution_slug": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Distribution Slug",
+              "type": "string"
+            },
+            "image_bytes": {
+              "maximum": 17592186044416.0,
+              "minimum": 1.0,
+              "title": "Image Bytes",
+              "type": "integer"
+            },
+            "image_digest": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "title": "Image Digest",
+              "type": "string"
+            },
+            "local_image_config_id": {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "title": "Local Image Config Id",
+              "type": "string"
+            },
+            "oci_archive_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Oci Archive Sha256",
+              "type": "string"
+            },
+            "recorded_at": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Recorded At",
+              "type": "string"
+            },
+            "runtime_adapter": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Runtime Adapter",
+              "type": "string"
+            },
+            "runtime_adapter_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Runtime Adapter Sha256",
+              "type": "string"
+            },
+            "runtime_interface": {
+              "const": "vonk.runtime.v1",
+              "title": "Runtime Interface",
+              "type": "string"
+            },
+            "runtime_interface_label": {
+              "const": "v1",
+              "title": "Runtime Interface Label",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": 2,
+              "title": "Schema Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema_version",
+            "distribution_publisher",
+            "distribution_slug",
+            "distribution_content_sha256",
+            "image_digest",
+            "oci_archive_sha256",
+            "image_bytes",
+            "local_image_config_id",
+            "architecture",
+            "runtime_interface",
+            "archive_path",
+            "recorded_at",
+            "build_id",
+            "runtime_interface_label",
+            "runtime_adapter",
+            "runtime_adapter_sha256"
+          ],
+          "title": "RuntimeImageReceipt",
+          "type": "object"
+        },
+        "RuntimePreflightFinding": {
+          "additionalProperties": false,
+          "description": "One capability's verdict.\n\n``code`` travels as the word of a :class:`RuntimePreflightFindingCode` member.\nIt stays a pattern-bound string on the wire so an older agent's free-text\ncode (``available``, ``proc-mount-denied``) and a newer agent's word still\nread; :attr:`finding_code` is the typed reading of either.",
+          "properties": {
+            "capability": {
+              "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
+              "title": "Capability",
+              "type": "string"
+            },
+            "code": {
+              "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
+              "title": "Code",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "failed",
+                "unknown"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "capability",
+            "status",
+            "code"
+          ],
+          "title": "RuntimePreflightFinding",
+          "type": "object"
+        },
+        "RuntimePreflightResult": {
+          "additionalProperties": false,
+          "properties": {
+            "findings": {
+              "items": {
+                "$ref": "#/components/schemas/RuntimePreflightFinding"
+              },
+              "maxItems": 96,
+              "title": "Findings",
+              "type": "array"
+            },
+            "fingerprint": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Fingerprint",
+              "type": "string"
+            },
+            "observed_at": {
+              "maximum": 1.8446744073709552e+19,
+              "minimum": 0.0,
+              "title": "Observed At",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "fingerprint",
+            "observed_at",
+            "findings"
+          ],
+          "title": "RuntimePreflightResult",
+          "type": "object"
+        },
+        "SparkGroup": {
+          "additionalProperties": false,
+          "description": "A complete, rank-labelled Spark group selected by the operator.",
+          "properties": {
+            "nodes": {
+              "items": {
+                "$ref": "#/components/schemas/SparkGroupNode"
+              },
+              "maxItems": 32,
+              "minItems": 1,
+              "title": "Nodes",
+              "type": "array"
+            }
+          },
+          "required": [
+            "nodes"
+          ],
+          "title": "SparkGroup",
+          "type": "object"
+        },
+        "SparkGroupNode": {
+          "additionalProperties": false,
+          "properties": {
+            "endpoint_owner": {
+              "default": false,
+              "title": "Endpoint Owner",
+              "type": "boolean"
+            },
+            "node_id": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "title": "Node Id",
+              "type": "string"
+            },
+            "rank": {
+              "maximum": 31.0,
+              "minimum": 0.0,
+              "title": "Rank",
+              "type": "integer"
+            },
+            "role": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Role",
+              "type": "string"
+            }
+          },
+          "required": [
+            "node_id",
+            "rank",
+            "role"
+          ],
+          "title": "SparkGroupNode",
+          "type": "object"
+        },
+        "SupersedeCode": {
+          "description": "Why a fleet profile application was superseded by newer intent.",
+          "enum": [
+            "superseded-by-intent",
+            "superseded-by-retry",
+            "effects-changed-during-admission"
+          ],
+          "title": "SupersedeCode",
+          "type": "string"
+        }
+      }
+    },
+    "paths": {
+      "/api/profile/applications/{application_id}": {
+        "get": {
+          "responses": {
+            "200": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/FleetProfileApplicationView"
+                  }
+                }
+              },
+              "description": "Successful Response"
+            }
+          }
+        }
+      }
+    }
+  },
+  "provenance": [
+    {
+      "git_blob": "4a609dd1712475dfd57c9c7c87718b21a064c6ca",
+      "source_path": "control/openapi.json",
+      "source_sha": "3d0bc507c4917f7d41f0938d29c7a64b26b8d0ea",
+      "source_sha256": "67917894b128f07b4e1e4ed9869f069be8fdd5507d066990d000dfadec714bda"
+    },
+    {
+      "git_blob": "c10e8e3d79575f0bb024350ba40e6d29f2dff465",
+      "source_path": "control/openapi.json",
+      "source_sha": "f8a65ee9eeb6ab82e3e31004fcc159140f5b2b44",
+      "source_sha256": "da4a433a86250d188303e4742b10af8c5e037f5ed4acf1400c4b8e54084d083f"
+    }
+  ]
+}

@@ -12,30 +12,30 @@ import json
 import logging
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Literal
 
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentProtocolError, canonical_message
 
+from .fleet_profile_adapter_conversion_contract import (
+    ProfileAdapterConversionOutcome,
+    _AcceptedRequestBinding,
+    _RetainedChild,
+)
 from .fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfilePreview,
     FleetProfileReviewedDecision,
     FleetProfileSwitchAdapterState,
-    FleetProfileSwitchChildKind,
-    FleetProfileSwitchChildResult,
     FleetProfileSwitchChildState,
     FleetProfileSwitchPendingChild,
-    UuidId,
     profile_switch_child_request_key,
 )
 from .lifecycle.evidence import BookkeepingReason
 from .models import FleetProfileApplication, FleetProfileSelection, Job, RecipeRun
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
-from .strict_json import StrictModel
 
 _LOGGER = logging.getLogger(__name__)
 _DEFERRED = "Profile journal conversion waiting: "
@@ -44,25 +44,6 @@ _SCAN_SECONDS = 1.0
 _SCAN_BYTES = 4 * 1024 * 1024
 # A bounded SQL page limits locks; the byte/time budgets bound work after claim.
 _PAGE_ROWS = 16
-
-
-class ProfileAdapterConversionOutcome(StrictModel):
-    state: Literal["current", "converted", "deferred"]
-    reason: BookkeepingReason | None = None
-    next_attempt_at: datetime | None = None
-    detail: str | None = Field(default=None, max_length=512)
-
-
-class _RetainedChild(StrictModel):
-    operation_id: UuidId
-    kind: FleetProfileSwitchChildKind
-    state: Literal["succeeded", "failed", "cancelled"]
-    result: FleetProfileSwitchChildResult | None = None
-
-
-class _AcceptedRequestBinding(StrictModel):
-    request_key: UuidId
-    retry_of_application_id: UuidId | None
 
 
 class _UnprovenJournal(Exception):

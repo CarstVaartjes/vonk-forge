@@ -15,10 +15,20 @@ harness" instead of a bare 422 from hardware.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
+
+from pydantic import JsonValue, TypeAdapter
+
+from cluster_profiles.control_client import source_schema_validator
+from cluster_profiles.observation_transfer_reader import (
+    ObservationStream,
+    receive_observation,
+)
 
 _REFERENCE = "#/components/schemas/"
 _MAXIMUM_DEPTH = 16
@@ -28,8 +38,71 @@ class ContractSkew(Exception):
     """The harness sent something the Controller's published contract refuses."""
 
 
+@dataclass(frozen=True)
+class ObservationResponseContract:
+    """Decoder selected from one verified source before making its request."""
+
+    label: str
+    media_type: str
+    resource: str
+    payload_schema: dict[str, object]
+    record_schema: dict[str, object] | None
+    record_max_bytes: int | None
+
+    def _validate(self, value: object, schema: dict[str, object]) -> None:
+        validator = source_schema_validator(schema)
+        # As in the production receiver, establish the validator's recursive
+        # JSON instance type from actual JSON bytes rather than a type cast.
+        # Integral float tokens remain floats and the shared strict checker
+        # still refuses them; non-JSON values never become accepted payloads.
+        try:
+            instance = json.loads(json.dumps(value, allow_nan=False))
+        except (TypeError, ValueError):
+            raise ContractSkew(
+                f"{self.label} observation violates its source schema"
+            ) from None
+        if not validator.is_valid(instance):
+            raise ContractSkew(f"{self.label} observation violates its source schema")
+
+    def _payload(self, value: object) -> dict[str, object]:
+        self._validate(value, self.payload_schema)
+        if not isinstance(value, dict) or any(
+            not isinstance(key, str) for key in value
+        ):
+            raise ContractSkew(f"{self.label} observation is not an object")
+        return {key: item for key, item in value.items()}
+
+    def decode(
+        self, stream: ObservationStream, *, status: int, media_type: str
+    ) -> dict[str, object]:
+        if status != 200 or media_type.partition(";")[0].strip() != self.media_type:
+            raise ContractSkew(f"{self.label} observation status or media differs")
+        if self.media_type == "application/json":
+            # Only historical sources explicitly declaring JSON take this path.
+            from scripts.development_slice_client import MAXIMUM_RESPONSE_BYTES
+
+            body = stream.read(MAXIMUM_RESPONSE_BYTES + 1)
+            if len(body) > MAXIMUM_RESPONSE_BYTES:
+                raise ContractSkew(
+                    f"{self.label} historical JSON observation is too large"
+                )
+            return self._payload(json.loads(body))
+        record_schema = self.record_schema
+        allocation = self.record_max_bytes
+        if record_schema is None or allocation is None:
+            raise ContractSkew(f"{self.label} observation record contract is missing")
+        return receive_observation(
+            stream,
+            resource=self.resource,
+            record_max_bytes=allocation,
+            validate_record=lambda record: self._validate(record, record_schema),
+            validate_payload=self._payload,
+        )
+
+
 class ControllerContract:
     def __init__(self, openapi: Mapping[str, Any], *, label: str) -> None:
+        openapi = copy.deepcopy(openapi)
         paths = openapi.get("paths")
         schemas = (openapi.get("components") or {}).get("schemas")
         if not isinstance(paths, dict) or not isinstance(schemas, dict):
@@ -45,6 +118,60 @@ class ControllerContract:
                 if isinstance(operations, dict)
             ),
             key=lambda item: -len(re.sub(r"\{[^}]*\}", "", item[1])),
+        )
+
+    def observation(self, path: str) -> ObservationResponseContract:
+        """Select transport solely from this verified release's OpenAPI."""
+        resource = {"/api/fleet": "fleet", "/api/platform": "platform"}.get(path)
+        if resource is None:
+            raise ContractSkew(f"{self._label} path is not a whole observation")
+        for pattern, _template, operations in self._operations:
+            if pattern.fullmatch(path):
+                operation = operations.get("get")
+                break
+        else:
+            raise ContractSkew(f"{self._label} has no GET {path}")
+        if not isinstance(operation, dict):
+            raise ContractSkew(f"{self._label} has no GET {path}")
+        content = ((operation.get("responses") or {}).get("200") or {}).get("content")
+        if not isinstance(content, dict) or len(content) != 1:
+            raise ContractSkew(f"{self._label} observation media is ambiguous")
+        media_type, media = next(iter(content.items()))
+        stream_type = "application/x-vonk-observation+ndjson"
+        if media_type not in {"application/json", stream_type} or not isinstance(
+            media, dict
+        ):
+            raise ContractSkew(f"{self._label} observation transport is unsupported")
+        schema = media.get("schema")
+        if not isinstance(schema, dict):
+            raise ContractSkew(f"{self._label} observation schema is missing")
+
+        def rooted(selected: dict[str, object]) -> dict[str, object]:
+            return {"components": {"schemas": self._schemas}, "allOf": [selected]}
+
+        if media_type == "application/json":
+            return ObservationResponseContract(
+                self._label, media_type, resource, rooted(schema), None, None
+            )
+        payload = operation.get("x-vonk-observation-payload")
+        allocation = operation.get("x-vonk-response-record-max-bytes")
+        expected = "FleetSnapshot" if resource == "fleet" else "PlatformObservation"
+        if (
+            not isinstance(payload, dict)
+            or payload.get("$ref") != _REFERENCE + expected
+            or type(allocation) is not int
+            or allocation < 1
+        ):
+            raise ContractSkew(
+                f"{self._label} observation payload or allocation is missing"
+            )
+        return ObservationResponseContract(
+            self._label,
+            media_type,
+            resource,
+            rooted(payload),
+            rooted(schema),
+            allocation,
         )
 
     @staticmethod
@@ -90,6 +217,44 @@ class ControllerContract:
             raise ContractSkew(
                 f"{method} {template} sends what {self._label} does not accept: "
                 + "; ".join(problems[:3])
+            )
+
+    def check_json_response(
+        self, method: str, path: str, value: object, *, status: int = 200
+    ) -> None:
+        """Validate a receipt against the source of the Controller that sent it."""
+        route = path.partition("?")[0]
+        for pattern, template, operations in self._operations:
+            if pattern.fullmatch(route):
+                break
+        else:
+            raise ContractSkew(f"{self._label} has no operation {method} {route}")
+        operation = operations.get(method.lower())
+        if not isinstance(operation, dict):
+            raise ContractSkew(f"{self._label} has no operation {method} {template}")
+        response = (operation.get("responses") or {}).get(str(status)) or {}
+        content = response.get("content") or {}
+        if set(content) != {"application/json"}:
+            raise ContractSkew(f"{self._label} receipt media is not canonical JSON")
+        schema = content["application/json"].get("schema")
+        if not isinstance(schema, dict):
+            raise ContractSkew(f"{self._label} receipt schema is missing")
+        rooted = {"components": {"schemas": self._schemas}, "allOf": [schema]}
+        try:
+            instance = TypeAdapter(JsonValue).validate_json(
+                json.dumps(value, allow_nan=False), strict=True
+            )
+        except (TypeError, ValueError):
+            raise ContractSkew(f"{self._label} receipt is not JSON") from None
+        validator = source_schema_validator(rooted)
+        problem = next(validator.iter_errors(instance), None)
+        if problem is not None:
+            # Only schema locations and validator names, never input values or
+            # jsonschema's message (which can reproduce the whole receipt).
+            location = ".".join(str(part)[:64] for part in problem.absolute_path)[:384]
+            raise ContractSkew(
+                f"{self._label} receipt violates its source schema at "
+                f"{location or '<root>'} ({problem.validator})"
             )
 
     def _resolve(self, schema: Any) -> Any:

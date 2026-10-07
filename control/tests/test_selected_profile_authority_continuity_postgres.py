@@ -281,6 +281,12 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         run_switches=coordinator,
         recoveries=TerminalHistoryCollector(sessions, clock=lambda: clock[0]),
     )
+    # Each native claim carries the host policy fingerprint, as the real agent
+    # does; an omitted field truthfully invalidates old preflight evidence.
+    with sessions() as session:
+        host = session.get(AgentNode, node_b)
+        assert host is not None and host.preflight_fingerprint is not None
+        host_fingerprint = host.preflight_fingerprint
     # Drive only native coordinators until B's exact Stop has been issued.
     stop_claim = None
     due_checks = []
@@ -289,7 +295,9 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         if due is not None:
             due_checks.append(due)
         worker.tick()
-        stop_claim = claim_agent(jobs, node_b, "serial-b")
+        stop_claim = claim_agent(
+            jobs, node_b, "serial-b", preflight_fingerprint=host_fingerprint
+        )
         if stop_claim is not None:
             break
     assert stop_claim is not None and stop_claim.operation.value == "recipe.stop"
@@ -388,7 +396,9 @@ def test_serving_selection_observes_issued_stop_but_fences_new_cleanup_until_aut
         if due is not None:
             due_checks.append(due)
         worker.tick()
-        claim = claim_agent(jobs, node_b, "serial-b")
+        claim = claim_agent(
+            jobs, node_b, "serial-b", preflight_fingerprint=host_fingerprint
+        )
         if claim is not None:
             if claim.operation.value == "runtime.preflight.v1":
                 # Uninstall's real phase owner refreshes required runtime evidence

@@ -254,6 +254,13 @@
       "reason": "Operation-internal binding: the verified runtime image receipt must name the exact build already selected by this distribution operation; image digest, archive digest and byte identity are checked separately. A foreign receipt cannot complete the accepted transfer."
     },
     {
+      "path": "control/src/vonk_control/fleet_profile_adapter_conversion.py",
+      "function": "_job_proof",
+      "kind": "provenance_comparison",
+      "expression": "plan.recipe_revision_id == assignment.recipe_revision_id",
+      "reason": "Retained child adoption binds the exact accepted assignment revision, after proving the immutable application request, queue index, child kind, payload digest, workload-intent ordinal, parent receipt and target scope. This checks ownership of an already-issued child; it neither compares reusable content nor prevents content-equivalent artifacts from reuse across revisions."
+    },
+    {
       "path": "control/src/vonk_control/fleet_profiles.py",
       "function": "FleetProfileService._assignment_state",
       "kind": "provenance_comparison",

@@ -409,6 +409,13 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         final_core.tick()
         final_adapter.advance(original.id)
     completed = _stored(sessions, original.id)
+    healthy_pending = next(
+        child
+        for child in before.pending_children
+        if child.operation_id == healthy_child.operation_id
+    )
+    assert healthy_pending in completed.pending_children
+    assert healthy_pending.queue_index not in completed.skipped_indices
     assert any(
         item.queue_index == stop_index
         and item.operation_id == stop_id

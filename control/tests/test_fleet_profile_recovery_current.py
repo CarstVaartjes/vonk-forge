@@ -25,6 +25,7 @@ from vonk_control.models import (
     FleetProfile,
     FleetProfileApplication,
     Job,
+    ResourceReservation,
 )
 from vonk_control.operation_blockers import make_blocker
 from vonk_control.recovery_policy import RecoveryPolicy
@@ -1184,8 +1185,8 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
     with sessions() as session:
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        intended = FleetProfileApplicationProgress.model_validate(
-            row.progress
+        intended = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(row.progress), strict=True
         ).intended_profile
         assert intended is not None
         assert {item.recipe_revision_id for item in intended.assignments} == {newer_id}
@@ -1345,7 +1346,7 @@ def test_a_child_start_with_a_stale_review_ends_superseded_not_failed(
     assert ended.blockers == [] and ended.next_attempt_at is None
 
 
-def test_a_child_start_that_hits_a_busy_admission_ends_superseded_never_blocks(
+def test_a_child_start_waits_for_busy_admission_and_resumes_its_accepted_intent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from vonk_control.fleet_profiles import FleetProfileAdmissionEffectBusy
@@ -1388,19 +1389,76 @@ def test_a_child_start_that_hits_a_busy_admission_ends_superseded_never_blocks(
         ),
         actor="admin",
     )
+    now = [lifecycle._clock()]
+    clock = lambda: now[0]
+    lifecycle._clock = run_switch._clock = service._clock = clock
     application = service.apply(profile.id, request_key=_uuid(831), actor="admin")
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        accepted_plan = canonical_message(row.plan)
+        accepted_ordinal = row.progress["workload_intent_ordinal"]
+        accepted_jobs = set(session.scalars(select(Job.id)))
+        accepted_claims = {
+            (claim.id, claim.owner_id, claim.state)
+            for claim in session.scalars(select(ResourceReservation))
+        }
+    original_start = service._start_step
+    attempts = 0
 
-    def stale(*_args, **_kwargs):
+    def busy(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
         raise FleetProfileAdmissionEffectBusy("a live effect owner is busy")
 
-    monkeypatch.setattr(service, "_start_step", stale)
+    monkeypatch.setattr(service, "_start_step", busy)
     for _ in range(4):
         service.tick()
 
-    ended = service.application(application.id)
-    assert ended.state == "superseded", ended.status_reason
-    assert ended.reason_code == "effects-changed-during-admission"
-    assert ended.blockers == [] and ended.next_attempt_at is None
+    waiting = service.application(application.id)
+    assert waiting.state == "running", waiting.status_reason
+    assert waiting.superseded_by is None
+    assert waiting.next_attempt_at is not None and waiting.next_attempt_at > now[0]
+    assert attempts == 1, "not-yet-due observation must not repeat admission"
+    assert "live effect owner is busy" in (waiting.status_reason or "")
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        assert canonical_message(row.plan) == accepted_plan
+        assert row.progress["workload_intent_ordinal"] == accepted_ordinal
+        assert set(session.scalars(select(Job.id))) == accepted_jobs
+        assert {
+            (claim.id, claim.owner_id, claim.state)
+            for claim in session.scalars(select(ResourceReservation))
+        } == accepted_claims
+
+    # Clear the transient fault and recreate the real parent reader. The saved
+    # due time resumes this accepted intent, rather than replacing the request.
+    monkeypatch.setattr(service, "_start_step", original_start)
+    restarted = build_production_fleet_profile_service(
+        sessions, clock=clock, run_switch_operations=run_switch
+    )
+    restarted.tick()
+    assert (
+        restarted.application(application.id).next_attempt_at == waiting.next_attempt_at
+    )
+    now[0] = waiting.next_attempt_at
+    for _ in range(4):
+        restarted.tick()
+    resumed = restarted.application(application.id)
+    assert resumed.state == "running", resumed.status_reason
+    adapter = resumed.progress.switch_adapter
+    assert adapter is not None and adapter.pending_children
+    child = run_switch.get(adapter.pending_children[0].operation_id)
+    assert child is not None and child.node_ids == list(nodes)
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None and row.request_key == application.request_key
+        assert canonical_message(row.plan) == accepted_plan
+        assert row.progress["workload_intent_ordinal"] == accepted_ordinal
+        assert tuple(session.scalars(select(FleetProfileApplication.id))) == (
+            application.id,
+        )
 
 
 def _expire_backoff(service, lifecycle) -> None:

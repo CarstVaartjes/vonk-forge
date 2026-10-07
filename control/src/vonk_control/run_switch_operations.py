@@ -9723,6 +9723,21 @@ def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
         )
     except (TypeError, ValueError):
         observed = RunSwitchObservedEvidence()
+    if isinstance(child, RecipeOperationView) and child.progress is not None:
+        measured = child.progress
+        observed.operation = measured
+        observed.completed_bytes = measured.completed_bytes
+        observed.total_bytes = measured.total_bytes
+        observed.members = [
+            RunSwitchMemberReceipt(
+                node_id=member.member_id,
+                state=_progress_state(member.state) or "unknown",
+                phase=_progress_phase(member.phase),
+                completed_bytes=member.completed_bytes,
+                total_bytes=member.total_bytes,
+            )
+            for member in measured.members
+        ]
     observed.child_state = state
     observed.status_reason = reason[:512] if reason is not None else None
     return observed
