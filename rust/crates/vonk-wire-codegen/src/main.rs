@@ -398,11 +398,42 @@ fn equality_types(items: &[Item]) -> std::collections::BTreeSet<String> {
     eligible
 }
 
+fn named_payload_schema<'a>(
+    payload: &syn::Type,
+    schema_names: &'a BTreeMap<String, String>,
+) -> Option<&'a String> {
+    let syn::Type::Path(path) = payload else {
+        return None;
+    };
+    if path.qself.is_some() || path.path.leading_colon.is_some() || path.path.segments.len() != 1 {
+        return None;
+    }
+    path.path
+        .segments
+        .first()
+        .filter(|segment| matches!(segment.arguments, syn::PathArguments::None))
+        .and_then(|segment| schema_names.get(&segment.ident.to_string()))
+}
+
 // Serde's derived untagged enum buffers Content, which cannot represent
 // arbitrary-precision integers or preserve RawValue through nested models.
 // Try the generated payload types directly from the original-kind Value instead.
-fn untagged_deserialize_impl(item: &mut syn::ItemEnum, schema_name: Option<&str>) -> Item {
+fn untagged_deserialize_impl(
+    item: &mut syn::ItemEnum,
+    schema_name: Option<&str>,
+    schema_names: &BTreeMap<String, String>,
+) -> Item {
     let ident = &item.ident;
+    let object_keys = if item.variants.iter().any(|variant| {
+        matches!(&variant.fields, syn::Fields::Unnamed(fields)
+            if fields.unnamed.len() == 1
+                && named_payload_schema(&fields.unnamed.first().unwrap().ty, schema_names).is_some())
+    }) {
+        quote! {
+            let object_keys = value.as_object().map(|object|
+                object.keys().map(String::as_str).collect::<Vec<_>>());
+        }
+    } else { quote! {} };
     let branches = item.variants.iter().map(|variant| {
         let name = &variant.ident;
         match &variant.fields {
@@ -413,10 +444,18 @@ fn untagged_deserialize_impl(item: &mut syn::ItemEnum, schema_name: Option<&str>
             },
             syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
                 let payload = &fields.unnamed.first().unwrap().ty;
-                quote! {
-                    if let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
-                        return Ok(Self::#name(payload));
-                    }
+                match named_payload_schema(payload, schema_names) {
+                    Some(model) => quote! {
+                        if crate::wire_schema::may_match_wire_model_shape(#model, object_keys.as_deref())
+                            && let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
+                            return Ok(Self::#name(payload));
+                        }
+                    },
+                    None => quote! {
+                        if let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
+                            return Ok(Self::#name(payload));
+                        }
+                    },
                 }
             }
             syn::Fields::Unnamed(fields) => {
@@ -449,6 +488,7 @@ fn untagged_deserialize_impl(item: &mut syn::ItemEnum, schema_name: Option<&str>
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
                 let value = crate::wire_schema::deserialize_wire_value(deserializer, #schema_owner)?;
+                #object_keys
                 #(#branches)*
                 Err(::serde::de::Error::custom(concat!("invalid canonical union ", stringify!(#ident))))
             }
@@ -814,6 +854,7 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
             validation.push(untagged_deserialize_impl(
                 enumeration,
                 names.get(&name).map(String::as_str),
+                &names,
             ));
         } else if let Some(schema_name) = names.get(&name)
             && let Some(implementation) = deserialize_impl(item, schema_name)

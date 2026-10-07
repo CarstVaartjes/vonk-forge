@@ -384,13 +384,18 @@ fn cleanup_abandoned_generations(
 }
 
 pub fn renewal_due(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
+    Ok(now >= renewal_time(root)?)
+}
+
+/// The scheduling boundary owned by the active signed certificate's validity.
+pub fn renewal_time(root: &Path) -> Result<DateTime<Utc>, IdentityError> {
     let paths = active_identity_paths(root)?;
     let (not_before, not_after) = certificate_validity(&paths.certificate)?;
     let lifetime = not_after - not_before;
     if lifetime <= chrono::Duration::zero() {
         return Err(std::io::Error::other("active certificate validity is invalid").into());
     }
-    Ok(now >= not_after - lifetime / 3)
+    Ok(not_after - lifetime / 3)
 }
 
 fn certificate_validity(path: &Path) -> Result<(DateTime<Utc>, DateTime<Utc>), IdentityError> {
@@ -590,6 +595,22 @@ mod tests {
             fingerprint: format!("fingerprint-{generation}"),
             generation,
         }
+    }
+
+    #[test]
+    fn renewal_clock_uses_the_active_certificate_boundary_without_changing_identity() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        persist_identity(&root, &certificate_material(1, false)).unwrap();
+        let path = active_identity_paths(&root).unwrap().certificate;
+        let before = fs::read(&path).unwrap();
+        let due = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
+
+        assert_eq!(renewal_time(&root).unwrap(), due);
+        assert!(!renewal_due(&root, due - chrono::Duration::seconds(1)).unwrap());
+        assert!(renewal_due(&root, due).unwrap());
+        assert!(renewal_due(&root, due + chrono::Duration::seconds(1)).unwrap());
+        assert_eq!(fs::read(path).unwrap(), before);
     }
 
     #[test]

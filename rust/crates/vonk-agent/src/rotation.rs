@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use thiserror::Error;
 use vonk_agent_protocol::generated::SecurityRefusalReason;
 
@@ -77,6 +77,16 @@ pub async fn rotate_if_due(
     config: &AgentConfig,
     client: &AgentHttpClient,
 ) -> Result<bool, RotationError> {
+    rotate_if_due_at(config, client, Utc::now()).await
+}
+
+/// Rotate through the same production protocol at a supplied scheduling clock.
+/// TLS, staged-identity expiry, Controller and CA clocks remain real wall time.
+pub async fn rotate_if_due_at(
+    config: &AgentConfig,
+    client: &AgentHttpClient,
+    scheduling_now: DateTime<Utc>,
+) -> Result<bool, RotationError> {
     let root = config.data_dir.join("credentials");
     let now = Utc::now();
     if let Some((generation, paths)) = staged_identity_paths(&root)? {
@@ -91,7 +101,7 @@ pub async fn rotate_if_due(
             return Ok(true);
         }
     }
-    if !renewal_due(&root, now)? {
+    if !renewal_due(&root, scheduling_now)? {
         return Ok(false);
     }
     let pending = match load_pending(&root)? {
