@@ -418,7 +418,7 @@ def run(
     command: list[str],
     *,
     cwd: Path,
-    timeout: int = 300,
+    timeout: float = 300,
     allow_output: bool = True,
     environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:

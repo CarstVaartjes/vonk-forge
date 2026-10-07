@@ -100,6 +100,8 @@ def https_peer(tmp_path, monkeypatch):
     stop = threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
+        raw_requestline: bytes
+
         # The client's close can surface anywhere in the exchange, not only
         # while respond() is writing; record it wherever it lands.
         def handle(self):
