@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -241,7 +242,9 @@ def stream(command: list[str], *, timeout: float = 20 * 60) -> tuple[int, str]:
             while selector.get_map():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise subprocess.TimeoutExpired(command, timeout)
+                    raise subprocess.TimeoutExpired(
+                        command, timeout, output="".join(chunks)
+                    )
                 for key, _events in selector.select(timeout=remaining):
                     raw = os.read(key.fd, 65536)
                     if not raw:
@@ -256,12 +259,37 @@ def stream(command: list[str], *, timeout: float = 20 * 60) -> tuple[int, str]:
         sys.stdout.write(tail)
         code = process.wait(timeout=max(0, deadline - time.monotonic()))
         return code, "".join(chunks)
+    except subprocess.TimeoutExpired as error:
+        error.output = "".join(chunks)
+        process.kill()
+        process.wait(timeout=5)
+        raise
     except BaseException:
         process.kill()
         process.wait(timeout=5)
         raise
     finally:
         process.stdout.close()
+
+
+def stream_owned_container(command: list[str], log_path: Path) -> tuple[int, str]:
+    """End only this invocation's Docker container and retain partial output."""
+    name = "vonk-wire-lane-" + uuid.uuid4().hex
+    owned = command[:3] + ["--name", name] + command[3:]
+    try:
+        code, output = stream(owned)
+        log_path.write_text(output, encoding="utf-8")
+        return code, output
+    except subprocess.TimeoutExpired as error:
+        output = error.output
+        log_path.write_text(output if isinstance(output, str) else "", encoding="utf-8")
+        raise LaneError(
+            f"wire tier observation expired; partial output in {log_path}"
+        ) from error
+    finally:
+        code, output = capture([command[0], "rm", "--force", name])
+        if code != 0 and "No such container" not in output:
+            raise LaneError(f"could not remove owned wire container {name}: {output}")
 
 
 def capture(command: list[str]) -> tuple[int, str]:
@@ -568,9 +596,8 @@ def run(args: argparse.Namespace) -> int:
     print("lane: running the CI wire command: " + TIER_COMMAND)
     command = container_command(docker or "docker", REPO_ROOT, library, cache)
     run_started = time.monotonic()
-    code, output = stream(command)
+    code, output = stream_owned_container(command, log_path)
     run_seconds = time.monotonic() - run_started
-    log_path.write_text(output, encoding="utf-8")
     elapsed = time.monotonic() - started
 
     if code != 0:

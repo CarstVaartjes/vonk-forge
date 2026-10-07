@@ -148,3 +148,31 @@ def test_stream_times_out_a_silent_child_and_reaps_it(tmp_path):
     assert pidfile.exists()
     with pytest.raises(ProcessLookupError):
         module.os.kill(int(pidfile.read_text()), 0)
+
+
+def test_container_timeout_removes_only_owned_scope_and_preserves_log(
+    tmp_path, monkeypatch
+):
+    import subprocess
+
+    import pytest
+
+    module = _module()
+    commands = []
+
+    def expired(command):
+        commands.append(command)
+        raise subprocess.TimeoutExpired(command, 1200, output="compiler progress\n")
+
+    def removed(command):
+        commands.append(command)
+        return 0, ""
+
+    monkeypatch.setattr(module, "stream", expired)
+    monkeypatch.setattr(module, "capture", removed)
+    log = tmp_path / "lane.log"
+    with pytest.raises(module.LaneError, match="partial output"):
+        module.stream_owned_container(["docker", "run", "--rm", "image"], log)
+    name = commands[0][commands[0].index("--name") + 1]
+    assert commands[1] == ["docker", "rm", "--force", name]
+    assert log.read_text() == "compiler progress\n"
