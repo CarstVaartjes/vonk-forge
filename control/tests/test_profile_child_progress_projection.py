@@ -475,7 +475,7 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     assert switch.progress.members[1].state == "pending"
     future = switch.progress.operation.members[1]
     assert future.state == LifecycleState.QUEUED
-    assert future.completed_bytes is None
+    assert future.completed_bytes == 0
     assert future.total_bytes is None
     assert future.bytes_per_second is None
     assert future.eta_seconds is None
