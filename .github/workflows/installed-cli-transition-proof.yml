@@ -14,6 +14,8 @@ on:
       - 'control/src/vonk_control/api.py'
       - 'src/cluster_profiles/schemas/cli-update-contract.schema.json'
       - 'tools/hatch_build.py'
+      - 'install/channel'
+      - 'scripts/install-release-publication'
       - 'pyproject.toml'
       - 'uv.lock'
 
@@ -22,7 +24,7 @@ permissions:
 
 jobs:
   signed-update:
-    name: Actual old CLI to NDJSON Controller update
+    name: Actual old CLI to NDJSON Controller signed bootstrap
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -61,7 +63,7 @@ jobs:
               --python "$RUNNER_TEMP/signed-update-dependencies/bin/python" \
               --reinstall --require-hashes -r "$RUNNER_TEMP/signed-update-requirements.txt"
           test -d "$RUNNER_TEMP/signed-update-cache"
-      - name: Exercise actual installed updater and reject corrupted bytes
+      - name: Prove manifest refusal, signed bootstrap and installed NDJSON command
         shell: bash
         env:
           VONK_SIGNED_UPDATE_PROOF: '1'
@@ -84,6 +86,10 @@ jobs:
           assert proof['real_uv_tool_receipt_changed']
           assert proof['real_controller_ndjson_observed']
           assert proof['actual_complete_fresh_worker_capture']
+          assert proof['manifest_epoch_requires_signed_bootstrap']
+          assert proof['prior_manifest_refusal_retained_tool_receipt']
+          assert proof['actual_installed_ndjson_command']
+          assert proof['bootstrap_source'] == os.environ['VONK_TRANSITION_SOURCE_SHA']
           assert proof['old_control_fingerprint'] != proof['new_control_fingerprint']
           assert proof['prior_source'] == os.environ['VONK_PRIOR_STABLE_SOURCE_SHA']
           assert proof['candidate_source'] == os.environ['VONK_TRANSITION_SOURCE_SHA']

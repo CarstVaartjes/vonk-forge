@@ -1424,6 +1424,43 @@ impl ::std::convert::TryFrom<::std::string::String> for CatalogSyncState {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateCode {
+    #[serde(rename = "certificate.response_unrepresentable")]
+    CertificateResponseUnrepresentable,
+}
+impl ::std::fmt::Display for CertificateCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CertificateResponseUnrepresentable => {
+                f.write_str("certificate.response_unrepresentable")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "certificate.response_unrepresentable" => Ok(Self::CertificateResponseUnrepresentable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CertificateState {
     #[serde(rename = "valid")]
     Valid,
@@ -4526,6 +4563,7 @@ impl ::std::convert::TryFrom<::std::string::String> for InstallerReleaseIdentity
 #[derive(Eq)]
 pub struct InstallerReleaseImages {
     pub api: ::std::string::String,
+    pub ca: ::std::string::String,
     pub hermes: ::std::string::String,
     pub litellm: ::std::string::String,
     pub worker: ::std::string::String,
@@ -7584,6 +7622,7 @@ pub struct ReasonCodeVocabulary {
     pub cache_reference_reason: CacheReferenceReason,
     pub catalog_code: CatalogCode,
     pub catalog_sync_code: CatalogSyncCode,
+    pub certificate_code: CertificateCode,
     pub cluster_mapping_code: ClusterMappingCode,
     pub controller_error_code: ControllerErrorCode,
     pub distribution_code: DistributionCode,
@@ -14128,38 +14167,86 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
 impl<'de> ::serde::Deserialize<'de> for AgentClaimPayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = crate::wire_schema::deserialize_wire_value(deserializer, None)?;
-        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightRequest>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RuntimePreflightRequest",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RuntimePreflightRequest>(value.clone())
+        {
             return Ok(Self::RuntimePreflightRequest(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradePayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "AgentUpgradePayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<AgentUpgradePayload>(value.clone())
+        {
             return Ok(Self::AgentUpgradePayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionPayload>(value.clone())
+        if crate::wire_schema::may_match_wire_model_shape(
+            "ArtifactDistributionPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
+            ::serde_json::from_value::<ArtifactDistributionPayload>(value.clone())
         {
             return Ok(Self::ArtifactDistributionPayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildRequest>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeBuildRequest",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeBuildRequest>(value.clone())
+        {
             return Ok(Self::RecipeBuildRequest(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupRequest>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeBuildCleanupRequest",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
+            ::serde_json::from_value::<RecipeBuildCleanupRequest>(value.clone())
+        {
             return Ok(Self::RecipeBuildCleanupRequest(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunRequest>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeJobRunRequest",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeJobRunRequest>(value.clone())
+        {
             return Ok(Self::RecipeJobRunRequest(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeInstallPayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeInstallPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeInstallPayload>(value.clone())
+        {
             return Ok(Self::RecipeInstallPayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeStartPayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeStartPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeStartPayload>(value.clone())
+        {
             return Ok(Self::RecipeStartPayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeStopPayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeStopPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeStopPayload>(value.clone())
+        {
             return Ok(Self::RecipeStopPayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcilePayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeReconcilePayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeReconcilePayload>(value.clone())
+        {
             return Ok(Self::RecipeReconcilePayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallPayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeUninstallPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeUninstallPayload>(value.clone())
+        {
             return Ok(Self::RecipeUninstallPayload(payload));
         }
         Err(::serde::de::Error::custom(concat!(
@@ -14674,49 +14761,108 @@ impl<'de> ::serde::Deserialize<'de> for AgentResult {
 impl<'de> ::serde::Deserialize<'de> for AgentResultResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = crate::wire_schema::deserialize_wire_value(deserializer, None)?;
-        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightResult>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RuntimePreflightResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RuntimePreflightResult>(value.clone())
+        {
             return Ok(Self::RuntimePreflightResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<AgentInstallResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "AgentInstallResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<AgentInstallResult>(value.clone())
+        {
             return Ok(Self::AgentInstallResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeStartResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeStartResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeStartResult>(value.clone())
+        {
             return Ok(Self::RecipeStartResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeStopResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeStopResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeStopResult>(value.clone())
+        {
             return Ok(Self::RecipeStopResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcileResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeReconcileResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeReconcileResult>(value.clone())
+        {
             return Ok(Self::RecipeReconcileResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeUninstallResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeUninstallResult>(value.clone())
+        {
             return Ok(Self::RecipeUninstallResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildEvidence>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeBuildEvidence",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeBuildEvidence>(value.clone())
+        {
             return Ok(Self::RecipeBuildEvidence(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupEvidence>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeBuildCleanupEvidence",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
+            ::serde_json::from_value::<RecipeBuildCleanupEvidence>(value.clone())
+        {
             return Ok(Self::RecipeBuildCleanupEvidence(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeJobRunResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeJobRunResult>(value.clone())
+        {
             return Ok(Self::RecipeJobRunResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "ArtifactDistributionResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
+            ::serde_json::from_value::<ArtifactDistributionResult>(value.clone())
+        {
             return Ok(Self::ArtifactDistributionResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<AgentFailureResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "AgentFailureResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<AgentFailureResult>(value.clone())
+        {
             return Ok(Self::AgentFailureResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradeResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "AgentUpgradeResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<AgentUpgradeResult>(value.clone())
+        {
             return Ok(Self::AgentUpgradeResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<OutcomeDone>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape("OutcomeDone", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<OutcomeDone>(value.clone())
+        {
             return Ok(Self::OutcomeDone(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<OutcomeFailed>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape("OutcomeFailed", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<OutcomeFailed>(value.clone())
+        {
             return Ok(Self::OutcomeFailed(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<OutcomeUnknown>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape("OutcomeUnknown", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<OutcomeUnknown>(value.clone())
+        {
             return Ok(Self::OutcomeUnknown(payload));
         }
         Err(::serde::de::Error::custom(concat!(
@@ -15672,6 +15818,56 @@ impl<'de> ::serde::Deserialize<'de> for CatalogSyncState {
             Raw::Current => Self::Current,
             Raw::Partial => Self::Partial,
             Raw::Failed => Self::Failed,
+        })
+    }
+}
+impl CertificateCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CertificateResponseUnrepresentable => "certificate.response_unrepresentable",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("CertificateCode"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "certificate.response_unrepresentable")]
+            CertificateResponseUnrepresentable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CertificateResponseUnrepresentable => Self::CertificateResponseUnrepresentable,
         })
     }
 }
@@ -16990,13 +17186,22 @@ impl<'de> ::serde::Deserialize<'de> for ErrorCatalog {
 impl<'de> ::serde::Deserialize<'de> for ErrorCatalogError {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = crate::wire_schema::deserialize_wire_value(deserializer, None)?;
-        if let Ok(payload) = ::serde_json::from_value::<SecurityRefusal>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape("SecurityRefusal", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<SecurityRefusal>(value.clone())
+        {
             return Ok(Self::SecurityRefusal(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<InvalidRequest>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape("InvalidRequest", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<InvalidRequest>(value.clone())
+        {
             return Ok(Self::InvalidRequest(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<UnknownError>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape("UnknownError", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<UnknownError>(value.clone())
+        {
             return Ok(Self::UnknownError(payload));
         }
         Err(::serde::de::Error::custom(concat!(
@@ -18343,15 +18548,28 @@ impl<'de> ::serde::Deserialize<'de> for HostOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value =
             crate::wire_schema::deserialize_wire_value(deserializer, Some("HostOperation"))?;
-        if let Ok(payload) = ::serde_json::from_value::<InstallVonkDebOperation>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape(
+            "InstallVonkDebOperation",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<InstallVonkDebOperation>(value.clone())
+        {
             return Ok(Self::InstallVonkDebOperation(payload));
         }
-        if let Ok(payload) =
+        if crate::wire_schema::may_match_wire_model_shape(
+            "ConfirmPackageActivationOperation",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
             ::serde_json::from_value::<ConfirmPackageActivationOperation>(value.clone())
         {
             return Ok(Self::ConfirmPackageActivationOperation(payload));
         }
-        if let Ok(payload) =
+        if crate::wire_schema::may_match_wire_model_shape(
+            "ExecuteContainerRuntimeRequestOperation",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
             ::serde_json::from_value::<ExecuteContainerRuntimeRequestOperation>(value.clone())
         {
             return Ok(Self::ExecuteContainerRuntimeRequestOperation(payload));
@@ -19458,6 +19676,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
         #[derive(Eq)]
         struct Raw {
             pub api: ::std::string::String,
+            pub ca: ::std::string::String,
             pub hermes: ::std::string::String,
             pub litellm: ::std::string::String,
             pub worker: ::std::string::String,
@@ -19466,6 +19685,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseImages {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             api: raw.api,
+            ca: raw.ca,
             hermes: raw.hermes,
             litellm: raw.litellm,
             worker: raw.worker,
@@ -19478,10 +19698,21 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseManifest {
             deserializer,
             Some("InstallerReleaseManifest"),
         )?;
-        if let Ok(payload) = ::serde_json::from_value::<InstallerCandidateRelease>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape(
+            "InstallerCandidateRelease",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
+            ::serde_json::from_value::<InstallerCandidateRelease>(value.clone())
+        {
             return Ok(Self::CandidateRelease(payload));
         }
-        if let Ok(payload) =
+        if crate::wire_schema::may_match_wire_model_shape(
+            "InstallerAcceptanceBaselineRelease",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
             ::serde_json::from_value::<InstallerAcceptanceBaselineRelease>(value.clone())
         {
             return Ok(Self::AcceptanceBaselineRelease(payload));
@@ -21980,13 +22211,22 @@ impl<'de> ::serde::Deserialize<'de> for OutcomeCatalog {
 impl<'de> ::serde::Deserialize<'de> for OutcomeCatalogOutcome {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = crate::wire_schema::deserialize_wire_value(deserializer, None)?;
-        if let Ok(payload) = ::serde_json::from_value::<OutcomeDone>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape("OutcomeDone", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<OutcomeDone>(value.clone())
+        {
             return Ok(Self::Done(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<OutcomeFailed>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape("OutcomeFailed", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<OutcomeFailed>(value.clone())
+        {
             return Ok(Self::Failed(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<OutcomeUnknown>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape("OutcomeUnknown", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<OutcomeUnknown>(value.clone())
+        {
             return Ok(Self::Unknown(payload));
         }
         Err(::serde::de::Error::custom(concat!(
@@ -22039,37 +22279,86 @@ impl ::std::cmp::PartialEq<&str> for OutcomeDoneKind {
 impl<'de> ::serde::Deserialize<'de> for OutcomeDoneResult {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = crate::wire_schema::deserialize_wire_value(deserializer, None)?;
-        if let Ok(payload) = ::serde_json::from_value::<RuntimePreflightResult>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RuntimePreflightResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RuntimePreflightResult>(value.clone())
+        {
             return Ok(Self::RuntimePreflightResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<AgentInstallResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "AgentInstallResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<AgentInstallResult>(value.clone())
+        {
             return Ok(Self::AgentInstallResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeStartResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeStartResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeStartResult>(value.clone())
+        {
             return Ok(Self::RecipeStartResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeStopResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeStopResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeStopResult>(value.clone())
+        {
             return Ok(Self::RecipeStopResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcileResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeReconcileResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeReconcileResult>(value.clone())
+        {
             return Ok(Self::RecipeReconcileResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeUninstallResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeUninstallResult>(value.clone())
+        {
             return Ok(Self::RecipeUninstallResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildEvidence>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeBuildEvidence",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeBuildEvidence>(value.clone())
+        {
             return Ok(Self::RecipeBuildEvidence(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeBuildCleanupEvidence>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeBuildCleanupEvidence",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
+            ::serde_json::from_value::<RecipeBuildCleanupEvidence>(value.clone())
+        {
             return Ok(Self::RecipeBuildCleanupEvidence(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeJobRunResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeJobRunResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeJobRunResult>(value.clone())
+        {
             return Ok(Self::RecipeJobRunResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<ArtifactDistributionResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "ArtifactDistributionResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) =
+            ::serde_json::from_value::<ArtifactDistributionResult>(value.clone())
+        {
             return Ok(Self::ArtifactDistributionResult(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<AgentUpgradeResult>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "AgentUpgradeResult",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<AgentUpgradeResult>(value.clone())
+        {
             return Ok(Self::AgentUpgradeResult(payload));
         }
         Err(::serde::de::Error::custom(concat!(
@@ -23154,6 +23443,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             pub cache_reference_reason: CacheReferenceReason,
             pub catalog_code: CatalogCode,
             pub catalog_sync_code: CatalogSyncCode,
+            pub certificate_code: CertificateCode,
             pub cluster_mapping_code: ClusterMappingCode,
             pub controller_error_code: ControllerErrorCode,
             pub distribution_code: DistributionCode,
@@ -23201,6 +23491,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             cache_reference_reason: raw.cache_reference_reason,
             catalog_code: raw.catalog_code,
             catalog_sync_code: raw.catalog_sync_code,
+            certificate_code: raw.certificate_code,
             cluster_mapping_code: raw.cluster_mapping_code,
             controller_error_code: raw.controller_error_code,
             distribution_code: raw.distribution_code,
@@ -24448,19 +24739,42 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequest {
 impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequestPayload {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = crate::wire_schema::deserialize_wire_value(deserializer, None)?;
-        if let Ok(payload) = ::serde_json::from_value::<RecipeInstallPayload>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeInstallPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeInstallPayload>(value.clone())
+        {
             return Ok(Self::InstallPayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeStartPayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeStartPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeStartPayload>(value.clone())
+        {
             return Ok(Self::StartPayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeStopPayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeStopPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeStopPayload>(value.clone())
+        {
             return Ok(Self::StopPayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeUninstallPayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeUninstallPayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeUninstallPayload>(value.clone())
+        {
             return Ok(Self::UninstallPayload(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<RecipeReconcilePayload>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "RecipeReconcilePayload",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<RecipeReconcilePayload>(value.clone())
+        {
             return Ok(Self::ReconcilePayload(payload));
         }
         Err(::serde::de::Error::custom(concat!(
@@ -29081,19 +29395,38 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyOperation {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value =
             crate::wire_schema::deserialize_wire_value(deserializer, Some("SparkApplyOperation"))?;
-        if let Ok(payload) = ::serde_json::from_value::<SparkApplyFresh>(value.clone()) {
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape("SparkApplyFresh", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<SparkApplyFresh>(value.clone())
+        {
             return Ok(Self::Fresh(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<SparkApplyPair>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape("SparkApplyPair", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<SparkApplyPair>(value.clone())
+        {
             return Ok(Self::Pair(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<SparkApplyReenroll>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "SparkApplyReenroll",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<SparkApplyReenroll>(value.clone())
+        {
             return Ok(Self::Reenroll(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<SparkApplyRecover>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "SparkApplyRecover",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<SparkApplyRecover>(value.clone())
+        {
             return Ok(Self::Recover(payload));
         }
-        if let Ok(payload) = ::serde_json::from_value::<SparkApplyUpgrade>(value.clone()) {
+        if crate::wire_schema::may_match_wire_model_shape(
+            "SparkApplyUpgrade",
+            object_keys.as_deref(),
+        ) && let Ok(payload) = ::serde_json::from_value::<SparkApplyUpgrade>(value.clone())
+        {
             return Ok(Self::Upgrade(payload));
         }
         Err(::serde::de::Error::custom(concat!(

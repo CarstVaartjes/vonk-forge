@@ -80,6 +80,12 @@ class CacheReferenceReason(WireEnum):
     SAVED_PROFILE = "saved-profile"
 
 
+class CertificateCode(WireEnum):
+    """Owned certificate issuance admission refusals."""
+
+    RESPONSE_UNREPRESENTABLE = "certificate.response_unrepresentable"
+
+
 class CatalogCode(WireEnum):
     """Refusals of the recipe catalog and the recipe library documents."""
 
@@ -1361,6 +1367,7 @@ REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
     AgentEvidenceCode,
     ArtifactLifecycleCode,
     CacheReferenceReason,
+    CertificateCode,
     CatalogCode,
     CatalogSyncCode,
     ClusterMappingCode,
@@ -1537,6 +1544,7 @@ class ReasonCodeVocabulary(WireModel):
     agent_evidence_code: AgentEvidenceCode
     artifact_lifecycle_code: ArtifactLifecycleCode
     cache_reference_reason: CacheReferenceReason
+    certificate_code: CertificateCode
     catalog_code: CatalogCode
     catalog_sync_code: CatalogSyncCode
     cluster_mapping_code: ClusterMappingCode
@@ -1588,6 +1596,7 @@ __all__ = [
     "CacheReferenceReason",
     "CatalogCode",
     "CatalogSyncCode",
+    "CertificateCode",
     "ClusterMappingCode",
     "ControllerErrorCode",
     "DistributionCode",

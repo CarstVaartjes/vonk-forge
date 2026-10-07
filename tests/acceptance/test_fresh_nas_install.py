@@ -391,6 +391,8 @@ def is_immutable_image(image: str) -> bool:
 
 
 def is_channel_image(image: str, channel: str | None = None) -> bool:
+    if image.startswith("ghcr.io/carstvaartjes/vonk-forge-ca:"):
+        return re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image) is not None
     if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
         if "@" in image:
             return False
@@ -720,10 +722,11 @@ def verify_deployed_controller_identity(bundle: Path) -> None:
     if re.fullmatch(r"[0-9a-f]{40}", source) is None:
         raise AcceptanceError("candidate Controller source is invalid")
     script = """
-import json, time, urllib.request
+import json, time, urllib.error, urllib.request
 from dataclasses import asdict
 from cluster_profiles.runtime_identity import packaged_runtime_identity
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from cluster_profiles.control_transport import open_https
 from cluster_profiles.observation_transfer_reader import receive_observation
 from vonk_control.observation_transfer import OBSERVATION_MEDIA_TYPE, ObservationTransferRecord
 from vonk_control.platform_observation import PlatformObservation
@@ -736,10 +739,15 @@ def validate_record(value):
     ObservationTransferRecord.model_validate(value)
 def validate_payload(value):
     return PlatformObservation.model_validate_json(json.dumps(value)).model_dump(mode="json")
-with urllib.request.urlopen(request, timeout=10) as response:
-    assert response.status == 200
+deadline = time.monotonic() + 10
+try:
+    response = open_https(request, timeout=deadline - time.monotonic(), trust_env=False)
+except urllib.error.HTTPError as error:
+    response = error
+with response:
+    assert (response.code if isinstance(response, urllib.error.HTTPError) else response.status) == 200
     assert response.headers.get_content_type() == OBSERVATION_MEDIA_TYPE
-    observation = receive_observation(response, resource="platform", record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES, validate_record=validate_record, validate_payload=validate_payload)
+    observation = receive_observation(response, resource="platform", record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES, deadline=deadline, validate_record=validate_record, validate_payload=validate_payload)
 print(json.dumps({"package": asdict(identity), "observation": observation}))
 """
     result = run(

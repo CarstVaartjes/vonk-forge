@@ -18,6 +18,11 @@ from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 from vonk_agent_protocol import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
+from .platform_observation_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
+)
+
 
 def _serialized_field_name(field_name: str, field: Any, *, by_alias: bool) -> str:
     if by_alias:
@@ -203,6 +208,13 @@ def _presence_policy_endpoint(
                 result = await endpoint(**values)
             else:
                 result = await run_in_threadpool(endpoint, **values)
+        except ObservationCaptureUnavailable as error:
+            current = route()
+            return observation_capture_unavailable_response(
+                error,
+                operation=current.operation_id or current.name,
+                endpoint=current.path,
+            )
         except UnknownOutcomeError as error:
             # An unknown outcome that no route handled is not a server fault and
             # not a refusal: the caller is told to ask again.

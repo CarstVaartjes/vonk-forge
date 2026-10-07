@@ -570,6 +570,11 @@ export const CacheReferenceReason = {
 } as const;
 export type CacheReferenceReason = (typeof CacheReferenceReason)[keyof typeof CacheReferenceReason];
 
+export const CertificateCode = {
+  RESPONSE_UNREPRESENTABLE: "certificate.response_unrepresentable",
+} as const;
+export type CertificateCode = (typeof CertificateCode)[keyof typeof CertificateCode];
+
 export const CatalogCode = {
   ACTOR: "catalog.actor",
   CANDIDATE_EXISTS: "catalog.candidate_exists",

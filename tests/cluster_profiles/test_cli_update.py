@@ -111,6 +111,7 @@ def _signed_publication(
     channel: str = "stable",
     wheel: bytes | None = None,
     omit_images: bool = False,
+    wheel_name: str = "vonk_cluster_profiles-0.1.1-py3-none-any.whl",
 ) -> tuple[Path, dict[str, bytes]]:
     key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
     public_key = tmp_path / "installer-public.pem"
@@ -144,8 +145,22 @@ def _signed_publication(
     wheel = wheel if wheel is not None else wheel_buffer.getvalue()
     generation = "a" * 64
     prefix = f"artifacts/{channel}/releases/{generation}"
-    wheel_path = f"{prefix}/cli/vonk_cluster_profiles-0.1.1-py3-none-any.whl"
+    wheel_path = f"{prefix}/cli/{wheel_name}"
     descriptor = {"path": f"{prefix}/example", "sha256": "a" * 64, "size": 1}
+    # CLI proofs do not execute either native installer, but every signed
+    # pointer field must bind actual immutable bytes rather than placeholders.
+    bootstrap_objects = {
+        "nas": b"#!/bin/sh\n# CLI fixture does not install a NAS.\nexit 64\n",
+        "spark": b"#!/bin/sh\n# CLI fixture does not install a Spark.\nexit 64\n",
+    }
+    bootstraps = {
+        kind: {
+            "path": f"{prefix}/bootstraps/{kind}",
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "size": len(content),
+        }
+        for kind, content in bootstrap_objects.items()
+    }
     artifacts = {
         name: dict(descriptor)
         for name in (
@@ -180,10 +195,10 @@ def _signed_publication(
         "source_sha": source_sha,
         "images": {
             name: "ghcr.io/vonk/" + name + ":v1@sha256:" + "a" * 64
-            for name in ("api", "worker", "hermes", "litellm")
+            for name in ("api", "worker", "hermes", "litellm", "ca")
         },
         "artifacts": artifacts,
-        "bootstraps": {"nas": dict(descriptor), "spark": dict(descriptor)},
+        "bootstraps": bootstraps,
     }
     if omit_images:
         del release["images"]
@@ -202,7 +217,10 @@ def _signed_publication(
         f"release_sha256={hashlib.sha256(release_raw).hexdigest()}\n"
         f"release_signature_path={prefix}/release.sig\n"
         f"release_signature_sha256={hashlib.sha256(release_sig).hexdigest()}\n"
-        "nas_path=unused\nnas_sha256=unused\nspark_path=unused\nspark_sha256=unused\n"
+        f"nas_path={bootstraps['nas']['path']}\n"
+        f"nas_sha256={bootstraps['nas']['sha256']}\n"
+        f"spark_path={bootstraps['spark']['path']}\n"
+        f"spark_sha256={bootstraps['spark']['sha256']}\n"
     ).encode()
     pointer = (
         claims
@@ -215,6 +233,10 @@ def _signed_publication(
         f"https://install.vonkforge.ai/{prefix}/release.json": release_raw,
         f"https://install.vonkforge.ai/{prefix}/release.sig": release_sig,
         f"https://install.vonkforge.ai/{wheel_path}": wheel,
+        **{
+            f"https://install.vonkforge.ai/{prefix}/bootstraps/{kind}": content
+            for kind, content in bootstrap_objects.items()
+        },
     }
 
 
@@ -968,7 +990,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
 def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     transition_signed_update_tool, monkeypatch
 ) -> None:
-    """Catch an old updater deadlocked on the Controller's new full API media."""
+    """Prove the trusted bootstrap when an old release schema refuses an epoch."""
     import socket
 
     import uvicorn
@@ -1074,7 +1096,10 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     token_path.chmod(0o600)
     cert_path, tls_key_path = _proof_tls_files(workspace)
     key, objects = _signed_publication(
-        workspace, source_sha=current_source, wheel=candidate_wheel.read_bytes()
+        workspace,
+        source_sha=current_source,
+        wheel=candidate_wheel.read_bytes(),
+        wheel_name=candidate_wheel.name,
     )
     responses = {
         url.removeprefix("https://install.vonkforge.ai"): content
@@ -1139,6 +1164,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
     environment = {
         **environment,
         "SSL_CERT_FILE": str(cert_path),
+        "CURL_CA_BUNDLE": str(cert_path),
         "VONK_CONTROL_URL": control_origin,
         "VONK_CONTROL_TOKEN_FILE": str(token_path),
     }
@@ -1203,34 +1229,80 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
             origin = f"https://127.0.0.1:{publication.server_port}"
             driver = "import json,sys; from pathlib import Path; from cluster_profiles import cli_update; assert Path(cli_update.__file__).is_relative_to(sys.prefix); print(json.dumps(cli_update.run_update(channel='stable',apply=True,origin=sys.argv[1],public_key=Path(sys.argv[2]))))"
             try:
+                # The frozen prior CLI rejects this new, closed five-image
+                # release schema. Its ordinary updater must fail intact.
+                refused = invoke([str(python), "-c", driver, origin, str(key)])
+                assert refused.returncode != 0, refused.stdout
+                assert "immutable release is invalid" in refused.stderr
+                assert identity() == before
+                assert tool_receipt_path.read_bytes() == before_tool_receipt
+                assert api_responses[boundary:] == []
+
+                # Render the official publisher endpoint from this exact
+                # reviewed source, independently of the candidate wheel.
+                bootstrap = workspace / "signed-vonkctl-bootstrap"
+                render = invoke(
+                    [
+                        sys.executable,
+                        "-c",
+                        (
+                            "import runpy,sys; from pathlib import Path; "
+                            "root=Path(sys.argv[1]); "
+                            "sys.path.insert(0,str(root/'scripts')); "
+                            "publisher=runpy.run_path(str(root/'scripts/install-release-publication')); "
+                            "rendered=publisher['_render_channel_endpoint']"
+                            "('cli','stable',sys.argv[2],Path(sys.argv[3]).read_bytes()); "
+                            "Path(sys.argv[4]).write_bytes(rendered)"
+                        ),
+                        str(root),
+                        origin,
+                        str(key),
+                        str(bootstrap),
+                    ]
+                )
+                assert render.returncode == 0, render.stderr
+                bootstrap_bytes = bootstrap.read_bytes()
+                responses["/vonkctl"] = bootstrap_bytes
+                downloaded = invoke(
+                    [
+                        "curl",
+                        "-fsSL",
+                        "--proto",
+                        "=https",
+                        "--tlsv1.2",
+                        f"{origin}/vonkctl",
+                        "-o",
+                        str(bootstrap),
+                    ]
+                )
+                assert downloaded.returncode == 0, downloaded.stderr
+                assert bootstrap.read_bytes() == bootstrap_bytes
+                bootstrap_environment = {
+                    **environment,
+                    "VONK_INSTALL_BASE_URL": origin,
+                }
+
+                def install_bootstrap():
+                    return subprocess.run(
+                        ["sh", str(bootstrap)],
+                        env=bootstrap_environment,
+                        cwd=workspace,
+                        capture_output=True,
+                        text=True,
+                        timeout=180,
+                        check=False,
+                    )
+
                 responses[wheel_path] = b"!" + responses[wheel_path][1:]
-                rejected = invoke([str(python), "-c", driver, origin, str(key)])
-                assert rejected.returncode != 0
-                assert "CLI wheel digest or size is invalid" in rejected.stderr
+                rejected = install_bootstrap()
+                assert rejected.returncode != 0, rejected.stdout
+                assert "CLI wheel digest is invalid" in rejected.stderr
                 assert identity() == before
                 assert tool_receipt_path.read_bytes() == before_tool_receipt
                 responses[wheel_path] = candidate_wheel.read_bytes()
-                # A real renewal can land after a capture's fixed timestamp.
-                # Unknown preserves the old tool; retry the same signed bytes
-                # through the ordinary updater, never substitute a receipt.
-                for _attempt in range(3):
-                    applied = invoke([str(python), "-c", driver, origin, str(key)])
-                    assert applied.returncode == 0, applied.stderr
-                    receipt = json.loads(applied.stdout)
-                    if receipt["updated"]:
-                        break
-                    assert (
-                        receipt["compatibility"]
-                        == "controller-contract-unavailable-or-different"
-                    )
-                    assert receipt["controller"]["worker_compatibility"] == "unknown"
-                    assert (
-                        receipt["controller"]["worker_issue"]
-                        == "worker-observation-unavailable"
-                    )
-                    assert identity() == before
-                    assert tool_receipt_path.read_bytes() == before_tool_receipt
-                    time.sleep(0.25)
+                applied = install_bootstrap()
+                assert applied.returncode == 0, applied.stderr
+                assert "vonkctl 1.2.3 is installed" in applied.stdout
                 after = identity()
                 assert not worker_errors
                 assert worker_thread.is_alive()
@@ -1239,15 +1311,20 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                     "source_sha": current_source,
                     "control_contract_sha256": candidate_identity.control_contract_sha256,
                 }
-                assert (
-                    receipt["updated"] is True
-                    and receipt["compatibility"] == "compatible"
-                )
                 assert tool_receipt_path.read_bytes() != before_tool_receipt
-                update_paths = [
-                    path for path, _status, _media in api_responses[boundary:]
+                assert api_responses[boundary:] == []
+                installed_platform = invoke([str(executable), "platform", "--json"])
+                assert installed_platform.returncode == 0, installed_platform.stderr
+                installed_observation = PlatformObservation.model_validate_json(
+                    installed_platform.stdout
+                )
+                assert installed_observation.api.source_sha == current_source
+                assert installed_observation.workers is not None
+                assert len(installed_observation.workers) == 1
+                assert installed_observation.workers[0].source_sha == current_source
+                assert api_responses[boundary:] == [
+                    ("/api/platform", 200, OBSERVATION_MEDIA_TYPE)
                 ]
-                assert update_paths and set(update_paths) == {"/api/cli/contract"}
                 Path(os.environ["VONK_SIGNED_UPDATE_REPORT"]).write_text(
                     json.dumps(
                         {
@@ -1264,6 +1341,16 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                             "actual_complete_fresh_worker_capture": True,
                             "tampered_wheel_retained_prior_tool_receipt": True,
                             "real_uv_tool_receipt_changed": True,
+                            "manifest_epoch_requires_signed_bootstrap": True,
+                            "prior_manifest_refusal_retained_tool_receipt": True,
+                            "actual_installed_ndjson_command": True,
+                            "bootstrap_source": current_source,
+                            "bootstrap_sha256": hashlib.sha256(
+                                bootstrap_bytes
+                            ).hexdigest(),
+                            "candidate_wheel_sha256": hashlib.sha256(
+                                candidate_wheel.read_bytes()
+                            ).hexdigest(),
                         },
                         indent=2,
                     )

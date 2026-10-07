@@ -373,10 +373,21 @@ def image_errors(root: Path) -> list[str]:
             "target": "runtime",
         },
     ]
+    expected_releases.append(
+        {
+            "context": ".",
+            "dockerfile": "deploy/compose/step-ca/Dockerfile",
+            "environment": "STEP_CA_IMAGE",
+            "package": "vonk-forge-ca",
+            "required": True,
+            "target": "runtime",
+        }
+    )
     required_deployment_releases = [
         expected_releases[0],
         expected_releases[1],
         expected_releases[3],
+        expected_releases[4],
     ]
     hermes_is_opt_in = (
         "profiles: [hermes]" in compose

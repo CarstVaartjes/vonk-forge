@@ -63,7 +63,9 @@ class _HTTPSLoop(asyncio.SelectorEventLoop):
 
 
 class HTTPSResponse(io.BufferedIOBase):
-    def __init__(self, request: urllib.request.Request, timeout: float) -> None:
+    def __init__(
+        self, request: urllib.request.Request, timeout: float, *, trust_env: bool = True
+    ) -> None:
         self._runner = asyncio.Runner(loop_factory=_HTTPSLoop)
         self._deadline = self._runner.get_loop().time() + timeout
         self._client: httpx2.AsyncClient | None = None
@@ -74,7 +76,9 @@ class HTTPSResponse(io.BufferedIOBase):
         self._closed = False
         self._interrupted = False
         try:
-            self._response = self._run(self._open(request, timeout))
+            self._response = self._run(
+                self._open(request, timeout, trust_env=trust_env)
+            )
         except BaseException:
             # Cleanup never replaces the cause: a Ctrl-C must stay a Ctrl-C.
             self._close_after_failure()
@@ -102,10 +106,10 @@ class HTTPSResponse(io.BufferedIOBase):
             raise urllib.error.URLError(error) from None
 
     async def _open(
-        self, request: urllib.request.Request, timeout: float
+        self, request: urllib.request.Request, timeout: float, *, trust_env: bool
     ) -> httpx2.Response:
         self._client = httpx2.AsyncClient(
-            timeout=timeout, follow_redirects=False, verify=True
+            timeout=timeout, follow_redirects=False, verify=True, trust_env=trust_env
         )
         data = request.data
         content: bytes | AsyncIterator[bytes] | None
@@ -202,8 +206,10 @@ class HTTPSResponse(io.BufferedIOBase):
             self._close_after_failure()
 
 
-def open_https(request: urllib.request.Request, *, timeout: float) -> HTTPSResponse:
-    response = HTTPSResponse(request, timeout)
+def open_https(
+    request: urllib.request.Request, *, timeout: float, trust_env: bool = True
+) -> HTTPSResponse:
+    response = HTTPSResponse(request, timeout, trust_env=trust_env)
     if response.status >= 300:
         # Preserve the existing injected opener boundary for all consumers,
         # including streaming artifact transfers, without following redirects.

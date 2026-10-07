@@ -72,6 +72,9 @@ test("Fleet summary keeps each count above its label at narrow and wide widths",
   await page.goto("/fleet");
   const summary = page.getByRole("region", {name: "Fleet summary"});
   await expect(summary.locator("strong")).toHaveCount(5);
+  await expect(summary.locator("strong")).toHaveText(["0", "0", "0", "0", "0"]);
+  await expect(summary.locator("span")).toHaveText(["Sparks", "Online", "Need attention", "Running recipes", "Installed recipes"]);
+  await expect(page.getByRole("heading", {name: "Fleet unavailable"})).toHaveCount(0);
 
   for (const width of [360, 768, 1280]) {
     await page.setViewportSize({width, height: 900});

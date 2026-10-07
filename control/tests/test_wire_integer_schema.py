@@ -56,6 +56,8 @@ def test_pinned_openapi_assembler_keeps_framework_output_and_inline_numbers() ->
     from typing import Annotated, Any, Literal
 
     from fastapi import Query
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.openapi.models import OpenAPI
     from fastapi.openapi.utils import get_openapi
     from pydantic import BaseModel, Field
     from pydantic.json_schema import models_json_schema
@@ -104,6 +106,9 @@ def test_pinned_openapi_assembler_keeps_framework_output_and_inline_numbers() ->
     )
     for name, definition in observation_graph["$defs"].items():
         standard["components"]["schemas"].setdefault(name, definition)
+    # The added raw owner schemas need the framework's same final document
+    # rendering (including omitted None defaults), not a second schema policy.
+    standard = jsonable_encoder(OpenAPI(**standard), by_alias=True, exclude_none=True)
     numeric_keywords = {
         "minimum",
         "maximum",

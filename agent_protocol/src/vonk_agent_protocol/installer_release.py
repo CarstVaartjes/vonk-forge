@@ -39,6 +39,7 @@ class InstallerReleaseImages(WireModel):
     worker: InstallerImage
     hermes: InstallerImage
     litellm: InstallerImage
+    ca: InstallerImage
 
 
 class InstallerBaselineArtifacts(WireModel):

@@ -958,6 +958,7 @@ mod tests {
                 self.stop.store(true, Ordering::SeqCst);
             }
         }
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
         let temp = tempfile::tempdir().unwrap();
         let socket = temp.path().join("inspection.sock");
         let requests = temp.path().join("requests");
@@ -979,6 +980,10 @@ mod tests {
         let server = std::thread::spawn(move || {
             let mut workers = Vec::new();
             while !stop.load(Ordering::SeqCst) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "inspection fixture server exceeded its elapsed budget"
+                );
                 let (mut stream, _) = match listener.accept() {
                     Ok(connection) => connection,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -1009,7 +1014,16 @@ mod tests {
                         started.fetch_add(1, Ordering::SeqCst);
                         let mut released = release.0.lock().unwrap();
                         while !*released {
-                            released = release.1.wait(released).unwrap();
+                            let remaining = deadline
+                                .checked_duration_since(std::time::Instant::now())
+                                .expect("inspection fixture release exceeded its elapsed budget");
+                            let (next, timeout) =
+                                release.1.wait_timeout(released, remaining).unwrap();
+                            released = next;
+                            assert!(
+                                !timeout.timed_out() || *released,
+                                "inspection fixture release timed out"
+                            );
                         }
                         // Dropping an awaiting logical page must neither free
                         // the native permit nor delete its still-owned request.
@@ -1042,7 +1056,14 @@ mod tests {
                 }));
             }
             for worker in workers {
-                worker.join().unwrap();
+                while !worker.is_finished() {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "inspection fixture worker exceeded its elapsed budget"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                std::thread::JoinHandle::join(worker).unwrap();
             }
         });
         let spawn = |background: bool| {
@@ -1074,6 +1095,10 @@ mod tests {
             .collect();
         tokio::time::timeout(Duration::from_secs(3), async {
             while active.load(Ordering::SeqCst) != BACKGROUND_RUN_INSPECTION_CONCURRENCY {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "inspection fixture startup exceeded its elapsed budget"
+                );
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         })
@@ -1125,6 +1150,10 @@ mod tests {
         );
         tokio::time::timeout(Duration::from_secs(2), async {
             while active.load(Ordering::SeqCst) != 0 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "inspection fixture draining exceeded its elapsed budget"
+                );
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         })
@@ -1141,7 +1170,14 @@ mod tests {
         .unwrap()
         .unwrap();
         drop(gate);
-        server.join().unwrap();
+        while !server.is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "inspection fixture server shutdown exceeded its elapsed budget"
+            );
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        std::thread::JoinHandle::join(server).unwrap();
         assert!(fs::read_dir(requests).unwrap().next().is_none());
         drop(permits);
     }

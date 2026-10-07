@@ -1,0 +1,296 @@
+name: CA exact issuance proof
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/ca-exact-issuance-proof.yml
+      - deploy/compose/step-ca/**
+      - scripts/build-journal-ca
+      - scripts/prepare-journal-ca.py
+      - control/src/vonk_control/step_ca.py
+      - control/src/vonk_control/enrollment.py
+      - control/tests/test_ca_claims_postgres.py
+      - control/tests/test_ca_image_controller_postgres.py
+      - rust/crates/vonk-agent/src/client.rs
+  workflow_dispatch:
+    inputs:
+      bootstrap_lock:
+        description: Generate reviewable Go dependency locks, without acceptance
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ca-exact-issuance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  connected-proof:
+    name: Real pinned Authority, durable journal and fenced response (${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+            machine: x86_64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Install pinned Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25.8'
+          cache: false
+      - name: Select dependency bootstrap or locked proof
+        id: mode
+        shell: bash
+        env:
+          EXPLICIT_BOOTSTRAP: ${{ inputs.bootstrap_lock }}
+        run: |
+          set -euo pipefail
+          if [ "$EXPLICIT_BOOTSTRAP" = true ] || [ ! -f deploy/compose/step-ca/service/go.sum ] || [ -n "$(gofmt -l deploy/compose/step-ca/service)" ]; then
+            echo bootstrap=true >> "$GITHUB_OUTPUT"
+          else
+            echo bootstrap=false >> "$GITHUB_OUTPUT"
+          fi
+      - name: Generate dependency locks for source review
+        if: ${{ steps.mode.outputs.bootstrap == 'true' }}
+        run: scripts/build-journal-ca lock
+      - name: Explore real signing proofs while preparing dependency locks
+        if: ${{ steps.mode.outputs.bootstrap == 'true' }}
+        continue-on-error: true
+        working-directory: deploy/compose/step-ca/service
+        shell: bash
+        env:
+          GOTOOLCHAIN: local
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p ../../../../artifacts/ca-proof
+          go test -race -json -count=1 -timeout=180s ./... 2>&1 \
+            | tee ../../../../artifacts/ca-proof/bootstrap-exploration.log
+      - name: Prove real signing, crash recovery and epoch fencing
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/ca-proof
+          scripts/build-journal-ca proof 2>&1 | tee artifacts/ca-proof/connected-proof.log
+      - name: Build the journal CA binary from proven source
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        working-directory: deploy/compose/step-ca/service
+        env:
+          CGO_ENABLED: '0'
+          GOTOOLCHAIN: local
+        run: go build -mod=readonly -trimpath -buildvcs=false -o ../../../../artifacts/ca-proof/vonk-step-ca .
+      - name: Build OCI runtime with existing CA trust and database layout
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "${{ matrix.machine }}"
+          docker build --file deploy/compose/step-ca/Dockerfile --target runtime \
+            --platform "linux/${{ matrix.architecture }}" \
+            --tag vonk-ca-proof:"$GITHUB_SHA" .
+          test "$(docker image inspect --format '{{.Architecture}}' \
+            vonk-ca-proof:"$GITHUB_SHA")" = "${{ matrix.architecture }}"
+          docker save vonk-ca-proof:"$GITHUB_SHA" --output artifacts/ca-proof/ca-image.tar
+          docker image inspect vonk-ca-proof:"$GITHUB_SHA" > artifacts/ca-proof/image-inspect.json
+      - name: Prepare the locked Controller environment
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        uses: ./.github/actions/python-env
+      - name: Provide the canonical recipe library for Controller test imports
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        uses: ./.github/actions/recipe-library
+      - name: Prove actual CA refusal causes through the native Python provider
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        working-directory: deploy/compose/step-ca/service
+        env:
+          VONK_CA_REFUSAL_PYTHON: ${{ github.workspace }}/control/.venv/bin/python
+          VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+          CGO_ENABLED: '1'
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -race -json -count=1 -timeout=180s \
+            -run '^TestAuthorityHTTPCanonicalRefusalsReachNativeProvider$' ./... \
+            | tee ../../../../artifacts/ca-proof/native-refusal-consumer.log
+      - name: Pull the reviewed PostgreSQL image for claim and HTTP concurrency proofs
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        run: scripts/pull-test-images postgres
+      - name: Prove the real Controller provider against the journal CA image
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        env:
+          VONK_JOURNAL_CA_TEST_IMAGE: vonk-ca-proof:${{ github.sha }}
+          VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+          VONK_CI_PREREQUISITES: postgres
+        run: >-
+          uv run --project control --frozen pytest -q
+          control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
+          control/tests/test_ca_journal_recovery.py
+          control/tests/test_ca_claims_postgres.py
+          control/tests/test_ca_image_controller_postgres.py
+          --junitxml=artifacts/ca-proof/controller-provider.xml
+      - name: Record exact source and artifact provenance
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          root = pathlib.Path('artifacts/ca-proof')
+          inputs = [
+              'deploy/compose/step-ca/source.lock.json',
+              'deploy/compose/step-ca/upstream/manifest.json',
+              'deploy/compose/step-ca/upstream/context-signing.patch',
+              'deploy/compose/step-ca/service/go.mod',
+              'deploy/compose/step-ca/service/go.sum',
+          ]
+          outputs = [str(p) for p in root.iterdir() if p.is_file()]
+          manifest = {
+              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'inputs': {p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in inputs},
+              'outputs': {p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in outputs},
+              'acceptance': 'hosted proof only; no publication or deployment',
+          }
+          (root / 'manifest.json').write_text(json.dumps(manifest, sort_keys=True, indent=2) + '\n')
+          PY
+      - name: Attest hosted binary and OCI archive
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        uses: actions/attest-build-provenance@8beda2b7ed98355c0e97c0a63bec38ae472e66c4 # v4
+        with:
+          subject-path: |
+            artifacts/ca-proof/vonk-step-ca
+            artifacts/ca-proof/ca-image.tar
+      - name: Bind bootstrap outputs to original candidate inputs
+        if: ${{ always() && steps.mode.outputs.bootstrap == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          root = pathlib.Path('artifacts/ca-proof')
+          root.mkdir(parents=True, exist_ok=True)
+          paths = sorted(str(p) for p in pathlib.Path('deploy/compose/step-ca/service').glob('*') if p.suffix == '.go' or p.name in {'go.mod', 'go.sum'})
+          original = {}
+          for path in paths:
+              entry = subprocess.run(['git', 'rev-parse', 'HEAD:' + path], capture_output=True, text=True)
+              original[path] = entry.stdout.strip() if entry.returncode == 0 else None
+          manifest = {
+              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'original_git_blob': original,
+              'generated_sha256': {p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in paths},
+              'acceptance': False,
+              'required_action': 'Review and adopt generated dependency locks and formatting in a signed commit; rerun readonly proofs.',
+          }
+          (root / 'bootstrap-manifest.json').write_text(json.dumps(manifest, sort_keys=True, indent=2) + '\n')
+          PY
+      - name: Upload proofs or dependency locks
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ca-exact-issuance-${{ github.sha }}-${{ matrix.architecture }}
+          path: |
+            artifacts/ca-proof
+            deploy/compose/step-ca/service/go.mod
+            deploy/compose/step-ca/service/go.sum
+            deploy/compose/step-ca/service/*.go
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require signed adoption of hosted dependency locks
+        if: ${{ steps.mode.outputs.bootstrap == 'true' }}
+        run: |
+          echo 'Dependency bootstrap is evidence only. Adopt reviewed Go locks and formatted sources in a signed commit, then rerun the locked proof.' >&2
+          exit 1
+  rotation-recovery:
+    name: Native transport activation timeout and same-generation recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Install pinned Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          scripts/retry-dependency-fetch rustup toolchain install 1.98.1
+      - name: Restore locked Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Prove native timeout, writer release and same-generation repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/rotation-proof
+          git rev-parse HEAD > artifacts/rotation-proof/source-sha.txt
+          git rev-parse HEAD:rust/crates/vonk-agent/src/client.rs > artifacts/rotation-proof/client-blob.txt
+          sha256sum rust/crates/vonk-agent/src/client.rs > artifacts/rotation-proof/client-before.sha256
+          cd rust
+          cargo test --locked -p vonk-agent --lib \
+            client::tests::rotation_silent_activation_retries_same_generation_and_repairs_heartbeat \
+            -- --exact --test-threads=1 --nocapture 2>&1 | tee ../artifacts/rotation-proof/positive.log
+          grep -F 'test result: ok. 1 passed; 0 failed; 0 ignored;' ../artifacts/rotation-proof/positive.log
+      - name: Reject removing the owning activation deadline
+        shell: bash
+        run: |
+          set -euo pipefail
+          owned_source=rust/crates/vonk-agent/src/client.rs
+          cp "$owned_source" "$RUNNER_TEMP/rotation-client-pristine.rs"
+          restore_source() { cp "$RUNNER_TEMP/rotation-client-pristine.rs" "$owned_source"; }
+          trap restore_source EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          path = Path('rust/crates/vonk-agent/src/client.rs')
+          source = path.read_text()
+          start = source.index('    pub async fn activate(')
+          end = source.index('    /// Read one object', start)
+          block = source[start:end]
+          needle = '            .timeout(ROTATION_REQUEST_TIMEOUT)\n'
+          assert block.count(needle) == 1
+          path.write_text(source[:start] + block.replace(needle, '') + source[end:])
+          PYCODE
+          set +e
+          (cd rust && cargo test --locked -p vonk-agent --lib \
+            client::tests::rotation_silent_activation_retries_same_generation_and_repairs_heartbeat \
+            -- --exact --test-threads=1 --nocapture) 2>&1 | tee artifacts/rotation-proof/counterexample.log
+          result=${PIPESTATUS[0]}
+          set -e
+          test "$result" -ne 0
+          grep -F 'activation deadline consumed the heartbeat request budget' artifacts/rotation-proof/counterexample.log
+          restore_source
+          trap - EXIT
+          sha256sum -c artifacts/rotation-proof/client-before.sha256
+          git diff --exit-code -- rust/crates/vonk-agent/src/client.rs
+          printf 'pristine source restored; deadline counterexample failed as required\n' > artifacts/rotation-proof/restoration.txt
+      - name: Preserve exact source and both outcomes
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rotation-recovery-${{ github.sha }}
+          path: artifacts/rotation-proof
+          if-no-files-found: error
+          retention-days: 7

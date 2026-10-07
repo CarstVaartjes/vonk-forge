@@ -918,3 +918,101 @@ def test_a_route_whose_reference_also_escapes_is_still_a_guarded_route() -> None
     source = _ROUTE + "\n    handlers = [show]\n"
     proof = _guarded(source, {"guard": ("Busy",)})
     assert proof.proven
+
+
+def test_endpoint_capture_guard_does_not_guard_an_unrelated_route() -> None:
+    source = (
+        _ROUTE
+        + """
+    @app.get("/owned")
+    def owned():
+        try:
+            helper()
+        except Busy:
+            return None
+    """
+    )
+    proof = _guarded(source, {"owned": ("Busy",)})
+    assert not proof.proven
+    assert "route" in _kinds(proof)
+
+
+def test_endpoint_capture_guard_proves_only_its_own_named_handler() -> None:
+    source = """
+    @app.get("/owned")
+    def owned():
+        try:
+            helper()
+        except Busy:
+            return None
+    def helper():
+        raise Busy("x")
+    """
+    assert _guarded(source, {"owned": ("Busy",)}).proven
+
+
+def test_conditional_capture_callback_retains_both_real_call_paths() -> None:
+    source = """
+    def helper():
+        raise Busy("x")
+    def healthy():
+        return None
+    def install(capture):
+        @app.get("/owned")
+        def owned():
+            try:
+                capture()
+            except Busy:
+                return None
+    install(capture=healthy if enabled else helper)
+    """
+    assert _guarded(source, {"install.owned": ("Busy",)}).proven
+    # An unresolved caller still makes both potential callback branches public;
+    # binding the known route must not erase this independent escape.
+    escaped = (
+        textwrap.dedent(source) + "\nunknown(capture=healthy if enabled else helper)\n"
+    )
+    proof = _guarded(escaped, {"install.owned": ("Busy",)})
+    assert not proof.proven and "reference-escape" in _kinds(proof)
+
+
+def test_protocol_return_filter_retains_subtypes_and_uncertain_candidates() -> None:
+    graph = _graph(
+        {
+            "m": _BASE
+            + textwrap.dedent("""
+        from typing import Protocol
+        class Reading: pass
+        class DetailedReading(Reading): pass
+        class Other: pass
+        class Shape(Protocol):
+            def value(self): ...
+        class Probe(Protocol):
+            def read(self) -> Reading: ...
+        class Good:
+            def read(self) -> DetailedReading: ...
+        class Wrong:
+            def read(self) -> Other: ...
+        class Unknown:
+            def read(self): ...
+        class External:
+            def read(self) -> MissingExternalClass: ...
+        class Generic:
+            def read(self) -> list[Reading]: ...
+        class Structural:
+            def read(self) -> Shape: ...
+        def observe(probe: Probe):
+            probe.read()
+    """)
+        }
+    )
+    observer = graph.by_key[(M, "observe")]
+    targets = {edge.callee.qualname for edge in graph.callees[observer]}
+    assert "Good.read" in targets
+    assert "Wrong.read" not in targets
+    assert {
+        "Unknown.read",
+        "External.read",
+        "Generic.read",
+        "Structural.read",
+    } <= targets

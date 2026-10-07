@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from pydantic import JsonValue
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -616,6 +617,7 @@ class AgentCertificateRotation(Base):
     generation: Mapped[int] = mapped_column(Integer, nullable=False)
     csr_pem: Mapped[str] = mapped_column(Text, nullable=False)
     csr_public_key_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_request: Mapped[JsonValue | None] = mapped_column(JSON)
     provider_request_id: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=False
     )
@@ -699,6 +701,7 @@ class AgentEnrollment(Base):
         nullable=False,
     )
     node_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    provider_request: Mapped[JsonValue | None] = mapped_column(JSON)
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     csr_pem: Mapped[str] = mapped_column(Text, nullable=False)
     csr_public_key_pem: Mapped[str] = mapped_column(Text, nullable=False)
