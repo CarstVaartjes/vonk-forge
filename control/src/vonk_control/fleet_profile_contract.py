@@ -830,7 +830,11 @@ class FleetProfileAdoptedApplicationEffect(StrictModel):
     workload_intent_ordinal: int = Field(ge=1)
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     assignment_ids: list[UuidId] = Field(default_factory=list, max_length=64)
-    stops: list[FleetProfileAdoptedStopEffect] = Field(default_factory=list)
+    # No cleanup adoption has the same canonical wire as before this optional
+    # effect was introduced; accepted assignment-only review digests stay exact.
+    stops: list[FleetProfileAdoptedStopEffect] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def scope_is_canonical(self) -> FleetProfileAdoptedApplicationEffect:
