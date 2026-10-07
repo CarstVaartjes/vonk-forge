@@ -779,7 +779,7 @@ class AgentOperationAdapter:
         Its retained result and progress remain historical evidence. Failed
         means this attempt ended, not that remote files were removed.
         """
-        if attempt.state == "running" or aos.attempt_is_observing(attempt):
+        if attempt.state == State.RUNNING.value or aos.attempt_is_observing(attempt):
             attempt.state = State.FAILED.value
             attempt.observation_cause = None
             attempt.lease_deadline = aware(now)

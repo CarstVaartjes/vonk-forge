@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
+    ReservationState,
     UnknownOutcomeError,
     canonical_message,
     is_state,
@@ -384,15 +385,18 @@ def _prove(
         or child.kind != "recipe.install"
         or child.state
         not in {
-            "queued",
-            "running",
-            "observing",
-            "needs-operator",
-            "succeeded",
-            "failed",
-            "cancelled",
+            LifecycleState.QUEUED.value,
+            LifecycleState.RUNNING.value,
+            LifecycleState.OBSERVING.value,
+            LifecycleState.NEEDS_OPERATOR.value,
+            LifecycleState.SUCCEEDED.value,
+            LifecycleState.FAILED.value,
+            LifecycleState.CANCELLED.value,
         }
-        or (purpose == JournalRepairPurpose.MEASUREMENT and child.state != "running")
+        or (
+            purpose == JournalRepairPurpose.MEASUREMENT
+            and child.state != LifecycleState.RUNNING.value
+        )
     ):
         return None
     child_parent = read_row_column(child, "payload")
@@ -524,7 +528,12 @@ def _try_repair_once(
             if (
                 job is None
                 or job.kind != "recipe.run-switch.v2"
-                or job.state not in {"queued", "running", "observing"}
+                or job.state
+                not in {
+                    LifecycleState.QUEUED.value,
+                    LifecycleState.RUNNING.value,
+                    LifecycleState.OBSERVING.value,
+                }
             ):
                 return JournalRepairDisposition.NOT_APPLICABLE
             progress = _candidate(job)
@@ -574,7 +583,12 @@ def _try_repair_once(
                 elif (
                     (
                         child is not None
-                        and child.state in {"succeeded", "failed", "cancelled"}
+                        and child.state
+                        in {
+                            LifecycleState.SUCCEEDED.value,
+                            LifecycleState.FAILED.value,
+                            LifecycleState.CANCELLED.value,
+                        }
                     )
                     or expired
                     or deadline_expired
@@ -708,7 +722,11 @@ def record_repair_cancellation(
     """Commit intent before attempting any journal evidence or child observation."""
     with sessions.begin() as session:
         job = session.get(Job, operation_id, with_for_update=True)
-        if job is None or job.state not in {"queued", "running", "observing"}:
+        if job is None or job.state not in {
+            LifecycleState.QUEUED.value,
+            LifecycleState.RUNNING.value,
+            LifecycleState.OBSERVING.value,
+        }:
             return
         # The repair may have committed after cancel's initial snapshot. The
         # same Job lock hands intent to the now-readable canonical checkpoint.
@@ -741,7 +759,12 @@ def try_repair_zero_transfer_journal(
         snapshot = session.get(Job, operation_id)
         if (
             snapshot is None
-            or snapshot.state not in {"queued", "running", "observing"}
+            or snapshot.state
+            not in {
+                LifecycleState.QUEUED.value,
+                LifecycleState.RUNNING.value,
+                LifecycleState.OBSERVING.value,
+            }
             or _candidate(snapshot) is None
         ):
             return JournalRepairDisposition.NOT_APPLICABLE
@@ -752,7 +775,12 @@ def try_repair_zero_transfer_journal(
         if job is None:
             return JournalRepairDisposition.DEFERRED
         if (
-            job.state not in {"queued", "running", "observing"}
+            job.state
+            not in {
+                LifecycleState.QUEUED.value,
+                LifecycleState.RUNNING.value,
+                LifecycleState.OBSERVING.value,
+            }
             or _candidate(job) is None
         ):
             return JournalRepairDisposition.NOT_APPLICABLE
@@ -882,7 +910,11 @@ def _end_unproven_journal(
         ):
             return JournalRepairDisposition.DEFERRED
         progress = _candidate(job)
-        if progress is None or job.state not in {"queued", "running", "observing"}:
+        if progress is None or job.state not in {
+            LifecycleState.QUEUED.value,
+            LifecycleState.RUNNING.value,
+            LifecycleState.OBSERVING.value,
+        }:
             return JournalRepairDisposition.NOT_APPLICABLE
         row, state = _pending(session, job, now)
         parent = _run_switch_payload(job)
@@ -925,7 +957,11 @@ def _end_unproven_journal(
                     )
                 ):
                     AgentOperationAdapter.end_unobserved_attempt(retained_attempt, now)
-            if child.state not in {"succeeded", "failed", "cancelled"}:
+            if child.state not in {
+                LifecycleState.SUCCEEDED.value,
+                LifecycleState.FAILED.value,
+                LifecycleState.CANCELLED.value,
+            }:
                 RecipeOperationAdapter().cancelled(
                     child, now, reason=JournalRepairCode.EXHAUSTED
                 )
@@ -947,19 +983,23 @@ def _end_unproven_journal(
                     ResourceReservation.owner_kind == "fleet-profile",
                     ResourceReservation.owner_id == progress.profile_application_id,
                     ResourceReservation.node_id.in_(job.targets),
-                    ResourceReservation.state.in_(["active", "promised"]),
+                    ResourceReservation.state.in_(
+                        [ReservationState.ACTIVE.value, ReservationState.PROMISED.value]
+                    ),
                 )
             ):
-                reservation.state = "released"
+                reservation.state = ReservationState.RELEASED.value
                 reservation.released_at = now
         # Parent reservations, if any, cannot survive its end.
         for reservation in session.scalars(
             select(ResourceReservation).where(
                 ResourceReservation.owner_id == job.id,
-                ResourceReservation.state.in_(["active", "promised"]),
+                ResourceReservation.state.in_(
+                    [ReservationState.ACTIVE.value, ReservationState.PROMISED.value]
+                ),
             )
         ):
-            reservation.state = "released"
+            reservation.state = ReservationState.RELEASED.value
             reservation.released_at = now
         reason = f"{JournalRepairCode.EXHAUSTED}: bounded journal observation ended; original evidence retained, installation bytes remain reusable"
         if state.cancellation is not None:

@@ -92,6 +92,7 @@ def test_failure_report_survives_every_failure_boundary(
     assert not list(tmp_path.glob(".report.json.*"))
     if fault != "cleanup":
         assert cleanup_reports[0]["status"] == "failed"
+        assert cleanup_reports[0]["failure"]["cause"]
     if fault == "both":
         assert "AssertionError" in report["failure"]["cause"]
         assert "cleanup disk failure" in report["failure"]["cause"]

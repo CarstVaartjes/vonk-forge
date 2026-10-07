@@ -9026,7 +9026,12 @@ class RunSwitchOperationService:
 
         if (
             persisted_result is None
-            and job.state in {"queued", "running", "observing"}
+            and job.state
+            in {
+                LifecycleState.QUEUED.value,
+                LifecycleState.RUNNING.value,
+                LifecycleState.OBSERVING.value,
+            }
             and is_zero_transfer_journal_fault(job)
         ):
             from .models import RunSwitchJournalRepairPending
