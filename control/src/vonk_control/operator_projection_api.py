@@ -20,6 +20,7 @@ from pydantic import ConfigDict, Field, model_serializer
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.responses import Response
 from vonk_agent_protocol import (
     ControllerErrorCode,
     ObservationCause,
@@ -66,6 +67,10 @@ from .observation_transfer import (
 )
 from .operation_api import bounded_error_responses
 from .operation_item_contract import OperationResultFacts
+from .platform_observation_errors import (
+    ObservationCaptureUnavailable,
+    observation_capture_unavailable_response,
+)
 from .request_fault import RequestFault
 from .strict_json import StrictJSONModel, stored_document_detail
 
@@ -810,6 +815,8 @@ def install_operator_projection_routes(
             return fleet().read()
         except HTTPException:
             raise
+        except SQLAlchemyError as error:
+            raise ObservationCaptureUnavailable(phase="database-capture") from error
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
 
@@ -830,8 +837,16 @@ def install_operator_projection_routes(
         openapi_extra=observation_openapi("FleetSnapshot"),
         operation_id="getFleetStatus",
     )
-    def fleet_status(_actor: Actor = authenticated) -> ObservationTransferResponse:
-        return observation_response(snapshot(), resource="fleet")
+    def fleet_status(
+        _actor: Actor = authenticated,
+    ) -> ObservationTransferResponse | Response:
+        try:
+            captured = snapshot()
+        except ObservationCaptureUnavailable as error:
+            return observation_capture_unavailable_response(
+                error, operation="getFleetStatus", endpoint="/api/fleet"
+            )
+        return observation_response(captured, resource="fleet")
 
     @app.get(
         "/api/fleet/locks",
