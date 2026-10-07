@@ -7,6 +7,7 @@ collection, cancellation and availability completion use their real owners.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import time
@@ -27,6 +28,7 @@ from vonk_control.inventory_repository import (
 )
 from vonk_control.models import AgentCertificate, Job, ResourceReservation, User
 from vonk_control.oci_image_store import StoredImage
+from vonk_control.recipe_availability_intent import RecipeBuildDependency
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
@@ -204,9 +206,12 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
         with sessions() as session:
             parent = session.get(Job, accepted.id)
             assert parent is not None
-            dependency = parent.payload["build_dependency"]
-            child_id = dependency["operation_id"]
-            child_request = dependency["request_key"]
+            dependency = RecipeBuildDependency.model_validate_json(
+                json.dumps(parent.payload["build_dependency"])
+            )
+            assert dependency.operation_id is not None
+            child_id = str(dependency.operation_id)
+            child_request = str(dependency.request_key)
             child = session.get(Job, child_id)
             assert child is not None and child.kind == "recipe.build.v1"
             assert child.request_id == child_request
