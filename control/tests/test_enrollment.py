@@ -1713,6 +1713,7 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine)
 def test_known_rotation_capacity_refusal_preserves_active_certificate(
     service, monkeypatch
 ) -> None:
+    from vonk_agent_protocol.reason_codes import CertificateCode
     from vonk_control.step_ca import StepCAError
 
     enrollment, sessions, _clock, authority = service
@@ -1722,7 +1723,7 @@ def test_known_rotation_capacity_refusal_preserves_active_certificate(
     def refuse_capacity(*_args: object, **_kwargs: object) -> IssuedCertificate:
         raise StepCAError(
             "capacity refused before commit",
-            reason_code="certificate.response_unrepresentable",
+            reason_code=CertificateCode.RESPONSE_UNREPRESENTABLE,
         )
 
     monkeypatch.setattr(authority, "renew_node", refuse_capacity)

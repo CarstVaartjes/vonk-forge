@@ -23,7 +23,7 @@ import jwt
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import ECAlgorithm
 from sqlalchemy import func, select, text
@@ -148,6 +148,8 @@ def https_journal(tmp_path: Path):
     committed = threading.Event()
     control: dict[str, str | None] = {"pause_node": None, "lose_node": None}
     jtis: list[str] = []
+    jwt_public_key = ECAlgorithm.from_jwk(json.dumps(material["public_jwk"]))
+    assert isinstance(jwt_public_key, ec.EllipticCurvePublicKey)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -169,7 +171,7 @@ def https_journal(tmp_path: Path):
             binding = CertificateIssuanceBinding.model_validate(body["request"])
             claims = jwt.decode(
                 body["ott"],
-                ECAlgorithm.from_jwk(json.dumps(material["public_jwk"])),
+                jwt_public_key,
                 algorithms=["ES256"],
                 issuer="vonk-forge-agent",
                 audience=origin + "/1.0/sign",

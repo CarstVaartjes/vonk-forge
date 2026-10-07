@@ -3788,6 +3788,7 @@ def test_reenrollment_refuses_an_unprivileged_actor_before_node_lookup(agent_sys
 def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial(
     agent_system, monkeypatch
 ) -> None:
+    from vonk_agent_protocol.reason_codes import CertificateCode
     from vonk_control.step_ca import StepCAError
 
     client, services, _, _ = agent_system
@@ -3796,7 +3797,7 @@ def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial
     def refuse_capacity(*_args: object, **_kwargs: object) -> IssuedCertificate:
         raise StepCAError(
             "capacity refused before commit",
-            reason_code="certificate.response_unrepresentable",
+            reason_code=CertificateCode.RESPONSE_UNREPRESENTABLE,
         )
 
     monkeypatch.setattr(services.enrollment._authority, "issue_node", refuse_capacity)
