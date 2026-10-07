@@ -115,7 +115,7 @@ def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
     assert token not in repr(observed["environment"])
 
 
-def test_acceptance_controller_configuration_is_short_lived_and_generation_bound(
+def test_acceptance_controller_configuration_preserves_fixed_ca_and_generation(
     tmp_path: Path,
 ) -> None:
     lifecycle = _module()
@@ -163,21 +163,24 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     ]["entrypoint"]
     compose_path.write_text(yaml.safe_dump(compose_document))
 
+    ca_before = (bundle / "secrets/step-ca/ca.json").read_bytes()
     lifecycle._configure_acceptance_renewal(
         bundle,
         lifetime_seconds=lifecycle.CERTIFICATE_LIFETIME_SECONDS,
         agent_source_address="172.31.42.1",
     )
 
-    assert lifecycle.CERTIFICATE_LIFETIME_SECONDS == 90
+    assert (bundle / "secrets/step-ca/ca.json").read_bytes() == ca_before
+    assert lifecycle.CERTIFICATE_LIFETIME_SECONDS == 2_592_000
+    assert lifecycle.RENEWAL_OBSERVATION_SECONDS == 150
     ca = json.loads((bundle / "secrets/step-ca/ca.json").read_text())
     claims = ca["authority"]["provisioners"][0]["claims"]
     assert claims == {
-        "defaultTLSCertDuration": "90s",
+        "defaultTLSCertDuration": "720h",
         "disableRenewal": True,
         "disableSmallstepExtensions": True,
-        "maxTLSCertDuration": "90s",
-        "minTLSCertDuration": "90s",
+        "maxTLSCertDuration": "720h",
+        "minTLSCertDuration": "720h",
     }
     compose = (bundle / "docker-compose.yaml").read_text()
     assert "CERTIFICATE_LIFETIME" not in compose
@@ -1375,6 +1378,8 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
     serial_before = str(int("1234567890abcdef", 16))
     serial_after = str(int("abcdef1234567890", 16))
     run.graph = {"candidate_version": "1.2.3"}
+    triggers: list[str] = []
+    run._exercise_native_renewal = lambda: triggers.append("native")
     run._psql = lambda _query: [[serial_after, "revoked", "1"]]
     run._wait_for_agent_identity = lambda **_kwargs: {
         "node_id": node_id,
@@ -1386,6 +1391,7 @@ def test_renewal_requires_new_active_serial_and_real_old_identity_rejection() ->
     )
 
     observed = run._observe_renewal(node_id, serial_before)
+    assert triggers == ["native"]
 
     assert observed == {
         "node_id": node_id,
