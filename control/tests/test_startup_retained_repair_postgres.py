@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
@@ -53,15 +55,16 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
     sessions, lifecycle, switches, accepted, run, stop_id, original, _claims = (
         _retained_stop(tmp_path, postgres_engine)
     )
-    # First expose the real native Stop behind this accepted Run/Switch child.
-    # The fixture's retained bytes are seeded again below only at the historical
-    # ingress; the current worker never executes the retired active-pair format.
-    from vonk_control.fleet_profile_adapter_conversion import try_convert_application
-
-    with sessions.begin() as session:
+    # Establish current schema and expose the native Stop through the real
+    # startup converter before planting damage. The later lock fault therefore
+    # belongs to bookkeeping adoption, not an initial migration's DDL.
+    db.initialize_database(
+        postgres_engine.url.render_as_string(hide_password=False),
+        config_path=Path(__file__).resolve().parents[1] / "alembic.ini",
+    )
+    with sessions() as session:
         row = session.get(FleetProfileApplication, accepted.id)
-        assert row is not None
-        assert try_convert_application(session, row, NOW).state == "converted"
+        assert row is not None and not needs_conversion(row)
         root_key, root_digest = row.request_key, row.plan_digest
     clock = [NOW]
     jobs = AgentJobService(sessions, clock=lambda: clock[0])
@@ -254,6 +257,11 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
             item.operation_id == stop_id and item.state == "succeeded"
             for item in progress.switch_adapter.children
         )
+        terminal_child = next(
+            item
+            for item in progress.switch_adapter.children
+            if item.operation_id == stop_id and item.state == "succeeded"
+        )
         assert (row.request_key, row.plan_digest) == (root_key, root_digest)
         assert (
             session.scalar(select(Job.id).where(Job.request_id == child_key)) == stop_id
@@ -266,3 +274,34 @@ def test_actual_startup_adoption_fault_preserves_and_repairs_original_stop(
     fresh = restarted.apply(followup.id, request_key=_uuid(19802), actor="admin")
     assert fresh.id != accepted.id and fresh.request_key == _uuid(19802)
     assert not fresh.progress.admission_pending
+    if output := os.environ.get("VONK_STARTUP_REPAIR_PROOF_OUTPUT"):
+        destination = Path(output)
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "current-recovery.json").write_text(
+            json.dumps(
+                {
+                    "source_sha": os.environ.get("VONK_PROOF_SOURCE_SHA"),
+                    "startup_sqlstate": "55P03",
+                    "startup_adoption_owner": "legacy_states",
+                    "application_id": accepted.id,
+                    "request_key": root_key,
+                    "plan_digest": root_digest,
+                    "stop_operation_id": stop_id,
+                    "stop_request_key": child_key,
+                    "native_operation_id": native_id,
+                    "native_node_id": node_id,
+                    "run_id": fresh_stop.run_id,
+                    "terminal_child": terminal_child.model_dump(mode="json"),
+                    "claims_retained_before_receipt": sorted(before_claims),
+                    "claims_after_receipt": sorted(_claim_snapshot(sessions)),
+                    "fresh_application_id": fresh.id,
+                    "fresh_request_key": fresh.request_key,
+                    "same_child_terminal": True,
+                    "fresh_admission_pending": fresh.progress.admission_pending,
+                },
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
