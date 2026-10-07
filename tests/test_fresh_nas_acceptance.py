@@ -103,6 +103,48 @@ def test_nas_responses_answer_only_the_remaining_installer_prompts() -> None:
     assert not any("CIDR" in prompt or "password" in prompt for prompt in disabled)
 
 
+@pytest.mark.parametrize("hermes", [False, True])
+def test_installer_output_detects_permuted_secret_answers(
+    tmp_path: Path, hermes: bool
+) -> None:
+    acceptance = _acceptance_module()
+    arguments = {
+        "nas_ip": "192.0.2.10",
+        "tailnet_suffix": "acceptance.example.test",
+        "oauth_client_id": "distinct-client-id",
+        "oauth_client_secret": "distinct-client-secret",
+        "upstream_key": "distinct-upstream-key",
+        "control_service": "svc:vonk-forge-ci",
+        "hermes_dashboard_service": "svc:hermes-dashboard-ci",
+        "hermes": hermes,
+    }
+    profiles = '"secure-remote,hermes"' if hermes else "secure-remote"
+    (tmp_path / ".env").write_text(
+        "NAS_LAN_IP=192.0.2.10\n"
+        "VONK_CONTROL_HOSTNAME=vonk-forge-ci.acceptance.example.test\n"
+        f"COMPOSE_PROFILES={profiles}\n"
+    )
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    for name, value in {
+        "tailscale-oauth-client-id": "distinct-client-id\n",
+        "tailscale-oauth-client-secret": "distinct-client-secret\n",
+        "litellm-upstream-key": "distinct-upstream-key\n",
+        "hf-token": "",
+    }.items():
+        (secrets / name).write_text(value)
+    acceptance.assert_installer_answer_bindings(tmp_path, **arguments)
+
+    # Individually valid answers still have distinct owners; an unordered answer
+    # set cannot detect their permutation at the consumer's output boundary.
+    (secrets / "tailscale-oauth-client-id").write_text("distinct-client-secret\n")
+    (secrets / "tailscale-oauth-client-secret").write_text("distinct-client-id\n")
+    with pytest.raises(
+        AcceptanceError, match="bound to secret tailscale-oauth-client-id"
+    ):
+        acceptance.assert_installer_answer_bindings(tmp_path, **arguments)
+
+
 def test_generate_bundle_allows_the_installer_to_reuse_its_target(
     tmp_path: Path, monkeypatch
 ) -> None:

@@ -1053,33 +1053,9 @@
       "count": 1
     },
     {
-      "path": "scripts/dev_agent_wire_linux.py",
-      "function": "run_commands",
-      "kind": "loop-without-deadline",
-      "count": 2
-    },
-    {
-      "path": "scripts/dev_agent_wire_linux.py",
-      "function": "stream",
-      "kind": "wait-without-timeout",
-      "count": 1
-    },
-    {
       "path": "scripts/generate-control-clients",
       "function": "_normalize_generated_text",
       "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_rclone_bytes",
-      "kind": "wait-without-timeout",
-      "count": 2
-    },
-    {
-      "path": "scripts/install-release-publication",
-      "function": "_rclone_digest",
-      "kind": "wait-without-timeout",
       "count": 1
     },
     {
@@ -1092,12 +1068,6 @@
       "path": "scripts/install-release-publication",
       "function": "_write",
       "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "scripts/lifecycle-counts",
-      "function": "_git",
-      "kind": "call-without-timeout",
       "count": 1
     },
     {
@@ -1311,6 +1281,14 @@
       "count": 1,
       "reason": "input-validation",
       "justification": "Bounded diagnostic normalization to the durable byte contract, not an external wait: each iteration removes an ancillary observation or halves a nontrivial text field. The finite item/text measure strictly decreases; when only structural/scalar fields remain it rejects an oversized document rather than repeating. Typed failure and exit facts remain explicit."
+    },
+    {
+      "path": "scripts/dev_agent_wire_linux.py",
+      "function": "run_commands",
+      "kind": "loop-without-deadline",
+      "count": 2,
+      "reason": "input-validation",
+      "justification": "Pure finite traversal of a materialized workflow line list. Both nested loops increment index on every traversed line and test index < len(lines); no subprocess, I/O wait or sleep occurs inside these parsing loops."
     }
   ]
 }

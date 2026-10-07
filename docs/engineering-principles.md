@@ -139,9 +139,9 @@ message says "budget". A forecast and an enforced limit have different meanings:
 | Authorization, contract, integrity, or exact identity | Fail closed. Retry cannot broaden grants, ignore corruption, revive cancelled/revoked intent, or silently change the model, image, topology, context, or plan. An alternative must be explicitly permitted and bound in the accepted plan. |
 | Time, attempts, and retry rate | Bound attempts and waiting dependencies; persist deadlines across restart and show the next check. Reconcile at expiry. An exhausted attempt must not permanently ban a fresh authorized request, and repeated deadline resets cannot make stuck work healthy. |
 
-Admission retains the recipe's declared system reserve, workload demand, and
-existing reservations. Do not weaken those guarantees by changing an estimate's
-severity or adding an arbitrary platform reserve. Derive caps from the resource
+Admission retains accepted capacity promises and existing reservations.
+Distinguish estimated recipe demand from the platform memory floor described
+below; changing an estimate's severity must not weaken actual resource limits. Derive caps from the resource
 they protect and report the observed value and limit. Structural counts need a
 resource basis too. All layers must agree on values the canonical plan permits;
 reject an invalid value at its owning compile/admission boundary before effects.
@@ -153,8 +153,9 @@ Installation records the recipe envelope; run admission binds its resolved
 reservation. A role is admitted when its declared peak is at most the observed
 available memory minus the platform floor (`PLATFORM_MEMORY_FLOOR_BYTES`, 2 GB);
 the recipe's `reserve_bytes` is informational and is never added to the peak.
-`memory_floor_bytes` is that platform floor, and job invocations may increase it
-but cannot lower the installed floor.
+`memory_floor_bytes` binds the accepted platform floor. Job invocations must
+retain a positive floor when the installed plan has one; an older, larger
+installed floor may be reduced to the current accepted floor.
 
 A declared envelope is an estimate and hardware is the truth, so it never
 refuses work on a Spark where no Vonk claim holds memory (nothing of ours is
@@ -274,9 +275,9 @@ recipes reproducible rather than to restrict them.
   operator-reviewed image of a profile load. A static check
   ([testing and CI](testing-and-ci.md)) fails on any other comparison of a
   provenance field unless the site is allowlisted with a reason.
-- Run admission enforces the recipe's declared system memory reserve alongside
-  its workload demand and existing reservations. It does not impose an
-  additional fixed platform reserve that prevents a fitting recipe from running.
+- Run admission follows the resource accounting policy above: recipe demand
+  remains an estimate, the platform memory floor protects observed free
+  capacity, and existing accepted reservations constrain co-location.
 - The operator experience stays model-first: discovery starts from a model or
   task, and recipes are the exact ways to make it runnable on this fleet.
 - Labels and grouping metadata stay cross-cutting so filters, saved scopes, and
