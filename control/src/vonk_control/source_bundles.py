@@ -179,7 +179,10 @@ class SourceBundleStore:
         if destination.exists():
             try:
                 existing = destination.read_bytes()
-                present = (
+                # This immutable ingress was fully inspected and its digest
+                # checked above. Exact current bytes need no second inspection;
+                # a different archive still crosses the strict existing path.
+                present = existing == archive or (
                     _inspect_archive(existing, self._limits).sha256 == expected_sha256
                 )
             except (FileNotFoundError, SourceBundleError):
