@@ -123,6 +123,13 @@ def _pending_adoption(connection: Connection) -> dict[str, tuple[str, ...]]:
     for table_name, names in _COLUMNS.items():
         if table_name not in tables:
             continue
+        if connection.dialect.name == "postgresql":
+            # Native constraint rendering can acquire a relation read lock.
+            # Fence observation NOWAIT before reflection; ordinary writers
+            # remain compatible. Actual adoption upgrades separately NOWAIT.
+            connection.exec_driver_sql(
+                f"LOCK TABLE {table_name} IN ACCESS SHARE MODE NOWAIT"
+            )
         columns = {
             column["name"]: column for column in inspector.get_columns(table_name)
         }
