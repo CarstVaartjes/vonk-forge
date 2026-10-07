@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import threading
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from email.message import Message
@@ -15,12 +16,18 @@ import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
+from vonk_control.admission_locking import acquire_admission_keys, node_admission_key
 from vonk_control.auth import Actor
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import (
+    FleetProfileInput,
+    FleetProfileSwitchQueueItem,
+)
 from vonk_control.fleet_profiles import (
     FleetProfileAdmissionBusy,
     FleetProfileConflict,
     FleetProfileService,
+    build_production_fleet_profile_service,
 )
 from vonk_control.lifecycle.types import State as LifecycleState
 from vonk_control.models import (
@@ -38,6 +45,7 @@ from vonk_control.models import (
     ResourceReservation,
     User,
 )
+from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
@@ -212,28 +220,72 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
 
 
 def test_load_retries_a_transient_admission_owner(postgres_engine, monkeypatch) -> None:
-    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
+    sessions, _api, _codec, _headers_unused, _preview = _profile_api(postgres_engine)
+    now = [NOW]
+    clock = lambda: now[0]
+    planner = RunSwitchOperationService(sessions, clock=clock)
+    profiles = build_production_fleet_profile_service(
+        sessions, clock=clock, run_switch_operations=planner
+    )
+    api, codec = _client(sessions, profiles=profiles)
+    headers = _headers(codec, "administrator")
     original = FleetProfileService._queue_application
     attempts = 0
 
     def busy_then_queue(service, reviewed, **kwargs):
         nonlocal attempts
-        if attempts < 2:
-            attempts += 1
+        attempts += 1
+        if attempts <= 2:
             raise FleetProfileAdmissionBusy("transient admission owner")
         return original(service, reviewed, **kwargs)
 
     monkeypatch.setattr(FleetProfileService, "_queue_application", busy_then_queue)
+    key = str(uuid4())
     response = api.post(
-        "/api/profile/1/load",
-        headers=headers,
-        json={"request_key": str(uuid4())},
+        "/api/profile/1/load", headers=headers, json={"request_key": key}
     )
 
     assert response.status_code == 202, response.text
-    assert attempts == 2
+    assert attempts == 1, "HTTP acceptance tries admission once without waiting"
+    application_id = response.json()["id"]
     with sessions() as session:
-        assert session.scalar(select(FleetProfileApplication)) is not None
+        accepted = session.get(FleetProfileApplication, application_id)
+        assert accepted is not None and accepted.request_key == key
+        accepted_plan = canonical_message(accepted.plan)
+        intended = profiles.application(application_id).progress.intended_profile
+        assert intended is not None
+        accepted_intent = canonical_message(intended)
+        accepted_ordinal = accepted.progress["workload_intent_ordinal"]
+    profiles.tick()
+    assert attempts == 2
+    waiting = profiles.application(application_id)
+    assert waiting.state == "queued" and waiting.next_attempt_at is not None
+    profiles.tick()
+    assert attempts == 2, "a durable retry must not run before its due time"
+    now[0] = waiting.next_attempt_at
+    profiles.tick()
+    assert attempts == 3
+    lookup = api.get(f"/api/profile/1/requests/{key}", headers=headers)
+    assert lookup.status_code == 200 and lookup.json()["id"] == application_id
+    replay = api.post("/api/profile/1/load", headers=headers, json={"request_key": key})
+    assert replay.status_code == 202 and replay.json()["id"] == application_id
+    assert attempts == 3, "same-key replay observes the existing accepted owner"
+    with sessions() as session:
+        assert tuple(session.scalars(select(FleetProfileApplication.id))) == (
+            application_id,
+        )
+        accepted = session.get(FleetProfileApplication, application_id)
+        assert accepted is not None and accepted.request_key == key
+        assert canonical_message(accepted.plan) == accepted_plan
+        assert (
+            canonical_message(
+                profiles.application(application_id).progress.intended_profile
+            )
+            == accepted_intent
+        )
+        assert accepted.progress["workload_intent_ordinal"] == accepted_ordinal
+        selected = session.get(FleetProfileSelection, 1)
+        assert selected is not None and selected.application_id == application_id
 
 
 @pytest.mark.parametrize("change", ["roster", "authority", "profile"])
@@ -725,7 +777,7 @@ def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(
     with pytest.raises(FleetProfileConflict, match="unreviewed"):
         adapter._start_child(
             accepted.id,
-            {"kind": "run", "id": assignment.id},
+            FleetProfileSwitchQueueItem(kind="run", id=assignment.id),
             (assignment,),
             tuple(nodes),
             "admin",
@@ -768,9 +820,34 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
         "request_key": str(uuid4()),
     }
     prefix = f"SELECT {locked_model.__tablename__}."
+    lock_statements: list[str] = []
+    request_backend: list[int] = []
 
-    def before_lock(_connection, _cursor, statement, _parameters, _context, _many):
-        if statement.startswith(prefix) and "FOR UPDATE" in statement:
+    def names_locked_owner(value: object) -> bool:
+        if isinstance(value, str):
+            return value == pending.id
+        if isinstance(value, Mapping):
+            return any(names_locked_owner(item) for item in value.values())
+        if isinstance(value, tuple | list):
+            return any(names_locked_owner(item) for item in value)
+        return False
+
+    def before_lock(connection, _cursor, statement, parameters, _context, _many):
+        if (
+            statement.startswith(prefix)
+            and "FOR UPDATE" in statement
+            and names_locked_owner(parameters)
+            and (
+                locked_model is Job
+                or f"{locked_model.__tablename__}.parent_job_id IN" in statement
+            )
+        ):
+            # Capture parameterless SQL and the exact requesting backend. A
+            # failure must identify the wait rather than guess from its owner.
+            lock_statements.append(statement[:512])
+            request_backend[:] = [
+                connection.connection.driver_connection.info.backend_pid
+            ]
             attempted.set()
 
     locker = sessions()
@@ -782,7 +859,12 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
         )
     )
     assert locked_id is not None
-    assert locker.get(locked_model, locked_id, with_for_update=True) is not None
+    locked_owner = locker.get(locked_model, locked_id, with_for_update=True)
+    assert locked_owner is not None
+    if isinstance(locked_owner, AgentOperation):
+        assert locked_owner.parent_job_id == pending.id
+    # The canonical child lock declares the complete exact parent scope, not
+    # individual child IDs. Its bound parent includes this verified locked row.
     event.listen(postgres_engine, "before_cursor_execute", before_lock)
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
@@ -797,9 +879,48 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
                 # The lock is still held. Admission must park the reviewed
                 # intent now, not wait for the worker whose effects it is
                 # trying to supersede.
-                response = future.result(timeout=1)
+                try:
+                    response = future.result(timeout=1)
+                except TimeoutError:
+                    with postgres_engine.connect() as diagnostic:
+                        wait = diagnostic.execute(
+                            text(
+                                "SELECT wait_event_type, wait_event, pg_blocking_pids(pid) "
+                                "FROM pg_stat_activity WHERE pid = :pid"
+                            ),
+                            {"pid": request_backend[0]},
+                        ).one_or_none()
+                    pytest.fail(
+                        f"admission waited while {locked_model.__name__} stayed locked; "
+                        f"SQL={lock_statements!r}; backend_wait={wait!r}"
+                    )
                 assert response.status_code == 202, response.text
+                # Lost-response replay reconnects to the same parked intent
+                # while its exact superseded owner is still locked.
+                replay = pool.submit(
+                    api.post,
+                    f"/api/profile/{profile.number}/load",
+                    headers=headers,
+                    json=request_body,
+                ).result(timeout=1)
+                assert replay.status_code == 202, replay.text
+                assert replay.json()["id"] == response.json()["id"]
+                assert replay.json()["request_key"] == request_body["request_key"]
+                with sessions.begin() as admission:
+                    scope = tuple(admission.scalars(select(AgentNode.node_id)))
+                    # This independent SQL transaction can take every node
+                    # gate before the locker rolls back: the HTTP request
+                    # retained its receipt, not its admission transaction.
+                    acquire_admission_keys(
+                        admission,
+                        tuple(node_admission_key(node_id) for node_id in scope),
+                        holder="profile-contention-proof",
+                    )
                 with sessions() as session:
+                    assert (
+                        len(tuple(session.scalars(select(FleetProfileApplication))))
+                        == 1
+                    )
                     parked = session.scalar(select(FleetProfileApplication))
                     assert parked is not None
                     assert parked.state == "queued"

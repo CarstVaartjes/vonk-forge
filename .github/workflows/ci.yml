@@ -124,9 +124,11 @@ jobs:
               echo "No changed Python files; skipping Ruff"
             else
               uv run --project control --frozen ruff check --force-exclude "${changed_python[@]}"
+              uv run --project control --frozen ruff format --check --force-exclude "${changed_python[@]}"
             fi
           else
             uv run --project control --frozen ruff check .
+            uv run --project control --frozen ruff format --check .
           fi
       - name: Check Python types
         shell: bash
@@ -308,6 +310,14 @@ jobs:
                 control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
                 control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
                 --api-response-witness="$RUNNER_TEMP/api-response-witnesses.json"
+      - name: Attribute catalog wire validation cost with the actual compiled probe
+        env:
+          VONK_WIRE_PROBE_TIMINGS: "1"
+        run: |
+          set -euo pipefail
+          export VONK_INSTALL_START_WIRE_PROBE="${CARGO_TARGET_DIR:-$PWD/target}/debug/examples/install_start_wire_probe"
+          uv run --project control --frozen pytest -s -q -n 0 \
+            agent_protocol/tests/test_schema2_recipe_rust_compat.py::test_catalog_launch_payloads_are_accepted_by_python_and_rust
       - name: Exercise Controller requests and Spark results together
         run: >-
           uv run --project control --frozen
@@ -445,7 +455,10 @@ jobs:
             tools/openapi-client \
             src/cluster_profiles/generated_control \
             control/web/src/api/generated.d.ts \
-            src/cluster_profiles/schemas/control-openapi.json; then
+            control/web/src/api/runtime.generated.js \
+            control/web/src/api/runtime.generated.d.ts \
+            src/cluster_profiles/schemas/control-openapi.json \
+            src/cluster_profiles/schemas/cli-update-contract.schema.json; then
             run_full=false
           fi
           echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
@@ -467,8 +480,11 @@ jobs:
         run: >-
           git diff --exit-code -- control/openapi.json
           src/cluster_profiles/schemas/control-openapi.json
+          src/cluster_profiles/schemas/cli-update-contract.schema.json
           src/cluster_profiles/generated_control
           control/web/src/api/generated.d.ts
+          control/web/src/api/runtime.generated.js
+          control/web/src/api/runtime.generated.d.ts
 
   compose-integration:
     name: Compose integration
@@ -538,7 +554,9 @@ jobs:
           target: api
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.IMAGE_TAG }}
-          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ci-test-vonk-forge-api
       - name: Build the Controller worker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -548,7 +566,9 @@ jobs:
           target: worker
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-worker:${{ env.IMAGE_TAG }}
-          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ci-test-vonk-forge-worker
       - name: Build the LiteLLM image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -629,6 +649,7 @@ jobs:
           VONK_ACCEPTANCE_COMPOSE_UGREEN: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_REFERENCE_COMPOSE: ${{ runner.temp }}/compose-fixtures/docker-compose-v5.1.3
           VONK_ACCEPTANCE_COMPOSE_OVERLAY: ${{ runner.temp }}/nas-local/overlay.yml
+          VONK_ACCEPTANCE_SOURCE_SHA: ${{ github.sha }}
           VONK_ACCEPTANCE_LOCAL_SETUP: ${{ github.workspace }}/target/release/vonk-nas-setup
           VONK_ACCEPTANCE_LOCAL_PAYLOAD: ${{ runner.temp }}/nas-local/payload.json
           # Not a real key: it only has to be accepted by the installer.
@@ -796,10 +817,56 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-  control-suite:
-    name: Complete control suite (${{ matrix.shard.label }})
+  consumer-probe:
+    name: Build actual native consumer probe
     needs: changes
     if: needs.changes.outputs.control == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "1"
+    steps:
+      - name: Check out exact suite source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Install pinned Rust toolchain
+        run: scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --profile minimal
+      - name: Restore read-only Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: "false"
+      - name: Build actual canonical parser, HTTP client and state probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/retry-dependency-fetch cargo fetch --locked
+          uv run --project control --frozen python scripts/generate-agent-wire
+          cargo build --locked --package vonk-agent --example consumer_corpus_probe
+          mkdir -p "$RUNNER_TEMP/consumer-probe"
+          cp target/debug/examples/consumer_corpus_probe "$RUNNER_TEMP/consumer-probe/"
+          git rev-parse HEAD > "$RUNNER_TEMP/consumer-probe/source-sha.txt"
+          cd "$RUNNER_TEMP/consumer-probe"
+          sha256sum consumer_corpus_probe > sha256.txt
+      - name: Upload source-bound native probe
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: control-consumer-probe-${{ github.sha }}
+          path: ${{ runner.temp }}/consumer-probe
+          if-no-files-found: error
+          retention-days: 1
+
+  control-suite:
+    name: Complete control suite (${{ matrix.shard.label }})
+    needs: [changes, consumer-probe]
+    if: needs.changes.outputs.control == 'true'
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -821,10 +888,39 @@ jobs:
         uses: ./.github/actions/recipe-library
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
+      - name: Download the exact-source native probe
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: control-consumer-probe-${{ github.sha }}
+          path: ${{ runner.temp }}/consumer-probe
+      - name: Verify native probe source and bytes before execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat "$RUNNER_TEMP/consumer-probe/source-sha.txt")" = "$(git rev-parse HEAD)"
+          cd "$RUNNER_TEMP/consumer-probe"
+          sha256sum --check --strict sha256.txt
+          chmod 0700 consumer_corpus_probe
+          test -x consumer_corpus_probe
+          printf 'VONK_CONSUMER_CORPUS_PROBE=%s/consumer-probe/consumer_corpus_probe\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Build recipe library index and packages
         run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Pull the pinned test images once
         run: scripts/pull-test-images postgres step-ca python
+      - name: Attribute fresh PostgreSQL catalog phase costs
+        if: matrix.shard.index == 2
+        env:
+          VONK_CATALOG_TIMINGS: "1"
+        run: >-
+          uv run --project control --frozen pytest -s -q -n 0
+          control/tests/test_fresh_launch_catalog_postgres_acceptance.py::test_fresh_postgres_imports_typed_canonical_model_recipe_api
+          control/tests/test_catalog_service.py
+      - name: Verify installed Activity byte refusal and same-read recovery
+        if: matrix.shard.index == 1
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_operation_response_budget_installed_cli.py::test_installed_activity_byte_continuation_and_aggregate_fact_recovery
+
       - name: Set up Docker Buildx for the candidate CA
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build the exact candidate journal CA for provider tests
@@ -908,7 +1004,9 @@ jobs:
           target: api
           load: true
           tags: ${{ env.VONK_TEST_CONTROLLER_IMAGE }}
-          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ci-test-vonk-forge-api
           # Only main writes the shared cache; pull requests read it.
           cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=ci-test-vonk-forge-api' || '' }}
@@ -920,7 +1018,9 @@ jobs:
           target: worker
           load: true
           tags: ${{ env.VONK_TEST_WORKER_IMAGE }}
-          build-args: DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+          build-args: |
+            DEPENDENCY_DAY=${{ steps.dependency_day.outputs.day }}
+            VONK_BUILD_SOURCE_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ci-test-vonk-forge-worker
           # Only main writes the shared cache; pull requests read it.
           cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=ci-test-vonk-forge-worker' || '' }}
@@ -951,39 +1051,55 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # Match control/web/package-lock.json; browsers and system libraries are baked in.
+    # https://playwright.dev/docs/ci#via-containers
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --init --ipc=host
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Install pinned Node.js with admin web dependency cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
           cache: npm
           cache-dependency-path: control/web/package-lock.json
+      - name: Install Python for the dependency fetch helper
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
       - name: Install locked admin web dependencies
         run: scripts/retry-dependency-fetch npm ci --prefix control/web
+      - name: Check TypeScript lint, formatting and types
+        shell: bash
+        env:
+          WEB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          cd control/web
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            mapfile -d '' -t changed_web < <(git diff --name-only -z --diff-filter=ACMR "${WEB_BASE_SHA:?missing base SHA}" "$GITHUB_SHA" -- '*.ts' '*.tsx')
+            if ((${#changed_web[@]})); then
+              node_modules/.bin/biome check "${changed_web[@]/#/$GITHUB_WORKSPACE/}"
+            fi
+          else
+            npm run lint
+          fi
+          npm run typecheck
       - name: Run complete admin web suite
         run: npm test --prefix control/web -- --run
       - name: Build admin web application
         run: npm run build --prefix control/web
-      - name: Restore the pinned Chromium browser
-        id: playwright-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
-      - name: Install pinned Chromium browser and its system libraries
+      - name: Run fixture-backed Admin browser acceptance
+        # Native contract consumers run with their Python-produced corpus and
+        # development server in browser-contract-artifacts.yml.
         run: >-
-          scripts/retry-dependency-fetch control/web/node_modules/.bin/playwright
-          install --with-deps chromium
-      - name: Save the pinned Chromium browser
-        if: steps.playwright-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
-      - name: Run fixture-backed browser acceptance
-        run: npm run test:e2e --prefix control/web -- --project=chromium
+          npm run test:e2e --prefix control/web --
+          e2e/admin.spec.ts e2e/feedback.spec.ts e2e/operation-progress.spec.ts
+          --project=chromium
       - name: Upload browser failure evidence
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

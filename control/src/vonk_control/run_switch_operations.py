@@ -9488,6 +9488,9 @@ def _progress_int(value: object) -> int | None:
 
 
 def _progress_state(value: object) -> RunSwitchMemberState | None:
+    # A canonical unissued recipe role is pending in the switch projection.
+    if value == LifecycleState.QUEUED:
+        return "pending"
     try:
         return _MEMBER_STATE_ADAPTER.validate_python(value, strict=True)
     except ValidationError:
@@ -9728,6 +9731,21 @@ def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
         )
     except (TypeError, ValueError):
         observed = RunSwitchObservedEvidence()
+    if isinstance(child, RecipeOperationView) and child.progress is not None:
+        measured = child.progress
+        observed.operation = measured
+        observed.completed_bytes = measured.completed_bytes
+        observed.total_bytes = measured.total_bytes
+        observed.members = [
+            RunSwitchMemberReceipt(
+                node_id=member.member_id,
+                state=_progress_state(member.state) or "unknown",
+                phase=_progress_phase(member.phase),
+                completed_bytes=member.completed_bytes,
+                total_bytes=member.total_bytes,
+            )
+            for member in measured.members
+        ]
     observed.child_state = state
     observed.status_reason = reason[:512] if reason is not None else None
     return observed
@@ -10099,16 +10117,19 @@ def _merge_progress_evidence(
         ),
         None,
     )
+    # Native install/build measurements belong to their phase's OperationProgress.
+    # Only transfer evidence can advance the accepted distribution byte budget.
     if reported_completed is not None:
-        model_download, _, _ = _planned_transfer_parts(plan)
-        offset = (
-            model_download
-            if phase.subphase == "target-copy" and model_download is not None
-            else 0
-        )
-        progress.completed_bytes = max(
-            progress.completed_bytes, offset + reported_completed
-        )
+        if phase.kind == "transfer":
+            model_download, _, _ = _planned_transfer_parts(plan)
+            offset = (
+                model_download
+                if phase.subphase == "target-copy" and model_download is not None
+                else 0
+            )
+            progress.completed_bytes = max(
+                progress.completed_bytes, offset + reported_completed
+            )
         if now is not None and payload.progress is None and payload.operation is None:
             prior = progress.operation
             completed = (
@@ -10124,7 +10145,11 @@ def _merge_progress_evidence(
             )
             progress.operation = _observe_progress(prior, current, now)
             progress.operation_phase_index = phase.index
-    if payload.total_bytes is not None and progress.total_bytes is None:
+    if (
+        phase.kind == "transfer"
+        and payload.total_bytes is not None
+        and progress.total_bytes is None
+    ):
         model_download, _, _ = _planned_transfer_parts(plan)
         if phase.subphase == "target-copy" and model_download is not None:
             progress.total_bytes = model_download + payload.total_bytes

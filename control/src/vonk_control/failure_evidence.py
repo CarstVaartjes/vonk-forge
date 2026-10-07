@@ -26,10 +26,15 @@ from pydantic import (
 from sqlalchemy import String, and_, cast, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import FailureCode, LifecycleState, StateAlias
-from vonk_agent_protocol.failure_evidence import FailureDiagnostics, FailureLogTail
+from vonk_agent_protocol.failure_evidence import (
+    FailureDiagnostics,
+    FailureLogTail,
+    add_known_dropped_bytes,
+)
 
 from . import agent_operation_states
 from .bounded_json import BoundedJSONError, require_integer, sequence
+from .integer_domains import MAX_DATABASE_INTEGER
 from .logging import redact_text
 from .models import (
     AgentOperation,
@@ -111,12 +116,12 @@ class EvidenceModel(StrictJSONModel):
 
 class EvidenceContext(EvidenceModel):
     operation_id: str = Field(min_length=1, max_length=128)
-    attempt: int = Field(ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     kind: str = Field(min_length=1, max_length=80)
     node_ids: list[str] = Field(max_length=128)
     updated_at: str
     source: EvidenceSource
-    rank: int | None = Field(default=None, ge=0)
+    rank: int | None = Field(default=None, ge=0, le=MAX_DATABASE_INTEGER)
 
 
 class FailureEvidenceBundle(EvidenceModel):
@@ -339,9 +344,9 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
         document[field]["text"] = cleaned
         if dropped:
             document[field]["truncated"] = True
-            document[field]["dropped_bytes"] = (
-                document[field]["dropped_bytes"] or 0
-            ) + dropped
+            document[field]["dropped_bytes"] = add_known_dropped_bytes(
+                document[field]["dropped_bytes"], dropped
+            )
     for field in ("versions", "sandbox", "storage", "preflight"):
         document[field] = [
             {

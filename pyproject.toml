@@ -43,6 +43,7 @@ path = "tools/hatch_build.py"
 "src/cluster_profiles/schemas/qualification-authority-v5.schema.json" = "cluster_profiles/schemas/qualification-authority-v5.schema.json"
 "src/cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-campaign-manifest-v2.schema.json"
 "src/cluster_profiles/schemas/control-openapi.json" = "cluster_profiles/schemas/control-openapi.json"
+"src/cluster_profiles/schemas/cli-update-contract.schema.json" = "cluster_profiles/schemas/cli-update-contract.schema.json"
 
 [tool.ruff]
 required-version = "==0.16.9"

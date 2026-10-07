@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -274,14 +276,33 @@ def test_frozen_corpus_closure_is_dynamic() -> None:
         assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
 
 
-# Slow by design: migrates a fresh PostgreSQL database and imports the whole
-# frozen corpus through the real package reader before reading the API.
-@pytest.mark.slow(30)
+# Slow by design: cold-verifies every canonical package, imports the whole
+# corpus into fresh PostgreSQL, validates every API page and restarts the cache.
+# Hosted phase timings total about 32s for 223 Models and 301 Recipes; allow
+# 45s for this whole-corpus acceptance while retaining the same assertions.
+@pytest.mark.slow(45)
 def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
+    timings = os.environ.get("VONK_CATALOG_TIMINGS") == "1"
+    previous = time.perf_counter()
+
+    def lap(stage: str) -> None:
+        nonlocal previous
+        now = time.perf_counter()
+        if timings:
+            print(f"catalog_pg_timing stage={stage} elapsed_s={now - previous:.6f}")
+        previous = now
+
     corpus = _load_frozen_corpus()
+    lap("corpus_load")
+    if timings:
+        print(
+            f"catalog_pg_count models={len(corpus.index['catalog_entities'])} "
+            f"recipes={len(corpus.index['recipes'])}"
+        )
     _upgrade_fresh_database(postgres_engine)
+    lap("database_migration")
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     clock = lambda: datetime.now(UTC)
     catalog = CatalogService(
@@ -297,6 +318,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     reader = release.client(tmp_path / "packages")
     snapshot = reader.list()
     reader.prepare(snapshot)
+    lap("reader_list_prepare")
     model_keys = {_model_key(row) for row in corpus.index["catalog_entities"]}
     fetched_items = [reader.fetch(item.uri) for item in snapshot.items]
     for item in fetched_items:
@@ -310,6 +332,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     }
     assert package_model_keys <= model_keys
     assert _selected_model_keys(corpus.index) <= package_model_keys
+    lap("package_fetch_closure")
     sync = ManagedRecipeCatalogSyncService(
         sessions, catalog=catalog, reader=reader, clock=clock
     )
@@ -326,6 +349,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     )
     assert result.imported_count == len(corpus.index["recipes"])
     assert release.library_downloads == 1
+    lap("catalog_sync")
 
     forbidden_tables = {
         "local_recipes",
@@ -364,6 +388,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
             )
         ) == len(corpus.index["recipes"])
 
+    lap("database_inventory")
     api = _app(
         TokenCodec(b"a" * 32),
         catalog=catalog,
@@ -395,6 +420,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         key: read_model(document) for key, document in expected_model_documents.items()
     }
 
+    lap("model_api_pages_validation")
     library_recipes = _library_recipes(api)
     by_digest = {item.identity.content_sha256: item for item in library_recipes}
     assert len(by_digest) == len(library_recipes)
@@ -408,6 +434,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
         digest: read_recipe(document)
         for digest, document in expected_recipe_documents.items()
     }
+    lap("recipe_api_pages_validation")
     multi_model_detail_seen = False
     # The listing above already compares every recipe document. Detail adds
     # per-selection Model resolution, whose paths are single- and multi-Model
@@ -441,6 +468,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
             multi_model_detail_seen = True
             assert len(detail.model_documents) == len(row["document"]["models"])
     assert multi_model_detail_seen, "frozen corpus has no multi-Model Recipe detail"
+    lap("recipe_details_validation")
 
     from vonk_control.catalog_api import CATALOG_OPERATION_IDS
 
@@ -490,6 +518,7 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     )
     api.close()
     reader.close()
+    lap("api_schema_inventory_close")
 
     # A new reader can continue from the durable, re-verified snapshot and
     # package objects with the release unavailable.  The failed release request
@@ -504,3 +533,4 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     assert release.requests == [f"/repos/{REPOSITORY}/releases"]
     assert not (tmp_path / "packages" / "snapshot.candidate.json").exists()
     restarted.close()
+    lap("offline_reader_restart")

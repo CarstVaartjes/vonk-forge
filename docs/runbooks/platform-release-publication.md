@@ -110,6 +110,43 @@ Immutable image records and `docker-compose.pinned.yml` are publication evidence
 inputs; the payload builder converts every image to the deployment channel before
 embedding Compose. They are not the installed deployment configuration.
 
+## Deployed runtime authority and client compatibility
+
+`vonkctl --json platform` reads the authenticated `/api/platform` contract. Its
+API source and Control contract fingerprint come from the API's installed
+package. Each worker reports its own installed source and worker contract in a
+process-bound heartbeat; only completed loops within the last 30 seconds appear
+as fresh observations. A restarted process must complete a loop before it is
+observable. Missing, damaged, or old package metadata remains nullable. No fresh
+worker yields `worker-observation-unavailable`; fresh workers with unknown
+package provenance yield `worker-provenance-unavailable`. Different fresh worker
+sources remain separate observations, rather than one guessed Controller version.
+
+The existing packaged build-identity record also binds the CLI's shipped Control
+schema and the worker wire schema. `vonkctl --json --version` reports its own
+source and Control fingerprint. Signed client updates verify the wheel identity,
+shipped contract, artifact digest, and signed release descriptor. Installation
+requires a current authenticated API observation with known source and the same
+Control fingerprint; an unavailable or different deployed contract retains the
+installed client and reports the unresolved compatibility condition. Publication
+acceptance and actual API deployment are separate authorities. An unchanged image
+reused by a new publication retains its own producer source.
+
+The heartbeat schema change adds two nullable telemetry columns (`source_sha`
+and `worker_contract_sha256`) through the existing startup schema reconciliation
+and advisory lock. It does not reset process rows, operation state, claims,
+requests, or volumes. Existing rows are unknown until their owning upgraded worker
+records its package identity and completes a loop. NAS acceptance verifies the
+running API package against its authenticated observation and each fresh worker
+against the worker's installed package, separately from the publication envelope.
+
+Recovery consumers must retain the request identity, attempt history, cause,
+evidence, and cooldown when publication changes. An early retry requires a typed
+fault owner and a proven relevant change in that owner's deployed fingerprint.
+A new accepted client publication is not evidence that the Controller, worker,
+agent, resource condition, or recipe artifact changed. Unknown ownership and
+unknown or stale provenance continue through normal scheduled recovery.
+
 ### Managed CA image closure
 
 The current installer graph requires the managed `ca` image alongside API,

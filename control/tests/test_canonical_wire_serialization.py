@@ -14,6 +14,7 @@ from vonk_control.fleet_stream_contract import (
 
 def test_fleet_stream_root_retains_nested_canonical_model_policy() -> None:
     change = FleetChangeEvent(
+        event_cursor=7,
         change=NodeProfileChange(
             entity_kind="node-profile",
             entity_id="spk_" + "a" * 32,
@@ -24,7 +25,7 @@ def test_fleet_stream_root_retains_nested_canonical_model_policy() -> None:
                 profile_changed=True,
                 display_name_changed=None,
             ),
-        )
+        ),
     )
     encoded = canonical_message(FleetStreamEvent(root=change))
     assert encoded == canonical_message(change)

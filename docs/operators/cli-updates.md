@@ -35,3 +35,28 @@ noninteractive commands, including offline `--version`, never start a check.
 Notices never install an update.
 An accepted release without a CLI wheel is invalid under the current schema-2
 publication contract.
+
+A CLI with an older closed release-manifest schema may refuse a newer accepted
+release before it can examine the wheel. For example, a CLI accepting four
+image roles cannot parse the current five-role manifest containing the CA.
+This refusal preserves its installed tool and credentials; it is not a
+seamless normal update across that manifest epoch.
+
+After approving the accepted release, rerun the supported signed workstation
+bootstrap once:
+
+```sh
+curl -fsSL https://install.vonkforge.ai/vonkctl | sh
+```
+
+For the accepted development channel, use
+`curl -fsSL https://install.vonkforge.ai/dev/vonkctl | sh`. The official endpoint
+verifies the signed pointer, immutable release, and exact wheel digest and
+source/version before replacing the tool through `uv`. It does not use the
+older CLI's manifest parser. Do not edit the old wheel, omit required manifest
+roles, or install an unverified wheel to make that refusal disappear.
+
+Confirm the installed source with `vonkctl --json --version` and the actual
+Controller observation with `vonkctl platform --json`. Later normal updates
+use the installed CLI's current signed-release schema and stable compatibility
+receipt. This workstation bootstrap changes no Controller or Spark deployment.

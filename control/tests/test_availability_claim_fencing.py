@@ -128,7 +128,9 @@ def test_expired_callback_preserves_the_new_claim(claimed_image, monkeypatch, bo
 
             def observe_after_takeover(*_args, **_kwargs):
                 takeover()
-                return AvailabilityModelChild(id=str(uuid.uuid4()), state=LifecycleState.RUNNING)
+                return AvailabilityModelChild(
+                    id=str(uuid.uuid4()), state=LifecycleState.RUNNING
+                )
 
             patch.setattr(service, "_current_model_child", observe_after_takeover)
         elif boundary == "receipt":

@@ -28,6 +28,7 @@ from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts.recipe import Scalar
 
 from .distribution_assignment import NodeDistributionAssignment
+from .integer_domains import MAX_DATABASE_INTEGER
 from .lifecycle_preflight import LifecyclePreflightCheckpoint
 from .mapping_parameters import MappingParameters
 from .model_cache_contract import ModelCacheDownloadResult
@@ -311,7 +312,7 @@ class RunSwitchReconciliationAuthority(StrictModel):
     recipe_revision_id: UuidId
     recipe_content_sha256: Digest
     mapping_id: UuidId
-    mapping_generation: int = Field(ge=1)
+    mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     recipe_build_id: UuidId | None
     image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
     model_content_sha256: Digest | None
@@ -511,7 +512,7 @@ class RunSwitchBuildEvidence(StrictModel):
 
 class MappingSelection(StrictModel):
     mapping_id: UuidId | None
-    mapping_generation: int | None = Field(default=None, ge=1)
+    mapping_generation: int | None = Field(le=MAX_DATABASE_INTEGER, default=None, ge=1)
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     parameters: MappingParameters = Field(default_factory=dict, max_length=128)
     # The effective recipe-option choices this mapping runs with (also inside
@@ -1171,7 +1172,7 @@ class RunSwitchRuntimeImageReferenceIntent(StrictModel):
     plan_digest: Digest
     phase_index: int = Field(ge=0, le=31)
     item_index: int = Field(ge=0, le=31)
-    workload_intent_ordinal: int = Field(ge=1)
+    workload_intent_ordinal: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     recipe_revision_id: UuidId
     profile_application_id: UuidId | None = None
     execution_keys: list[Digest] = Field(min_length=1, max_length=32)
@@ -1194,7 +1195,9 @@ class RunSwitchOperationResult(StrictModel):
     """Exact durable result tree stored in ``Job.result``."""
 
     phase_index: int = Field(default=0, ge=0, le=31)
-    workload_intent_ordinal: int | None = Field(default=None, ge=1)
+    workload_intent_ordinal: int | None = Field(
+        le=MAX_DATABASE_INTEGER, default=None, ge=1
+    )
     profile_application_id: UuidId | None = None
     item_index: int = Field(default=0, ge=0, le=31)
     phase: RunSwitchPhaseKind | None = None

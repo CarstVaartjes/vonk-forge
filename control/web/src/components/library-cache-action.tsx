@@ -1,11 +1,12 @@
-import {useCallback, useEffect, useRef, useState} from "react";
-import type {CacheRemovalReview, ControlApi, ModelCacheOperatorResponse} from "../api/types";
+import { compareWire, displayRatio } from "../api/contract-numeric";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { CacheRemovalReview, ControlApi, ModelCacheOperatorResponse } from "../api/types";
 
-import {failureNotice} from "../lib/error-display";
-import {CancelOperation} from "./cancel-operation";
-import {WaitingFor} from "./waiting-for";
-import {useToast} from "./toast";
-import {CacheRemovalProgress} from "./cache-removal-progress";
+import { failureNotice } from "../lib/error-display";
+import { CancelOperation } from "./cancel-operation";
+import { WaitingFor } from "./waiting-for";
+import { useToast } from "./toast";
+import { CacheRemovalProgress } from "./cache-removal-progress";
 import {
   CacheRemovalOutcomeUnknown,
   submitReviewedRemoval,
@@ -13,7 +14,7 @@ import {
   type CacheRemovalIntent,
   type CacheRemovalReceipt,
 } from "./cache-removal-operations";
-import {CacheRemovalReviewDetails} from "./cache-removal-review";
+import { CacheRemovalReviewDetails } from "./cache-removal-review";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 const POLL_INTERVAL_MS = 1_000;
@@ -24,8 +25,8 @@ export type LibraryCacheState = "cached" | "preparing" | "not_cached" | "failed"
 function progressLabel(response: ModelCacheOperatorResponse): string {
   const total = response.total_bytes ?? 0;
   const transferred = response.transferred_bytes ?? 0;
-  if (total > 0 && transferred > 0) {
-    const percent = Math.min(100, Math.round((transferred / total) * 100));
+  if (compareWire(total, 0) > 0 && compareWire(transferred, 0) > 0) {
+    const percent = Math.min(100, Math.round(displayRatio(transferred, total) * 100));
     return `${response.phase} · ${percent}%`;
   }
   return response.phase;
@@ -44,7 +45,13 @@ function failureText(response: ModelCacheOperatorResponse): string {
  * authority for what a profile may place, so an uncached model needs an
  * explicit, observable preparation action rather than a silent fetch later.
  */
-export function LibraryCacheAction({api, selector, modelContentSha256, state, onPrepared}: {
+export function LibraryCacheAction({
+  api,
+  selector,
+  modelContentSha256,
+  state,
+  onPrepared,
+}: {
   api: ControlApi;
   selector: string;
   modelContentSha256: string;
@@ -54,14 +61,16 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [removal, setRemoval] = useState<{
-    intent: Extract<CacheRemovalIntent, {kind: "model"}>;
+    intent: Extract<CacheRemovalIntent, { kind: "model" }>;
     initial: CacheRemovalReceipt | null;
     initialError?: string;
   } | null>(null);
   const [review, setReview] = useState<CacheRemovalReview | null>(null);
   const [phase, setPhase] = useState("");
   const [operationId, setOperationId] = useState("");
-  const [waiting, setWaiting] = useState<Pick<ModelCacheOperatorResponse, "blockers" | "next_attempt_at">>({});
+  const [waiting, setWaiting] = useState<
+    Pick<ModelCacheOperatorResponse, "blockers" | "next_attempt_at">
+  >({});
   const [error, setError] = useState("");
   const abort = useRef<AbortController | undefined>(undefined);
   const toast = useToast();
@@ -91,8 +100,12 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
       setOperationId(current.operation_id ?? "");
       setWaiting(current);
       let attempts = 0;
-      while (!TERMINAL_STATES.has(current.state) && current.operation_id && attempts < MAX_POLL_ATTEMPTS) {
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+      while (
+        !TERMINAL_STATES.has(current.state) &&
+        current.operation_id &&
+        attempts < MAX_POLL_ATTEMPTS
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
         if (controller.signal.aborted) return;
         current = await api.modelCacheOperation(current.operation_id, controller.signal);
         attempts += 1;
@@ -112,13 +125,17 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
         onPrepared();
         return;
       }
-      const failed = current.state === "cancelled" ? "Download cancelled. Partial files are kept; download again to resume." : failureText(current);
+      const failed =
+        current.state === "cancelled"
+          ? "Download cancelled. Partial files are kept; download again to resume."
+          : failureText(current);
       setError(failed);
       if (current.state !== "cancelled") toast.error(failureNotice(failed, requestKey));
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
-      const failed = value instanceof Error ? value.message.slice(0, 256) : "Cache preparation failed";
+      const failed =
+        value instanceof Error ? value.message.slice(0, 256) : "Cache preparation failed";
       setError(failed);
       toast.error(failureNotice(failed, requestKey));
     }
@@ -135,10 +152,11 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     try {
       const current = await api.modelRemovalReview(selector, controller.signal);
       if (controller.signal.aborted) return;
-      validateRemovalReview(current, {kind: "model", selector, modelContentSha256});
+      validateRemovalReview(current, { kind: "model", selector, modelContentSha256 });
       setReview(current);
     } catch (value) {
-      if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Cache removal review failed");
+      if (!controller.signal.aborted)
+        setError(value instanceof Error ? value.message : "Cache removal review failed");
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
@@ -151,7 +169,7 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
     abort.current = controller;
     setBusy(true);
     setError("");
-    const intent: Extract<CacheRemovalIntent, {kind: "model"}> = {
+    const intent: Extract<CacheRemovalIntent, { kind: "model" }> = {
       kind: "model",
       selector,
       requestKey: crypto.randomUUID(),
@@ -169,53 +187,124 @@ export function LibraryCacheAction({api, selector, modelContentSha256, state, on
         return;
       }
       toast.info("Model removal queued.");
-      setRemoval({intent, initial: result});
+      setRemoval({ intent, initial: result });
     } catch (value) {
       if (controller.signal.aborted) return;
       setBusy(false);
       setReview(null);
       if (value instanceof CacheRemovalOutcomeUnknown) {
         setConfirming(false);
-        setRemoval({intent, initial: null, initialError: value.message});
+        setRemoval({ intent, initial: null, initialError: value.message });
       } else {
-        const failed = value instanceof Error ? value.message : "Cache removal failed; review again before retrying.";
+        const failed =
+          value instanceof Error
+            ? value.message
+            : "Cache removal failed; review again before retrying.";
         setError(failed);
         toast.error(failureNotice(failed, intent.requestKey));
       }
     }
   }, [api, modelContentSha256, onPrepared, review, selector, toast]);
 
-  if (removal) return <CacheRemovalProgress api={api} intent={removal.intent} initial={removal.initial}
-    initialError={removal.initialError}
-    onComplete={() => {setRemoval(null); onPrepared();}}
-    onDismiss={() => setRemoval(null)}
-    onRejected={message => {setRemoval(null); setError(message);}}/>;
+  if (removal)
+    return (
+      <CacheRemovalProgress
+        api={api}
+        intent={removal.intent}
+        initial={removal.initial}
+        initialError={removal.initialError}
+        onComplete={() => {
+          setRemoval(null);
+          onPrepared();
+        }}
+        onDismiss={() => setRemoval(null)}
+        onRejected={(message) => {
+          setRemoval(null);
+          setError(message);
+        }}
+      />
+    );
 
   if (state === "cached") {
     // Confirmation accepts exactly the Controller review shown here.
-    return <div className="library-cache-action">
-      <span className="library-cache-state is-ready">Cached</span>
-      {confirming
-        ? <>
-            <button type="button" className="button secondary" disabled={busy || !review || review.blockers.length > 0} onClick={() => void remove()}>
+    return (
+      <div className="library-cache-action">
+        <span className="library-cache-state is-ready">Cached</span>
+        {confirming ? (
+          <>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy || !review || review.blockers.length > 0}
+              onClick={() => void remove()}
+            >
               Confirm remove
             </button>
-            <button type="button" className="button secondary" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={busy}
+              onClick={() => setConfirming(false)}
+            >
+              Cancel
+            </button>
           </>
-        : <button type="button" className="button secondary" disabled={busy} onClick={() => void reviewRemoval()}>Remove from cache</button>}
-      {confirming && busy && <span role="status">Waiting for Controller…</span>}
-      {confirming && review && <CacheRemovalReviewDetails review={review}/> }
-      {confirming && !review && !busy && <button type="button" className="button secondary" onClick={() => void reviewRemoval()}>Review again</button>}
-      {error && <span className="library-cache-error" role="alert">{error}</span>}
-    </div>;
+        ) : (
+          <button
+            type="button"
+            className="button secondary"
+            disabled={busy}
+            onClick={() => void reviewRemoval()}
+          >
+            Remove from cache
+          </button>
+        )}
+        {confirming && busy && <span role="status">Waiting for Controller…</span>}
+        {confirming && review && <CacheRemovalReviewDetails review={review} />}
+        {confirming && !review && !busy && (
+          <button type="button" className="button secondary" onClick={() => void reviewRemoval()}>
+            Review again
+          </button>
+        )}
+        {error && (
+          <span className="library-cache-error" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
+    );
   }
-  return <div className="library-cache-action">
-    <button type="button" className="button secondary" disabled={busy || state === "preparing"} onClick={() => void prepare()}>
-      {busy || state === "preparing" ? "Downloading…" : state === "failed" ? "Retry download" : "Download model"}
-    </button>
-    {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
-    {(busy || state === "preparing") && <WaitingFor blockers={waiting.blockers} nextAttemptAt={waiting.next_attempt_at}/>}
-    {busy && operationId && <CancelOperation what="download" consequence="Stops this download. Partial files are kept and the download resumes if you start it again." command={`vonkctl model cancel ${operationId}`} cancel={key => api.cancelModelOperation(operationId, key)}/>}
-    {error && <span className="library-cache-error" role="alert">{error}</span>}
-  </div>;
+  return (
+    <div className="library-cache-action">
+      <button
+        type="button"
+        className="button secondary"
+        disabled={busy || state === "preparing"}
+        onClick={() => void prepare()}
+      >
+        {busy || state === "preparing"
+          ? "Downloading…"
+          : state === "failed"
+            ? "Retry download"
+            : "Download model"}
+      </button>
+      {(busy || state === "preparing") && <span role="status">{phase || "queued"}</span>}
+      {(busy || state === "preparing") && (
+        <WaitingFor blockers={waiting.blockers} nextAttemptAt={waiting.next_attempt_at} />
+      )}
+      {busy && operationId && (
+        <CancelOperation
+          what="download"
+          consequence="Stops this download. Partial files are kept and the download resumes if you start it again."
+          command={`vonkctl model cancel ${operationId}`}
+          cancel={(key) => api.cancelModelOperation(operationId, key)}
+        />
+      )}
+      {error && (
+        <span className="library-cache-error" role="alert">
+          {error}
+        </span>
+      )}
+    </div>
+  );
 }

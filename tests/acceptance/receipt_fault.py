@@ -100,10 +100,20 @@ class LostStartReceipt:
         # A retry may arrive while the harness probes the still-serving effect.
         # Keep every Start receipt out of Controller ingress until journal loss
         # and the real agent restart have actually completed.
-        if (
-            receipt["fence"] == blocked.get("fence")
-            or not (self.root / "recovered.json").is_file()
-        ):
+        old_fence = receipt["fence"] == blocked.get("fence")
+        restart_incomplete = not (self.root / "recovered.json").is_file()
+        _write(
+            self.root / "last-start-receipt.json",
+            {
+                "fence": receipt["fence"],
+                "gate": "old-fence"
+                if old_fence
+                else "restart-incomplete"
+                if restart_incomplete
+                else "released",
+            },
+        )
+        if old_fence or restart_incomplete:
             await send({"type": "http.response.start", "status": 503, "headers": []})
             await send(
                 {

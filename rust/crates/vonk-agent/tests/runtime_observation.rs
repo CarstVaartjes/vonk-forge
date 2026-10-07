@@ -1,7 +1,11 @@
 #![forbid(unsafe_code)]
 
 use serde_json::{Value, json};
-use std::{fs, path::Path, time::Duration};
+use std::{
+    fs,
+    path::Path,
+    time::{Duration, Instant},
+};
 use tempfile::tempdir;
 use vonk_agent::{
     oci::{OciRuntime, RecipeRunStartIdentity},
@@ -108,7 +112,9 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
     fs::create_dir_all(&invalid_metadata).unwrap();
     fs::write(invalid_metadata.join("lifecycle.json"), b"not-json").unwrap();
     fs::create_dir_all(root.path().join("runs").join("not-a-run-id")).unwrap();
-    let inspections = runtime.recipe_run_inspection_plans().unwrap();
+    let inspections = runtime
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+        .unwrap();
     assert_eq!(inspections.len(), 1);
     assert_eq!(inspections[0].run_id.to_string(), RUN);
     assert_eq!(&inspections[0].arguments[4..], launched.main.as_slice());
@@ -128,12 +134,24 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
     changed_placement.runtime.placement.endpoint_address = Some("192.168.1.213".parse().unwrap());
     for tampered in [changed_workload, changed_placement] {
         fs::write(&retained_path, serde_json::to_vec(&tampered).unwrap()).unwrap();
-        assert!(runtime.recipe_run_inspection_plans().is_err());
+        assert!(
+            runtime
+                .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+                .is_err()
+        );
     }
     fs::write(&retained_path, b"{}").unwrap();
-    assert!(runtime.recipe_run_inspection_plans().is_err());
+    assert!(
+        runtime
+            .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+            .is_err()
+    );
     fs::remove_file(&retained_path).unwrap();
-    assert!(runtime.recipe_run_inspection_plans().is_err());
+    assert!(
+        runtime
+            .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+            .is_err()
+    );
     std::os::unix::fs::symlink(
         root.path()
             .join("installations")
@@ -142,7 +160,11 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
         &retained_path,
     )
     .unwrap();
-    assert!(runtime.recipe_run_inspection_plans().is_err());
+    assert!(
+        runtime
+            .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+            .is_err()
+    );
 }
 
 #[test]
@@ -184,7 +206,9 @@ fn retained_inspection_and_agent_preparation_leave_private_tmp_cleanup_to_helper
             &identity,
         )
         .unwrap();
-    let inspections = runtime.recipe_run_inspection_plans().unwrap();
+    let inspections = runtime
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+        .unwrap();
     assert_eq!(inspections.len(), 1);
     assert_eq!(inspections[0].endpoint_address, None);
     assert!(
@@ -502,7 +526,17 @@ fn retained_lifecycle_requires_all_canonical_placement_fields() {
             &identity(&plan),
         )
         .unwrap();
-    runtime.recipe_run_inspection_plans().unwrap();
+    let expired = runtime.recipe_run_inspection_plans(Instant::now());
+    assert!(matches!(
+        expired,
+        Err(vonk_agent::oci::OciError::Io(ref error))
+            if error.kind() == std::io::ErrorKind::TimedOut
+    ));
+    // Expiry is unknown coverage, never an empty/successful result; the same
+    // retained accepted Start is still readable under a fresh caller budget.
+    runtime
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+        .unwrap();
     let path = root
         .path()
         .join("run-metadata")
@@ -523,7 +557,9 @@ fn retained_lifecycle_requires_all_canonical_placement_fields() {
             .remove(field);
         fs::write(&path, serde_json::to_vec(&incomplete).unwrap()).unwrap();
         assert!(
-            runtime.recipe_run_inspection_plans().is_err(),
+            runtime
+                .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+                .is_err(),
             "missing {field}"
         );
     }
@@ -540,4 +576,667 @@ fn unbound_compiled_placement_requires_addresses_only_at_execution() {
     assert!(plan.runtime.placement.validate_bound().is_err());
     let bound = schema2_dual_plan();
     bound.runtime.placement.validate_bound().unwrap();
+}
+
+fn native_observation_plan(root: &Path) -> CompiledExecutionPlan {
+    let mut plan = schema2_single_plan();
+    persist_plan(root, &plan);
+    plan.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+    plan.security.network_mode = "bridge".parse().unwrap();
+    plan.validate().unwrap();
+    plan
+}
+
+/// The native retained Start producer, node-bound SQLite checkpoint and a new
+/// runtime/store instance on every page share the same exact generation.
+#[test]
+fn sixty_five_native_starts_survive_durable_pagination_and_restart() {
+    use std::collections::BTreeSet;
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let mut expected = BTreeSet::new();
+    for _ in 0..65 {
+        let id = uuid::Uuid::new_v4();
+        runtime
+            .prepare_start_with_inspection_identity(
+                &plan,
+                INSTALLATION,
+                &id.to_string(),
+                &placement(&plan),
+                &identity(&plan),
+            )
+            .unwrap();
+        expected.insert(id);
+    }
+    let database = root.path().join("agent-state.sqlite");
+    let mut observed = BTreeSet::new();
+    let mut pages = 0;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "native scan fixture exceeded its elapsed budget"
+        );
+        let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+        let checkpoint = state.observation_checkpoint().unwrap();
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        assert!(page.plans.len() <= 64);
+        assert!(page.failures.is_empty());
+        assert!(!page.empty_snapshot_safe);
+        for plan in &page.plans {
+            assert_eq!(plan.run_generation, 2);
+            assert!(
+                observed.insert(plan.run_id),
+                "restart must resume rather than replay an already delivered page"
+            );
+        }
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        assert_eq!(state.observation_checkpoint().unwrap(), page.checkpoint);
+        pages += 1;
+        if page.complete {
+            break;
+        }
+        assert!(pages < 70);
+    }
+    assert!(pages >= 2);
+    assert_eq!(observed, expected);
+}
+
+/// Reopen the existing SQL key with its original UTC JSON spelling. Reading
+/// must not rewrite the retained bytes, and the native witness must still let
+/// the next page continue the exact producer-created runs without replay.
+#[test]
+fn legacy_checkpoint_json_reopens_without_rewrite_and_resumes_native_scan() {
+    use std::collections::BTreeSet;
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let mut expected = BTreeSet::new();
+    for _ in 0..9 {
+        let id = uuid::Uuid::new_v4();
+        runtime
+            .prepare_start_with_inspection_identity(
+                &plan,
+                INSTALLATION,
+                &id.to_string(),
+                &placement(&plan),
+                &identity(&plan),
+            )
+            .unwrap();
+        expected.insert(id);
+    }
+    let first = runtime.recipe_run_inspection_page(None).unwrap();
+    assert!(!first.complete);
+    assert!(!first.plans.is_empty());
+    assert!(first.failures.is_empty());
+    let mut checkpoint = first.checkpoint.clone().unwrap();
+    assert!(checkpoint.witness.is_some());
+    // This exact nine-digit UTC spelling was emitted by the preceding native
+    // chrono owner; its final 789ns must survive the canonical reader.
+    checkpoint.started_at = "2026-10-07T00:00:00.123456789Z".to_owned();
+    let database = root.path().join("agent-state.sqlite");
+    let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+    state
+        .save_observation_checkpoint(Some(&checkpoint))
+        .unwrap();
+    drop(state);
+
+    // This fixture uses the actual native producer's record, with the spelling
+    // emitted by the preceding DateTime<Utc> checkpoint owner. No alternate
+    // reader or checkpoint migration is introduced in production.
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let stored: String = connection
+        .query_row(
+            "SELECT value FROM metadata WHERE key='recipe_observation_scan_v1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let legacy: Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(
+        legacy["started_at"],
+        json!("2026-10-07T00:00:00.123456789Z")
+    );
+    assert!(legacy.as_object().unwrap().contains_key("metadata_stamp"));
+    assert!(legacy.as_object().unwrap().contains_key("witness"));
+    let legacy_bytes = serde_json::to_string(&legacy).unwrap();
+    assert!(legacy_bytes.len() <= 16 * 1024);
+    connection
+        .execute(
+            "UPDATE metadata SET value=?1 WHERE key='recipe_observation_scan_v1'",
+            [&legacy_bytes],
+        )
+        .unwrap();
+    drop(connection);
+
+    let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+    let reopened = state.observation_checkpoint().unwrap().unwrap();
+    assert_eq!(reopened, checkpoint);
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    let unchanged: String = connection
+        .query_row(
+            "SELECT value FROM metadata WHERE key='recipe_observation_scan_v1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unchanged, legacy_bytes);
+    drop(connection);
+    let mut observed: BTreeSet<_> = first.plans.iter().map(|plan| plan.run_id).collect();
+    let mut retained = Some(reopened);
+    let mut pages = 0;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "native scan fixture exceeded its elapsed budget"
+        );
+        let page = runtime
+            .recipe_run_inspection_page(retained.as_ref())
+            .unwrap();
+        assert!(page.failures.is_empty());
+        assert!(!page.empty_snapshot_safe);
+        for plan in &page.plans {
+            assert_eq!(plan.run_generation, 2);
+            assert!(
+                observed.insert(plan.run_id),
+                "retained witness must not replay delivered runs"
+            );
+        }
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        retained = state.observation_checkpoint().unwrap();
+        pages += 1;
+        if page.complete {
+            break;
+        }
+        assert!(pages < 12);
+        drop(state);
+        state = StateStore::open(&database, "observation-test-node").unwrap();
+    }
+    assert_eq!(observed, expected);
+    assert!(retained.is_none());
+    // Shared Python/native corpus checks the actual persisted restart boundary,
+    // including ISO spellings accepted by Python but refused by RFC3339.
+    let cases: Value = serde_json::from_str(include_str!(
+        "../../../../agent_protocol/tests/fixtures/runtime_scan_cutoffs.json"
+    ))
+    .unwrap();
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    for (category, accepted) in [("valid", true), ("invalid", false)] {
+        for cutoff in cases[category].as_array().unwrap() {
+            let mut record = legacy.clone();
+            record["started_at"] = cutoff.clone();
+            connection.execute(
+                "INSERT INTO metadata(key,value) VALUES ('recipe_observation_scan_v1',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [serde_json::to_string(&record).unwrap()],
+            ).unwrap();
+            let restarted = StateStore::open(&database, "observation-test-node").unwrap();
+            let parsed = restarted.observation_checkpoint();
+            assert_eq!(parsed.is_ok(), accepted, "cutoff: {cutoff}");
+            if let Ok(Some(checkpoint)) = parsed {
+                assert_eq!(checkpoint.started_at, cutoff.as_str().unwrap());
+                assert!(
+                    runtime
+                        .recipe_run_inspection_page(Some(&checkpoint))
+                        .is_ok()
+                );
+            }
+        }
+    }
+}
+
+fn historical_runs(root: &Path, count: usize) {
+    for _ in 0..count {
+        fs::create_dir_all(root.join("runs").join(uuid::Uuid::new_v4().to_string())).unwrap();
+    }
+}
+
+#[test]
+fn retired_filesystem_witness_marks_restart_and_keeps_exact_start() {
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    historical_runs(root.path(), 4097);
+    let tail_name = fs::read_dir(root.path().join("runs"))
+        .unwrap()
+        .nth(4096)
+        .unwrap()
+        .unwrap()
+        .file_name();
+    let run_id = uuid::Uuid::parse_str(tail_name.to_str().unwrap()).unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            &run_id.to_string(),
+            &placement(&plan),
+            &identity(&plan),
+        )
+        .unwrap();
+    let lifecycle = root
+        .path()
+        .join("run-metadata")
+        .join(run_id.to_string())
+        .join("lifecycle.json");
+    let original = fs::read(&lifecycle).unwrap();
+    let first = runtime.recipe_run_inspection_page(None).unwrap();
+    assert!(!first.complete);
+    assert!(!first.scan_restarted);
+    let checkpoint = first.checkpoint.unwrap();
+    let witness_name = std::str::from_utf8(&checkpoint.witness.as_ref().unwrap().name).unwrap();
+    assert_ne!(witness_name, run_id.to_string());
+    let database = root.path().join("state.sqlite");
+    let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+    state
+        .save_observation_checkpoint(Some(&checkpoint))
+        .unwrap();
+    drop(state);
+    // Retire the actual directory entry which produced the persisted witness;
+    // no manufactured cookie, checkpoint flag or terminal receipt is injected.
+    fs::rename(
+        root.path().join("runs").join(witness_name),
+        root.path()
+            .join("runs")
+            .join(uuid::Uuid::new_v4().to_string()),
+    )
+    .unwrap();
+    let mut reopened_state = StateStore::open(&database, "observation-test-node").unwrap();
+    let retained = reopened_state.observation_checkpoint().unwrap().unwrap();
+    assert_eq!(retained, checkpoint);
+    let restarted = runtime.recipe_run_inspection_page(Some(&retained)).unwrap();
+    assert!(restarted.scan_restarted);
+    assert!(!restarted.empty_snapshot_safe);
+    reopened_state
+        .save_observation_checkpoint(restarted.checkpoint.as_ref())
+        .unwrap();
+    drop(reopened_state);
+    let reopened = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let healthy = reopened
+        .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+        .unwrap();
+    assert_eq!(healthy.len(), 1);
+    assert_eq!(healthy[0].run_id, run_id);
+    assert_eq!(healthy[0].run_generation, 2);
+    assert_eq!(fs::read(lifecycle).unwrap(), original);
+}
+
+/// A legacy collector must not publish stable enumeration (or empty absence)
+/// while directory authority is changing. Positive malformed-neighbor isolation
+/// remains a separate existing contract. Repair/restart must
+/// read the same native retained Start without changing its stored identity.
+#[test]
+fn whole_collection_mutation_stays_unknown_then_same_owner_reopens() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    };
+    struct StopOnDrop(Arc<AtomicBool>);
+    impl Drop for StopOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    for retain_start in [true, false] {
+        let root = tempdir().unwrap();
+        historical_runs(root.path(), 4097);
+        let plan = native_observation_plan(root.path());
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let tail_name = fs::read_dir(root.path().join("runs"))
+            .unwrap()
+            .nth(4096)
+            .unwrap()
+            .unwrap()
+            .file_name();
+        let run_id = uuid::Uuid::parse_str(tail_name.to_str().unwrap()).unwrap();
+        if retain_start {
+            runtime
+                .prepare_start_with_inspection_identity(
+                    &plan,
+                    INSTALLATION,
+                    &run_id.to_string(),
+                    &placement(&plan),
+                    &identity(&plan),
+                )
+                .unwrap();
+        }
+        let lifecycle = root
+            .path()
+            .join("run-metadata")
+            .join(run_id.to_string())
+            .join("lifecycle.json");
+        let original = if retain_start {
+            Some(fs::read(&lifecycle).unwrap())
+        } else {
+            None
+        };
+        let first_name = root
+            .path()
+            .join("runs")
+            .join(uuid::Uuid::new_v4().to_string());
+        let second_name = root
+            .path()
+            .join("runs")
+            .join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir(&first_name).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let changes = Arc::new(AtomicUsize::new(0));
+        let cleanup = StopOnDrop(stop.clone());
+        let worker_stop = stop.clone();
+        let worker_changes = changes.clone();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        // Rename one empty historical directory rather than growing unbounded
+        // history. Real filesystem stamp changes, not injected checkpoint facts,
+        // are the fault seen by the production reader.
+        let worker = std::thread::spawn(move || {
+            let mut from = first_name;
+            let mut to = second_name;
+            while !worker_stop.load(Ordering::SeqCst) && Instant::now() < deadline {
+                fs::rename(&from, &to).unwrap();
+                std::mem::swap(&mut from, &mut to);
+                worker_changes.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        while changes.load(Ordering::SeqCst) == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "directory fault producer did not start"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let before = changes.load(Ordering::SeqCst);
+        let faulted = runtime.recipe_run_inspection_plans(deadline);
+        let during = changes.load(Ordering::SeqCst);
+        drop(cleanup);
+        let shutdown_deadline = Instant::now() + Duration::from_secs(2);
+        while !worker.is_finished() {
+            assert!(
+                Instant::now() < shutdown_deadline,
+                "directory fault producer did not stop"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        std::thread::JoinHandle::join(worker).unwrap();
+        assert!(
+            during > before,
+            "the real root changed while collection was in flight"
+        );
+        // Retain only bounded outcome facts, never plans, arguments or paths.
+        // Rename overlap alone does not identify the reader's failure phase.
+        let outcome = match &faulted {
+            Ok(plans) => format!("ok positives={}", plans.len()),
+            Err(vonk_agent::oci::OciError::Io(error)) => {
+                format!("io kind={:?}", error.kind())
+            }
+            Err(error) => format!("error category={}", error.safe_start_context().1),
+        };
+        eprintln!(
+            "collection fault outcome: {outcome}; retained_start={retain_start}; renames_before={before}; renames_during={during}"
+        );
+        assert!(
+            matches!(faulted, Err(vonk_agent::oci::OciError::Io(ref error))
+            if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)),
+            "collection fault outcome: {outcome}; retained_start={retain_start}; renames_before={before}; renames_during={during}"
+        );
+        let reopened = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let recovered = reopened
+            .recipe_run_inspection_plans(Instant::now() + Duration::from_secs(30))
+            .unwrap();
+        if retain_start {
+            assert_eq!(recovered.len(), 1);
+            assert_eq!(recovered[0].run_id, run_id);
+            assert_eq!(recovered[0].run_generation, 2);
+            assert_eq!(fs::read(lifecycle).unwrap(), original.unwrap());
+        } else {
+            assert!(recovered.is_empty());
+        }
+    }
+}
+
+#[test]
+fn history_beyond_4096_keeps_cursor_progress_during_new_arrivals_and_restart() {
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    historical_runs(root.path(), 4097);
+    // Choose the actual filesystem iteration tail, rather than assuming a
+    // newly created UUID sorts last in getdents order.
+    let tail_id = fs::read_dir(root.path().join("runs"))
+        .unwrap()
+        .nth(4096)
+        .unwrap()
+        .unwrap()
+        .file_name()
+        .into_string()
+        .unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            &tail_id,
+            &placement(&plan),
+            &identity(&plan),
+        )
+        .unwrap();
+    let database = root.path().join("agent-state.sqlite");
+    let mut found = false;
+    let mut pages = 0;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "native scan fixture exceeded its elapsed budget"
+        );
+        let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+        let checkpoint = state.observation_checkpoint().unwrap();
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        found |= page
+            .plans
+            .iter()
+            .any(|plan| plan.run_id.to_string() == tail_id);
+        assert!(!page.empty_snapshot_safe);
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        pages += 1;
+        if page.complete {
+            break;
+        }
+        // A root stamp changes at every page. Resetting to zero would never
+        // reach EOF/history tail; witnessed filesystem progress must survive.
+        historical_runs(root.path(), 1);
+        assert!(pages < 80, "new arrivals must not rewind every page");
+    }
+    assert!(pages > 16);
+    assert!(
+        found,
+        "the retained Start must reach the consumer beyond old history"
+    );
+}
+
+#[test]
+fn complete_empty_history_uses_initial_cutoff_and_partial_scan_is_never_empty() {
+    let root = tempdir().unwrap();
+    historical_runs(root.path(), 4097);
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let first = runtime.recipe_run_inspection_page(None).unwrap();
+    assert!(!first.complete);
+    assert!(!first.empty_snapshot_safe);
+    let original_cutoff = first.observed_at;
+    let mut checkpoint = first.checkpoint;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "native scan fixture exceeded its elapsed budget"
+        );
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        checkpoint = page.checkpoint;
+        if page.complete {
+            assert!(page.empty_snapshot_safe);
+            assert_eq!(page.observed_at, original_cutoff);
+            break;
+        }
+        assert!(!page.empty_snapshot_safe);
+    }
+}
+
+#[test]
+fn interrupted_empty_scan_cannot_erase_a_native_start_arriving_between_pages() {
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    historical_runs(root.path(), 4097);
+    let database = root.path().join("agent-state.sqlite");
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    let first = runtime.recipe_run_inspection_page(None).unwrap();
+    let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+    state
+        .save_observation_checkpoint(first.checkpoint.as_ref())
+        .unwrap();
+    drop(state);
+    let plan = native_observation_plan(root.path());
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            RUN,
+            &placement(&plan),
+            &identity(&plan),
+        )
+        .unwrap();
+    let mut found = false;
+    // Arrivals before the cursor may belong to the next cycle. Both cycles
+    // must stay truthful; the next complete cycle must recover the new run.
+    for _ in 0..100 {
+        let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+        let checkpoint = state.observation_checkpoint().unwrap();
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        assert!(!page.empty_snapshot_safe);
+        found |= page.plans.iter().any(|plan| plan.run_id.to_string() == RUN);
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        if page.complete && found {
+            return;
+        }
+    }
+    panic!("the original scan and subsequent complete cycle must recover the new Start");
+}
+
+#[test]
+fn damaged_and_symlinked_runs_do_not_hide_exact_healthy_generation_on_later_pages() {
+    use std::os::unix::fs::symlink;
+    use vonk_agent::state::StateStore;
+    let root = tempdir().unwrap();
+    let outside = tempdir().unwrap();
+    fs::write(outside.path().join("untouched"), b"external state").unwrap();
+    let plan = native_observation_plan(root.path());
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    runtime
+        .prepare_start_with_inspection_identity(
+            &plan,
+            INSTALLATION,
+            RUN,
+            &placement(&plan),
+            &identity(&plan),
+        )
+        .unwrap();
+    for _ in 0..17 {
+        let id = uuid::Uuid::new_v4().to_string();
+        fs::create_dir_all(root.path().join("runs").join(&id)).unwrap();
+        let metadata = root.path().join("run-metadata").join(&id);
+        fs::create_dir_all(&metadata).unwrap();
+        fs::write(metadata.join("lifecycle.json"), b"not-json").unwrap();
+    }
+    symlink(
+        outside.path(),
+        root.path()
+            .join("runs")
+            .join(uuid::Uuid::new_v4().to_string()),
+    )
+    .unwrap();
+    let database = root.path().join("state.sqlite");
+    let mut healthy = 0;
+    let mut damaged = 0;
+    for _ in 0..30 {
+        let mut state = StateStore::open(&database, "observation-test-node").unwrap();
+        let checkpoint = state.observation_checkpoint().unwrap();
+        let page = runtime
+            .recipe_run_inspection_page(checkpoint.as_ref())
+            .unwrap();
+        assert!(!page.empty_snapshot_safe);
+        damaged += page.failures.len();
+        for plan in page.plans {
+            assert_eq!(plan.run_id.to_string(), RUN);
+            assert_eq!(plan.run_generation, 2);
+            healthy += 1;
+        }
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        if page.complete {
+            break;
+        }
+    }
+    assert_eq!(healthy, 1);
+    assert_eq!(damaged, 18);
+    assert_eq!(
+        fs::read(outside.path().join("untouched")).unwrap(),
+        b"external state"
+    );
 }

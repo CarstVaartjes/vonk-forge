@@ -27,12 +27,14 @@ class FleetProfileAssignmentFailure:
             reason (str):
             assignment_id (None | str | Unset):
             operation_id (None | str | Unset):
+            queue_index (int | None | Unset):
             terminal (bool | Unset):  Default: False.
      """
 
     reason: str
     assignment_id: None | str | Unset = UNSET
     operation_id: None | str | Unset = UNSET
+    queue_index: int | None | Unset = UNSET
     terminal: bool | Unset = False
 
 
@@ -54,6 +56,12 @@ class FleetProfileAssignmentFailure:
         else:
             operation_id = self.operation_id
 
+        queue_index: int | None | Unset
+        if isinstance(self.queue_index, Unset):
+            queue_index = UNSET
+        else:
+            queue_index = self.queue_index
+
         terminal = self.terminal
 
 
@@ -66,6 +74,8 @@ class FleetProfileAssignmentFailure:
             field_dict["assignment_id"] = assignment_id
         if operation_id is not UNSET:
             field_dict["operation_id"] = operation_id
+        if queue_index is not UNSET:
+            field_dict["queue_index"] = queue_index
         if terminal is not UNSET:
             field_dict["terminal"] = terminal
 
@@ -98,12 +108,23 @@ class FleetProfileAssignmentFailure:
         operation_id = _parse_operation_id(d.pop("operation_id", UNSET))
 
 
+        def _parse_queue_index(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        queue_index = _parse_queue_index(d.pop("queue_index", UNSET))
+
+
         terminal = d.pop("terminal", UNSET)
 
         fleet_profile_assignment_failure = cls(
             reason=reason,
             assignment_id=assignment_id,
             operation_id=operation_id,
+            queue_index=queue_index,
             terminal=terminal,
         )
 

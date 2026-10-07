@@ -10,7 +10,7 @@ import pytest
 from httpx2 import Response
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationView,
@@ -38,6 +38,7 @@ from .test_fleet_profiles import (
     NOW,
     _assessment,
     _exact_preparation,
+    _follow_profile_retry,
     _recipe_document,
     _SwitchAdapter,
     _uuid,
@@ -97,9 +98,10 @@ class _PairedReceiptAdapter(_SwitchAdapter):
             )
             child_receipts.append(
                 FleetProfileSwitchChildState(
+                    queue_index=item_index,
                     operation_id=operation_id,
                     kind="run",
-                    state="succeeded",
+                    state=LifecycleState.SUCCEEDED,
                     result=FleetProfileSwitchChildResult(
                         run_switch_operation_id=operation_id,
                         run_switch=run_switch,
@@ -172,9 +174,10 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     _seed(sessions)
     second_revision_id = _add_second_recipe_revision(sessions)
     adapter = _PairedReceiptAdapter()
+    now = [NOW]
     profiles = FleetProfileService(
         sessions,
-        clock=lambda: NOW,
+        clock=lambda: now[0],
         switch_adapter=adapter,
         assessment_provider=lambda _session, _assignment, expected_nodes, **_kwargs: (
             _assessment(_exact_preparation(tuple(expected_nodes)))
@@ -304,6 +307,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
         completed = profiles.application(application_id)
         if completed.state == "succeeded":
             break
+        _follow_profile_retry(profiles, application_id, now)
         assert profiles.tick() is True
     else:
         pytest.fail("paired application did not reach a terminal success")
@@ -324,16 +328,18 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     assert isinstance(result, FleetProfileSwitchAdapterResult)
     assert result.assignment_ids == sorted(assignments)
     assert len(result.children) == 2
+    assert [child.queue_index for child in result.children] == [0, 1]
     observed_lanes: set[tuple[str, str]] = set()
     receipt_ids: set[str] = set()
     for child in result.children:
-        assert child.state == "succeeded"
+        assert child.state == LifecycleState.SUCCEEDED
         assert child.result is not None
         receipt = child.result
         assert isinstance(receipt, FleetProfileSwitchChildResult)
         assert receipt.run_switch_operation_id == child.operation_id
         run_switch = receipt.run_switch
         assert run_switch.profile_application_id == application_id
+        assert child.queue_index == run_switch.item_index
         assignment_id = result.assignment_ids[run_switch.item_index]
         assignment = assignments[assignment_id]
         assert [member.node_id for member in run_switch.members] == [

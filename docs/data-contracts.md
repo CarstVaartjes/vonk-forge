@@ -53,6 +53,7 @@ of the 50 hand-written serde types of the baseline are generated now.
 | `rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs` | `PersistBindingInput` | test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones |
 | `rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs` | `SerializeInput` | test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones |
 | `rust/crates/vonk-agent/examples/restart_recovery_probe.rs` | `Request` | test harness: stdin request of the restart-recovery probe, not product data |
+| `rust/crates/vonk-agent/examples/acceptance_certificate_renewal.rs` | `Evidence` | test harness: stdout provenance of the separately built hosted certificate-renewal acceptance peer, never installed or read as a production wire document; records the real native rotation clock, exact agent binary/build identity, certificate/key changes and fixed thirty-day lifetimes |
 | `rust/crates/vonk-agent/src/base_images.rs` | `Descriptor` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
 | `rust/crates/vonk-agent/src/base_images.rs` | `ImageConfig` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
 | `rust/crates/vonk-agent/src/base_images.rs` | `Index` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
@@ -90,6 +91,7 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 
 | File | Type | Reason |
 | --- | --- | --- |
+| `control/web/src/api/fleet-event-connection.ts` | `FleetEventStream` | Browser-local event connection handle with listener/disposal methods and its route URL; never serialized as API data. Event payloads use the generated canonical route schema. |
 | `control/web/src/api/types.ts` | `ActivityFilters` | UI-only state or form draft; never serialized to the API |
 | `control/web/src/api/types.ts` | `ArtifactTransferProgress` | browser-local upload hashing progress and worker messages; not API data |
 | `control/web/src/api/types.ts` | `ControlApi` | method-signature interface over the generated schema types (client seam for tests); declares no data fields |
@@ -170,6 +172,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/recipe_operations.py` | agent-protocol | 10 | Closed declarative protocol for digest-bound recipe lifecycle work. |
 | `agent_protocol/src/vonk_agent_protocol/route_activation.py` | agent-protocol | 2 | Canonical schema-2 activation receipt shared with the LiteLLM supervisor. |
 | `agent_protocol/src/vonk_agent_protocol/runtime_preflight.py` | agent-protocol | 3 | Current recipe runtime preflight wire contract; no raw host diagnostics. |
+| `agent_protocol/src/vonk_agent_protocol/runtime_scan.py` | agent-protocol | 3 | Node-local durable traversal checkpoint for managed run observation; native filesystem witnesses remain authoritative. |
 | `agent_protocol/src/vonk_agent_protocol/source_bundles.py` | agent-protocol | 3 | Canonical source-bundle digest document and verified storage metadata. |
 | `agent_protocol/src/vonk_agent_protocol/telemetry.py` | agent-protocol | 3 | The authenticated agent telemetry wire contract: a flat sample of host scalars. |
 | `agent_protocol/src/vonk_agent_protocol/wire_model.py` | agent-protocol | 5 | Shared strict JSON boundary helpers for Pydantic wire models. |
@@ -187,6 +190,7 @@ module defines its own.
 | `control/src/vonk_control/catalog_api.py` | declared | 3 | Strict authenticated HTTP surface for the local database recipe catalog. |
 | `control/src/vonk_control/catalog_revision_contract.py` | controller-contract | 9 | Typed readers and writers for immutable catalog revision JSON columns. |
 | `control/src/vonk_control/catalog_sync_contract.py` | controller-contract | 4 | Canonical durable catalog synchronization evidence shared with the API. |
+| `control/src/vonk_control/cli_update_contract.py` | controller-contract | 1 | Authenticated CLI compatibility observation; its canonical schema is generated into the installed updater package. |
 | `control/src/vonk_control/cluster_mappings.py` | declared | 2 | The identity document whose digest binds a cluster mapping plan to its exact placement. |
 | `control/src/vonk_control/compiled_artifact_contract.py` | controller-contract | 12 | Canonical compiled contract for artifact-producing recipe jobs. |
 | `control/src/vonk_control/compiled_execution_plan.py` | declared | 7 | Verified Controller receipts for the compiled Spark execution plan. |
@@ -195,8 +199,9 @@ module defines its own.
 | `control/src/vonk_control/enrollment_contract.py` | controller-contract | 1 | Nonsecret operator enrollment status and request identity. |
 | `control/src/vonk_control/failure_evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
+| `control/src/vonk_control/fleet_profile_adapter_conversion_contract.py` | controller-contract | 3 | Private one-time retained journal proof inputs and typed conversion outcome; never execution authority. |
 | `control/src/vonk_control/fleet_profile_contract.py` | controller-contract | 50 | Strict public contracts for saved Fleet profiles and their applications. |
-| `control/src/vonk_control/fleet_projection.py` | declared | 12 | Bounded typed projection of PostgreSQL-authoritative Fleet state. |
+| `control/src/vonk_control/fleet_projection.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
 | `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
@@ -206,11 +211,13 @@ module defines its own.
 | `control/src/vonk_control/litellm.py` | declared | 7 | The LiteLLM configuration the Controller renders from published routes (our document, LiteLLM's file format). |
 | `control/src/vonk_control/model_cache.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
 | `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
+| `control/src/vonk_control/observation_transfer.py` | controller-contract | 5 | Canonical immutable observation transfer records; sequence, identity, byte count and final digest bind the original complete Fleet or platform payload. |
 | `control/src/vonk_control/operation_api.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
 | `control/src/vonk_control/operation_blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
 | `control/src/vonk_control/operation_contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
 | `control/src/vonk_control/operation_item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
 | `control/src/vonk_control/operator_projection_api.py` | declared | 10 | Singular operator API for Fleet, Model and Recipe projections. |
+| `control/src/vonk_control/platform_observation.py` | controller-contract | 3 | API and worker process provenance observations; unavailable producer facts remain nullable. |
 | `control/src/vonk_control/preparation_contract.py` | controller-contract | 10 | Shared schema-2 truth for Controller-owned rollout preparation. |
 | `control/src/vonk_control/profile_stop_authority.py` | declared | 4 | Typed ownership for profile-authorized one-shot JobRun cleanup Stops. |
 | `control/src/vonk_control/recipe_availability_intent.py` | declared | 4 | Original requests, distinct from resolved preparation and worker effects. |
@@ -244,7 +251,7 @@ module defines its own.
 | | Before | After |
 | --- | --- | --- |
 | Rust hand-written serde types outside `generated.rs` (src) | 50 in 13 files | 11 in 6 files, all external formats or tolerant site files |
-| Rust serde types in examples and tests (harness inputs) | 7 | 7, allowlisted |
+| Rust serde types in examples and tests (harness inputs) | 7 | 8, allowlisted |
 | TypeScript hand-written API data shapes | 1 named by the owner (`CliTokenDownload`), plus an inline body type and a blocker shape | 0; 44 UI-only shapes allowlisted with reasons |
 | Python duplicate model groups (same name or same bases and fields) | 12 | 0 |
 | Python copies of contract words | 2 (`cli_states.py`, `route_activation.py`) | 0; both read generated modules |

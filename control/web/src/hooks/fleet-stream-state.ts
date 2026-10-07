@@ -1,5 +1,6 @@
-import type {TelemetryPoint, VisualFleetSnapshot} from "../api/types";
-import {reconcileTelemetryWarnings, telemetryFreshnessAt} from "../lib/fleet";
+import { compareWire, type WireNumber } from "../api/contract-numeric";
+import type { TelemetryPoint, VisualFleetSnapshot } from "../api/types";
+import { reconcileTelemetryWarnings, telemetryFreshnessAt } from "../lib/fleet";
 
 export type FleetConnectionState = "connecting" | "live" | "reconnecting" | "polling";
 
@@ -9,7 +10,8 @@ export type FleetStreamState = {
   lastResetReason: string | null;
   loading: boolean;
   refreshRevision: number;
-  requiredRefreshCursor: number | null;
+  requiredRefreshCursor: WireNumber | null;
+  observationGap: boolean;
   snapshot?: VisualFleetSnapshot;
 };
 
@@ -20,37 +22,61 @@ export const initialFleetStreamState: FleetStreamState = {
   loading: true,
   refreshRevision: 0,
   requiredRefreshCursor: null,
+  observationGap: false,
 };
 
 export type FleetStreamAction =
-  | {type: "requested-snapshot"; snapshot: VisualFleetSnapshot}
-  | {type: "reset-snapshot"; snapshot: VisualFleetSnapshot; reason: string}
-  | {type: "node-telemetry"; cursor: number; nodeId: string; sample: TelemetryPoint; receivedAt: Date}
-  | {type: "node-profile-updated"; nodeId: string; displayName: string}
-  | {type: "projection-refresh"; cursor: number}
-  | {type: "stream-open"}
-  | {type: "stream-error"}
-  | {type: "polling-start"}
-  | {type: "request-error"; message: string}
-  | {type: "retry"};
+  | { type: "requested-snapshot"; snapshot: VisualFleetSnapshot }
+  | { type: "refresh-notice"; cursor: WireNumber; reason: string }
+  | { type: "reset-snapshot"; snapshot: VisualFleetSnapshot; reason: string }
+  | {
+      type: "node-telemetry";
+      cursor: WireNumber;
+      nodeId: string;
+      sample: TelemetryPoint;
+      receivedAt: Date;
+    }
+  | { type: "node-profile-updated"; nodeId: string; displayName: string }
+  | { type: "projection-refresh"; cursor: WireNumber }
+  | { type: "stream-gap" }
+  | { type: "stream-open" }
+  | { type: "stream-error" }
+  | { type: "polling-start" }
+  | { type: "request-error"; message: string }
+  | { type: "retry" };
 
-function currentCursor(state: FleetStreamState): number {
+function currentCursor(state: FleetStreamState): WireNumber {
   return state.snapshot?.event_cursor ?? -1;
 }
 
-export function fleetStreamReducer(state: FleetStreamState, action: FleetStreamAction): FleetStreamState {
+export function fleetStreamReducer(
+  state: FleetStreamState,
+  action: FleetStreamAction,
+): FleetStreamState {
   switch (action.type) {
     case "requested-snapshot":
-      if (action.snapshot.event_cursor < currentCursor(state)) return state;
+      if (compareWire(action.snapshot.event_cursor, currentCursor(state)) < 0) return state;
       return {
         ...state,
         error: "",
         loading: false,
-        requiredRefreshCursor: state.requiredRefreshCursor !== null
-          && action.snapshot.event_cursor >= state.requiredRefreshCursor
-          ? null
-          : state.requiredRefreshCursor,
+        observationGap: false,
+        requiredRefreshCursor:
+          state.requiredRefreshCursor !== null &&
+          compareWire(action.snapshot.event_cursor, state.requiredRefreshCursor) >= 0
+            ? null
+            : state.requiredRefreshCursor,
         snapshot: action.snapshot,
+      };
+    case "stream-gap":
+      return { ...state, observationGap: true };
+    case "refresh-notice":
+      return {
+        ...state,
+        observationGap: true,
+        lastResetReason: action.reason,
+        requiredRefreshCursor: action.cursor,
+        refreshRevision: state.refreshRevision + 1,
       };
     case "reset-snapshot":
       return {
@@ -58,11 +84,30 @@ export function fleetStreamReducer(state: FleetStreamState, action: FleetStreamA
         error: "",
         lastResetReason: action.reason,
         loading: false,
-        requiredRefreshCursor: null,
+        observationGap: false,
+        requiredRefreshCursor:
+          state.requiredRefreshCursor !== null &&
+          compareWire(action.snapshot.event_cursor, state.requiredRefreshCursor) < 0
+            ? state.requiredRefreshCursor
+            : null,
         snapshot: action.snapshot,
       };
     case "node-telemetry": {
-      if (!state.snapshot || action.cursor <= state.snapshot.event_cursor || action.sample.node_id !== action.nodeId) return state;
+      if (
+        !state.snapshot ||
+        compareWire(action.cursor, state.snapshot.event_cursor) <= 0 ||
+        action.sample.node_id !== action.nodeId
+      )
+        return state;
+      if (state.observationGap || state.requiredRefreshCursor !== null) {
+        return {
+          ...state,
+          requiredRefreshCursor:
+            compareWire(action.cursor, state.requiredRefreshCursor ?? -1) > 0
+              ? action.cursor
+              : state.requiredRefreshCursor,
+        };
+      }
       const freshness = telemetryFreshnessAt(action.sample.observed_at, action.receivedAt);
       const observed = Date.parse(action.sample.observed_at);
       const ageSeconds = Number.isFinite(observed)
@@ -73,11 +118,15 @@ export function fleetStreamReducer(state: FleetStreamState, action: FleetStreamA
         snapshot: {
           ...state.snapshot,
           event_cursor: action.cursor,
-          nodes: state.snapshot.nodes.map(node => node.id === action.nodeId ? {
-            ...node,
-            telemetry: {age_seconds: ageSeconds, freshness, sample: action.sample},
-            warnings: reconcileTelemetryWarnings(node.warnings, freshness),
-          } : node),
+          nodes: state.snapshot.nodes.map((node) =>
+            node.id === action.nodeId
+              ? {
+                  ...node,
+                  telemetry: { age_seconds: ageSeconds, freshness, sample: action.sample },
+                  warnings: reconcileTelemetryWarnings(node.warnings, freshness),
+                }
+              : node,
+          ),
         },
       };
     }
@@ -87,27 +136,33 @@ export function fleetStreamReducer(state: FleetStreamState, action: FleetStreamA
         ...state,
         snapshot: {
           ...state.snapshot,
-          nodes: state.snapshot.nodes.map(node => node.id === action.nodeId
-            ? {...node, display_name: action.displayName}
-            : node),
+          nodes: state.snapshot.nodes.map((node) =>
+            node.id === action.nodeId ? { ...node, display_name: action.displayName } : node,
+          ),
         },
       };
     case "projection-refresh":
-      if (!state.snapshot || action.cursor <= Math.max(state.snapshot.event_cursor, state.requiredRefreshCursor ?? -1)) return state;
+      if (compareWire(action.cursor, state.requiredRefreshCursor ?? -1) <= 0) return state;
+      if (
+        state.snapshot &&
+        (compareWire(action.cursor, state.snapshot.event_cursor) <= 0 ||
+          compareWire(action.cursor, state.requiredRefreshCursor ?? -1) <= 0)
+      )
+        return state;
       return {
         ...state,
         refreshRevision: state.refreshRevision + 1,
         requiredRefreshCursor: action.cursor,
       };
     case "stream-open":
-      return {...state, connection: "live", error: ""};
+      return { ...state, connection: "live", error: "" };
     case "stream-error":
-      return {...state, connection: "reconnecting"};
+      return { ...state, connection: "reconnecting" };
     case "polling-start":
-      return {...state, connection: "polling"};
+      return { ...state, connection: "polling" };
     case "request-error":
-      return {...state, error: action.message, loading: false};
+      return { ...state, error: action.message, loading: false };
     case "retry":
-      return {...state, connection: "connecting", error: "", loading: true};
+      return { ...state, connection: "connecting", error: "", loading: true };
   }
 }

@@ -2,7 +2,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -25,6 +25,22 @@ use crate::failure_evidence::{FailureProcessLogs, sanitize_tail};
 /// The frame ceiling is owned by the wire contract so the agent, the upgrade
 /// channel and the privileged helper cannot drift.
 const MAX_HELPER_MESSAGE_BYTES: usize = vonk_agent_protocol::MAX_HELPER_FRAME_BYTES;
+
+/// The existing background observation concurrency wave belongs to native
+/// helper work, not to futures that may be cancelled before that work finishes.
+/// Foreground lifecycle/diagnostic requests do not wait on this pool.
+pub(crate) const BACKGROUND_RUN_INSPECTION_CONCURRENCY: usize = 8;
+fn background_inspection_slots() -> std::sync::Arc<tokio::sync::Semaphore> {
+    static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    SLOTS
+        .get_or_init(|| {
+            std::sync::Arc::new(tokio::sync::Semaphore::new(
+                BACKGROUND_RUN_INSPECTION_CONCURRENCY,
+            ))
+        })
+        .clone()
+}
 
 #[derive(Debug, Error)]
 pub enum HostRuntimeError {
@@ -314,12 +330,35 @@ impl HostRuntimeBoundary<'_> {
             .map(|report| report.running)
     }
 
+    pub async fn inspect_recipe_run_for_observation(
+        &self,
+        arguments: Vec<String>,
+    ) -> Result<bool, HostRuntimeError> {
+        let permit = background_inspection_slots()
+            .acquire_owned()
+            .await
+            .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))?;
+        self.inspect_recipe_run_report_with_permit(arguments, false, Some(permit))
+            .await
+            .map(|report| report.running)
+    }
+
     /// Like `inspect_recipe_run`, and when `include_logs` is set also reads the
     /// running container's bounded output without stopping it.
     pub async fn inspect_recipe_run_report(
         &self,
         arguments: Vec<String>,
         include_logs: bool,
+    ) -> Result<RunInspectionReport, HostRuntimeError> {
+        self.inspect_recipe_run_report_with_permit(arguments, include_logs, None)
+            .await
+    }
+
+    async fn inspect_recipe_run_report_with_permit(
+        &self,
+        arguments: Vec<String>,
+        include_logs: bool,
+        permit: Option<tokio::sync::OwnedSemaphorePermit>,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
         let request = HostRuntimeRequest {
             action: HostRuntimeAction::RunInspect,
@@ -339,7 +378,7 @@ impl HostRuntimeBoundary<'_> {
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let digest = hex_sha256(&body);
         let request_path = write_request(self.request_root, &digest, &body)?;
-        let _request_cleanup = RequestFileCleanup(request_path);
+        let request_cleanup = RequestFileCleanup(request_path);
         let request_id = uuid::Uuid::new_v4();
         let frame = canonical_generated_json(&RecipeRunInspectionRequest {
             request_id,
@@ -349,6 +388,10 @@ impl HostRuntimeBoundary<'_> {
         .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding))?;
         let helper_socket = self.helper_socket.to_path_buf();
         let response = tokio::task::spawn_blocking(move || {
+            // Both native ownership and its request stay alive until actual
+            // socket work returns, even when the awaiting page is cancelled.
+            let _permit = permit;
+            let _request_cleanup = request_cleanup;
             call_helper(&helper_socket, &frame, Duration::from_secs(15))
         })
         .await
@@ -776,8 +819,10 @@ pub fn finding_word(code: RuntimePreflightFindingCode) -> String {
 }
 
 fn write_request(root: &Path, digest: &str, body: &[u8]) -> Result<PathBuf, HostRuntimeError> {
-    match fs::create_dir(root) {
-        Ok(()) => fs::set_permissions(root, fs::Permissions::from_mode(0o700))?,
+    // Publish the directory with its owner-only mode in the mkdir itself.
+    // Parallel callers must never observe an intermediate permissive root.
+    match fs::DirBuilder::new().mode(0o700).create(root) {
+        Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => return Err(error.into()),
     }
@@ -895,6 +940,444 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
     use vonk_agent_protocol::{HostRuntimeAction, RecipeStartRequest};
+
+    #[test]
+    fn request_root_publication_has_no_permissive_intermediate_state() {
+        const CHILD: &str = "VONK_REQUEST_ROOT_PUBLICATION_COUNTERPROOF";
+        if std::env::var_os(CHILD).is_none() {
+            // Umask is process-wide. Give only this isolated child the old
+            // publisher's ordinary 022 umask; parallel tests remain untouched.
+            let mut child = std::process::Command::new("sh")
+                .args(["-c", "umask 022; exec \"$@\"", "request-root-counterproof"])
+                .arg(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "host_runtime::tests::request_root_publication_has_no_permissive_intermediate_state",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .spawn()
+                .unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            // Reserve one second inside the existing total budget to reap
+            // this exact child; killing is not itself proof of completion.
+            let work_deadline = deadline - Duration::from_secs(1);
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(
+                        status.success(),
+                        "request root publication counterproof failed"
+                    );
+                    return;
+                }
+                if std::time::Instant::now() >= work_deadline {
+                    let kill_error = child.kill().err();
+                    while std::time::Instant::now() < deadline {
+                        if child.try_wait().unwrap().is_some() {
+                            panic!(
+                                "request root publication counterproof exceeded its elapsed budget; exact child reaped"
+                            );
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    panic!(
+                        "request root publication child {} remains unreaped after its elapsed budget; kill error: {:?}",
+                        child.id(),
+                        kill_error
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let temp = tempfile::tempdir().unwrap();
+        let old_root = temp.path().join("two-phase");
+        // Pause the old real two-phase publisher after mkdir, before chmod.
+        // Another actual writer must refuse the published unsafe root.
+        fs::create_dir(&old_root).unwrap();
+        assert_eq!(
+            fs::metadata(&old_root).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        let (result_sender, result_receiver) = std::sync::mpsc::channel();
+        let writer_root = old_root.clone();
+        let writer = std::thread::spawn(move || {
+            let result = write_request(&writer_root, &"a".repeat(64), b"{}");
+            let _ = result_sender.send(result);
+        });
+        let result = match result_receiver
+            .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let retained = temp.keep();
+                panic!(
+                    "request root writer outcome unresolved ({error}); owned fixture retained at {}",
+                    retained.display()
+                );
+            }
+        };
+        while !writer.is_finished() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if !writer.is_finished() {
+            let retained = temp.keep();
+            panic!(
+                "request root writer completion unresolved; owned fixture retained at {}",
+                retained.display()
+            );
+        }
+        // The same owned handle was observed finished. Joining only surfaces
+        // its panic; it cannot wait for further writer work or fixture cleanup.
+        writer.join().unwrap();
+        let old_error =
+            result.expect_err("another writer must refuse the unsafe intermediate directory");
+        assert_eq!(old_error.preflight_code(), "helper_request_storage_invalid");
+        fs::set_permissions(&old_root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(write_request(&old_root, &"a".repeat(64), b"{}").is_ok());
+
+        let atomic_root = temp.path().join("atomic");
+        let path = write_request(&atomic_root, &"b".repeat(64), b"{}").unwrap();
+        assert_eq!(
+            fs::metadata(&atomic_root).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(fs::read(path).unwrap(), b"{}");
+        // The cancellation proof below starts all eight native calls against
+        // one absent root, and keeps their actual files through cancellation.
+    }
+
+    /// Real Unix framing and the production spawn_blocking boundary prove
+    /// ownership survives abandoned logical pages. Only native process-running
+    /// evidence is a fixture response; permits/socket/request cleanup are real.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work_ready() {
+        use super::{BACKGROUND_RUN_INSPECTION_CONCURRENCY, HostRuntimeBoundary};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Condvar, Mutex};
+        struct Gate {
+            release: Arc<(Mutex<bool>, Condvar)>,
+            stop: Arc<AtomicBool>,
+            server: Option<std::thread::JoinHandle<()>>,
+            tasks: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
+            deadline: std::time::Instant,
+            fixture: Option<tempfile::TempDir>,
+        }
+        impl Drop for Gate {
+            fn drop(&mut self) {
+                let mut cleanup_complete = true;
+                let tasks = self.tasks.lock().unwrap_or_else(|error| error.into_inner());
+                for task in tasks.iter() {
+                    task.abort();
+                }
+                *self
+                    .release
+                    .0
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = true;
+                self.release.1.notify_all();
+                self.stop.store(true, Ordering::SeqCst);
+                if let Some(server) = self.server.take() {
+                    while !server.is_finished() && std::time::Instant::now() < self.deadline {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    // Never turn a bounded cleanup into an unbounded join.
+                    // A still-running server keeps the fixture below intact.
+                    if server.is_finished() {
+                        cleanup_complete &= server.join().is_ok();
+                    } else {
+                        cleanup_complete = false;
+                    }
+                }
+                while tasks.iter().any(|task| !task.is_finished())
+                    && std::time::Instant::now() < self.deadline
+                {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                cleanup_complete &= tasks.iter().all(|task| task.is_finished());
+                // An aborted async task can leave real spawn_blocking work
+                // alive. Returning all permits fences its request cleanup.
+                let slots = super::background_inspection_slots();
+                loop {
+                    if let Ok(permits) = slots
+                        .clone()
+                        .try_acquire_many_owned(BACKGROUND_RUN_INSPECTION_CONCURRENCY as u32)
+                    {
+                        drop(permits);
+                        break;
+                    }
+                    if std::time::Instant::now() >= self.deadline {
+                        cleanup_complete = false;
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                if !cleanup_complete {
+                    // Files remain owned by unresolved native calls. Do not
+                    // turn a deadline or a failed reaper into false absence.
+                    if let Some(fixture) = self.fixture.take() {
+                        let _retained = fixture.keep();
+                    }
+                    eprintln!("inspection fixture cleanup unresolved; owned files retained");
+                    if !std::thread::panicking() {
+                        panic!("inspection fixture cleanup exceeded its elapsed budget or failed");
+                    }
+                }
+            }
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let temp = tempfile::tempdir().unwrap();
+        let socket = temp.path().join("inspection.sock");
+        let requests = temp.path().join("requests");
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let tasks = Arc::new(Mutex::new(Vec::new()));
+        let mut gate = Gate {
+            release: release.clone(),
+            stop: stop.clone(),
+            server: None,
+            tasks: tasks.clone(),
+            deadline,
+            fixture: Some(temp),
+        };
+        let native_active = active.clone();
+        let native_maximum = maximum.clone();
+        let native_started = started.clone();
+        let native_requests = requests.clone();
+        let server = std::thread::spawn(move || {
+            let mut workers = Vec::new();
+            while !stop.load(Ordering::SeqCst) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "inspection fixture server exceeded its elapsed budget"
+                );
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
+                    Err(error) => panic!("inspection listener: {error}"),
+                };
+                let active = native_active.clone();
+                let maximum = native_maximum.clone();
+                let started = native_started.clone();
+                let release = release.clone();
+                let requests = native_requests.clone();
+                workers.push(std::thread::spawn(move || {
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut prefix = [0; 4];
+                    stream.read_exact(&mut prefix).unwrap();
+                    let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
+                    stream.read_exact(&mut body).unwrap();
+                    let request: vonk_agent_protocol::RecipeRunInspectionRequest =
+                        vonk_agent_protocol::parse_strict(&body).unwrap();
+                    let background = request.include_logs != Some(true);
+                    if background {
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        maximum.fetch_max(current, Ordering::SeqCst);
+                        started.fetch_add(1, Ordering::SeqCst);
+                        let mut released = release.0.lock().unwrap();
+                        while !*released {
+                            let remaining = deadline
+                                .checked_duration_since(std::time::Instant::now())
+                                .expect("inspection fixture release exceeded its elapsed budget");
+                            let (next, timeout) =
+                                release.1.wait_timeout(released, remaining).unwrap();
+                            released = next;
+                            assert!(
+                                !timeout.timed_out() || *released,
+                                "inspection fixture release timed out"
+                            );
+                        }
+                        // Dropping an awaiting logical page must neither free
+                        // the native permit nor delete its still-owned request.
+                        assert!(
+                            requests
+                                .join(format!("{}.json", request.request_sha256))
+                                .exists()
+                        );
+                    }
+                    let response = super::HelperResponse {
+                        schema_version: 1,
+                        request_id: Some(request.request_id),
+                        status: super::HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
+                        process_running: Some(true),
+                        exit_code: None,
+                        error_code: None,
+                        diagnostic: None,
+                        process_logs: None,
+                    };
+                    let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
+                    if background {
+                        // Native inspection is finished before its reply makes
+                        // the client's permit available to the next call.
+                        active.fetch_sub(1, Ordering::SeqCst);
+                    }
+                    stream
+                        .write_all(&(body.len() as u32).to_be_bytes())
+                        .unwrap();
+                    stream.write_all(&body).unwrap();
+                }));
+            }
+            let mut worker_failed = false;
+            for worker in workers {
+                while !worker.is_finished() {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "inspection fixture worker exceeded its elapsed budget"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                worker_failed |= std::thread::JoinHandle::join(worker).is_err();
+            }
+            assert!(!worker_failed, "inspection fixture worker failed");
+        });
+        gate.server = Some(server);
+        let spawn = |background: bool| {
+            let socket = socket.clone();
+            let requests = requests.clone();
+            let task = tokio::spawn(async move {
+                let client = crate::client::AgentHttpClient::for_http_test(
+                    "http://127.0.0.1:9/",
+                    "spk_0123456789abcdef0123456789abcdef",
+                );
+                let boundary = HostRuntimeBoundary {
+                    client: &client,
+                    request_root: &requests,
+                    helper_socket: &socket,
+                };
+                let arguments = vec![Uuid::new_v4().to_string()];
+                if background {
+                    boundary.inspect_recipe_run_for_observation(arguments).await
+                } else {
+                    boundary
+                        .inspect_recipe_run_report(arguments, true)
+                        .await
+                        .map(|report| report.running)
+                }
+            });
+            tasks.lock().unwrap().push(task.abort_handle());
+            task
+        };
+        let mut first: Vec<_> = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+            .map(|_| spawn(true))
+            .collect();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while active.load(Ordering::SeqCst) != BACKGROUND_RUN_INSPECTION_CONCURRENCY {
+                for task in &mut first {
+                    if task.is_finished() {
+                        match task.await {
+                            Ok(Err(error)) => panic!(
+                                "inspection fixture startup refused request: {}",
+                                error.preflight_code()
+                            ),
+                            Ok(Ok(_)) => {
+                                panic!("inspection fixture unexpectedly completed before release")
+                            }
+                            Err(_) => panic!("inspection fixture startup task failed to join"),
+                        }
+                    }
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "inspection fixture startup exceeded its elapsed budget"
+                );
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        for task in first {
+            task.abort();
+            let _ = task.await;
+        }
+        for _ in 0..3 {
+            let page: Vec<_> = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+                .map(|_| spawn(true))
+                .collect();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            for task in page {
+                task.abort();
+                let _ = task.await;
+            }
+            assert_eq!(
+                active.load(Ordering::SeqCst),
+                BACKGROUND_RUN_INSPECTION_CONCURRENCY
+            );
+            assert_eq!(
+                started.load(Ordering::SeqCst),
+                BACKGROUND_RUN_INSPECTION_CONCURRENCY
+            );
+        }
+        // A real foreground boundary call has its own lifecycle lane. It is
+        // not stuck behind permits still owned by abandoned observer futures.
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), spawn(false))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            maximum.load(Ordering::SeqCst),
+            BACKGROUND_RUN_INSPECTION_CONCURRENCY
+        );
+        *gate.release.0.lock().unwrap() = true;
+        gate.release.1.notify_all();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), spawn(true))
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while active.load(Ordering::SeqCst) != 0 {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "inspection fixture draining exceeded its elapsed budget"
+                );
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        // Returning every native permit also proves request cleanup happened
+        // in the blocking closures, rather than just in the fixture server.
+        let permits = tokio::time::timeout(
+            Duration::from_secs(2),
+            super::background_inspection_slots()
+                .acquire_many_owned(BACKGROUND_RUN_INSPECTION_CONCURRENCY as u32),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        *gate.release.0.lock().unwrap() = true;
+        gate.release.1.notify_all();
+        gate.stop.store(true, Ordering::SeqCst);
+        while !gate.server.as_ref().unwrap().is_finished() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "inspection fixture server shutdown exceeded its elapsed budget"
+            );
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        std::thread::JoinHandle::join(gate.server.take().unwrap()).unwrap();
+        assert!(fs::read_dir(requests).unwrap().next().is_none());
+        drop(permits);
+        drop(gate);
+    }
 
     #[test]
     fn runtime_rejection_binds_and_redacts_captured_process_logs() {

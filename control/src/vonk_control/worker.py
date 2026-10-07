@@ -109,7 +109,11 @@ class WorkerHeartbeatRecorder:
     def _register_process_start(self) -> None:
         from sqlalchemy import select
 
+        from cluster_profiles.runtime_identity import packaged_runtime_identity
+
         from .models import ControlProcessHeartbeat
+
+        identity = packaged_runtime_identity()
 
         with self._sessions.begin() as session:
             heartbeat = session.scalar(
@@ -126,12 +130,16 @@ class WorkerHeartbeatRecorder:
                     ControlProcessHeartbeat(
                         process_kind="worker",
                         process_instance_id=self._process_instance_id,
+                        source_sha=identity.source_sha,
+                        worker_contract_sha256=identity.worker_contract_sha256,
                         loop_sequence=0,
                         completed_at=None,
                     )
                 )
                 return
             heartbeat.process_instance_id = self._process_instance_id
+            heartbeat.source_sha = identity.source_sha
+            heartbeat.worker_contract_sha256 = identity.worker_contract_sha256
             heartbeat.loop_sequence = 0
             heartbeat.completed_at = None
 

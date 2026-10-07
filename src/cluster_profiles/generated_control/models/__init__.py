@@ -24,6 +24,7 @@ from .agent_upgrade_rollout_payload_sources import AgentUpgradeRolloutPayloadSou
 from .agent_upgrade_rollout_result import AgentUpgradeRolloutResult
 from .agent_upgrade_rollout_result_skipped_type_0 import AgentUpgradeRolloutResultSkippedType0
 from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
+from .api_runtime_observation import ApiRuntimeObservation
 from .artifact_distribution_payload import ArtifactDistributionPayload
 from .artifact_distribution_result import ArtifactDistributionResult
 from .artifact_file_declaration import ArtifactFileDeclaration
@@ -106,6 +107,9 @@ from .certificate_issuance_binding import CertificateIssuanceBinding
 from .certificate_issuance_binding_purpose import CertificateIssuanceBindingPurpose
 from .certificate_state import CertificateState
 from .cli_token_download import CliTokenDownload
+from .cli_update_contract import CliUpdateContract
+from .cli_update_contract_worker_compatibility import CliUpdateContractWorkerCompatibility
+from .cli_update_contract_worker_issue_type_0 import CliUpdateContractWorkerIssueType0
 from .cluster_mapping_code import ClusterMappingCode
 from .compatibility_identity import CompatibilityIdentity
 from .compatibility_preparation import CompatibilityPreparation
@@ -187,6 +191,8 @@ from .fleet_assignment_recipe_view import FleetAssignmentRecipeView
 from .fleet_cache_summary import FleetCacheSummary
 from .fleet_change_event import FleetChangeEvent
 from .fleet_enroll_request import FleetEnrollRequest
+from .fleet_frame_issue import FleetFrameIssue
+from .fleet_frame_issue_reason_code import FleetFrameIssueReasonCode
 from .fleet_lock_holder import FleetLockHolder
 from .fleet_locks_response import FleetLocksResponse
 from .fleet_log_entry import FleetLogEntry
@@ -200,6 +206,7 @@ from .fleet_node_view import FleetNodeView
 from .fleet_open_transaction import FleetOpenTransaction
 from .fleet_profile_admission_decision import FleetProfileAdmissionDecision
 from .fleet_profile_adopted_application_effect import FleetProfileAdoptedApplicationEffect
+from .fleet_profile_adopted_stop_effect import FleetProfileAdoptedStopEffect
 from .fleet_profile_application_cancel_request import FleetProfileApplicationCancelRequest
 from .fleet_profile_application_cancellation_intent import FleetProfileApplicationCancellationIntent
 from .fleet_profile_application_cancellation_intent_cause import FleetProfileApplicationCancellationIntentCause
@@ -212,6 +219,7 @@ from .fleet_profile_application_effect_kind import FleetProfileApplicationEffect
 from .fleet_profile_application_effect_outcome import FleetProfileApplicationEffectOutcome
 from .fleet_profile_application_progress import FleetProfileApplicationProgress
 from .fleet_profile_application_progress_step_results import FleetProfileApplicationProgressStepResults
+from .fleet_profile_application_projection_issue import FleetProfileApplicationProjectionIssue
 from .fleet_profile_application_result import FleetProfileApplicationResult
 from .fleet_profile_application_view import FleetProfileApplicationView
 from .fleet_profile_application_view_state import FleetProfileApplicationViewState
@@ -236,6 +244,9 @@ from .fleet_profile_definition import FleetProfileDefinition
 from .fleet_profile_definition_installation_policy import FleetProfileDefinitionInstallationPolicy
 from .fleet_profile_definition_labels import FleetProfileDefinitionLabels
 from .fleet_profile_definition_view import FleetProfileDefinitionView
+from .fleet_profile_effect_progress import FleetProfileEffectProgress
+from .fleet_profile_effect_progress_kind import FleetProfileEffectProgressKind
+from .fleet_profile_effect_progress_state import FleetProfileEffectProgressState
 from .fleet_profile_effects import FleetProfileEffects
 from .fleet_profile_endpoint_assignment_view import FleetProfileEndpointAssignmentView
 from .fleet_profile_endpoint_projection_issue import FleetProfileEndpointProjectionIssue
@@ -270,12 +281,13 @@ from .fleet_profile_scope_preview import FleetProfileScopePreview
 from .fleet_profile_step_result import FleetProfileStepResult
 from .fleet_profile_switch_adapter_result import FleetProfileSwitchAdapterResult
 from .fleet_profile_switch_adapter_state import FleetProfileSwitchAdapterState
-from .fleet_profile_switch_adapter_state_active_kind_type_0 import FleetProfileSwitchAdapterStateActiveKindType0
 from .fleet_profile_switch_adapter_state_state import FleetProfileSwitchAdapterStateState
 from .fleet_profile_switch_child_result import FleetProfileSwitchChildResult
 from .fleet_profile_switch_child_state import FleetProfileSwitchChildState
 from .fleet_profile_switch_child_state_kind import FleetProfileSwitchChildStateKind
 from .fleet_profile_switch_child_state_state import FleetProfileSwitchChildStateState
+from .fleet_profile_switch_pending_child import FleetProfileSwitchPendingChild
+from .fleet_profile_switch_pending_child_kind import FleetProfileSwitchPendingChildKind
 from .fleet_profile_switch_queue_item import FleetProfileSwitchQueueItem
 from .fleet_profile_switch_queue_item_kind import FleetProfileSwitchQueueItemKind
 from .fleet_profile_verification_result import FleetProfileVerificationResult
@@ -283,9 +295,10 @@ from .fleet_profile_view import FleetProfileView
 from .fleet_profile_view_installation_policy import FleetProfileViewInstallationPolicy
 from .fleet_profile_view_labels import FleetProfileViewLabels
 from .fleet_reenroll_request import FleetReenrollRequest
+from .fleet_refresh_event import FleetRefreshEvent
+from .fleet_refresh_event_reset_reason import FleetRefreshEventResetReason
 from .fleet_rename_request import FleetRenameRequest
 from .fleet_snapshot import FleetSnapshot
-from .fleet_snapshot_event import FleetSnapshotEvent
 from .fleet_telemetry_event import FleetTelemetryEvent
 from .fleet_upgrade_request import FleetUpgradeRequest
 from .float_parameter import FloatParameter
@@ -428,6 +441,11 @@ from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
 from .node_telemetry_payload import NodeTelemetryPayload
 from .observation_cause import ObservationCause
+from .observation_transfer_chunk import ObservationTransferChunk
+from .observation_transfer_complete import ObservationTransferComplete
+from .observation_transfer_error import ObservationTransferError
+from .observation_transfer_start import ObservationTransferStart
+from .observation_transfer_start_resource import ObservationTransferStartResource
 from .observed_assignment_state import ObservedAssignmentState
 from .operation_blocker import OperationBlocker
 from .operation_blocker_severity import OperationBlockerSeverity
@@ -441,6 +459,8 @@ from .operation_member_progress_activity_type_0 import OperationMemberProgressAc
 from .operation_owner_reference import OperationOwnerReference
 from .operation_progress import OperationProgress
 from .operation_progress_activity_type_0 import OperationProgressActivityType0
+from .operation_projection_issue import OperationProjectionIssue
+from .operation_projection_issue_field import OperationProjectionIssueField
 from .operation_recovery import OperationRecovery
 from .operation_recovery_action import OperationRecoveryAction
 from .operations_response import OperationsResponse
@@ -458,6 +478,8 @@ from .package_rollback_authority import PackageRollbackAuthority
 from .package_rollback_source import PackageRollbackSource
 from .placement_install_state import PlacementInstallState
 from .placement_load_state import PlacementLoadState
+from .platform_observation import PlatformObservation
+from .platform_observation_worker_issue_type_0 import PlatformObservationWorkerIssueType0
 from .prebuilt_image import PrebuiltImage
 from .prebuilt_image_code import PrebuiltImageCode
 from .preparation_reason import PreparationReason
@@ -835,6 +857,7 @@ from .unknown_error import UnknownError
 from .unprojected_revision import UnprojectedRevision
 from .wait_reason import WaitReason
 from .wait_verdict import WaitVerdict
+from .worker_runtime_observation import WorkerRuntimeObservation
 from .writable_path import WritablePath
 
 __all__ = (
@@ -862,6 +885,7 @@ __all__ = (
     "AgentUpgradeRolloutResult",
     "AgentUpgradeRolloutResultSkippedType0",
     "AgentUpgradeTargetDiagnosticsResponse",
+    "ApiRuntimeObservation",
     "ArtifactDistributionPayload",
     "ArtifactDistributionResult",
     "ArtifactFileDeclaration",
@@ -944,6 +968,9 @@ __all__ = (
     "CertificateIssuanceBindingPurpose",
     "CertificateState",
     "CliTokenDownload",
+    "CliUpdateContract",
+    "CliUpdateContractWorkerCompatibility",
+    "CliUpdateContractWorkerIssueType0",
     "ClusterMappingCode",
     "CompatibilityIdentity",
     "CompatibilityPreparation",
@@ -1025,6 +1052,8 @@ __all__ = (
     "FleetCacheSummary",
     "FleetChangeEvent",
     "FleetEnrollRequest",
+    "FleetFrameIssue",
+    "FleetFrameIssueReasonCode",
     "FleetLockHolder",
     "FleetLocksResponse",
     "FleetLogEntry",
@@ -1038,6 +1067,7 @@ __all__ = (
     "FleetOpenTransaction",
     "FleetProfileAdmissionDecision",
     "FleetProfileAdoptedApplicationEffect",
+    "FleetProfileAdoptedStopEffect",
     "FleetProfileApplicationCancellationIntent",
     "FleetProfileApplicationCancellationIntentCause",
     "FleetProfileApplicationCancellationIntentState",
@@ -1050,6 +1080,7 @@ __all__ = (
     "FleetProfileApplicationEffectOutcome",
     "FleetProfileApplicationProgress",
     "FleetProfileApplicationProgressStepResults",
+    "FleetProfileApplicationProjectionIssue",
     "FleetProfileApplicationResult",
     "FleetProfileApplicationView",
     "FleetProfileApplicationViewState",
@@ -1074,6 +1105,9 @@ __all__ = (
     "FleetProfileDefinitionInstallationPolicy",
     "FleetProfileDefinitionLabels",
     "FleetProfileDefinitionView",
+    "FleetProfileEffectProgress",
+    "FleetProfileEffectProgressKind",
+    "FleetProfileEffectProgressState",
     "FleetProfileEffects",
     "FleetProfileEndpointAssignmentView",
     "FleetProfileEndpointProjectionIssue",
@@ -1108,12 +1142,13 @@ __all__ = (
     "FleetProfileStepResult",
     "FleetProfileSwitchAdapterResult",
     "FleetProfileSwitchAdapterState",
-    "FleetProfileSwitchAdapterStateActiveKindType0",
     "FleetProfileSwitchAdapterStateState",
     "FleetProfileSwitchChildResult",
     "FleetProfileSwitchChildState",
     "FleetProfileSwitchChildStateKind",
     "FleetProfileSwitchChildStateState",
+    "FleetProfileSwitchPendingChild",
+    "FleetProfileSwitchPendingChildKind",
     "FleetProfileSwitchQueueItem",
     "FleetProfileSwitchQueueItemKind",
     "FleetProfileVerificationResult",
@@ -1121,9 +1156,10 @@ __all__ = (
     "FleetProfileViewInstallationPolicy",
     "FleetProfileViewLabels",
     "FleetReenrollRequest",
+    "FleetRefreshEvent",
+    "FleetRefreshEventResetReason",
     "FleetRenameRequest",
     "FleetSnapshot",
-    "FleetSnapshotEvent",
     "FleetTelemetryEvent",
     "FleetUpgradeRequest",
     "FloatParameter",
@@ -1266,6 +1302,11 @@ __all__ = (
     "NodeProfilePayload",
     "NodeTelemetryPayload",
     "ObservationCause",
+    "ObservationTransferChunk",
+    "ObservationTransferComplete",
+    "ObservationTransferError",
+    "ObservationTransferStart",
+    "ObservationTransferStartResource",
     "ObservedAssignmentState",
     "OperationBlocker",
     "OperationBlockerSeverity",
@@ -1279,6 +1320,8 @@ __all__ = (
     "OperationOwnerReference",
     "OperationProgress",
     "OperationProgressActivityType0",
+    "OperationProjectionIssue",
+    "OperationProjectionIssueField",
     "OperationRecovery",
     "OperationRecoveryAction",
     "OperationsResponse",
@@ -1296,6 +1339,8 @@ __all__ = (
     "PackageRollbackSource",
     "PlacementInstallState",
     "PlacementLoadState",
+    "PlatformObservation",
+    "PlatformObservationWorkerIssueType0",
     "PrebuiltImage",
     "PrebuiltImageCode",
     "PreparationReason",
@@ -1673,5 +1718,6 @@ __all__ = (
     "UnprojectedRevision",
     "WaitReason",
     "WaitVerdict",
+    "WorkerRuntimeObservation",
     "WritablePath",
 )

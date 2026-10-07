@@ -22,6 +22,8 @@ import sys
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path, PurePosixPath
@@ -51,7 +53,7 @@ from scripts.spark_lifecycle_contract import (
     recompute_publication_graphs,
     validate_lifecycle,
 )
-from tests.acceptance.controller_contract import ContractSkew
+from tests.acceptance.controller_contract import ContractSkew, ControllerContract
 from tests.acceptance.runtime import (
     AcceptanceError,
     _compose_rows,
@@ -102,15 +104,51 @@ UUID = re.compile(
 )
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
-# Exercise the production-supported lower bound.  The agent renews at two thirds
-# of a certificate lifetime and its independent rotation lane polls on a bounded
-# interval, so 90 seconds leaves real scheduling margin in every ARM64 gate.
-CERTIFICATE_LIFETIME_SECONDS = 90
+# The published CA owns a fixed thirty-day certificate profile. The native
+# acceptance peer advances only the certificate-derived renewal scheduling
+# clock; real CA, Controller, TLS and identity validity clocks stay unchanged.
+CERTIFICATE_LIFETIME_SECONDS = 2_592_000
+RENEWAL_OBSERVATION_SECONDS = 150
+RENEWAL_HELPER_INPUTS = (
+    "Cargo.lock",
+    "Cargo.toml",
+    "rust-toolchain.toml",
+    "rust/crates/vonk-agent/Cargo.toml",
+    "rust/crates/vonk-agent/examples/acceptance_certificate_renewal.rs",
+    "rust/crates/vonk-agent/src/rotation.rs",
+    "rust/crates/vonk-agent/src/identity.rs",
+    "rust/crates/vonk-agent/src/client.rs",
+    "rust/crates/vonk-agent/src/config.rs",
+    "rust/crates/vonk-agent/src/runtime_identity.rs",
+)
 CONTROLLER_ADDRESS = "127.0.0.1"
 CANARY_CATALOG_IMPORT = Path(__file__).with_name("spark_canary_catalog_import.py")
 SPARK_CONFIG = Path("/etc/vonk-forge-agent/agent.toml")
 AGENT_BINARY = Path("/usr/lib/vonk-forge/vonk-agent")
 AGENT_DATA = Path("/var/lib/vonk-forge-agent")
+
+
+def _agent_journal_fault_command(journal: Path) -> list[str]:
+    """Fault the stopped disposable SQLite journal, including its WAL pages."""
+    if journal.name != "state.sqlite":
+        raise LifecycleError("acceptance journal path is invalid")
+    return [
+        "sudo",
+        "/usr/bin/python3",
+        "-c",
+        (
+            "from pathlib import Path; import json, sys; journal = Path(sys.argv[1]); "
+            "sidecars = [Path(str(journal) + suffix) for suffix in ('-wal', '-shm')]; "
+            "before = [path.exists() for path in sidecars]; "
+            "journal.write_bytes(b'acceptance-corrupt-agent-journal'); "
+            "[path.unlink(missing_ok=True) for path in sidecars]; "
+            "print(json.dumps({'wal_before': before[0], 'shm_before': before[1], "
+            "'wal_after': sidecars[0].exists(), 'shm_after': sidecars[1].exists()}))"
+        ),
+        os.fspath(journal),
+    ]
+
+
 COMPOSE_IMAGE_ROLES = {
     "api": "control-api",
     "worker": "control-worker",
@@ -711,15 +749,16 @@ def _configure_acceptance_renewal(
         or claims.get("disableSmallstepExtensions") is not True
     ):
         raise LifecycleError("Step CA provisioner claims are invalid")
-    # The Controller derives the agent certificate lifetime from this claim.
-    duration = f"{lifetime_seconds}s"
-    claims.update(
-        defaultTLSCertDuration=duration,
-        maxTLSCertDuration=duration,
-        minTLSCertDuration=duration,
-    )
-    ca_path.write_bytes(_canonical(ca))
-    os.chmod(ca_path, 0o600)
+    if any(
+        claims.get(name) != "720h"
+        for name in (
+            "defaultTLSCertDuration",
+            "maxTLSCertDuration",
+            "minTLSCertDuration",
+        )
+    ):
+        raise LifecycleError("Step CA fixed certificate lifetime is invalid")
+    # Preserve the signed installer's CA configuration and production policy.
 
     compose_path = bundle / "docker-compose.yaml"
     try:
@@ -968,6 +1007,7 @@ class LocalBrowserController:
         hostname: str,
         port: int,
         request_guard: Callable[[str, str, bytes | None], None] | None = None,
+        observation_contract: Callable[[], ControllerContract] | None = None,
     ) -> None:
         if (
             not hostname
@@ -981,6 +1021,73 @@ class LocalBrowserController:
         self.port = port
         # Sees every request the administrator session sends before it leaves.
         self.request_guard = request_guard
+        self.observation_contract = observation_contract
+
+    def observation_request(
+        self, path: str, headers: dict[str, str], timeout: float
+    ) -> tuple[int, dict[str, object]]:
+        # Capture one source contract before I/O; carry changes this getter only
+        # when the verified release's Controller generation changes.
+        contract = (
+            self.observation_contract()
+            if self.observation_contract is not None
+            else ControllerContract(
+                json.loads(
+                    (
+                        Path(__file__).resolve().parents[2] / "control/openapi.json"
+                    ).read_text()
+                ),
+                label="this acceptance source's Controller",
+            )
+        )
+        selected = contract.observation(path)
+        request_headers = {**headers, "Accept": selected.media_type}
+        if self.request_guard is not None:
+            self.request_guard("GET", path, None)
+        if timeout <= 0 or any(
+            name.lower() in {"connection", "content-length", "host"}
+            or any(character in name for character in "\0\r\n:")
+            or any(character in value for character in "\0\r\n")
+            for name, value in request_headers.items()
+        ):
+            raise LifecycleError("local browser observation request is invalid")
+        from cluster_profiles.control_transport import HTTPSResponse, open_https
+
+        # This acceptance boundary deliberately targets the local Caddy HTTP
+        # listener with its original virtual Host and administrator credentials.
+        # Reuse the cancellable facade; production ControlClient still requires
+        # an HTTPS origin. One budget covers opening and the complete receipt.
+        deadline = time.monotonic() + timeout
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}{path}",
+            headers={"Host": self.hostname, **request_headers},
+        )
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("observation attempt deadline elapsed")
+            response: HTTPSResponse | urllib.error.HTTPError
+            try:
+                response = open_https(request, timeout=remaining, trust_env=False)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                status = (
+                    response.code
+                    if isinstance(response, urllib.error.HTTPError)
+                    else response.status
+                )
+                document = selected.decode(
+                    response,
+                    status=status,
+                    media_type=response.headers.get("Content-Type", ""),
+                    deadline=deadline,
+                )
+                return status, document
+        except (OSError, http.client.HTTPException, ValueError, ContractSkew) as error:
+            raise LifecycleError(
+                "complete source-bound observation is unavailable; retry observation"
+            ) from error
 
     def raw_request(
         self,
@@ -1095,6 +1202,7 @@ class LocalBrowserController:
             timeout=timeout,
             headers=fixed_headers,
             transport=transport,
+            observation_transport=self.observation_request,
         )
 
     def bearer(self, token: str, *, timeout: float) -> Client:
@@ -1115,6 +1223,7 @@ class LocalBrowserController:
             token,
             timeout=timeout,
             transport=transport,
+            observation_transport=self.observation_request,
         )
 
 
@@ -1551,11 +1660,23 @@ class SparkLifecycle:
             hostname=self.control_hostname,
             port=self._local_browser_port(),
             request_guard=self._controller_request_guard(),
+            observation_contract=self._controller_observation_contract,
         )
         self.browser = boundary
         password = self._read_secret("admin-password")
         self.control = boundary.login(password, timeout=30)
         del password
+
+    def _controller_observation_contract(self) -> ControllerContract:
+        """Fresh lanes run the Controller built from this acceptance source."""
+        return ControllerContract(
+            json.loads(
+                (
+                    Path(__file__).resolve().parents[2] / "control/openapi.json"
+                ).read_text()
+            ),
+            label="this acceptance source's Controller",
+        )
 
     def _controller_request_guard(
         self,
@@ -1796,6 +1917,63 @@ class SparkLifecycle:
             )
         self._lost_start_placement = (address, int(port))
 
+    def _record_start_recovery_checkpoint(
+        self,
+        phase: str,
+        operation_id: str,
+        run_id: str,
+        fence: str,
+        *,
+        observe_attempts: bool = False,
+    ) -> None:
+        """Retain bounded identifiers/phase facts before disposable cleanup."""
+        assert self.bundle is not None
+        root = self.bundle.parent / "acceptance-receipts"
+        document: dict[str, object] = {
+            "phase": phase,
+            "operation_id": operation_id,
+            "run_id": run_id,
+            "old_fence": fence,
+            "restart_marker_exists": (root / "recovered.json").is_file(),
+        }
+        fault = getattr(self, "_start_journal_fault", None)
+        if fault is not None:
+            document["journal_fault"] = fault
+        if phase != "profile_timeout":
+            self._start_recovery_phase = phase
+        else:
+            document["last_completed_phase"] = getattr(
+                self, "_start_recovery_phase", None
+            )
+        latest = root / "last-start-receipt.json"
+        if latest.is_file() and latest.stat().st_size <= 64 * 1024:
+            value = require_object(
+                json.loads(latest.read_text()), "receipt relay observation"
+            )
+            received = value.get("fence")
+            gate = value.get("gate")
+            if isinstance(received, str) and UUID.fullmatch(received) is not None:
+                document["latest_received_fence"] = received
+            if isinstance(gate, str) and gate in {
+                "old-fence",
+                "restart-incomplete",
+                "released",
+            }:
+                document["relay_gate"] = gate
+        if observe_attempts:
+            try:
+                document["controller_attempts"] = self._psql(
+                    "SELECT a.attempt,a.fence,a.state,o.state,"
+                    "CASE WHEN a.lease_deadline<=clock_timestamp() THEN 'expired' ELSE 'live' END "
+                    "FROM agent_operations o JOIN agent_operation_attempts a ON a.operation_id=o.id "
+                    f"WHERE o.id='{operation_id}' ORDER BY a.attempt DESC LIMIT 8"
+                )
+            except LifecycleError as error:
+                document["attempt_observation_error"] = type(error).__name__
+        _atomic_write(
+            self.arguments.output.with_name("failed-start-recovery.json"), document
+        )
+
     def _recover_lost_start_receipt(self, node_id: str) -> None:
         if getattr(self, "lost_start_proof", None) is not None:
             return
@@ -1864,21 +2042,31 @@ class SparkLifecycle:
         before_container = self._container_for_replay(run_id)
         before_managed = self._managed_for_replay()
         before_response = self._direct_canary_inference(endpoint)
+        self._record_start_recovery_checkpoint(
+            "runtime_verified", operation_id, run_id, fence
+        )
         self._run_command(
             ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"],
             cwd=self.temporary_root,
             timeout=30,
         )
-        self._run_command(
-            [
-                "sudo",
-                "/usr/bin/python3",
-                "-c",
-                "from pathlib import Path; import sys; Path(sys.argv[1]).write_bytes(b'acceptance-lost-start-journal')",
-                os.fspath(AGENT_DATA / "state.sqlite"),
-            ],
+        self._record_start_recovery_checkpoint(
+            "agent_stopped", operation_id, run_id, fence
+        )
+        fault = self._run_command(
+            _agent_journal_fault_command(AGENT_DATA / "state.sqlite"),
             cwd=self.temporary_root,
             timeout=30,
+        )
+        observation = require_object(
+            json.loads(fault.stdout), "journal fault observation"
+        )
+        keys = ("wal_before", "shm_before", "wal_after", "shm_after")
+        if any(type(observation.get(key)) is not bool for key in keys):
+            raise LifecycleError("journal fault observation is invalid")
+        self._start_journal_fault = {key: observation[key] for key in keys}
+        self._record_start_recovery_checkpoint(
+            "journal_faulted", operation_id, run_id, fence
         )
         # Retire every pre-restart lease using Controller time. A buffered
         # receipt from the stopped process must be stale even if the network
@@ -1900,9 +2088,15 @@ class SparkLifecycle:
             cwd=self.temporary_root,
             timeout=30,
         )
+        self._record_start_recovery_checkpoint(
+            "agent_restarted", operation_id, run_id, fence
+        )
         recovered = bundle.parent / "acceptance-receipts/recovered.json"
         recovered.write_text(json.dumps({"fence": fence}), encoding="utf-8")
         os.chmod(recovered, 0o644)
+        self._record_start_recovery_checkpoint(
+            "restart_released", operation_id, run_id, fence
+        )
         self.lost_start_proof = LostStartProof(
             operation_id,
             payload_digest,
@@ -3246,7 +3440,7 @@ class SparkLifecycle:
                 label="synthetic canary profile cleanup",
                 node_id=node_id,
             )
-            _validate_canary_cleanup_application(
+            self._validate_cleanup_application(
                 cleanup_application,
                 installation_ids=[installation_id],
                 run_id=run_id,
@@ -3374,16 +3568,7 @@ class SparkLifecycle:
         # Only the derived journal is faulted; credentials and runtime evidence
         # are preserved so the recovered agent must adopt the exact effect.
         self._run_command(
-            [
-                "sudo",
-                "/usr/bin/python3",
-                "-c",
-                (
-                    "from pathlib import Path; import sys; "
-                    "Path(sys.argv[1]).write_bytes(b'acceptance-corrupt-agent-journal')"
-                ),
-                os.fspath(AGENT_DATA / "state.sqlite"),
-            ],
+            _agent_journal_fault_command(AGENT_DATA / "state.sqlite"),
             cwd=temporary_root,
             timeout=30,
         )
@@ -3624,6 +3809,17 @@ class SparkLifecycle:
             )
         return typed.model_dump(mode="json")
 
+    def _validate_cleanup_application(
+        self,
+        application: dict[str, object],
+        *,
+        installation_ids: Sequence[str],
+        run_id: str,
+    ) -> None:
+        _validate_canary_cleanup_application(
+            application, installation_ids=installation_ids, run_id=run_id
+        )
+
     def _await_profile_application(
         self, operation: dict[str, object], *, label: str, node_id: str
     ) -> dict[str, object]:
@@ -3651,6 +3847,15 @@ class SparkLifecycle:
         while typed.state in _LIVE_APPLICATION_STATES:
             self._recover_lost_start_receipt(node_id)
             if time.monotonic() >= deadline:
+                proof = self.lost_start_proof
+                if proof is not None:
+                    self._record_start_recovery_checkpoint(
+                        "profile_timeout",
+                        proof.operation_id,
+                        proof.run_id,
+                        proof.fence,
+                        observe_attempts=True,
+                    )
                 # Say where it stalled: a queued application with no step
                 # means nothing claimed it, while a running one names the step
                 # and child phase it never left.
@@ -4069,13 +4274,107 @@ class SparkLifecycle:
         finally:
             shutil.rmtree(probe)
 
+    def _exercise_native_renewal(self) -> None:
+        helper = Path(self._required_environment("VONK_ACCEPTANCE_RENEWAL_HELPER"))
+        manifest_path = Path(
+            self._required_environment("VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST")
+        )
+        manifest = _read_document(manifest_path, "native renewal helper manifest")
+        source_inputs = manifest.get("source_inputs")
+        if not isinstance(source_inputs, dict):
+            raise LifecycleError("native renewal helper inputs are invalid")
+        if (
+            manifest.get("source_sha") != self.arguments.source_sha
+            or set(source_inputs) != set(RENEWAL_HELPER_INPUTS)
+            or helper.is_symlink()
+            or not helper.is_file()
+            or hashlib.sha256(helper.read_bytes()).hexdigest()
+            != manifest.get("binary_sha256")
+        ):
+            raise LifecycleError("native renewal helper provenance is invalid")
+        for name in RENEWAL_HELPER_INPUTS:
+            if (
+                hashlib.sha256((REPOSITORY_ROOT / name).read_bytes()).hexdigest()
+                != source_inputs[name]
+            ):
+                raise LifecycleError("native renewal helper source input changed")
+        source = self._run_command(
+            ["git", "rev-parse", "HEAD"], cwd=REPOSITORY_ROOT, timeout=30
+        ).stdout.strip()
+        if source != self.arguments.source_sha:
+            raise LifecycleError("native renewal helper source checkout changed")
+        for command in (
+            ["git", "diff", "--quiet"],
+            ["git", "diff", "--cached", "--quiet"],
+        ):
+            self._run_command(command, cwd=REPOSITORY_ROOT, timeout=30)
+        identity = self._self_test()
+        if manifest.get("build_digest") != identity.get("build_digest"):
+            raise LifecycleError("native renewal helper candidate build changed")
+        installed = Path("/usr/local/libexec/vonk-acceptance-certificate-renewal")
+        self._run_command(
+            ["sudo", "install", "-D", "-m", "0555", helper, installed],
+            cwd=REPOSITORY_ROOT,
+            timeout=30,
+        )
+        self._run_command(
+            ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"],
+            cwd=Path("/"),
+            timeout=30,
+        )
+        try:
+            result = self._run_command(
+                [
+                    "sudo",
+                    "-u",
+                    "vonk-agent",
+                    installed,
+                    SPARK_CONFIG,
+                    AGENT_BINARY,
+                    str(identity["binary_digest"]),
+                    str(identity["build_digest"]),
+                ],
+                cwd=Path("/"),
+                timeout=60,
+                report_failure_output=True,
+            )
+        finally:
+            self._run_command(
+                ["sudo", "/usr/bin/systemctl", "start", "vonk-forge-agent.service"],
+                cwd=Path("/"),
+                timeout=30,
+            )
+        try:
+            native = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise LifecycleError(
+                "native renewal scheduling evidence is invalid"
+            ) from error
+        if (
+            not isinstance(native, dict)
+            or native.get("scheduling_clock") != "certificate-derived-controlled-clock"
+            or native.get("source_agent_binary_sha256") != identity["binary_digest"]
+            or native.get("source_agent_build_digest") != identity["build_digest"]
+            or native.get("source_lifetime_seconds") != CERTIFICATE_LIFETIME_SECONDS
+            or native.get("replacement_lifetime_seconds")
+            != CERTIFICATE_LIFETIME_SECONDS
+            or native.get("source_certificate_sha256")
+            == native.get("replacement_certificate_sha256")
+            or native.get("source_public_key_sha256")
+            == native.get("replacement_public_key_sha256")
+        ):
+            raise LifecycleError("native renewal did not prove fixed-profile rekey")
+        evidence = Path(self.arguments.output).parent / "renewal-scheduling-clock.json"
+        evidence.write_bytes(_canonical({"helper": manifest, "native": native}))
+
     def _observe_renewal(self, node_id: str, serial_before: str) -> dict[str, object]:
         if (
             NODE_ID.fullmatch(node_id) is None
             or SERIAL.fullmatch(serial_before) is None
         ):
             raise LifecycleError("renewal identity is invalid")
-        deadline = time.monotonic() + CERTIFICATE_LIFETIME_SECONDS + 60
+        deadline = time.monotonic() + RENEWAL_OBSERVATION_SECONDS
+        self._exercise_native_renewal()
         while time.monotonic() < deadline:
             rows = self._psql(
                 "SELECT n.contact_certificate_serial,c.state,"

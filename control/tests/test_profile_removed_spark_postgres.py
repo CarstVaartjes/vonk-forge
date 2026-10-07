@@ -30,6 +30,7 @@ from vonk_control.models import (
     RunNode,
 )
 
+from .profile_due_fixtures import next_profile_due
 from .test_profile_capacity_admission import _capacity_profile
 from .test_recipe_operations import (
     installed_recipe,
@@ -102,6 +103,9 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
     )
     lifecycle = planner._lifecycle
     assert lifecycle is not None
+    now = [lifecycle._clock()]
+    clock = lambda: now[0]
+    profiles._clock = planner._clock = lifecycle._clock = clock
     with sessions() as session:
         mapping_id = session.scalar(select(ClusterMapping.id))
         build_id = session.scalar(select(RecipeBuild.id))
@@ -115,7 +119,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         selector = f"{revision.publisher}/{revision.slug}"
 
     unrelated_nodes = tuple("spk_" + f"{index:032x}" for index in (3, 4))
-    now = lifecycle._clock()
+    observed_at = lifecycle._clock()
     for index, unrelated_node in enumerate(unrelated_nodes):
         with sessions.begin() as session:
             template = session.get(AgentNode, nodes[0])
@@ -132,7 +136,7 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     state="active",
                     protocol_version=1,
                     architecture=template.architecture,
-                    last_seen_at=now,
+                    last_seen_at=observed_at,
                 )
             )
             session.flush()
@@ -143,8 +147,8 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     serial=serial,
                     node_id=unrelated_node,
                     fingerprint=fingerprint,
-                    not_before=now,
-                    not_after=now + timedelta(days=365),
+                    not_before=observed_at,
+                    not_after=observed_at + timedelta(days=365),
                 )
             )
             session.add(
@@ -153,13 +157,13 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
                     certificate_serial=serial,
                     certificate_fingerprint=fingerprint,
                     management_address=f"192.168.1.{213 + index}",
-                    observed_at=now,
+                    observed_at=observed_at,
                 )
             )
         InventoryRepository(sessions, clock=lifecycle._clock).record(
             InventorySnapshotInput(
                 node_id=unrelated_node,
-                observed_at=now,
+                observed_at=observed_at,
                 disk_total_bytes=10_000,
                 disk_free_bytes=8_000,
                 host_memory_total_bytes=10_000,
@@ -232,6 +236,10 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
 
     stop_job = None
     for _ in range(12):
+        due = next_profile_due(profiles, planner, application.id)
+        if due is not None:
+            assert due > now[0]
+            now[0] = due
         planner.tick()
         profiles.tick()
         with sessions() as session:
@@ -263,23 +271,33 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
 
     lifecycle.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
     for _ in range(40):
+        due = next_profile_due(profiles, planner, application.id)
+        if due is not None:
+            assert due > now[0]
+            now[0] = due
         planner.tick()
         profiles.tick()
         current = profiles.application(application.id)
         adapter = current.progress.switch_adapter
         if (
             adapter is not None
-            and adapter.position == 1
-            and adapter.active_kind == "install"
-            and adapter.active_operation_id is not None
+            and any(child.queue_index == 0 for child in adapter.children)
+            and any(child.kind == "install" for child in adapter.pending_children)
+            and adapter.pending_children
         ):
             break
     current = profiles.application(application.id)
     adapter = current.progress.switch_adapter
-    active_child = (
-        planner.get(adapter.active_operation_id)
-        if adapter is not None and adapter.active_operation_id is not None
+    pending_install = (
+        next(
+            (child for child in adapter.pending_children if child.kind == "install"),
+            None,
+        )
+        if adapter is not None
         else None
+    )
+    active_child = (
+        planner.get(pending_install.operation_id) if pending_install else None
     )
     child_status = (
         (
@@ -296,8 +314,11 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
     assert (
         current.state == "running"
         and adapter is not None
-        and adapter.position == 1
-        and adapter.active_kind == "install"
+        and any(child.queue_index == 0 for child in adapter.children)
+        and any(child.kind == "install" for child in adapter.pending_children)
+        and pending_install is not None
+        and pending_install.queue_index == 1
+        and adapter.queue[pending_install.queue_index].kind == pending_install.kind
         and active_child is not None
         and active_child.action == "install"
         and active_child.state in {"queued", "running"}
@@ -306,7 +327,9 @@ def test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim(
         current.state,
         current.status_reason,
         adapter.position if adapter is not None else None,
-        adapter.active_kind if adapter is not None else None,
+        [child.kind for child in adapter.pending_children]
+        if adapter is not None
+        else None,
         child_status,
     )
     with sessions() as session:

@@ -5,6 +5,8 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from vonk_agent_protocol.source_bundles import SourceBundleManifest
+from vonk_control import source_bundles
 from vonk_control.source_bundles import (
     BundleLimits,
     SourceBundleError,
@@ -69,13 +71,26 @@ def test_bundle_rejects_links_and_expansion_overflow() -> None:
     assert error.value.code == "bundle.file_too_large"
 
 
-def test_store_is_content_addressed_and_idempotent(tmp_path) -> None:
+def test_store_is_content_addressed_and_idempotent(tmp_path, monkeypatch) -> None:
     payload = archive([("Dockerfile", b"FROM scratch\n")])
     manifest = inspect_source_bundle(io.BytesIO(payload), LIMITS)
     store = SourceBundleStore(tmp_path, limits=LIMITS)
 
     first = store.put(manifest.sha256, io.BytesIO(payload))
+    inode = first.path.stat().st_ino
+    inspected: list[bytes] = []
+    inspect_original = source_bundles._inspect_archive
+
+    def inspect_actual(value: bytes, limits: BundleLimits) -> SourceBundleManifest:
+        inspected.append(value)
+        return inspect_original(value, limits)
+
+    monkeypatch.setattr(source_bundles, "_inspect_archive", inspect_actual)
     second = store.put(manifest.sha256, io.BytesIO(payload))
+    # Validate the actual incoming archive once, reuse its proven exact bytes,
+    # and preserve the verified physical object instead of rewriting it.
+    assert inspected == [payload]
+    assert second.path.stat().st_ino == inode
     loaded = store.get(manifest.sha256)
 
     assert first == second
@@ -84,12 +99,70 @@ def test_store_is_content_addressed_and_idempotent(tmp_path) -> None:
     assert loaded.files["Dockerfile"] == b"FROM scratch\n"
 
 
+@pytest.mark.parametrize("stored_damage", ["different-valid", "corrupt"])
+def test_nonidentical_stored_archive_is_strictly_checked_and_recovers(
+    tmp_path, monkeypatch, stored_damage: str
+) -> None:
+    payload = archive([("Dockerfile", b"FROM scratch\n"), ("x", b"1")])
+    manifest = inspect_source_bundle(io.BytesIO(payload), LIMITS)
+    store = SourceBundleStore(tmp_path, limits=LIMITS)
+    stored = store.put(manifest.sha256, io.BytesIO(payload))
+    changed = (
+        archive([("x", b"1"), ("Dockerfile", b"FROM scratch\n")])
+        if stored_damage == "different-valid"
+        else b"damaged archive bytes"
+    )
+    assert changed != payload
+    stored.path.write_bytes(changed)
+    inspected: list[bytes] = []
+    inspect_original = source_bundles._inspect_archive
+
+    def inspect_actual(value: bytes, limits: BundleLimits) -> SourceBundleManifest:
+        inspected.append(value)
+        return inspect_original(value, limits)
+
+    monkeypatch.setattr(source_bundles, "_inspect_archive", inspect_actual)
+    restored = store.put(manifest.sha256, io.BytesIO(payload))
+    assert inspected == [payload, changed]
+    assert restored.manifest == manifest
+    loaded = store.get(manifest.sha256)
+    assert loaded.manifest == manifest
+    assert loaded.files == {"Dockerfile": b"FROM scratch\n", "x": b"1"}
+    # Different tar order is valid under the same content identity. Corruption
+    # is repaired atomically from the real, strictly validated ingress.
+    assert loaded.archive == (
+        changed if stored_damage == "different-valid" else payload
+    )
+
+
+def test_equal_unvalidated_archive_is_not_blessed(tmp_path) -> None:
+    payload = archive([("Dockerfile", b"FROM scratch\n")])
+    manifest = inspect_source_bundle(io.BytesIO(payload), LIMITS)
+    store = SourceBundleStore(tmp_path, limits=LIMITS)
+    stored = store.put(manifest.sha256, io.BytesIO(payload))
+    damaged = b"not an archive"
+    stored.path.write_bytes(damaged)
+    with pytest.raises(SourceBundleError):
+        store.put(manifest.sha256, io.BytesIO(damaged))
+    assert stored.path.read_bytes() == damaged
+    # Repair resumes through the same identity and full ordinary ingress.
+    repaired = store.put(manifest.sha256, io.BytesIO(payload))
+    assert repaired.manifest == manifest
+    assert store.get(manifest.sha256).archive == payload
+
+
 def test_store_rejects_expected_digest_mismatch(tmp_path) -> None:
     store = SourceBundleStore(tmp_path, limits=LIMITS)
+    payload = archive([("Dockerfile", b"FROM scratch\n")])
+    manifest = inspect_source_bundle(io.BytesIO(payload), LIMITS)
+    original = store.put(manifest.sha256, io.BytesIO(payload))
     with pytest.raises(SourceBundleError) as error:
-        store.put("f" * 64, io.BytesIO(archive([("Dockerfile", b"FROM scratch\n")])))
+        store.put("f" * 64, io.BytesIO(payload))
 
     assert error.value.code == "bundle.digest_mismatch"
+    assert original.path.read_bytes() == payload
+    assert store.get(manifest.sha256).manifest == manifest
+    assert not (tmp_path / "ff" / f"{'f' * 64}.tar").exists()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
 from uuid import uuid4
 
 import pytest
@@ -29,11 +29,14 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileChildOperation,
     FleetProfileChildProgress,
     FleetProfileInput,
+    FleetProfileNode,
+    FleetProfileRunEffect,
     FleetProfileScope,
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
     FleetProfileSwitchChildState,
+    FleetProfileSwitchQueueItem,
     FleetProfileVerificationResult,
 )
 from vonk_control.fleet_profiles import (
@@ -215,7 +218,10 @@ def test_profile_progress_and_results_are_closed_nested_contracts() -> None:
     adapter_result = FleetProfileSwitchAdapterResult(
         children=[
             FleetProfileSwitchChildState(
-                operation_id=operation_id, kind="run", state="succeeded"
+                queue_index=0,
+                operation_id=operation_id,
+                kind="run",
+                state=LifecycleState.SUCCEEDED,
             )
         ],
         assignment_ids=[],
@@ -1074,6 +1080,30 @@ def test_profile_observation_does_not_depend_on_damaged_bookkeeping(
     assert view.projection_issue.code == "profile.application_intent.invalid"
 
 
+def _follow_profile_retry(
+    service: FleetProfileService,
+    application_id: str,
+    now: list[datetime],
+    *,
+    assert_no_work: bool = False,
+) -> None:
+    """Respect the accepted row's durable due time, without a guessed clock jump."""
+    with service._sessions() as session:
+        row = session.get(FleetProfileApplication, application_id)
+        assert row is not None
+        progress = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(row.progress)
+        )
+        due = progress.retry_due_at
+        child_id = row.current_operation_id
+    if due is not None and due > now[0]:
+        worked = service.tick()
+        if assert_no_work:
+            assert worked is False
+        assert service.application(application_id).current_operation_id == child_id
+        now[0] = due
+
+
 def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> (
     None
 ):
@@ -1089,8 +1119,11 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
                 last_seen_at=NOW,
             )
         )
+    now = [NOW]
     adapter = _SwitchAdapter()
-    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
+    service = FleetProfileService(
+        sessions, clock=lambda: now[0], switch_adapter=adapter
+    )
     profile_input = _input(revision_id).model_copy(
         update={"scope": FleetProfileScope(node_ids=[_node_id(1), _node_id(2)])}
     )
@@ -1122,6 +1155,7 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
 
     observed_phases = [progress.child_progress.phase]
     for _ in range(8):
+        _follow_profile_retry(service, application.id, now, assert_no_work=True)
         assert service.tick() is True
         current = service.application(application.id)
         child_progress = current.progress.child_progress
@@ -1775,8 +1809,11 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
                 last_seen_at=NOW,
             )
         )
+    now = [NOW]
     adapter = _SwitchAdapter()
-    service = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
+    service = FleetProfileService(
+        sessions, clock=lambda: now[0], switch_adapter=adapter
+    )
     profile = service.create(
         FleetProfileInput.model_validate(
             {
@@ -1819,10 +1856,13 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
     assert replayed_child.id == running.current_operation_id
     assert len(adapter.starts) == 1
 
-    resumed = FleetProfileService(sessions, clock=lambda: NOW, switch_adapter=adapter)
+    resumed = FleetProfileService(
+        sessions, clock=lambda: now[0], switch_adapter=adapter
+    )
     for _ in range(8):
         if resumed.application(application.id).state == "succeeded":
             break
+        _follow_profile_retry(resumed, application.id, now, assert_no_work=True)
         assert resumed.tick() is True
 
     assert resumed.application(application.id).state == "succeeded"
@@ -2175,6 +2215,8 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
             )
         )
     assert revision is not None
+    now = [lifecycle._clock()]
+    lifecycle._clock = lambda: now[0]
     run_switch = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -2220,7 +2262,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert current.current_operation_id == application.id
     adapter_progress = current.progress.switch_adapter
     assert isinstance(adapter_progress, FleetProfileSwitchAdapterState)
-    child_id = adapter_progress.active_operation_id
+    child_id = adapter_progress.pending_children[0].operation_id
     assert isinstance(child_id, str)
     child = run_switch.get(child_id)
     assert child.kind == "recipe.run-switch.v2"
@@ -2232,8 +2274,8 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     with sessions() as session:
         stored = session.get(FleetProfileApplication, application.id)
         assert stored is not None
-        persisted_progress = FleetProfileApplicationProgress.model_validate(
-            stored.progress
+        persisted_progress = FleetProfileApplicationProgress.model_validate_json(
+            canonical_message(stored.progress)
         )
         assert isinstance(
             persisted_progress.switch_adapter, FleetProfileSwitchAdapterState
@@ -2266,11 +2308,15 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
         switch_adapter=restarted_adapter,
         assessment_provider=restarted_adapter.assess,
     )
-    assert restarted_service.tick() is False
+    assert restarted_service.tick() is True
+    _follow_profile_retry(restarted_service, application.id, now, assert_no_work=True)
     resumed = restarted_service.application(application.id)
     assert resumed.current_operation_id == application.id
     assert resumed.progress.switch_adapter is not None
-    assert resumed.progress.switch_adapter.active_operation_id == child_id
+    assert any(
+        child.operation_id == child_id
+        for child in resumed.progress.switch_adapter.pending_children
+    )
 
 
 def _transfer_result(nodes: tuple[str, ...]) -> dict[str, object]:
@@ -2387,7 +2433,7 @@ def test_completed_switch_child_keeps_its_run_switch_receipt(tmp_path: Path) -> 
     assert service.tick() is True
     started = service.application(application.id)
     assert started.progress.switch_adapter is not None
-    child_id = started.progress.switch_adapter.active_operation_id
+    child_id = started.progress.switch_adapter.pending_children[0].operation_id
     assert isinstance(child_id, str)
 
     # The child finishes with its public Run/Switch result tree, exactly as the
@@ -2473,6 +2519,8 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
             )
         )
     assert revision is not None
+    now = [lifecycle._clock()]
+    lifecycle._clock = lambda: now[0]
     run_switch = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -2514,7 +2562,7 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     assert service.tick() is True
     started = service.application(application.id)
     assert started.progress.switch_adapter is not None
-    child_id = started.progress.switch_adapter.active_operation_id
+    child_id = started.progress.switch_adapter.pending_children[0].operation_id
     assert isinstance(child_id, str)
 
     with sessions.begin() as session:
@@ -2528,7 +2576,10 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     waiting = service.application(application.id)
     assert waiting.state in {"queued", "running"}, waiting.status_reason
     assert waiting.progress.switch_adapter is not None
-    assert waiting.progress.switch_adapter.active_operation_id == child_id
+    assert any(
+        child.operation_id == child_id
+        for child in waiting.progress.switch_adapter.pending_children
+    )
 
     with sessions.begin() as session:
         job = session.get(Job, child_id)
@@ -2542,6 +2593,7 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
         )
         job.updated_at = lifecycle._clock()
 
+    _follow_profile_retry(service, application.id, now, assert_no_work=True)
     assert service.tick() is True
     completed = service.application(application.id)
     assert completed.state == "succeeded", completed.status_reason
@@ -2622,7 +2674,7 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
     assert service.tick() is True
     started = service.application(application.id)
     assert started.progress.switch_adapter is not None
-    child_id = started.progress.switch_adapter.active_operation_id
+    child_id = started.progress.switch_adapter.pending_children[0].operation_id
     assert isinstance(child_id, str)
 
     with sessions.begin() as session:
@@ -2649,11 +2701,14 @@ def test_switch_adapter_joins_the_callers_row_transaction(tmp_path: Path) -> Non
         assert stored is not None
         progress = FleetProfileApplicationProgress.model_validate(stored.progress)
         assert isinstance(progress.switch_adapter, FleetProfileSwitchAdapterState)
-        assert progress.switch_adapter.active_operation_id == child_id
+        assert any(
+            child.operation_id == child_id
+            for child in progress.switch_adapter.pending_children
+        )
 
     committed = service.application(application.id).progress.switch_adapter
     assert committed is not None
-    assert committed.active_operation_id == child_id
+    assert any(child.operation_id == child_id for child in committed.pending_children)
 
 
 def test_profile_tick_advances_a_switch_child_on_postgres(
@@ -2693,6 +2748,8 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
                 )
             )
         assert revision is not None
+        now = [lifecycle._clock()]
+        lifecycle._clock = lambda: now[0]
         run_switch = RunSwitchOperationService(
             sessions,
             lifecycle=lifecycle,
@@ -2736,14 +2793,18 @@ def test_profile_tick_advances_a_switch_child_on_postgres(
         started = service.application(application.id)
         assert started.current_operation_id == application.id
         assert started.progress.switch_adapter is not None
-        child_id = started.progress.switch_adapter.active_operation_id
+        child_id = started.progress.switch_adapter.pending_children[0].operation_id
         assert isinstance(child_id, str)
-        # The next pass reads the child under the same row lock; unchanged
-        # progress is not written again.
-        assert service.tick() is False
+        # The next pass reads under the same row lock and persists its first
+        # observation deadline; the following before-due pass does no work.
+        assert service.tick() is True
+        _follow_profile_retry(service, application.id, now, assert_no_work=True)
         resumed = service.application(application.id)
         assert resumed.progress.switch_adapter is not None
-        assert resumed.progress.switch_adapter.active_operation_id == child_id
+        assert any(
+            child.operation_id == child_id
+            for child in resumed.progress.switch_adapter.pending_children
+        )
     finally:
         engine.dispose()
 
@@ -2816,7 +2877,7 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
     assert current.current_operation_id == application.id
     state = current.progress.switch_adapter
     assert state is not None
-    child_id = state.active_operation_id
+    child_id = state.pending_children[0].operation_id
     assert isinstance(child_id, str)
     child = run_switch.get(child_id)
     assert child.kind == "recipe.stop.v2"
@@ -2904,7 +2965,7 @@ def test_all_idle_profile_stops_a_lost_run_that_still_has_residue(
     assert service.tick() is True
     state = service.application(application.id).progress.switch_adapter
     assert state is not None
-    child_id = state.active_operation_id
+    child_id = state.pending_children[0].operation_id
     assert isinstance(child_id, str)
     child = run_switch.get(child_id)
     assert child.kind == "recipe.stop.v2"
@@ -3805,7 +3866,7 @@ def test_switch_queue_removes_an_installation_the_profile_no_longer_references(
             expected_images={},
         )
 
-    assert {"kind": "cleanup", "id": installed.owner_id} in exact
+    assert FleetProfileSwitchQueueItem(kind="cleanup", id=installed.owner_id) in exact
     # Retention decides whether it is removed at all: keep-cached retains it.
     assert retained == []
 
@@ -3888,9 +3949,14 @@ def test_exact_profile_switch_abandons_a_never_installed_leftover(
     with ``run-switch.plan_blocked: run-switch.uninstall-blocked``.
     """
 
-    sessions, _lifecycle, _adapter, run_switch, service, profile, planned, _nodes = (
+    sessions, lifecycle, _adapter, run_switch, service, profile, planned, _nodes = (
         _exact_planned_cleanup_profile(tmp_path)
     )
+
+    now = [lifecycle._clock()]
+    lifecycle._clock = lambda: now[0]
+    service._clock = lifecycle._clock
+    run_switch._clock = lifecycle._clock
 
     preview = service.preview(profile.id)
     assert preview.allowed is True
@@ -3902,6 +3968,7 @@ def test_exact_profile_switch_abandons_a_never_installed_leftover(
         actor="admin",
     )
     for _ in range(12):
+        _follow_profile_retry(service, application.id, now)
         run_switch.tick()
         service.tick()
         if service.application(application.id).state in {"succeeded", "failed"}:
@@ -3971,6 +4038,8 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
         request_id=_uuid(901),
         alias="acceptance-cleanup",
     )
+    now = [lifecycle._clock()]
+    lifecycle._clock = lambda: now[0]
     run_switch = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -4002,6 +4071,7 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
     )
     completed_agent_operations: set[str] = set()
     for _ in range(30):
+        _follow_profile_retry(service, application.id, now)
         run_switch.tick()
         service.tick()
         current = service.application(application.id)
@@ -4009,22 +4079,21 @@ def test_acceptance_cleanup_consumer_reads_the_complete_run_switch_result(
             break
         state = current.progress.switch_adapter
         assert state is not None
-        active_id = state.active_operation_id
-        if active_id is None:
-            continue
-        child = run_switch.get(active_id)
-        operation_id = child.result.child_operation_id if child.result else None
-        if operation_id is None or operation_id in completed_agent_operations:
-            continue
-        with sessions() as session:
-            operation = session.get(Job, operation_id)
-            assert operation is not None
-            kind = operation.kind
-        assert kind in {"recipe.stop", "recipe.uninstall"}
-        lifecycle.record_node_result(
-            operation_id, nodes[0], succeeded=True, evidence={}
-        )
-        completed_agent_operations.add(operation_id)
+        for pending_child in state.pending_children:
+            assert pending_child.kind == state.queue[pending_child.queue_index].kind
+            child = run_switch.get(pending_child.operation_id)
+            operation_id = child.result.child_operation_id if child.result else None
+            if operation_id is None or operation_id in completed_agent_operations:
+                continue
+            with sessions() as session:
+                operation = session.get(Job, operation_id)
+                assert operation is not None
+                kind = operation.kind
+            assert kind in {"recipe.stop", "recipe.uninstall"}
+            lifecycle.record_node_result(
+                operation_id, nodes[0], succeeded=True, evidence={}
+            )
+            completed_agent_operations.add(operation_id)
     else:
         pytest.fail(
             "profile cleanup did not converge: "
@@ -4117,15 +4186,26 @@ def test_persisted_child_progress_is_read_with_json_semantics() -> None:
     valid datetime".
     """
 
-    state = {
-        "state": "running",
-        "child_progress": {
-            "phase": "start",
-            "node_ids": [_node_id(1)],
-            "startup_budget_seconds": 1800,
-            "start_deadline": "2026-09-17T08:48:21.262460Z",
-        },
-    }
+    state = FleetProfileSwitchAdapterState.model_validate_json(
+        json.dumps(
+            {
+                "child_id": _uuid(900),
+                "scope_node_ids": [_node_id(1)],
+                "assignment_ids": [],
+                "assignments": [],
+                "queue": [],
+                "actor": "admin",
+                "request_id": _uuid(901),
+                "state": "running",
+                "child_progress": {
+                    "phase": "start",
+                    "node_ids": [_node_id(1)],
+                    "startup_budget_seconds": 1800,
+                    "start_deadline": "2026-09-17T08:48:21.262460Z",
+                },
+            }
+        )
+    )
 
     view = RunSwitchFleetProfileAdapter._view_from_state(
         cast("FleetProfileApplication", SimpleNamespace(id=_uuid(900))), state
@@ -4141,52 +4221,63 @@ def test_persisted_child_progress_is_read_with_json_semantics() -> None:
 
 
 def test_a_replaced_workload_keeps_serving_until_its_successor_starts() -> None:
-    """Wrong implementation: every stop ran first, so loading a new revision of
-    a running workload took it down for the successor's whole preparation."""
-
-    from types import SimpleNamespace
-
+    """A replacement must prepare before stopping the exact old workload."""
     from vonk_control.fleet_profiles import _switch_queue
 
-    def stop(run_id: str, *nodes: int):
-        return SimpleNamespace(
-            run_id=run_id,
-            node_ids=[_node_id(n) for n in nodes],
-            profile_stop_scope=None,
+    identities = {
+        name: _uuid(19890 + index)
+        for index, name in enumerate(
+            ("old-glm", "spread", "new-glm", "solo-three", "solo-four", "leftover")
+        )
+    }
+
+    def stop(name: str, *nodes: int) -> FleetProfileRunEffect:
+        return FleetProfileRunEffect(
+            run_id=identities[name],
+            installation_id=_uuid(19899),
+            alias=name,
+            node_ids=[_node_id(node) for node in nodes],
+            action="stop",
         )
 
-    def assignment(assignment_id: str, *nodes: int, state: str = "running"):
-        return SimpleNamespace(
-            id=assignment_id,
-            nodes=[SimpleNamespace(node_id=_node_id(n)) for n in nodes],
-            desired_state=state,
-        )
-
-    # The ordering reads only identities and Spark sets, so plain records
-    # stand in for the full effect and assignment models.
-    queue = _switch_queue(
-        cast(Any, [stop("old-glm", 1, 2), stop("spread", 3, 4)]),
-        cast(
-            Any,
-            [
-                assignment("new-glm", 1, 2),
-                assignment("solo-three", 3),
-                assignment("solo-four", 4),
+    def assignment(name: str, *nodes: int) -> FleetProfileAssignment:
+        return FleetProfileAssignment(
+            id=identities[name],
+            recipe_revision_id=_uuid(19898),
+            recipe_id=_uuid(19897),
+            recipe_title=name,
+            topology_name="full-reviewed-group",
+            desired_state=DesiredAssignmentState.RUNNING,
+            alias=name,
+            nodes=[
+                FleetProfileNode(
+                    node_id=_node_id(node),
+                    rank=index,
+                    role=f"rank-{index}",
+                    endpoint_owner=index == 0,
+                )
+                for index, node in enumerate(nodes)
             ],
-        ),
-        ["leftover"],
-    )
+        )
 
-    assert [(item["kind"], item["id"]) for item in queue] == [
-        # Two new runs take the spread workload's Sparks separately; neither
-        # one alone can stop it, so it stops first.
-        ("stop", "spread"),
-        ("run", "new-glm"),
-        ("run", "solo-three"),
-        ("run", "solo-four"),
-        # The new GLM's own Run/Switch stops the old one right before start.
-        ("stop", "old-glm"),
-        ("cleanup", "leftover"),
+    queue = _switch_queue(
+        [stop("old-glm", 1, 2), stop("spread", 3, 4)],
+        [
+            assignment("new-glm", 1, 2),
+            assignment("solo-three", 3),
+            assignment("solo-four", 4),
+        ],
+        [identities["leftover"]],
+    )
+    assert [(item.kind, item.id) for item in queue] == [
+        # Neither single-node successor alone replaces the old two-node gang.
+        ("stop", identities["spread"]),
+        ("run", identities["new-glm"]),
+        ("run", identities["solo-three"]),
+        ("run", identities["solo-four"]),
+        # This successor keeps the complete old group serving while preparing.
+        ("stop", identities["old-glm"]),
+        ("cleanup", identities["leftover"]),
     ]
 
 
@@ -4243,7 +4334,7 @@ def test_a_stop_step_for_an_already_replaced_workload_is_skipped(
 
     current = service.application(application.id)
     state = current.progress.switch_adapter
-    assert state is not None and state.active_operation_id is None
+    assert state is not None and not state.pending_children
     assert current.state == "succeeded", current.status_reason
 
 

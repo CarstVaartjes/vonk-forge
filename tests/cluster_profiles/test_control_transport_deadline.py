@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import ipaddress
 import json
@@ -13,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from contextlib import redirect_stdout
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +28,15 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from test_control_client_requests import _artifact_job_response
+from vonk_control.observation_transfer import (
+    OBSERVATION_MEDIA_TYPE,
+    ObservationTransferChunk,
+    ObservationTransferComplete,
+    ObservationTransferStart,
+    _record,
+    observation_response,
+)
+from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import (
@@ -32,6 +44,7 @@ from cluster_profiles.control_client import (
     ControlClientError,
     ControlTransportError,
 )
+from control.tests.test_observation_transfer import _large_snapshot
 
 KEY = "11111111-1111-4111-8111-111111111111"
 
@@ -81,11 +94,14 @@ def https_peer(tmp_path, monkeypatch):
         "status": 202,
         "calls": [],
         "closed": threading.Event(),
+        "accepted": threading.Event(),
         "started": threading.Event(),
     }
     stop = threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
+        raw_requestline: bytes
+
         # The client's close can surface anywhere in the exchange, not only
         # while respond() is writing; record it wherever it lands.
         def handle(self):
@@ -93,6 +109,11 @@ def https_peer(tmp_path, monkeypatch):
                 super().handle()
             except (BrokenPipeError, ConnectionResetError, ssl.SSLError):
                 state["closed"].set()
+            else:
+                # BaseHTTPRequestHandler treats a clean peer EOF before a
+                # request line as a normal return, not a write exception.
+                if self.raw_requestline == b"":
+                    state["closed"].set()
 
         def finish(self):
             try:
@@ -127,6 +148,17 @@ def https_peer(tmp_path, monkeypatch):
                     self.wfile.write(headers + body)
                     self.wfile.flush()
                     return
+                if state["stage"] == "records":
+                    self.wfile.write(headers)
+                    self.wfile.flush()
+                    state["started"].set()
+                    for record in body.splitlines(keepends=True):
+                        self.wfile.write(record)
+                        self.wfile.flush()
+                        state["records_sent"] += 1
+                        if stop.wait(0.005):
+                            break
+                    return
                 if state["stage"] == "headers":
                     data = headers + body
                 else:
@@ -147,8 +179,21 @@ def https_peer(tmp_path, monkeypatch):
 
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert_path, key_path)
-    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        server.socket = context.wrap_socket(server.socket, server_side=True)
+
+    class Server(ThreadingHTTPServer):
+        def get_request(self):
+            connection, address = super().get_request()
+            # Observe actual TCP admission before TLS can fail or the client
+            # deadline can expire without an HTTP request reaching Handler.
+            state["accepted"].set()
+            return (
+                context.wrap_socket(
+                    connection, server_side=True, do_handshake_on_connect=False
+                ),
+                address,
+            )
+
+    with Server(("127.0.0.1", 0), Handler) as server:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         client = ControlClient(
@@ -187,9 +232,34 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
     assert context.http_status == (status if stage == "body" else None)
     assert context.request_id == ("deadline-fixture" if stage == "body" else None)
     assert failure.value.retry_after_seconds == (120 if stage == "body" else None)
-    assert state["closed"].wait(1), "deadline left its HTTPS connection open"
-    assert len(state["calls"]) == 1
+    closure_deadline = time.monotonic() + 1
+    state["accepted"].wait(1)
+    if state["accepted"].is_set():
+        assert state["closed"].wait(max(0, closure_deadline - time.monotonic())), (
+            "deadline left its admitted HTTPS connection open"
+        )
+    else:
+        # The total attempt includes native setup before a connection exists.
+        # Such an expiry cannot invent admission or a peer closure observation.
+        assert not state["calls"]
+    assert len(state["calls"]) <= 1
+    if stage == "body":
+        assert len(state["calls"]) == 1
     assert "private-test-token" not in str(failure.value)
+
+
+def test_tls_peer_eof_before_request_is_observed_without_write_failure(https_peer):
+    _, state = https_peer
+    origin = urllib.parse.urlsplit(state["url"])
+    assert origin.hostname is not None and origin.port is not None
+    context = ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])
+    with (
+        socket.create_connection((origin.hostname, origin.port), timeout=0.25) as raw,
+        context.wrap_socket(raw, server_hostname=origin.hostname),
+    ):
+        assert state["accepted"].wait(1)
+    assert state["closed"].wait(1), "graceful TLS EOF was not actually observed"
+    assert not state["calls"], "EOF fixture unexpectedly delivered an HTTP request"
 
 
 @pytest.mark.parametrize(
@@ -217,15 +287,20 @@ def test_cli_slow_response_never_repeats_post_without_authoritative_absence(
     assert json.loads(state["calls"][0][2])["request_key"] == KEY
 
 
-def test_generated_client_uses_same_body_deadline_and_received_evidence(https_peer):
+@pytest.mark.parametrize("stage", ["headers", "body"])
+def test_generated_client_uses_same_body_deadline_and_received_evidence(
+    https_peer, stage
+):
     client, state = https_peer
-    state["status"] = 503
+    state.update(status=503, stage=stage)
     with pytest.raises(ControlTransportError) as failure:
         client.fleet()
     context = failure.value.context
     assert context is not None and context.transport == "timeout"
-    assert context.http_status == 503 and context.request_id == "deadline-fixture"
-    assert failure.value.retry_after_seconds == 120
+    assert context.http_status == (503 if stage == "body" else None)
+    assert context.request_id == ("deadline-fixture" if stage == "body" else None)
+    assert failure.value.retry_after_seconds == (120 if stage == "body" else None)
+    assert len(state["calls"]) == 1
     assert state["closed"].wait(1)
 
 
@@ -502,3 +577,76 @@ def test_a_cleanup_failure_with_nothing_in_flight_is_still_reported(monkeypatch)
     response = transport.HTTPSResponse(request, 1)
     with pytest.raises(RuntimeError, match="Event loop stopped"):
         response.close()
+
+
+@pytest.mark.slow(20)
+def test_continuous_valid_observation_progress_cannot_extend_attempt(
+    https_peer, tmp_path: Path
+) -> None:
+    client, state = https_peer
+    snapshot = _large_snapshot(tmp_path)
+    frozen = serialize_json_value(snapshot)
+    response = observation_response(snapshot, resource="fleet")
+
+    async def collect() -> bytes:
+        parts: list[bytes] = []
+        async for part in response.body_iterator:
+            parts.append(part.encode() if isinstance(part, str) else bytes(part))
+        return b"".join(parts)
+
+    original = asyncio.run(collect()).splitlines()
+    start = ObservationTransferStart.model_validate_json(original[0], strict=True)
+    raw = b"".join(
+        base64.b64decode(
+            ObservationTransferChunk.model_validate_json(line, strict=True).data,
+            validate=True,
+        )
+        for line in original[1:-1]
+    )
+    # Smaller legal fragments expose repeated record progress during one
+    # attempt; this fixture packet size is not a domain or transfer-size cap.
+    fragments = [raw[offset : offset + 4096] for offset in range(0, len(raw), 4096)]
+    records = [
+        start,
+        *(
+            ObservationTransferChunk(
+                type="chunk",
+                transfer_id=start.transfer_id,
+                ordinal=ordinal,
+                data=base64.b64encode(fragment).decode("ascii"),
+            )
+            for ordinal, fragment in enumerate(fragments)
+        ),
+        ObservationTransferComplete(
+            type="complete",
+            transfer_id=start.transfer_id,
+            chunks=len(fragments),
+            bytes=len(raw),
+            sha256=hashlib.sha256(raw).hexdigest(),
+        ),
+    ]
+    body = b"".join(_record(record) for record in records)
+    state.update(
+        status=200,
+        stage="records",
+        body=body,
+        media_type=OBSERVATION_MEDIA_TYPE,
+        records_sent=0,
+    )
+    started = time.monotonic()
+    with pytest.raises(ControlTransportError) as failure:
+        client.fleet()
+    assert time.monotonic() - started < 0.75
+    context = failure.value.context
+    assert context is not None and context.transport == "timeout"
+    assert context.http_status == 200 and context.request_id == "deadline-fixture"
+    assert failure.value.retry_after_seconds == 120
+    assert state["records_sent"] > 2, "no repeated valid-record progress was exercised"
+    assert len(state["calls"]) == 1
+    assert state["closed"].wait(1), "expired observation left the connection open"
+    # A fresh read-only attempt gets its own normal caller budget, then adopts
+    # the same complete frozen document, without partial membership or reapply.
+    state.update(stage="fast")
+    repaired = ControlClient(state["url"], Path(state["token"]))
+    assert repaired.request("GET", "/api/fleet") == frozen
+    assert len(state["calls"]) == 2

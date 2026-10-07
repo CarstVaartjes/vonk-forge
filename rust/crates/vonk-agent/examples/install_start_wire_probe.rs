@@ -11,6 +11,7 @@
 use std::{
     io::{self, BufRead, Write},
     path::Path,
+    time::{Duration, Instant},
 };
 
 use vonk_agent::{
@@ -64,29 +65,57 @@ fn runtime_plan(
     })
 }
 
-fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
-    // Keep this explicit even though RecipeOperationRequest::parse validates
-    // the claim too: the wire probe must exercise the authenticated claim
-    // boundary before touching the operation payload.
-    claim
-        .validate()
-        .map_err(|_| "agent claim is invalid".to_owned())?;
-    let request = RecipeOperationRequest::parse(claim)
+// Opt-in hosted profiling keeps production boundaries and verdicts identical.
+// Only accumulated durations and call counts reach stderr, never wire content.
+#[derive(Default)]
+struct StageTimings {
+    enabled: bool,
+    stages: std::collections::BTreeMap<&'static str, (usize, Duration)>,
+}
+
+impl StageTimings {
+    fn measure<T>(&mut self, name: &'static str, work: impl FnOnce() -> T) -> T {
+        let started = self.enabled.then(Instant::now);
+        let result = work();
+        if let Some(started) = started {
+            let stage = self.stages.entry(name).or_default();
+            stage.0 += 1;
+            stage.1 += started.elapsed();
+        }
+        result
+    }
+
+    fn report(&self) {
+        for (name, (calls, elapsed)) in &self.stages {
+            eprintln!(
+                "wire_probe_timing stage={name} calls={calls} elapsed_us={}",
+                elapsed.as_micros()
+            );
+        }
+    }
+}
+
+fn result_for(claim: &AgentClaim, timings: &mut StageTimings) -> Result<AgentResult, String> {
+    // The production parser validates this exact claim before touching its
+    // payload. Exercise that boundary once, as the normal worker does.
+    let request = timings
+        .measure("request_parse", || RecipeOperationRequest::parse(claim))
         .map_err(|_| "recipe operation payload is invalid".to_owned())?;
     let result = match request {
         RecipeOperationRequest::Install(request) => {
-            request
-                .compiled_execution_plan
-                .validate()
+            timings
+                .measure("install_plan_validate", || {
+                    request.compiled_execution_plan.validate()
+                })
                 .map_err(|_| "compiled execution plan is invalid".to_owned())?;
             recipe_install_success(request.expected_bytes)
         }
         RecipeOperationRequest::Start(request) => {
             let spec = request.compiled_execution_plan.clone();
-            spec.validate()
-                .map_err(|_| "compiled execution plan is invalid".to_owned())?;
-            // Projecting the runtime plan still proves the launch is derivable.
-            let plan = runtime_plan(&request, &spec)?;
+            // The production OCI projection validates this same immutable spec
+            // before building arguments; do not repeat its full document and
+            // per-artifact validation immediately before that boundary.
+            let plan = timings.measure("start_oci_projection", || runtime_plan(&request, &spec))?;
             let _ = runtime_arguments_for_plan(&plan, &plan.main);
             recipe_start_success(&request)
         }
@@ -107,14 +136,18 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
         result: finished.result,
         state: finished.state,
     };
-    message
-        .validate()
+    timings
+        .measure("agent_result_validate", || message.validate())
         .map_err(|_| "canonical agent result is invalid".to_owned())?;
     Ok(message)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    let mut timings = StageTimings {
+        enabled: arguments.iter().any(|value| value == "--timings"),
+        ..StageTimings::default()
+    };
     let distribution_mode = arguments.iter().any(|value| value == "--distribution");
     // Constructing the typed claim validators dominates one probe run (~100ms,
     // against ~4ms for each further claim in the same process), so the wire
@@ -130,8 +163,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         if verdicts_mode {
-            let verdict = match serde_json::from_str::<AgentClaim>(&line) {
-                Ok(claim) => result_for(&claim).is_ok(),
+            let verdict = match timings
+                .measure("claim_decode", || serde_json::from_str::<AgentClaim>(&line))
+            {
+                Ok(claim) => result_for(&claim, &mut timings).is_ok(),
                 Err(_) => false,
             };
             writeln!(output, "{}", u8::from(verdict))?;
@@ -144,11 +179,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             serde_json::to_writer(&mut output, &assignment)?;
         } else {
             let claim: AgentClaim = serde_json::from_str(&line)?;
-            let result = result_for(&claim).map_err(io::Error::other)?;
+            let result = result_for(&claim, &mut timings).map_err(io::Error::other)?;
             serde_json::to_writer(&mut output, &result)?;
         }
         output.write_all(b"\n")?;
         output.flush()?;
     }
+    timings.report();
     Ok(())
 }

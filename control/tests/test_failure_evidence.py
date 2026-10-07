@@ -242,7 +242,10 @@ def test_a_configuration_line_that_names_tokens_is_not_redacted() -> None:
     assert safe_text("token: hunter2") == "[redacted diagnostic line]"
 
 
-def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail() -> None:
+@pytest.mark.parametrize("prior_count", [0, None, 2**64 - 1])
+def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail(
+    prior_count: int | None,
+) -> None:
     """Redaction grows a tail past the bound, so the bound belongs at its front.
 
     ``[redacted diagnostic line]`` is longer than the credential line it
@@ -268,7 +271,7 @@ def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail() -> N
             "stderr": {
                 "text": text,
                 "truncated": False,
-                "dropped_bytes": 0,
+                "dropped_bytes": prior_count,
                 "dropped_lines": 0,
             },
             "versions": [],
@@ -282,7 +285,10 @@ def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail() -> N
     assert cleaned.stderr.text.endswith("the container exited here\n")
     assert len(cleaned.stderr.text.encode()) <= 2048
     assert cleaned.stderr.truncated
-    assert (cleaned.stderr.dropped_bytes or 0) > 0
+    if prior_count == 0:
+        assert (cleaned.stderr.dropped_bytes or 0) > 0
+    else:
+        assert cleaned.stderr.dropped_bytes is None
     assert "token: v" not in cleaned.stderr.text
 
 

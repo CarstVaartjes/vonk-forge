@@ -1086,6 +1086,79 @@ jobs:
             jq -e 'index("/etc/cdi") != null and index("/var/run/cdi") != null' \
               >/dev/null
 
+      - name: Install pinned native renewal proof toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install 1.98.1
+          rustup default 1.98.1
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Restore native renewal proof dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-arm64-candidate
+          add-job-id-key: "false"
+          cache-workspace-crates: "false"
+
+      - name: Build exact-source native renewal scheduling peer
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          VERSION: ${{ needs.authority.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --quiet
+          git diff --cached --quiet
+          test "$(uname -m)" = aarch64
+          epoch=$(git show -s --format=%ct "$SOURCE_SHA")
+          lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
+          build_digest="sha256:$(
+            printf 'vonk-agent-build-v2\0%s\0%s\0%s\0%s' \
+              "$SOURCE_SHA" linux-arm64 "$lock_digest" "$VERSION" \
+              | sha256sum | cut -d' ' -f1
+          )"
+          export CARGO_INCREMENTAL=0 SOURCE_DATE_EPOCH="$epoch"
+          export VONK_AGENT_BUILD_DIGEST="$build_digest"
+          export VONK_AGENT_SEMANTIC_VERSION="${VERSION%%~*}"
+          cargo build --release --locked --target aarch64-unknown-linux-gnu \
+            --package vonk-agent --example acceptance_certificate_renewal
+          install -D -m 0555 \
+            target/aarch64-unknown-linux-gnu/release/examples/acceptance_certificate_renewal \
+            "$RUNNER_TEMP/spark-renewal-helper/acceptance_certificate_renewal"
+          python3 - <<'PYPROVENANCE'
+          import ast
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          source = Path("tests/acceptance/test_spark_lifecycle.py")
+          declaration = next(
+              node for node in ast.parse(source.read_text()).body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "RENEWAL_HELPER_INPUTS"
+                      for target in node.targets)
+          )
+          inputs = ast.literal_eval(declaration.value)
+          root = Path(os.environ["RUNNER_TEMP"]) / "spark-renewal-helper"
+          helper = root / "acceptance_certificate_renewal"
+          manifest = {
+              "source_sha": os.environ["SOURCE_SHA"],
+              "binary_sha256": hashlib.sha256(helper.read_bytes()).hexdigest(),
+              "build_digest": os.environ["VONK_AGENT_BUILD_DIGEST"],
+              "source_inputs": {
+                  name: hashlib.sha256(Path(name).read_bytes()).hexdigest()
+                  for name in inputs
+              },
+          }
+          (root / "manifest.json").write_text(
+              json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
+          )
+          PYPROVENANCE
+
       - name: Run packaged Spark architecture acceptance
         shell: bash
         env:
@@ -1094,6 +1167,8 @@ jobs:
           VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_PLATFORM: linux-arm64
+          VONK_ACCEPTANCE_RENEWAL_HELPER: ${{ runner.temp }}/spark-renewal-helper/acceptance_certificate_renewal
+          VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST: ${{ runner.temp }}/spark-renewal-helper/manifest.json
           VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY: loopback
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
@@ -1132,7 +1207,20 @@ jobs:
           name: installer-spark-start-topology-${{ needs.candidate.outputs.generation }}-linux-arm64
           retention-days: 7
           if-no-files-found: ignore
-          path: ${{ runner.temp }}/spark-acceptance/failed-start-topology.json
+          path: |
+            ${{ runner.temp }}/spark-acceptance/failed-start-topology.json
+            ${{ runner.temp }}/spark-acceptance/failed-start-recovery.json
+
+      - name: Retain exact-source controlled scheduling-clock evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-spark-renewal-clock-${{ needs.candidate.outputs.generation }}-linux-arm64
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            ${{ runner.temp }}/spark-renewal-helper/
+            ${{ runner.temp }}/spark-acceptance/renewal-scheduling-clock.json
 
       - name: Upload Spark behavioral gate report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

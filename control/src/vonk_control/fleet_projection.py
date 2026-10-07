@@ -58,6 +58,7 @@ from .models import (
     RunNode,
 )
 from .nas_route_notice import nas_route_notice
+from .observation_capture import begin_observation_capture
 from .operation_blockers import PHASE_RETRY_CODE, read_blockers
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -87,8 +88,6 @@ _BOOT_UUID_PATTERN = (
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
 _MAX_FLEET_NODES = 500
-_MAX_OPERATIONAL_GROUPS = 512
-_MAX_GROUP_MEMBER_ROWS = 8_192
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 _MAX_SIGNED_INTEGER = 2_147_483_647
 _MAX_TELEMETRY_BYTES = 16 * 1024**4
@@ -312,8 +311,8 @@ class InstallPartialEvidence(StrictModel):
     reason: InstallDegradedReason
     group_state: InstallationStateField
     rank_state: InstallationStateField
-    installed_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
-    required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    installed_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
+    required_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
 
 
 class ProjectionReason(StrictModel):
@@ -350,7 +349,9 @@ class InventoryState(StrictModel):
     artifact_store_read_only: bool
     capabilities: list[Text64] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    fabric_bandwidth_mbps: Annotated[int, Field(ge=1, le=_MAX_SIGNED_BIGINT)] | None = (
+        None
+    )
     nvidia_driver_version: Text256
     container_runtime_version: Text256
     network_interfaces: list[NetworkInterface] | None = Field(
@@ -411,8 +412,8 @@ class RecipePresence(StrictModel):
     affected_ranks: list[Rank] = Field(
         default_factory=list, max_length=_MAX_FLEET_NODES
     )
-    installed_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
-    required_bytes: int | None = Field(default=None, ge=0, le=_MAX_SIGNED_BIGINT)
+    installed_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
+    required_bytes: Annotated[int, Field(ge=0, le=_MAX_SIGNED_BIGINT)] | None = None
 
 
 class RunPresence(StrictModel):
@@ -540,8 +541,8 @@ class FleetNode(StrictModel):
     connection: NodeConnection
     inventory: InventoryState | None
     telemetry: TelemetryState | None
-    installed: list[InstallationPresence] = Field(max_length=512)
-    loaded: list[LoadedPresence] = Field(max_length=512)
+    installed: list[InstallationPresence]
+    loaded: list[LoadedPresence]
     reservations: CapacityReservations
     warnings: list[ProjectionReason] = Field(max_length=128)
 
@@ -646,7 +647,7 @@ class FleetProjection:
         self._run_rank_fresh_seconds = run_rank_fresh_seconds
 
     def read(self) -> FleetSnapshot:
-        return self.read_at(self._events.high_watermark())
+        return self.read_at(None)
 
     def update_display_name(self, node_id: str, display_name: str) -> FleetNodeIdentity:
         """Persist an operator alias without changing the node's technical identity."""
@@ -680,14 +681,19 @@ class FleetProjection:
                 ip_address=(None if presence is None else presence.management_address),
             )
 
-    def read_at(self, event_cursor: int) -> FleetSnapshot:
-        if (
+    def read_at(self, event_cursor: int | None) -> FleetSnapshot:
+        # A supplied cursor is a replay boundary, not historical reconstruction.
+        # Normal capture reads its committed boundary in the same SQL snapshot.
+        if event_cursor is not None and (
             type(event_cursor) is not int
             or not 0 <= event_cursor <= 9_223_372_036_854_775_807
         ):
             raise CursorError("Fleet event cursor is invalid")
         current = _utc(self._clock())
         with self._sessions() as session:
+            begin_observation_capture(session)
+            if event_cursor is None:
+                event_cursor = self._events.high_watermark_in_session(session)
             agents = self._registered_agents(session)
             node_ids = tuple(agents)
             profiles = self._node_profiles(session, node_ids)
@@ -714,7 +720,6 @@ class FleetProjection:
                     select(ClusterMappingNode)
                     .where(ClusterMappingNode.mapping_id.in_(mapping_ids))
                     .order_by(ClusterMappingNode.mapping_id, ClusterMappingNode.rank)
-                    .limit(_MAX_GROUP_MEMBER_ROWS)
                 )
             )
             installed = self._installed_presence(
@@ -870,7 +875,6 @@ class FleetProjection:
             .order_by(
                 RecipeInstallation.updated_at.desc(), RecipeInstallation.id.desc()
             )
-            .limit(_MAX_OPERATIONAL_GROUPS)
         )
         return tuple(
             session.execute(
@@ -903,7 +907,6 @@ class FleetProjection:
                 )
                 .where(InstallationNode.installation_id.in_(selected))
                 .order_by(InstallationNode.installation_id, InstallationNode.rank)
-                .limit(_MAX_GROUP_MEMBER_ROWS)
             )
         )
 
@@ -1254,7 +1257,6 @@ class FleetProjection:
             )
             .group_by(RecipeRun.id, RecipeRun.updated_at)
             .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
-            .limit(_MAX_OPERATIONAL_GROUPS)
         )
         return tuple(
             session.execute(
@@ -1287,7 +1289,6 @@ class FleetProjection:
                 )
                 .where(RunNode.run_id.in_(selected))
                 .order_by(RunNode.run_id, RunNode.rank)
-                .limit(_MAX_GROUP_MEMBER_ROWS)
             )
         )
 
@@ -1343,7 +1344,6 @@ class FleetProjection:
             select(FleetProfileApplication.progress)
             .where(FleetProfileApplication.state == "running")
             .order_by(FleetProfileApplication.id)
-            .limit(_MAX_OPERATIONAL_GROUPS)
         ):
             raw = progress.get("blockers") if isinstance(progress, Mapping) else None
             for blocker in read_blockers(raw):

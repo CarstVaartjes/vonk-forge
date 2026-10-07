@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import binascii
 import hashlib
 import http.client
 import json
@@ -20,7 +21,7 @@ from email.message import Message
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, Self, TypedDict
+from typing import TYPE_CHECKING, Any, Never, Protocol, Self, TypedDict
 
 import httpx2
 from jsonschema import Draft202012Validator, FormatChecker, validators
@@ -38,6 +39,11 @@ from .error_reporting import (
     safe_endpoint,
     safe_request_id,
     transport_context,
+)
+from .observation_transfer_reader import (
+    ObservationTransferInvalid,
+    ObservationTransferUnavailable,
+    receive_observation,
 )
 
 if TYPE_CHECKING:
@@ -149,6 +155,14 @@ class ControlMalformedResponse(ControlClientError):
 
 class ControlResponseTooLarge(ControlClientError):
     pass
+
+
+class ControlObservationUnavailable(ControlClientError):
+    def __init__(
+        self, reason_code: str, detail: str, *, context: ErrorContext | None = None
+    ) -> None:
+        self.reason_code = reason_code
+        super().__init__(f"{reason_code}: {detail}", context=context)
 
 
 class ControlTransportError(ControlClientError):
@@ -359,9 +373,18 @@ def _control_openapi() -> dict[str, object]:
     return schema
 
 
+def source_schema_validator(schema: dict[str, object]) -> Draft202012Validator:
+    """Validate an explicit source graph with the canonical JSON token rules.
+
+    Acceptance may supply a verified historical release's schema here. This
+    factory never selects or falls back to the current bundled contract.
+    """
+    return _ControlValidator(schema, format_checker=FormatChecker())
+
+
 @lru_cache(maxsize=1)
 def _control_validator() -> Draft202012Validator:
-    return _ControlValidator(_control_openapi(), format_checker=FormatChecker())
+    return source_schema_validator(_control_openapi())
 
 
 def _path_pattern(template: str) -> re.Pattern[str]:
@@ -741,6 +764,20 @@ def _read_control_response(
     return status, content, response_headers
 
 
+def _observation_payload(path: str, method: str) -> str | None:
+    operation = _operation(path, method)
+    payload = operation.get("x-vonk-observation-payload")
+    if method != "GET" or not isinstance(payload, dict):
+        return None
+    reference = payload.get("$ref")
+    if reference not in (
+        "#/components/schemas/FleetSnapshot",
+        "#/components/schemas/PlatformObservation",
+    ):
+        raise ControlClientError("observation payload contract is invalid")
+    return str(reference).rsplit("/", 1)[1]
+
+
 class _OpenerTransport(httpx2.BaseTransport):
     def __init__(self, opener: Callable[..., _OpenedResponse], timeout: float) -> None:
         self._opener = opener
@@ -1057,6 +1094,17 @@ class ControlClient:
             self._base + path, data=data, headers=headers, method=method
         )
         operation = f"{method} {route_path}"[:160]
+        observation_payload = _observation_payload(route_path, method)
+        if observation_payload is not None:
+            return self._read_observation(
+                request,
+                timeout,
+                route_path,
+                observation_payload,
+                validate_payload=lambda document: validate_control_document(
+                    observation_payload, document
+                ),
+            )
         status, content, response_headers = _read_control_response(
             self._opener, request, timeout
         )
@@ -1073,6 +1121,237 @@ class ControlClient:
                 )
             raise
 
+    def _read_observation[Receipt](
+        self,
+        request: urllib.request.Request,
+        timeout: float,
+        path: str,
+        payload: str,
+        *,
+        validate_payload: Callable[[object], Receipt],
+    ) -> Receipt:
+        """Verify one frozen whole observation before returning any domain fact.
+
+        Only the declared streaming routes bypass the whole-document allocation.
+        Every record is bounded before retention; bytes are spooled, with no
+        invented aggregate size cap or claim that the final model has bounded RAM.
+        """
+        deadline = time.monotonic() + timeout
+        media_type = "application/x-vonk-observation+ndjson"
+        request.add_header("Accept", media_type)
+        status: int | None = None
+        request_id: str | None = None
+        received_retry_after: int | None = None
+        try:
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("observation attempt deadline elapsed")
+                response = self._opener(request, timeout=remaining)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                status = (
+                    response.code
+                    if isinstance(response, urllib.error.HTTPError)
+                    else response.status
+                )
+                request_id = safe_request_id(response.headers.get("x-request-id"))
+                received_retry_after = _retry_after_seconds(
+                    response.headers.get("retry-after")
+                )
+                if not 200 <= status < 300:
+                    self._raise_http_error(
+                        "GET",
+                        path,
+                        status,
+                        response.read(MAX_CONTROL_DOCUMENT_BYTES + 1),
+                        response.headers,
+                    )
+                actual_media = (
+                    response.headers.get("content-type", "")
+                    .split(";", 1)[0]
+                    .strip()
+                    .lower()
+                )
+                _response_media_contract(
+                    path, "GET", status, actual_media, has_content=True
+                )
+                if actual_media != media_type:
+                    raise ValueError("observation transfer content type differs")
+                content = _response_definition(path, "GET", status).get("content")
+                if not isinstance(content, dict) or not isinstance(
+                    content.get(media_type), dict
+                ):
+                    raise TypeError("observation transfer schema is unavailable")
+                record_media = content[media_type]
+                if not isinstance(record_media, dict):
+                    raise TypeError("observation transfer schema is unavailable")
+                record_schema = record_media.get("schema")
+
+                def schema_failure(
+                    error: ControlClientError,
+                ) -> ControlMalformedResponse:
+                    # Only the owning canonical validators reach this boundary.
+                    # Their bounded reasons name schema rules, not payload values.
+                    return ControlMalformedResponse(
+                        f"Complete observation unavailable: {error}; retry observation",
+                        context=replace(
+                            protocol_context(operation=f"GET {path}", endpoint=path),
+                            http_status=status,
+                            request_id=request_id,
+                        ),
+                    )
+
+                def validate_record(record: object) -> None:
+                    try:
+                        _validate_schema(
+                            record,
+                            record_schema,
+                            message="observation record violates canonical schema",
+                        )
+                    except ControlClientError as error:
+                        raise schema_failure(error) from None
+
+                def decode_payload(document: object) -> Receipt:
+                    try:
+                        return validate_payload(document)
+                    except ControlClientError as error:
+                        raise schema_failure(error) from None
+
+                return receive_observation(
+                    response,
+                    resource="fleet" if payload == "FleetSnapshot" else "platform",
+                    record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+                    deadline=deadline,
+                    validate_record=validate_record,
+                    validate_payload=decode_payload,
+                )
+        except ObservationTransferUnavailable as error:
+            raise ControlObservationUnavailable(
+                error.reason_code,
+                error.detail,
+                context=replace(
+                    protocol_context(operation=f"GET {path}", endpoint=path),
+                    http_status=status,
+                    request_id=request_id,
+                ),
+            ) from None
+        except ObservationTransferInvalid as error:
+            raise ControlMalformedResponse(
+                f"Complete observation unavailable: {error}; retry observation",
+                context=replace(
+                    protocol_context(operation=f"GET {path}", endpoint=path),
+                    http_status=status,
+                    request_id=request_id,
+                ),
+            ) from None
+        except (ControlHTTPError, ControlObservationUnavailable):
+            raise
+        except (ControlMalformedResponse, ControlResponseTooLarge) as error:
+            # The bounded HTTP error parser and canonical validators already
+            # classified this failure. Preserve that cause and attach only the
+            # status/correlation evidence received before body validation.
+            if error.context is None:
+                error.context = replace(
+                    protocol_context(operation=f"GET {path}", endpoint=path),
+                    http_status=status,
+                    request_id=request_id,
+                )
+            raise
+        except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
+            context = replace(
+                transport_context(operation=f"GET {path}", endpoint=path, error=error),
+                http_status=status,
+                request_id=request_id,
+            )
+            raise ControlTransportError(
+                context.render("observation transfer failed"),
+                context=context,
+                retry_after_seconds=received_retry_after,
+            ) from None
+        except (
+            ValueError,
+            TypeError,
+            RecursionError,
+            binascii.Error,
+            ControlClientError,
+        ):
+            context = replace(
+                protocol_context(operation=f"GET {path}", endpoint=path),
+                http_status=status,
+                request_id=request_id,
+            )
+            raise ControlMalformedResponse(
+                "Complete observation unavailable: transfer or canonical payload validation failed; retry observation",
+                context=context,
+            ) from None
+
+    def _raise_http_error(
+        self,
+        method: str,
+        route_path: str,
+        status: int,
+        content: bytes,
+        response_headers: Message,
+    ) -> Never:
+        """Parse the bounded non-success body and always raise its owning error."""
+
+        if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
+            raise ControlResponseTooLarge("control API response exceeds safety limit")
+        error_media_type = response_headers.get("content-type", "").split(";", 1)[0]
+        _response_media_contract(
+            route_path,
+            method,
+            status,
+            error_media_type.strip().lower(),
+            has_content=bool(content),
+        )
+        try:
+            problem = json.loads(content)
+        except RecursionError:
+            raise ControlMalformedResponse(
+                "control API response exceeds the nesting limit"
+            ) from None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            if error_media_type.strip().lower() == "application/json":
+                raise ControlMalformedResponse(
+                    "control API returned invalid JSON error"
+                ) from None
+            problem = None
+        if error_media_type.strip().lower() == "application/json":
+            if not isinstance(problem, dict):
+                raise ControlMalformedResponse(
+                    "control API error does not match the OpenAPI schema"
+                )
+            _response_contract(route_path, method, status, problem)
+        detail = problem.get("detail") if isinstance(problem, dict) else None
+        problem_context = (
+            problem.get("context") if isinstance(problem, Mapping) else None
+        )
+        error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
+        fields, body_retry_after = _structured_http_error_fields(problem)
+        if fields.get("code") is None:
+            fields["code"] = response_headers.get("x-vonk-error-code")
+        retry_after = _retry_after_seconds(response_headers.get("retry-after"))
+        if retry_after is None and type(body_retry_after) is int:
+            retry_after = body_retry_after
+        raise error_type(
+            status,
+            detail if isinstance(detail, str) else "control API request failed",
+            retry_after,
+            **fields,
+            sensitive_values=(self._token,),
+            operation=f"{method} {route_path}"[:160],
+            endpoint=route_path,
+            request_id=response_headers.get("x-request-id")
+            or (
+                problem_context.get("request_id")
+                if isinstance(problem_context, Mapping)
+                else None
+            ),
+        )
+
     def _request_response(
         self,
         method: str,
@@ -1083,61 +1362,12 @@ class ControlClient:
     ) -> dict[str, object]:
         """Interpret the bounded body while the caller retains HTTP evidence."""
 
+        if not 200 <= status < 300:
+            self._raise_http_error(
+                method, route_path, status, content, response_headers
+            )
         if len(content) > MAX_CONTROL_DOCUMENT_BYTES:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
-        if not 200 <= status < 300:
-            error_media_type = response_headers.get("content-type", "").split(";", 1)[0]
-            _response_media_contract(
-                route_path,
-                method,
-                status,
-                error_media_type.strip().lower(),
-                has_content=bool(content),
-            )
-            try:
-                problem = json.loads(content)
-            except RecursionError:
-                raise ControlMalformedResponse(
-                    "control API response exceeds the nesting limit"
-                ) from None
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                if error_media_type.strip().lower() == "application/json":
-                    raise ControlMalformedResponse(
-                        "control API returned invalid JSON error"
-                    ) from None
-                problem = None
-            if error_media_type.strip().lower() == "application/json":
-                if not isinstance(problem, dict):
-                    raise ControlMalformedResponse(
-                        "control API error does not match the OpenAPI schema"
-                    )
-                _response_contract(route_path, method, status, problem)
-            detail = problem.get("detail") if isinstance(problem, dict) else None
-            problem_context = (
-                problem.get("context") if isinstance(problem, Mapping) else None
-            )
-            error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
-            fields, body_retry_after = _structured_http_error_fields(problem)
-            if fields.get("code") is None:
-                fields["code"] = response_headers.get("x-vonk-error-code")
-            retry_after = _retry_after_seconds(response_headers.get("retry-after"))
-            if retry_after is None and type(body_retry_after) is int:
-                retry_after = body_retry_after
-            raise error_type(
-                status,
-                detail if isinstance(detail, str) else "control API request failed",
-                retry_after,
-                **fields,
-                sensitive_values=(self._token,),
-                operation=f"{method} {route_path}"[:160],
-                endpoint=route_path,
-                request_id=response_headers.get("x-request-id")
-                or (
-                    problem_context.get("request_id")
-                    if isinstance(problem_context, Mapping)
-                    else None
-                ),
-            )
         if status == 204 or not content:
             _response_contract(route_path, method, status, {})
             return {}
@@ -1536,9 +1766,9 @@ class ControlClient:
         return self.request("GET", path)
 
     def fleet(self) -> FleetSnapshot:
-        from .generated_control.api.default import get_fleet_status
+        from .generated_control.models.fleet_snapshot import FleetSnapshot
 
-        return self._call_generated(get_fleet_status.sync_detailed)  # type: ignore[return-value]
+        return FleetSnapshot.from_dict(self.request("GET", "/api/fleet"))
 
     def job(self, job_id: str) -> JobDetailResponse:
         from .generated_control.api.default import get_job

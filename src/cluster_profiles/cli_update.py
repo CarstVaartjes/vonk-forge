@@ -29,6 +29,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from jsonschema import Draft202012Validator, ValidationError
 
 from .build_identity import current_build
+from .runtime_identity import contract_fingerprint, verified_wheel_identity
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _SOURCE = re.compile(r"[0-9a-f]{40}\Z")
@@ -261,6 +262,7 @@ def run_update(
     apply: bool,
     public_key: Path | None = None,
     download: Callable[[str, int], bytes] = _download,
+    compatibility_observation: Callable[[], object] | None = None,
 ) -> dict[str, object]:
     release, base = _signed_release(
         channel=channel,
@@ -294,15 +296,78 @@ def run_update(
         raise CliUpdateError("CLI wheel digest or size is invalid")
     try:
         with zipfile.ZipFile(io.BytesIO(wheel)) as archive:
-            identity = json.loads(archive.read("cluster_profiles/build-identity.json"))
-        if identity != {
-            "schema_version": 1,
-            "source_sha": target_source,
-            "release_version": release["version"],
-        }:
-            raise CliUpdateError("CLI wheel identity does not match accepted release")
+            compatibility_schema = json.loads(
+                archive.read("cluster_profiles/schemas/cli-update-contract.schema.json")
+            )
+            identity = verified_wheel_identity(
+                archive,
+                source_sha=cast(str, target_source),
+                version=cast(str, release["version"]),
+            )
     except (KeyError, ValueError, zipfile.BadZipFile) as error:
         raise CliUpdateError("CLI wheel identity is invalid") from error
+    from .control_client import (
+        ControlClient,
+        ControlClientError,
+        ControlForbidden,
+        ControlUnauthorized,
+    )
+
+    try:
+        deployed = (
+            compatibility_observation()
+            if compatibility_observation is not None
+            else ControlClient.from_environment().get("/api/cli/contract")
+        )
+    except (ControlUnauthorized, ControlForbidden):
+        raise
+    except (ControlClientError, OSError):
+        result["compatibility"] = "controller-observation-unavailable"
+        return result
+    try:
+        installed_schema = json.loads(
+            files("cluster_profiles")
+            .joinpath("schemas/cli-update-contract.schema.json")
+            .read_text()
+        )
+        schema_fingerprint = contract_fingerprint(installed_schema)
+        Draft202012Validator(installed_schema).validate(deployed)
+        # The canonical raw schema owns ingress before the generated decoder.
+        # Keep the validated original document for output, never dump this model.
+        if not isinstance(deployed, dict):
+            raise TypeError("controller compatibility document is not an object")
+        from .generated_control.models.cli_update_contract import CliUpdateContract
+
+        observed = CliUpdateContract.from_dict(deployed)
+    except (OSError, KeyError, TypeError, ValueError, ValidationError):
+        result["compatibility"] = "controller-contract-unavailable-or-different"
+        return result
+    if (
+        contract_fingerprint(compatibility_schema) != schema_fingerprint
+        or observed.compatibility_schema_sha256 != schema_fingerprint
+    ):
+        result["compatibility"] = "controller-contract-unavailable-or-different"
+        return result
+    source = observed.api.source_sha
+    fingerprint = observed.api.control_contract_sha256
+    result["controller"] = deployed
+    if (
+        not isinstance(source, str)
+        or _SOURCE.fullmatch(source) is None
+        or fingerprint != identity.control_contract_sha256
+        or observed.worker_compatibility != "compatible"
+        or observed.worker_issue is not None
+        or type(observed.worker_count) is not int
+        or observed.worker_count < 1
+        or not isinstance(observed.worker_source_sha, str)
+        or _SOURCE.fullmatch(observed.worker_source_sha) is None
+        or identity.worker_contract_sha256 is None
+        or observed.expected_worker_contract_sha256 != identity.worker_contract_sha256
+        or observed.worker_contract_sha256 != identity.worker_contract_sha256
+    ):
+        result["compatibility"] = "controller-contract-unavailable-or-different"
+        return result
+    result["compatibility"] = "compatible"
     uv = shutil.which("uv")
     if uv is None:
         raise CliUpdateError("CLI update requires uv")

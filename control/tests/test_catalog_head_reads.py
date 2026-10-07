@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_queries import active_head_revision
 from vonk_control.catalog_service import CatalogService, CatalogValidationError
-from vonk_control.library_projection import LibraryProjection
+from vonk_control.library_projection import LibraryProjection, _canonical_recipe
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevision
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
@@ -69,7 +69,8 @@ def _assert_current(catalog, first, expected):
     detail = _library(catalog).authoring_recipe_detail(first.document_id)
     assert detail.recipe.recipe_revision_id == expected.id
     assert detail.recipe.content_sha256 == expected.content_digest
-    assert detail.definition == RecipeDefinition.model_validate(expected.document)
+    expected_document = RecipeDefinition.model_validate(expected.document)
+    assert detail.definition == expected_document
     assert catalog.get_recipe(first.document_id).id == expected.id
     current = catalog.recipe_catalog_local_revisions([(first.publisher, first.slug)])
     assert (
@@ -86,12 +87,13 @@ def _assert_current(catalog, first, expected):
         == expected.id
     )
     # A cached historical revision must not reappear as another Library choice.
-    assert {
-        row.id
-        for row in library._catalog_documents(
-            kind="recipe", local_digests=[first.content_digest]
-        )
-    } == {expected.id}
+    retained = library._catalog_documents(
+        kind="recipe",
+        local_digests=[first.content_digest],
+        reader=_canonical_recipe,
+    )
+    assert {row.id for row, _document in retained} == {expected.id}
+    assert [document for _row, document in retained] == [expected_document]
     with catalog._sessions() as session:
         active = _active_revision(session, first.document_id)
         assert active is not None

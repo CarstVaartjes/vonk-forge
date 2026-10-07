@@ -497,6 +497,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "Unknown abandonment retains the plan, logs its next attempt and continues other plans; the tick re-observes the retained plan after a five second backoff."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs.py",
+      "function": "_exact_service_stop_receipt_covers_start",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "This exact Stop observer returns False for unreadable accepted Start evidence, retaining the issued old effect. AgentJobService.assess_superseded_agent_effects_in_session returns typed UNCERTAIN_EFFECT with persisted observation due, so FleetProfileService re-observes the same journal; the AgentJobService claim gate retains the old active mutation and each next AgentClaim re-reads the healed receipt. The connected PostgreSQL pending-effect proof exercises partial and nine damaged receipts, repair, the same profile continuation and a fresh native Start claim without changing the old attempt."
     }
   ],
   "call_edges": [
@@ -524,6 +532,30 @@
     }
   ],
   "route_guards": [
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.platform_observation",
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
+    },
+    {
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "function": "install_operator_projection_routes.fleet_status",
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
+    },
+    {
+      "path": "control/src/vonk_control/cli_update_contract.py",
+      "function": "install_cli_update_contract_routes.cli_update_contract",
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
+    },
     {
       "path": "control/src/vonk_control/strict_json.py",
       "function": "_presence_policy_endpoint.policy_endpoint",
@@ -578,6 +610,16 @@
     }
   ],
   "fail_closed": [
+    {
+      "family": "platform_observation.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py. The exact authenticated capture route guards return canonical retryable 503 without inventing worker membership; a later request performs a new capture.",
+      "sites": [
+        ["control/src/vonk_control/operator_projection_api.py", "ObservationCaptureUnavailable", "install_operator_projection_routes.snapshot", "database-capture", 1],
+        ["control/src/vonk_control/platform_observation.py", "ObservationCaptureUnavailable", "PlatformObserver.capture", "database-capture", 1],
+        ["control/src/vonk_control/platform_observation.py", "ObservationCaptureUnavailable", "PlatformObserver.capture", "stored-worker-validation", 1]
+      ]
+    },
     {
       "family": "agent.input-validation",
       "category": "input-validation",
@@ -1229,86 +1271,6 @@
       ]
     },
     {
-      "family": "enrollment.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1]
-      ]
-    },
-    {
-      "family": "enrollment.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class EnrollmentIssuanceUncertain is an uncertain outcome: observe, do not park; class RemoteRevocationUncertain is an uncertain outcome: observe, do not park; class RenewalConflictRevocationUncertain is an uncertain outcome: observe, do not park; class RenewalIssuanceUncertain is an uncertain outcome: observe, do not park.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "EnrollmentIssuanceUncertain", "EnrollmentService._issue_enrollment_claim", "certificate-issuance-is-uncertain-retry-exact-request-obser", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentIssuanceUncertain", "EnrollmentService._issue_enrollment_claim", "certificate-persistence-failed-retry-exact-request-observat", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentIssuanceUncertain", "EnrollmentService._issue_enrollment_claim", "historical-certificate-issuance-has-no-exact-journal-binding", 1],
-        ["control/src/vonk_control/enrollment.py", "RemoteRevocationUncertain", "EnrollmentService.revoke_node", "local-revocation-complete-remote-ca-revocation-is-uncertain", 1],
-        ["control/src/vonk_control/enrollment.py", "RenewalConflictRevocationUncertain", "EnrollmentService._finish_rotation_recovery", "obsolete-staged-certificate-recovery-state-changed", 2],
-        ["control/src/vonk_control/enrollment.py", "RenewalConflictRevocationUncertain", "EnrollmentService._prepare_rotation_recovery", "obsolete-staged-certificate-revocation-requires-reconciliati", 1],
-        ["control/src/vonk_control/enrollment.py", "RenewalConflictRevocationUncertain", "EnrollmentService.recover_rotation", "obsolete-staged-certificate-revocation-is-uncertain-retry-r", 1],
-        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._issue_rotation_claim", "certificate-rotation-is-uncertain-retry-exact-request-obser", 1],
-        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._issue_rotation_claim", "historical-certificate-rotation-has-no-exact-journal-binding", 1],
-        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._prepare_rotation_recovery", "certificate-rotation-requires-manual-recovery", 1],
-        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._revoke_denied_rotation", "issued-certificate-is-denied-locally-remote-revocation-requ", 1]
-      ]
-    },
-    {
-      "family": "enrollment.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
-      "sites": [
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-in-progress", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-staged", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-active", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-currently-valid", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-rotation-state-is-invalid", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-serial-does-not-identify-node", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._create", "enrollment-grant-identity-already-exists-inspect-its-status", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-generation-was-not-persisted", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-issuance-state-changed-manual-recovery-required", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-already-exists", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_rotation_claim", "node-identity-retired-during-certificate-rotation-issued-ce", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._persist_rotation", "certificate-rotation-issuance-state-changed-manual-recovery", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "certificate-rotation-state-is-invalid", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "certificate-serial-does-not-identify-node", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._record_orphan_revocation", "issued-certificate-revocation-evidence-conflicts-manual-rec", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-returned-a-mismatched-node-identity", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-returned-non-pem-certificate-material", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-reused-renewal-serial", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._wait_for_issuance", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._wait_for_issuance", "enrollment-state-is-invalid", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_grant", "enrollment-grant-is-consumed-inspect-the-enrolled-spark", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_node", "node-identity-does-not-exist", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "csr-is-too-large", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "message", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_decode_token", "invalid-enrollment-grant", 3],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-must-be-valid-pem", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-must-contain-only-the-node-uri-san-extension", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-node-uri-san-does-not-match-enrollment-node", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-node-uri-san-is-required", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-public-key-must-be-ed25519", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-signature-is-invalid", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-subject-does-not-match-enrollment-node", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-subject-must-contain-a-canonical-node-id", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_locked_enrollment", "unknown-enrollment", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-authority-returned-non-pem-certificate-material", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-rotation-is-in-progress", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-generation-changed-from-accepted-issuance-binding", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-purpose-is-invalid", 2],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-already-exists", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-has-no-certificate-history", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1]
-      ]
-    },
-    {
       "family": "execution_plan_service.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: validation class, but a stored record is the problem.",
@@ -1585,6 +1547,8 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "ProfileStopAuthorityError", "derive_runtime_plan_binding", "profile-stop-target-is-ambiguous", 1],
+        ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "derive_runtime_plan_binding", "profile-jobrun-stop-authority-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_check_operation_target", "lifecycle-plan-node-identity-differs", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_job_run_authority", "artifact-jobrun-owner-is-invalid", 1],
         ["control/src/vonk_control/host_runtime_plan_authority.py", "RuntimePlanAuthorityRefused", "_service_run_authority", "service-start-owner-is-invalid", 1],
@@ -2360,48 +2324,6 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class SourcePolicyError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/source_policy.py", "SourcePolicyError", "enforce_build_source_policy", "message", 1]
-      ]
-    },
-    {
-      "family": "step_ca.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class StepCAError guards a security boundary.",
-      "sites": [
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._json_request", "step-ca-returned-malformed-json", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "ca-refused-exact-certificate-request", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "ca-returned-an-invalid-refusal-response", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-redirects-are-forbidden", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-request-failed", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-request-failed-with-status", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-response-is-too-large", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "ca-certificate-differs-from-the-accepted-exact-effect", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-invalid-certificate-chain", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-invalid-sign-response", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-unexpected-intermediate", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-inconsistent-certificate-chain-fields", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-ca-certificate", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-for-another-public-key", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-outside-the-allowed-clock-ske", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-with-an-invalid-signature", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-with-the-wrong-key-type", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-authority-key-identifier", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-certificate-issuer", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-certificate-subject", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-node-uri-san", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-subject-key-identifier", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-invalid-certificate-lifetime", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-unexpected-certificate-extension-profile", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-unverifiable-authority-key-identifier", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-certificate-extension-criticality", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-extended-key-usage", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-key-usage", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.check_health", "step-ca-health-response-is-invalid", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.issue_node", "ca-issue-returned-absence", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-returned-an-invalid-revocation-bundle", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-revocation-bundle-issuer-is-invalid", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-revocation-bundle-signature-is-invalid", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revoke_node", "step-ca-returned-an-invalid-revocation-response", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "_validate_crl_freshness", "step-ca-revocation-bundle-freshness-window-is-invalid", 1]
       ]
     },
     {
@@ -3638,6 +3560,128 @@
         ["control/src/vonk_control/run_admission.py", "RunAdmissionBusy", "RunAdmissionService._accept_run_locked_in_session", "run-target-membership-changed-during-admission", 1],
         ["control/src/vonk_control/run_admission.py", "RunAdmissionBusy", "RunAdmissionService.accept_run_in_session", "run-capacity-writer-is-busy", 2],
         ["control/src/vonk_control/run_admission.py", "RunAdmissionBusy", "require_admissible", "run-is-waiting-for-current-inventory-or-capacity", 1]
+      ]
+    },
+    {
+      "family": "enrollment.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
+      "sites": [
+        ["control/src/vonk_control/enrollment.py", "RenewalInProgress", "EnrollmentService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1]
+      ]
+    },
+    {
+      "family": "enrollment.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class EnrollmentIssuanceUncertain is an uncertain outcome: observe, do not park; class RemoteRevocationUncertain is an uncertain outcome: observe, do not park; class RenewalConflictRevocationUncertain is an uncertain outcome: observe, do not park; class RenewalIssuanceUncertain is an uncertain outcome: observe, do not park.",
+      "sites": [
+        ["control/src/vonk_control/enrollment.py", "EnrollmentIssuanceUncertain", "EnrollmentService._issue_enrollment_claim", "certificate-issuance-is-uncertain-retry-exact-request-obser", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentIssuanceUncertain", "EnrollmentService._issue_enrollment_claim", "certificate-persistence-failed-retry-exact-request-observat", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentIssuanceUncertain", "EnrollmentService._issue_enrollment_claim", "historical-certificate-issuance-has-no-exact-journal-binding", 1],
+        ["control/src/vonk_control/enrollment.py", "RemoteRevocationUncertain", "EnrollmentService.revoke_node", "local-revocation-complete-remote-ca-revocation-is-uncertain", 1],
+        ["control/src/vonk_control/enrollment.py", "RenewalConflictRevocationUncertain", "EnrollmentService._finish_rotation_recovery", "obsolete-staged-certificate-recovery-state-changed", 2],
+        ["control/src/vonk_control/enrollment.py", "RenewalConflictRevocationUncertain", "EnrollmentService._prepare_rotation_recovery", "obsolete-staged-certificate-revocation-requires-reconciliati", 1],
+        ["control/src/vonk_control/enrollment.py", "RenewalConflictRevocationUncertain", "EnrollmentService.recover_rotation", "obsolete-staged-certificate-revocation-is-uncertain-retry-r", 1],
+        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._issue_rotation_claim", "certificate-rotation-is-uncertain-retry-exact-request-obser", 1],
+        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._issue_rotation_claim", "historical-certificate-rotation-has-no-exact-journal-binding", 1],
+        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._prepare_rotation_recovery", "certificate-rotation-requires-manual-recovery", 1],
+        ["control/src/vonk_control/enrollment.py", "RenewalIssuanceUncertain", "EnrollmentService._revoke_denied_rotation", "issued-certificate-is-denied-locally-remote-revocation-requ", 1]
+      ]
+    },
+    {
+      "family": "enrollment.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class EnrollmentDenied guards a security boundary.",
+      "sites": [
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-in-progress", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "a-different-certificate-rotation-is-already-staged", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-active", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-is-not-currently-valid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-rotation-state-is-invalid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "certificate-serial-does-not-identify-node", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._claim_rotation", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._create", "enrollment-grant-identity-already-exists-inspect-its-status", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-generation-was-not-persisted", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "certificate-issuance-state-changed-manual-recovery-required", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "enrollment-grant-is-revoked-or-missing", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-already-exists", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_enrollment_claim", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._issue_rotation_claim", "node-identity-retired-during-certificate-rotation-issued-ce", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._persist_rotation", "certificate-rotation-issuance-state-changed-manual-recovery", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "certificate-rotation-state-is-invalid", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "certificate-serial-does-not-identify-node", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._prepare_rotation_recovery", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._record_orphan_revocation", "issued-certificate-revocation-evidence-conflicts-manual-rec", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-returned-a-mismatched-node-identity", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-returned-non-pem-certificate-material", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._validate_renewal_result", "certificate-authority-reused-renewal-serial", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._wait_for_issuance", "enrollment-grant-is-revoked-or-missing", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService._wait_for_issuance", "enrollment-state-is-invalid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_grant", "enrollment-grant-is-consumed-inspect-the-enrolled-spark", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_node", "node-identity-does-not-exist", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "csr-is-too-large", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "message", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_decode_token", "invalid-enrollment-grant", 3],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-must-be-valid-pem", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-must-contain-only-the-node-uri-san-extension", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-node-uri-san-does-not-match-enrollment-node", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-node-uri-san-is-required", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-public-key-must-be-ed25519", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-signature-is-invalid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-subject-does-not-match-enrollment-node", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_load_csr", "csr-subject-must-contain-a-canonical-node-id", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_locked_enrollment", "unknown-enrollment", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-authority-returned-non-pem-certificate-material", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-rotation-is-in-progress", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-generation-changed-from-accepted-issuance-binding", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-grant-is-revoked-or-missing", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-purpose-is-invalid", 2],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-already-exists", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-has-no-certificate-history", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1]
+      ]
+    },
+    {
+      "family": "step_ca.security-edge",
+      "category": "security-edge",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class StepCAError guards a security boundary.",
+      "sites": [
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._json_request", "step-ca-returned-malformed-json", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "ca-refused-exact-certificate-request", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "ca-returned-an-invalid-refusal-response", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-redirects-are-forbidden", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-request-failed", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-request-failed-with-status", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-response-is-too-large", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "ca-certificate-differs-from-the-accepted-exact-effect", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-invalid-certificate-chain", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-invalid-sign-response", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-unexpected-intermediate", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-inconsistent-certificate-chain-fields", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-ca-certificate", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-for-another-public-key", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-outside-the-allowed-clock-ske", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-with-an-invalid-signature", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-with-the-wrong-key-type", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-authority-key-identifier", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-certificate-issuer", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-certificate-subject", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-node-uri-san", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-subject-key-identifier", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-invalid-certificate-lifetime", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-unexpected-certificate-extension-profile", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-unverifiable-authority-key-identifier", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-certificate-extension-criticality", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-extended-key-usage", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-key-usage", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.check_health", "step-ca-health-response-is-invalid", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.issue_node", "ca-issue-returned-absence", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-returned-an-invalid-revocation-bundle", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-revocation-bundle-issuer-is-invalid", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-revocation-bundle-signature-is-invalid", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revoke_node", "step-ca-returned-an-invalid-revocation-response", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "_validate_crl_freshness", "step-ca-revocation-bundle-freshness-window-is-invalid", 1]
       ]
     },
     {

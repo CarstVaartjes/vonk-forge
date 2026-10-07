@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator
 from vonk_agent_protocol.state_machines import GatewayRouteState
 
+from .integer_domains import MAX_DATABASE_BIGINT
 from .strict_json import StrictModel
 
 Identifier = Annotated[str, Field(min_length=1, max_length=256)]
@@ -58,7 +59,7 @@ class RouteRunIdentity(StrictModel):
     run_id: str = Field(min_length=1, max_length=128)
     alias: str = Field(min_length=1, max_length=128)
     plan_digest: str = Field(min_length=1, max_length=128)
-    run_generation: int = Field(ge=0)
+    run_generation: int = Field(le=MAX_DATABASE_BIGINT, ge=0)
     upstream_model: str = Field(min_length=1, max_length=256)
     ranks: list[RouteRankIdentity]
 

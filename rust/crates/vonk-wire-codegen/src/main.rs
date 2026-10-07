@@ -86,12 +86,23 @@ fn prepare(value: &mut Value) {
                         .and_then(Value::as_f64)
                         .is_some_and(|v| v >= 0.0)
                     || object.get("const").and_then(Value::as_u64).is_some();
-                let format = if object.get("format").and_then(Value::as_str) == Some("int64") {
+                let unbounded = !["maximum", "exclusiveMaximum", "const", "enum"]
+                    .iter()
+                    .any(|key| object.contains_key(*key));
+                let format = if unbounded {
+                    "vonk-integer"
+                } else if object.get("format").and_then(Value::as_str) == Some("int64") {
                     "int64"
-                } else if object
-                    .get("const")
-                    .and_then(Value::as_u64)
-                    .is_some_and(|v| v <= 255)
+                } else if (object.get("format").and_then(Value::as_str) == Some("uint8")
+                    && object.get("minimum").and_then(Value::as_u64).is_some()
+                    && object
+                        .get("maximum")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|maximum| maximum <= u8::MAX as u64))
+                    || object
+                        .get("const")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|v| v <= 255)
                 {
                     "uint8"
                 } else if unsigned && object.get("maximum").and_then(Value::as_u64) == Some(65535) {
@@ -387,6 +398,121 @@ fn equality_types(items: &[Item]) -> std::collections::BTreeSet<String> {
     eligible
 }
 
+fn named_payload_schema<'a>(
+    payload: &syn::Type,
+    schema_names: &'a BTreeMap<String, String>,
+) -> Option<&'a String> {
+    let syn::Type::Path(path) = payload else {
+        return None;
+    };
+    if path.qself.is_some() || path.path.leading_colon.is_some() || path.path.segments.len() != 1 {
+        return None;
+    }
+    path.path
+        .segments
+        .first()
+        .filter(|segment| matches!(segment.arguments, syn::PathArguments::None))
+        .and_then(|segment| schema_names.get(&segment.ident.to_string()))
+}
+
+// Serde's derived untagged enum buffers Content, which cannot represent
+// arbitrary-precision integers or preserve RawValue through nested models.
+// Try the generated payload types directly from the original-kind Value instead.
+fn untagged_deserialize_impl(
+    item: &mut syn::ItemEnum,
+    schema_name: Option<&str>,
+    schema_names: &BTreeMap<String, String>,
+) -> Item {
+    let ident = &item.ident;
+    let object_keys = if item.variants.iter().any(|variant| {
+        matches!(&variant.fields, syn::Fields::Unnamed(fields)
+            if fields.unnamed.len() == 1
+                && named_payload_schema(&fields.unnamed.first().unwrap().ty, schema_names).is_some())
+    }) {
+        quote! {
+            let object_keys = value.as_object().map(|object|
+                object.keys().map(String::as_str).collect::<Vec<_>>());
+        }
+    } else { quote! {} };
+    let branches = item.variants.iter().map(|variant| {
+        let name = &variant.ident;
+        match &variant.fields {
+            syn::Fields::Unit => quote! {
+                if ::serde_json::from_value::<()>(value.clone()).is_ok() {
+                    return Ok(Self::#name);
+                }
+            },
+            syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+                let payload = &fields.unnamed.first().unwrap().ty;
+                match named_payload_schema(payload, schema_names) {
+                    Some(model) => quote! {
+                        if crate::wire_schema::may_match_wire_model_shape(#model, object_keys.as_deref())
+                            && let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
+                            return Ok(Self::#name(payload));
+                        }
+                    },
+                    None => quote! {
+                        if let Ok(payload) = ::serde_json::from_value::<#payload>(value.clone()) {
+                            return Ok(Self::#name(payload));
+                        }
+                    },
+                }
+            }
+            syn::Fields::Unnamed(fields) => {
+                let types: Vec<_> = fields.unnamed.iter().map(|field| &field.ty).collect();
+                let names: Vec<_> = (0..types.len()).map(|index| format_ident!("value{index}")).collect();
+                quote! {
+                    if let Ok((#(#names),*)) = ::serde_json::from_value::<(#(#types),*)>(value.clone()) {
+                        return Ok(Self::#name(#(#names),*));
+                    }
+                }
+            }
+            syn::Fields::Named(fields) => {
+                let helper = format_ident!("Raw{name}");
+                let names: Vec<_> = fields.named.iter().map(|field| field.ident.as_ref().unwrap()).collect();
+                quote! {
+                    #[derive(::serde::Deserialize)]
+                    struct #helper #fields
+                    if let Ok(payload) = ::serde_json::from_value::<#helper>(value.clone()) {
+                        return Ok(Self::#name { #(#names: payload.#names),* });
+                    }
+                }
+            }
+        }
+    });
+    let schema_owner = match schema_name {
+        Some(schema_name) => quote! { Some(#schema_name) },
+        None => quote! { None },
+    };
+    let implementation = parse_quote! {
+        impl<'de> ::serde::Deserialize<'de> for #ident {
+            fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let value = crate::wire_schema::deserialize_wire_value(deserializer, #schema_owner)?;
+                #object_keys
+                #(#branches)*
+                Err(::serde::de::Error::custom(concat!("invalid canonical union ", stringify!(#ident))))
+            }
+        }
+    };
+    for attr in item
+        .attrs
+        .iter_mut()
+        .filter(|attr| attr.path().is_ident("derive"))
+    {
+        let paths = attr
+            .parse_args_with(
+                syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+            )
+            .unwrap();
+        let retained: Vec<_> = paths
+            .into_iter()
+            .filter(|path| path.segments.last().unwrap().ident != "Deserialize")
+            .collect();
+        *attr = parse_quote!(#[derive(#(#retained),*)]);
+    }
+    implementation
+}
+
 fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
     let (ident, fields, attrs, raw, construction) = match item {
         Item::Struct(item) if matches!(item.fields, syn::Fields::Named(_)) => {
@@ -461,9 +587,7 @@ fn deserialize_impl(item: &mut Item, schema_name: &str) -> Option<Item> {
     Some(parse_quote! {
         impl<'de> ::serde::Deserialize<'de> for #ident {
             fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let mut value = <::serde_json::Value as ::serde::Deserialize>::deserialize(deserializer)?;
-                crate::wire_schema::validate_and_materialize(#schema_name, &mut value)
-                    .map_err(::serde::de::Error::custom)?;
+                let value = crate::wire_schema::deserialize_wire_value(deserializer, Some(#schema_name))?;
                 #raw
                 // An empty message constructs itself without reading `raw`.
                 #[allow(unused_variables)]
@@ -640,6 +764,18 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     let mut settings = typify::TypeSpaceSettings::default();
     settings.with_derive("PartialEq".into());
     settings.with_map_type("::std::collections::BTreeMap");
+    // A canonical unbounded integer cannot be represented by i64/u64 or f64.
+    // The owned scalar also rejects decimal/exponent lexemes, including when
+    // an anonymous generated union is deserialized without its parent model.
+    settings.with_conversion(
+        serde_json::from_value(json!({"type":"integer","format":"vonk-integer"}))?,
+        "crate::integer::Integer",
+        [
+            typify::TypeSpaceImpl::Display,
+            typify::TypeSpaceImpl::Default,
+        ]
+        .into_iter(),
+    );
     settings.with_conversion(
         serde_json::from_value(json!({"type":"string", "format":"date-time"}))?,
         "::chrono::DateTime<::chrono::FixedOffset>",
@@ -709,7 +845,18 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
                 attrs.push(parse_quote!(#[derive(Eq)]));
             }
         }
-        if let Some(schema_name) = names.get(&name)
+        if let Item::Enum(enumeration) = item
+            && enumeration.attrs.iter().any(|attr| {
+                attr.path().is_ident("serde")
+                    && attr.meta.to_token_stream().to_string().contains("untagged")
+            })
+        {
+            validation.push(untagged_deserialize_impl(
+                enumeration,
+                names.get(&name).map(String::as_str),
+                &names,
+            ));
+        } else if let Some(schema_name) = names.get(&name)
             && let Some(implementation) = deserialize_impl(item, schema_name)
         {
             validation.push(implementation);
@@ -784,6 +931,45 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
         }
     }
     syntax.items.extend(validation);
+    // The canonical unbounded integer is a JSON scalar, not an independently
+    // authored object contract. Generate its serde representation together with
+    // the declarations which select it through the conversion above. Semantic
+    // ordering and machine-integer conversions remain ordinary Rust behavior.
+    let integer_ident = format_ident!("Integer");
+    let integer: syn::File = parse_quote! {
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct #integer_ident(::serde_json::Number);
+
+        impl #integer_ident {
+            pub(crate) fn number(&self) -> &::serde_json::Number {
+                &self.0
+            }
+            pub(crate) fn from_i64(value: i64) -> Self {
+                Self(value.into())
+            }
+            pub(crate) fn from_u64(value: u64) -> Self {
+                Self(value.into())
+            }
+        }
+
+        impl<'de> ::serde::Deserialize<'de> for #integer_ident {
+            fn deserialize<D: ::serde::Deserializer<'de>>(
+                deserializer: D,
+            ) -> Result<Self, D::Error> {
+                crate::wire_schema::deserialize_integer_number(deserializer).map(Self)
+            }
+        }
+
+        impl ::serde::Serialize for #integer_ident {
+            fn serialize<S: ::serde::Serializer>(
+                &self,
+                serializer: S,
+            ) -> Result<S::Ok, S::Error> {
+                ::serde::Serialize::serialize(&self.0, serializer)
+            }
+        }
+    };
+    syntax.items.extend(integer.items);
     let content = format!(
         "// @generated by scripts/generate-agent-wire. Do not edit.\n{}",
         prettyplease::unparse(&syntax)
@@ -809,6 +995,38 @@ fn render(schema_path: &str) -> Result<String, Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_unbounded_integer_schemas_use_the_lossless_scalar() {
+        let mut free = json!({"type":"integer"});
+        prepare(&mut free);
+        assert_eq!(free, json!({"type":"integer","format":"vonk-integer"}));
+        let mut lower_only = json!({"type":"integer","minimum":0});
+        prepare(&mut lower_only);
+        assert_eq!(lower_only, free);
+        let mut counter = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
+        prepare(&mut counter);
+        assert_eq!(counter, json!({"type":"integer","format":"uint64"}));
+        let mut scalar = json!({"type":"integer","minimum":i64::MIN,"maximum":i64::MAX});
+        prepare(&mut scalar);
+        assert_eq!(scalar, json!({"type":"integer","format":"int64"}));
+    }
+
+    #[test]
+    fn byte_representation_requires_canonical_byte_bounds() {
+        let mut byte = json!({"type":"integer","format":"uint8","minimum":0,"maximum":255});
+        prepare(&mut byte);
+        assert_eq!(byte, json!({"type":"integer","format":"uint8"}));
+        let mut wide = json!({"type":"integer","format":"uint8","minimum":0,"maximum":256});
+        prepare(&mut wide);
+        assert_eq!(wide, json!({"type":"integer","format":"uint32"}));
+        let mut signed = json!({"type":"integer","format":"uint8","minimum":-1,"maximum":255});
+        prepare(&mut signed);
+        assert_eq!(signed, json!({"type":"integer","format":"int64"}));
+        let mut unbounded = json!({"type":"integer","format":"uint8","minimum":0});
+        prepare(&mut unbounded);
+        assert_eq!(unbounded, json!({"type":"integer","format":"vonk-integer"}));
+    }
 
     #[test]
     fn committed_generated_types_match_the_committed_wire_schema() {

@@ -11,8 +11,12 @@ MIRROR = ROOT / "schemas"
 STANDALONE_SCHEMAS = {
     "install-release-manifest.schema.json",
 }
-# The packaged CLI OpenAPI document has no repository mirror.
-PACKAGE_ONLY_SCHEMAS = {"control-openapi.json"}
+# CLI response schemas are generated directly into the installed package;
+# qualification documents retain their repository mirrors.
+PACKAGE_ONLY_SCHEMAS = {
+    "control-openapi.json",
+    "cli-update-contract.schema.json",
+}
 
 
 def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
@@ -57,6 +61,7 @@ def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
         packaged_names = set(archive.namelist())
         assert {
             "cluster_profiles/schemas/control-openapi.json",
+            "cluster_profiles/schemas/cli-update-contract.schema.json",
             "cluster_profiles/schemas/install-release-manifest.schema.json",
             "cluster_profiles/schemas/qualification-manifest-v2.schema.json",
         } <= packaged_names

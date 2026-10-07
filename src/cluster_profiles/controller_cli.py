@@ -61,6 +61,9 @@ if TYPE_CHECKING:
     from .generated_control.models.fleet_profile_endpoints_view import (
         FleetProfileEndpointsView,
     )
+    from .generated_control.models.recipe_image_availability_response import (
+        RecipeImageAvailabilityResponse,
+    )
 
 MAX_PAGE_LIMIT = 512
 # An enrollment grant lives for the longest time the Controller allows.
@@ -432,6 +435,10 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     commands: argparse._SubParsersAction[ControllerParserT],
 ) -> None:
     """Register the Fleet, Model, Recipe, Profile and Key command namespaces."""
+    platform = commands.add_parser(
+        "platform", help="Actual Controller processes and installed contracts"
+    )
+    _add_output(platform)
     fleet = commands.add_parser(
         "fleet",
         help="Sparks, their health, and what they run",
@@ -714,6 +721,11 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Show the Controller-owned removal impact without submitting it",
     )
+    recipe_retry = recipe_actions.add_parser(
+        "retry", help="Submit preparation using the original frozen recipe intent"
+    )
+    recipe_retry.add_argument("operation_id", type=_uuid_argument)
+    _action_flags(recipe_retry, followable=True)
     recipe_cancel = recipe_actions.add_parser(
         "cancel", help="Cancel one accepted recipe preparation"
     )
@@ -1981,6 +1993,94 @@ def _submit_model_cancellation(
     )
 
 
+def _submit_recipe_retry(
+    client: ControllerClient,
+    args: argparse.Namespace,
+    factory: Callable[[], str],
+) -> RecipeImageAvailabilityResponse:
+    """Preserve the owning frozen intent instead of a mutable recipe selector."""
+    from .generated_control.models.recipe_image_availability_response import (
+        RecipeImageAvailabilityResponse,
+    )
+    from .generated_control.models.recipe_retry_intent import RecipeRetryIntent
+
+    def decode(value: object) -> RecipeImageAvailabilityResponse:
+        if not isinstance(value, Mapping):
+            raise ControlMalformedResponse(
+                "recipe preparation receipt is not an object"
+            )
+        try:
+            return RecipeImageAvailabilityResponse.from_dict(
+                validate_control_document("RecipeImageAvailabilityResponse", value)
+            )
+        except (ControlClientError, KeyError, TypeError, ValueError) as error:
+            raise ControlMalformedResponse(
+                "recipe preparation receipt is malformed"
+            ) from error
+
+    original_id = args.operation_id
+    original = decode(
+        client.request("GET", f"/api/recipe/operations/{_quoted(original_id)}")
+    )
+    revision = original.recipe_revision_id
+    content = original.recipe_content_sha256
+    if (
+        _cache_operation_id("recipe", original.to_dict()) != original_id
+        or original.kind != "recipe.image.availability.v2"
+        or not isinstance(revision, str)
+        or not revision
+        or not isinstance(content, str)
+        or re.fullmatch(r"[0-9a-f]{64}", content) is None
+    ):
+        raise ControlMalformedResponse(
+            "original recipe preparation has no verifiable frozen identity"
+        )
+    _confirm_action(
+        args,
+        f"Submit recipe preparation from {original_id} using its frozen revision {revision}?",
+    )
+    key = _request_key(args, factory)
+
+    def validate(document: object) -> str:
+        result = decode(document)
+        intent = result.request
+        if (
+            result.kind != "recipe.image.availability.v2"
+            or result.request_id != key
+            or not isinstance(intent, RecipeRetryIntent)
+            or intent.kind != "retry"
+            or intent.operation_id != original_id
+            or result.recipe_revision_id != revision
+            or result.recipe_content_sha256 != content
+        ):
+            raise ControlMalformedResponse(
+                "recipe retry receipt identifies another request or frozen intent"
+            )
+        operation_id = _cache_operation_id("recipe", result.to_dict())
+        if operation_id == original_id:
+            raise ControlMalformedResponse(
+                "recipe retry did not identify a new accepted attempt"
+            )
+        return operation_id
+
+    return decode(
+        _submit_idempotent_request(
+            client,
+            args,
+            key=key,
+            path=f"/api/recipe/operations/{_quoted(original_id)}/retry",
+            lookup=f"/api/recipe/requests/{key}",
+            body={"request_key": key},
+            noun="recipe",
+            action="retry",
+            validate=validate,
+            reconnect=shlex.join(
+                ["vonkctl", "recipe", "progress", "--request-key", key, "--follow"]
+            ),
+        )
+    )
+
+
 def _submit_recipe_cancellation(
     client: ControllerClient,
     args: argparse.Namespace,
@@ -3242,6 +3342,9 @@ def _recipe(
         if args.review:
             return result
         return _follow_mutation(client, "recipe", result, args)
+    if action == "retry":
+        result = _submit_recipe_retry(client, args, factory)
+        return _follow_mutation(client, "recipe", result.to_dict(), args)
     if action == "cancel":
         if not args.yes:
             raise ValueError("recipe cancel requires --yes in noninteractive mode")
@@ -4107,6 +4210,8 @@ def run_controller(
     request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
     command = getattr(args, "command", None) or "profile"
+    if command == "platform":
+        return client.request("GET", "/api/platform")
     if command == "run":
         return _run(args, client, request_id_factory)
     if command == "fleet":

@@ -181,6 +181,13 @@ class ControlProcessHeartbeat(Base):
 
     __tablename__ = "control_process_heartbeats"
     __table_args__ = (
+        CheckConstraint(
+            _lower_hex("source_sha", 40), name="ck_control_process_heartbeats_source"
+        ),
+        CheckConstraint(
+            _lower_hex("worker_contract_sha256", 64),
+            name="ck_control_process_heartbeats_worker_contract",
+        ),
         UniqueConstraint(
             "process_kind",
             "process_instance_id",
@@ -205,6 +212,10 @@ class ControlProcessHeartbeat(Base):
     )
     process_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     process_instance_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    worker_contract_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
     loop_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True

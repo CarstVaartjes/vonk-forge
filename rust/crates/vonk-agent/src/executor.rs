@@ -19,8 +19,14 @@ use crate::{
         RecipeRunDisposition,
     },
     health::{wait_ready, wait_ready_until},
-    host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome, HostRuntimePlan},
-    oci::{OciError, OciRuntime, RecipeRunStartIdentity},
+    host_runtime::{
+        BACKGROUND_RUN_INSPECTION_CONCURRENCY, HostRuntimeBoundary, HostRuntimeOutcome,
+        HostRuntimePlan,
+    },
+    oci::{
+        MAX_RECIPE_RUN_OBSERVATIONS_PER_BATCH, OciError, OciRuntime,
+        RecipeRunObservationCheckpoint, RecipeRunStartIdentity,
+    },
     outcome::{ExecutionResult, Failure, RefusalBound, UnknownEvidence},
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
@@ -257,11 +263,6 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
     }
 }
 
-enum Prepared {
-    Plan(crate::oci::RecipeRunInspectionPlan),
-    Observed(ExactRecipeRunObservation),
-}
-
 /// True the first time this process reports on `key`; keeps a permanent
 /// per-run condition from filling the journal every sweep.
 fn first_report_of_run(key: &str) -> bool {
@@ -272,13 +273,30 @@ fn first_report_of_run(key: &str) -> bool {
         .insert(key.to_owned())
 }
 
-/// A collection failure is unknown evidence for its run, not for another
-/// successfully inspected run. Nonempty partial reports preserve omitted ranks
-/// on the Controller. Only a successfully collected empty set reports absence.
+pub struct RecipeObservationSweep {
+    pub reported: usize,
+    pub checkpoint: Option<RecipeRunObservationCheckpoint>,
+    /// Only an authoritative, complete empty snapshot permits idle cadence.
+    pub empty_snapshot_safe: bool,
+}
+
+#[cfg(test)]
 async fn report_complete_recipe_run_observations(
     client: &AgentHttpClient,
     observed_at: DateTime<Utc>,
     results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
+) -> Result<usize, RecipeObservationError> {
+    report_recipe_run_observation_page(client, observed_at, results, true).await
+}
+
+/// A collection failure is unknown evidence for its run, not for another
+/// successfully inspected run. Nonempty partial reports preserve omitted ranks
+/// on the Controller. Only a successfully collected empty set reports absence.
+async fn report_recipe_run_observation_page(
+    client: &AgentHttpClient,
+    observed_at: DateTime<Utc>,
+    results: Vec<Result<ExactRecipeRunObservation, RecipeObservationError>>,
+    allow_empty: bool,
 ) -> Result<usize, RecipeObservationError> {
     let mut observations = Vec::with_capacity(results.len());
     let mut failure = None;
@@ -296,9 +314,14 @@ async fn report_complete_recipe_run_observations(
             }
         }
     }
-    if !observations.is_empty() || (failure.is_none() && !skipped_run) {
+    for batch in observations.chunks(MAX_RECIPE_RUN_OBSERVATIONS_PER_BATCH) {
         client
-            .report_exact_recipe_run_observations(observed_at, &observations)
+            .report_exact_recipe_run_observations(observed_at, batch)
+            .await?;
+    }
+    if observations.is_empty() && allow_empty && failure.is_none() && !skipped_run {
+        client
+            .report_exact_recipe_run_observations(observed_at, &[])
             .await?;
     }
     match failure {
@@ -310,18 +333,6 @@ async fn report_complete_recipe_run_observations(
 impl<R> RecipeExecutor<'_, R> {
     async fn report_phase(&self, claim: &AgentClaim, phase: ProgressPhase) {
         self.client.set_progress_phase(claim.fence, phase);
-    }
-
-    /// Locally retained managed runs, counted without asking the Controller.
-    ///
-    /// A refused sweep must not be mistaken for a node with nothing left to
-    /// observe: the claim cadence follows this count, so reporting zero after
-    /// a transient refusal slowed exact observation six-fold.
-    pub fn managed_recipe_run_count(&self) -> Result<usize, RecipeObservationError>
-    where
-        R: ProcessRunner,
-    {
-        Ok(self.runtime.recipe_run_inspection_results()?.len())
     }
 
     /// Ask the Controller about one local run; a failed lookup is logged once
@@ -425,7 +436,10 @@ impl<R> RecipeExecutor<'_, R> {
                     request_root: &request_root,
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
                 };
-                match boundary.inspect_recipe_run(vec![run_id.to_owned()]).await {
+                match boundary
+                    .inspect_recipe_run_for_observation(vec![run_id.to_owned()])
+                    .await
+                {
                     Ok(false) => Ok(ExactRecipeRunObservation {
                         run_id: uuid::Uuid::parse_str(run_id)
                             .map_err(|_| RecipeObservationError::SkippedRun)?,
@@ -443,32 +457,54 @@ impl<R> RecipeExecutor<'_, R> {
         }
     }
 
+    #[cfg(test)]
     pub async fn report_exact_recipe_run_observations(
         &self,
     ) -> Result<usize, RecipeObservationError>
     where
         R: ProcessRunner,
     {
-        // Taken before the local runs are listed: the Controller never lets
-        // this report overwrite a rank it changed after this instant.
-        let observed_at = Utc::now();
-        let plans = self.runtime.recipe_run_inspection_results()?;
-        let results = stream::iter(plans)
-            .filter_map(|plan| async move {
-                match plan {
-                    Ok(Some(plan)) => Some(Ok(Prepared::Plan(plan))),
-                    Ok(None) => None,
-                    Err((run_id, error)) => Some(
-                        self.observe_unreadable_run(&run_id, &error)
-                            .await
-                            .map(Prepared::Observed),
-                    ),
-                }
-            })
+        Ok(self
+            .report_recipe_run_observation_page(None)
+            .await?
+            .reported)
+    }
+
+    pub async fn report_recipe_run_observation_page(
+        &self,
+        checkpoint: Option<&RecipeRunObservationCheckpoint>,
+    ) -> Result<RecipeObservationSweep, RecipeObservationError>
+    where
+        R: ProcessRunner,
+    {
+        let mut page = self.runtime.recipe_run_inspection_page(checkpoint)?;
+        let prepared: Vec<_> = page
+            .plans
+            .into_iter()
+            .map(Ok)
+            .chain(page.failures.into_iter().map(Err))
+            .collect();
+        let expected = prepared.len();
+        // Inspection is read-only. A timed-out page retains unknown evidence
+        // but releases the claim lane; durable traversal proceeds, and the next
+        // complete cycle retries every omitted inspection.
+        let results = stream::iter(prepared)
             .map(|prepared| async move {
-                let plan = match prepared? {
-                    Prepared::Plan(plan) => plan,
-                    Prepared::Observed(observation) => return Ok(observation),
+                let plan = match prepared {
+                    Ok(plan) => plan,
+                    Err(failure) => {
+                        return match failure.run_id {
+                            Some(run_id) => {
+                                self.observe_unreadable_run(&run_id, &failure.error).await
+                            }
+                            None => {
+                                if first_report_of_run("invalid-observation-directory-entry") {
+                                    eprintln!("vonk-agent: managed run scan has an invalid directory entry ({}); absence remains unknown", failure.error.safe_category());
+                                }
+                                Err(RecipeObservationError::SkippedRun)
+                            },
+                        };
+                    }
                 };
                 let request_root = self.runtime_root.join("runtime-requests");
                 let boundary = HostRuntimeBoundary {
@@ -477,7 +513,7 @@ impl<R> RecipeExecutor<'_, R> {
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
                 };
                 let process_running = boundary
-                    .inspect_recipe_run(plan.arguments)
+                    .inspect_recipe_run_for_observation(plan.arguments)
                     .await
                     .inspect_err(|error| {
                         eprintln!(
@@ -496,14 +532,18 @@ impl<R> RecipeExecutor<'_, R> {
                 {
                     return Err(RecipeObservationError::UnownedRun);
                 }
-                let endpoint_ready = plan.endpoint_address.map(|address| {
-                    process_running
-                        && self.runtime.readiness_request(
-                            address,
-                            plan.endpoint_port,
-                            &plan.health_path,
-                        )
-                });
+                let endpoint_ready = match plan.endpoint_address {
+                    Some(address) => Some(
+                        process_running
+                            && crate::health::readiness_once(
+                                address,
+                                plan.endpoint_port,
+                                &plan.health_path,
+                            )
+                            .await,
+                    ),
+                    None => None,
+                };
                 Ok::<_, RecipeObservationError>(ExactRecipeRunObservation {
                     run_id: plan.run_id,
                     run_generation: plan.run_generation,
@@ -511,10 +551,49 @@ impl<R> RecipeExecutor<'_, R> {
                     endpoint_ready,
                 })
             })
-            .buffer_unordered(8)
+            .buffer_unordered(BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+            .take_until(tokio::time::sleep(Duration::from_secs(10)))
             .collect::<Vec<_>>()
             .await;
-        report_complete_recipe_run_observations(self.client, observed_at, results).await
+        if results.len() != expected {
+            eprintln!(
+                "vonk-agent: run observation page reached its 10s inspection budget; {} of {} inspections completed; omitted runs remain unknown and retry next cycle",
+                results.len(),
+                expected
+            );
+        }
+        let had_unknown = results.len() != expected || results.iter().any(Result::is_err);
+        if had_unknown {
+            page.empty_snapshot_safe = false;
+            if let Some(progress) = &mut page.checkpoint {
+                progress.had_failures = true;
+            }
+        }
+        let results = results
+            .into_iter()
+            .map(|result| match result {
+                Err(RecipeObservationError::Inspection(error)) => {
+                    eprintln!(
+                        "vonk-agent: partial run observation: {}",
+                        error.preflight_code()
+                    );
+                    Err(RecipeObservationError::SkippedRun)
+                }
+                other => other,
+            })
+            .collect();
+        let reported = report_recipe_run_observation_page(
+            self.client,
+            page.observed_at,
+            results,
+            page.empty_snapshot_safe,
+        )
+        .await?;
+        Ok(RecipeObservationSweep {
+            reported,
+            checkpoint: page.checkpoint,
+            empty_snapshot_safe: page.empty_snapshot_safe,
+        })
     }
 
     /// Read the exact workload's bounded output without stopping it, for a
@@ -912,7 +991,7 @@ fn exact_stop_plan_from_claim(
     }
     Some(RecipeStopRequest {
         cancel_pending_start,
-        rank: compiled_execution_plan.runtime.placement.rank,
+        rank: compiled_execution_plan.runtime.placement.rank.clone(),
         role: compiled_execution_plan.runtime.placement.role.clone(),
         recipe_content_sha256: compiled_execution_plan
             .identity
@@ -1112,12 +1191,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     let progress = AgentProgress {
                         fence: progress_claim.fence,
                         progress: Some(OperationProgress {
-                            completed_items: Some(completed_items),
-                            total_items: Some(item.total_items),
+                            completed_items: Some(completed_items.into()),
+                            total_items: Some(item.total_items.into()),
                             object_sha256: Some(item.object_sha256),
                             kind: Some(item.kind),
-                            completed_bytes,
-                            total_bytes: item.total_bytes,
+                            completed_bytes: completed_bytes.into(),
+                            total_bytes: item.total_bytes.map(Into::into),
                             total_bytes_known: item.total_bytes.is_some(),
                             ..phase_progress(item.phase)
                         }),
@@ -1331,8 +1410,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 let progress = AgentProgress {
                                     fence: progress_claim.fence,
                                     progress: Some(OperationProgress {
-                                        completed_bytes,
-                                        total_bytes: Some(total_bytes),
+                                        completed_bytes: completed_bytes.into(),
+                                        total_bytes: Some(total_bytes.into()),
                                         total_bytes_known: true,
                                         ..phase_progress(ProgressPhase::Uploading)
                                     }),
@@ -1986,7 +2065,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let placement = spec.runtime.placement.clone();
                 let run_id = request.run_id.to_string();
                 let inspection_identity = Some(RecipeRunStartIdentity {
-                    run_generation: u64::from(request.run_generation),
+                    run_generation: request.run_generation,
                 });
                 let collective_readiness =
                     matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
@@ -3593,7 +3672,7 @@ fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
 fn phase_progress(phase: ProgressPhase) -> OperationProgress {
     OperationProgress {
         phase: phase.to_string(),
-        completed_bytes: 0,
+        completed_bytes: 0_u64.into(),
         total_bytes: None,
         total_bytes_known: false,
         completed_items: None,
@@ -3778,13 +3857,17 @@ mod tests {
         distribution_failure_result, distribution_success, exact_stop_plan_from_claim,
         first_report_of_run, output_media_type, parse_compiled_execution_plan, readiness_identity,
         recipe_build_client_failure_result, recipe_install_success,
-        report_complete_recipe_run_observations, run_interruptible_job, run_once_with_claim_hook,
-        run_once_with_heartbeat_interval, runtime_observation_failure, temporary_observation_error,
+        report_complete_recipe_run_observations, report_recipe_run_observation_page,
+        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
+        runtime_observation_failure, temporary_observation_error,
         temporary_runtime_observation_failure, wait_for_launch_stability,
         wait_ready_with_runtime_guard_and_cancellation,
     };
     use crate::{
-        client::{AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence},
+        client::{
+            AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence,
+            ExactRecipeRunObservation,
+        },
         oci::OciRuntime,
         outcome::Failure,
         process::{ProcessError, ProcessOutput, ProcessRunner, Program},
@@ -3803,7 +3886,7 @@ mod tests {
             atomic::{AtomicBool, Ordering},
         },
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
     use tempfile::tempdir;
     use uuid::Uuid;
@@ -4074,6 +4157,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sixty_five_exact_observations_use_two_bounded_native_wire_batches() {
+        let server = ObservationServer::new(Some(204));
+        let root = tempdir().unwrap();
+        let installation = Uuid::new_v4().to_string();
+        let mut plan: crate::workloads::CompiledExecutionPlan = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        let installed = root.path().join("installations").join(&installation);
+        fs::create_dir_all(&installed).unwrap();
+        fs::write(
+            installed.join("spec.json"),
+            serde_json::to_vec(&plan).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            installed.join("recipe-content.sha256"),
+            &plan.identity.recipe_revision_sha256,
+        )
+        .unwrap();
+        plan.runtime.placement.endpoint_address = Some("192.168.1.211".parse().unwrap());
+        plan.security.network_mode = "bridge".parse().unwrap();
+        plan.validate().unwrap();
+        let runtime = OciRuntime {
+            runner: &NoProcess,
+            data_root: root.path(),
+        };
+        let expected: std::collections::BTreeSet<_> = (0..65).map(|_| Uuid::new_v4()).collect();
+        for id in &expected {
+            runtime
+                .prepare_start_with_inspection_identity(
+                    &plan,
+                    &installation,
+                    &id.to_string(),
+                    &plan.runtime.placement,
+                    &crate::oci::RecipeRunStartIdentity { run_generation: 2 },
+                )
+                .unwrap();
+        }
+        let database = root.path().join("state.sqlite");
+        let mut observations = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            assert!(
+                Instant::now() < deadline,
+                "native observation fixture exceeded its elapsed budget"
+            );
+            let mut state = StateStore::open(&database, NODE_ID).unwrap();
+            let checkpoint = state.observation_checkpoint().unwrap();
+            let page = runtime
+                .recipe_run_inspection_page(checkpoint.as_ref())
+                .unwrap();
+            assert!(page.failures.is_empty());
+            // Physical liveness is the fixture input at this boundary. Exact
+            // IDs/generations come only from the real persisted Start reader.
+            observations.extend(page.plans.into_iter().map(|plan| {
+                Ok(ExactRecipeRunObservation {
+                    run_id: plan.run_id,
+                    run_generation: plan.run_generation,
+                    process_running: true,
+                    endpoint_ready: Some(true),
+                })
+            }));
+            state
+                .save_observation_checkpoint(page.checkpoint.as_ref())
+                .unwrap();
+            if page.complete {
+                break;
+            }
+        }
+        assert_eq!(
+            report_recipe_run_observation_page(&server.client, Utc::now(), observations, false)
+                .await
+                .unwrap(),
+            65
+        );
+        let reports = server.finish();
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0]["runs"].as_array().unwrap().len(), 64);
+        assert_eq!(reports[1]["runs"].as_array().unwrap().len(), 1);
+        let delivered: std::collections::BTreeSet<_> = reports
+            .iter()
+            .flat_map(|report| report["runs"].as_array().unwrap())
+            .map(|run| {
+                assert_eq!(run["run_generation"], 2);
+                Uuid::parse_str(run["run_id"].as_str().unwrap()).unwrap()
+            })
+            .collect();
+        assert_eq!(delivered, expected);
+    }
+
+    #[tokio::test]
+    async fn partial_zero_page_does_not_send_an_empty_wire_snapshot() {
+        let server = ObservationServer::new(Some(204));
+        assert_eq!(
+            report_recipe_run_observation_page(&server.client, Utc::now(), vec![], false)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(server.finish().is_empty());
+    }
+
+    #[tokio::test]
     async fn exact_snapshot_reports_multiple_runs_together() {
         let server = ObservationServer::new(Some(204));
         let ids = [Uuid::new_v4(), Uuid::new_v4()];
@@ -4338,7 +4525,7 @@ mod tests {
             0
         );
         let requests = server.finish();
-        assert_eq!(requests.len(), 3);
+        assert_eq!(requests.len(), 2);
         assert_eq!(
             requests[0],
             json!({ "disposition": format!("/agent/recipe-runs/{run_id}/disposition") })
@@ -5666,6 +5853,59 @@ mod tests {
         typed.validate().unwrap();
         assert_eq!(typed.exit_code, 1);
         assert!(typed.diagnostics.is_some());
+    }
+
+    #[tokio::test]
+    async fn durable_partial_history_page_does_not_starve_an_unrelated_ready_claim() {
+        let directory = tempdir().unwrap();
+        let data = directory.path().join("data");
+        for _ in 0..4097 {
+            fs::create_dir_all(data.join("runs").join(Uuid::new_v4().to_string())).unwrap();
+        }
+        let database = directory.path().join("state.sqlite");
+        let server = ObservationServer::new(Some(204));
+        let runner = NoProcess;
+        let mut state = StateStore::open(&database, NODE_ID).unwrap();
+        let recipes = RecipeExecutor {
+            client: &server.client,
+            runtime_root: directory.path(),
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: &data,
+            },
+        };
+        let page = recipes
+            .report_recipe_run_observation_page(None)
+            .await
+            .unwrap();
+        assert!(!page.empty_snapshot_safe);
+        assert!(page.checkpoint.is_some());
+        state
+            .save_observation_checkpoint(page.checkpoint.as_ref())
+            .unwrap();
+        drop(state);
+        let mut state = StateStore::open(&database, NODE_ID).unwrap();
+        let client = RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(claim()))),
+            fail_heartbeat: false,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        };
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let executor = OrderingExecutor {
+            events: events.clone(),
+        };
+        run_once_with_claim_hook(&client, &mut state, &executor, None, 0, None, || Ok(()))
+            .await
+            .unwrap();
+        assert_eq!(*events.lock().unwrap(), ["execute"]);
+        assert_eq!(state.observation_checkpoint().unwrap(), page.checkpoint);
+        assert_eq!(client.results.lock().unwrap().len(), 1);
+        assert!(
+            server.finish().is_empty(),
+            "partial zero history is never an empty observation report"
+        );
     }
 
     #[tokio::test]

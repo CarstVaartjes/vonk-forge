@@ -418,7 +418,7 @@ def run(
     command: list[str],
     *,
     cwd: Path,
-    timeout: int = 300,
+    timeout: float = 300,
     allow_output: bool = True,
     environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -715,6 +715,135 @@ def assert_site_secrets_preserved(bundle: Path, before: dict[Path, bytes]) -> No
 def compose_services(bundle: Path) -> set[str]:
     output = run([*reference_compose(), "config", "--services"], cwd=bundle)
     return {line for line in output.stdout.splitlines() if line}
+
+
+def assert_running_package_identity(role: str, identity: dict[str, object]) -> None:
+    source = identity["source_sha"]
+    if not isinstance(source, str) or re.fullmatch(r"[0-9a-f]{40}", source) is None:
+        raise AcceptanceError(f"running {role} package has unknown source")
+    for field in ("control_contract_sha256", "worker_contract_sha256"):
+        digest = identity[field]
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise AcceptanceError(f"running {role} package has unknown {field}")
+
+
+def verify_deployed_controller_identity(bundle: Path) -> None:
+    source = required_environment("VONK_ACCEPTANCE_SOURCE_SHA")
+    if re.fullmatch(r"[0-9a-f]{40}", source) is None:
+        raise AcceptanceError("candidate Controller source is invalid")
+    script = """
+import json, time, urllib.error, urllib.request
+from dataclasses import asdict
+from cluster_profiles.runtime_identity import packaged_runtime_identity
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from cluster_profiles.control_transport import open_https
+from cluster_profiles.observation_transfer_reader import receive_observation
+from vonk_control.observation_transfer import OBSERVATION_MEDIA_TYPE, ObservationTransferRecord
+from vonk_control.platform_observation import PlatformObservation
+from vonk_control.auth import Actor, TokenCodec
+from vonk_control.settings import Settings
+identity = packaged_runtime_identity()
+token = TokenCodec(Settings.from_env_and_secrets().token_signing_key).issue(Actor("acceptance-runtime", "viewer"), ttl_seconds=30, now=int(time.time()))
+request = urllib.request.Request("http://127.0.0.1:8000/api/platform", headers={"Authorization": "Bearer " + token, "Accept": OBSERVATION_MEDIA_TYPE})
+def validate_record(value):
+    ObservationTransferRecord.model_validate(value)
+def validate_payload(value):
+    return PlatformObservation.model_validate_json(json.dumps(value)).model_dump(mode="json")
+deadline = time.monotonic() + 10
+try:
+    response = open_https(request, timeout=deadline - time.monotonic(), trust_env=False)
+except urllib.error.HTTPError as error:
+    response = error
+with response:
+    assert (response.code if isinstance(response, urllib.error.HTTPError) else response.status) == 200
+    assert response.headers.get_content_type() == OBSERVATION_MEDIA_TYPE
+    observation = receive_observation(response, resource="platform", record_max_bytes=MAX_CONTROL_DOCUMENT_BYTES, deadline=deadline, validate_record=validate_record, validate_payload=validate_payload)
+print(json.dumps({"package": asdict(identity), "observation": observation}))
+"""
+    # Compose health can precede the worker's first completed loop, especially
+    # after restart. Re-observe within the existing capture subprocess budget;
+    # never reuse a pre-restart receipt or extend the Controller freshness window.
+    deadline = time.monotonic() + 20
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceError(
+                "worker provenance is not available from a fresh completed loop"
+            )
+        result = run(
+            [*reference_compose(), "exec", "-T", "control-api", "python", "-c", script],
+            cwd=bundle,
+            timeout=remaining,
+        )
+        document = json.loads(result.stdout)
+        package = document["package"]
+        observation = document["observation"]
+        assert_running_package_identity("API", package)
+        if observation["api"]["source_sha"] != package["source_sha"]:
+            raise AcceptanceError(
+                "running API observation differs from its installed package source"
+            )
+        if (
+            observation["api"]["control_contract_sha256"]
+            != package["control_contract_sha256"]
+        ):
+            raise AcceptanceError(
+                "running API contract differs from its installed package"
+            )
+        if observation["worker_issue"] != "worker-observation-unavailable":
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise AcceptanceError(
+                "worker provenance is not available from a fresh completed loop"
+            )
+        time.sleep(min(1, remaining))
+    worker_script = """
+import json
+from dataclasses import asdict
+from cluster_profiles.runtime_identity import packaged_runtime_identity
+print(json.dumps(asdict(packaged_runtime_identity())))
+"""
+    worker_result = run(
+        [
+            *reference_compose(),
+            "exec",
+            "-T",
+            "control-worker",
+            "python",
+            "-c",
+            worker_script,
+        ],
+        cwd=bundle,
+        timeout=20,
+    )
+    worker_package = json.loads(worker_result.stdout)
+    assert_running_package_identity("worker", worker_package)
+    workers = observation["workers"]
+    if not workers or observation["worker_issue"] is not None:
+        raise AcceptanceError(
+            "worker provenance is not available from a fresh completed loop"
+        )
+    if any(
+        worker["source_sha"] != worker_package["source_sha"]
+        or worker["worker_contract_sha256"] != worker_package["worker_contract_sha256"]
+        for worker in workers
+    ):
+        raise AcceptanceError(
+            "fresh worker observations differ from their own installed package"
+        )
+    # Signed image closure is verified by the installer. Reused immutable images
+    # retain their producer source, which can differ from the publication envelope.
+    print(
+        json.dumps(
+            {
+                "accepted_source_sha": source,
+                "api_package": package,
+                "worker_package": worker_package,
+                "platform": observation,
+            }
+        )
+    )
 
 
 def verify_controller_tls(bundle: Path, nas_ip: str, enrollment_hostname: str) -> None:
@@ -1664,6 +1793,7 @@ def exercise_compose(
             assert_tailscale_services_absent(status.stdout)
         assert_compose_services_healthy(status.stdout, expected)
         verify_controller_tls(bundle, nas_ip, enrollment_hostname)
+        verify_deployed_controller_identity(bundle)
         verify_postgres_databases(bundle)
 
     try:

@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, select
 from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
+    FleetProfileService,
     RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
 )
@@ -26,6 +27,7 @@ from vonk_control.models import (
 )
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
 from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchInstallationVerifyResult,
@@ -108,6 +110,41 @@ def _apply(service, profile):
     )
 
 
+def _tick_profile_when_due(
+    service: FleetProfileService,
+    planner: RunSwitchOperationService,
+    lifecycle: RecipeOperationService,
+    application_id: str,
+) -> None:
+    """Follow this accepted owner and child's durable schedules, not guessed time."""
+    observed = service.application(application_id)
+    now = service._clock()
+    due = [observed.progress.retry_due_at]
+    adapter = observed.progress.switch_adapter
+    if adapter is not None:
+        due.extend(
+            planner.get(child.operation_id).next_attempt_at
+            for child in adapter.pending_children
+        )
+    future = [instant for instant in due if instant is not None and instant > now]
+    if future:
+        if (
+            observed.progress.retry_due_at is not None
+            and observed.progress.retry_due_at > now
+        ):
+            # A completed native receipt cannot bypass the parent's persisted
+            # observation schedule. The same step/child stays bound until due.
+            service.tick()
+            held = service.application(application_id)
+            assert held.current_operation_id == observed.current_operation_id
+            assert held.progress.step_results == observed.progress.step_results
+        instant = min(future)
+        for owner in (service, planner, lifecycle):
+            owner._clock = lambda instant=instant: instant
+    planner.tick()
+    service.tick()
+
+
 def _drive_to_job(service, planner, sessions, kind: str):
     for _ in range(12):
         planner.tick()
@@ -144,8 +181,7 @@ def test_installed_profile_waits_for_every_install_receipt_and_never_starts(
     )
     install_id = None
     for _ in range(12):
-        planner.tick()
-        service.tick()
+        _tick_profile_when_due(service, planner, lifecycle, application.id)
         with sessions() as session:
             install = session.scalar(select(Job).where(Job.kind == "recipe.install"))
             if install is not None:
@@ -158,16 +194,14 @@ def test_installed_profile_waits_for_every_install_receipt_and_never_starts(
         lifecycle.record_node_result(
             install_id, node_id, succeeded=True, evidence={"installed_bytes": 120}
         )
-        planner.tick()
-        service.tick()
+        _tick_profile_when_due(service, planner, lifecycle, application.id)
         if index < len(nodes) - 1:
             assert service.application(application.id).state == "running"
 
     # New service instances must consume the persisted installation receipt.
     restarted, restarted_planner = _profile_service(sessions, lifecycle)
     for _ in range(8):
-        restarted_planner.tick()
-        restarted.tick()
+        _tick_profile_when_due(restarted, restarted_planner, lifecycle, application.id)
         if restarted.application(application.id).state == "succeeded":
             break
     completed = restarted.application(application.id)
@@ -481,8 +515,7 @@ def test_running_to_installed_stops_and_reuses_the_existing_installation(
     stop_id = _drive_to_job(service, planner, sessions, "recipe.stop")
     lifecycle.record_node_result(stop_id, nodes[0], succeeded=True, evidence={})
     for _ in range(12):
-        planner.tick()
-        service.tick()
+        _tick_profile_when_due(service, planner, lifecycle, application.id)
     completed = service.application(application.id)
     assert completed.state == "succeeded", completed.status_reason
     assert withdrawn == [run.owner_id]
@@ -539,7 +572,7 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
 
             def crash_after_child(session, row, state):
                 nonlocal crashed
-                if state.get("active_operation_id") is not None and not crashed:
+                if state.pending_children and not crashed:
                     crashed = True
                     raise SystemExit("crash after child commit")
                 return write_state(session, row, state)
@@ -611,8 +644,9 @@ def test_postgres_installed_profile_adopts_committed_child_after_crash(
                 install_id, nodes[0], succeeded=True, evidence={"installed_bytes": 120}
             )
         for _ in range(12):
-            restarted_planner.tick()
-            restarted.tick()
+            _tick_profile_when_due(
+                restarted, restarted_planner, lifecycle, application.id
+            )
         resumed = restarted.application(application.id)
         assert resumed.state == "succeeded", resumed.status_reason
         with sessions() as session:

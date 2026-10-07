@@ -5,7 +5,7 @@ use std::{
     net::IpAddr,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::Deserialize;
@@ -15,6 +15,8 @@ use vonk_agent_protocol::generated::FailureStage;
 use vonk_agent_protocol::generated::{
     InstallationMetadataEntry, InstallationMetadataReceipt, InstallationReconciliationCheckpoint,
     InstallationReconciliationCheckpointState as InstallationReconciliationState,
+    RecipeRunObservationCursorWitness as ObservationCursorWitness,
+    RecipeRunObservationDirectoryStamp as ObservationDirectoryStamp,
     RunLifecycleRecord as RunLifecycle,
 };
 use vonk_agent_protocol::{
@@ -25,10 +27,11 @@ use vonk_agent_protocol::{
     },
 };
 
+pub use vonk_agent_protocol::generated::RecipeRunObservationCheckpoint;
+
 use crate::{
-    health::readiness_endpoint,
     inventory::{available_disk_bytes, available_memory_bytes},
-    process::{ProcessError, ProcessRunner, Program},
+    process::{ProcessError, ProcessRunner},
     workloads::{
         CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, managed_path,
         same_installed_workload, same_job_workload,
@@ -113,14 +116,98 @@ pub struct OciRuntime<'a, R> {
     pub data_root: &'a Path,
 }
 
-pub const MAX_MANAGED_RECIPE_RUNS: usize = 64;
+/// A throughput bound of the current observation wire envelope, not a limit on
+/// retained or running workloads. Larger inventories use successive pages.
+pub const MAX_RECIPE_RUN_OBSERVATIONS_PER_BATCH: usize = 64;
+// One wave of the executor's eight simultaneous physical inspections. A
+// sick first wave cannot permanently hide later runs inside a larger page.
+const MAX_RUN_INSPECTIONS_PER_PAGE: usize =
+    crate::host_runtime::BACKGROUND_RUN_INSPECTION_CONCURRENCY;
+// Bound traversal work by a 64 KiB worst-case directory-name wave (Unix
+// NAME_MAX plus a terminator per entry), in addition to elapsed scan time.
+const RUN_DIRECTORY_NAME_WAVE_BYTES: usize = 64 * 1024;
+const MAX_RUN_DIRECTORY_ENTRIES_PER_PAGE: usize = RUN_DIRECTORY_NAME_WAVE_BYTES / 256;
+const MAX_RUN_INSPECTION_PAGE_BYTES: usize = 256 * 1024;
+const RUN_INSPECTION_PAGE_BUDGET: Duration = Duration::from_millis(250);
+const MAX_EMPTY_SCAN_AGE: chrono::TimeDelta = chrono::TimeDelta::minutes(5);
+
+fn stamp_of_metadata(metadata: &fs::Metadata) -> ObservationDirectoryStamp {
+    ObservationDirectoryStamp {
+        device: format!("{:x}", metadata.dev()),
+        inode: format!("{:x}", metadata.ino()),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    }
+}
+
+fn same_observation_directory(
+    first: &ObservationDirectoryStamp,
+    second: &ObservationDirectoryStamp,
+) -> bool {
+    first.device == second.device && first.inode == second.inode
+}
+
+pub struct RecipeRunInspectionFailure {
+    pub run_id: Option<String>,
+    pub error: OciError,
+}
+
+pub struct RecipeRunInspectionPage {
+    pub plans: Vec<RecipeRunInspectionPlan>,
+    pub failures: Vec<RecipeRunInspectionFailure>,
+    pub checkpoint: Option<RecipeRunObservationCheckpoint>,
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+    pub complete: bool,
+    pub empty_snapshot_safe: bool,
+    /// Local enumeration restarted instead of resuming its retained witness.
+    /// This is page-local evidence, not a stored checkpoint or wire field.
+    pub scan_restarted: bool,
+}
+
+fn observation_directory_stamp(path: &Path) -> Result<Option<ObservationDirectoryStamp>, OciError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            Ok(Some(stamp_of_metadata(&metadata)))
+        }
+        Ok(_) => Err(OciError::Artifact),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+// Only a directory with the captured physical identity can continue this scan.
+// Changes to that directory's timestamps invalidate coverage, not its identity.
+fn open_observation_directory(
+    path: &Path,
+    captured: &ObservationDirectoryStamp,
+) -> Result<File, OciError> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    let opened = stamp_of_metadata(&metadata);
+    if !metadata.is_dir() || !same_observation_directory(captured, &opened) {
+        return Err(OciError::Artifact);
+    }
+    if opened != *captured {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::WouldBlock,
+            "run inspection directory changed between capture and open",
+        )
+        .into());
+    }
+    Ok(file)
+}
+
 const MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES;
-const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct RecipeRunInspectionPlan {
     pub run_id: uuid::Uuid,
-    pub run_generation: u32,
+    pub run_generation: u64,
     pub arguments: Vec<String>,
     pub endpoint_address: Option<IpAddr>,
     pub endpoint_port: u16,
@@ -131,7 +218,7 @@ type LoadedRunLifecycle = (
     CompiledExecutionPlan,
     String,
     CompiledRuntimePlacement,
-    Option<u32>,
+    Option<u64>,
 );
 
 /// The Controller run generation a service start is launched for; it is
@@ -240,9 +327,6 @@ fn runtime_policy() -> Result<RuntimePolicy, OciError> {
     ))
     .map_err(OciError::Json)
 }
-
-/// One run directory's inspection outcome; a failure names the run it belongs to.
-type RunInspectionResult = Result<Option<RecipeRunInspectionPlan>, (String, OciError)>;
 
 impl<R: ProcessRunner> OciRuntime<'_, R> {
     pub fn job_input_destination(&self, run_id: &str, name: &str) -> Result<PathBuf, OciError> {
@@ -956,9 +1040,9 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
         let run_generation = identity
             .map(|identity| {
-                u32::try_from(identity.run_generation)
-                    .ok()
-                    .filter(|generation| *generation != 0)
+                (1..=i64::MAX as u64)
+                    .contains(&identity.run_generation)
+                    .then_some(identity.run_generation)
                     .ok_or(OciError::Artifact)
             })
             .transpose()
@@ -1063,7 +1147,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let Some((_, _, _, Some(run_generation))) = self.load_run_lifecycle(run_id)? else {
             return Err(OciError::Runtime);
         };
-        if u64::from(run_generation) != identity.run_generation {
+        if run_generation != identity.run_generation {
             return Err(OciError::Runtime);
         }
         Ok(plan)
@@ -1142,22 +1226,75 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
     }
 
-    pub fn recipe_run_inspection_plans(&self) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
+    /// Compatibility callers own a finite aggregate budget. Production scans
+    /// persist one bounded page at a time instead of awaiting a whole history.
+    pub fn recipe_run_inspection_plans(
+        &self,
+        deadline: Instant,
+    ) -> Result<Vec<RecipeRunInspectionPlan>, OciError> {
+        let runs = self.data_root.join("runs");
+        let metadata_root = self.data_root.join("run-metadata");
+        let runs_stamp = observation_directory_stamp(&runs)?;
+        let metadata_stamp = observation_directory_stamp(&metadata_root)?;
         let mut plans = Vec::new();
+        let mut checkpoint = None;
         let mut failure = None;
-        for result in self.recipe_run_inspection_results()? {
-            match result {
-                Ok(Some(plan)) => plans.push(plan),
-                Ok(None) => {}
-                Err((run_id, error)) => {
-                    eprintln!(
-                        "vonk-agent: skipping exact recipe run {run_id}: invalid managed metadata ({})",
-                        error.safe_category()
-                    );
-                    if failure.is_none() {
-                        failure = Some(error);
+        loop {
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "run inspection aggregate budget expired",
+                )
+                .into());
+            }
+            let page = self.recipe_run_inspection_page(checkpoint.as_ref())?;
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "run inspection aggregate budget expired",
+                )
+                .into());
+            }
+            if page.scan_restarted {
+                if plans.is_empty() && page.plans.is_empty() {
+                    if let Some(error) = failure.take() {
+                        return Err(error);
+                    }
+                    if let Some(fault) = page.failures.into_iter().next() {
+                        return Err(fault.error);
                     }
                 }
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "run inspection enumeration restarted during collection",
+                )
+                .into());
+            }
+            plans.extend(page.plans);
+            for fault in page.failures {
+                failure.get_or_insert(fault.error);
+            }
+            checkpoint = page.checkpoint;
+            if page.complete {
+                // This is a collection of individually validated positive
+                // plans: malformed neighbors remain isolated, not authoritative
+                // absence. Changed enumeration authority cannot be accepted.
+                if plans.is_empty()
+                    && let Some(error) = failure.take()
+                {
+                    return Err(error);
+                }
+                if observation_directory_stamp(&runs)? != runs_stamp
+                    || observation_directory_stamp(&metadata_root)? != metadata_stamp
+                    || (plans.is_empty() && !page.empty_snapshot_safe)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WouldBlock,
+                        "run inspection coverage changed during collection",
+                    )
+                    .into());
+                }
+                break;
             }
         }
         if plans.is_empty()
@@ -1168,77 +1305,150 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(plans)
     }
 
-    pub(crate) fn recipe_run_inspection_results(
+    /// Cookies are opaque filesystem positions, not sorted UUID offsets. Before
+    /// resuming across a process restart, replay the preceding entry and verify
+    /// its exact name, inode and next cookie. Mutation invalidates coverage but
+    /// does not rewind a verified position and starve the history tail.
+    pub fn recipe_run_inspection_page(
         &self,
-    ) -> Result<Vec<RunInspectionResult>, OciError> {
+        checkpoint: Option<&RecipeRunObservationCheckpoint>,
+    ) -> Result<RecipeRunInspectionPage, OciError> {
+        let observed_at = chrono::Utc::now();
         let runs = self.data_root.join("runs");
-        let metadata = match fs::symlink_metadata(&runs) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-            Err(error) => return Err(error.into()),
+        let metadata_root = self.data_root.join("run-metadata");
+        let Some(stamp) = observation_directory_stamp(&runs)? else {
+            return Ok(RecipeRunInspectionPage {
+                plans: vec![],
+                failures: vec![],
+                checkpoint: None,
+                observed_at,
+                complete: true,
+                empty_snapshot_safe: checkpoint.is_none(),
+                scan_restarted: checkpoint.is_some(),
+            });
         };
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-            return Err(OciError::Artifact);
+        let file = open_observation_directory(&runs, &stamp)?;
+        let mut directory = rustix::fs::Dir::new(file).map_err(std::io::Error::from)?;
+        let metadata_stamp = observation_directory_stamp(&metadata_root)?;
+        let mut scan_restarted = checkpoint.is_some_and(|old| {
+            Path::new(&old.root) != runs || !same_observation_directory(&old.runs_stamp, &stamp)
+        });
+        let mut progress = match checkpoint {
+            Some(old)
+                if Path::new(&old.root) == runs
+                    && same_observation_directory(&old.runs_stamp, &stamp) =>
+            {
+                old.clone()
+            }
+            _ => RecipeRunObservationCheckpoint {
+                root: runs.to_str().ok_or(OciError::Artifact)?.to_owned(),
+                runs_stamp: stamp.clone(),
+                metadata_stamp: metadata_stamp.clone(),
+                started_at: observed_at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+                witness: None,
+                had_plans: false,
+                had_failures: checkpoint.is_some(),
+            },
+        };
+        let cutoff = chrono::DateTime::parse_from_rfc3339(&progress.started_at)
+            .map_err(|_| OciError::Artifact)?
+            .with_timezone(&chrono::Utc);
+        progress.had_failures |=
+            progress.runs_stamp != stamp || progress.metadata_stamp != metadata_stamp;
+        if let Some(witness) = &progress.witness {
+            directory
+                .seek(witness.before)
+                .map_err(std::io::Error::from)?;
+            let verified = matches!(directory.next(), Some(Ok(ref entry))
+                if entry.offset() == witness.after && entry.file_name().to_bytes() == witness.name
+                && format!("{:x}", entry.ino()) == witness.inode);
+            if !verified {
+                directory.seek(0).map_err(std::io::Error::from)?;
+                progress.witness = None;
+                progress.had_failures = true;
+                scan_restarted = true;
+            }
         }
-        let mut run_ids = Vec::new();
-        for (index, entry) in fs::read_dir(&runs)?.enumerate() {
-            if index == MAX_RUN_DIRECTORY_ENTRIES {
-                eprintln!(
-                    "vonk-agent: run inspection skipped entries beyond the configured {} directory scan bound",
-                    MAX_RUN_DIRECTORY_ENTRIES
-                );
+        let mut plans = Vec::new();
+        let mut failures = Vec::new();
+        let mut bytes = 0usize;
+        let started = Instant::now();
+        let mut complete = false;
+        for _ in 0..MAX_RUN_DIRECTORY_ENTRIES_PER_PAGE {
+            if plans.len() + failures.len() >= MAX_RUN_INSPECTIONS_PER_PAGE
+                || bytes >= MAX_RUN_INSPECTION_PAGE_BYTES
+                || started.elapsed() >= RUN_INSPECTION_PAGE_BUDGET
+            {
                 break;
             }
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(error) => {
-                    eprintln!("vonk-agent: skipping unreadable run directory entry: {error}");
-                    continue;
+            let before = progress.witness.as_ref().map_or(0, |entry| entry.after);
+            let entry = match directory.next() {
+                None => {
+                    complete = true;
+                    break;
                 }
+                Some(Err(error)) => return Err(std::io::Error::from(error).into()),
+                Some(Ok(entry)) => entry,
             };
-            let run_id = match entry.file_name().into_string() {
-                Ok(run_id) => run_id,
-                Err(_) => {
-                    eprintln!("vonk-agent: skipping run directory entry with a non-UTF-8 name");
-                    continue;
-                }
-            };
-            let file_type = match entry.file_type() {
-                Ok(file_type) => file_type,
-                Err(error) => {
-                    eprintln!(
-                        "vonk-agent: skipping run entry {run_id}: cannot inspect type: {error}"
-                    );
-                    continue;
-                }
-            };
-            if !canonical_uuid(&run_id) || !file_type.is_dir() || file_type.is_symlink() {
-                eprintln!(
-                    "vonk-agent: skipping malformed run entry {run_id}: expected a canonical UUID directory"
-                );
+            let name = entry.file_name().to_bytes();
+            progress.witness = Some(ObservationCursorWitness {
+                before,
+                after: entry.offset(),
+                name: name.to_vec(),
+                inode: format!("{:x}", entry.ino()),
+            });
+            if name == b"." || name == b".." {
                 continue;
             }
-            run_ids.push(run_id);
-        }
-        run_ids.sort_unstable();
-
-        let mut plans = Vec::new();
-        for run_id in run_ids {
-            if plans
-                .iter()
-                .filter(|plan| matches!(plan, Ok(Some(_))))
-                .count()
-                == MAX_MANAGED_RECIPE_RUNS
-            {
-                plans.push(Err((run_id, OciError::Artifact)));
+            let run_id = std::str::from_utf8(name)
+                .ok()
+                .filter(|id| canonical_uuid(id));
+            if entry.file_type() != rustix::fs::FileType::Directory || run_id.is_none() {
+                progress.had_failures = true;
+                failures.push(RecipeRunInspectionFailure {
+                    run_id: None,
+                    error: OciError::Artifact,
+                });
                 continue;
             }
-            plans.push(
-                self.recipe_run_inspection_plan(&run_id)
-                    .map_err(|error| (run_id, error)),
-            );
+            let run_id = run_id.expect("validated UUID");
+            match self.recipe_run_inspection_plan(run_id) {
+                Ok(Some(plan)) => {
+                    bytes += plan.arguments.iter().map(String::len).sum::<usize>()
+                        + plan.health_path.len();
+                    progress.had_plans = true;
+                    plans.push(plan);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    progress.had_failures = true;
+                    failures.push(RecipeRunInspectionFailure {
+                        run_id: Some(run_id.to_owned()),
+                        error,
+                    });
+                }
+            }
         }
-        Ok(plans)
+        progress.had_failures |= observation_directory_stamp(&runs)?
+            != Some(progress.runs_stamp.clone())
+            || observation_directory_stamp(&metadata_root)? != progress.metadata_stamp;
+        let empty_snapshot_safe = complete
+            && !progress.had_plans
+            && !progress.had_failures
+            && observed_at - cutoff <= MAX_EMPTY_SCAN_AGE;
+        Ok(RecipeRunInspectionPage {
+            plans,
+            failures,
+            observed_at: if empty_snapshot_safe {
+                cutoff
+            } else {
+                observed_at
+            },
+            checkpoint: if complete { None } else { Some(progress) },
+            complete,
+            empty_snapshot_safe,
+            scan_restarted,
+        })
     }
 
     fn recipe_run_inspection_plan(
@@ -1281,41 +1491,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             endpoint_port: placement.port.ok_or(OciError::Artifact)?,
             health_path,
         }))
-    }
-
-    pub(crate) fn readiness_request(&self, address: IpAddr, port: u16, health_path: &str) -> bool {
-        let endpoint = readiness_endpoint(address, port, health_path);
-        let output = self.runner.run(
-            Program::Curl,
-            &[
-                "--silent".to_owned(),
-                "--show-error".to_owned(),
-                "--connect-timeout".to_owned(),
-                "2".to_owned(),
-                "--max-time".to_owned(),
-                "3".to_owned(),
-                "--max-filesize".to_owned(),
-                (64 * 1024).to_string(),
-                "--noproxy".to_owned(),
-                "*".to_owned(),
-                "--proto".to_owned(),
-                "=http".to_owned(),
-                "--output".to_owned(),
-                "/dev/null".to_owned(),
-                "--write-out".to_owned(),
-                "%{http_code}".to_owned(),
-                endpoint,
-            ],
-            Duration::from_secs(5),
-        );
-        let Ok(output) = output else {
-            return false;
-        };
-        output.success
-            && std::str::from_utf8(&output.stdout)
-                .ok()
-                .and_then(|status| status.parse::<u16>().ok())
-                .is_some_and(|status| (200..300).contains(&status))
     }
 
     fn load_run_lifecycle(&self, run_id: &str) -> Result<Option<LoadedRunLifecycle>, OciError> {
@@ -1364,6 +1539,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             return Err(OciError::Artifact);
         }
         let record: RunLifecycle = serde_json::from_slice(&read_regular_file(path, 16 * 1024)?)?;
+        if record
+            .run_generation
+            .is_some_and(|generation| generation > i64::MAX as u64)
+        {
+            return Err(OciError::Artifact);
+        }
         Ok(Some(record))
     }
 
@@ -2656,10 +2837,11 @@ mod tests {
     use super::{
         InstallationReconciliationState, OciError, OciRuntime, ensure_runtime_tmp,
         materialize_compiled_models, materialize_compiled_models_observed,
-        materialize_compiled_models_with, read_installation_metadata,
-        read_reconciliation_directory_identity, reconciliation_checkpoint_path,
-        reconciliation_quarantine_path, release_page_cache, unique_plan_artifacts,
-        write_installation_metadata, write_reconciliation_checkpoint,
+        materialize_compiled_models_with, observation_directory_stamp, open_observation_directory,
+        read_installation_metadata, read_reconciliation_directory_identity,
+        reconciliation_checkpoint_path, reconciliation_quarantine_path, release_page_cache,
+        same_observation_directory, unique_plan_artifacts, write_installation_metadata,
+        write_reconciliation_checkpoint,
     };
     use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
     use serde_json::{Value, json};
@@ -2672,6 +2854,97 @@ mod tests {
     };
     use tempfile::tempdir;
     use uuid::Uuid;
+
+    #[test]
+    fn observation_capture_rename_is_unknown_then_same_directory_reopens() {
+        let root = tempdir().unwrap();
+        let runs = root.path().join("runs");
+        fs::create_dir(&runs).unwrap();
+        let before_name = runs.join(Uuid::new_v4().to_string());
+        let after_name = runs.join(Uuid::new_v4().to_string());
+        fs::create_dir(&before_name).unwrap();
+        // An actual old filesystem mtime makes the subsequent rename's change
+        // observable even when this filesystem's clock has coarse resolution.
+        fs::File::open(&runs)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+            .unwrap();
+        // Capture the actual root stat, then mutate its real directory entry
+        // before the production guarded open; no injected stamp or hook.
+        let captured = observation_directory_stamp(&runs).unwrap().unwrap();
+        fs::rename(&before_name, &after_name).unwrap();
+        let changed = observation_directory_stamp(&runs).unwrap().unwrap();
+        assert!(same_observation_directory(&captured, &changed));
+        assert_ne!(
+            captured, changed,
+            "real rename must change the captured stamp"
+        );
+        let guarded = open_observation_directory(&runs, &captured);
+        assert!(
+            matches!(&guarded, Err(OciError::Io(error))
+                if error.kind() == std::io::ErrorKind::WouldBlock),
+            "capture-rename coverage must be retryable; category={:?}",
+            guarded
+                .as_ref()
+                .err()
+                .map(|error| error.safe_start_context().1)
+        );
+        let reopened = open_observation_directory(&runs, &changed).unwrap();
+        assert_eq!(
+            reopened.metadata().unwrap().ino(),
+            fs::metadata(&runs).unwrap().ino()
+        );
+        assert!(after_name.is_dir());
+        assert!(!before_name.exists());
+    }
+
+    #[test]
+    fn observation_capture_refuses_replaced_symlink_and_nondirectory_roots() {
+        let root = tempdir().unwrap();
+        let runs = root.path().join("runs");
+        let retained = root.path().join("retained-runs");
+        fs::create_dir(&runs).unwrap();
+        let captured = observation_directory_stamp(&runs).unwrap().unwrap();
+        fs::rename(&runs, &retained).unwrap();
+        fs::create_dir(&runs).unwrap();
+        let replacement = observation_directory_stamp(&runs).unwrap().unwrap();
+        assert!(!same_observation_directory(&captured, &replacement));
+        assert!(matches!(
+            open_observation_directory(&runs, &captured),
+            Err(OciError::Artifact)
+        ));
+        fs::remove_dir(&runs).unwrap();
+        symlink(&retained, &runs).unwrap();
+        assert!(matches!(
+            open_observation_directory(&runs, &captured),
+            Err(OciError::Io(ref error)) if error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error())
+        ));
+        fs::remove_file(&runs).unwrap();
+        fs::write(&runs, b"not a directory").unwrap();
+        assert!(matches!(
+            open_observation_directory(&runs, &captured),
+            Err(OciError::Artifact)
+        ));
+        assert!(retained.is_dir());
+    }
+
+    #[test]
+    fn observation_capture_keeps_actual_permission_denial_explicit() {
+        let root = tempdir().unwrap();
+        let runs = root.path().join("runs");
+        fs::create_dir(&runs).unwrap();
+        let captured = observation_directory_stamp(&runs).unwrap().unwrap();
+        let permissions = fs::metadata(&runs).unwrap().permissions();
+        fs::set_permissions(&runs, fs::Permissions::from_mode(0o0)).unwrap();
+        let refused = open_observation_directory(&runs, &captured);
+        fs::set_permissions(&runs, permissions).unwrap();
+        assert!(matches!(
+            refused,
+            Err(OciError::Io(ref error)) if error.kind() == std::io::ErrorKind::PermissionDenied
+        ));
+        let restored = observation_directory_stamp(&runs).unwrap().unwrap();
+        assert!(open_observation_directory(&runs, &restored).is_ok());
+    }
 
     fn reconciliation_identity(
         installation_id: Uuid,
@@ -3145,37 +3418,45 @@ mod tests {
     }
 
     #[test]
-    fn service_start_persists_its_run_generation_for_observation() {
+    fn service_start_persists_its_full_controller_generation_for_restart_observation() {
         let data = tempdir().unwrap();
         let (installation_id, installation, plan) = persisted_installation(data.path());
         authorize_installation(&installation, &"9".repeat(64));
-        let run_id = Uuid::new_v4().to_string();
         let placement = plan.runtime.placement.clone();
-        let identity = super::RecipeRunStartIdentity { run_generation: 7 };
         let runner = NoProcess;
-        let runtime = runtime(data.path(), &runner);
-
-        runtime
-            .prepare_start_with_inspection_identity(
-                &plan,
-                &installation_id,
-                &run_id,
-                &placement,
-                &identity,
-            )
-            .unwrap();
-
-        let lifecycle: Value = serde_json::from_slice(
-            &fs::read(
-                data.path()
-                    .join("run-metadata")
-                    .join(&run_id)
-                    .join("lifecycle.json"),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(lifecycle["run_generation"], 7);
+        for generation in [u64::from(u32::MAX) + 1, i64::MAX as u64] {
+            let run_id = Uuid::new_v4().to_string();
+            let identity = super::RecipeRunStartIdentity {
+                run_generation: generation,
+            };
+            runtime(data.path(), &runner)
+                .prepare_start_with_inspection_identity(
+                    &plan,
+                    &installation_id,
+                    &run_id,
+                    &placement,
+                    &identity,
+                )
+                .expect("legal Controller generations must not narrow at local persistence");
+            let lifecycle_path = data
+                .path()
+                .join("run-metadata")
+                .join(&run_id)
+                .join("lifecycle.json");
+            let lifecycle: Value =
+                serde_json::from_slice(&fs::read(&lifecycle_path).unwrap()).unwrap();
+            assert_eq!(lifecycle["run_generation"], generation);
+            let restarted = runtime(data.path(), &runner);
+            let (_, _, _, retained) = restarted.load_run_lifecycle(&run_id).unwrap().unwrap();
+            assert_eq!(retained, Some(generation));
+            let mut invalid = lifecycle;
+            invalid["run_generation"] = serde_json::json!(i64::MAX as u64 + 1);
+            fs::write(&lifecycle_path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+            assert!(matches!(
+                restarted.read_run_lifecycle(&lifecycle_path),
+                Err(OciError::Json(_))
+            ));
+        }
     }
 
     #[test]

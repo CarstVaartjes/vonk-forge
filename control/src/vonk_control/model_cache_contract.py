@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts.model import ModelReference
 
+from .integer_domains import MAX_DATABASE_INTEGER
 from .machine_states import ModelFileStateField
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure, OperationProgress
@@ -663,7 +664,7 @@ class ModelCacheOperationResponse(StrippedStrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
     kind: ModelCacheOperationKind
     state: ModelCacheOperationState
-    attempt: int = Field(ge=1)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     artifact_set_sha256: Digest | None
     plan_digest: Digest | None
     review_digest: Digest | None = None

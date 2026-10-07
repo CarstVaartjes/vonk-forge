@@ -7,15 +7,20 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import InstallationState, RunState, adopt_machine_state
+from vonk_agent_protocol import (
+    InstallationState,
+    RunState,
+    adopt_machine_state,
+    canonical_message,
+)
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -55,7 +60,11 @@ from .library_contract import (
 )
 from .library_image_presence import ImageKey, ImagePresenceIndex
 from .machine_states import RUN_LIVE
-from .model_cache_contract import DIGEST_PATTERN, UUID_PATTERN
+from .model_cache_contract import (
+    DIGEST_PATTERN,
+    UUID_PATTERN,
+    ModelCacheOperationProgress,
+)
 from .models import (
     CatalogDocumentRevision,
     ModelCacheOperation,
@@ -68,6 +77,7 @@ from .models import (
 )
 from .request_fault import RequestFault
 from .revision_images import revision_images
+from .strict_json import serialize_json_value
 
 
 class LibraryProjectionError(RuntimeError):
@@ -127,7 +137,7 @@ def _bounded_library_page[T: BaseModel](
     require it.
     """
 
-    envelope = empty_response.model_dump(mode="json")
+    envelope = serialize_json_value(empty_response)
     empty_items = envelope.get(collection_field)
     if empty_items != [] or envelope.get("next_cursor") is not None:
         raise AssertionError("byte page sizing requires an empty response envelope")
@@ -142,7 +152,7 @@ def _bounded_library_page[T: BaseModel](
         return [], None
 
     item_sizes = [
-        len(_wire_json_bytes(item.model_dump(mode="json"))) for item in candidates
+        len(_wire_json_bytes(serialize_json_value(item))) for item in candidates
     ]
     prefix_sizes = [0]
     for item_size in item_sizes:
@@ -164,14 +174,14 @@ def _bounded_library_page[T: BaseModel](
             # This boundary cannot be issued to a caller. A later contiguous
             # boundary can still be representable, so keep scanning prefixes.
             continue
-        cursor_bytes = len(_wire_json_bytes(cursor)) if cursor is not None else 4
+        cursor_envelope = serialize_json_value(
+            empty_response.model_copy(update={"next_cursor": cursor})
+        )
         response_bytes = (
-            envelope_bytes
+            len(_wire_json_bytes(cursor_envelope))
             + prefix_sizes[count]
             + count
             - 1  # Commas between entries.
-            + cursor_bytes
-            - 4  # Replace the serialized null cursor.
         )
         if count == 1:
             first_item_response_bytes = response_bytes
@@ -231,13 +241,14 @@ def _note_unreadable(kind: str, key: str, detail: str) -> None:
         _LOGGER.warning("ignoring unreadable %s %s: %s", kind, key, detail)
 
 
-def _readable(revision: CatalogDocumentRevision) -> bool:
-    """Whether this Controller can read the revision; log an unreadable one once."""
+def _readable_document[T: ModelDefinition | RecipeDefinition](
+    revision: CatalogDocumentRevision,
+    reader: Callable[[CatalogDocumentRevision], T],
+) -> T | None:
+    """Retain the canonical read for this request; log an unreadable row once."""
 
     try:
-        _canonical_document(
-            revision, ModelDefinition if revision.kind == "model" else RecipeDefinition
-        )
+        return reader(revision)
     except LibraryProjectionError as error:
         if revision.id not in _LOGGED_UNREADABLE:
             _LOGGED_UNREADABLE.add(revision.id)
@@ -249,8 +260,7 @@ def _readable(revision: CatalogDocumentRevision) -> bool:
                 revision.slug,
                 error.__cause__ or error,
             )
-        return False
-    return True
+        return None
 
 
 def _canonical_document(
@@ -537,7 +547,6 @@ class LibraryProjection:
         are large and grow with the catalog and the operation history; none of
         them is transferred or decoded here.
         """
-        operation_progress = ModelCacheOperation.progress
         operation_payload = ModelCacheOperation.payload
         with self._sessions() as session:
             cache_sets = session.execute(
@@ -555,11 +564,7 @@ class LibraryProjection:
                     ModelCacheOperation.artifact_set_sha256,
                     operation_payload["model_content_sha256"].as_json(),
                     operation_payload["recipe_revision_sha256"].as_json(),
-                    operation_progress[("measurement", "phase")].as_json(),
-                    operation_progress[("measurement", "completed_bytes")].as_json(),
-                    operation_progress[("measurement", "total_bytes")].as_json(),
-                    operation_progress["downloaded_bytes"].as_json(),
-                    operation_progress["expected_bytes"].as_json(),
+                    ModelCacheOperation.progress,
                 ).where(ModelCacheOperation.kind.in_(("download", "repair")))
             ).all()
             revisions = session.execute(
@@ -655,11 +660,7 @@ class LibraryProjection:
             artifact_set_sha256,
             payload_model_digest,
             payload_recipe_digest,
-            phase,
-            measured_completed,
-            measured_total,
-            downloaded_bytes,
-            expected_bytes,
+            stored_progress,
         ) in cache_operations:
             digest_values = {payload_model_digest, payload_recipe_digest}
             if artifact_set_sha256:
@@ -668,17 +669,38 @@ class LibraryProjection:
                     digest_values.update(
                         digest for digest in cache_set[1:3] if digest is not None
                     )
-            preparation = self._cache_progress(
-                operation_id,
-                state,
-                phase=phase,
-                completed=(
-                    measured_completed
-                    if measured_completed is not None
-                    else (downloaded_bytes if downloaded_bytes is not None else 0)
-                ),
-                total=measured_total if measured_total is not None else expected_bytes,
-            )
+            # Read complete JSON through the database JSON decoder. Numeric
+            # subpath extraction on SQLite converts wide integers to floats
+            # before Python can validate their canonical meaning.
+            try:
+                progress = ModelCacheOperationProgress.model_validate_json(
+                    canonical_message(stored_progress), strict=True
+                )
+            except ValidationError as error:
+                _note_unreadable(
+                    "cache progress",
+                    operation_id,
+                    "; ".join(
+                        f"{issue['loc']}: {issue['type']}"
+                        for issue in error.errors(
+                            include_input=False,
+                            include_context=False,
+                            include_url=False,
+                        )
+                    ),
+                )
+                preparation = None
+            except (TypeError, ValueError) as error:
+                _note_unreadable("cache progress", operation_id, type(error).__name__)
+                preparation = None
+            else:
+                preparation = self._cache_progress(
+                    operation_id,
+                    state,
+                    phase=progress.measurement.phase,
+                    completed=progress.measurement.completed_bytes,
+                    total=progress.measurement.total_bytes,
+                )
             controller = (
                 "preparing"
                 if state in model_cache_states.LIVE
@@ -955,13 +977,12 @@ class LibraryProjection:
 
     @staticmethod
     def _alignment_by_model(
-        recipe_rows: Sequence[CatalogDocumentRevision],
+        recipe_documents: Iterable[RecipeDefinition],
     ) -> dict[tuple[str, str], set[str]]:
         """Map each model publisher/slug to the alignments of recipes serving it."""
 
         alignments: dict[tuple[str, str], set[str]] = {}
-        for row in recipe_rows:
-            document = _canonical_recipe(row)
+        for document in recipe_documents:
             alignment = document.metadata.alignment
             if alignment is None:
                 continue
@@ -971,12 +992,13 @@ class LibraryProjection:
                 ).add(alignment)
         return alignments
 
-    def _catalog_documents(
+    def _catalog_documents[T: ModelDefinition | RecipeDefinition](
         self,
         *,
         kind: str,
         local_digests: Sequence[str],
-    ) -> list[CatalogDocumentRevision]:
+        reader: Callable[[CatalogDocumentRevision], T],
+    ) -> list[tuple[CatalogDocumentRevision, T]]:
         # Historical recipe revisions remain valid for exact workload reads,
         # but only the accepted head is a discoverable Library choice.
         with self._sessions() as session:
@@ -992,15 +1014,27 @@ class LibraryProjection:
                     CatalogDocumentRevision.content_digest.in_(local_digests),
                 ),
             )
-            return [row for row in session.scalars(query) if _readable(row)]
+            documents: list[tuple[CatalogDocumentRevision, T]] = []
+            for row in session.scalars(query):
+                document = _readable_document(row, reader)
+                if document is not None:
+                    documents.append((row, document))
+            return documents
 
     def _documents_for_snapshot(
         self, snapshot: Mapping[str, Mapping[str, object]]
-    ) -> tuple[list[CatalogDocumentRevision], list[CatalogDocumentRevision]]:
+    ) -> tuple[
+        list[tuple[CatalogDocumentRevision, ModelDefinition]],
+        list[tuple[CatalogDocumentRevision, RecipeDefinition]],
+    ]:
         local_digests = tuple(snapshot)
         return (
-            self._catalog_documents(kind="model", local_digests=local_digests),
-            self._catalog_documents(kind="recipe", local_digests=local_digests),
+            self._catalog_documents(
+                kind="model", local_digests=local_digests, reader=_canonical_model
+            ),
+            self._catalog_documents(
+                kind="recipe", local_digests=local_digests, reader=_canonical_recipe
+            ),
         )
 
     @staticmethod
@@ -1090,11 +1124,13 @@ class LibraryProjection:
             raise RequestFault("model library sort is invalid")
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
-        alignment_by_model = self._alignment_by_model(recipe_rows)
+        alignment_by_model = self._alignment_by_model(
+            document for _, document in recipe_rows
+        )
         entries = [
             self._model_projection(
                 row,
-                model := _canonical_model(row),
+                model,
                 snapshot,
                 alignment=sorted(
                     alignment_by_model.get(
@@ -1102,7 +1138,7 @@ class LibraryProjection:
                     )
                 ),
             )
-            for row in model_rows
+            for row, model in model_rows
         ]
         if cached:
             entries = [
@@ -1264,11 +1300,13 @@ class LibraryProjection:
             raise RequestFault("model selector is required")
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
-        alignment_by_model = self._alignment_by_model(recipe_rows)
+        alignment_by_model = self._alignment_by_model(
+            document for _, document in recipe_rows
+        )
         entries = [
             self._model_projection(
                 row,
-                model := _canonical_model(row),
+                model,
                 snapshot,
                 alignment=sorted(
                     alignment_by_model.get(
@@ -1276,9 +1314,9 @@ class LibraryProjection:
                     )
                 ),
             )
-            for row in model_rows
+            for row, model in model_rows
         ]
-        pairs = list(zip(model_rows, entries, strict=True))
+        pairs = list(zip((row for row, _ in model_rows), entries, strict=True))
         candidates: list[LibraryModelProjection]
         if re.fullmatch(DIGEST_PATTERN, selected):
             candidates = [
@@ -1370,12 +1408,13 @@ class LibraryProjection:
         deadline = time.monotonic() + self._request_budget
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
-        models = [_canonical_model(row) for row in model_rows]
         model_by_key = {
             (model.identity.publisher, model.identity.slug, row.content_digest): model
-            for row, model in zip(model_rows, models, strict=True)
+            for row, model in model_rows
         }
-        alignment_by_model = self._alignment_by_model(recipe_rows)
+        alignment_by_model = self._alignment_by_model(
+            document for _, document in recipe_rows
+        )
         model_entries = [
             self._model_projection(
                 row,
@@ -1387,7 +1426,7 @@ class LibraryProjection:
                     )
                 ),
             )
-            for row, model in zip(model_rows, models, strict=True)
+            for row, model in model_rows
         ]
         selected_keys: set[tuple[str, str, str]] | None = None
         local_recipe_digests: set[str] = set()
@@ -1426,8 +1465,8 @@ class LibraryProjection:
             else:
                 selected_keys &= cached_keys
         entries = [
-            self._recipe_projection(row, _canonical_recipe(row), model_by_key, snapshot)
-            for row in recipe_rows
+            self._recipe_projection(row, recipe, model_by_key, snapshot)
+            for row, recipe in recipe_rows
         ]
         wanted_search = search.casefold() if search else None
         filtered = [
@@ -1622,14 +1661,13 @@ class LibraryProjection:
         deadline = time.monotonic() + self._request_budget
         snapshot = self._local_state_snapshot()
         model_rows, recipe_rows = self._documents_for_snapshot(snapshot)
-        models = [_canonical_model(row) for row in model_rows]
         model_by_key = {
             (model.identity.publisher, model.identity.slug, row.content_digest): model
-            for row, model in zip(model_rows, models, strict=True)
+            for row, model in model_rows
         }
         entries = [
-            self._recipe_projection(row, _canonical_recipe(row), model_by_key, snapshot)
-            for row in recipe_rows
+            self._recipe_projection(row, recipe, model_by_key, snapshot)
+            for row, recipe in recipe_rows
         ]
         entry = self._resolve_selector(
             entries,
@@ -1638,12 +1676,11 @@ class LibraryProjection:
         )
         assert isinstance(entry, LibraryRecipeProjection)
         entry = self._assessed([entry], deadline=deadline)[0]
-        recipe_row = next(
-            row
-            for row in recipe_rows
+        recipe = next(
+            document
+            for row, document in recipe_rows
             if row.content_digest == entry.identity.content_sha256
         )
-        recipe = _canonical_recipe(recipe_row)
         siblings = [
             item
             for item in entries

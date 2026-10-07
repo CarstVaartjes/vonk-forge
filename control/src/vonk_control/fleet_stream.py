@@ -7,16 +7,26 @@ import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel
+from vonk_agent_protocol.reason_codes import ProjectionCode
+
+from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .fleet_event_contract import NodeTelemetryPayload, validate_fleet_event_payload
-from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
-from .fleet_projection import FleetProjection, FleetSnapshot, telemetry_point
+from .fleet_events import (
+    FleetEvent,
+    FleetEventRepository,
+    FleetReplayBatch,
+    _FleetStoredEventGap,
+)
+from .fleet_projection import telemetry_point
 from .fleet_stream_contract import (
     FleetChangeAdapter,
     FleetChangeEvent,
-    FleetSnapshotEvent,
+    FleetFrameIssue,
+    FleetRefreshEvent,
     FleetTelemetryEvent,
 )
 from .strict_json import serialize_json_value
@@ -50,16 +60,6 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _json(value: BaseModel) -> str:
-    return json.dumps(
-        serialize_json_value(value),
-        allow_nan=False,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
 def _event_frame(
     identifier: int,
     event_type: str,
@@ -67,11 +67,49 @@ def _event_frame(
     *,
     retry: bool,
 ) -> str:
-    lines = []
-    if retry:
-        lines.append(f"retry: {RETRY_MILLISECONDS}")
-    lines.extend((f"id: {identifier}", f"event: {event_type}", f"data: {_json(data)}"))
-    return "\n".join(lines) + "\n\n"
+    prefix = (
+        f"retry: {RETRY_MILLISECONDS}\n" if retry else ""
+    ) + f"id: {identifier}\nevent: {event_type}\ndata: "
+    parts = [prefix]
+    measured = len(prefix.encode("utf-8")) + 2  # terminating blank line
+    issue: FleetFrameIssue | None = None
+    try:
+        encoder = json.JSONEncoder(
+            allow_nan=False, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
+        for fragment in encoder.iterencode(serialize_json_value(data)):
+            # The application output buffer never accumulates beyond its frame
+            # owner. Existing source models / JSON scalar encoder temporaries
+            # remain a separate process-memory concern, not a claimed heap cap.
+            for offset in range(0, len(fragment), 4096):
+                piece = fragment[offset : offset + 4096]
+                measured += len(piece.encode("utf-8"))
+                if measured > MAX_CONTROL_DOCUMENT_BYTES:
+                    issue = FleetFrameIssue(
+                        reason_code=ProjectionCode.FLEET_FRAME_BUDGET_EXCEEDED,
+                        observed_bytes_at_least=measured,
+                        budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+                    )
+                    break
+                parts.append(piece)
+            if issue is not None:
+                break
+    except (TypeError, ValueError, OverflowError, UnicodeError):
+        issue = FleetFrameIssue(
+            reason_code=ProjectionCode.FLEET_FRAME_ENCODING_UNAVAILABLE,
+            observed_bytes_at_least=None,
+            budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+        )
+    if issue is not None:
+        return _event_frame(
+            identifier,
+            "fleet-refresh",
+            FleetRefreshEvent(
+                reset_reason="frame-unavailable", event_cursor=identifier, issue=issue
+            ),
+            retry=retry,
+        )
+    return "".join(parts) + "\n\n"
 
 
 def _keepalive_frame(now: datetime, *, retry: bool) -> str:
@@ -82,10 +120,6 @@ def _keepalive_frame(now: datetime, *, retry: bool) -> str:
     return "\n".join(lines) + "\n\n"
 
 
-def _snapshot_data(snapshot: FleetSnapshot, reason: str) -> FleetSnapshotEvent:
-    return FleetSnapshotEvent(reset_reason=reason, snapshot=snapshot)
-
-
 class FleetStream:
     """Replay the durable outbox without holding resources across suspension."""
 
@@ -93,7 +127,6 @@ class FleetStream:
         self,
         events: FleetEventRepository,
         telemetry: TelemetryRepository,
-        projection: FleetProjection,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         monotonic: Callable[[], float] = time.monotonic,
@@ -101,7 +134,6 @@ class FleetStream:
     ) -> None:
         self._events = events
         self._telemetry = telemetry
-        self._projection = projection
         self._clock = clock
         self._monotonic = monotonic
         self._sleep = sleep
@@ -112,11 +144,12 @@ class FleetStream:
         try:
             if last_event_id is None:
                 current_cursor = self._events.high_watermark()
-                snapshot = self._projection.read_at(current_cursor)
                 yield _event_frame(
                     current_cursor,
-                    "fleet-snapshot",
-                    _snapshot_data(snapshot, "initial"),
+                    "fleet-refresh",
+                    FleetRefreshEvent(
+                        reset_reason="initial", event_cursor=current_cursor
+                    ),
                     retry=retry,
                 )
                 retry = False
@@ -132,15 +165,36 @@ class FleetStream:
                         await self._sleep(POLL_INTERVAL_SECONDS - elapsed)
                 now = self._clock()
                 last_poll = self._monotonic()
-                replay = self._events.replay_after(current_cursor, now, limit=128)
+                try:
+                    replay = self._events.replay_after(current_cursor, now, limit=128)
+                except _FleetStoredEventGap as error:
+                    yield _event_frame(
+                        error.event_cursor,
+                        "fleet-refresh",
+                        FleetRefreshEvent(
+                            reset_reason="frame-unavailable",
+                            event_cursor=error.event_cursor,
+                            issue=FleetFrameIssue(
+                                reason_code=ProjectionCode.FLEET_STORED_EVENT_PAYLOAD_UNAVAILABLE,
+                                observed_bytes_at_least=None,
+                                budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+                            ),
+                        ),
+                        retry=retry,
+                    )
+                    # This notice is not applied-state authority. End replay at
+                    # the gap; only a completed fresh capture lets the consumer
+                    # advance its applied cursor and reconnect beyond this row.
+                    return
                 reset_reason = self._reset_reason(current_cursor, replay)
                 if reset_reason is not None:
                     current_cursor = replay.high_watermark
-                    snapshot = self._projection.read_at(current_cursor)
                     yield _event_frame(
                         current_cursor,
-                        "fleet-snapshot",
-                        _snapshot_data(snapshot, reset_reason),
+                        "fleet-refresh",
+                        FleetRefreshEvent(
+                            reset_reason=reset_reason, event_cursor=current_cursor
+                        ),
                         retry=retry,
                     )
                     retry = False
@@ -151,11 +205,13 @@ class FleetStream:
                     samples = self._hydrate_telemetry(replay.events)
                     if samples is None:
                         current_cursor = replay.high_watermark
-                        snapshot = self._projection.read_at(current_cursor)
                         yield _event_frame(
                             current_cursor,
-                            "fleet-snapshot",
-                            _snapshot_data(snapshot, "missing-telemetry-sample"),
+                            "fleet-refresh",
+                            FleetRefreshEvent(
+                                reset_reason="missing-telemetry-sample",
+                                event_cursor=current_cursor,
+                            ),
                             retry=retry,
                         )
                         retry = False
@@ -183,7 +239,9 @@ class FleetStream:
             pass
 
     @staticmethod
-    def _reset_reason(last_event_id: int, window: FleetReplayBatch) -> str | None:
+    def _reset_reason(
+        last_event_id: int, window: FleetReplayBatch
+    ) -> Literal["cursor-ahead", "retention-gap"] | None:
         if last_event_id > window.high_watermark:
             return "cursor-ahead"
         if window.first_retained_id is None:
@@ -235,6 +293,7 @@ class FleetStream:
             if sample is None or sample.node_id != event.node_id:
                 raise RuntimeError("Fleet telemetry event hydration is inconsistent")
             return FleetTelemetryEvent(
+                event_cursor=event.id,
                 node_id=sample.node_id,
                 sample=telemetry_point(sample),
             )
@@ -248,6 +307,7 @@ class FleetStream:
             event.payload,
         )
         return FleetChangeEvent(
+            event_cursor=event.id,
             change=FleetChangeAdapter.validate_python(
                 {
                     "entity_kind": event.entity_kind,
@@ -256,5 +316,5 @@ class FleetStream:
                     "occurred_at": event.occurred_at,
                     "fields": fields,
                 }
-            )
+            ),
         )

@@ -6,13 +6,12 @@ import hashlib
 import json
 import logging
 import re
-import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol, TypedDict
 from typing import cast as _typing_cast
 
 from pydantic import TypeAdapter, ValidationError
@@ -47,7 +46,7 @@ from vonk_agent_protocol import (
     canonical_message,
     input_state,
 )
-from vonk_forge_contracts import RecipeOptionError, read_recipe
+from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology
 
 from . import fleet_profile_states, job_states
@@ -65,7 +64,7 @@ from .artifact_lifecycle import (
 )
 from .artifact_reference_scan import require_model_sets_open
 from .auth import MUTATION_ROLES, Actor
-from .bounded_json import integer, sequence
+from .bounded_json import sequence
 from .catalog_revision_contract import read_catalog_document
 from .categorized_errors import (
     InvalidType,
@@ -74,6 +73,12 @@ from .categorized_errors import (
 )
 from .cluster_mappings import mapping_option_choices
 from .failure_classification import error_code, is_security_failure
+from .fleet_profile_adapter_conversion import (
+    conversion_observation,
+    conversion_progress,
+    convert_due_retained_applications,
+    needs_conversion,
+)
 from .fleet_profile_contract import (
     MAX_PROFILE_WARNINGS,
     FleetAssignmentModelView,
@@ -83,14 +88,17 @@ from .fleet_profile_contract import (
     FleetProfileAction,
     FleetProfileAdmissionDecision,
     FleetProfileAdoptedApplicationEffect,
+    FleetProfileAdoptedStopEffect,
     FleetProfileApplicationCancellationIntent,
     FleetProfileApplicationCancellationView,
     FleetProfileApplicationEffect,
     FleetProfileApplicationProgress,
+    FleetProfileApplicationProjectionIssue,
     FleetProfileApplicationResult,
     FleetProfileApplicationView,
     FleetProfileAssignment,
     FleetProfileAssignmentAssessment,
+    FleetProfileAssignmentFailure,
     FleetProfileAssignmentInput,
     FleetProfileAssignmentPreparation,
     FleetProfileAssignmentPreview,
@@ -102,6 +110,7 @@ from .fleet_profile_contract import (
     FleetProfileChildResult,
     FleetProfileDefinition,
     FleetProfileDefinitionView,
+    FleetProfileEffectProgress,
     FleetProfileEffects,
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
@@ -132,6 +141,9 @@ from .fleet_profile_contract import (
     FleetProfileSwitchAdapterResult,
     FleetProfileSwitchAdapterState,
     FleetProfileSwitchChildResult,
+    FleetProfileSwitchChildState,
+    FleetProfileSwitchPendingChild,
+    FleetProfileSwitchQueueItem,
     FleetProfileView,
     SavedProfileProjectionIssue,
     UnavailableFleetProfileView,
@@ -227,6 +239,7 @@ from .run_switch_contract import (
     RunSwitchProfileStopScope,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
+    RunSwitchStopResult,
     SparkGroup,
     SparkGroupNode,
 )
@@ -322,7 +335,6 @@ _VARIABLE_TEXT = re.compile(
 # transaction while taking the reviewed admission snapshot.  Retry the whole
 # SQL transaction after releasing it; the request key keeps a later successful
 # attempt idempotent.  A persistent owner still reaches the normal busy error.
-_PROFILE_ADMISSION_RETRY_DELAYS_SECONDS = (0.05, 0.15, 0.35)
 #: How many parked applications one worker tick observes for a terminal child.
 #: Bounded so a large parked backlog cannot turn one tick into an unbounded
 #: scan, while still letting every parked order record its own ending.
@@ -908,7 +920,9 @@ class FleetProfileUnsupportedStore(InvalidRequestError, RuntimeError):
 
 
 class FleetProfileChildPlanBlocked(UnknownOutcomeError, RunSwitchOperationConflict):
-    """The profile child's plan is blocked for now: observed again, not parked."""
+    """The exact accepted child waits for a recoverable admission observation."""
+
+    retry_disposition = RETRY_WAIT
 
     def __init__(
         self,
@@ -1192,7 +1206,7 @@ def _progress_with_blockers(
     progress: FleetProfileApplicationProgress,
     blockers: Sequence[OperationBlocker],
     **changes: object,
-) -> dict[str, object]:
+) -> FleetProfileApplicationProgress:
     """Canonical progress document carrying the application's current blockers."""
 
     data = progress.model_dump(mode="json")
@@ -1205,7 +1219,7 @@ def _progress_with_blockers(
         canonical_message(data),
         strict=True,
         from_json=True,
-    ).model_dump(mode="json")
+    )
 
 
 def _profile_preview_is_waitable(preview: FleetProfilePreview) -> bool:
@@ -1352,10 +1366,12 @@ _CANCELLED_OPERATION: FleetProfileOperationState = _typing_cast(
 )
 
 
-def _stored_state(state: _LifecycleState | None) -> str:
+def _stored_state(state: _LifecycleState | None) -> FleetProfileOperationState:
     """The stored label of a profile's aggregate state (``succeeded`` when empty)."""
 
-    return "succeeded" if state is None else state.value
+    return _operation_state(
+        "succeeded" if state is None else state.value, default=LifecycleState.RUNNING
+    )
 
 
 def _string_items(value: object, *, fallback: Sequence[str] = ()) -> list[str]:
@@ -1409,19 +1425,8 @@ class RunSwitchFleetProfileAdapter:
         )
 
     def request_cancellation(
-        self,
-        application_id: str,
-        *,
-        request_key: str,
-        actor: str,
+        self, application_id: str, *, request_key: str, actor: str
     ) -> None:
-        """Forward the durable profile request to its exact active child.
-
-        The read transaction ends before Run/Switch opens its own mutation
-        transaction. The persisted parent cancellation is the retry authority,
-        so a worker can safely repeat this call after a process restart.
-        """
-
         with self._sessions() as session:
             application = session.get(FleetProfileApplication, application_id)
             if application is None:
@@ -1431,50 +1436,38 @@ class RunSwitchFleetProfileAdapter:
             progress = _persisted_profile_progress(application)
             cancellation = progress.cancellation
             state = self._state(application)
-            active = None if state is None else state.get("active_operation_id")
             if (
                 cancellation is None
                 or cancellation.request_key != request_key
                 or cancellation.actor != actor
-                or not isinstance(active, str)
+                or state is None
             ):
                 return
-            child_id = active
-        try:
-            self._run_switch.cancel(
-                child_id,
-                actor=actor,
-                request_key=request_key,
-                reason="Profile application cancellation",
-            )
-        except (KeyError, RunSwitchOperationConflict):
-            # A child past its safe cancellation boundary or already
-            # superseded remains owned by Run/Switch. The profile worker keeps
-            # its dependency visible and reconciles the child's durable result.
-            return
+            child_ids = [child.operation_id for child in state.pending_children]
+        for child_id in child_ids:
+            try:
+                self._run_switch.cancel(
+                    child_id,
+                    actor=actor,
+                    request_key=request_key,
+                    reason="Profile application cancellation",
+                )
+            except (KeyError, RunSwitchOperationConflict):
+                continue
 
     def _failed_children(
         self, application_id: str, *, session: Session
-    ) -> tuple[dict[str, object], list[RunSwitchOperation]] | None:
-        """Return the adapter state and every child recorded as failed."""
-
+    ) -> tuple[FleetProfileSwitchAdapterState, list[RunSwitchOperation]] | None:
         application = session.get(FleetProfileApplication, application_id)
         state = None if application is None else self._state(application)
         if state is None:
             return None
-        failures = sequence(state.get("assignment_failures")) or ()
-        operation_ids = {
-            value
-            for value in (
-                state.get("active_operation_id"),
-                *(
-                    failure.get("operation_id")
-                    for failure in failures
-                    if isinstance(failure, Mapping)
-                ),
-            )
-            if isinstance(value, str)
-        }
+        operation_ids = {child.operation_id for child in state.pending_children}
+        operation_ids.update(
+            failure.operation_id
+            for failure in state.assignment_failures
+            if failure.operation_id is not None
+        )
         children: list[RunSwitchOperation] = []
         for operation_id in sorted(operation_ids):
             try:
@@ -1495,10 +1488,7 @@ class RunSwitchFleetProfileAdapter:
         if found is None:
             return False
         state, children = found
-        if any(
-            isinstance(failure, Mapping) and failure.get("terminal") is True
-            for failure in sequence(state.get("assignment_failures")) or ()
-        ):
+        if any(failure.terminal for failure in state.assignment_failures):
             return True
         for child in children:
             code = child.result.failure_code if child.result is not None else None
@@ -1544,18 +1534,15 @@ class RunSwitchFleetProfileAdapter:
                 )
             )
         if not parts:
-            for failure in sequence(state.get("assignment_failures")) or ():
-                if isinstance(failure, Mapping):
-                    parts.add(
-                        "recorded|" + _normalized_failure_text(failure.get("reason"))
-                    )
+            for failure in state.assignment_failures:
+                parts.add("recorded|" + _normalized_failure_text(failure.reason))
         return "\n".join(sorted(parts)) or None
 
     def recoverable_cache_loss(self, application_id: str, *, session: Session) -> bool:
         """Recognize only a typed, pre-effect Controller cache loss."""
 
         found = self._failed_children(application_id, session=session)
-        if found is None or found[0].get("state") != "failed":
+        if found is None or found[0].state != "failed":
             return False
         return any(
             child.state == "failed"
@@ -1650,22 +1637,15 @@ class RunSwitchFleetProfileAdapter:
                     for item in reviewed_plan.preparation_decisions
                 },
             )
-            state: dict[str, object] = {
-                "schema_version": 2,
-                "child_id": application_id,
-                "scope_node_ids": list(scope_node_ids),
-                "assignment_ids": [item.id for item in ordered_assignments],
-                "assignments": [
-                    item.model_dump(mode="json") for item in ordered_assignments
-                ],
-                "queue": queue,
-                "position": 0,
-                "active_operation_id": None,
-                "active_kind": None,
-                "children": [],
-                "actor": actor,
-                "request_id": request_id,
-            }
+            state = FleetProfileSwitchAdapterState(
+                child_id=application_id,
+                scope_node_ids=list(scope_node_ids),
+                assignment_ids=[item.id for item in ordered_assignments],
+                assignments=list(ordered_assignments),
+                queue=queue,
+                actor=actor,
+                request_id=request_id,
+            )
         self._save_state(application_id, state)
         return self._advance(application_id, ordered_assignments)
 
@@ -1682,12 +1662,10 @@ class RunSwitchFleetProfileAdapter:
             state = self._state(application)
             if state is None:
                 raise MissingRecord(operation_id, reason=InvalidRequestReason.NOT_FOUND)
-            active = state.get("active_operation_id")
-            child = self._observed_child(active) if isinstance(active, str) else None
-            if child is not None:
-                return self._view_from_child(operation_id, state, child)
-            # No child, or one that is gone (recorded): the mirror the
-            # application itself holds is what is shown, until a tick re-enters it.
+            for pending in state.pending_children:
+                child = self._observed_child(pending.operation_id)
+                if child is not None:
+                    return self._view_from_child(operation_id, state, child)
             return self._view_from_state(application, state)
 
     def advance(
@@ -1976,476 +1954,356 @@ class RunSwitchFleetProfileAdapter:
         application_id: str,
         assignments: tuple[FleetProfileAssignment, ...],
     ) -> FleetProfileChildOperation:
-
         application = session.get(FleetProfileApplication, application_id)
         if application is None:
             raise MissingRecord(application_id, reason=InvalidRequestReason.NOT_FOUND)
         state = self._state(application)
         if state is None:
             raise MissingRecord(application_id, reason=InvalidRequestReason.NOT_FOUND)
-        cancelling = _persisted_profile_progress(application).cancellation is not None
+        progress = _persisted_profile_progress(application)
+        cancelling = progress.cancellation is not None
         adopted_scope = FleetProfileService._adopted_application_scope(
             session, application
         )
-        active = state.get("active_operation_id")
-        position = state.get("position")
-        queue_state = sequence(state.get("queue")) or ()
-        current_item = (
-            queue_state[integer(position) or 0]
-            if (integer(position) or 0) < len(queue_state)
-            else None
-        )
-        active_kind = state.get("active_kind") or (
-            current_item.get("kind") if isinstance(current_item, Mapping) else None
-        )
-        expected_partial_failure = False
-        child = self._observed_child(active) if isinstance(active, str) else None
-        if isinstance(active, str) and child is None:
-            # Bookkeeping, not a verdict: the child's record is gone (pruned, or
-            # lost with a database restore).  Its identity is deterministic from
-            # the application and the step, so the step is entered again and the
-            # Run/Switch owner reconciles whatever that child already did, instead
-            # of the load failing for it.
-            _LOGGER.warning(
-                "profile application %s: its Run/Switch child %s is gone; "
-                "issuing the step again",
-                application_id,
-                active,
-            )
-            # (Nothing is flushed yet: the step is issued by its owner in its own
-            # transaction below, and this write is committed with the new child.)
-            state["active_operation_id"] = None
-            state["active_kind"] = None
-            self._write_state(session, application, state)
-            active = None
-        if isinstance(active, str) and child is not None:
-            # ``waiting`` is an automatically observed Run/Switch state (for
-            # example background runtime-image preparation or an overdue start
-            # observation); the child resumes on its own, so it is in progress.
-            # So is a legacy ``waiting-for-operator`` child (no Run/Switch action
-            # exists; its own tick heals it): the profile mirrors it as running and
-            # observes it again, never as a wait of its own.
-            if child.state in job_states.words(
-                LifecycleState.QUEUED,
-                LifecycleState.RUNNING,
-                LifecycleState.OBSERVING,
-                LifecycleState.NEEDS_OPERATOR,
-            ):
-                view = self._view_from_child(application_id, state, child)
-                new_progress = (
-                    view.progress.model_dump(mode="json")
-                    if view.progress is not None
-                    else None
-                )
-                if (
-                    state.get("state") != view.state
-                    or state.get("child_progress") != new_progress
+        pending_scopes: list[set[str]] = []
+        lost_children: dict[int, FleetProfileSwitchPendingChild] = {}
+        view: FleetProfileChildOperation | None = None
+        for pending in list(state.pending_children):
+            item = state.queue[pending.queue_index]
+            nodes = self._queue_item_nodes(application, item)
+            child = self._observed_child(pending.operation_id)
+            if child is None:
+                # Re-enter exactly the same queue index/request after lost SQL
+                # bookkeeping. No changed preview or new effect identity is used.
+                if cancelling or (
+                    adopted_scope is not None and not set(nodes) <= set(adopted_scope)
                 ):
-                    doc_state(state, view.state)
-                    state["child_progress"] = new_progress
-                    self._write_state(session, application, state)
-                    session.flush()
-                return view
-            if child.state in {"failed", "cancelled"}:
-                if cancelling:
-                    children = list(sequence(state.get("children")) or ())
-                    receipt = self._child_receipt(child)
-                    children.append(
-                        {
-                            "operation_id": child.operation_id,
-                            "kind": active_kind,
-                            "state": child.state,
-                            "result": (
-                                receipt.model_dump(mode="json")
-                                if receipt is not None
-                                else None
-                            ),
-                        }
-                    )
-                    state["children"] = children
-                    state["active_operation_id"] = None
-                    state["active_kind"] = None
-                    state["position"] = (integer(position) or 0) + 1
-                    self._write_state(session, application, state)
-                    session.flush()
-                    pending_cancellation = self._observe_superseded_agent_effects(
-                        session, application, state
-                    )
-                    if pending_cancellation is not None:
-                        return pending_cancellation
-                    return self._finish_cancelled_in_session(
-                        session, application, state
-                    )
-                queue = sequence(state.get("queue")) or ()
-                current_item = (
-                    queue[integer(position) or 0]
-                    if (integer(position) or 0) < len(queue)
-                    else None
+                    # An issued child outside the continuing selection is
+                    # still unknown. Retain its one pending queue identity;
+                    # neither skipping it nor issuing it again proves absence.
+                    pending_scopes.append(set(nodes))
+                    continue
+                lost_children[pending.queue_index] = pending
+                state.position = min(state.position, pending.queue_index)
+                continue
+            if child.state in _CHILD_PENDING_STATES:
+                pending_scopes.append(set(nodes))
+                view = self._view_from_child(application_id, state, child)
+                state.child_progress = view.progress
+                continue
+            if child.state not in {"succeeded", "failed", "cancelled"}:
+                pending_scopes.append(set(nodes))
+                continue
+            state.pending_children.remove(pending)
+            receipt = self._child_receipt(child)
+            state.children.append(
+                FleetProfileSwitchChildState(
+                    queue_index=pending.queue_index,
+                    operation_id=child.operation_id,
+                    kind=pending.kind,
+                    state=LifecycleState.SUCCEEDED
+                    if child.state == "succeeded"
+                    else LifecycleState.FAILED
+                    if child.state == "failed"
+                    else LifecycleState.CANCELLED,
+                    result=receipt,
+                    original_operation_id=pending.original_operation_id,
                 )
-                expected_partial_failure = (
-                    child.state == "failed"
-                    and state.get("active_kind") == "stop"
-                    and isinstance(current_item, Mapping)
-                    and isinstance(current_item.get("profile_stop_scope"), Mapping)
-                    and child.result is not None
-                    and child.result.failure_code
-                    == RunSwitchCode.PROFILE_INCOMPLETE_MULTI_SPARK_MODEL
-                )
-                if not expected_partial_failure:
-                    reason = child.status_reason or (
-                        f"Run/Switch child ended in {child.state}"
-                    )
-                    failures = list(sequence(state.get("assignment_failures")) or ())
-                    failures.append(
-                        {
-                            "assignment_id": (
-                                current_item.get("assignment_id")
-                                if isinstance(current_item, Mapping)
-                                else None
-                            ),
-                            "operation_id": child.operation_id,
-                            "reason": reason[:512],
-                            "terminal": is_security_failure(
-                                child.result.failure_code
-                                if child.result is not None
-                                else None
-                            ),
-                        }
-                    )
-                    state["assignment_failures"] = failures
-                    # The failure is recorded per assignment; the shared code
-                    # below records the child and continues with the next one.
-                    expected_partial_failure = True
-                children = list(sequence(state.get("children")) or ())
-                receipt = self._child_receipt(child)
-                children.append(
-                    {
-                        "operation_id": child.operation_id,
-                        "kind": active_kind,
-                        "state": child.state,
-                        "result": (
-                            receipt.model_dump(mode="json")
-                            if receipt is not None
-                            else None
-                        ),
-                    }
-                )
-                state["children"] = children
-                state["active_operation_id"] = None
-                state["active_kind"] = None
-                state["position"] = (integer(position) or 0) + 1
-                self._write_state(session, application, state)
-                session.flush()
-                position = state["position"]
+            )
+            relevant = adopted_scope is None or set(nodes) <= set(adopted_scope)
+            partial_stop = (
+                pending.kind == "stop"
+                and item.profile_stop_scope is not None
+                and child.result is not None
+                and child.result.failure_code
+                == RunSwitchCode.PROFILE_INCOMPLETE_MULTI_SPARK_MODEL
+            )
             if (
-                child.state != "succeeded"
-                and not expected_partial_failure
+                relevant
                 and not cancelling
+                and child.state != "succeeded"
+                and not partial_stop
             ):
-                # (A cancel never parks here: a child in a state it cannot read is
-                # recorded as ended below and the cancel goes on, so it completes.)
-                return self._failed_in_session(
-                    session,
-                    application,
-                    state,
-                    f"Run/Switch child returned {child.state}",
-                )
-            if not expected_partial_failure:
-                children = list(sequence(state.get("children")) or ())
-                # Record the child's public result tree with the child. A
-                # profile step receipt is read back from this mirror, so a
-                # completion that only updated progress would lose the child
-                # receipt on this tick and again after restart.
-                receipt = self._child_receipt(child)
-                children.append(
-                    {
-                        "operation_id": child.operation_id,
-                        "kind": active_kind,
-                        # A cancelled load records a child it cannot read as ended
-                        # by the cancel; the receipt vocabulary is closed.
-                        "state": child.state
-                        if child.state in {"succeeded", "failed", "cancelled"}
-                        else "cancelled",
-                        "result": (
-                            receipt.model_dump(mode="json")
-                            if receipt is not None
-                            else None
+                state.assignment_failures.append(
+                    FleetProfileAssignmentFailure(
+                        queue_index=pending.queue_index,
+                        assignment_id=item.id
+                        if item.kind in {"run", "install"}
+                        else None,
+                        operation_id=child.operation_id,
+                        reason=(
+                            child.status_reason
+                            or f"Run/Switch child ended in {child.state}"
+                        )[:512],
+                        terminal=is_security_failure(
+                            child.result.failure_code if child.result else None
                         ),
-                    }
+                    )
                 )
-                state["children"] = children
-                state["active_operation_id"] = None
-                state["active_kind"] = None
-                state["position"] = (integer(position) or 0) + 1
-                self._write_state(session, application, state)
-                session.flush()
-                position = state["position"]
-            if cancelling:
-                pending_cancellation = self._observe_superseded_agent_effects(
-                    session, application, state
-                )
-                if pending_cancellation is not None:
-                    return pending_cancellation
-                return self._finish_cancelled_in_session(session, application, state)
+        self._write_state(session, application, state)
         if cancelling:
-            pending_cancellation = self._observe_superseded_agent_effects(
+            if state.pending_children:
+                doc_state(state, LifecycleState.RUNNING)
+                self._write_state(session, application, state)
+                return view or self._view_from_state(application, state)
+            waiting = self._observe_superseded_agent_effects(
                 session, application, state
             )
-            if pending_cancellation is not None:
-                return pending_cancellation
-            return self._finish_cancelled_in_session(session, application, state)
-        queue = sequence(state.get("queue"))
-        if queue is None or (integer(position) or 0) >= len(queue):
-            pending_cancellation = self._observe_superseded_agent_effects(
+            return waiting or self._finish_cancelled_in_session(
                 session, application, state
             )
-            if pending_cancellation is not None:
-                return pending_cancellation
-            reviewed = self._child_review(session, application_id)
-            incomplete_model = (
-                None
-                if isinstance(reviewed, Residue)
-                else next(
-                    (
-                        reason
-                        for reason in (
-                            reviewed.reasons
-                            if adopted_scope is None
-                            else [
-                                reason
-                                for assignment in reviewed.assignments
-                                if set(assignment.node_ids) <= set(adopted_scope)
-                                for reason in assignment.reasons
-                            ]
-                        )
-                        if reason.code == ProfileReasonCode.INCOMPLETE_MULTI_SPARK_MODEL
-                    ),
-                    None,
-                )
-            )
-            failures = sequence(state.get("assignment_failures")) or ()
-            aggregate_children = sequence(state.get("children")) or ()
-            if adopted_scope is not None:
-                # Receipts retain the original application's complete history;
-                # unrelated ended lanes cannot poison an adopted lane's outcome.
-                def in_adopted_scope(item: object) -> bool:
-                    if not isinstance(item, Mapping):
-                        return False
-                    operation_id = item.get("operation_id")
-                    job = (
-                        session.get(Job, operation_id)
-                        if isinstance(operation_id, str)
-                        else None
-                    )
-                    return (
-                        job is not None
-                        and bool(job.targets)
-                        and set(job.targets) <= set(adopted_scope)
-                    )
 
-                aggregate_children = tuple(
-                    item for item in aggregate_children if in_adopted_scope(item)
+        occupied = {
+            child.queue_index
+            for child in (*state.pending_children, *state.children)
+            if child.queue_index not in lost_children
+        } | set(state.skipped_indices)
+        state.position = next(
+            (
+                index
+                for index in range(state.position, len(state.queue))
+                if index not in occupied
+            ),
+            max(state.position, len(state.queue)),
+        )
+        preceding: list[set[str]] = []
+        for index, item in enumerate(state.queue):
+            if index in occupied:
+                continue
+            nodes = self._queue_item_nodes(application, item)
+            if not nodes:
+                doc_state(state, LifecycleState.RUNNING)
+                state.status_reason = (
+                    "Waiting for the exact reviewed queue target evidence"
                 )
-                failures = tuple(item for item in failures if in_adopted_scope(item))
-            # The load's state is the aggregate of its children: a recorded failure
-            # (or a model the reviewed plan could not complete) is a failed child;
-            # otherwise every child ended well.
-            doc_state(
-                state,
-                "failed"
-                if incomplete_model is not None or failures
-                else _stored_state(
-                    FleetProfileAdapter.recorded_aggregate(aggregate_children)
-                ),
+                self._write_state(session, application, state)
+                return self._view_from_state(application, state)
+            if adopted_scope is not None and not set(nodes) <= set(adopted_scope):
+                state.skipped_indices.append(index)
+                occupied.add(index)
+                continue
+            # Preserve dependency order only where full target scopes overlap.
+            # A gang Stop intersects every replacement rank, so no half can start.
+            if any(set(nodes) & scope for scope in (*pending_scopes, *preceding)):
+                preceding.append(set(nodes))
+                continue
+            if item.kind == "stop":
+                run = session.get(RecipeRun, item.id)
+                if run is None or run.state not in STOPPABLE_RUN_STATES:
+                    # The canonical run owner already reconciled this workload.
+                    state.skipped_indices.append(index)
+                    occupied.add(index)
+                    continue
+            with session.no_autoflush:
+                waiting = (
+                    None
+                    if item.kind == "stop"
+                    else self._observe_superseded_agent_effects(
+                        session,
+                        application,
+                        state,
+                        before_dispatch=True,
+                        dispatch_scope=nodes,
+                    )
+                )
+            if waiting is not None:
+                preceding.append(set(nodes))
+                continue
+            self._write_state(session, application, state)
+            # Observation of issued children continues under retained authority;
+            # each new effect still requires the author's current mutation role.
+            FleetProfileService._authorize(session, state.actor, serialize=False)
+            operation = self._start_child(
+                application_id,
+                item,
+                assignments,
+                nodes,
+                state.actor,
+                state.request_id,
+                index,
+                progress.workload_intent_ordinal,
             )
-            first_failure = next(
+            if isinstance(operation, Residue):
+                if operation.reason is BookkeepingReason.EVIDENCE_UNAVAILABLE:
+                    state.status_reason = (
+                        f"Waiting for exact queue effect: {operation.note}"[:512]
+                    )
+                    preceding.append(set(nodes))
+                    continue
+                state.assignment_failures.append(
+                    FleetProfileAssignmentFailure(
+                        queue_index=index,
+                        assignment_id=item.id
+                        if item.kind in {"run", "install"}
+                        else None,
+                        reason=f"{operation.reason.value}: {operation.note}"[:512],
+                    )
+                )
+                state.skipped_indices.append(index)
+                occupied.add(index)
+                continue
+            if index in lost_children:
+                state.pending_children.remove(lost_children[index])
+            state.pending_children.append(
+                FleetProfileSwitchPendingChild(
+                    queue_index=index,
+                    operation_id=operation.operation_id,
+                    kind=item.kind,
+                    original_operation_id=(
+                        lost_children[index].original_operation_id
+                        or lost_children[index].operation_id
+                    )
+                    if index in lost_children
+                    else None,
+                )
+            )
+            doc_state(state, LifecycleState.RUNNING)
+            state.child_progress = self._view_from_child(
+                application_id, state, operation
+            ).progress
+            # Persist one dispatch at a time; the next fair worker pass can issue
+            # a disjoint child without holding this child's execution resources.
+            self._write_state(session, application, state)
+            session.flush()
+            return self._view_from_child(application_id, state, operation)
+        state.position = next(
+            (
+                index
+                for index in range(state.position, len(state.queue))
+                if index not in occupied
+            ),
+            max(state.position, len(state.queue)),
+        )
+        self._write_state(session, application, state)
+        if state.pending_children or state.position < len(state.queue):
+            doc_state(state, LifecycleState.RUNNING)
+            self._write_state(session, application, state)
+            return view or self._view_from_state(application, state)
+        waiting = self._observe_superseded_agent_effects(session, application, state)
+        if waiting is not None:
+            return waiting
+        relevant_children = [
+            child
+            for child in state.children
+            if adopted_scope is None
+            or set(self._queue_item_nodes(application, state.queue[child.queue_index]))
+            <= set(adopted_scope)
+        ]
+        relevant_failures = [
+            failure
+            for failure in state.assignment_failures
+            if adopted_scope is None
+            or failure.queue_index is None
+            or set(
+                self._queue_item_nodes(application, state.queue[failure.queue_index])
+            )
+            <= set(adopted_scope)
+        ]
+        reviewed = self._child_review(session, application_id)
+        incomplete = (
+            None
+            if isinstance(reviewed, Residue)
+            else next(
                 (
-                    str(failure.get("reason"))
-                    for failure in failures
-                    if isinstance(failure, Mapping)
+                    reason
+                    for reason in reviewed.reasons
+                    if reason.code == RunSwitchCode.PROFILE_INCOMPLETE_MULTI_SPARK_MODEL
                 ),
                 None,
             )
-            state["status_reason"] = (
-                incomplete_model.detail
-                if incomplete_model is not None
-                else (
-                    f"{len(failures)} assignment(s) need reconciliation: "
-                    f"{first_failure}"[:512]
-                    if failures
-                    else None
-                )
-            )
-            state["result"] = {
-                "children": list(sequence(state.get("children")) or ()),
-                "assignment_ids": (
-                    [
-                        assignment.id
-                        for assignment in assignments
-                        if {node.node_id for node in assignment.nodes}
-                        <= set(adopted_scope)
-                    ]
-                    if adopted_scope is not None
-                    else list(sequence(state.get("assignment_ids")) or ())
-                ),
-            }
-            if adopted_scope is not None and state["status_reason"] is None:
-                state["status_reason"] = (
-                    "Adopted assignments reconciled; other assignments were replaced "
-                    "by the selected profile"
-                )
-            self._write_state(session, application, state)
-            session.flush()
-            return self._view_from_state(application, state)
-        # Queue positions own deterministic child request identities. Skip old
-        # unissued effects without renumbering or dropping an in-flight child.
-        while adopted_scope is not None and (integer(position) or 0) < len(queue):
-            item = queue[integer(position) or 0]
-            if self._queue_item_in_scope(session, application, item, adopted_scope):
-                break
-            position = (integer(position) or 0) + 1
-            state["position"] = position
-        if (integer(position) or 0) >= len(queue):
-            self._write_state(session, application, state)
-            session.flush()
-            return self._view_from_state(application, state)
-        item = queue[integer(position) or 0]
-        if isinstance(item, Mapping) and item.get("kind") == "stop":
-            stopped = session.get(RecipeRun, item.get("id"))
-            if stopped is None or stopped.state not in STOPPABLE_RUN_STATES:
-                # The Run/Switch that replaced this workload already stopped
-                # it, right before its successor started.
-                _LOGGER.info(
-                    "profile application %s: workload %s is already stopped by "
-                    "its replacement",
-                    application_id,
-                    item.get("id"),
-                )
-                state["position"] = (integer(position) or 0) + 1
-                self._write_state(session, application, state)
-                session.flush()
-                return self._view_from_state(application, state)
-        if not isinstance(item, Mapping):
-            failures = list(sequence(state.get("assignment_failures")) or ())
-            failures.append(
-                {
-                    "assignment_id": None,
-                    "reason": "Persisted assignment queue item is malformed",
-                    "terminal": False,
-                }
-            )
-            state["assignment_failures"] = failures
-            state["position"] = (integer(position) or 0) + 1
-            self._write_state(session, application, state)
-            session.flush()
-            return self._view_from_state(application, state)
-        # Adoption-scope reads also query the session. Keep the entire read
-        # path from flushing a lost child's pending mirror before its owner
-        # starts a replacement in a separate transaction.
-        with session.no_autoflush:
-            pending_cancellation = (
-                None
-                if item.get("kind") == "stop"
-                else self._observe_superseded_agent_effects(
-                    session, application, state, before_dispatch=True
-                )
-            )
-        if pending_cancellation is not None:
-            # A newer selected effect may own the fence while an older executor
-            # still runs. Observe its exact cleanup before issuing replacement
-            # work; unrelated adopted scopes retain their execution path.
-            return pending_cancellation
-        operation = self._start_child(
-            application_id,
-            item,
-            assignments,
-            adopted_scope
-            if adopted_scope is not None
-            else tuple(
-                str(node_id)
-                for node_id in (sequence(state.get("scope_node_ids")) or ())
-            ),
-            str(state["actor"]),
-            str(state["request_id"]),
-            integer(position) or 0,
-            _persisted_profile_progress(application).workload_intent_ordinal,
         )
-        if isinstance(operation, Residue):
-            # This assignment's step cannot be issued (its identity or its bound
-            # child cannot be established).  It is recorded as that assignment's
-            # failure and the queue goes on with the next one: one damaged element
-            # never stops the others, and the load's automatic recovery retries
-            # the recorded failure with a fresh child identity.
-            failures = list(sequence(state.get("assignment_failures")) or ())
-            failures.append(
-                {
-                    "assignment_id": (
-                        item.get("assignment_id") if isinstance(item, Mapping) else None
-                    ),
-                    "reason": f"{operation.reason.value}: {operation.note}"[:512],
-                    "terminal": False,
-                }
+        doc_state(
+            state,
+            LifecycleState.FAILED
+            if relevant_failures or incomplete
+            else _stored_state(
+                FleetProfileAdapter.recorded_aggregate(relevant_children)
+            ),
+        )
+        state.status_reason = (
+            incomplete.detail
+            if incomplete
+            else (
+                f"{len(relevant_failures)} assignment(s) need reconciliation: {relevant_failures[0].reason}"[
+                    :512
+                ]
+                if relevant_failures
+                else None
             )
-            state["assignment_failures"] = failures
-            state["position"] = (integer(position) or 0) + 1
-            self._write_state(session, application, state)
-            session.flush()
-            return self._view_from_state(application, state)
-        state["active_operation_id"] = operation.operation_id
-        state["active_kind"] = item.get("kind")
+        )
+        state.result = FleetProfileSwitchAdapterResult(
+            children=state.children,
+            assignment_ids=[
+                item.id
+                for item in assignments
+                if adopted_scope is None
+                or {node.node_id for node in item.nodes} <= set(adopted_scope)
+            ],
+        )
+        if adopted_scope is not None and state.status_reason is None:
+            state.status_reason = "Adopted assignments reconciled; other assignments were replaced by the selected profile"
         self._write_state(session, application, state)
         session.flush()
-        return self._view_from_child(application_id, state, operation)
+        return self._view_from_state(application, state)
+
+    @staticmethod
+    def _queue_item_nodes(
+        application: FleetProfileApplication, item: FleetProfileSwitchQueueItem
+    ) -> tuple[str, ...]:
+        reviewed = _persisted_profile_plan(application)
+        progress = _persisted_profile_progress(application)
+        if isinstance(reviewed, Residue) or progress.intended_profile is None:
+            return ()
+        if item.kind in {"run", "install"}:
+            assignment = next(
+                (
+                    value
+                    for value in progress.intended_profile.assignments
+                    if value.id == item.id
+                ),
+                None,
+            )
+            return (
+                tuple(sorted(node.node_id for node in assignment.nodes))
+                if assignment
+                else ()
+            )
+        if item.kind == "stop":
+            effect = next(
+                (
+                    value
+                    for value in reviewed.effects.runs
+                    if value.run_id == item.id and value.action == "stop"
+                ),
+                None,
+            )
+            if effect is None:
+                return ()
+            return tuple(
+                effect.profile_stop_scope.target_node_ids
+                if effect.profile_stop_scope
+                else effect.node_ids
+            )
+        effect = next(
+            (
+                value
+                for value in reviewed.effects.installations
+                if value.installation_id == item.id and value.action == "remove"
+            ),
+            None,
+        )
+        return tuple(effect.node_ids) if effect else ()
 
     @staticmethod
     def _queue_item_in_scope(
         session: Session,
         application: FleetProfileApplication,
-        item: object,
+        item: FleetProfileSwitchQueueItem,
         scope: tuple[str, ...],
     ) -> bool:
-        """Prove an unissued effect stays inside a complete adopted lane."""
-        if not isinstance(item, Mapping):
-            return False
-        reviewed = _persisted_profile_plan(application)
-        intended = FleetProfileService._intended_profile(application, session=session)
-        if isinstance(reviewed, Residue) or isinstance(intended, Residue):
-            return False
-        kind, identity = item.get("kind"), item.get("id")
-        nodes: set[str] | None = None
-        if kind in {"run", "install"}:
-            assignment = next(
-                (value for value in intended.assignments if value.id == identity), None
-            )
-            if assignment is not None:
-                nodes = {node.node_id for node in assignment.nodes}
-        elif kind == "stop":
-            effect = next(
-                (
-                    value
-                    for value in reviewed.effects.runs
-                    if value.run_id == identity and value.action == "stop"
-                ),
-                None,
-            )
-            if effect is not None:
-                nodes = set(
-                    effect.profile_stop_scope.target_node_ids
-                    if effect.profile_stop_scope is not None
-                    else effect.node_ids
-                )
-        elif kind == "cleanup":
-            removal = next(
-                (
-                    value
-                    for value in reviewed.effects.installations
-                    if value.installation_id == identity and value.action == "remove"
-                ),
-                None,
-            )
-            if removal is not None:
-                nodes = set(removal.node_ids)
-        return nodes is not None and bool(nodes) and nodes <= set(scope)
+        del session
+        nodes = RunSwitchFleetProfileAdapter._queue_item_nodes(application, item)
+        return bool(nodes) and set(nodes) <= set(scope)
 
     def _observed_child(self, operation_id: str) -> RunSwitchOperation | None:
         """The Run/Switch child, or ``None`` when its record is gone (recorded)."""
@@ -2465,89 +2323,83 @@ class RunSwitchFleetProfileAdapter:
         self,
         session: Session,
         application: FleetProfileApplication,
-        state: dict[str, object],
+        state: FleetProfileSwitchAdapterState,
         *,
         before_dispatch: bool = False,
+        dispatch_scope: tuple[str, ...] | None = None,
     ) -> FleetProfileChildOperation | None:
-        """Wait for older issued cancellation receipts before a switch succeeds."""
-
         now = _aware(self._run_switch._clock())
-        raw_due = state.get("observation_due_at")
         if (
-            state.get("state") == "running"
-            and isinstance(raw_due, str)
-            and now < _aware(datetime.fromisoformat(raw_due))
+            not before_dispatch
+            and state.state == "running"
+            and state.observation_due_at is not None
+            and now < _aware(state.observation_due_at)
         ):
             return self._view_from_state(application, state)
         progress = _persisted_profile_progress(application)
-        ordinal = progress.workload_intent_ordinal
         cancellation = progress.cancellation
-        if cancellation is not None:
-            ordinal = cancellation.workload_intent_ordinal
-        if ordinal is None:
-            # A load that never recorded a workload intent fenced no older
-            # effects, so there is none to wait for: its own child is what it
-            # stops or completes (a cancel or an adopted older run alike).
-            return None
-        scope_node_ids = _string_items(
-            state.get("scope_node_ids"),
-            fallback=_persisted_profile_scope(application) or (),
+        ordinal = (
+            cancellation.workload_intent_ordinal
+            if cancellation
+            else progress.workload_intent_ordinal
         )
+        if ordinal is None:
+            return None
+        scope = dispatch_scope or tuple(state.scope_node_ids)
         adopted_scope = FleetProfileService._adopted_application_scope(
             session, application
         )
         if cancellation is None and adopted_scope is not None:
-            scope_node_ids = list(adopted_scope)
+            if dispatch_scope is not None and not set(dispatch_scope) <= set(
+                adopted_scope
+            ):
+                state.status_reason = (
+                    "Dispatch is waiting for the selected exact continuing scope"
+                )
+                self._write_state(session, application, state)
+                return self._view_from_state(application, state)
+            scope = dispatch_scope or adopted_scope
         if before_dispatch:
-            # A lost child has an unflushed mirror update. The new child's
-            # owner opens its own transaction, so this read must neither flush
-            # that update nor acquire mutation locks before dispatch.
             with session.no_autoflush:
                 effects = AgentJobService.assess_superseded_agent_effects_in_session(
-                    session, scope_node_ids, ordinal, now
+                    session, scope, ordinal, now
                 )
         else:
             AgentJobService.abandon_superseded_idempotent_operations_in_session(
-                session, scope_node_ids, ordinal, now
+                session, scope, ordinal, now
             )
             effects = AgentJobService.assess_superseded_agent_effects_in_session(
-                session, scope_node_ids, ordinal, now
+                session, scope, ordinal, now
             )
         if not effects:
-            state["observation_due_at"] = None
-            state["observation_deadline_at"] = None
-            state["pending_operation_ids"] = []
-            state["status_reason"] = None
-            state["stop_reissue_attempt"] = 0
+            if not before_dispatch:
+                state.observation_due_at = None
+                state.observation_deadline_at = None
+                state.pending_operation_ids = []
+                state.status_reason = None
+                state.stop_reissue_attempt = 0
             return None
         AgentJobService.request_superseded_workload_cancellation_in_session(
-            session, scope_node_ids, ordinal, now
+            session, scope, ordinal, now
         )
-        deadline = min(effect.observation_deadline for effect in effects)
-        due = min(effect.observe_due_at for effect in effects)
-        # Each re-issue backs off exponentially (persisted attempt counter), so
-        # an effect past its observation deadline is not re-stopped every tick.
-        raw_attempt = state.get("stop_reissue_attempt")
-        attempt = (raw_attempt if type(raw_attempt) is int else 0) + 1
-        due = max(due, FleetProfileAdapter.next_retry(application.id, attempt, now))
-        operation_ids = sorted(effect.operation_id for effect in effects)
-        reason = (
+        attempt = min(state.stop_reissue_attempt + 1, 32)
+        due = max(
+            min(effect.observe_due_at for effect in effects),
+            FleetProfileAdapter.next_retry(application.id, attempt, now),
+        )
+        doc_state(state, LifecycleState.RUNNING)
+        state.status_reason = (
             "Reissuing Stop and observing older issued workload cancellation: "
-            + ", ".join(operation_ids)
+            + ", ".join(sorted(effect.operation_id for effect in effects))
+        )[:512]
+        state.observation_due_at = due
+        state.observation_deadline_at = min(
+            effect.observation_deadline for effect in effects
         )
-        updated = {
-            "status_reason": reason[:512],
-            "observation_due_at": due.isoformat(),
-            "observation_deadline_at": deadline.isoformat(),
-            "pending_operation_ids": operation_ids,
-            "stop_reissue_attempt": min(attempt, 32),
-        }
-        if state.get("state") != "running" or any(
-            state.get(key) != value for key, value in updated.items()
-        ):
-            doc_state(state, "running")
-            state.update(updated)
-            self._write_state(session, application, state)
+        state.pending_operation_ids = sorted(effect.operation_id for effect in effects)
+        state.stop_reissue_attempt = attempt
+        self._write_state(session, application, state)
+        if not before_dispatch:
             session.flush()
         return self._view_from_state(application, state)
 
@@ -2555,33 +2407,25 @@ class RunSwitchFleetProfileAdapter:
         self,
         session: Session,
         application: FleetProfileApplication,
-        state: dict[str, object],
+        state: FleetProfileSwitchAdapterState,
     ) -> FleetProfileChildOperation:
-        doc_state(state, "cancelled")
-        state["status_reason"] = "Profile effects were reconciled after cancellation"
-        state["result"] = {
-            "children": list(sequence(state.get("children")) or ()),
-            "assignment_ids": list(sequence(state.get("assignment_ids")) or ()),
-        }
+        doc_state(state, LifecycleState.CANCELLED)
+        state.status_reason = "Profile effects were reconciled after cancellation"
+        state.result = FleetProfileSwitchAdapterResult(
+            children=state.children, assignment_ids=state.assignment_ids
+        )
         self._write_state(session, application, state)
-        cancellation = _persisted_profile_progress(application).cancellation
-        if cancellation is not None:
-            progress = _persisted_profile_progress(application)
-            progress_data = progress.model_dump(mode="json")
-            cancellation_state(progress_data, "cancelled")
-            application.progress = read_stored_model(
-                FleetProfileApplicationProgress,
-                canonical_message(progress_data),
-                strict=True,
-                from_json=True,
-            ).model_dump(mode="json")
+        progress = _persisted_profile_progress(application)
+        if progress.cancellation is not None:
+            cancellation_state(progress, LifecycleState.CANCELLED)
+            application.progress = progress.model_dump(mode="json")
         session.flush()
         return self._view_from_state(application, state)
 
     def _start_child(
         self,
         application_id: str,
-        item: Mapping[str, object],
+        item: FleetProfileSwitchQueueItem,
         assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
         actor: str,
@@ -2596,9 +2440,9 @@ class RunSwitchFleetProfileAdapter:
         """
 
         child_request_key = profile_switch_child_request_key(
-            application_id, position, str(item.get("kind")), str(item.get("id"))
+            application_id, position, item.kind, item.id
         )
-        kind = item.get("kind")
+        kind = item.kind
         adopted = self._adopt_child(
             child_request_key,
             application_id=application_id,
@@ -2624,7 +2468,7 @@ class RunSwitchFleetProfileAdapter:
         if isinstance(reviewed, Residue):
             return reviewed
         if kind == "cleanup":
-            installation_id = item.get("id")
+            installation_id = item.id
             if not isinstance(installation_id, str):
                 return retire_as_unknown(
                     "profile-child",
@@ -2648,7 +2492,7 @@ class RunSwitchFleetProfileAdapter:
                 workload_intent_ordinal=workload_intent_ordinal,
             )
         if kind == "stop":
-            run_id = item.get("id")
+            run_id = item.id
             if not isinstance(run_id, str):
                 return retire_as_unknown(
                     "profile-child",
@@ -2656,17 +2500,7 @@ class RunSwitchFleetProfileAdapter:
                     BookkeepingReason.ROW_INCOMPLETE,
                     "a stop item has no run identity",
                 )
-            raw_scope = item.get("profile_stop_scope")
-            profile_stop_scope = (
-                read_stored_model(
-                    RunSwitchProfileStopScope,
-                    canonical_message(raw_scope),
-                    strict=True,
-                    from_json=True,
-                )
-                if isinstance(raw_scope, Mapping)
-                else None
-            )
+            profile_stop_scope = item.profile_stop_scope
             preview = (
                 self._run_switch.preview_stop(
                     RunSwitchStopPreviewRequest(run_id=run_id), actor=actor
@@ -2699,7 +2533,7 @@ class RunSwitchFleetProfileAdapter:
                 workload_intent_ordinal=workload_intent_ordinal,
                 profile_application_id=application_id,
             )
-        assignment_id = item.get("id")
+        assignment_id = item.id
         assignment = next(
             (value for value in assignments if value.id == assignment_id), None
         )
@@ -2834,7 +2668,7 @@ class RunSwitchFleetProfileAdapter:
         request_key: str,
         *,
         application_id: str,
-        item: Mapping[str, object],
+        item: FleetProfileSwitchQueueItem,
         assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
         workload_intent_ordinal: int | None,
@@ -2854,7 +2688,7 @@ class RunSwitchFleetProfileAdapter:
             job = session.scalar(select(Job).where(Job.request_id == request_key))
             if job is None:
                 return None
-            kind = item.get("kind")
+            kind = item.kind
             if not isinstance(kind, str):
                 return unknown(
                     BookkeepingReason.ROW_INCOMPLETE, "the queue item names no kind"
@@ -2910,21 +2744,11 @@ class RunSwitchFleetProfileAdapter:
                     BookkeepingReason.EVIDENCE_MISMATCH,
                     "the child's Spark scope differs from the bound scope",
                 )
-            owner_id = item.get("id")
+            owner_id = item.id
             if kind == "cleanup":
                 valid = plan.action == "cleanup" and plan.installation_id == owner_id
             elif kind == "stop":
-                raw_scope = item.get("profile_stop_scope")
-                expected_scope = (
-                    read_stored_model(
-                        RunSwitchProfileStopScope,
-                        canonical_message(raw_scope),
-                        strict=True,
-                        from_json=True,
-                    )
-                    if isinstance(raw_scope, Mapping)
-                    else None
-                )
+                expected_scope = item.profile_stop_scope
                 valid = (
                     plan.action == "stop"
                     and plan.run_id == owner_id
@@ -2999,7 +2823,7 @@ class RunSwitchFleetProfileAdapter:
         installation_policy: str,
         reviewed_effects: FleetProfileEffects,
         expected_images: Mapping[str, RuntimeImageIdentity],
-    ) -> list[dict[str, object]]:
+    ) -> list[FleetProfileSwitchQueueItem]:
         adopted_assignment_ids = {
             assignment_id
             for effect in reviewed_effects.adopted
@@ -3062,20 +2886,14 @@ class RunSwitchFleetProfileAdapter:
         )
 
     @staticmethod
-    def _state(application: FleetProfileApplication) -> dict[str, object] | None:
-        # Persisted JSON is consumed with the canonical JSON validation
-        # semantics, exactly as it was written.  Validating an already-decoded
-        # document as strict Python data rejects JSON arrays where the contract
-        # declares tuples, which makes Pydantic's smart union pick a different
-        # phase-result variant and loses the receipt entirely.  Damaged progress
-        # is rebuilt from the row's receipt (no child document), so the child is
-        # found again through its deterministic request key, never refused.
-        raw = _persisted_profile_progress(application).switch_adapter
-        if raw is None:
-            return None
-        return raw.model_dump(mode="json")
+    def _state(
+        application: FleetProfileApplication,
+    ) -> FleetProfileSwitchAdapterState | None:
+        return _persisted_profile_progress(application).switch_adapter
 
-    def _save_state(self, application_id: str, state: Mapping[str, object]) -> None:
+    def _save_state(
+        self, application_id: str, state: FleetProfileSwitchAdapterState
+    ) -> None:
         with self._sessions.begin() as session:
             application = session.get(
                 FleetProfileApplication, application_id, with_for_update=True
@@ -3096,114 +2914,52 @@ class RunSwitchFleetProfileAdapter:
     def _write_state(
         session: Session,
         application: FleetProfileApplication,
-        state: Mapping[str, object],
+        state: FleetProfileSwitchAdapterState,
     ) -> None:
-        typed = read_stored_model(
-            FleetProfileSwitchAdapterState,
-            canonical_message(state),
-            strict=True,
-            from_json=True,
-        )
-        progress = read_stored_model(
-            FleetProfileApplicationProgress,
-            canonical_message(application.progress),
-            strict=True,
-            from_json=True,
-        )
-        application.progress = {
-            **progress.model_dump(mode="json"),
-            "switch_adapter": typed.model_dump(mode="json"),
-        }
+        del session
+        progress = _persisted_profile_progress(application)
+        progress.switch_adapter = state
+        application.progress = _canonical_progress(
+            progress.model_dump(mode="json")
+        ).model_dump(mode="json")
 
     def _failed_in_session(
         self,
         session: Session,
         application: FleetProfileApplication,
-        state: dict[str, object],
+        state: FleetProfileSwitchAdapterState,
         reason: str,
     ) -> FleetProfileChildOperation:
-        doc_state(state, "failed")
-        state["status_reason"] = reason[:512]
+        doc_state(state, LifecycleState.FAILED)
+        state.status_reason = reason[:512]
         self._write_state(session, application, state)
         session.flush()
         return self._view_from_state(application, state)
 
     @staticmethod
     def _assignments_from_state(
-        state: Mapping[str, object], application: FleetProfileApplication
+        state: FleetProfileSwitchAdapterState, application: FleetProfileApplication
     ) -> tuple[FleetProfileAssignment, ...]:
-        """The assignments a child was started with, rebuilt from the accepted intent.
-
-        An element of the stored snapshot that cannot be read is skipped.  When
-        the snapshot is missing or unreadable as a whole, the application's own
-        accepted intent is the evidence it was copied from, narrowed to the
-        assignments the child names.
-        """
-
-        raw = state.get("assignments")
-        values: list[FleetProfileAssignment] = []
-        damaged = not isinstance(raw, list)
-        for item in raw if isinstance(raw, list) else ():
-            try:
-                values.append(read_stored_model(FleetProfileAssignment, item))
-            except ValueError:
-                damaged = True
-        if damaged:
-            wanted = {
-                value
-                for value in (sequence(state.get("assignment_ids")) or ())
-                if isinstance(value, str)
-            }
-            intent = _persisted_profile_progress(application).intended_profile
-            known = {value.id for value in values}
-            rebuilt = [
-                assignment
-                for assignment in (intent.assignments if intent is not None else ())
-                if assignment.id in wanted and assignment.id not in known
-            ]
-            if rebuilt:
-                _LOGGER.info(
-                    "profile application %s: rebuilt %d assignment(s) of its child "
-                    "from the accepted intent",
-                    application.id,
-                    len(rebuilt),
-                )
-            values.extend(rebuilt)
-        return tuple(sorted(values, key=lambda item: item.id))
+        del application
+        return tuple(state.assignments)
 
     @staticmethod
     def _child_receipt(
         child: RunSwitchOperation,
     ) -> FleetProfileSwitchChildResult | None:
-        """Return the child's public result tree as a profile step receipt."""
-
-        if child.result is None:
-            return None
-        try:
-            return FleetProfileSwitchChildResult(
+        return (
+            None
+            if child.result is None
+            else FleetProfileSwitchChildResult(
                 run_switch_operation_id=child.operation_id,
-                run_switch=read_stored_model(
-                    RunSwitchOperationResult,
-                    canonical_message(child.result),
-                    strict=True,
-                    from_json=True,
-                ),
+                run_switch=child.result,
             )
-        except (TypeError, ValueError) as error:
-            # The child's own record keeps its result; the profile step is
-            # recorded without a receipt rather than refusing to record it.
-            retire_as_unknown(
-                "profile-child-receipt",
-                str(child.operation_id),
-                BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                stored_document_detail(error) or type(error).__name__,
-            )
-            return None
+        )
 
     def _view_from_child(
         self,
         application_id: str,
-        state: Mapping[str, object],
+        state: FleetProfileSwitchAdapterState,
         child: RunSwitchOperation,
     ) -> FleetProfileChildOperation:
         run_phase = child.current_phase or child.progress.phase or "prepare"
@@ -3215,7 +2971,7 @@ class RunSwitchFleetProfileAdapter:
             startup_budget_seconds=child.progress.startup_budget_seconds,
             start_deadline=child.progress.start_deadline,
             phase=phase,
-            node_ids=_string_items(state.get("scope_node_ids")),
+            node_ids=state.scope_node_ids,
             bytes=child.progress.completed_bytes,
             total_bytes=child.progress.total_bytes,
         )
@@ -3246,71 +3002,28 @@ class RunSwitchFleetProfileAdapter:
 
     @staticmethod
     def _view_from_state(
-        application: FleetProfileApplication,
-        state: Mapping[str, object],
+        application: FleetProfileApplication, state: FleetProfileSwitchAdapterState
     ) -> FleetProfileChildOperation:
-        child_state = _operation_state(
-            state.get("state"), default=LifecycleState.RUNNING
-        )
-        raw_progress = state.get("child_progress")
-        progress = (
-            # The stored document is JSON that the database driver already
-            # decoded, so it must be read with the contract's JSON semantics:
-            # Python mode refuses the ISO string this same model serializes for
-            # ``start_deadline``, which failed a whole live application after
-            # its distribution and install had already succeeded.
-            read_stored_model(
-                FleetProfileChildProgress, json.dumps(raw_progress), from_json=True
-            )
-            if isinstance(raw_progress, Mapping)
-            else FleetProfileChildProgress(
-                phase="final-verify" if child_state == "succeeded" else "prepare",
-                node_ids=_string_items(state.get("scope_node_ids")),
-            )
-        )
-        raw_status_reason = state.get("status_reason")
         return FleetProfileChildOperation(
             id=application.id,
-            state=child_state,
-            progress=progress,
-            status_reason=(
-                raw_status_reason if isinstance(raw_status_reason, str) else None
+            state=state.state,
+            progress=state.child_progress
+            or FleetProfileChildProgress(
+                phase="final-verify" if state.state == "succeeded" else "prepare",
+                node_ids=state.scope_node_ids,
             ),
+            status_reason=state.status_reason,
             result=_state_receipt(state),
         )
 
 
-def _state_receipt(state: Mapping[str, object]) -> FleetProfileChildResult | None:
-    """Return the newest completed child receipt held by a mirrored state.
-
-    A profile step's recorded result is read from the mirror, so the receipt of
-    the child that finished last is the step's evidence.  States written before
-    receipts were mirrored fall back to the adapter's own summary.
-    """
-
-    children = sequence(state.get("children")) or ()
-    for raw in reversed(list(children)):
-        if not isinstance(raw, Mapping):
-            continue
-        receipt = raw.get("result")
-        if isinstance(receipt, Mapping):
-            return read_stored_model(
-                FleetProfileSwitchChildResult,
-                canonical_message(receipt),
-                strict=True,
-                from_json=True,
-            )
-    summary = state.get("result")
-    return (
-        read_stored_model(
-            FleetProfileSwitchAdapterResult,
-            canonical_message(summary),
-            strict=True,
-            from_json=True,
-        )
-        if isinstance(summary, Mapping)
-        else None
-    )
+def _state_receipt(
+    state: FleetProfileSwitchAdapterState,
+) -> FleetProfileChildResult | None:
+    for child in reversed(state.children):
+        if child.result is not None:
+            return child.result
+    return state.result
 
 
 def _application_cancellation_view(
@@ -3364,14 +3077,14 @@ def _application_cancellation_view(
                 ),
             )
             (cancelled if child.state == "cancelled" else completed).append(effect)
-        active_id = adapter.active_operation_id
-        if active_id is not None:
+        active_ids = {child.operation_id for child in adapter.pending_children}
+        for child in adapter.pending_children:
             pending.append(
                 FleetProfileApplicationEffect(
-                    effect_id=active_id,
-                    kind=adapter.active_kind or "run",
-                    label="Active Run/Switch child",
-                    operation_id=active_id,
+                    effect_id=child.operation_id,
+                    kind=child.kind,
+                    label="Pending Run/Switch child",
+                    operation_id=child.operation_id,
                     outcome="pending",
                 )
             )
@@ -3379,7 +3092,7 @@ def _application_cancellation_view(
             set(adapter.pending_operation_ids) | set(intent.pending_operation_ids)
         )
         for operation_id in pending_ids:
-            if operation_id == active_id:
+            if operation_id in active_ids:
                 continue
             pending.append(
                 FleetProfileApplicationEffect(
@@ -3390,8 +3103,13 @@ def _application_cancellation_view(
                     outcome="pending",
                 )
             )
-        queue_start = adapter.position + (1 if active_id else 0)
-        for index, item in enumerate(adapter.queue[queue_start:], start=queue_start):
+        occupied = {
+            child.queue_index
+            for child in (*adapter.pending_children, *adapter.children)
+        } | set(adapter.skipped_indices)
+        for index, item in enumerate(adapter.queue):
+            if index in occupied:
+                continue
             cancelled.append(
                 FleetProfileApplicationEffect(
                     effect_id=f"queue:{index}:{item.kind}:{item.id}",
@@ -3423,7 +3141,11 @@ def _application_cancellation_view(
         for operation_id in pending_ids
         if operation_id not in {effect.effect_id for effect in pending}
     )
-    dependency = adapter.active_operation_id if adapter is not None else None
+    dependency = (
+        adapter.pending_children[0].operation_id
+        if adapter is not None and adapter.pending_children
+        else None
+    )
     if dependency is not None:
         owner = "run-switch"
         deadline = None
@@ -3637,55 +3359,39 @@ def _switch_queue(
     stops: Sequence[FleetProfileRunEffect],
     work: Sequence[FleetProfileAssignment],
     removals: Sequence[str],
-) -> list[dict[str, object]]:
-    """Order a profile's switch steps so replaced workloads keep serving.
-
-    A Run/Switch stops the workloads on its own Sparks right before it starts.
-    A workload that one new run replaces on the same Sparks is therefore left
-    serving until then: its stop step comes after the new work and finds
-    nothing left to do. A workload no single new run covers (for example one
-    spread over Sparks two new runs take separately) is stopped first.
-    """
-
+) -> list[FleetProfileSwitchQueueItem]:
     run_groups = [
         {node.node_id for node in assignment.nodes}
         for assignment in work
         if assignment.desired_state == DesiredAssignmentState.RUNNING
     ]
-
-    def stop_item(effect: FleetProfileRunEffect) -> dict[str, object]:
-        return {
-            "kind": "stop",
-            "id": effect.run_id,
-            **(
-                {
-                    "profile_stop_scope": effect.profile_stop_scope.model_dump(
-                        mode="json"
-                    )
-                }
-                if effect.profile_stop_scope is not None
-                else {}
-            ),
-        }
-
     replaced = [
         effect
         for effect in stops
         if any(set(effect.node_ids) <= group for group in run_groups)
     ]
+
+    def stop(effect: FleetProfileRunEffect) -> FleetProfileSwitchQueueItem:
+        return FleetProfileSwitchQueueItem(
+            kind="stop", id=effect.run_id, profile_stop_scope=effect.profile_stop_scope
+        )
+
     return [
-        *(stop_item(effect) for effect in stops if effect not in replaced),
+        *(stop(effect) for effect in stops if effect not in replaced),
         *(
-            {
-                "kind": "install"
+            FleetProfileSwitchQueueItem(
+                kind="install"
                 if assignment.desired_state == DesiredAssignmentState.INSTALLED
                 else "run",
-                "id": assignment.id,
-            }
+                id=assignment.id,
+            )
             for assignment in work
         ),
-        *(stop_item(effect) for effect in replaced),
-        *({"kind": "cleanup", "id": installation_id} for installation_id in removals),
+        *(stop(effect) for effect in replaced),
+        *(
+            FleetProfileSwitchQueueItem(kind="cleanup", id=identity)
+            for identity in removals
+        ),
     ]
 
 
@@ -3718,7 +3424,7 @@ def _validate_remaining_effects(
 
 
 def _effective_option_choices(
-    document: Mapping[str, object],
+    recipe: RecipeDefinition,
     stored: Mapping[str, str],
 ) -> tuple[dict[str, str], list[str]]:
     """The choice for every option the recipe declares, defaults filled in.
@@ -3730,10 +3436,6 @@ def _effective_option_choices(
     it is shown instead of blocking the profile.
     """
 
-    try:
-        recipe = read_recipe(document)
-    except ValueError:
-        return dict(stored), []
     try:
         return recipe.resolve_options(stored), []
     except RecipeOptionError:
@@ -3864,6 +3566,7 @@ class FleetProfileService:
         # Round-robin position of the bounded automatic-recovery scan, so rows
         # that stay ineligible cannot starve later due rows.
         self._recovery_cursor: str | None = None
+        self._ordinary_cursor: str | None = None
 
     def _selected_profile_snapshot(
         self, session: Session
@@ -3962,8 +3665,16 @@ class FleetProfileService:
                 return False
 
     @staticmethod
-    def _authorize(session: Session, actor: str, *, mutation: bool = True) -> None:
-        if mutation:
+    def _authorize(
+        session: Session,
+        actor: str,
+        *,
+        mutation: bool = True,
+        serialize: bool = True,
+    ) -> None:
+        # Queue preflight requires mutation roles too, but cannot hold this
+        # parent lock across the child's separate serialized acceptance.
+        if mutation and serialize:
             serialize_user_authority(session)
         user = session.scalar(select(User).where(User.subject == actor))
         if not FleetProfileService._user_has_profile_authority(user, mutation=mutation):
@@ -4299,7 +4010,7 @@ class FleetProfileService:
             document, revision, _cache = resolved
             topology = recipe_topology(revision.document)
             option_choices, _notes = _effective_option_choices(
-                revision.document, choice.option_choices
+                read_recipe(revision.document), choice.option_choices
             )
             roles = _expanded_roles(topology)
             nodes = [
@@ -5712,6 +5423,79 @@ class FleetProfileService:
         )
 
     @staticmethod
+    def _stop_binding_is_exact(
+        session: Session,
+        application: FleetProfileApplication,
+        stop: FleetProfileAdoptedStopEffect,
+    ) -> bool:
+        progress = _persisted_profile_progress(application)
+        document = progress.switch_adapter
+        if document is None or stop.queue_index >= len(document.queue):
+            return False
+        item = document.queue[stop.queue_index]
+        if (
+            item.kind != "stop"
+            or item.id != stop.effect.run_id
+            or item.profile_stop_scope != stop.effect.profile_stop_scope
+        ):
+            return False
+        request_key = profile_switch_child_request_key(
+            application.id, stop.queue_index, item.kind, item.id
+        )
+        if request_key != stop.request_key:
+            return False
+        record = next(
+            (
+                child
+                for child in (*document.pending_children, *document.children)
+                if child.queue_index == stop.queue_index
+                and child.kind == "stop"
+                and (
+                    child.operation_id == stop.operation_id
+                    or child.original_operation_id == stop.operation_id
+                )
+            ),
+            None,
+        )
+        if record is None:
+            return False
+        job = session.get(Job, record.operation_id)
+        if (
+            job is None
+            or job.kind != "recipe.stop.v2"
+            or job.request_id != request_key
+            or not isinstance(job.payload, dict)
+            or job.payload_digest != _digest(job.payload)
+        ):
+            return False
+        try:
+            child_plan = read_stored_model(
+                RunSwitchPlan,
+                canonical_message(job.payload.get("plan")),
+                strict=True,
+                from_json=True,
+            )
+            child_result = read_stored_model(
+                RunSwitchOperationResult,
+                canonical_message(job.result),
+                strict=True,
+                from_json=True,
+            )
+        except (TypeError, ValueError):
+            return False
+        return (
+            child_plan.action == "stop"
+            and child_plan.run_id == stop.effect.run_id
+            and child_plan.installation_id == stop.effect.installation_id
+            and child_plan.profile_stop_scope == stop.effect.profile_stop_scope
+            and sorted(node.node_id for node in child_plan.spark_group.nodes)
+            == stop.effect.node_ids
+            and sorted(job.targets) == stop.effect.node_ids
+            and child_result.profile_application_id == application.id
+            and child_result.workload_intent_ordinal == progress.workload_intent_ordinal
+        )
+
+    @staticmethod
     def _adopted_application_scope(
         session: Session, application: FleetProfileApplication
     ) -> tuple[str, ...] | None:
@@ -5769,6 +5553,47 @@ class FleetProfileService:
             for identifier in link.assignment_ids
             for node in old[identifier].nodes
         }
+        original_state = original_progress.switch_adapter
+        desired_nodes = {
+            node.node_id
+            for item in selected_progress.intended_profile.assignments
+            for node in item.nodes
+        }
+        for stop in link.stops:
+            if not FleetProfileService._stop_binding_is_exact(
+                session, application, stop
+            ):
+                return None
+            if original_state is None or stop.queue_index >= len(original_state.queue):
+                return None
+            item = original_state.queue[stop.queue_index]
+            if (
+                item.kind != "stop"
+                or item.id != stop.effect.run_id
+                or item.profile_stop_scope != stop.effect.profile_stop_scope
+            ):
+                return None
+            if stop.request_key != profile_switch_child_request_key(
+                application.id, stop.queue_index, item.kind, item.id
+            ):
+                return None
+            if (
+                stop.effect not in original_plan.effects.runs
+                or set(stop.effect.node_ids) & desired_nodes
+            ):
+                return None
+            records = (*original_state.pending_children, *original_state.children)
+            if not any(
+                child.queue_index == stop.queue_index
+                and (
+                    child.operation_id == stop.operation_id
+                    or child.original_operation_id == stop.operation_id
+                )
+                and child.kind == "stop"
+                for child in records
+            ):
+                return None
+            scope.update(stop.effect.node_ids)
         if scope != set(link.node_ids):
             return None
         original_preparations = {
@@ -5844,9 +5669,11 @@ class FleetProfileService:
                 continue
             if progress.intended_profile.installation_policy != installation_policy:
                 continue
-            if {
-                item.id: item for item in progress.intended_profile.assignments
-            } == desired:
+            if (
+                not progress.switch_adapter
+                and {item.id: item for item in progress.intended_profile.assignments}
+                == desired
+            ):
                 # An explicit repeat of the entire same profile remains a new
                 # request. Continuity only preserves independent unchanged work
                 # while the newer decision changes another assignment.
@@ -5857,10 +5684,14 @@ class FleetProfileService:
             )
             if existing_adopted_scope:
                 effect_nodes &= set(existing_adopted_scope)
+            repeating_assignments = {
+                item.id: item for item in progress.intended_profile.assignments
+            } == desired
             equivalent = [
                 item
                 for item in progress.intended_profile.assignments
-                if item == desired.get(item.id)
+                if not repeating_assignments
+                and item == desired.get(item.id)
                 and {node.node_id for node in item.nodes} <= target_nodes
                 and {node.node_id for node in item.nodes} <= effect_nodes
             ]
@@ -5877,6 +5708,52 @@ class FleetProfileService:
                 if {node.node_id for node in item.nodes} <= scope
             ]
             scope = {node.node_id for item in equivalent for node in item.nodes}
+            stops: list[FleetProfileAdoptedStopEffect] = []
+            document = progress.switch_adapter
+            desired_nodes = {
+                node.node_id for item in assignments for node in item.nodes
+            }
+            if document is not None:
+                for child in (*document.pending_children, *document.children):
+                    if child.kind != "stop":
+                        continue
+                    item = document.queue[child.queue_index]
+                    effect = next(
+                        (
+                            effect
+                            for effect in plan.effects.runs
+                            if effect.action == "stop" and effect.run_id == item.id
+                        ),
+                        None,
+                    )
+                    if effect is None or effect.profile_stop_scope is not None:
+                        # A removed-rank gang still binds its original complete
+                        # topology; membership reconciliation owns that cleanup.
+                        continue
+                    members = set(effect.node_ids)
+                    if (
+                        members & desired_nodes
+                        or not members <= target_nodes
+                        or not members <= effect_nodes
+                    ):
+                        continue
+                    if (
+                        isinstance(child, FleetProfileSwitchChildState)
+                        and child.state != "succeeded"
+                    ):
+                        continue
+                    binding = FleetProfileAdoptedStopEffect(
+                        effect=effect,
+                        queue_index=child.queue_index,
+                        operation_id=child.original_operation_id or child.operation_id,
+                        request_key=profile_switch_child_request_key(
+                            application.id, child.queue_index, item.kind, item.id
+                        ),
+                    )
+                    if not cls._stop_binding_is_exact(session, application, binding):
+                        continue
+                    stops.append(binding)
+                    scope.update(members)
             if not scope or scope & owned_nodes:
                 continue
             nodes = tuple(
@@ -5897,6 +5774,7 @@ class FleetProfileService:
                     workload_intent_ordinal=progress.workload_intent_ordinal,
                     node_ids=sorted(scope),
                     assignment_ids=sorted(item.id for item in equivalent),
+                    stops=sorted(stops, key=lambda stop: stop.queue_index),
                 )
             )
             owned_nodes.update(scope)
@@ -6262,7 +6140,7 @@ class FleetProfileService:
                         admission_pending=False,
                         admission_retry_at=None,
                         storage_wait_since=since.isoformat(),
-                    )
+                    ).model_dump(mode="json")
                     _LOGGER.warning(
                         "profile application %s refused for disk: %s: %s",
                         application_id,
@@ -6294,7 +6172,7 @@ class FleetProfileService:
                 admission_attempt=attempt,
                 admission_retry_at=next_retry.isoformat(),
                 **wait_changes,
-            )
+            ).model_dump(mode="json")
             if {(item.code, tuple(item.node_ids)) for item in current_blockers} != {
                 (item.code, tuple(item.node_ids)) for item in progress.blockers
             }:
@@ -6578,53 +6456,42 @@ class FleetProfileService:
                 operation_kind="fleet-profile.apply",
                 select_profile=True,
             )
-            for retry_delay in (
-                *_PROFILE_ADMISSION_RETRY_DELAYS_SECONDS,
-                None,
-            ):
-                try:
-                    return self._queue_application(
-                        preview,
-                        request_key=request_key,
-                        actor=actor,
-                        operation_kind="fleet-profile.apply",
-                        pending_application_id=pending.id,
+            # Acceptance already has a durable owner and immutable reviewed
+            # intent. Try admission once; a busy lock is retried by that owner,
+            # rather than repeating SQL and sleeping inside the HTTP request.
+            try:
+                return self._queue_application(
+                    preview,
+                    request_key=request_key,
+                    actor=actor,
+                    operation_kind="fleet-profile.apply",
+                    pending_application_id=pending.id,
+                )
+            except FleetProfileAdmissionBusy as busy:
+                return self._defer_pending_application(
+                    pending.id,
+                    "Profile admission is busy"
+                    + (
+                        f" ({busy.holder} holds a selected Spark)"
+                        if busy.holder
+                        else ""
                     )
-                except FleetProfileAdmissionBusy as busy:
-                    if retry_delay is None:
-                        return self._defer_pending_application(
-                            pending.id,
-                            "Profile admission is busy"
-                            + (
-                                f" ({busy.holder} holds a selected Spark)"
-                                if busy.holder
-                                else ""
-                            )
-                            + "; the Controller will retry automatically.",
-                            retry_delay=timedelta(0),
-                        )
-                    time.sleep(retry_delay)
-                except (
-                    FleetProfileAdmissionEffectBusy,
-                    FleetProfileAdmissionStorageError,
-                ) as error:
-                    return self._defer_pending_application(
-                        pending.id,
-                        str(error),
-                        retry_delay=timedelta(seconds=60)
-                        if isinstance(error, FleetProfileAdmissionStorageError)
-                        else timedelta(0),
-                        code=_deferral_code(error),
-                        storage=_storage_wait_of(error),
-                    )
-            # The last attempt (no delay left) defers and returns above; a spent
-            # schedule is deferred the same way, to be retried automatically.
-            assert pending is not None
-            return self._defer_pending_application(
-                pending.id,
-                "Profile admission is busy; the Controller will retry automatically.",
-                retry_delay=timedelta(0),
-            )
+                    + "; the Controller will retry automatically.",
+                    retry_delay=timedelta(0),
+                )
+            except (
+                FleetProfileAdmissionEffectBusy,
+                FleetProfileAdmissionStorageError,
+            ) as error:
+                return self._defer_pending_application(
+                    pending.id,
+                    str(error),
+                    retry_delay=timedelta(seconds=60)
+                    if isinstance(error, FleetProfileAdmissionStorageError)
+                    else timedelta(0),
+                    code=_deferral_code(error),
+                    storage=_storage_wait_of(error),
+                )
         except (
             FleetProfileConflict,
             FleetProfilePermissionDenied,
@@ -7344,7 +7211,7 @@ class FleetProfileService:
                         _canonical_progress(retry_parent.progress),
                         [],
                         retry_due_at=None,
-                    )
+                    ).model_dump(mode="json")
                     retry_parent.updated_at = now
                 if (
                     selected_generation is None
@@ -7820,7 +7687,7 @@ class FleetProfileService:
             admission_pending=False,
             admission_retry_at=None,
             retry_due_at=None,
-        )
+        ).model_dump(mode="json")
         self._lifecycle.fail(
             row, exhausted.detail, _aware(self._clock()), session=session
         )
@@ -7861,7 +7728,7 @@ class FleetProfileService:
             blockers,
             attempt=progress.attempt + 1,
             retry_due_at=due.isoformat(),
-        )
+        ).model_dump(mode="json")
         lead = (
             f"{blockers[0].code}: {blockers[0].detail}"
             if blockers
@@ -8262,6 +8129,25 @@ class FleetProfileService:
         usable.
         """
 
+        if needs_conversion(row):
+            observed = conversion_observation(row)
+            item = cls._unreadable_operation_item(row)
+            item.status_reason = observed.detail
+            item.next_attempt_at = (
+                observed.next_attempt_at.isoformat()
+                if observed.next_attempt_at
+                else None
+            )
+            item.blockers = bound_blockers(
+                [
+                    make_blocker(
+                        ProfileReasonCode.RETRY_CONFLICT,
+                        observed.detail
+                        or "Exact retained child evidence is being reconciled",
+                    )
+                ]
+            )
+            return item
         try:
             typed_progress = _canonical_progress(row.progress)
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
@@ -8723,7 +8609,7 @@ class FleetProfileService:
                 )
                 .limit(1)
             )
-            if candidate is None:
+            if candidate is None or needs_conversion(candidate):
                 return False
             application_id = candidate.id
             try:
@@ -8744,7 +8630,7 @@ class FleetProfileService:
                 .with_for_update(skip_locked=True)
                 .limit(1)
             )
-            if row is None:
+            if row is None or needs_conversion(row):
                 return False
             plan = _persisted_profile_plan(row)
             current = _stored_progress(row)
@@ -8902,12 +8788,13 @@ class FleetProfileService:
     def tick(self) -> bool:
         """Observe one due cancellation, then advance one ordinary work item."""
 
-        if self._switch_adapter is None:
-            return False
         now = _aware(self._clock())
+        converted = bool(convert_due_retained_applications(self._sessions, now))
+        if self._switch_adapter is None:
+            return converted
         if self._reconcile_selected_roster(now):
             return True
-        pending_admission_observed = self._observe_pending_admissions(now)
+        pending_admission_observed = self._observe_pending_admissions(now) or converted
         parked_observed = self._heal_legacy_applications(now)
         recovery_deferred = False
         cancellation_observed = self._observe_pending_cancellation(now)
@@ -9018,14 +8905,40 @@ class FleetProfileService:
                     FleetProfileApplication.state.in_(("queued", "running")),
                     cancellation_state.not_in(fleet_profile_states.CANCEL_IN_FLIGHT),
                     admission_pending.is_(False),
+                    or_(
+                        FleetProfileApplication.progress["retry_due_at"]
+                        .as_string()
+                        .is_(None),
+                        func.replace(
+                            FleetProfileApplication.progress[
+                                "retry_due_at"
+                            ].as_string(),
+                            "Z",
+                            "+00:00",
+                        )
+                        <= now.isoformat(),
+                    ),
                 )
                 .order_by(
-                    FleetProfileApplication.created_at, FleetProfileApplication.id
+                    case(
+                        (FleetProfileApplication.id > self._ordinary_cursor, 0), else_=1
+                    )
+                    if self._ordinary_cursor is not None
+                    else FleetProfileApplication.updated_at,
+                    FleetProfileApplication.id,
                 )
                 .with_for_update(skip_locked=True)
                 .limit(1)
             )
             if row is None:
+                return (
+                    pending_admission_observed
+                    or cancellation_observed
+                    or parked_observed
+                    or recovery_deferred
+                )
+            self._ordinary_cursor = row.id
+            if needs_conversion(row):
                 return (
                     pending_admission_observed
                     or cancellation_observed
@@ -9051,6 +8964,16 @@ class FleetProfileService:
                 )
                 return True
             progress = stored
+            if (
+                progress.retry_due_at is not None
+                and _aware(progress.retry_due_at) > now
+            ):
+                return (
+                    pending_admission_observed
+                    or cancellation_observed
+                    or parked_observed
+                    or recovery_deferred
+                )
             if (
                 progress.cancellation is not None
                 and progress.cancellation.state == LifecycleState.OBSERVING
@@ -9080,12 +9003,35 @@ class FleetProfileService:
                     session=session,
                 )
                 return True
-            steps = [step.model_dump(mode="json") for step in plan.steps]
+            steps = plan.steps
             if row.current_operation_id:
                 try:
                     child = self._switch_adapter.advance(
                         row.current_operation_id, session=session
                     )
+                except FleetProfilePermissionDenied as error:
+                    self._defer_exact_step(
+                        row,
+                        _persisted_profile_progress(row),
+                        str(error),
+                        now,
+                        code=ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE,
+                    )
+                    return True
+                except UnknownOutcomeError as error:
+                    if retry_disposition_of(error) == RETRY_WAIT:
+                        self._defer_exact_step(
+                            row, _persisted_profile_progress(row), str(error), now
+                        )
+                    else:
+                        self._lifecycle.cancelled(
+                            row,
+                            str(error),
+                            now,
+                            effect=_LifecycleEffect.UNKNOWN,
+                            session=session,
+                        )
+                    return True
                 except (KeyError, RuntimeError, ValueError) as error:
                     # A damaged persisted document is retained as the evidence of
                     # what was issued (a missing child record is reconciled before
@@ -9142,6 +9088,11 @@ class FleetProfileService:
                     )
                     row.progress = progress.model_dump(mode="json")
                 if child.state in _CHILD_PENDING_STATES:
+                    progress.retry_due_at = FleetProfileAdapter.next_retry(
+                        row.id, 1, now
+                    )
+                    row.progress = progress.model_dump(mode="json")
+                    row.updated_at = now
                     if row.state == "running" and not session.is_modified(row):
                         return (
                             pending_admission_observed
@@ -9173,28 +9124,17 @@ class FleetProfileService:
                         session=session,
                     )
                     return True
-                progress_data = progress.model_dump(mode="json")
-                results = dict(progress_data.get("step_results", {}))
-                # The receipt names the *plan* step it completed.  Copying the
-                # child's own kind recorded "recipe.uninstall" for an
-                # "uninstall" step and nothing at all for a switch-adapter
-                # child, so no reader could match a receipt to its plan step.
-                completed_step = steps[row.current_step]
-                child_result = FleetProfileStepResult(
+                # This worker dispatches reviewed switch steps only. Preserve
+                # the exact native receipt under its immutable plan index.
+                progress.step_results[str(row.current_step)] = FleetProfileStepResult(
                     operation_id=child.id,
-                    kind=completed_step["kind"],
+                    kind="switch",
                     result=child.result,
                 )
-                results[str(row.current_step)] = child_result.model_dump(mode="json")
-                progress_data["step_results"] = results
-                progress = read_stored_model(
-                    FleetProfileApplicationProgress,
-                    canonical_message(progress_data),
-                    strict=True,
-                    from_json=True,
-                )
+                progress.retry_due_at = None
                 row.progress = progress.model_dump(mode="json")
                 row.current_operation_id = None
+
                 row.current_step += 1
             if row.current_step >= len(steps):
                 waiting_for_adopted = False
@@ -9230,6 +9170,38 @@ class FleetProfileService:
                             session=session,
                         )
                         return True
+                    owner_progress = _persisted_profile_progress(owner)
+                    document = owner_progress.switch_adapter
+                    for stop in effect.stops:
+                        completed = (
+                            None
+                            if document is None
+                            else next(
+                                (
+                                    child
+                                    for child in document.children
+                                    if child.queue_index == stop.queue_index
+                                    and (
+                                        child.operation_id == stop.operation_id
+                                        or child.original_operation_id
+                                        == stop.operation_id
+                                    )
+                                    and child.kind == "stop"
+                                ),
+                                None,
+                            )
+                        )
+                        if (
+                            completed is None
+                            or completed.state != LifecycleState.SUCCEEDED
+                            or completed.result is None
+                            or not any(
+                                isinstance(receipt, RunSwitchStopResult)
+                                and receipt.run_id == stop.effect.run_id
+                                for receipt in completed.result.run_switch.phase_results
+                            )
+                        ):
+                            waiting_for_adopted = True
                     expected_images = {
                         item.assignment_id: item.runtime_image
                         for item in owner_plan.preparation_decisions
@@ -9252,6 +9224,10 @@ class FleetProfileService:
                         )
                     )
                 if waiting_for_adopted:
+                    progress.retry_due_at = FleetProfileAdapter.next_retry(
+                        row.id, 1, now
+                    )
+                    row.progress = progress.model_dump(mode="json")
                     row.status_reason = "Waiting for exact continuing assignments to finish under the selected profile"
                     row.updated_at = now
                     return True
@@ -9281,14 +9257,6 @@ class FleetProfileService:
                 row.updated_at = now
                 return True
             raw_step = steps[row.current_step]
-            if not isinstance(raw_step, Mapping):
-                self._lifecycle.fail(
-                    row,
-                    "Persisted Fleet profile step is invalid",
-                    now,
-                    session=session,
-                )
-                return True
             self._lifecycle.project(
                 row, now, state=_LifecycleState.RUNNING, session=session
             )
@@ -9299,7 +9267,7 @@ class FleetProfileService:
                         **progress.model_dump(mode="json"),
                         "completed_steps": row.current_step,
                         "total_steps": len(steps),
-                        "current_label": raw_step.get("label", "Applying profile"),
+                        "current_label": raw_step.label,
                     }
                 ),
                 strict=True,
@@ -9307,7 +9275,7 @@ class FleetProfileService:
             )
             row.progress = progress.model_dump(mode="json")
             row.updated_at = now
-            step = dict(raw_step)
+            step = raw_step
             application_id = row.id
             step_index = row.current_step
             actor = row.actor
@@ -9323,6 +9291,7 @@ class FleetProfileService:
             KeyError,
             RecipeOperationConflict,
             FleetProfileConflict,
+            FleetProfilePermissionDenied,
             RuntimeError,
             ValueError,
         ) as error:
@@ -9345,6 +9314,33 @@ class FleetProfileService:
                             "Cancellation is reconciling the profile child: "
                             + (str(error)[:360] or "child start was interrupted")
                         )[:512]
+                    elif isinstance(error, FleetProfilePermissionDenied) or (
+                        isinstance(error, UnknownOutcomeError)
+                        and retry_disposition_of(error) == RETRY_WAIT
+                    ):
+                        failed_progress = _persisted_profile_progress(failed)
+                        if self._application_is_current_selection(
+                            session, failed, failed_progress
+                        ):
+                            self._defer_exact_step(
+                                failed,
+                                failed_progress,
+                                str(error),
+                                _aware(self._clock()),
+                                code=(
+                                    ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE
+                                    if isinstance(error, FleetProfilePermissionDenied)
+                                    else ProfileReasonCode.RETRY_CONFLICT
+                                ),
+                            )
+                        else:
+                            self._lifecycle.supersede(
+                                failed,
+                                "A newer selected intent replaced the retry",
+                                _aware(self._clock()),
+                                code=SupersedeCode.SUPERSEDED_BY_INTENT,
+                                session=session,
+                            )
                     elif isinstance(
                         error, FleetProfileReviewStale | UnknownOutcomeError
                     ):
@@ -9381,6 +9377,7 @@ class FleetProfileService:
                 return True
             try:
                 current_progress = _persisted_profile_progress(current)
+                current_progress.retry_due_at = None
                 progress_data = current_progress.model_dump(mode="json")
                 if synchronous:
                     current.current_step += 1
@@ -9408,6 +9405,27 @@ class FleetProfileService:
             current.updated_at = _aware(self._clock())
         return True
 
+    @staticmethod
+    def _defer_exact_step(
+        row: FleetProfileApplication,
+        progress: FleetProfileApplicationProgress,
+        reason: str,
+        now: datetime,
+        *,
+        code: ProfileReasonCode = ProfileReasonCode.RETRY_CONFLICT,
+    ) -> None:
+        """Continue the same accepted queue/child identity without replacement admission."""
+        progress.attempt += 1
+        progress.retry_due_at = FleetProfileAdapter.next_retry(
+            row.id, progress.attempt, now
+        )
+        progress.blockers = bound_blockers([make_blocker(code, reason)])
+        row.progress = progress.model_dump(mode="json")
+        row.status_reason = f"Waiting for exact accepted effect ({reason}); next attempt at {progress.retry_due_at.isoformat()}"[
+            :512
+        ]
+        row.updated_at = now
+
     def _step_unissued(self, application_id: str, residue: Residue) -> bool:
         """A step could not be issued: wait for the evidence, or retire the load.
 
@@ -9427,10 +9445,16 @@ class FleetProfileService:
                     _LifecycleState.QUEUED,
                     _LifecycleState.RUNNING,
                 }:
-                    row.status_reason = (
-                        f"Waiting to issue the next step ({residue.note})"
-                    )[:512]
-                    row.updated_at = _aware(self._clock())
+                    progress = _persisted_profile_progress(row)
+                    if (
+                        progress.cancellation is None
+                        and self._application_is_current_selection(
+                            session, row, progress
+                        )
+                    ):
+                        self._defer_exact_step(
+                            row, progress, residue.note, _aware(self._clock())
+                        )
             return False
         with self._sessions.begin() as session:
             row = session.get(
@@ -9544,7 +9568,7 @@ class FleetProfileService:
                     }
                 ),
                 [],
-            )
+            ).model_dump(mode="json")
             row.updated_at = _aware(self._clock())
         return fresh
 
@@ -9675,7 +9699,7 @@ class FleetProfileService:
                 admission_pending=True,
                 admission_attempt=0,
                 admission_retry_at=now.isoformat(),
-            )
+            ).model_dump(mode="json")
             self._lifecycle.project(
                 row, now, state=_LifecycleState.QUEUED, reason=reason, session=session
             )
@@ -9852,7 +9876,7 @@ class FleetProfileService:
                 progress.blockers,
                 admission_pending=False,
                 admission_retry_at=None,
-            )
+            ).model_dump(mode="json")
             if state == "superseded":
                 assert code is not None
                 self._lifecycle.supersede(row, reason, now, code=code, session=session)
@@ -9898,6 +9922,8 @@ class FleetProfileService:
                 )
             )
             for row in rows:
+                if needs_conversion(row):
+                    continue
                 self._lifecycle.heal(row, now, session=session)
             legacy = tuple(
                 session.scalars(
@@ -9919,7 +9945,11 @@ class FleetProfileService:
                     .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
                 )
             )
-            relabelled = [self._lifecycle.heal_superseded(row, now) for row in legacy]
+            relabelled = [
+                self._lifecycle.heal_superseded(row, now)
+                for row in legacy
+                if not needs_conversion(row)
+            ]
             return bool(rows) or any(relabelled)
 
     @staticmethod
@@ -9937,16 +9967,8 @@ class FleetProfileService:
         due = _aware(due_at) if due_at is not None else None
         if due is None or due <= now:
             due = now + timedelta(seconds=_CANCELLATION_OBSERVATION_SECONDS)
-        progress_data = progress.model_dump(mode="json")
-        cancellation_data = dict(progress_data["cancellation"])
-        cancellation_data["observation_due_at"] = due.isoformat()
-        progress_data["cancellation"] = cancellation_data
-        row.progress = read_stored_model(
-            FleetProfileApplicationProgress,
-            canonical_message(progress_data),
-            strict=True,
-            from_json=True,
-        ).model_dump(mode="json")
+        progress.cancellation.observation_due_at = due
+        row.progress = progress.model_dump(mode="json")
 
     def _advance_cancellation_in_session(
         self,
@@ -10203,40 +10225,23 @@ class FleetProfileService:
         del session
         now = _aware(self._clock())
         progress = _persisted_profile_progress(row)
-        progress_data = progress.model_dump(mode="json")
-        cancellation_data = dict(progress_data["cancellation"] or {})
-        cancellation_data.update(
-            {
-                # The pending operation ids stay when the stop was never confirmed:
-                # they are the residue record.  A confirmed stop clears them.
-                "observation_due_at": None,
-                "observation_deadline_at": None,
-            }
-        )
-        if not residue:
-            cancellation_data["pending_operation_ids"] = []
-        progress_data["cancellation"] = cancellation_data
-        cancellation_state(progress_data, "cancelled")
-        document = progress_data.get("switch_adapter")
-        if isinstance(document, dict) and document.get("state") not in {
+        cancellation = progress.cancellation
+        if cancellation is not None:
+            cancellation.observation_due_at = None
+            cancellation.observation_deadline_at = None
+            if not residue:
+                cancellation.pending_operation_ids = []
+        cancellation_state(progress, LifecycleState.CANCELLED)
+        document = progress.switch_adapter
+        if document is not None and document.state not in {
             "succeeded",
             "failed",
             "cancelled",
         }:
-            document = dict(document)
-            doc_state(document, "cancelled")
-            if not residue:
-                # A stop that was never confirmed keeps its child's identity: it is
-                # the evidence of what may remain.
-                document["active_operation_id"] = None
-                document["active_kind"] = None
-            progress_data["switch_adapter"] = document
-        row.progress = read_stored_model(
-            FleetProfileApplicationProgress,
-            canonical_message(progress_data),
-            strict=True,
-            from_json=True,
-        ).model_dump(mode="json")
+            doc_state(document, LifecycleState.CANCELLED)
+            # Retain pending child identities even at cancellation expiry: a
+            # terminal parent does not establish the child's physical effect.
+        row.progress = progress.model_dump(mode="json")
         row.current_operation_id = None
         row.result = {
             "changed": bool(progress.completed_steps or progress.step_results),
@@ -10414,6 +10419,8 @@ class FleetProfileService:
             return state, None
         if state == LifecycleState.QUEUED and progress.admission_pending:
             return state, progress.admission_retry_at
+        if state in {LifecycleState.QUEUED, LifecycleState.RUNNING}:
+            return state, progress.retry_due_at
         return state, None
 
     def _automatic_profile_recovery(self, now: datetime) -> tuple[str, str] | None:
@@ -10552,7 +10559,7 @@ class FleetProfileService:
         self,
         application_id: str,
         step_index: int,
-        step: Mapping[str, object],
+        step: FleetProfilePlanStep,
         *,
         actor: str,
     ) -> tuple[str | None, bool, FleetProfileChildOperation | None] | Residue:
@@ -10563,7 +10570,7 @@ class FleetProfileService:
         is unknown, not a failure of the load.
         """
 
-        kind = step.get("kind")
+        kind = step.kind
         request_id = str(
             uuid.uuid5(
                 uuid.NAMESPACE_URL, f"vonk-forge:profile:{application_id}:{step_index}"
@@ -10577,9 +10584,7 @@ class FleetProfileService:
                     BookkeepingReason.EVIDENCE_UNAVAILABLE,
                     "the Run/Switch executor is not bound yet",
                 )
-            execution_scope = tuple(
-                read_stored_model(FleetProfilePlanStep, step).node_ids
-            )
+            execution_scope = tuple(step.node_ids)
             if not execution_scope:
                 # A switch that affects no Spark has no effect to issue: the step
                 # is complete (a synchronous no-op).
@@ -10637,7 +10642,7 @@ class FleetProfileService:
             # Every option is saved with an explicit value: the operator's
             # choice, or the recipe default where none was made or offered.
             choices, replaced = _effective_option_choices(
-                revision.document, value.option_choices
+                read_recipe(revision.document), value.option_choices
             )
             notes.extend(f"{value.recipe_selector}: {note}" for note in replaced)
             # Save the canonical catalog selector.  This is a logical recipe
@@ -10852,7 +10857,7 @@ class FleetProfileService:
                 model_name = self._model_title(session, revision.document)
             assignment_selector = self._assignment_selector(choice)
             effective_choices, choice_notes = _effective_option_choices(
-                revision.document, choice.option_choices
+                read_recipe(revision.document), choice.option_choices
             )
             warnings.extend(
                 f"{recipe.publisher}/{recipe.slug}: {note}" for note in choice_notes
@@ -11179,7 +11184,7 @@ class FleetProfileService:
         # assignment's, even for the same recipe revision and Sparks.
         wanted_choices = (
             _effective_option_choices(
-                recipe_revision.document, assignment.option_choices
+                read_recipe(recipe_revision.document), assignment.option_choices
             )[0]
             if recipe_revision is not None
             else dict(assignment.option_choices)
@@ -11379,6 +11384,143 @@ class FleetProfileService:
             )
         )
 
+    @staticmethod
+    def _effect_progress(
+        session: Session,
+        row: FleetProfileApplication,
+        plan: FleetProfilePreview,
+        progress: FleetProfileApplicationProgress,
+    ) -> list[FleetProfileEffectProgress]:
+        effects: list[FleetProfileEffectProgress] = []
+        owners: list[
+            tuple[
+                FleetProfileApplication,
+                FleetProfileApplicationProgress,
+                set[str] | None,
+            ]
+        ] = [(row, progress, None)]
+        for binding in plan.effects.adopted:
+            owner = session.get(FleetProfileApplication, binding.application_id)
+            if owner is not None:
+                owners.append(
+                    (owner, _persisted_profile_progress(owner), set(binding.node_ids))
+                )
+        for owner, owner_progress, scope in owners:
+            document = owner_progress.switch_adapter
+            if document is None or owner_progress.workload_intent_ordinal is None:
+                continue
+            owner_plan = _persisted_profile_plan(owner)
+            if isinstance(owner_plan, Residue):
+                continue
+            pending = {child.queue_index: child for child in document.pending_children}
+            completed = {child.queue_index: child for child in document.children}
+            for index, item in enumerate(document.queue):
+                nodes = RunSwitchFleetProfileAdapter._queue_item_nodes(owner, item)
+                if not nodes or (scope is not None and not set(nodes) <= scope):
+                    continue
+                closed = completed.get(index)
+                active = pending.get(index)
+                effect_state: Literal[
+                    "not-issued",
+                    "pending",
+                    "succeeded",
+                    "failed",
+                    "cancelled",
+                    "unknown",
+                ] = (
+                    closed.state.value
+                    if closed
+                    else "pending"
+                    if active
+                    else "unknown"
+                    if index in document.skipped_indices
+                    else "not-issued"
+                )
+                stop = (
+                    next(
+                        (
+                            effect
+                            for effect in owner_plan.effects.runs
+                            if effect.run_id == item.id and effect.action == "stop"
+                        ),
+                        None,
+                    )
+                    if item.kind == "stop"
+                    else None
+                )
+                if (
+                    stop is not None
+                    and closed is not None
+                    and closed.state == LifecycleState.SUCCEEDED
+                    and (
+                        closed.result is None
+                        or not any(
+                            isinstance(receipt, RunSwitchStopResult)
+                            and receipt.run_id == stop.run_id
+                            for receipt in closed.result.run_switch.phase_results
+                        )
+                    )
+                ):
+                    effect_state = "unknown"
+                record = closed or active
+                child_progress = None
+                if record is not None:
+                    child_job = session.get(Job, record.operation_id)
+                    expected_kind = (
+                        "recipe.stop.v2"
+                        if item.kind == "stop"
+                        else "recipe.cleanup.v2"
+                        if item.kind == "cleanup"
+                        else "recipe.run-switch.v2"
+                    )
+                    if (
+                        child_job is not None
+                        and child_job.kind == expected_kind
+                        and child_job.request_id
+                        == profile_switch_child_request_key(
+                            owner.id, index, item.kind, item.id
+                        )
+                        and sorted(child_job.targets) == sorted(nodes)
+                    ):
+                        try:
+                            child_progress = RunSwitchOperationService._operation_view(
+                                child_job
+                            ).progress
+                        except (TypeError, ValueError):
+                            # Damaged measurement is unavailable; queue identity,
+                            # exact effects, receipts and claims remain visible.
+                            child_progress = None
+                effects.append(
+                    FleetProfileEffectProgress(
+                        effect_id=f"{owner.id}:queue:{index}:{item.kind}:{item.id}",
+                        application_id=owner.id,
+                        plan_digest=owner.plan_digest,
+                        workload_intent_ordinal=owner_progress.workload_intent_ordinal,
+                        queue_index=index,
+                        kind=item.kind,
+                        target_id=item.id,
+                        node_ids=list(nodes),
+                        request_key=profile_switch_child_request_key(
+                            owner.id, index, item.kind, item.id
+                        ),
+                        operation_id=closed.operation_id
+                        if closed
+                        else active.operation_id
+                        if active
+                        else None,
+                        state=effect_state,
+                        result=closed.result if closed else None,
+                        progress=child_progress,
+                        stop_effect=stop,
+                        original_operation_id=closed.original_operation_id
+                        if closed
+                        else active.original_operation_id
+                        if active
+                        else None,
+                    )
+                )
+        return effects
+
     def _application_view(
         self, row: FleetProfileApplication
     ) -> FleetProfileApplicationView:
@@ -11386,6 +11528,56 @@ class FleetProfileService:
         # cannot be read shows the step count the progress recorded and no
         # cancellation projection; damaged progress and result are rebuilt from the
         # receipt the row itself carries.
+        if needs_conversion(row):
+            observed = conversion_observation(row)
+            plan = _persisted_profile_plan(row)
+            total = row.current_step if isinstance(plan, Residue) else len(plan.steps)
+            blockers = bound_blockers(
+                [
+                    make_blocker(
+                        ProfileReasonCode.RETRY_CONFLICT,
+                        observed.detail
+                        or "Exact retained child evidence is being reconciled",
+                    )
+                ]
+            )
+            outer_progress = conversion_progress(row)
+            progress = outer_progress or _progress_from_receipt(row)
+            progress.total_steps = total
+            progress.current_label = "Reconciling exact retained cleanup journal"
+            progress.retry_due_at = observed.next_attempt_at
+            progress.blockers = blockers
+            state = _operation_state(row.state, default=LifecycleState.RUNNING)
+            return FleetProfileApplicationView(
+                id=row.id,
+                request_key=row.request_key,
+                profile_id=row.profile_id,
+                profile_digest=row.profile_digest,
+                plan_digest=row.plan_digest,
+                state=state,
+                attempt=progress.attempt,
+                retry_of_application_id=progress.retry_of_application_id,
+                superseded_by=progress.superseded_by if state == "superseded" else None,
+                reason_code=progress.supersede_code if state == "superseded" else None,
+                current_step=row.current_step,
+                total_steps=total,
+                current_operation_id=row.current_operation_id,
+                status_reason=None if state == "succeeded" else observed.detail,
+                progress=progress,
+                result=_persisted_profile_result(row),
+                projection_issue=(
+                    FleetProfileApplicationProjectionIssue(
+                        code=ProfileReasonCode.APPLICATION_INTENT_INVALID,
+                        detail="Retained outer metadata cannot be verified; historical state and exact child evidence remain unchanged",
+                    )
+                    if outer_progress is None
+                    else None
+                ),
+                blockers=blockers,
+                next_attempt_at=observed.next_attempt_at,
+                created_at=_aware(row.created_at),
+                updated_at=_aware(row.updated_at),
+            )
         plan = _persisted_profile_plan(row)
         progress = _persisted_profile_progress(row)
         if (
@@ -11397,6 +11589,11 @@ class FleetProfileService:
                 progress.child_progress.operation, _aware(self._clock())
             )
         state, next_attempt_at = self._presented_state(row, progress)
+        session = object_session(row)
+        if session is not None and not isinstance(plan, Residue):
+            progress = progress.model_copy(
+                update={"effects": self._effect_progress(session, row, plan, progress)}
+            )
         return FleetProfileApplicationView(
             id=row.id,
             request_key=row.request_key,

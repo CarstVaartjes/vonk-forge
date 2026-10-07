@@ -73,7 +73,9 @@ class RenewRequest(WireModel):
 
 
 class ActivateRequest(WireModel):
-    generation: int = Field(ge=1)
+    # AgentCertificate and AgentCertificateRotation own this monotone identity
+    # in PostgreSQL INTEGER columns, whose domain is signed 32-bit.
+    generation: int = Field(ge=1, le=2**31 - 1)
     node_id: NodeId
 
 
@@ -85,7 +87,7 @@ class IssuedCertificateResponse(WireModel):
     fingerprint: Digest
     not_before: str = Field(min_length=1)
     not_after: str = Field(min_length=1)
-    generation: int = Field(ge=1)
+    generation: int = Field(ge=1, le=2**31 - 1)
 
     @model_validator(mode="after")
     def bounded_response(self) -> Self:

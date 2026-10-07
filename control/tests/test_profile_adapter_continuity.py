@@ -6,6 +6,10 @@ from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
     FleetProfileSwitchAdapterResult,
+    FleetProfileSwitchAdapterState,
+    FleetProfileSwitchChildState,
+    FleetProfileSwitchPendingChild,
+    FleetProfileSwitchQueueItem,
 )
 from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
@@ -97,23 +101,25 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
         by_node = {
             assignment.nodes[0].node_id: assignment for assignment in assignments
         }
-        state = {
-            "child_id": row.id,
-            "scope_node_ids": [_node_id(1), _node_id(2)],
-            "assignment_ids": [item.id for item in assignments],
-            "assignments": [item.model_dump(mode="json") for item in assignments],
-            "queue": [
-                {"kind": "run", "id": by_node[_node_id(1)].id},
-                {"kind": "run", "id": by_node[_node_id(2)].id},
-                {"kind": "run", "id": by_node[_node_id(1)].id},
+        state = FleetProfileSwitchAdapterState(
+            child_id=row.id,
+            scope_node_ids=[_node_id(1), _node_id(2)],
+            assignment_ids=[item.id for item in assignments],
+            assignments=list(assignments),
+            queue=[
+                FleetProfileSwitchQueueItem(kind="run", id=by_node[_node_id(1)].id),
+                FleetProfileSwitchQueueItem(kind="run", id=by_node[_node_id(2)].id),
+                FleetProfileSwitchQueueItem(kind="run", id=by_node[_node_id(1)].id),
             ],
-            "position": 0,
-            "active_operation_id": active_id,
-            "active_kind": "run",
-            "actor": "admin",
-            "request_id": _uuid(18103),
-            "state": "running",
-        }
+            pending_children=[
+                FleetProfileSwitchPendingChild(
+                    queue_index=0, operation_id=active_id, kind="run"
+                )
+            ],
+            actor="admin",
+            request_id=_uuid(18103),
+            state=LifecycleState.RUNNING,
+        )
         adapter._write_state(session, row, state)
     child = _running_child(active_id, _node_id(1))
     monkeypatch.setattr(adapter, "_observed_child", lambda identity: child)
@@ -130,7 +136,7 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
         assert row is not None
         stored = _persisted_profile_progress(row).switch_adapter
         assert stored is not None
-        assert stored.active_operation_id == active_id
+        assert [child.operation_id for child in stored.pending_children] == [active_id]
     # Resume after a persisted checkpoint and a new adapter instance. The old
     # replaced item remains in history but its original index is never issued.
     with sessions.begin() as session:
@@ -138,7 +144,16 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
         assert row is not None
         state = adapter._state(row)
         assert state is not None
-        state.update(position=1, active_operation_id=None, active_kind=None)
+        state.position = 1
+        state.pending_children = []
+        state.children = [
+            FleetProfileSwitchChildState(
+                queue_index=0,
+                operation_id=active_id,
+                kind="run",
+                state=LifecycleState.SUCCEEDED,
+            )
+        ]
         adapter._write_state(session, row, state)
     restarted = RunSwitchFleetProfileAdapter(
         sessions, RunSwitchOperationService(sessions, clock=lambda: NOW)
@@ -146,7 +161,7 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
     issued = []
 
     def start(*args):
-        issued.append((args[1]["id"], args[3], args[6]))
+        issued.append((args[1].id, args[3], args[6]))
         return _running_child(_uuid(18104), _node_id(1))
 
     monkeypatch.setattr(restarted, "_start_child", start)
@@ -164,7 +179,16 @@ def test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane(
         assert row is not None
         state = restarted._state(row)
         assert state is not None
-        state.update(position=3, active_operation_id=None, active_kind=None)
+        state.position = 3
+        state.pending_children = []
+        state.children.append(
+            FleetProfileSwitchChildState(
+                queue_index=2,
+                operation_id=_uuid(18104),
+                kind="run",
+                state=LifecycleState.SUCCEEDED,
+            )
+        )
         restarted._write_state(session, row, state)
     completed = restarted.advance(both.id)
     assert isinstance(completed.result, FleetProfileSwitchAdapterResult)

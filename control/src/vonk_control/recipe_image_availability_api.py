@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
 from .auth import MUTATION_ROLES
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
+from .integer_domains import MAX_DATABASE_INTEGER
 from .logging import redact_text
 from .model_cache_contract import UUID_PATTERN, Digest
 from .operation_api import bounded_error_responses
@@ -125,7 +126,7 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
     request: RecipeAvailabilityIntent | None
     kind: RecipeImageAvailabilityKind
     state: RecipeImageAvailabilityState
-    attempt: int = Field(ge=0)
+    attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     recipe_revision_id: str | None
     recipe_content_sha256: str | None
     progress: OperationProgress | None
@@ -223,6 +224,7 @@ RecipeOperationResponse = (
 RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS = {
     ("get", "/api/recipe/operations/{operation_id}"): "getRecipeOperation",
     ("get", "/api/recipe/requests/{request_key}"): "getRecipeRequest",
+    ("post", "/api/recipe/operations/{operation_id}/retry"): "retryRecipeOperation",
     ("post", "/api/recipe/operations/{operation_id}/cancel"): "cancelRecipeOperation",
     ("post", "/api/recipe/{selector}/download"): "downloadRecipe",
     ("post", "/api/recipe/{selector}/remove"): "removeRecipe",
@@ -486,6 +488,28 @@ def install_recipe_operator_routes(
             if isinstance(operation, RecipeImageAvailabilityView):
                 return _view_document(operation)
             return removal_document(operation)
+        except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
+            raise _recipe_error(error) from None
+
+    @app.post(
+        "/api/recipe/operations/{operation_id}/retry",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=RecipeImageAvailabilityResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="retryRecipeOperation",
+    )
+    def retry_operation(
+        body: RecipeDownloadRequest,
+        operation_id: Annotated[str, Path(pattern=UUID_PATTERN)],
+        actor: Any = actor_dependency,
+    ) -> RecipeImageAvailabilityResponse:
+        _mutating(actor, "/api/recipe/operations/{operation_id}/retry")
+        try:
+            return _view_document(
+                _service(service).retry(
+                    operation_id, actor=actor.subject, request_id=body.request_key
+                )
+            )
         except (RecipeImageAvailabilityError, KeyError, ValueError) as error:
             raise _recipe_error(error) from None
 

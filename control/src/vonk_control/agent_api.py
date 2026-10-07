@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from pydantic import (
@@ -88,6 +88,7 @@ from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
 )
+from .integer_domains import MAX_DATABASE_BIGINT
 from .inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -106,6 +107,7 @@ from .models import (
     RecipeSourceBundle,
     RunNode,
 )
+from .openapi_numbers import install_canonical_openapi
 from .operation_api import bounded_error_responses
 from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
@@ -295,7 +297,9 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     start_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     stop_plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    run_generation: int | None = Field(default=None, ge=1, le=2**31 - 1, strict=True)
+    run_generation: (
+        Annotated[int, Field(ge=1, le=MAX_DATABASE_BIGINT, strict=True)] | None
+    ) = None
     runtime_run_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     runtime_target_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
     runtime_installation_id: str | None = Field(default=None, pattern=_UUID4_TEXT)
@@ -1905,6 +1909,7 @@ def install_agent_routes(
     # submission still consumes its identifiable one-use grant. Document that
     # input from the very same model used above; a Request parameter alone
     # would otherwise hide the request contract from OpenAPI consumers.
+    install_canonical_openapi(app)
     standard_openapi = app.openapi
 
     def openapi_with_enrollment_contract() -> dict[str, object]:

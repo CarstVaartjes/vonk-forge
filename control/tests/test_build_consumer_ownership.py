@@ -213,8 +213,7 @@ def test_accepted_profile_consumer_protects_build_until_its_intent_is_cancelled(
             assert isinstance(adapter, dict)
             progress["switch_adapter"] = {
                 **adapter,
-                "active_operation_id": None,
-                "active_kind": None,
+                "pending_children": [],
             }
             application.progress = progress
     lifecycle = planner._lifecycle

@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     normalize_operation_progress,
 )
 from vonk_agent_protocol.contracts import AgentFailureResult
+from vonk_agent_protocol.failure_evidence import add_known_dropped_bytes
 
 from . import agent_operation_states
 from .logging import redact_text
@@ -354,9 +355,10 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
             if key == "text" and "truncated" in document:
                 document["truncated"] = True
                 prior = document.get("dropped_bytes")
-                document["dropped_bytes"] = (
-                    prior if isinstance(prior, int) else 0
-                ) + len(longest_text[len(shortened) :].encode())
+                document["dropped_bytes"] = add_known_dropped_bytes(
+                    prior if type(prior) is int else None,
+                    len(longest_text[len(shortened) :].encode()),
+                )
                 # A cut within a line does not prove how many complete lines
                 # were omitted; preserve unknown rather than inventing a count.
                 document["dropped_lines"] = None
