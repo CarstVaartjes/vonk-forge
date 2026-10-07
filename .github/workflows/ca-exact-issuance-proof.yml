@@ -10,6 +10,7 @@ on:
       - scripts/prepare-journal-ca.py
       - control/src/vonk_control/step_ca.py
       - control/src/vonk_control/enrollment.py
+      - control/tests/test_ca_claims_postgres.py
   workflow_dispatch:
     inputs:
       bootstrap_lock:
@@ -101,15 +102,20 @@ jobs:
       - name: Provide the canonical recipe library for Controller test imports
         if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         uses: ./.github/actions/recipe-library
+      - name: Pull the reviewed PostgreSQL image for claim and HTTP concurrency proofs
+        if: ${{ steps.mode.outputs.bootstrap != 'true' }}
+        run: scripts/pull-test-images postgres
       - name: Prove the real Controller provider against the journal CA image
         if: ${{ steps.mode.outputs.bootstrap != 'true' }}
         env:
           VONK_JOURNAL_CA_TEST_IMAGE: vonk-ca-proof:${{ github.sha }}
           VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+          VONK_CI_PREREQUISITES: postgres
         run: >-
           uv run --project control --frozen pytest -q
           control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
           control/tests/test_ca_journal_recovery.py
+          control/tests/test_ca_claims_postgres.py
           --junitxml=artifacts/ca-proof/controller-provider.xml
       - name: Record exact source and artifact provenance
         if: ${{ steps.mode.outputs.bootstrap != 'true' }}

@@ -132,3 +132,10 @@ canonical `--config` and `--password-file` arguments. It preserves the TLS
 listener, root/intermediate trust, secret mounts, keys and `step-ca-data` volume.
 Keep the existing bundle `.env`, secrets and named volumes during deployment.
 Repository or image acceptance does not itself redeploy a running NAS.
+
+Controller enrollment and rotation commit their exact issuance claims before
+provider HTTP, then conditionally persist the observed bound result in a short
+transaction. PostgreSQL row/advisory locks own concurrent claims; unrelated
+node requests share no process lock during provider waits. The local SQLite
+fixture guard covers SQL transactions only. Lost responses and process death
+retain the same provider journal binding, serial and generation for adoption.
