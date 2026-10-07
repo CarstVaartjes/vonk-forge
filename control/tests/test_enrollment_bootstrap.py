@@ -232,10 +232,11 @@ def test_bootstrap_configuration_refuses_unrepresentable_full_envelope_before_se
     )
     pem = certificate.public_bytes(serialization.Encoding.PEM)
     assert len(pem) < 64 * 1024
+    hostname = ".".join(("a" * 63, "b" * 63, "c" * 63, "d" * 61))
     with pytest.raises(ValueError, match="enrollment response exceeds"):
         EnrollmentBootstrapConfig(
-            controller_endpoint="https://" + "a" * 1900 + ".example.test",
-            enrollment_endpoint="https://enroll.example.test",
+            controller_endpoint=f"https://{hostname}",
+            enrollment_endpoint=f"https://{hostname}:8443",
             ca_fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
             ca_pem=pem.decode("ascii"),
         )
