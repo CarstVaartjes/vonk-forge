@@ -52,6 +52,8 @@ jobs:
           scripts/retry-dependency-fetch cargo fetch --locked
           uv run --project control --frozen python scripts/generate-agent-wire
           cargo build --locked --package vonk-agent --example consumer_corpus_probe
+      - name: Exercise bounded enrollment response recovery over real TCP
+        run: cargo test --locked -p vonk-agent --lib pair::tests
       - name: Emit canonical corpus and source provenance
         run: |
           uv run --project control --frozen python control/tests/cross_language_consumer_corpus.py --output artifacts/consumer-corpus
