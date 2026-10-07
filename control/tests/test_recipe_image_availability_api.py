@@ -33,6 +33,9 @@ from vonk_control.recipe_image_availability_api import (
     _view_document,
     install_recipe_operator_routes,
 )
+from vonk_control.recipe_image_availability_view_contract import (
+    RecipeCacheRemovalStatus,
+)
 from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 
 
@@ -455,30 +458,33 @@ def test_remove_names_a_terminal_availability_refusal() -> None:
 
 def test_remove_response_projects_the_stored_model_choice_not_the_request() -> None:
     service = Mock()
-    service.remove_selector.return_value = {
-        "schema_version": 2,
-        "action": "remove",
-        "selector": "example",
-        "request_key": _REQUEST_KEY,
-        "operation_id": "00000000-0000-4000-8000-000000000002",
-        "recipe_revision_id": "revision-example",
-        "with_model": False,
-        "state": "succeeded",
-        "progress": {
-            "phase": "completed",
-            "completed_bytes": 0,
-            "total_bytes": 0,
-            "total_bytes_known": True,
-            "completed_items": 0,
-            "total_items": 0,
-        },
-        "reclaimed_bytes": 0,
-        "preserved": ["model-download"],
-        "next_actions": [],
-        "cancelled_operations": [],
-        "cancelled_builds": [],
-        "model_removals": [],
-    }
+    service.remove_selector.return_value = RecipeCacheRemovalStatus.model_validate(
+        {
+            "schema_version": 2,
+            "review_digest": "a" * 64,
+            "action": "remove",
+            "selector": "example",
+            "request_key": _REQUEST_KEY,
+            "operation_id": "00000000-0000-4000-8000-000000000002",
+            "recipe_revision_id": "revision-example",
+            "with_model": False,
+            "state": "succeeded",
+            "progress": {
+                "phase": "completed",
+                "completed_bytes": 0,
+                "total_bytes": 0,
+                "total_bytes_known": True,
+                "completed_items": 0,
+                "total_items": 0,
+            },
+            "reclaimed_bytes": 0,
+            "preserved": ["model-download"],
+            "next_actions": [],
+            "cancelled_operations": [],
+            "cancelled_builds": [],
+            "model_removals": [],
+        }
+    )
 
     response = _operator_client(service).post(
         "/api/recipe/example/remove",
@@ -501,38 +507,41 @@ def test_remove_response_projects_the_stored_model_choice_not_the_request() -> N
 
 def test_remove_response_preserves_partial_progress_and_failure() -> None:
     service = Mock()
-    service.remove_selector.return_value = {
-        "schema_version": 2,
-        "action": "remove",
-        "selector": "example",
-        "request_key": _REQUEST_KEY,
-        "operation_id": "00000000-0000-4000-8000-000000000002",
-        "recipe_revision_id": "revision-example",
-        "with_model": False,
-        "state": "partial",
-        "progress": {
-            "phase": "reclaiming",
-            "completed_bytes": 13,
-            "total_bytes_known": False,
-            "completed_items": 1,
-            "total_items": 2,
-            "activity": "waiting",
-        },
-        "reclaimed_bytes": 13,
-        "preserved": ["model-download"],
-        "next_actions": ["retry"],
-        "cancelled_operations": [],
-        "cancelled_builds": [],
-        "model_removals": [],
-        "failure": {
-            "code": "runtime_image.removal_storage_failed",
-            "detail": "managed image storage is temporarily unavailable",
-            "retryable": True,
-            "recovery_actions": ["retry"],
-            "retry_time": "2026-01-01T00:00:05+00:00",
-            "retry_after_seconds": 5,
-        },
-    }
+    service.remove_selector.return_value = RecipeCacheRemovalStatus.model_validate(
+        {
+            "schema_version": 2,
+            "review_digest": "a" * 64,
+            "action": "remove",
+            "selector": "example",
+            "request_key": _REQUEST_KEY,
+            "operation_id": "00000000-0000-4000-8000-000000000002",
+            "recipe_revision_id": "revision-example",
+            "with_model": False,
+            "state": "backoff",
+            "progress": {
+                "phase": "reclaiming",
+                "completed_bytes": 13,
+                "total_bytes_known": False,
+                "completed_items": 1,
+                "total_items": 2,
+                "activity": "waiting",
+            },
+            "reclaimed_bytes": 13,
+            "preserved": ["model-download"],
+            "next_actions": ["retry"],
+            "cancelled_operations": [],
+            "cancelled_builds": [],
+            "model_removals": [],
+            "failure": {
+                "code": "runtime_image.removal_storage_failed",
+                "detail": "managed image storage is temporarily unavailable",
+                "retryable": True,
+                "recovery_actions": ["retry"],
+                "retry_time": "2026-01-01T00:00:05+00:00",
+                "retry_after_seconds": 5,
+            },
+        }
+    )
 
     response = _operator_client(service).post(
         "/api/recipe/example/remove",

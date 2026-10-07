@@ -1719,46 +1719,99 @@ def test_stored_evidence_projections_keep_absence_and_corruption_distinct() -> N
         operation_item({**base, "evidence_download": {"href": 7}})
 
 
-def test_corrupt_stored_evidence_decoration_preserves_readable_identity() -> None:
-    """Unreadable optional evidence retains identity with an explicit unknown view."""
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_corrupt_stored_evidence_decoration_preserves_readable_identity(
+    tmp_path,
+) -> None:
+    """Stored optional progress damage preserves durable identity, then repairs."""
 
     now = datetime(2026, 8, 5, tzinfo=UTC)
-    value: dict[str, object] = {
-        "id": "11111111-1111-4111-8111-111111111111",
-        "attempt": 1,
-        "kind": "node.probe",
-        "node_ids": [NODE_ID],
-        "state": "succeeded",
-        "created_at": now.isoformat(),
-        "updated_at": now.isoformat(),
-        "evidence_download": {"href": 7},
-    }
-
-    def unavailable(*_args: object) -> NoReturn:
-        raise AssertionError("not used")
-
-    services = OperationApiServices(
-        agents=lambda: (),
-        job_operations=unavailable,
-        resume_job=lambda _job_id: None,
-        # The list route decorates each item, so it reaches the same corrupt
-        # document through the projection rather than through a failing call.
-        list_operations=lambda *_args: OperationListPage((value,), None, 1),
-        get_operation=lambda _operation_id: value,
+    engine = create_engine(f"sqlite:///{tmp_path / 'operation-evidence.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    identifier = "11111111-1111-4111-8111-111111111111"
+    with sessions.begin() as session:
+        job = Job(
+            request_id="22222222-2222-4222-8222-222222222222",
+            kind="reconcile",
+            state="running",
+            actor="operator",
+            authority_revision=COMMIT,
+            targets=[NODE_ID],
+            payload_digest=DIGEST,
+            payload={},
+            current_attempt=1,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(AgentNode(node_id=NODE_ID, state="active"))
+        session.add(job)
+        session.flush()
+        session.add(
+            AgentOperation(
+                id=identifier,
+                parent_job_id=job.id,
+                node_id=NODE_ID,
+                kind="node.probe",
+                payload_digest=DIGEST,
+                payload={},
+                authority_revision=COMMIT,
+                state="running",
+                current_attempt=1,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            AgentOperationAttempt(
+                operation_id=identifier,
+                attempt=1,
+                fence="33333333-3333-4333-8333-333333333333",
+                lease_deadline=now + timedelta(seconds=60),
+                agent_certificate_serial="certificate",
+                state="running",
+                progress={"phase": 7},
+            )
+        )
+    services = durable_operation_services(
+        sessions,
+        tmp_path,
+        clock=lambda: now,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
     )
     client, operator, *_ = _client(operations=services)
-
-    detail = client.get(f"/api/operations/{value['id']}", headers=operator)
-    assert detail.status_code == 200
-    assert detail.json()["id"] == value["id"]
-    assert detail.json()["kind"] == "unreadable"
-    assert detail.json()["state"] == "unavailable"
-
-    listed = client.get("/api/operations", headers=operator)
-    assert listed.status_code == 200
-    assert listed.json()["operations"][0]["id"] == value["id"]
-    assert listed.json()["operations"][0]["kind"] == "unreadable"
-    assert listed.json()["operations"][0].get("failure") is None
+    for path in (f"/api/operations/{identifier}", "/api/operations"):
+        response = client.get(path, headers=operator)
+        assert response.status_code == 200
+        item = (
+            response.json()
+            if path.endswith(identifier)
+            else response.json()["operations"][0]
+        )
+        assert item["id"] == identifier
+        assert item["kind"] == "node.probe"
+        assert item["state"] == "running"
+        assert item.get("progress") is None
+        assert "progress evidence is unreadable" in item["status_reason"]
+    with sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == identifier
+            )
+        )
+        assert attempt is not None
+        assert attempt.progress == {"phase": 7}
+        attempt.progress = {
+            "phase": "probe",
+            "completed_bytes": 12,
+            "total_bytes_known": False,
+        }
+    repaired = client.get(f"/api/operations/{identifier}", headers=operator)
+    assert repaired.status_code == 200
+    assert repaired.json()["id"] == identifier
+    assert repaired.json()["state"] == "running"
+    assert repaired.json()["progress"]["completed_bytes"] == 12
+    assert repaired.json().get("status_reason") is None
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

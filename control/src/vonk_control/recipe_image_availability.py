@@ -1114,7 +1114,7 @@ class RecipeImageAvailabilityService:
     def _removal_progress_document(
         operation: Job,
         owner: RecipeCacheRemovalOwner,
-    ):
+    ) -> OperationProgress:
         checkpoint = owner.checkpoint
         total_items = len(owner.plan.image_archives) + len(owner.plan.model_children)
         completed_items = checkpoint.image_index + checkpoint.model_index
@@ -1140,7 +1140,9 @@ class RecipeImageAvailabilityService:
         )
         return progress
 
-    def _read_removal_result(self, operation: Job, intent: RecipeCacheRemovalIntent):
+    def _read_removal_result(
+        self, operation: Job, intent: RecipeCacheRemovalIntent
+    ) -> RecipeCacheRemovalStatus:
         """Rebuild the read projection from the authoritative plan and checkpoint."""
         owner = self._read_removal_owner(operation)
         intent = owner.plan.intent
@@ -1169,7 +1171,7 @@ class RecipeImageAvailabilityService:
             cancelled_builds=[],
             model_removals=[child.operation_id for child in owner.plan.model_children],
         )
-        return status.model_dump(mode="json", exclude_none=True)
+        return status
 
     @staticmethod
     def _stored_removal_result(
@@ -1211,7 +1213,7 @@ class RecipeImageAvailabilityService:
         actor: str,
         request_id: str,
         with_model: bool,
-    ):
+    ) -> RecipeCacheRemovalStatus:
         if operation.kind != REMOVE_OPERATION_KIND:
             raise RecipeImageAvailabilityInvalid(
                 RecipeImageCode.REQUEST_KEY_REUSED,
@@ -1804,7 +1806,7 @@ class RecipeImageAvailabilityService:
         actor: str,
         request_id: str,
         with_model: bool = False,
-    ):
+    ) -> RecipeCacheRemovalStatus:
         """Accept a restart-safe removal of the named recipe against current state.
 
         Assets still in use are fenced against new consumers and the removal
@@ -4408,7 +4410,7 @@ class RecipeImageAvailabilityService:
         RecipeImageAvailabilityView
         | RecipeUpdateResponse
         | RecipeRemovalUnavailableView
-        | dict[str, object]
+        | RecipeCacheRemovalStatus
     ):
         """Observe either current recipe preparation or durable cache removal."""
 
@@ -4443,7 +4445,7 @@ class RecipeImageAvailabilityService:
         RecipeImageAvailabilityView
         | RecipeUpdateResponse
         | RecipeRemovalUnavailableView
-        | dict[str, object]
+        | RecipeCacheRemovalStatus
     ):
         """Correlate only this issuer's request within the recipe family."""
 
