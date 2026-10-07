@@ -8,6 +8,7 @@ Unprovable journals remain intact and are revisited with a bounded backoff.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import time
 from datetime import UTC, datetime, timedelta
@@ -213,7 +214,15 @@ def _accepted_review(row: FleetProfileApplication) -> FleetProfilePreview:
         for key, value in row.plan.items()
         if key in FleetProfileReviewedDecision.model_fields
     }
-    if _digest(decision) != row.plan_digest:
+    canonical_decision = FleetProfileReviewedDecision.model_validate_json(
+        canonical_message(decision), strict=True
+    )
+    # The accepted producer used canonical_message(model), which omits optional
+    # nulls. SQL model_dump retains those nulls; it is not the digested wire.
+    # Omit fields introduced since acceptance rather than adding their defaults
+    # to the exact old decision's bytes.
+    wire = _retained_wire(json.loads(canonical_message(canonical_decision)), decision)
+    if _digest(wire) != row.plan_digest:
         raise _UnprovenJournal("accepted profile decision integrity differs from SQL")
     if (reviewed.profile_id, reviewed.profile_digest, reviewed.plan_digest) != (
         row.profile_id,
@@ -222,6 +231,23 @@ def _accepted_review(row: FleetProfileApplication) -> FleetProfilePreview:
     ):
         raise _UnprovenJournal("accepted profile plan differs from its SQL identity")
     return reviewed
+
+
+def _retained_wire(wire: object, retained: object) -> object:
+    if isinstance(wire, dict) and isinstance(retained, dict):
+        return {
+            key: _retained_wire(value, retained[key])
+            for key, value in wire.items()
+            if key in retained
+        }
+    if isinstance(wire, list) and isinstance(retained, list):
+        if len(wire) != len(retained):
+            raise _UnprovenJournal("accepted decision changed during wire validation")
+        return [
+            _retained_wire(value, old)
+            for value, old in zip(wire, retained, strict=True)
+        ]
+    return wire
 
 
 def _adopted_skip_is_proven(
@@ -494,13 +520,16 @@ def try_convert_application(
     try:
         converted = _convert(session, row)
     except (ValidationError, _UnprovenJournal) as error:
-        _LOGGER.warning(
-            "Profile journal %s conversion deferred (%s)", row.id, type(error).__name__
-        )
         detail = (
             str(error)
             if isinstance(error, _UnprovenJournal)
             else "retained journal contract is invalid"
+        )
+        _LOGGER.warning(
+            "Profile journal %s conversion deferred (%s): %s",
+            row.id,
+            type(error).__name__,
+            detail,
         )
         row.status_reason = (_DEFERRED + detail + "; retrying automatically")[:512]
         row.updated_at = now
@@ -536,7 +565,15 @@ def convert_due_retained_applications(
             )
         rows = session.scalars(
             select(FleetProfileApplication)
-            .where(marker)
+            .where(
+                marker,
+                or_(
+                    func.coalesce(FleetProfileApplication.status_reason, "").not_like(
+                        _DEFERRED + "%"
+                    ),
+                    FleetProfileApplication.updated_at <= _aware(now) - _RETRY_INTERVAL,
+                ),
+            )
             .order_by(FleetProfileApplication.updated_at, FleetProfileApplication.id)
             .limit(_PAGE_ROWS)
             .with_for_update(skip_locked=True)
