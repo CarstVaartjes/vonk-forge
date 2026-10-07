@@ -24,8 +24,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check-python-types"
 
 
-def _module() -> ModuleType:
-    loader = importlib.machinery.SourceFileLoader("check_python_types", str(SCRIPT))
+def _module(script: Path = SCRIPT) -> ModuleType:
+    loader = importlib.machinery.SourceFileLoader("check_python_types", str(script))
     specification = importlib.util.spec_from_loader(loader.name, loader)
     assert specification is not None
     module = importlib.util.module_from_spec(specification)
@@ -276,6 +276,9 @@ def test_real_hook_checks_whitespace_paths_without_building_or_syncing(
         '{"schema_version": 1, "exceptions": []}\n'
     )
     shutil.copy2(SCRIPT, tmp_path / "scripts/check-python-types")
+    shutil.copy2(
+        ROOT / "scripts/check-staged-code", tmp_path / "scripts/check-staged-code"
+    )
     probe = tmp_path / 'probe with space and "quote".py'
     probe.write_text(source)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=30)
@@ -307,3 +310,28 @@ def test_real_hook_checks_whitespace_paths_without_building_or_syncing(
     assert completed.returncode == (0 if source == "value: int = 1\n" else 1)
     assert authored_paths() == before
     assert probe.read_text() == source
+
+
+@pytest.mark.parametrize(
+    "file", ["control/web/src/probe.ts", "rust/crates/probe/src/lib.rs"]
+)
+def test_non_python_check_failure_still_blocks_the_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, file: str
+) -> None:
+    """A Python-only early return must not silently accept other languages."""
+    module = _module(ROOT / "scripts/check-staged-code")
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        module.subprocess, "check_output", lambda *a, **k: (file + "\0").encode()
+    )
+    tools = tmp_path / "control/web/node_modules/.bin"
+    tools.mkdir(parents=True)
+    (tools / "biome").touch()
+    (tools / "tsc").touch()
+
+    def refuse(command: list[str], **kwargs: object) -> None:
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(module, "run", refuse)
+    with pytest.raises(subprocess.CalledProcessError):
+        module.main()

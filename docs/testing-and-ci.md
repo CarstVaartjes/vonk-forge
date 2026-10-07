@@ -505,8 +505,13 @@ Controller-restart-tolerant wait through `vonkctl` and asserts that no operator
 wait lacks an action and no admission is stuck. It is run by hand after
 lifecycle releases; see [the runbook](runbooks/lifecycle-canary.md).
 
-There is no separate ESLint or Prettier configuration. TypeScript formatting
-follows the surrounding files, and `npm run build` is the type gate.
+TypeScript uses pinned Biome for formatting and focused correctness lint rules.
+The commit hook and pull-request CI check changed authored TypeScript files.
+`npm run typecheck --prefix control/web` checks both the application and browser
+tests/configuration; `npm run build` also checks application types. Generated
+contracts remain owned by their generators. Rust hooks run pinned formatting and
+offline Clippy/compiler checks, using the Linux VM on macOS. Dependency acquisition
+is explicit setup, never a commit-hook action.
 
 When acceptance inputs are available, run the actual harness through the same
 OrbStack Docker context, not only its unit tests:
@@ -671,3 +676,8 @@ before the existing bounded retry. Streaming object reads additionally bound
 connection and socket idle time to 30 seconds and use the same total transfer
 budget. These budgets bound attempts; they do not change document, argument,
 artifact size, authorization or integrity contracts.
+
+Chromium system-library downloads are cached by Ubuntu release, architecture and
+web lockfile. apt still verifies package metadata and checksums; a cached archive
+is never proof a package is installed. Package installation runs once with a
+bounded ten-minute window; retries do not replay a package mutation.

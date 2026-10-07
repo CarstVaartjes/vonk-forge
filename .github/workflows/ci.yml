@@ -1050,10 +1050,12 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Install pinned Node.js with admin web dependency cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1062,6 +1064,22 @@ jobs:
           cache-dependency-path: control/web/package-lock.json
       - name: Install locked admin web dependencies
         run: scripts/retry-dependency-fetch npm ci --prefix control/web
+      - name: Check TypeScript lint, formatting and types
+        shell: bash
+        env:
+          WEB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          cd control/web
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            mapfile -d '' -t changed_web < <(git diff --name-only -z --diff-filter=ACMR "${WEB_BASE_SHA:?missing base SHA}" "$GITHUB_SHA" -- '*.ts' '*.tsx')
+            if ((${#changed_web[@]})); then
+              node_modules/.bin/biome check "${changed_web[@]/#/$GITHUB_WORKSPACE/}"
+            fi
+          else
+            npm run lint
+          fi
+          npm run typecheck
       - name: Run complete admin web suite
         run: npm test --prefix control/web -- --run
       - name: Build admin web application
@@ -1072,14 +1090,28 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('control/web/package-lock.json') }}
+      - name: Restore Chromium system-library downloads
+        id: playwright-apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/playwright-apt
+          key: playwright-apt-ubuntu24-${{ runner.arch }}-${{ hashFiles('control/web/package-lock.json') }}
       - name: Install Chromium system libraries without replaying package mutations
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: |
           apt_configuration=/etc/apt/apt.conf.d/99vonk-playwright-ci
           test ! -e "$apt_configuration"
+          mkdir -p "$RUNNER_TEMP/playwright-apt/partial"
           printf 'DPkg::Lock::Timeout "60";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "2";\n' | sudo tee "$apt_configuration" >/dev/null
+          printf 'Dir::Cache::archives "%s";\n' "$RUNNER_TEMP/playwright-apt" | sudo tee -a "$apt_configuration" >/dev/null
           trap 'sudo rm -f "$apt_configuration"' EXIT
           control/web/node_modules/.bin/playwright install-deps chromium
+      - name: Save Chromium system-library downloads
+        if: always() && steps.playwright-apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/playwright-apt
+          key: playwright-apt-ubuntu24-${{ runner.arch }}-${{ hashFiles('control/web/package-lock.json') }}
       - name: Acquire the pinned Chromium browser
         run: >-
           scripts/retry-dependency-fetch control/web/node_modules/.bin/playwright

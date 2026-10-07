@@ -173,7 +173,13 @@ Python files selected from the index. Checks read the working files; stage the
 version you intend to commit. Filenames containing whitespace are preserved.
 The hook uses the prepared environment offline without syncing, building wheels,
 or generating or staging inventory. Missing tools fail with the setup command.
-Repeat setup after dependency changes. Commits without Python changes skip it.
+Repeat setup after dependency changes. Python checks skip commits without Python changes.
+For TypeScript, prepare `npm ci --prefix control/web`; the hook checks changed
+TypeScript with pinned Biome and runs the source, browser-test and configuration
+type checks. Generated contracts are excluded from Biome and remain generator-owned.
+For Rust, prepare the pinned toolchain and `cargo fetch --locked` explicitly;
+the hook runs formatting and offline Clippy/compiler checks across the workspace.
+On macOS it uses the configured `vonk-ci` Linux VM and its existing Cargo cache.
 CI checks formatting and lint on changed Python files, types across the whole
 repository, and supply-chain inputs in its separate release-evidence job.
 

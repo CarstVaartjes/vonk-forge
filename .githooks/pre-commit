@@ -1,21 +1,5 @@
-#!/bin/bash
+#!/bin/sh
 set -eu
-
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-changed_python=()
-while IFS= read -r -d '' file; do
-    changed_python+=("$file")
-done < <(git diff --cached --name-only -z --diff-filter=ACMR -- '*.py')
-if ((${#changed_python[@]} == 0)); then
-    exit 0
-fi
-
-# Setup is explicit; committing must never build or install dependencies.
-if ! uv run --project control --no-sync --offline python -c 'import ruff, pyright'; then
-    echo 'Prepare the hook environment: scripts/build-control-wheel && uv sync --project control --frozen' >&2
-    exit 1
-fi
-uv run --project control --no-sync --offline ruff check --force-exclude -- "${changed_python[@]}"
-uv run --project control --no-sync --offline ruff format --check --force-exclude -- "${changed_python[@]}"
-uv run --project control --no-sync --offline python scripts/check-python-types -- "${changed_python[@]}"
+exec python3 scripts/check-staged-code

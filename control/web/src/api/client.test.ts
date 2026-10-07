@@ -1,31 +1,70 @@
-import {afterEach, expect, test, vi} from "vitest";
-import {ApiClient} from "./client";
-import {ContractResponseTooLarge, validateComponent} from "./contract-json";
-import {isWireNumber, parseContractJson, stringifyContractJson} from "./contract-numeric";
-import type {ArtifactJobCreateInput, ArtifactJobInputFile, ModelLibrary, RecipeLibrary} from "./types";
+import { afterEach, expect, test, vi } from "vitest";
+import { ApiClient } from "./client";
+import { ContractResponseTooLarge, validateComponent } from "./contract-json";
+import { isWireNumber, parseContractJson, stringifyContractJson } from "./contract-numeric";
+import type {
+  ArtifactJobCreateInput,
+  ArtifactJobInputFile,
+  ModelLibrary,
+  RecipeLibrary,
+} from "./types";
 const libraryEnvelope = {
-  generated_at: "2026-09-01T00:00:00Z", library: null, next_cursor: null,
-  facets: {usage: [], family: [], version: [], quantization: [], publisher: [], creator: [], alignment: [], engine: [], sparks: []},
-  freshness_policy: {telemetry_live_seconds: 6, telemetry_delayed_seconds: 20, inventory_fresh_seconds: 300},
+  generated_at: "2026-09-01T00:00:00Z",
+  library: null,
+  next_cursor: null,
+  facets: {
+    usage: [],
+    family: [],
+    version: [],
+    quantization: [],
+    publisher: [],
+    creator: [],
+    alignment: [],
+    engine: [],
+    sparks: [],
+  },
+  freshness_policy: {
+    telemetry_live_seconds: 6,
+    telemetry_delayed_seconds: 20,
+    inventory_fresh_seconds: 300,
+  },
 };
-const modelLibrary = {...libraryEnvelope, models: []} satisfies ModelLibrary;
-const recipeLibrary = {...libraryEnvelope, recipes: []} satisfies RecipeLibrary;
+const modelLibrary = { ...libraryEnvelope, models: [] } satisfies ModelLibrary;
+const recipeLibrary = { ...libraryEnvelope, recipes: [] } satisfies RecipeLibrary;
 const RUN_ID = "00000000-0000-4000-8000-000000000201";
 const JOB_ID = "00000000-0000-4000-8000-000000000202";
 const artifactCreate = {
-  interface: "artifact-job", parameters: {}, inputs: [], timeout_seconds: 60,
-  output_limits: {max_files: 1, max_file_bytes: 1024, max_total_bytes: 1024, allowed_media_types: ["text/plain"]},
+  interface: "artifact-job",
+  parameters: {},
+  inputs: [],
+  timeout_seconds: 60,
+  output_limits: {
+    max_files: 1,
+    max_file_bytes: 1024,
+    max_total_bytes: 1024,
+    allowed_media_types: ["text/plain"],
+  },
 } satisfies ArtifactJobCreateInput;
-const artifactInput = {slot: "prompt", name: "input.bin", media_type: "application/octet-stream", size_bytes: 7, sha256: "a".repeat(64)} satisfies ArtifactJobInputFile;
+const artifactInput = {
+  slot: "prompt",
+  name: "input.bin",
+  media_type: "application/octet-stream",
+  size_bytes: 7,
+  sha256: "a".repeat(64),
+} satisfies ArtifactJobInputFile;
 
 const SINCE = "2026-09-01T00:00:00.000Z";
 
 function stubFetch(body: unknown): string[] {
   const urls: string[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    const request =
+      input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     urls.push(request.url);
-    return new Response(JSON.stringify(body), {status: 200, headers: {"Content-Type": "application/json"}});
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   });
   return urls;
 }
@@ -63,15 +102,34 @@ test("sends sort and updated_since to both library routes", async () => {
 test("creates a Fleet enrollment grant through the current operator endpoint", async () => {
   const requests: Request[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    const request =
+      input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request);
-    return new Response(JSON.stringify({action: "enroll", state: "created", grant: {id: "00000000-0000-4000-8000-000000000101", expires_at: SINCE, purpose: "new-node", token: "a".repeat(43), controller_endpoint: "https://controller.invalid", enrollment_endpoint: "https://controller.invalid/api/enroll", ca_fingerprint: "a".repeat(64), installer_url: "https://install.vonkforge.ai/dev/spark", service_hostnames: [], controller_address: null}}), {
-      status: 201,
-      headers: {"Content-Type": "application/json"},
-    });
+    return new Response(
+      JSON.stringify({
+        action: "enroll",
+        state: "created",
+        grant: {
+          id: "00000000-0000-4000-8000-000000000101",
+          expires_at: SINCE,
+          purpose: "new-node",
+          token: "a".repeat(43),
+          controller_endpoint: "https://controller.invalid",
+          enrollment_endpoint: "https://controller.invalid/api/enroll",
+          ca_fingerprint: "a".repeat(64),
+          installer_url: "https://install.vonkforge.ai/dev/spark",
+          service_hostnames: [],
+          controller_address: null,
+        },
+      }),
+      {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   });
   setCsrfCookie();
-  const input = {name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101"};
+  const input = { name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101" };
   await new ApiClient().enrollFleetNode(input);
   expect(requests).toHaveLength(1);
   expect(requests[0]!.method).toBe("POST");
@@ -83,9 +141,13 @@ test("creates a Fleet enrollment grant through the current operator endpoint", a
 test("sends caller-owned request identities on artifact create, submit and cancel", async () => {
   const requests: Request[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    const request =
+      input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     requests.push(request);
-    return new Response(JSON.stringify({detail: "artifact jobs are unavailable"}), {status: 503, headers: {"Content-Type": "application/json"}});
+    return new Response(JSON.stringify({ detail: "artifact jobs are unavailable" }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
   });
   setCsrfCookie();
   const client = new ApiClient();
@@ -93,12 +155,22 @@ test("sends caller-owned request identities on artifact create, submit and cance
   const submitKey = "00000000-0000-4000-8000-000000000102";
   const cancelKey = "00000000-0000-4000-8000-000000000103";
 
-  await expect(client.createArtifactJob(RUN_ID, artifactCreate, createKey)).rejects.toMatchObject({status: 503});
-  await expect(client.submitArtifactJob(JOB_ID, submitKey)).rejects.toMatchObject({status: 503});
-  await expect(client.cancelArtifactJob(JOB_ID, "stop", cancelKey)).rejects.toMatchObject({status: 503});
-  await expect(client.artifactJobByRequestId(createKey)).rejects.toMatchObject({status: 503});
+  await expect(client.createArtifactJob(RUN_ID, artifactCreate, createKey)).rejects.toMatchObject({
+    status: 503,
+  });
+  await expect(client.submitArtifactJob(JOB_ID, submitKey)).rejects.toMatchObject({ status: 503 });
+  await expect(client.cancelArtifactJob(JOB_ID, "stop", cancelKey)).rejects.toMatchObject({
+    status: 503,
+  });
+  await expect(client.artifactJobByRequestId(createKey)).rejects.toMatchObject({ status: 503 });
 
-  expect(requests.map(request => [request.method, new URL(request.url).pathname, request.headers.get("X-Request-ID")])).toEqual([
+  expect(
+    requests.map((request) => [
+      request.method,
+      new URL(request.url).pathname,
+      request.headers.get("X-Request-ID"),
+    ]),
+  ).toEqual([
     ["POST", `/api/recipe/runs/${RUN_ID}/artifact-jobs`, createKey],
     ["POST", `/api/artifact-jobs/${JOB_ID}/submit`, submitKey],
     ["POST", `/api/artifact-jobs/${JOB_ID}/cancel`, cancelKey],
@@ -106,24 +178,36 @@ test("sends caller-owned request identities on artifact create, submit and cance
   ]);
 });
 
-test.each(["1000.0", "-0.0"])("artifact scalar %s retains its canonical finite float token through actual fetch", async token => {
-  const value = parseContractJson(token);
-  if (!isWireNumber(value)) throw new Error("canonical scalar fixture is not numeric");
-  const input = {...artifactCreate, parameters: {scale: value}} satisfies ArtifactJobCreateInput;
-  validateComponent("ArtifactJobCreate", stringifyContractJson(input));
-  const requests: Request[] = [];
-  vi.stubGlobal("fetch", async (raw: RequestInfo | URL, init?: RequestInit) => {
-    const request = raw instanceof Request ? raw : new Request(new URL(String(raw), location.origin), init);
-    requests.push(request);
-    return new Response('{"detail":"artifact jobs are unavailable"}', {status: 503, headers: {"content-type": "application/json"}});
-  });
-  setCsrfCookie();
-  await expect(new ApiClient().createArtifactJob(RUN_ID, input, "00000000-0000-4000-8000-000000000101")).rejects.toMatchObject({status: 503});
-  expect(requests).toHaveLength(1);
-  const body = await requests[0]!.text();
-  validateComponent("ArtifactJobCreate", body);
-  expect(body).toContain(`"scale":${token}`);
-});
+test.each(["1000.0", "-0.0"])(
+  "artifact scalar %s retains its canonical finite float token through actual fetch",
+  async (token) => {
+    const value = parseContractJson(token);
+    if (!isWireNumber(value)) throw new Error("canonical scalar fixture is not numeric");
+    const input = {
+      ...artifactCreate,
+      parameters: { scale: value },
+    } satisfies ArtifactJobCreateInput;
+    validateComponent("ArtifactJobCreate", stringifyContractJson(input));
+    const requests: Request[] = [];
+    vi.stubGlobal("fetch", async (raw: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        raw instanceof Request ? raw : new Request(new URL(String(raw), location.origin), init);
+      requests.push(request);
+      return new Response('{"detail":"artifact jobs are unavailable"}', {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    setCsrfCookie();
+    await expect(
+      new ApiClient().createArtifactJob(RUN_ID, input, "00000000-0000-4000-8000-000000000101"),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(requests).toHaveLength(1);
+    const body = await requests[0]!.text();
+    validateComponent("ArtifactJobCreate", body);
+    expect(body).toContain(`"scale":${token}`);
+  },
+);
 
 test("binds artifact result URLs to a canonical output name and digest", () => {
   const client = new ApiClient();
@@ -143,12 +227,19 @@ test("a failed call carries the Controller's request ID on the error", async () 
   // Break caught: the X-Request-ID response header is dropped, so an operator
   // cannot quote the failed call to support.
   const id = "6f1c2f1e-0f3a-4c53-9a53-1b1a7d2f9a10";
-  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({detail: "no such Spark"}), {
-    status: 404,
-    headers: {"Content-Type": "application/json", "X-Request-ID": id},
-  }));
-  const failure = await new ApiClient().fleetNode("missing").then(() => null, error => error);
-  expect(failure).toMatchObject({status: 404, requestId: id});
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(JSON.stringify({ detail: "no such Spark" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", "X-Request-ID": id },
+      }),
+  );
+  const failure = await new ApiClient().fleetNode("missing").then(
+    () => null,
+    (error) => error,
+  );
+  expect(failure).toMatchObject({ status: 404, requestId: id });
   expect(String(failure.message)).toContain(id);
 });
 
@@ -158,42 +249,70 @@ test("refuses to send a mutating request when the CSRF token is missing", async 
   // so the operator saw the Controller's generic 403 instead of the missing
   // token that caused it. Every mutation transport must refuse up front.
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    const request =
+      input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
     expect(request.method).toBe("GET");
     expect(new URL(request.url).pathname).toBe("/api/auth/session");
-    return new Response(JSON.stringify({subject: "admin", role: "administrator", expires_at: SINCE}), {status: 200, headers: {"Content-Type": "application/json"}});
+    return new Response(
+      JSON.stringify({ subject: "admin", role: "administrator", expires_at: SINCE }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
   });
   const client = new ApiClient();
-  const outcomes = await Promise.all([
-    client.enrollFleetNode({name: "Spark home", request_key: "00000000-0000-4000-8000-000000000101"}),
-    client.logout(),
-    client.createArtifactJob(RUN_ID, artifactCreate, "00000000-0000-4000-8000-000000000102"),
-    client.uploadArtifactJobInput(JOB_ID, artifactInput, new Blob(["payload"])),
-  ].map(attempt => attempt.then(() => "sent", error => String(error.message))));
+  const outcomes = await Promise.all(
+    [
+      client.enrollFleetNode({
+        name: "Spark home",
+        request_key: "00000000-0000-4000-8000-000000000101",
+      }),
+      client.logout(),
+      client.createArtifactJob(RUN_ID, artifactCreate, "00000000-0000-4000-8000-000000000102"),
+      client.uploadArtifactJobInput(JOB_ID, artifactInput, new Blob(["payload"])),
+    ].map((attempt) =>
+      attempt.then(
+        () => "sent",
+        (error) => String(error.message),
+      ),
+    ),
+  );
   for (const message of outcomes) expect(message).toContain("CSRF token missing");
 });
 
-test.each(["generated", "request", "logout", "token", "upload"])("expired cookies trigger authentication through %s without sending a mutation", async transport => {
-  document.cookie = "vonk_csrf=; Max-Age=0; Path=/";
-  // Break caught: a missing CSRF cookie throws before the authentication
-  // callback, leaving expired sessions stranded on pages without polling.
-  const required = vi.fn();
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
-    expect(request.method).toBe("GET");
-    expect(new URL(request.url).pathname).toBe("/api/auth/session");
-    return new Response(JSON.stringify({detail: "authentication required"}), {status: 401, headers: {"Content-Type": "application/json"}});
-  });
-  const client = new ApiClient();
-  client.onAuthenticationRequired(required);
-  const attempt = transport === "generated" ? client.enrollFleetNode({name: "Spark", request_key: crypto.randomUUID()})
-    : transport === "request" ? client.createArtifactJob(RUN_ID, artifactCreate, crypto.randomUUID())
-    : transport === "logout" ? client.logout()
-    : transport === "token" ? client.downloadCliToken()
-    : client.uploadArtifactJobInput(JOB_ID, artifactInput, new Blob(["payload"]));
-  await expect(attempt).rejects.toBeInstanceOf(Error);
-  expect(required).toHaveBeenCalledTimes(1);
-});
+test.each(["generated", "request", "logout", "token", "upload"])(
+  "expired cookies trigger authentication through %s without sending a mutation",
+  async (transport) => {
+    document.cookie = "vonk_csrf=; Max-Age=0; Path=/";
+    // Break caught: a missing CSRF cookie throws before the authentication
+    // callback, leaving expired sessions stranded on pages without polling.
+    const required = vi.fn();
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request
+          ? input
+          : new Request(new URL(String(input), location.origin), init);
+      expect(request.method).toBe("GET");
+      expect(new URL(request.url).pathname).toBe("/api/auth/session");
+      return new Response(JSON.stringify({ detail: "authentication required" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const client = new ApiClient();
+    client.onAuthenticationRequired(required);
+    const attempt =
+      transport === "generated"
+        ? client.enrollFleetNode({ name: "Spark", request_key: crypto.randomUUID() })
+        : transport === "request"
+          ? client.createArtifactJob(RUN_ID, artifactCreate, crypto.randomUUID())
+          : transport === "logout"
+            ? client.logout()
+            : transport === "token"
+              ? client.downloadCliToken()
+              : client.uploadArtifactJobInput(JOB_ID, artifactInput, new Blob(["payload"]));
+    await expect(attempt).rejects.toBeInstanceOf(Error);
+    expect(required).toHaveBeenCalledTimes(1);
+  },
+);
 
 test("refuses a request body without an explicit method", async () => {
   // Break caught: a body without a method silently became a GET and only
@@ -201,7 +320,12 @@ test("refuses a request body without an explicit method", async () => {
   vi.stubGlobal("fetch", async () => {
     throw new Error("the request must not be sent");
   });
-  const failure = await new ApiClient().request("/api/model/library", {body: JSON.stringify({})}).then(() => null, error => error);
+  const failure = await new ApiClient()
+    .request("/api/model/library", { body: JSON.stringify({}) })
+    .then(
+      () => null,
+      (error) => error,
+    );
   expect(String(failure.message)).toContain("explicit method");
 });
 
@@ -210,32 +334,61 @@ test("native artifact upload rejects an undeclared JSON receipt before exposing 
   class Upload {
     status = 200;
     responseText = '{"unexpected":9007199254740993}';
-    response = {unexpected: 9007199254740992};
+    response = { unexpected: 9007199254740992 };
     upload = {};
     onload?: () => void;
     open() {}
     setRequestHeader() {}
-    getResponseHeader(name: string) { return name.toLowerCase() === "content-type" ? "application/json" : null; }
-    set responseType(value: string) { responseType = value; }
-    send() { this.onload?.(); }
+    getResponseHeader(name: string) {
+      return name.toLowerCase() === "content-type" ? "application/json" : null;
+    }
+    set responseType(value: string) {
+      responseType = value;
+    }
+    send() {
+      this.onload?.();
+    }
   }
   vi.stubGlobal("XMLHttpRequest", Upload);
   setCsrfCookie();
-  const request = new ApiClient().uploadArtifactJobInput("00000000-0000-4000-8000-000000000001", {
-    slot: "prompt", name: "input.txt", media_type: "text/plain", size_bytes: 1, sha256: "a".repeat(64),
-  }, new Blob(["x"]));
+  const request = new ApiClient().uploadArtifactJobInput(
+    "00000000-0000-4000-8000-000000000001",
+    {
+      slot: "prompt",
+      name: "input.txt",
+      media_type: "text/plain",
+      size_bytes: 1,
+      sha256: "a".repeat(64),
+    },
+    new Blob(["x"]),
+  );
   await expect(request).rejects.toThrow("Invalid Control API contract");
   expect(responseType).toBe("text");
 });
 
-
-test.each(["bespoke", "generated"])("%s JSON consumer uses the same producer-owned streaming budget", async path => {
-  const cancel = vi.fn();
-  vi.stubGlobal("fetch", async () => new Response(new ReadableStream<Uint8Array>({
-    pull(controller) { controller.enqueue(new Uint8Array(1048577)); }, cancel,
-  }, {highWaterMark: 0}), {headers: {"content-type": "application/json"}}));
-  const client = new ApiClient();
-  const request = path === "bespoke" ? client.request("/api/operations") : client.operations();
-  await expect(request).rejects.toBeInstanceOf(ContractResponseTooLarge);
-  expect(cancel).toHaveBeenCalledOnce();
-});
+test.each(["bespoke", "generated"])(
+  "%s JSON consumer uses the same producer-owned streaming budget",
+  async (path) => {
+    const cancel = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                controller.enqueue(new Uint8Array(1048577));
+              },
+              cancel,
+            },
+            { highWaterMark: 0 },
+          ),
+          { headers: { "content-type": "application/json" } },
+        ),
+    );
+    const client = new ApiClient();
+    const request = path === "bespoke" ? client.request("/api/operations") : client.operations();
+    await expect(request).rejects.toBeInstanceOf(ContractResponseTooLarge);
+    expect(cancel).toHaveBeenCalledOnce();
+  },
+);

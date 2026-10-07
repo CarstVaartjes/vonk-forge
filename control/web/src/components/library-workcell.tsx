@@ -1,15 +1,29 @@
-import {addWire, compareWire, formatWire, multiplyWire, type WireNumber} from "../api/contract-numeric";
-import {useEffect, useRef} from "react";
-import type {MouseEvent, ReactNode} from "react";
-import type {ControlApi, LibrarySort, LibraryViewModel, LibraryViewRecipe, LibraryViewRecipeDetail, LibraryViewSnapshot, VisualFleetSnapshot} from "../api/types";
-import {canonicalRecipeSelector} from "../api/types";
-import type {LibraryRoute} from "../lib/library-route";
-import {modelKey, modelLibraryPath, recipeLibraryPath} from "../lib/library-route";
-import {formatBytes} from "../lib/fleet";
-import {EmptyState} from "./empty-state";
-import {LibraryRecipeDownloadAction} from "./library-recipe-download-action";
-import {LibraryRecipeRemoveAction} from "./library-recipe-remove-action";
-import {LibraryRecipeUpdateAction} from "./library-recipe-update-action";
+import {
+  addWire,
+  compareWire,
+  formatWire,
+  multiplyWire,
+  type WireNumber,
+} from "../api/contract-numeric";
+import { useEffect, useRef } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import type {
+  ControlApi,
+  LibrarySort,
+  LibraryViewModel,
+  LibraryViewRecipe,
+  LibraryViewRecipeDetail,
+  LibraryViewSnapshot,
+  VisualFleetSnapshot,
+} from "../api/types";
+import { canonicalRecipeSelector } from "../api/types";
+import type { LibraryRoute } from "../lib/library-route";
+import { modelKey, modelLibraryPath, recipeLibraryPath } from "../lib/library-route";
+import { formatBytes } from "../lib/fleet";
+import { EmptyState } from "./empty-state";
+import { LibraryRecipeDownloadAction } from "./library-recipe-download-action";
+import { LibraryRecipeRemoveAction } from "./library-recipe-remove-action";
+import { LibraryRecipeUpdateAction } from "./library-recipe-update-action";
 
 // Filter names mirror `vonkctl model library` and `vonkctl recipe library`
 // one-for-one: --model --usage --family --version --quantization --publisher
@@ -19,8 +33,36 @@ import {LibraryRecipeUpdateAction} from "./library-recipe-update-action";
 // mirror --sort and --updated-since; `updated` is the recency window that the
 // request turns into a timestamp. Both ordering controls are applied by the
 // projection to the whole library, so changing one restarts paging.
-export type LibraryWorkcellFilters = {model: string; usage: string; family: string; version: string; quantization: string; publisher: string; alignment: string; sparks: string; engine: string; creator: string; cached: boolean; sort: LibrarySort; updated: LibraryRecency};
-export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {model: "", usage: "", family: "", version: "", quantization: "", publisher: "", alignment: "", sparks: "", engine: "", creator: "", cached: false, sort: "updated", updated: "any"};
+export type LibraryWorkcellFilters = {
+  model: string;
+  usage: string;
+  family: string;
+  version: string;
+  quantization: string;
+  publisher: string;
+  alignment: string;
+  sparks: string;
+  engine: string;
+  creator: string;
+  cached: boolean;
+  sort: LibrarySort;
+  updated: LibraryRecency;
+};
+export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {
+  model: "",
+  usage: "",
+  family: "",
+  version: "",
+  quantization: "",
+  publisher: "",
+  alignment: "",
+  sparks: "",
+  engine: "",
+  creator: "",
+  cached: false,
+  sort: "updated",
+  updated: "any",
+};
 
 // The values here are checked against the generated `sort` union, so a server
 // value rename or removal breaks the type gate instead of drifting silently.
@@ -28,22 +70,46 @@ export const LIBRARY_SORTS = ["updated", "name"] as const satisfies readonly Lib
 export const LIBRARY_RECENCY_VALUES = ["any", "24h", "7d", "31d"] as const;
 export type LibraryRecency = (typeof LIBRARY_RECENCY_VALUES)[number];
 
-const LIBRARY_RECENCY_HOURS: Record<LibraryRecency, number> = {any: 0, "24h": 24, "7d": 24 * 7, "31d": 24 * 31};
-export const LIBRARY_RECENCY_LABELS: Record<LibraryRecency, string> = {any: "Any time", "24h": "Last 24 hours", "7d": "Last 7 days", "31d": "Last 31 days"};
-export const LIBRARY_SORT_LABELS: Record<LibrarySort, string> = {updated: "Recently updated", name: "Name"};
+const LIBRARY_RECENCY_HOURS: Record<LibraryRecency, number> = {
+  any: 0,
+  "24h": 24,
+  "7d": 24 * 7,
+  "31d": 24 * 31,
+};
+export const LIBRARY_RECENCY_LABELS: Record<LibraryRecency, string> = {
+  any: "Any time",
+  "24h": "Last 24 hours",
+  "7d": "Last 7 days",
+  "31d": "Last 31 days",
+};
+export const LIBRARY_SORT_LABELS: Record<LibrarySort, string> = {
+  updated: "Recently updated",
+  name: "Name",
+};
 
 export function librarySortFromValue(value: string): LibrarySort {
-  return LIBRARY_SORTS.find(candidate => candidate === value) ?? "updated";
+  return LIBRARY_SORTS.find((candidate) => candidate === value) ?? "updated";
 }
 export function libraryRecencyFromValue(value: string): LibraryRecency {
-  return LIBRARY_RECENCY_VALUES.find(candidate => candidate === value) ?? "any";
+  return LIBRARY_RECENCY_VALUES.find((candidate) => candidate === value) ?? "any";
 }
 export function libraryRecencySince(recency: LibraryRecency, now = new Date()): string | undefined {
   const hours = LIBRARY_RECENCY_HOURS[recency];
   return hours === 0 ? undefined : new Date(now.getTime() - hours * 3_600_000).toISOString();
 }
 
-const FILTER_PARAMS = ["model", "usage", "family", "version", "quantization", "publisher", "alignment", "sparks", "engine", "creator"] as const;
+const FILTER_PARAMS = [
+  "model",
+  "usage",
+  "family",
+  "version",
+  "quantization",
+  "publisher",
+  "alignment",
+  "sparks",
+  "engine",
+  "creator",
+] as const;
 
 export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkcellFilters {
   return {
@@ -62,13 +128,20 @@ export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkce
     updated: libraryRecencyFromValue(params.get("updated") ?? ""),
   };
 }
-export function libraryFiltersToSearch(filters: LibraryWorkcellFilters, params = new URLSearchParams()): URLSearchParams {
+export function libraryFiltersToSearch(
+  filters: LibraryWorkcellFilters,
+  params = new URLSearchParams(),
+): URLSearchParams {
   for (const name of FILTER_PARAMS) {
-    if (filters[name]) params.set(name, filters[name]); else params.delete(name);
+    if (filters[name]) params.set(name, filters[name]);
+    else params.delete(name);
   }
-  if (filters.cached) params.set("cached", "1"); else params.delete("cached");
-  if (filters.sort === "updated") params.delete("sort"); else params.set("sort", filters.sort);
-  if (filters.updated === "any") params.delete("updated"); else params.set("updated", filters.updated);
+  if (filters.cached) params.set("cached", "1");
+  else params.delete("cached");
+  if (filters.sort === "updated") params.delete("sort");
+  else params.set("sort", filters.sort);
+  if (filters.updated === "any") params.delete("updated");
+  else params.set("updated", filters.updated);
   return params;
 }
 
@@ -89,20 +162,31 @@ export type LibraryRecipeRecord = {
 
 /** Cached, downloading, or running: the same test `vonkctl ... --cached` applies. */
 export function isModelCached(model: LibraryViewModel): boolean {
-  return model.local.controller === "cached" || model.local.controller === "preparing" || (model.local.running_on ?? []).length > 0;
+  return (
+    model.local.controller === "cached" ||
+    model.local.controller === "preparing" ||
+    (model.local.running_on ?? []).length > 0
+  );
 }
 
 /** What the operator filtered by, in words, for an empty result. */
 export function activeFilterSummary(filters: LibraryWorkcellFilters, query: string): string[] {
-  const parts = FILTER_PARAMS.filter(name => filters[name]).map(name => `${name}: ${filters[name]}`);
+  const parts = FILTER_PARAMS.filter((name) => filters[name]).map(
+    (name) => `${name}: ${filters[name]}`,
+  );
   if (filters.cached) parts.unshift("cached only");
-  if (filters.updated !== "any") parts.push(`updated: ${LIBRARY_RECENCY_LABELS[filters.updated].toLocaleLowerCase()}`);
+  if (filters.updated !== "any")
+    parts.push(`updated: ${LIBRARY_RECENCY_LABELS[filters.updated].toLocaleLowerCase()}`);
   if (query.trim()) parts.push(`search: ${query.trim()}`);
   return parts;
 }
 
 function modelTitle(model: LibraryViewModel): string {
-  return model.model_document.identity.model.title || model.model_document.identity.family.title || `${model.model.publisher}/${model.model.slug}`;
+  return (
+    model.model_document.identity.model.title ||
+    model.model_document.identity.family.title ||
+    `${model.model.publisher}/${model.model.slug}`
+  );
 }
 
 function recipeRecordKey(modelKey: string, recipe: LibraryViewRecipe): string {
@@ -124,30 +208,70 @@ export function sparkLabel(count: WireNumber): string {
 }
 
 /** Engine, creator and Spark count as compact badges. */
-export function RecipeBadges({recipe}: {recipe: LibraryViewRecipe}) {
+export function RecipeBadges({ recipe }: { recipe: LibraryViewRecipe }) {
   const creator = recipeCreator(recipe);
-  return <span className="library-badges">
-    <span className="library-badge" data-badge="engine" title="Engine">{recipeEngine(recipe)}</span>
-    {creator && <span className="library-badge" data-badge="creator" title="Creator">{creator}</span>}
-    <span className="library-badge" data-badge="sparks" title="Sparks">{sparkLabel(recipe.recipe_document.topology.node_count)}</span>
-  </span>;
+  return (
+    <span className="library-badges">
+      <span className="library-badge" data-badge="engine" title="Engine">
+        {recipeEngine(recipe)}
+      </span>
+      {creator && (
+        <span className="library-badge" data-badge="creator" title="Creator">
+          {creator}
+        </span>
+      )}
+      <span className="library-badge" data-badge="sparks" title="Sparks">
+        {sparkLabel(recipe.recipe_document.topology.node_count)}
+      </span>
+    </span>
+  );
 }
 
 export function recipeAttribution(document: LibraryViewRecipe["recipe_document"]): string {
-  const attribution = [...new Set(document.provenance.attribution.map(value => value.trim()).filter(Boolean))];
+  const attribution = [
+    ...new Set(document.provenance.attribution.map((value) => value.trim()).filter(Boolean)),
+  ];
   return attribution.length > 0 ? `Credits: ${attribution.join(", ")}` : "Credits: not declared";
 }
 
 export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): LibraryRecipeRecord[] {
-  return snapshot.models.flatMap(model => {
+  return snapshot.models.flatMap((model) => {
     const key = modelKey(model.model);
     const title = modelTitle(model);
     const files = model.model_document.files;
     const bytes = files.reduce<WireNumber>((total, file) => addWire(total, file.size_bytes), 0);
     const capabilities = model.model_capabilities ?? [];
     const modelCached = isModelCached(model);
-    if (model.recipes.length === 0) return [{key: `model:${key}`, title, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, modelCached, capabilities}];
-    return model.recipes.map(recipe => ({key: recipeRecordKey(key, recipe), title: recipe.title, recipe, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, modelCached, capabilities: [...new Set([...capabilities, ...recipe.capabilities])]}));
+    if (model.recipes.length === 0)
+      return [
+        {
+          key: `model:${key}`,
+          title,
+          model: model.model,
+          modelDocument: model.model_document,
+          modelCapabilities: model.model_capabilities,
+          modelKey: key,
+          modelTitle: title,
+          modelFiles: files,
+          modelBytes: bytes,
+          modelCached,
+          capabilities,
+        },
+      ];
+    return model.recipes.map((recipe) => ({
+      key: recipeRecordKey(key, recipe),
+      title: recipe.title,
+      recipe,
+      model: model.model,
+      modelDocument: model.model_document,
+      modelCapabilities: model.model_capabilities,
+      modelKey: key,
+      modelTitle: title,
+      modelFiles: files,
+      modelBytes: bytes,
+      modelCached,
+      capabilities: [...new Set([...capabilities, ...recipe.capabilities])],
+    }));
   });
 }
 
@@ -156,36 +280,107 @@ export function recordFamily(record: LibraryRecipeRecord): string {
   return family ? `${family.publisher}/${family.slug}` : "";
 }
 
-export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filters: LibraryWorkcellFilters, query: string): LibraryRecipeRecord[] {
+export function filterLibraryRecipeRecords(
+  records: LibraryRecipeRecord[],
+  filters: LibraryWorkcellFilters,
+  query: string,
+): LibraryRecipeRecord[] {
   const needle = query.trim().toLocaleLowerCase();
-  return records.filter(record => {
-    const text = [record.title, record.modelTitle, record.recipe?.slug ?? "", ...record.capabilities].join(" ").toLocaleLowerCase();
-    return (!needle || text.includes(needle))
-      && (!filters.cached || record.modelCached)
-      && (!filters.model || record.modelKey === filters.model)
-      && (!filters.usage || record.capabilities.includes(filters.usage))
-      && (!filters.family || recordFamily(record) === filters.family)
-      && (!filters.version || record.modelDocument?.identity.version === filters.version)
-      && (!filters.quantization || record.modelDocument?.format.quantization === filters.quantization)
-      && (!filters.publisher || record.model?.publisher === filters.publisher)
-      && (!filters.engine || (record.recipe !== undefined && recipeEngine(record.recipe).toLocaleLowerCase() === filters.engine.toLocaleLowerCase()))
-      && (!filters.creator || recipeCreator(record.recipe ?? ({} as LibraryViewRecipe))?.toLocaleLowerCase() === filters.creator.toLocaleLowerCase())
-      && (!filters.alignment || record.recipe?.recipe_document.metadata.alignment === filters.alignment)
-      && (!filters.sparks || String(record.recipe?.recipe_document.topology.node_count) === filters.sparks);
+  return records.filter((record) => {
+    const text = [
+      record.title,
+      record.modelTitle,
+      record.recipe?.slug ?? "",
+      ...record.capabilities,
+    ]
+      .join(" ")
+      .toLocaleLowerCase();
+    return (
+      (!needle || text.includes(needle)) &&
+      (!filters.cached || record.modelCached) &&
+      (!filters.model || record.modelKey === filters.model) &&
+      (!filters.usage || record.capabilities.includes(filters.usage)) &&
+      (!filters.family || recordFamily(record) === filters.family) &&
+      (!filters.version || record.modelDocument?.identity.version === filters.version) &&
+      (!filters.quantization ||
+        record.modelDocument?.format.quantization === filters.quantization) &&
+      (!filters.publisher || record.model?.publisher === filters.publisher) &&
+      (!filters.engine ||
+        (record.recipe !== undefined &&
+          recipeEngine(record.recipe).toLocaleLowerCase() ===
+            filters.engine.toLocaleLowerCase())) &&
+      (!filters.creator ||
+        recipeCreator(record.recipe ?? ({} as LibraryViewRecipe))?.toLocaleLowerCase() ===
+          filters.creator.toLocaleLowerCase()) &&
+      (!filters.alignment ||
+        record.recipe?.recipe_document.metadata.alignment === filters.alignment) &&
+      (!filters.sparks ||
+        String(record.recipe?.recipe_document.topology.node_count) === filters.sparks)
+    );
   });
 }
 
 /** Says which filters emptied the list, or that the library itself is empty. */
-export function EmptyLibrary({filters, query, onClear, onRefresh, noun = "models"}: {filters: LibraryWorkcellFilters; query: string; onClear(): void; onRefresh?(): void; noun?: string}) {
+export function EmptyLibrary({
+  filters,
+  query,
+  onClear,
+  onRefresh,
+  noun = "models",
+}: {
+  filters: LibraryWorkcellFilters;
+  query: string;
+  onClear(): void;
+  onRefresh?(): void;
+  noun?: string;
+}) {
   const filtered = activeFilterSummary(filters, query).length > 0;
-  return <EmptyState title={`No ${noun}`} description={`${noun[0]!.toLocaleUpperCase()}${noun.slice(1)} come from the recipe library, which the Controller syncs automatically; its sync status is shown above.`} filtered={filtered} onClearFilters={onClear} action={onRefresh ? {label: "Refresh library", onClick: onRefresh} : undefined}/>;
+  return (
+    <EmptyState
+      title={`No ${noun}`}
+      description={`${noun[0]!.toLocaleUpperCase()}${noun.slice(1)} come from the recipe library, which the Controller syncs automatically; its sync status is shown above.`}
+      filtered={filtered}
+      onClearFilters={onClear}
+      action={onRefresh ? { label: "Refresh library", onClick: onRefresh } : undefined}
+    />
+  );
 }
 
-function NavigateLink({current, href, onNavigate, children}: {current?: boolean; href: string; onNavigate: (event: MouseEvent<HTMLAnchorElement>, path: string) => void; children: ReactNode}) {
-  return <a href={href} aria-current={current ? "page" : undefined} onClick={event => onNavigate(event, href)}>{children}</a>;
+function NavigateLink({
+  current,
+  href,
+  onNavigate,
+  children,
+}: {
+  current?: boolean;
+  href: string;
+  onNavigate: (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      aria-current={current ? "page" : undefined}
+      onClick={(event) => onNavigate(event, href)}
+    >
+      {children}
+    </a>
+  );
 }
 
-export function LibraryWorkcell({api, detail: _detail, fleet: _fleet, filters, onFiltersChange, onNavigate, onQueryChange, onRefresh, query, route, snapshot}: {
+export function LibraryWorkcell({
+  api,
+  detail: _detail,
+  fleet: _fleet,
+  filters,
+  onFiltersChange,
+  onNavigate,
+  onQueryChange,
+  onRefresh,
+  query,
+  route,
+  snapshot,
+}: {
   api: ControlApi;
   detail?: LibraryViewRecipeDetail;
   detailError?: string;
@@ -206,48 +401,419 @@ export function LibraryWorkcell({api, detail: _detail, fleet: _fleet, filters, o
 }) {
   const records = buildLibraryRecipeRecords(snapshot);
   const matching = filterLibraryRecipeRecords(records, filters, query);
-  const models = [...new Map(records.map(record => [record.modelKey, record])).values()]
-    .filter(record => !query.trim() || matching.some(item => item.modelKey === record.modelKey));
-  const modelOptions = [...new Map(records.map(record => [record.modelKey, record.modelTitle])).entries()];
-  const selectedModelKey = route.kind === "model" ? route.modelKey : filters.model || models[0]?.modelKey;
-  const selectedModel = models.find(record => record.modelKey === selectedModelKey);
-  const selectedRecipes = matching.filter(record => record.modelKey === selectedModelKey && record.recipe);
+  const models = [...new Map(records.map((record) => [record.modelKey, record])).values()].filter(
+    (record) => !query.trim() || matching.some((item) => item.modelKey === record.modelKey),
+  );
+  const modelOptions = [
+    ...new Map(records.map((record) => [record.modelKey, record.modelTitle])).entries(),
+  ];
+  const selectedModelKey =
+    route.kind === "model" ? route.modelKey : filters.model || models[0]?.modelKey;
+  const selectedModel = models.find((record) => record.modelKey === selectedModelKey);
+  const selectedRecipes = matching.filter(
+    (record) => record.modelKey === selectedModelKey && record.recipe,
+  );
   const recipePaneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if ((!filters.model && route.kind !== "model") || typeof window === "undefined" || window.innerWidth > 760) return;
-    if (recipePaneRef.current && typeof recipePaneRef.current.scrollIntoView === "function") recipePaneRef.current.scrollIntoView({block: "start"});
-    recipePaneRef.current?.focus({preventScroll: true});
+    if (
+      (!filters.model && route.kind !== "model") ||
+      typeof window === "undefined" ||
+      window.innerWidth > 760
+    )
+      return;
+    if (recipePaneRef.current && typeof recipePaneRef.current.scrollIntoView === "function")
+      recipePaneRef.current.scrollIntoView({ block: "start" });
+    recipePaneRef.current?.focus({ preventScroll: true });
   }, [filters.model, route.kind, selectedModelKey]);
   // A recipe download also caches the model artifacts it needs, so name the
   // models that are not cached yet before the operator commits.
-  const controllerByModel = new Map(snapshot.models.map(model => [`${model.model.publisher}/${model.model.slug}`, model.local.controller]));
-  const missingModelsFor = (recipe: LibraryViewRecipe): string[] => (recipe.model_selectors ?? []).filter(selector => controllerByModel.get(selector) !== "cached");
+  const controllerByModel = new Map(
+    snapshot.models.map((model) => [
+      `${model.model.publisher}/${model.model.slug}`,
+      model.local.controller,
+    ]),
+  );
+  const missingModelsFor = (recipe: LibraryViewRecipe): string[] =>
+    (recipe.model_selectors ?? []).filter(
+      (selector) => controllerByModel.get(selector) !== "cached",
+    );
   const refresh = () => void onRefresh?.(new AbortController().signal);
-  return <section className="library-workcell" aria-label="Models and recipes">
-    <div className="library-workcell-toolbar">
-      <label>Find models or recipes<input type="search" aria-label="Search Library" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search names, slugs, capabilities" /></label>
-      <label>Exact model<select aria-label="Filter exact model" value={filters.model} onChange={event => onFiltersChange({...filters, model: event.target.value})}><option value="">All models</option>{modelOptions.map(([key, title]) => <option key={key} value={key}>{title}</option>)}</select></label>
-      <label>Usage<select aria-label="Filter usage" value={filters.usage} onChange={event => onFiltersChange({...filters, usage: event.target.value})}><option value="">All usage</option>{[...new Set(records.flatMap(record => record.capabilities))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Family<select aria-label="Filter family" value={filters.family} onChange={event => onFiltersChange({...filters, family: event.target.value})}><option value="">All families</option>{[...new Set(records.map(recordFamily).filter(Boolean))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Version<select aria-label="Filter version" value={filters.version} onChange={event => onFiltersChange({...filters, version: event.target.value})}><option value="">All versions</option>{[...new Set(records.map(record => record.modelDocument?.identity.version).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Quantization<select aria-label="Filter quantization" value={filters.quantization} onChange={event => onFiltersChange({...filters, quantization: event.target.value})}><option value="">All quantization</option>{[...new Set(records.map(record => record.modelDocument?.format.quantization).filter((value): value is string => Boolean(value)))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Engine<select aria-label="Filter engine" value={filters.engine} onChange={event => onFiltersChange({...filters, engine: event.target.value})}><option value="">All engines</option>{[...new Set(records.flatMap(record => record.recipe ? [recipeEngine(record.recipe)] : []))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Creator<select aria-label="Filter creator" value={filters.creator} onChange={event => onFiltersChange({...filters, creator: event.target.value})}><option value="">All creators</option>{[...new Set(records.flatMap(record => { const creator = record.recipe ? recipeCreator(record.recipe) : undefined; return creator ? [creator] : []; }))].sort((a, b) => a.localeCompare(b, undefined, {sensitivity: "base"})).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Alignment<select aria-label="Filter alignment" value={filters.alignment} onChange={event => onFiltersChange({...filters, alignment: event.target.value})}><option value="">All alignments</option>{[...new Set(records.flatMap(record => record.recipe?.recipe_document.metadata.alignment ? [record.recipe.recipe_document.metadata.alignment] : []))].sort().map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label>Sparks<select aria-label="Filter Sparks" value={filters.sparks} onChange={event => onFiltersChange({...filters, sparks: event.target.value})}><option value="">Any Sparks</option>{[...new Set(records.map(record => String(record.recipe?.recipe_document.topology.node_count ?? "")).filter(Boolean))].sort((a, b) => Number(a) - Number(b)).map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label className="library-cached-filter"><input type="checkbox" checked={filters.cached} onChange={event => onFiltersChange({...filters, cached: event.target.checked})}/> Cached only</label>
-      <label>Sort<select aria-label="Sort Library" value={filters.sort} onChange={event => onFiltersChange({...filters, sort: librarySortFromValue(event.target.value)})}>{LIBRARY_SORTS.map(value => <option key={value} value={value}>{LIBRARY_SORT_LABELS[value]}</option>)}</select></label>
-      <label>Updated<select aria-label="Filter updated" value={filters.updated} onChange={event => onFiltersChange({...filters, updated: libraryRecencyFromValue(event.target.value)})}>{LIBRARY_RECENCY_VALUES.map(value => <option key={value} value={value}>{LIBRARY_RECENCY_LABELS[value]}</option>)}</select></label>
-    <LibraryRecipeUpdateAction api={api} onUpdated={refresh} /></div>
-    <div className="library-paired-list" aria-label="Model and recipe list">
-      <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>
-      <div className="library-paired-panes">
-        <div className="library-model-pane" aria-label="Models"><ul>{models.map(model => <li key={model.modelKey}><NavigateLink current={model.modelKey === selectedModelKey} href={modelLibraryPath(model.modelKey)} onNavigate={onNavigate}><span className={model.modelKey === selectedModelKey ? "is-selected" : undefined}><strong>{model.modelTitle}</strong><small>{model.model?.publisher}/{model.model?.slug}</small><small>{model.modelFiles.length} files · {formatBytes(model.modelBytes)}</small><em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em></span></NavigateLink></li>)}</ul>{models.length === 0 && <EmptyLibrary noun="recipes" filters={filters} query={query} onRefresh={refresh} onClear={() => { onFiltersChange(EMPTY_LIBRARY_WORKCELL_FILTERS); onQueryChange(""); }}/>}</div>
-        <div className="library-recipe-pane" aria-label="Recipes matching selected Model" ref={recipePaneRef} tabIndex={-1}>{selectedModel && <div className="library-selected-model-context"><strong>{selectedModel.modelTitle}</strong><span>{selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)} · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}</span></div>}<ul>{selectedRecipes.map(record => { const document = record.recipe!.recipe_document; const roleBytes = document.topology.roles.reduce<WireNumber>((sum, role) => addWire(sum, multiplyWire(role.count, addWire(role.resources.disk.image_bytes, role.resources.disk.artifact_bytes))), 0); return <li key={record.key}><NavigateLink href={recipeLibraryPath(record.recipe!.recipe_id)} onNavigate={onNavigate}><strong>{record.title}</strong><RecipeBadges recipe={record.recipe!}/><small>{recipeAttribution(document)} · release {document.release.version}</small><small>{document.topology.roles.map(role => `${role.name}: ${formatBytes(role.resources.memory.peak_bytes)} peak`).join(" · ")}</small><small>{formatBytes(roleBytes)} image + artifact envelope</small></NavigateLink><LibraryRecipeDownloadAction api={api} missingModels={missingModelsFor(record.recipe!)} onDownloaded={refresh} selector={canonicalRecipeSelector(record.recipe!)} /><LibraryRecipeRemoveAction api={api} onRemoved={refresh} selector={canonicalRecipeSelector(record.recipe!)} /></li>; })}</ul>{selectedModel && selectedRecipes.length === 0 && <div className="library-empty-recipe"><strong>No Recipe linked</strong><span>This exact Model is available for cache management but has no runnable Recipe.</span></div>}{!selectedModel && <p className="library-empty-state">Select a Model to see matching Recipes.</p>}</div>
+  return (
+    <section className="library-workcell" aria-label="Models and recipes">
+      <div className="library-workcell-toolbar">
+        <label>
+          Find models or recipes
+          <input
+            type="search"
+            aria-label="Search Library"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="Search names, slugs, capabilities"
+          />
+        </label>
+        <label>
+          Exact model
+          <select
+            aria-label="Filter exact model"
+            value={filters.model}
+            onChange={(event) => onFiltersChange({ ...filters, model: event.target.value })}
+          >
+            <option value="">All models</option>
+            {modelOptions.map(([key, title]) => (
+              <option key={key} value={key}>
+                {title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Usage
+          <select
+            aria-label="Filter usage"
+            value={filters.usage}
+            onChange={(event) => onFiltersChange({ ...filters, usage: event.target.value })}
+          >
+            <option value="">All usage</option>
+            {[...new Set(records.flatMap((record) => record.capabilities))].sort().map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Family
+          <select
+            aria-label="Filter family"
+            value={filters.family}
+            onChange={(event) => onFiltersChange({ ...filters, family: event.target.value })}
+          >
+            <option value="">All families</option>
+            {[...new Set(records.map(recordFamily).filter(Boolean))].sort().map((value) => (
+              <option key={value} value={value}>
+                {value}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Version
+          <select
+            aria-label="Filter version"
+            value={filters.version}
+            onChange={(event) => onFiltersChange({ ...filters, version: event.target.value })}
+          >
+            <option value="">All versions</option>
+            {[
+              ...new Set(
+                records
+                  .map((record) => record.modelDocument?.identity.version)
+                  .filter((value): value is string => Boolean(value)),
+              ),
+            ]
+              .sort()
+              .map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Quantization
+          <select
+            aria-label="Filter quantization"
+            value={filters.quantization}
+            onChange={(event) => onFiltersChange({ ...filters, quantization: event.target.value })}
+          >
+            <option value="">All quantization</option>
+            {[
+              ...new Set(
+                records
+                  .map((record) => record.modelDocument?.format.quantization)
+                  .filter((value): value is string => Boolean(value)),
+              ),
+            ]
+              .sort()
+              .map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Engine
+          <select
+            aria-label="Filter engine"
+            value={filters.engine}
+            onChange={(event) => onFiltersChange({ ...filters, engine: event.target.value })}
+          >
+            <option value="">All engines</option>
+            {[
+              ...new Set(
+                records.flatMap((record) => (record.recipe ? [recipeEngine(record.recipe)] : [])),
+              ),
+            ]
+              .sort()
+              .map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Creator
+          <select
+            aria-label="Filter creator"
+            value={filters.creator}
+            onChange={(event) => onFiltersChange({ ...filters, creator: event.target.value })}
+          >
+            <option value="">All creators</option>
+            {[
+              ...new Set(
+                records.flatMap((record) => {
+                  const creator = record.recipe ? recipeCreator(record.recipe) : undefined;
+                  return creator ? [creator] : [];
+                }),
+              ),
+            ]
+              .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+              .map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Alignment
+          <select
+            aria-label="Filter alignment"
+            value={filters.alignment}
+            onChange={(event) => onFiltersChange({ ...filters, alignment: event.target.value })}
+          >
+            <option value="">All alignments</option>
+            {[
+              ...new Set(
+                records.flatMap((record) =>
+                  record.recipe?.recipe_document.metadata.alignment
+                    ? [record.recipe.recipe_document.metadata.alignment]
+                    : [],
+                ),
+              ),
+            ]
+              .sort()
+              .map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label>
+          Sparks
+          <select
+            aria-label="Filter Sparks"
+            value={filters.sparks}
+            onChange={(event) => onFiltersChange({ ...filters, sparks: event.target.value })}
+          >
+            <option value="">Any Sparks</option>
+            {[
+              ...new Set(
+                records
+                  .map((record) => String(record.recipe?.recipe_document.topology.node_count ?? ""))
+                  .filter(Boolean),
+              ),
+            ]
+              .sort((a, b) => Number(a) - Number(b))
+              .map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className="library-cached-filter">
+          <input
+            type="checkbox"
+            checked={filters.cached}
+            onChange={(event) => onFiltersChange({ ...filters, cached: event.target.checked })}
+          />{" "}
+          Cached only
+        </label>
+        <label>
+          Sort
+          <select
+            aria-label="Sort Library"
+            value={filters.sort}
+            onChange={(event) =>
+              onFiltersChange({ ...filters, sort: librarySortFromValue(event.target.value) })
+            }
+          >
+            {LIBRARY_SORTS.map((value) => (
+              <option key={value} value={value}>
+                {LIBRARY_SORT_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Updated
+          <select
+            aria-label="Filter updated"
+            value={filters.updated}
+            onChange={(event) =>
+              onFiltersChange({ ...filters, updated: libraryRecencyFromValue(event.target.value) })
+            }
+          >
+            {LIBRARY_RECENCY_VALUES.map((value) => (
+              <option key={value} value={value}>
+                {LIBRARY_RECENCY_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <LibraryRecipeUpdateAction api={api} onUpdated={refresh} />
       </div>
-    </div>
-  </section>;
+      <div className="library-paired-list" aria-label="Model and recipe list">
+        <div className="library-paired-heading">
+          <span>
+            Models · {models.length} of {new Set(records.map((record) => record.modelKey)).size}
+          </span>
+          <span>Recipes for selected Model · {selectedRecipes.length}</span>
+        </div>
+        <div className="library-paired-panes">
+          <div className="library-model-pane" aria-label="Models">
+            <ul>
+              {models.map((model) => (
+                <li key={model.modelKey}>
+                  <NavigateLink
+                    current={model.modelKey === selectedModelKey}
+                    href={modelLibraryPath(model.modelKey)}
+                    onNavigate={onNavigate}
+                  >
+                    <span
+                      className={model.modelKey === selectedModelKey ? "is-selected" : undefined}
+                    >
+                      <strong>{model.modelTitle}</strong>
+                      <small>
+                        {model.model?.publisher}/{model.model?.slug}
+                      </small>
+                      <small>
+                        {model.modelFiles.length} files · {formatBytes(model.modelBytes)}
+                      </small>
+                      <em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em>
+                    </span>
+                  </NavigateLink>
+                </li>
+              ))}
+            </ul>
+            {models.length === 0 && (
+              <EmptyLibrary
+                noun="recipes"
+                filters={filters}
+                query={query}
+                onRefresh={refresh}
+                onClear={() => {
+                  onFiltersChange(EMPTY_LIBRARY_WORKCELL_FILTERS);
+                  onQueryChange("");
+                }}
+              />
+            )}
+          </div>
+          <div
+            className="library-recipe-pane"
+            aria-label="Recipes matching selected Model"
+            ref={recipePaneRef}
+            tabIndex={-1}
+          >
+            {selectedModel && (
+              <div className="library-selected-model-context">
+                <strong>{selectedModel.modelTitle}</strong>
+                <span>
+                  {selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)}{" "}
+                  · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}
+                </span>
+              </div>
+            )}
+            <ul>
+              {selectedRecipes.map((record) => {
+                const document = record.recipe!.recipe_document;
+                const roleBytes = document.topology.roles.reduce<WireNumber>(
+                  (sum, role) =>
+                    addWire(
+                      sum,
+                      multiplyWire(
+                        role.count,
+                        addWire(
+                          role.resources.disk.image_bytes,
+                          role.resources.disk.artifact_bytes,
+                        ),
+                      ),
+                    ),
+                  0,
+                );
+                return (
+                  <li key={record.key}>
+                    <NavigateLink
+                      href={recipeLibraryPath(record.recipe!.recipe_id)}
+                      onNavigate={onNavigate}
+                    >
+                      <strong>{record.title}</strong>
+                      <RecipeBadges recipe={record.recipe!} />
+                      <small>
+                        {recipeAttribution(document)} · release {document.release.version}
+                      </small>
+                      <small>
+                        {document.topology.roles
+                          .map(
+                            (role) =>
+                              `${role.name}: ${formatBytes(role.resources.memory.peak_bytes)} peak`,
+                          )
+                          .join(" · ")}
+                      </small>
+                      <small>{formatBytes(roleBytes)} image + artifact envelope</small>
+                    </NavigateLink>
+                    <LibraryRecipeDownloadAction
+                      api={api}
+                      missingModels={missingModelsFor(record.recipe!)}
+                      onDownloaded={refresh}
+                      selector={canonicalRecipeSelector(record.recipe!)}
+                    />
+                    <LibraryRecipeRemoveAction
+                      api={api}
+                      onRemoved={refresh}
+                      selector={canonicalRecipeSelector(record.recipe!)}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+            {selectedModel && selectedRecipes.length === 0 && (
+              <div className="library-empty-recipe">
+                <strong>No Recipe linked</strong>
+                <span>
+                  This exact Model is available for cache management but has no runnable Recipe.
+                </span>
+              </div>
+            )}
+            {!selectedModel && (
+              <p className="library-empty-state">Select a Model to see matching Recipes.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
-export function recordCapabilities(record: LibraryRecipeRecord): string[] { return record.capabilities; }
-export function applyManagedCatalogWithdrawals(records: LibraryRecipeRecord[]): LibraryRecipeRecord[] { return records; }
+export function recordCapabilities(record: LibraryRecipeRecord): string[] {
+  return record.capabilities;
+}
+export function applyManagedCatalogWithdrawals(
+  records: LibraryRecipeRecord[],
+): LibraryRecipeRecord[] {
+  return records;
+}
