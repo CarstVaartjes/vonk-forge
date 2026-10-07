@@ -56,7 +56,7 @@ test("Chromium rejects an oversized SSE peer frame and later reads a bounded can
     return {values, equal: contractEqual(snapshot, validateComponent("FleetSnapshot", expected)), cursor: snapshot.event_cursor};
   }, {expected: recovery.payload_json});
   expect(recovered.values).toHaveLength(1);
-  expect(recovered.values[0]).toMatchObject({event_cursor: recovery.event_cursor, reset_reason: "frame-unavailable", issue: {reason_code: "fleet.frame_budget_exceeded"}});
+  expect(recovered.values[0]).toMatchObject({event_cursor: recovery.event_cursor, reset_reason: "frame-unavailable", issue: {reason_code: "fleet.stored_event_payload_unavailable", observed_bytes_at_least: null}});
   expect(recovered.equal).toBe(true);
   expect(recovered.cursor).toBe(recovery.event_cursor);
   await page.unroute(url => url.pathname === path);

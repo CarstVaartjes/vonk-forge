@@ -20,7 +20,6 @@ from vonk_control.observation_transfer import (
 from vonk_control.strict_json import serialize_json_value
 from vonk_control.telemetry import TelemetryRepository
 
-from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from tests.test_fleet_stream import (
     NODE_ID,
     NOW,
@@ -45,9 +44,10 @@ def _export_saved_event_recovery(output: Path) -> None:
             session.add(AgentNode(node_id=NODE_ID, state="active", last_seen_at=NOW))
             event = repository.append_in_session(session, _operation_draft(1))
             payload = _operation_draft(1).payload.model_dump(mode="json")
-            # Healthy writes are bounded at 8KiB. This models damage to optional
-            # saved outbox decoration, preserving the actual event identity.
-            payload["kind"] = "x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)
+            # Keep the SQL size/type/identity constraints enabled. An integer
+            # in a string field is valid SQL JSON but invalid canonical payload.
+            # Only this saved decoration is damaged; row authority stays intact.
+            payload["kind"] = 17
             session.execute(
                 update(FleetStreamEvent)
                 .where(FleetStreamEvent.id == event.id)

@@ -40,7 +40,12 @@ class FleetFrameIssue(_FleetStreamModel):
                 {
                     "if": {
                         "properties": {
-                            "reason_code": {"const": "fleet.frame_encoding_unavailable"}
+                            "reason_code": {
+                                "enum": [
+                                    "fleet.frame_encoding_unavailable",
+                                    "fleet.stored_event_payload_unavailable",
+                                ]
+                            }
                         },
                         "required": ["reason_code"],
                     },
@@ -68,7 +73,9 @@ class FleetFrameIssue(_FleetStreamModel):
         }
     )
     reason_code: Literal[
-        "fleet.frame_budget_exceeded", "fleet.frame_encoding_unavailable"
+        "fleet.frame_budget_exceeded",
+        "fleet.frame_encoding_unavailable",
+        "fleet.stored_event_payload_unavailable",
     ]
     observed_bytes_at_least: (
         Annotated[int, Field(ge=MAX_CONTROL_DOCUMENT_BYTES + 1)] | None
@@ -79,9 +86,12 @@ class FleetFrameIssue(_FleetStreamModel):
 
     @model_validator(mode="after")
     def truthful_measurement(self) -> FleetFrameIssue:
-        if self.reason_code == "fleet.frame_encoding_unavailable":
+        if self.reason_code in {
+            "fleet.frame_encoding_unavailable",
+            "fleet.stored_event_payload_unavailable",
+        }:
             if self.observed_bytes_at_least is not None:
-                raise ValueError("unencodable frame has no byte measurement")
+                raise ValueError("unavailable frame has no byte measurement")
         elif (
             self.observed_bytes_at_least is None
             or self.observed_bytes_at_least <= self.budget_bytes

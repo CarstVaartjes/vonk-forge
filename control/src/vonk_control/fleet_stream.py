@@ -14,7 +14,12 @@ from pydantic import BaseModel
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
 from .fleet_event_contract import NodeTelemetryPayload, validate_fleet_event_payload
-from .fleet_events import FleetEvent, FleetEventRepository, FleetReplayBatch
+from .fleet_events import (
+    FleetEvent,
+    FleetEventRepository,
+    FleetReplayBatch,
+    FleetStoredEventUnavailable,
+)
 from .fleet_projection import telemetry_point
 from .fleet_stream_contract import (
     FleetChangeAdapter,
@@ -159,7 +164,27 @@ class FleetStream:
                         await self._sleep(POLL_INTERVAL_SECONDS - elapsed)
                 now = self._clock()
                 last_poll = self._monotonic()
-                replay = self._events.replay_after(current_cursor, now, limit=128)
+                try:
+                    replay = self._events.replay_after(current_cursor, now, limit=128)
+                except FleetStoredEventUnavailable as error:
+                    yield _event_frame(
+                        error.event_cursor,
+                        "fleet-refresh",
+                        FleetRefreshEvent(
+                            reset_reason="frame-unavailable",
+                            event_cursor=error.event_cursor,
+                            issue=FleetFrameIssue(
+                                reason_code="fleet.stored_event_payload_unavailable",
+                                observed_bytes_at_least=None,
+                                budget_bytes=MAX_CONTROL_DOCUMENT_BYTES,
+                            ),
+                        ),
+                        retry=retry,
+                    )
+                    # This notice is not applied-state authority. End replay at
+                    # the gap; only a completed fresh capture lets the consumer
+                    # advance its applied cursor and reconnect beyond this row.
+                    return
                 reset_reason = self._reset_reason(current_cursor, replay)
                 if reset_reason is not None:
                     current_cursor = replay.high_watermark

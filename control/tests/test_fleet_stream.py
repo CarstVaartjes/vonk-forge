@@ -36,11 +36,12 @@ from vonk_control.fleet_events import (
     FleetReplayBatch,
 )
 from vonk_control.fleet_projection import FleetProjection, FleetSnapshot
-from vonk_control.fleet_stream import FleetStream, parse_last_event_id
+from vonk_control.fleet_stream import FleetStream, _event_frame, parse_last_event_id
 from vonk_control.fleet_stream_contract import (
     FleetChangeEvent,
     FleetRefreshEvent,
     FleetTelemetryEvent,
+    JobChange,
 )
 from vonk_control.models import (
     AgentNode,
@@ -1154,8 +1155,10 @@ def test_sse_route_accepts_shared_auth_and_sets_exact_headers() -> None:
     assert stream.calls == [0, 0]
 
 
-def test_oversized_saved_sparse_frame_becomes_bounded_truthful_refresh_notice() -> None:
-    """Healthy outbox writes cap at 8KiB; damaged saved bookkeeping is not ingress."""
+def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice() -> (
+    None
+):
+    """A malformed stored payload is repairable within normal SQL constraints."""
     from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
     engine, sessions, repository = _production_stream_store()
@@ -1165,7 +1168,7 @@ def test_oversized_saved_sparse_frame_becomes_bounded_truthful_refresh_notice() 
             # Corrupt the optional saved event decoration after a normal write;
             # preserve the real durable event identity/cursor and operation state.
             payload = _operation_draft(1).payload.model_dump(mode="json")
-            payload["kind"] = "x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)
+            payload["kind"] = 17
             session.execute(
                 update(FleetStreamEvent)
                 .where(FleetStreamEvent.id == event_value.id)
@@ -1173,14 +1176,18 @@ def test_oversized_saved_sparse_frame_becomes_bounded_truthful_refresh_notice() 
             )
         stream = FleetStream(repository, Telemetry({}))
 
-        async def read() -> str:
+        async def read(*, expect_closed: bool = False) -> str:
             generator = _events(stream, 0)
             try:
-                return await anext(generator)
+                frame = await anext(generator)
+                if expect_closed:
+                    with pytest.raises(StopAsyncIteration):
+                        await anext(generator)
+                return frame
             finally:
                 await generator.aclose()
 
-        frame = asyncio.run(read())
+        frame = asyncio.run(read(expect_closed=True))
         fields, data = _parsed_frame(frame)
         assert fields["event"] == "fleet-refresh"
         assert fields["id"] == str(event_value.id)
@@ -1189,9 +1196,8 @@ def test_oversized_saved_sparse_frame_becomes_bounded_truthful_refresh_notice() 
         assert refresh.event_cursor == event_value.id
         assert refresh.reset_reason == "frame-unavailable"
         assert refresh.issue is not None
-        assert refresh.issue.reason_code == "fleet.frame_budget_exceeded"
-        assert refresh.issue.observed_bytes_at_least is not None
-        assert refresh.issue.observed_bytes_at_least > refresh.issue.budget_bytes
+        assert refresh.issue.reason_code == "fleet.stored_event_payload_unavailable"
+        assert refresh.issue.observed_bytes_at_least is None
         # The row is preserved. A repaired decoration resumes the original
         # cursor and actual change, rather than inventing an empty replacement.
         with sessions.begin() as session:
@@ -1209,3 +1215,35 @@ def test_oversized_saved_sparse_frame_becomes_bounded_truthful_refresh_notice() 
         assert operation.change.fields.kind == "deploy"
     finally:
         engine.dispose()
+
+
+def test_oversized_canonical_frame_becomes_bounded_truthful_notice() -> None:
+    from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+
+    fields = JobPayload(
+        entity_kind="job",
+        entity_id="job-1",
+        kind="x" * (MAX_CONTROL_DOCUMENT_BYTES + 1),
+        state="running",
+        target_count=1,
+    )
+    data = FleetChangeEvent(
+        event_cursor=1,
+        change=JobChange(
+            entity_kind="job",
+            entity_id=fields.entity_id,
+            node_id=None,
+            occurred_at=NOW,
+            fields=fields,
+        ),
+    )
+    frame = _event_frame(1, "operation-state", data, retry=False)
+    header, body = _parsed_frame(frame)
+    assert header == {"id": "1", "event": "fleet-refresh"}
+    assert len(frame.encode("utf-8")) <= MAX_CONTROL_DOCUMENT_BYTES
+    refresh = FleetRefreshEvent.model_validate(body)
+    assert refresh.event_cursor == 1
+    assert refresh.issue is not None
+    assert refresh.issue.reason_code == "fleet.frame_budget_exceeded"
+    assert refresh.issue.observed_bytes_at_least is not None
+    assert refresh.issue.observed_bytes_at_least > refresh.issue.budget_bytes

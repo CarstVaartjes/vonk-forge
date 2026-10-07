@@ -93,6 +93,14 @@ class FleetEvent:
     expires_at: datetime
 
 
+class FleetStoredEventUnavailable(ValueError):
+    """A durable event cursor is known but its saved change is unreadable."""
+
+    def __init__(self, event_cursor: int) -> None:
+        super().__init__("Fleet stored event payload is unavailable")
+        self.event_cursor = event_cursor
+
+
 @dataclass(frozen=True, slots=True)
 class FleetRetentionWindow:
     high_watermark: int
@@ -359,26 +367,35 @@ class FleetEventRepository:
             rows = session.execute(statement).all()
         if not rows:
             raise RuntimeError("fleet event cursor singleton is not initialized")
-        events = tuple(
-            FleetEvent(
-                id=row[2],
-                event_type=row[3],
-                node_id=row[4],
-                entity_kind=row[5],
-                entity_id=row[6],
-                payload=validate_fleet_event_payload(
+        events: list[FleetEvent] = []
+        for row in rows:
+            if row[2] is None:
+                continue
+            # Only the stored canonical payload boundary is recoverable here.
+            # SQL availability, authorization and cursor allocation errors keep
+            # their original refusal semantics. Never expose the damaged value.
+            try:
+                payload = validate_fleet_event_payload(
                     row[3], row[5], row[6], row[4], row[7]
-                ),
-                occurred_at=_database_utc(row[8]),
-                expires_at=_database_utc(row[9]),
+                )
+            except ValueError as error:
+                raise FleetStoredEventUnavailable(row[2]) from error
+            events.append(
+                FleetEvent(
+                    id=row[2],
+                    event_type=row[3],
+                    node_id=row[4],
+                    entity_kind=row[5],
+                    entity_id=row[6],
+                    payload=payload,
+                    occurred_at=_database_utc(row[8]),
+                    expires_at=_database_utc(row[9]),
+                )
             )
-            for row in rows
-            if row[2] is not None
-        )
         return FleetReplayBatch(
             high_watermark=rows[0][0],
             first_retained_id=rows[0][1],
-            events=events,
+            events=tuple(events),
         )
 
 

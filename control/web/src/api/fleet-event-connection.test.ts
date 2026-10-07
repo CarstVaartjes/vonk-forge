@@ -103,6 +103,8 @@ test("canonical frame issues refuse contradictory cause evidence", () => {
   expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_budget_exceeded", 1048576))).toThrow();
   expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_budget_exceeded", 1048577, 2))).toThrow();
   expect(() => validateComponent("FleetRefreshEvent", document("fleet.frame_encoding_unavailable", null))).not.toThrow();
+  expect(() => validateComponent("FleetRefreshEvent", document("fleet.stored_event_payload_unavailable", null))).not.toThrow();
+  expect(() => validateComponent("FleetRefreshEvent", document("fleet.stored_event_payload_unavailable", 1048577))).toThrow();
 });
 
 
