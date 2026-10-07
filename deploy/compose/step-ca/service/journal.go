@@ -349,6 +349,11 @@ func (c *JournalCAS) CreateCertificateWithContext(ctx context.Context, req *casa
 		return nil, errors.New("certificate key changed")
 	}
 	chain := append([]*x509.Certificate{response.Certificate}, response.CertificateChain...)
+	// Cryptographic computation is still private here. Do not commit externally
+	// issued authority when its complete canonical response cannot be encoded.
+	if _, err := makeIssuedReply(a.Binding, chain); err != nil {
+		return nil, err
+	}
 	if err := c.Journal.Commit(a, chain, req.Provisioner); err != nil {
 		return nil, err
 	}

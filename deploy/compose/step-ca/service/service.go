@@ -191,11 +191,12 @@ func (s *Service) sign(w http.ResponseWriter, r *http.Request) {
 		failReply(w, err)
 		return
 	}
-	encoded := make([]string, len(chain))
-	for i, certificate := range chain {
-		encoded[i] = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw}))
+	reply, err := makeIssuedReply(binding, chain)
+	if err != nil {
+		failReply(w, err)
+		return
 	}
-	jsonReply(w, 201, issuedReply{"issued", binding, encoded[0], encoded[1], encoded})
+	jsonReply(w, 201, reply)
 }
 
 func (s *Service) validateCommitted(binding Binding, csr *x509.CertificateRequest, chain []*x509.Certificate) error {

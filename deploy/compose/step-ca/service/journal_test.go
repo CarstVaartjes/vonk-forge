@@ -320,6 +320,41 @@ func TestNodeSubjectPreservesExactIdentityBeforeAndAfterDER(t *testing.T) {
 	}
 }
 
+func TestUnrepresentableIssuedResponseCannotCommitCertificate(t *testing.T) {
+	f := newJournalFixture(t)
+	issuerTemplate := *f.c.Policy.Issuer
+	issuerTemplate.RawSubject = nil
+	issuerTemplate.Subject = pkix.Name{CommonName: strings.Repeat("i", 24*1024)}
+	der, err := x509.CreateCertificate(rand.Reader, &issuerTemplate, &issuerTemplate, issuerTemplate.PublicKey, f.c.Soft.Signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.c.Policy.Issuer = issuer
+	f.c.Soft.CertificateChain = []*x509.Certificate{issuer}
+	f.binding.IssuerFingerprint = digest(issuer.Raw)
+	f.binding.PolicySHA256 = f.c.Policy.policyDigest()
+	attempt, _, err := f.j.Claim(f.binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := f.c.CreateCertificateWithContext(withAttempt(context.Background(), *attempt), f.request())
+	var cause *fault
+	if response != nil || !errors.As(err, &cause) || cause.code != "certificate.response_unrepresentable" {
+		t.Fatalf("oversized actual certificate response did not fail before commit: %v", err)
+	}
+	if _, err := f.j.Get(certsTable, []byte(f.binding.Serial)); !nosql.IsErrNotFound(err) {
+		t.Fatalf("unrepresentable response committed usable leaf: %v", err)
+	}
+	receipt, err := f.j.Observe(f.binding)
+	if err != nil || len(receipt.Chain) != 0 {
+		t.Fatalf("unrepresentable response published receipt: %v", err)
+	}
+}
+
 func TestJournalProcessDeathBeforeAndAfterCommit(t *testing.T) {
 	if phase := os.Getenv("VONK_CA_PROCESS_DEATH_PHASE"); phase != "" {
 		path := os.Getenv("VONK_CA_PROCESS_DEATH_DB")
