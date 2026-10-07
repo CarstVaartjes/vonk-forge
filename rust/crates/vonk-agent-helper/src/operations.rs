@@ -549,7 +549,7 @@ struct RuntimeRequestGrantBinding<'a> {
     reconciliation_identity: Option<&'a RecipeReconciliationIdentity>,
     start_plan_sha256: Option<&'a str>,
     stop_plan_sha256: Option<&'a str>,
-    run_generation: Option<u32>,
+    run_generation: Option<u64>,
     runtime_run_id: Option<&'a uuid::Uuid>,
     runtime_target_id: Option<&'a uuid::Uuid>,
     runtime_installation_id: Option<&'a uuid::Uuid>,
@@ -583,7 +583,7 @@ const RUNTIME_GENERATION_FENCE_SCHEMA_VERSION: u8 = 2;
 struct RuntimeEffectIdentity {
     runtime_id: uuid::Uuid,
     installation_id: uuid::Uuid,
-    run_generation: u32,
+    run_generation: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -1387,7 +1387,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .runtime_target_id
                     .ok_or(OperationError::InvalidOperation)?;
                 if generation == 0
-                    || generation > i32::MAX as u32
+                    || generation > i64::MAX as u64
                     || request.run_generation != Some(generation)
                     || grant.run_generation != Some(generation)
                     || grant.runtime_run_id != Some(&logical_run_id)
@@ -1799,7 +1799,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || fence.installation_id != installation_id
             || fence.runtime_id != runtime_id
             || fence.highest_generation == 0
-            || fence.highest_generation > i32::MAX as u32
+            || fence.highest_generation > i64::MAX as u64
             || canonical_json(&fence).map_err(|_| OperationError::InvalidArtifact)? != bytes
         {
             return Err(OperationError::InvalidArtifact);
@@ -1819,7 +1819,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let bytes = canonical_json(fence).map_err(|_| OperationError::InvalidOperation)?;
         if fence.schema_version != RUNTIME_GENERATION_FENCE_SCHEMA_VERSION
             || fence.highest_generation == 0
-            || fence.highest_generation > i32::MAX as u32
+            || fence.highest_generation > i64::MAX as u64
             || bytes.len() as u64 > MAX_RUNTIME_GENERATION_FENCE_BYTES
         {
             return Err(OperationError::InvalidOperation);
@@ -1851,7 +1851,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: &RuntimeEffectIdentity,
         use_kind: RuntimeGenerationFenceUse,
     ) -> Result<(), OperationError> {
-        if identity.run_generation == 0 || identity.run_generation > i32::MAX as u32 {
+        if identity.run_generation == 0 || identity.run_generation > i64::MAX as u64 {
             return Err(OperationError::InvalidOperation);
         }
         let current =
@@ -3013,7 +3013,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<(), OperationError> {
         if !lower_hex(plan_digest, 64)
             || identity.run_generation == 0
-            || identity.run_generation > i32::MAX as u32
+            || identity.run_generation > i64::MAX as u64
         {
             return Err(OperationError::InvalidOperation);
         }
@@ -4069,7 +4069,7 @@ fn validate_runtime_start_plan(plan: &RecipeStartPayload) -> Result<(), Operatio
         _ => false,
     };
     if plan.run_generation == 0
-        || plan.run_generation > i32::MAX as u32
+        || plan.run_generation > i64::MAX as u64
         || placement.rank >= placement.world_size
         || !lower_hex(&plan.plan_digest, 64)
         || !valid_oci_digest(plan.image_digest())
@@ -4111,7 +4111,7 @@ fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), Operation
         .as_ref()
         .ok_or(OperationError::InvalidOperation)?;
     if plan.run_generation == 0
-        || plan.run_generation > i32::MAX as u32
+        || plan.run_generation > i64::MAX as u64
         || !lower_hex(&plan.plan_digest, 64)
         || !valid_oci_digest(&compiled.runtime_image.image_digest)
         || !(1..=3600).contains(&job.timeout_seconds)
@@ -4132,7 +4132,7 @@ fn validate_runtime_job_plan(plan: &RecipeJobRunRequest) -> Result<(), Operation
 fn validate_runtime_stop_plan(plan: &RecipeStopPayload) -> Result<(), OperationError> {
     let encoded_claim = canonical_json(plan).map_err(|_| OperationError::InvalidOperation)?;
     if plan.run_generation == 0
-        || plan.run_generation > i32::MAX as u32
+        || plan.run_generation > i64::MAX as u64
         || !lower_hex(&plan.plan_digest, 64)
         || !lower_hex(&plan.recipe_content_sha256, 64)
         || !(1..=600).contains(&plan.stop_timeout_seconds)
@@ -5023,7 +5023,7 @@ mod tests {
         logical_run_id: uuid::Uuid,
         target_id: uuid::Uuid,
         installation_id: uuid::Uuid,
-        run_generation: u32,
+        run_generation: u64,
         plan_digest: String,
         calls: Arc<Mutex<Vec<Vec<String>>>>,
     }
@@ -5503,7 +5503,7 @@ mod tests {
         assert!(!fence.was_cancelled(identity).unwrap());
     }
 
-    fn runtime_effect_identity(run_generation: u32) -> RuntimeEffectIdentity {
+    fn runtime_effect_identity(run_generation: u64) -> RuntimeEffectIdentity {
         RuntimeEffectIdentity {
             runtime_id: uuid::Uuid::parse_str(RUN_ID).unwrap(),
             installation_id: uuid::Uuid::parse_str("50000000-0000-4000-8000-000000000005").unwrap(),
@@ -5522,7 +5522,7 @@ mod tests {
         compiled
     }
 
-    fn recipe_start_plan_for_authority(run_generation: u32) -> RecipeStartPayload {
+    fn recipe_start_plan_for_authority(run_generation: u64) -> RecipeStartPayload {
         let compiled = compiled_plan_for_runtime_authority();
         RecipeStartPayload {
             compiled_execution_plan: compiled,
@@ -5539,7 +5539,7 @@ mod tests {
     }
 
     fn recipe_stop_plan_for_authority(
-        run_generation: u32,
+        run_generation: u64,
         cancel_pending_start: bool,
     ) -> RecipeStopPayload {
         let compiled = compiled_plan_for_runtime_authority();
@@ -5563,7 +5563,7 @@ mod tests {
     struct RuntimeRequestTestParts {
         action: HostRuntimeAction,
         arguments: Vec<String>,
-        run_generation: u32,
+        run_generation: u64,
         start_plan: Option<RecipeStartPayload>,
         stop_plan: Option<RecipeStopPayload>,
     }
@@ -5595,7 +5595,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let start_plan = recipe_start_plan_for_authority(1);
+        let start_plan = recipe_start_plan_for_authority(i64::MAX as u64);
         let arguments = executor
             .projected_runtime_arguments(
                 &start_plan.compiled_execution_plan,
@@ -5636,11 +5636,11 @@ mod tests {
                 identity: RuntimeEffectIdentity {
                     runtime_id,
                     installation_id,
-                    run_generation: 1,
+                    run_generation,
                 },
                 logical_run_id,
                 plan_digest,
-            } if runtime_id == start_plan.run_id
+            } if run_generation == i64::MAX as u64 && runtime_id == start_plan.run_id
                 && installation_id == start_plan.installation_id
                 && logical_run_id == start_plan.run_id
                 && plan_digest == start_plan.plan_digest
@@ -5813,6 +5813,51 @@ mod tests {
             .unwrap();
         assert_eq!(stored.highest_generation, 2);
         assert!(!stored.cancelled);
+    }
+
+    #[test]
+    fn full_controller_generation_fence_survives_restart_without_truncation() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        let helper =
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
+        let identity = runtime_effect_identity(i64::MAX as u64);
+        helper
+            .update_runtime_generation_fence(
+                &identity,
+                RuntimeGenerationFenceUse::Stop {
+                    cancel_pending_start: true,
+                },
+            )
+            .unwrap();
+        let restarted =
+            OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+        let stored = restarted
+            .read_runtime_generation_fence(identity.installation_id, identity.runtime_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.highest_generation, i64::MAX as u64);
+        assert!(stored.cancelled);
+        assert!(matches!(
+            restarted.update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
+        let stale = RuntimeEffectIdentity {
+            run_generation: u64::from(u32::MAX) + 1,
+            ..identity
+        };
+        assert!(matches!(
+            restarted.update_runtime_generation_fence(&stale, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
+        let invalid = RuntimeEffectIdentity {
+            run_generation: i64::MAX as u64 + 1,
+            ..identity
+        };
+        assert!(matches!(
+            restarted.update_runtime_generation_fence(&invalid, RuntimeGenerationFenceUse::Start),
+            Err(OperationError::InvalidOperation)
+        ));
     }
 
     #[test]

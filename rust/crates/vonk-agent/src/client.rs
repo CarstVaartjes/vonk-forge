@@ -398,7 +398,7 @@ pub fn build_exact_recipe_run_observations(
     let mut run_ids = std::collections::BTreeSet::new();
     for observation in observations {
         if observation.run_generation == 0
-            || observation.run_generation > i32::MAX as u32
+            || observation.run_generation > i64::MAX as u64
             || !run_ids.insert(observation.run_id)
         {
             return Err(ClientError::Protocol);
@@ -415,7 +415,7 @@ pub fn build_exact_recipe_run_observations(
 pub enum RecipeRunDisposition {
     /// The Controller has a record of the run; its integrity checks apply.
     /// `run_generation` is its accepted generation while the run is running.
-    Known { run_generation: Option<u32> },
+    Known { run_generation: Option<u64> },
     /// The Controller has no record of the run and never will accept it.
     Unowned,
 }
@@ -779,8 +779,8 @@ impl AgentHttpClient {
                     .headers()
                     .get(RECIPE_RUN_GENERATION_HEADER)
                     .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.parse::<u32>().ok())
-                    .filter(|generation| *generation > 0),
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .filter(|generation| (1..=i64::MAX as u64).contains(generation)),
             }),
             Some(value) if value.as_bytes() == RECIPE_RUN_UNOWNED.as_bytes() => {
                 Ok(RecipeRunDisposition::Unowned)
@@ -1771,7 +1771,7 @@ impl AgentHttpClient {
 struct HostRuntimePlanBinding {
     start_plan_sha256: Option<String>,
     stop_plan_sha256: Option<String>,
-    run_generation: Option<u32>,
+    run_generation: Option<u64>,
     runtime_run_id: Option<uuid::Uuid>,
     runtime_target_id: Option<uuid::Uuid>,
     runtime_installation_id: Option<uuid::Uuid>,
@@ -4436,7 +4436,7 @@ mod tests {
         let run_id = Uuid::new_v4();
         let observations = vec![ExactRecipeRunObservation {
             run_id,
-            run_generation: 3,
+            run_generation: i64::MAX as u64,
             process_running: false,
             endpoint_ready: None,
         }];
@@ -4456,7 +4456,36 @@ mod tests {
         assert_eq!(body["runs"][0]["run_id"], run_id.to_string());
         assert_eq!(body["runs"][0]["process_running"], false);
         assert_eq!(body["runs"][0]["endpoint_ready"], serde_json::Value::Null);
-        assert_eq!(body["runs"][0]["run_generation"], 3);
+        assert_eq!(body["runs"][0]["run_generation"], i64::MAX as u64);
+    }
+
+    #[tokio::test]
+    async fn disposition_retains_full_controller_generation_header() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let size = stream.read(&mut buffer).unwrap();
+                assert_ne!(size, 0);
+                request.extend_from_slice(&buffer[..size]);
+            }
+            write!(stream, "HTTP/1.1 200 OK\r\nx-vonk-recipe-run-generation: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", i64::MAX).unwrap();
+        });
+        let client = authenticated_test_client(
+            &format!("http://{address}/"),
+            "spk_0123456789abcdef0123456789abcdef",
+        );
+        let disposition = client.recipe_run_disposition(Uuid::new_v4()).await.unwrap();
+        assert_eq!(
+            disposition,
+            RecipeRunDisposition::Known {
+                run_generation: Some(i64::MAX as u64)
+            }
+        );
+        server.join().unwrap();
     }
 
     #[tokio::test]

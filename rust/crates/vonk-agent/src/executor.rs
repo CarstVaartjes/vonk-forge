@@ -1986,7 +1986,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let placement = spec.runtime.placement.clone();
                 let run_id = request.run_id.to_string();
                 let inspection_identity = Some(RecipeRunStartIdentity {
-                    run_generation: u64::from(request.run_generation),
+                    run_generation: request.run_generation,
                 });
                 let collective_readiness =
                     matches!(request.phase, Some(RecipeStartPhase::CollectiveReadiness));
