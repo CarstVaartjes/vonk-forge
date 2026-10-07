@@ -11,6 +11,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .admission_locking import is_admission_contention, label_transaction
+from .fleet_event_contract import NodeTelemetryPayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
     AgentNode,
@@ -268,10 +269,9 @@ class TelemetryMaintenance:
                     node_id=pointer.node_id,
                     entity_kind="node-telemetry-latest",
                     entity_id=pointer.node_id,
-                    payload={
-                        "node_id": pointer.node_id,
-                        "sample_id": pointer.sample_id,
-                    },
+                    payload=NodeTelemetryPayload(
+                        node_id=pointer.node_id, sample_id=pointer.sample_id
+                    ),
                 ),
             )
             session.delete(pointer)

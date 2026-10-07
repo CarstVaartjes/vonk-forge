@@ -18,6 +18,9 @@ from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.jobs import JobService
 from vonk_control.models import Base, CatalogDocument, User
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityService
+from vonk_control.recipe_image_availability_view_contract import (
+    RecipeImageAvailabilityView,
+)
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
@@ -151,7 +154,7 @@ def test_installed_recipe_cancel_recovers_dropped_acceptance_and_settles(
             "reason": CANCEL_REASON,
         }
         observed = service.get_operator_operation(operation.id)
-        assert not isinstance(observed, dict)
+        assert isinstance(observed, RecipeImageAvailabilityView)
         assert observed.state == "cancelled"
         assert observed.cancellation is not None
         assert observed.cancellation.cancel_request_id == CANCEL_REQUEST_KEY

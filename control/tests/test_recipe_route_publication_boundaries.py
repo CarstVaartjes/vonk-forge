@@ -83,9 +83,9 @@ class _BlockedAcknowledgement:
 
 
 def _live_aliases(root: Path) -> set[str]:
-    routes = verify_active_route_bundle(root).routes["routes"]
-    assert isinstance(routes, dict)
-    return set(routes)
+    bundle = verify_active_route_bundle(root).routes
+    assert bundle is not None
+    return set(bundle.routes)
 
 
 def _competing_change_is_not_blocked(base, root: Path, first_run: str) -> None:

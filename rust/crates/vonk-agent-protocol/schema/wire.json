@@ -8115,7 +8115,8 @@
     "RecipeOperationCode": {
       "description": "Recipe operation conflicts.",
       "enum": [
-        "recipe.operation_conflict"
+        "recipe.operation_conflict",
+        "recipe.evidence_unproven"
       ],
       "title": "RecipeOperationCode",
       "type": "string"

@@ -10,11 +10,12 @@ from pathlib import Path
 
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.models import ArtifactLifecycleGate, Base, Job
+from vonk_control.model_cache import ModelCacheService
+from vonk_control.models import ArtifactLifecycleGate, Base, Job, ModelCacheOperation
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
 from .recipe_removal_review_support import remove_after_review
-from .test_model_cache import _remove_model
+from .test_model_cache import _remove_model, threaded_cache  # noqa: F401 - fixture
 from .test_model_removal_reference_lifecycle import (
     _force_model_request,
     _one_model,
@@ -147,3 +148,59 @@ def test_accepted_image_request_waits_for_exact_lock_and_recovers_after_restart(
         )
         assert gate is not None and gate.removal_owner_id is None
     assert receipt_file.exists()
+
+
+def test_persisted_model_manifest_recovers_through_removal_gates_after_restart(
+    threaded_cache,  # noqa: F811 - imported pytest fixture
+    tmp_path: Path,
+) -> None:
+    service, sessions = threaded_cache
+    model = _one_model(tmp_path, "restart-manifest-gate")
+    selector = _register_model(sessions, model)
+    digest, artifact, set_digest = _seed_model(
+        service, tmp_path, model, str(uuid.uuid4())
+    )
+    removal = _remove_model(
+        service,
+        selector,
+        actor="operator",
+        request_key=str(uuid.uuid4()),
+        model_content_sha256=digest,
+    )
+    accepted = _force_model_request(
+        service,
+        selector=selector,
+        digest=digest,
+        artifact=artifact,
+        request_key=str(uuid.uuid4()),
+    )
+    with sessions() as session:
+        stored = session.get(ModelCacheOperation, accepted.id)
+        assert stored is not None and isinstance(stored.payload, dict)
+        assert stored.artifact_set_sha256 == set_digest
+        assert stored.plan_digest == accepted.plan_digest
+    object_digest = hashlib.sha256(b"abc").hexdigest()
+    object_path = service._object_path(object_digest)
+    before_inode = object_path.stat().st_ino
+    recovered = ModelCacheService(
+        sessions, service.root, reserve_bytes=0, fixture_sources=True
+    )
+    try:
+        with recovered._model_storage_lock(set_digest, model_set=True):
+            for _ in range(4):
+                if recovered.reconcile_requested_removals():
+                    break
+            assert recovered.get_operation(removal.id).state == "cancelled"
+            assert recovered._claim_operations(limit=1, respect_backoff=False) == []
+            assert object_path.read_bytes() == b"abc"
+            assert object_path.stat().st_ino == before_inode
+        assert recovered.reconcile_removal_gates() == 1
+        recovered.run_pending()
+        done = recovered.get_operation(accepted.id)
+        assert done.state == "succeeded"
+        assert done.request_key == accepted.request_key
+        assert done.plan_digest == accepted.plan_digest
+        assert done.artifact_set_sha256 == set_digest
+        assert object_path.read_bytes() == b"abc"
+    finally:
+        recovered.close()
