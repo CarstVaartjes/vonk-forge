@@ -708,6 +708,59 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
         _issue(bounded, NODE_ID, _csr(), NOW)
 
 
+def test_sign_wire_budget_stays_bounded_with_larger_crl_transport_budget(
+    tmp_path: Path,
+) -> None:
+    holder: dict[str, _Material] = {}
+    seen: list[_SignExchange] = []
+    fail_sign = True
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path == "/1.0/crl":
+            return httpx2.Response(200, content=b"x" * (70 * 1024))
+        if fail_sign:
+            return httpx2.Response(201, content=b"x" * (64 * 1024 + 1))
+        return _success_response(request, holder["material"], seen)
+
+    provider, material = _provider(tmp_path, handler, max_response_bytes=1024 * 1024)
+    holder["material"] = material
+    assert (
+        len(provider._request("GET", "/1.0/crl", None, accept="application/pkix-crl"))
+        == 70 * 1024
+    )
+    csr = _csr()
+    binding = provider.prepare_request(
+        NODE_ID, csr, NOW, purpose="enrollment", source_serial=None, generation=1
+    )
+    with pytest.raises(StepCAError, match="too large"):
+        provider.issue_node(NODE_ID, csr, NOW, request=binding)
+    fail_sign = False
+    issued = provider.issue_node(NODE_ID, csr, NOW, request=binding)
+    assert issued.serial == binding.serial
+
+
+def test_unrepresentable_certificate_generation_refuses_before_ca_effect(
+    tmp_path: Path,
+) -> None:
+    seen: list[_SignExchange] = []
+    holder: dict[str, _Material] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return _success_response(request, holder["material"], seen)
+
+    provider, material = _provider(tmp_path, handler)
+    holder["material"] = material
+    csr = _csr()
+    binding = provider.prepare_request(
+        NODE_ID, csr, NOW, purpose="enrollment", source_serial=None, generation=2**31
+    )
+    with pytest.raises(ValueError):
+        provider.issue_node(NODE_ID, csr, NOW, request=binding)
+    assert seen == []
+    issued = _issue(provider, NODE_ID, csr, NOW)
+    assert issued.node_id == NODE_ID and len(seen) == 1
+
+
 @pytest.mark.parametrize(
     "url",
     (

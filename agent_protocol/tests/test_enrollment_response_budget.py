@@ -14,6 +14,8 @@ from vonk_agent_protocol.enrollment import MAX_ENROLLMENT_RESPONSE_BYTES
 def test_response_budget_counts_complete_utf8_envelope_and_recovers(
     bootstrap: bool,
 ) -> None:
+    model: type[EnrollmentBootstrapResponse | IssuedCertificateResponse]
+    body: dict[str, object]
     if bootstrap:
         model = EnrollmentBootstrapResponse
         field = "ca_pem"
@@ -44,13 +46,13 @@ def test_response_budget_counts_complete_utf8_envelope_and_recovers(
     # These strings fit every declared character bound, but their real UTF-8
     # bytes and JSON escapes must be charged against the whole body.
     for padding in ("é" * remaining, "\n" * remaining):
-        oversized = {**body, field: body[field] + padding}
+        oversized = {**body, field: "certificate" + padding}
         with pytest.raises(ValidationError, match="enrollment response exceeds"):
             model.model_validate(oversized)
-    boundary = {**body, field: body[field] + "x" * remaining}
+    boundary = {**body, field: "certificate" + "x" * remaining}
     accepted = model.model_validate(boundary)
     assert len(canonical_message(accepted)) == MAX_ENROLLMENT_RESPONSE_BYTES
     assert getattr(accepted, field) == boundary[field]
     with pytest.raises(ValidationError, match="enrollment response exceeds"):
-        model.model_validate({**boundary, field: boundary[field] + "x"})
+        model.model_validate({**boundary, field: getattr(accepted, field) + "x"})
     assert canonical_message(model.model_validate(body)) == canonical_message(original)

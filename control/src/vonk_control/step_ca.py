@@ -19,6 +19,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 from pydantic import BaseModel, ConfigDict, ValidationError
+from vonk_agent_protocol import IssuedCertificateResponse, canonical_message
+from vonk_agent_protocol.enrollment import MAX_ENROLLMENT_RESPONSE_BYTES
 
 from .ca_issuance_contract import (
     CertificateAbsentReply,
@@ -385,6 +387,7 @@ class StepCertificateAuthority(CertificateAuthority):
             or request.policy_sha256 != expected.policy_sha256
         ):
             raise ValueError("CA request no longer matches exact issuer policy or CSR")
+        self._validate_sign_response_capacity(request)
         raw_response = self._json_request(
             "POST",
             "/1.0/vonk/sign",
@@ -634,6 +637,33 @@ class StepCertificateAuthority(CertificateAuthority):
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise StepCAError("step-ca returned malformed JSON") from error
 
+    def _validate_sign_response_capacity(
+        self, request: CertificateIssuanceBinding
+    ) -> None:
+        # The CA's committed reply includes each PEM twice (crt/ca and
+        # certChain). A complete sign reply bounded to 64 KiB therefore spends
+        # at most half that budget on the two PEMs in the agent response.
+        # Charge the actual outgoing metadata independently BEFORE CA effects;
+        # do not assume the CA transport bound covers the agent envelope.
+        metadata = IssuedCertificateResponse(
+            node_id=request.node_id,
+            certificate_pem="x",
+            chain_pem="x",
+            serial=request.serial,
+            fingerprint="0" * 64,
+            not_before=datetime.fromisoformat(request.not_before).isoformat(),
+            not_after=datetime.fromisoformat(request.not_after).isoformat(),
+            generation=request.generation,
+        )
+        maximum_response = (
+            len(canonical_message(metadata)) - 2 + MAX_ENROLLMENT_RESPONSE_BYTES // 2
+        )
+        if maximum_response > MAX_ENROLLMENT_RESPONSE_BYTES:
+            raise ValueError(
+                f"issued response cannot fit {MAX_ENROLLMENT_RESPONSE_BYTES} bytes "
+                f"(upper bound {maximum_response})"
+            )
+
     def _request(
         self,
         method: str,
@@ -653,7 +683,11 @@ class StepCertificateAuthority(CertificateAuthority):
                     raise StepCAError("step-ca redirects are forbidden")
                 output = bytearray()
                 for chunk in response.iter_bytes():
-                    if len(output) + len(chunk) > self._max_response_bytes:
+                    observed = len(output) + len(chunk)
+                    if observed > self._max_response_bytes or (
+                        path == "/1.0/vonk/sign"
+                        and observed > MAX_ENROLLMENT_RESPONSE_BYTES
+                    ):
                         raise StepCAError("step-ca response is too large")
                     output.extend(chunk)
                 if not response.is_success:
