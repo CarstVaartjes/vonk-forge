@@ -17,7 +17,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
 from threading import Thread
-from typing import cast
 
 import pytest
 from cryptography import x509
@@ -38,12 +37,30 @@ def _control_schema():
     )
 
 
+def _compatibility_schema():
+    return json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "src/cluster_profiles/schemas/cli-update-contract.schema.json"
+        ).read_text()
+    )
+
+
 def _controller_observation() -> dict[str, object]:
     return {
+        "observed_at": "2026-10-07T00:00:00Z",
+        "compatibility_schema_sha256": contract_fingerprint(_compatibility_schema()),
         "api": {
             "source_sha": "a" * 40,
             "control_contract_sha256": contract_fingerprint(_control_schema()),
-        }
+        },
+        "expected_worker_contract_sha256": "d" * 64,
+        "worker_count": 1,
+        "worker_membership_sha256": "e" * 64,
+        "worker_source_sha": "f" * 40,
+        "worker_contract_sha256": "d" * 64,
+        "worker_compatibility": "compatible",
+        "worker_issue": None,
     }
 
 
@@ -119,6 +136,10 @@ def _signed_publication(
         archive.writestr(
             "cluster_profiles/schemas/control-openapi.json",
             json.dumps(_control_schema()),
+        )
+        archive.writestr(
+            "cluster_profiles/schemas/cli-update-contract.schema.json",
+            json.dumps(_compatibility_schema()),
         )
     wheel = wheel if wheel is not None else wheel_buffer.getvalue()
     generation = "a" * 64
@@ -275,7 +296,7 @@ def test_update_installs_only_changed_signed_wheel(
         origin="https://install.vonkforge.ai",
         apply=True,
         download=download,
-        controller_observation=_controller_observation,
+        compatibility_observation=_controller_observation,
     )
     assert applied["updated"] is True and len(seen) == 1
     assert applied["previous"] == checked["current"]
@@ -293,7 +314,7 @@ def test_update_installs_only_changed_signed_wheel(
         origin="https://install.vonkforge.ai",
         apply=True,
         download=download,
-        controller_observation=_controller_observation,
+        compatibility_observation=_controller_observation,
     )
     assert unchanged["updated"] is False and len(seen) == 1
 
@@ -576,11 +597,50 @@ def test_signed_client_update_retains_install_until_deployed_contract_matches(
         origin="https://install.vonkforge.ai",
         apply=True,
         download=lambda url, _maximum: objects[url],
-        controller_observation=lambda: {"api": api},
+        compatibility_observation=lambda: {**_controller_observation(), "api": api},
     )
     assert result["updated"] is False
     assert result["current"] == current
     assert result["accepted_source_sha"] == "b" * 40
+    assert result["compatibility"] == "controller-contract-unavailable-or-different"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {
+            "worker_compatibility": "unknown",
+            "worker_issue": "worker-source-mixed",
+            "worker_source_sha": None,
+        },
+        {"worker_count": 0},
+        {"worker_source_sha": None},
+        {"expected_worker_contract_sha256": None},
+        {"worker_contract_sha256": "0" * 64},
+        {"compatibility_schema_sha256": "0" * 64},
+    ],
+)
+def test_update_preserves_installed_tool_for_unknown_or_mixed_complete_workers(
+    tmp_path, monkeypatch, change
+):
+    key, objects = _signed_publication(tmp_path, source_sha="b" * 40)
+    current = {"version": "0.1.1", "source_sha": "c" * 40}
+    monkeypatch.setattr(cli_update, "current_build", lambda: current)
+    monkeypatch.setattr(
+        cli_update.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("unknown membership installed a wheel"),
+    )
+    result = cli_update.run_update(
+        channel="stable",
+        public_key=key,
+        origin="https://install.vonkforge.ai",
+        apply=True,
+        download=lambda url, _maximum: objects[url],
+        compatibility_observation=lambda: {**_controller_observation(), **change},
+    )
+    assert result["updated"] is False
+    assert result["current"] == current
     assert result["compatibility"] == "controller-contract-unavailable-or-different"
 
 
@@ -711,22 +771,21 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
         url.removeprefix("https://install.vonkforge.ai"): content
         for url, content in objects.items()
     }
-    from cluster_profiles.generated_control.models.api_runtime_observation import (
-        ApiRuntimeObservation,
-    )
-    from cluster_profiles.generated_control.models.platform_observation import (
-        PlatformObservation,
-    )
-
-    platform = PlatformObservation(
-        observed_at=now,
-        api=ApiRuntimeObservation.from_dict(
-            cast(dict[str, object], _controller_observation()["api"])
-        ),
-        workers=None,
-        worker_issue="worker-observation-unavailable",
-    )
-    responses["/api/platform"] = json.dumps(platform.to_dict()).encode()
+    compatibility = _controller_observation()
+    with zipfile.ZipFile(wheel) as archive:
+        candidate_identity = json.loads(
+            archive.read("cluster_profiles/build-identity.json")
+        )
+    compatibility["expected_worker_contract_sha256"] = candidate_identity[
+        "worker_contract_sha256"
+    ]
+    compatibility["worker_contract_sha256"] = candidate_identity[
+        "worker_contract_sha256"
+    ]
+    responses["/api/cli/contract"] = json.dumps(compatibility).encode()
+    # The Controller has moved its whole-platform transport to NDJSON. The
+    # previously installed stable updater must use only its bounded authority.
+    responses["/api/platform"] = b'{"kind":"observation-header"}\n'
     token = os.urandom(32).hex()
     token_path = workspace / "test-controller-token"
     token_path.write_text(token)
@@ -739,7 +798,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
         def do_GET(self) -> None:
             requests.append(self.path)
             if (
-                self.path == "/api/platform"
+                self.path == "/api/cli/contract"
                 and self.headers.get("Authorization") != f"Bearer {token}"
             ):
                 self.send_response(401)
@@ -747,7 +806,12 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
                 return
             content = responses.get(self.path)
             self.send_response(200 if content is not None else 404)
-            self.send_header("Content-Type", "application/json")
+            self.send_header(
+                "Content-Type",
+                "application/x-ndjson"
+                if self.path == "/api/platform"
+                else "application/json",
+            )
             self.end_headers()
             self.wfile.write(content or b"")
 
@@ -808,7 +872,8 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             assert receipt["compatibility"] == "compatible"
             assert receipt["previous"] == before and receipt["current"] == after
             assert requests.count(wheel_path) == 2
-            assert requests.count("/api/platform") == 1
+            assert requests.count("/api/cli/contract") == 1
+            assert "/api/platform" not in requests
             # uv's real tool receipt must now reference the installed accepted
             # bytes rather than retaining the initial fixture wheel.
             tool_receipt = (python.parent.parent / "uv-receipt.toml").read_text()
@@ -822,6 +887,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
                             "after": after,
                             "receipt": receipt,
                             "tampered_wheel_retained_prior_tool_receipt": True,
+                            "stable_updater_after_platform_ndjson": True,
                             "real_uv_tool_receipt_changed": receipt_path.read_bytes()
                             != before_tool_receipt,
                         },

@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 aec9f6db5c5221fbf6202cd2f68fc0ee2f0cce45e8d0e8d77fa7f27222ebf4c0. Do not edit.
+// Generated from canonical OpenAPI SHA256 984b9196a059d06b9faa4d19ed63f62631bdec19f0aeb99f44c9348eaf2731d2. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -214,6 +214,23 @@ export interface paths {
         };
         /** Get Managed Recipe Catalog Sync Status */
         get: operations["getManagedRecipeCatalogSyncStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/cli/contract": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cli Update Contract */
+        get: operations["getCliUpdateContract"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2586,6 +2603,34 @@ export interface components {
         CliTokenDownload: {
             /** Expires At */
             expires_at: string;
+        };
+        /** CliUpdateContract */
+        CliUpdateContract: {
+            api: components["schemas"]["ApiRuntimeObservation"];
+            /** Compatibility Schema Sha256 */
+            compatibility_schema_sha256: string;
+            /** Expected Worker Contract Sha256 */
+            expected_worker_contract_sha256: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Worker Compatibility
+             * @enum {string}
+             */
+            worker_compatibility: "compatible" | "unknown" | "incompatible";
+            /** Worker Contract Sha256 */
+            worker_contract_sha256: string | null;
+            /** Worker Count */
+            worker_count: number | ExactNumber;
+            /** Worker Issue */
+            worker_issue: ("worker-observation-unavailable" | "worker-provenance-unavailable" | "worker-source-mixed" | "worker-contract-mixed" | "api-worker-contract-unavailable" | "worker-contract-incompatible") | null;
+            /** Worker Membership Sha256 */
+            worker_membership_sha256: string;
+            /** Worker Source Sha */
+            worker_source_sha: string | null;
         };
         /**
          * ClusterMappingCode
@@ -5906,28 +5951,12 @@ export interface components {
         ModelCacheCancellation: {
             /** Actor */
             actor: string;
-            observation?: components["schemas"]["ModelCacheCancellationObservation"] | null;
             /** Reason */
             reason: string;
             /** Request Key */
             request_key: string;
             /** Requested At */
             requested_at: string;
-        };
-        /**
-         * ModelCacheCancellationObservation
-         * @description The lifecycle owner's actual terminal cancellation evidence.
-         */
-        ModelCacheCancellationObservation: {
-            /** Detail */
-            detail: string;
-            /**
-             * Effect
-             * @enum {string}
-             */
-            effect: "unknown" | "none" | "stopped";
-            /** Observed At */
-            observed_at: string;
         };
         /**
          * ModelCacheCancellationRequest
@@ -6795,7 +6824,6 @@ export interface components {
             id: string;
             /** Kind */
             kind: string;
-            model_cache_cancellation?: components["schemas"]["ModelCacheCancellation"] | null;
             /** Next Attempt At */
             next_attempt_at?: string | null;
             /** Node Ids */
@@ -13189,6 +13217,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+        };
+    };
+    getCliUpdateContract: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CliUpdateContract"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };

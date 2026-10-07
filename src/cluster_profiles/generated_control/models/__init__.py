@@ -104,6 +104,9 @@ from .catalog_sync_code import CatalogSyncCode
 from .catalog_sync_state import CatalogSyncState
 from .certificate_state import CertificateState
 from .cli_token_download import CliTokenDownload
+from .cli_update_contract import CliUpdateContract
+from .cli_update_contract_worker_compatibility import CliUpdateContractWorkerCompatibility
+from .cli_update_contract_worker_issue_type_0 import CliUpdateContractWorkerIssueType0
 from .cluster_mapping_code import ClusterMappingCode
 from .compatibility_identity import CompatibilityIdentity
 from .compatibility_preparation import CompatibilityPreparation
@@ -951,6 +954,9 @@ __all__ = (
     "CatalogSyncState",
     "CertificateState",
     "CliTokenDownload",
+    "CliUpdateContract",
+    "CliUpdateContractWorkerCompatibility",
+    "CliUpdateContractWorkerIssueType0",
     "ClusterMappingCode",
     "CompatibilityIdentity",
     "CompatibilityPreparation",
