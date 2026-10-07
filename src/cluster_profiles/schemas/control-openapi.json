@@ -784,12 +784,12 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "title": "Selectors"
           }
         },
         "required": [
-          "all"
+          "all",
+          "selectors"
         ],
         "title": "AgentUpgradeRequestIntent",
         "type": "object"
@@ -855,7 +855,6 @@
               "type": "string"
             },
             "maxItems": 64,
-            "minItems": 1,
             "title": "Node Order",
             "type": "array"
           },
@@ -3104,6 +3103,17 @@
           "bookkeeping-debt"
         ],
         "title": "BlockerCategory",
+        "type": "string"
+      },
+      "BookkeepingReason": {
+        "description": "Why bookkeeping was treated as unknown instead of refused.",
+        "enum": [
+          "persisted-state-damaged",
+          "evidence-mismatch",
+          "evidence-unavailable",
+          "row-incomplete"
+        ],
+        "title": "BookkeepingReason",
         "type": "string"
       },
       "BooleanParameter": {
@@ -21190,34 +21200,62 @@
             "title": "Next Attempt At"
           },
           "progress": {
-            "$ref": "#/components/schemas/OperationProgress"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "recipe_content_sha256": {
-            "title": "Recipe Content Sha256",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Content Sha256"
           },
           "recipe_revision_id": {
-            "title": "Recipe Revision Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Revision Id"
           },
           "request": {
-            "discriminator": {
-              "mapping": {
-                "retry": "#/components/schemas/RecipeRetryIntent",
-                "revision": "#/components/schemas/RecipeRevisionIntent",
-                "selector": "#/components/schemas/RecipeSelectorIntent"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
+            "anyOf": [
               {
-                "$ref": "#/components/schemas/RecipeSelectorIntent"
+                "discriminator": {
+                  "mapping": {
+                    "retry": "#/components/schemas/RecipeRetryIntent",
+                    "revision": "#/components/schemas/RecipeRevisionIntent",
+                    "selector": "#/components/schemas/RecipeSelectorIntent"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RecipeSelectorIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeRevisionIntent"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RecipeRetryIntent"
+                  }
+                ]
               },
               {
-                "$ref": "#/components/schemas/RecipeRevisionIntent"
-              },
-              {
-                "$ref": "#/components/schemas/RecipeRetryIntent"
+                "type": "null"
               }
             ],
             "title": "Request"
@@ -21227,6 +21265,16 @@
             "minLength": 1,
             "title": "Request Id",
             "type": "string"
+          },
+          "residue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Residue"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "result": {
             "anyOf": [
@@ -22943,7 +22991,8 @@
       "RecipeOperationCode": {
         "description": "Recipe operation conflicts.",
         "enum": [
-          "recipe.operation_conflict"
+          "recipe.operation_conflict",
+          "recipe.evidence_unproven"
         ],
         "title": "RecipeOperationCode",
         "type": "string"
@@ -26207,6 +26256,34 @@
         ],
         "title": "ReservationState",
         "type": "string"
+      },
+      "Residue": {
+        "description": "A typed ``unknown``: what was damaged, why, and what the caller does next.\n\nIt is a value, not an exception: the caller retires the damaged row or skips\nthe element and carries on.",
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/BookkeepingReason"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "subject",
+          "reason"
+        ],
+        "title": "Residue",
+        "type": "object"
       },
       "ResourceBlockerCode": {
         "description": "The capacity-fit codes the resource planner gives a node that cannot fit.\n\n``insufficient`` is the family prefix a run admission maps onto\n``run.insufficient_memory``; the planner itself names the exact\n``insufficient_capacity*`` member.",
@@ -30692,6 +30769,18 @@
             ],
             "title": "Copied Bytes"
           },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostic"
+          },
           "downloaded_bytes": {
             "anyOf": [
               {
@@ -30704,6 +30793,46 @@
             ],
             "title": "Downloaded Bytes"
           },
+          "error": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "failure_kind": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9._-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Kind"
+          },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
@@ -30714,16 +30843,33 @@
             "title": "Phase",
             "type": "string"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
           "subphase": {
             "const": "target-copy",
             "title": "Subphase",
             "type": "string"
+          },
+          "uncertain": {
+            "default": false,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
+          "node_id",
           "phase",
-          "subphase",
-          "node_id"
+          "subphase"
         ],
         "title": "RunSwitchTargetTransferEvidenceResult",
         "type": "object"

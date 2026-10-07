@@ -156,6 +156,20 @@
       "reason": "The ASGI scope is Starlette's own mapping type; only a typed source value bound to the verified identity is read from it."
     },
     {
+      "path": "control/src/vonk_control/operation_contract.py",
+      "function": "sanitize_failure_evidence",
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
+    },
+    {
+      "path": "control/src/vonk_control/operation_contract.py",
+      "function": "sanitize_failure_evidence.candidates",
+      "annotation": "dict[str, object]",
+      "count": 2,
+      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
+    },
+    {
       "path": "control/src/vonk_control/recipe_library_types.py",
       "function": "RecipeLibraryItem",
       "annotation": "dict[str, object]",
@@ -196,20 +210,6 @@
       "annotation": "dict[str, object]",
       "count": 1,
       "reason": "Generic canonical-JSON digest utility over a document the caller built from typed values."
-    },
-    {
-      "path": "control/src/vonk_control/operation_contract.py",
-      "function": "sanitize_failure_evidence",
-      "annotation": "dict[str, object]",
-      "count": 1,
-      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
-    },
-    {
-      "path": "control/src/vonk_control/operation_contract.py",
-      "function": "sanitize_failure_evidence.candidates",
-      "annotation": "dict[str, object]",
-      "count": 2,
-      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
     }
   ],
   "debt": [
@@ -231,7 +231,7 @@
     },
     {
       "path": "control/src/vonk_control/agent_jobs.py",
-      "count": 21
+      "count": 4
     },
     {
       "path": "control/src/vonk_control/agent_upgrade_status.py",
@@ -239,11 +239,11 @@
     },
     {
       "path": "control/src/vonk_control/agent_upgrades.py",
-      "count": 26
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/api.py",
-      "count": 4
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/artifact_jobs.py",
@@ -279,7 +279,7 @@
     },
     {
       "path": "control/src/vonk_control/cluster_mappings.py",
-      "count": 12
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/compiled_artifact_contract.py",
@@ -295,7 +295,7 @@
     },
     {
       "path": "control/src/vonk_control/distributed_recovery.py",
-      "count": 20
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/distribution.py",
@@ -303,7 +303,7 @@
     },
     {
       "path": "control/src/vonk_control/distribution_executor.py",
-      "count": 25
+      "count": 8
     },
     {
       "path": "control/src/vonk_control/download_contract.py",
@@ -318,20 +318,8 @@
       "count": 6
     },
     {
-      "path": "control/src/vonk_control/failure_evidence.py",
-      "count": 8
-    },
-    {
-      "path": "control/src/vonk_control/fleet_event_contract.py",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_events.py",
-      "count": 3
-    },
-    {
       "path": "control/src/vonk_control/fleet_profiles.py",
-      "count": 29
+      "count": 25
     },
     {
       "path": "control/src/vonk_control/harnesses/canonical.py",
@@ -358,16 +346,8 @@
       "count": 13
     },
     {
-      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
-      "count": 3
-    },
-    {
       "path": "control/src/vonk_control/lifecycle/fleet_profile.py",
       "count": 4
-    },
-    {
-      "path": "control/src/vonk_control/lifecycle/image_availability.py",
-      "count": 10
     },
     {
       "path": "control/src/vonk_control/lifecycle/job.py",
@@ -375,31 +355,27 @@
     },
     {
       "path": "control/src/vonk_control/lifecycle/model_cache.py",
-      "count": 10
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/lifecycle/run_switch.py",
-      "count": 17
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/lifecycle_preflight.py",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/litellm.py",
-      "count": 2
-    },
-    {
       "path": "control/src/vonk_control/model_cache.py",
-      "count": 86
+      "count": 38
     },
     {
       "path": "control/src/vonk_control/model_cache_api.py",
-      "count": 4
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/model_cache_progress.py",
-      "count": 10
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/models.py",
@@ -407,7 +383,7 @@
     },
     {
       "path": "control/src/vonk_control/operation_api.py",
-      "count": 38
+      "count": 8
     },
     {
       "path": "control/src/vonk_control/operation_blockers.py",
@@ -415,15 +391,11 @@
     },
     {
       "path": "control/src/vonk_control/operation_contract.py",
-      "count": 6
+      "count": 3
     },
     {
-      "path": "control/src/vonk_control/operation_progress.py",
-      "count": 6
-    },
-    {
-      "path": "control/src/vonk_control/operator_projection_api.py",
-      "count": 6
+      "path": "control/src/vonk_control/operation_item_contract.py",
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/prebuilt_images.py",
@@ -432,10 +404,6 @@
     {
       "path": "control/src/vonk_control/profile_stop_authority.py",
       "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/recipe_action_plans.py",
-      "count": 3
     },
     {
       "path": "control/src/vonk_control/recipe_build_cancellation.py",
@@ -450,24 +418,12 @@
       "count": 6
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "count": 53
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability_api.py",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/recipe_lifecycle_contract.py",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/recipe_operation_phases.py",
       "count": 2
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
-      "count": 52
+      "count": 18
     },
     {
       "path": "control/src/vonk_control/recipe_packages.py",
@@ -476,10 +432,6 @@
     {
       "path": "control/src/vonk_control/recipe_release.py",
       "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/recipe_routes.py",
-      "count": 4
     },
     {
       "path": "control/src/vonk_control/recipe_runtime_specs.py",
@@ -494,10 +446,6 @@
       "count": 2
     },
     {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "count": 2
-    },
-    {
       "path": "control/src/vonk_control/recipe_update_notice.py",
       "count": 1
     },
@@ -507,11 +455,7 @@
     },
     {
       "path": "control/src/vonk_control/resource_planning.py",
-      "count": 13
-    },
-    {
-      "path": "control/src/vonk_control/route_runtime.py",
-      "count": 3
+      "count": 8
     },
     {
       "path": "control/src/vonk_control/run_admission.py",
@@ -519,7 +463,7 @@
     },
     {
       "path": "control/src/vonk_control/run_switch_operations.py",
-      "count": 64
+      "count": 14
     },
     {
       "path": "control/src/vonk_control/runtime.py",

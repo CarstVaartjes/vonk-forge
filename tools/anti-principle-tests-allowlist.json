@@ -2677,6 +2677,14 @@
       "justification": "Tests exact cancellation fencing under newer selection; retained borrowed child effects cannot be claimed released before receipt."
     },
     {
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "function": "test_damaged_clock_fields_keep_independent_live_lease_and_cancel_budget",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "security-edge",
+      "justification": "Pure lifecycle adapter fence test preserves the independent live executor lease and immutable cancellation deadline under damaged clock fields. At observer-budget expiry the effect remains explicitly UNKNOWN; no resource release or fresh service admission is claimed."
+    },
+    {
       "path": "control/tests/test_model_cache.py",
       "function": "test_missing_source_observations_follow_exact_file_and_survive_restart",
       "kind": "transient-failed-assertion",
@@ -2709,6 +2717,14 @@
       "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority."
     },
     {
+      "path": "control/tests/test_recipe_image_availability_bookkeeping.py",
+      "function": "test_model_child_cancel_intent_survives_unrelated_payload_damage",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Pure reader test verifies a canonical accepted cancellation object survives unrelated manifest damage and a malformed cancellation is not authorized. No service operation is ended and no effect or capacity release is inferred."
+    },
+    {
       "path": "control/tests/test_recipe_operation_bookkeeping.py",
       "function": "test_a_stop_without_start_history_uses_current_exact_run_ownership",
       "kind": "ending-without-fresh-request",
@@ -2731,6 +2747,14 @@
       "count": 1,
       "reason": "security-edge",
       "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission."
+    },
+    {
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "function": "test_role_phases_use_exact_stop_identity_without_launch_history",
+      "kind": "ending-without-fresh-request",
+      "count": 1,
+      "reason": "input-validation",
+      "justification": "Pure canonical Stop payload and role-order parser test; calls only payload construction and _role_phases, with no operation execution, ending, effect acknowledgement, capacity release or fresh-admission claim."
     }
   ]
 }

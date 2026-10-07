@@ -1,9 +1,8 @@
 """Typed response contracts for recipe lifecycle operations.
 
 The durable ``Job.result`` column is a JSON document, but the lifecycle API
-has a small, known set of result shapes.  Keep the persisted projection as a
-mapping for the orchestration code while validating the HTTP boundary against
-these concrete models.
+has a small, known set of result shapes.  Read persisted projections as these canonical models and serialize them only
+when writing JSON or returning an HTTP response.
 """
 
 from __future__ import annotations
@@ -128,7 +127,7 @@ RecipeLifecycleResult = (
 )
 
 
-def parse_recipe_lifecycle_result(kind: str, value: object) -> object:
+def parse_recipe_lifecycle_result(kind: str, value: object) -> RecipeLifecycleResult:
     """Validate one persisted lifecycle result against its operation kind."""
 
     if kind == "recipe.job.activate.v1":
@@ -154,9 +153,33 @@ def parse_recipe_lifecycle_result(kind: str, value: object) -> object:
     document = canonical_message(value)
     for model in models:
         try:
-            return model.model_validate_json(document)
+            parsed = model.model_validate_json(document)
         except (TypeError, ValueError):
             continue
+        if isinstance(
+            parsed,
+            (
+                RecipeOperationResult,
+                RecipeOperationProgressResult,
+                RecipeOperationCancellationResult,
+            ),
+        ):
+            # Empty receipts share a JSON shape. The parent's kind, not union
+            # member order, identifies the current canonical receipt model.
+            updates = {}
+            for name in ("node_evidence", "launch_evidence"):
+                evidence = (
+                    parsed.node_evidence
+                    if name == "node_evidence"
+                    else parsed.launch_evidence
+                )
+                if evidence is not None:
+                    updates[name] = {
+                        node: _typed_node_evidence(kind, item)
+                        for node, item in evidence.items()
+                    }
+            parsed = parsed.model_copy(update=updates)
+        return parsed
     raise ValueError("recipe operation result does not match its kind")
 
 
@@ -197,11 +220,7 @@ def validate_recipe_lifecycle_terminal(kind: str, state: str, value: object) -> 
             raise ValueError("failed recipe job requires a nonzero exit code")
 
 
-def _validate_evidence_for_kind(kind: str, value: object) -> None:
-    """Reject evidence belonging to a different lifecycle operation."""
-
-    if not isinstance(value, Mapping):
-        return
+def _node_evidence_models(kind: str) -> tuple[type[LifecycleNodeResult], ...]:
     if kind in {"recipe.build.v1"}:
         evidence_models = (RecipeBuildEvidence,)
     elif kind == "recipe.build.cleanup.v1":
@@ -217,8 +236,26 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
     elif kind == "recipe.reconcile":
         evidence_models = (RecipeReconcileResult,)
     else:
-        return
+        evidence_models = ()
     evidence_models = (*evidence_models, AgentFailureResult, LifecycleCodeFailureResult)
+    return evidence_models
+
+
+def _typed_node_evidence(kind: str, value: LifecycleNodeResult) -> LifecycleNodeResult:
+    for model in _node_evidence_models(kind):
+        try:
+            return model.model_validate_json(canonical_message(value))
+        except (TypeError, ValueError):
+            continue
+    raise ValueError("recipe operation evidence kind is invalid")
+
+
+def _validate_evidence_for_kind(kind: str, value: object) -> None:
+    """Reject evidence belonging to a different lifecycle operation."""
+
+    if not isinstance(value, Mapping):
+        return
+    evidence_models = _node_evidence_models(kind)
     for field_name in ("node_evidence", "launch_evidence"):
         evidence = value.get(field_name)
         if evidence is None:
@@ -226,13 +263,13 @@ def _validate_evidence_for_kind(kind: str, value: object) -> None:
         if not isinstance(evidence, Mapping):
             raise TypeError("recipe operation evidence is invalid")
         for item in evidence.values():
-            if not isinstance(item, Mapping):
+            if not isinstance(item, (Mapping, BaseModel)):
                 raise TypeError("recipe operation evidence is invalid")
             if not any(_model_accepts(model, item) for model in evidence_models):
                 raise ValueError("recipe operation evidence kind is invalid")
 
 
-def _model_accepts(model: type[BaseModel], value: Mapping[str, object]) -> bool:
+def _model_accepts(model: type[BaseModel], value: object) -> bool:
     try:
         model.model_validate_json(canonical_message(value))
     except (TypeError, ValueError):

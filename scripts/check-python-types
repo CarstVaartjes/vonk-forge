@@ -73,8 +73,9 @@ def _diagnostics() -> list[dict[str, object]]:
             {
                 "file": Path(diagnostic["file"]).resolve().relative_to(ROOT).as_posix(),
                 "rule": diagnostic.get("rule") or "unknown",
-                "line": diagnostic.get("range", {}).get("start", {}).get("line", 0) + 1,
                 "message": diagnostic.get("message", ""),
+                "line": diagnostic["range"]["start"]["line"] + 1,
+                "column": diagnostic["range"]["start"]["character"] + 1,
             }
         )
     return diagnostics
@@ -187,14 +188,15 @@ def main() -> int:
         print(problem, file=sys.stderr)
     if problems:
         reviewed = {
-            (str(entry["file"]), str(entry["rule"])): entry["count"]
+            (str(entry.get("file", "")), str(entry.get("rule", ""))): entry.get("count")
             for entry in exceptions
         }
         for diagnostic in diagnostics:
             key = (str(diagnostic["file"]), str(diagnostic["rule"]))
-            if counts[key] != reviewed.get(key, 0):
+            if counts[key] != reviewed.get(key):
                 print(
-                    f"{diagnostic['file']}:{diagnostic['line']}: {diagnostic['rule']}: {diagnostic['message']}",
+                    f"{diagnostic['file']}:{diagnostic['line']}:{diagnostic['column']}: "
+                    f"{diagnostic['rule']}: {diagnostic['message']}",
                     file=sys.stderr,
                 )
         print(

@@ -57,6 +57,15 @@ from .recipe_execution_contract import (
     parse_stored_run_endpoint,
     run_plan_document,
 )
+from .route_bundle_contract import (
+    RouteAcceptedModelPolicy,
+    RouteAcceptedRunIdentity,
+    RouteBundleDocument,
+    RouteEndpointDocument,
+    RouteIdentityDocument,
+    RouteRankIdentity,
+    RouteRunIdentity,
+)
 from .route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     ActivationMarker,
@@ -65,6 +74,7 @@ from .route_runtime import (
     recipe_route_run_id,
     verify_active_route_bundle,
 )
+from .stored_documents import RouteClaimMarker
 
 _NODE_ID = TypeAdapter(NodeId)
 _ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
@@ -188,16 +198,16 @@ class _RecipeEndpoint:
         )
         return f"http://{host}:{self.port}/v1"
 
-    def route_document(self) -> dict[str, object]:
-        return {
-            "address": self.address,
-            "node_id": self.node_id,
-            "observed_at": self.observed_at.isoformat(),
-            "operation_id": self.operation_id,
-            "path": "/v1",
-            "port": self.port,
-            "scheme": "http",
-        }
+    def route_document(self) -> RouteEndpointDocument:
+        return RouteEndpointDocument(
+            address=self.address,
+            node_id=self.node_id,
+            observed_at=self.observed_at.isoformat(),
+            operation_id=self.operation_id,
+            path="/v1",
+            port=self.port,
+            scheme="http",
+        )
 
 
 @dataclass(frozen=True)
@@ -358,75 +368,51 @@ class AtomicRecipeRoutePublisher:
             or bundle.marker.state != GatewayRouteState.PUBLISHED
         ):
             return None
+        routes, runtime = bundle.routes, bundle.litellm
         if (
-            bundle.routes.get("schema_version") != 2
-            or bundle.routes.get("state") != GatewayRouteState.PUBLISHED
-            or bundle.routes.get("generation") != bundle.marker.generation
+            routes is None
+            or runtime is None
+            or routes.schema_version != 2
+            or routes.state != GatewayRouteState.PUBLISHED
+            or routes.generation != bundle.marker.generation
             or bundle.marker.evidence_set_digest != bundle.marker.plan_digest
         ):
             raise RouteRuntimeError("accepted recipe route identity is invalid")
-        routes = bundle.routes.get("routes")
-        models = bundle.litellm.get("model_list")
-        if not isinstance(routes, Mapping) or not isinstance(models, list):
-            raise RouteRuntimeError("accepted recipe route bundle is invalid")
         found = [
-            (alias, raw)
-            for alias, raw in routes.items()
-            if isinstance(raw, Mapping)
-            and recipe_route_run_id(raw.get("operation_id")) == run_id
+            (alias, endpoint)
+            for alias, endpoint in routes.routes.items()
+            if recipe_route_run_id(endpoint.operation_id) == run_id
         ]
         if not found:
             return None
         if len(found) != 1:
             raise RouteRuntimeError("accepted recipe run has ambiguous route ownership")
         alias, raw = found[0]
-        address, port, node_id = raw.get("address"), raw.get("port"), raw.get("node_id")
-        observed_at, operation_id = raw.get("observed_at"), raw.get("operation_id")
-        if (
-            not isinstance(alias, str)
-            or _ALIAS.fullmatch(alias) is None
-            or not isinstance(address, str)
-            or not isinstance(port, int)
-            or isinstance(port, bool)
-            or not 1 <= port <= 65535
-            or not isinstance(node_id, str)
-            or not isinstance(observed_at, str)
-            or not isinstance(operation_id, str)
-            or raw.get("scheme") != "http"
-            or raw.get("path") != "/v1"
-        ):
+        if _ALIAS.fullmatch(alias) is None or raw.scheme != "http" or raw.path != "/v1":
             raise RouteRuntimeError("accepted recipe endpoint is invalid")
         try:
-            policy.validate(address)
+            policy.validate(raw.address)
         except PresenceError as error:
             raise RecipeEndpointAuthorityRefused(
                 "accepted endpoint is outside management policy", run_id=run_id
             ) from error
         endpoint = _RecipeEndpoint(
-            _NODE_ID.validate_python(node_id),
-            str(ipaddress.ip_address(address)),
-            port,
-            _aware(datetime.fromisoformat(observed_at)),
-            operation_id,
+            _NODE_ID.validate_python(raw.node_id),
+            str(ipaddress.ip_address(raw.address)),
+            raw.port,
+            _aware(datetime.fromisoformat(raw.observed_at)),
+            raw.operation_id,
         )
-        entries = [
-            item
-            for item in models
-            if isinstance(item, Mapping) and item.get("model_name") == alias
-        ]
-        if len(entries) != 1 or not isinstance(
-            params := entries[0].get("litellm_params"), Mapping
-        ):
+        entries = [item for item in runtime.model_list if item.model_name == alias]
+        if len(entries) != 1:
             raise RouteRuntimeError("accepted recipe runtime policy is invalid")
-        model, rpm, tpm = params.get("model"), params.get("rpm"), params.get("tpm")
+        params = entries[0].litellm_params
+        model, rpm, tpm = params.model, params.rpm, params.tpm
         if (
-            not isinstance(model, str)
-            or not model.startswith("openai/")
+            not model.startswith("openai/")
             or _UPSTREAM_MODEL.fullmatch(model[7:]) is None
-            or type(rpm) is not int
-            or type(tpm) is not int
-            or params.get("api_base") != endpoint.api_base.rstrip("/")
-            or params.get("api_key") != "os.environ/LITELLM_UPSTREAM_KEY"
+            or params.api_base != endpoint.api_base.rstrip("/")
+            or params.api_key != "os.environ/LITELLM_UPSTREAM_KEY"
         ):
             raise RouteRuntimeError("accepted recipe runtime policy is invalid")
         quota = LiteLlmPolicy(
@@ -472,19 +458,27 @@ class AtomicRecipeRoutePublisher:
                 current = None
 
             def route_bytes(generation: int) -> bytes:
-                document: dict[str, object] = {
-                    "generation": generation,
-                    "routes": {
+                document = RouteBundleDocument(
+                    generation=generation,
+                    routes={
                         alias: endpoint.route_document()
                         for alias, endpoint in sorted(endpoints.items())
                     },
-                    "schema_version": 2,
-                    "state": state,
-                }
-                if state == GatewayRouteState.MAINTENANCE:
-                    document["reason"] = "recipe routes withdrawn"
+                    schema_version=2,
+                    state=state,
+                    reason=(
+                        "recipe routes withdrawn"
+                        if state == GatewayRouteState.MAINTENANCE
+                        else None
+                    ),
+                )
                 return (
-                    json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n"
+                    json.dumps(
+                        document.model_dump(mode="json", exclude_none=True),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
                 ).encode()
 
             # Activation is durable before the supervisor acknowledgement and
@@ -605,7 +599,7 @@ class RecipeRouteService:
         now = _aware(self._clock())
         pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
         ordinal = (_claim_ordinal(pending) or 0) + 1
-        marker: dict[str, object] = {"claim_ordinal": ordinal}
+        marker = RouteClaimMarker(claim_ordinal=ordinal).model_dump(mode="json")
         if session.get(RecipeRouteAuthority, RECIPE_ROUTE_CLAIM_ID) is None:
             session.add(
                 RecipeRouteAuthority(
@@ -1488,7 +1482,7 @@ class RecipeRouteService:
         model_policies: dict[str, Mapping[str, int | str]] = {}
         endpoints: dict[str, _RecipeEndpoint] = {}
         included: set[str] = set()
-        run_identities: list[dict[str, object]] = []
+        run_identities: list[RouteRunIdentity | RouteAcceptedRunIdentity] = []
         run_statement = (
             select(RecipeRun)
             .where(
@@ -1676,24 +1670,19 @@ class RecipeRouteService:
                 included.add(run.id)
                 endpoints[run.alias] = endpoint
                 run_identities.append(
-                    {
-                        "run_id": run.id,
-                        "alias": run.alias,
-                        "plan_digest": run.plan_digest,
-                        "run_generation": run.run_generation,
-                        "upstream_model": upstream_model,
-                        # Observation time stays out of route identity so an
-                        # otherwise identical heartbeat never generates a new
-                        # bundle.
-                        "ranks": [
-                            {
-                                "node_id": node.node_id,
-                                "rank": node.rank,
-                                "role": node.role,
-                            }
+                    RouteRunIdentity(
+                        run_id=run.id,
+                        alias=run.alias,
+                        plan_digest=run.plan_digest,
+                        run_generation=run.run_generation,
+                        upstream_model=upstream_model,
+                        ranks=[
+                            RouteRankIdentity(
+                                node_id=node.node_id, rank=node.rank, role=node.role
+                            )
                             for node in nodes
                         ],
-                    }
+                    )
                 )
             except RecipeRouteError as error:
                 if not serving or isinstance(
@@ -1721,28 +1710,25 @@ class RecipeRouteService:
                     ]
                     aliases[accepted_alias] = endpoint.api_base
                     endpoints[accepted_alias] = endpoint
-                    upstream_models[accepted_alias] = str(
-                        accepted.policy.models[accepted_alias]["upstream_model"]
+                    accepted_policy = RouteAcceptedModelPolicy.model_validate_json(
+                        json.dumps(dict(accepted.policy.models[accepted_alias]))
                     )
+                    upstream_models[accepted_alias] = accepted_policy.upstream_model
                     run_identities.append(
-                        {
-                            "run_id": run.id,
-                            "alias": accepted_alias,
-                            "accepted_endpoint": endpoint.route_document(),
-                            "accepted_policy": dict(
-                                accepted.policy.models[accepted_alias]
-                            ),
-                        }
+                        RouteAcceptedRunIdentity(
+                            run_id=run.id,
+                            alias=accepted_alias,
+                            accepted_endpoint=endpoint.route_document(),
+                            accepted_policy=accepted_policy,
+                        )
                     )
                 included.add(run.id)
                 self._note_retained(run.id, [str(error)])
-        identity = {
-            "schema_version": 1,
-            "runs": run_identities,
-            "aliases": aliases,
-        }
+        identity = RouteIdentityDocument(runs=run_identities, aliases=aliases)
         digest = hashlib.sha256(
-            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+            json.dumps(
+                identity.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            ).encode()
         ).hexdigest()
         state = RouteState(aliases=aliases, digest=digest)
         policy = LiteLlmPolicy(models=model_policies)
