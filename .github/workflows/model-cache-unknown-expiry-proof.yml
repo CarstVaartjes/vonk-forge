@@ -1,0 +1,45 @@
+name: Model cache unknown cancellation recovery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/model-cache-unknown-expiry-proof.yml
+      - control/src/vonk_control/model_cache.py
+      - control/src/vonk_control/lifecycle/model_cache.py
+      - control/tests/test_model_cache_unknown_expiry_recovery.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-cache-unknown-expiry-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cancellation:
+    name: Unknown cancellation expiry through fresh exact artifact claim
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+    steps:
+      - name: Check out exact current producer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Provide canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare locked Python dependencies
+        uses: ./.github/actions/python-env
+      - name: Build canonical recipe library index
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Pull pinned disposable PostgreSQL
+        run: scripts/pull-test-images postgres
+      - name: Prove unknown expiry and fresh admission without orphaned holds
+        run: >-
+          uv run --project control --frozen pytest -q -n 0
+          control/tests/test_model_cache_unknown_expiry_recovery.py
+          --tb=short
