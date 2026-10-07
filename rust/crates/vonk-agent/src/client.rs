@@ -2438,11 +2438,11 @@ mod tests {
     const TEST_NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
     use super::{
-        AgentHttpClient, AgentResult, ClientError, ControllerError, DISTRIBUTION_CONCURRENCY,
-        ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS, ObjectPlacement,
-        RecipeRunDisposition, StreamGovernor, WriteBehind, clamp_inventory_request,
-        controller_rejection_digest, is_rotation_conflict, open_trusted_partial, partial_path,
-        preallocate, range_end, valid_reported_hostname,
+        AgentHttpClient, AgentResult, CONTROLLER_REQUEST_TIMEOUT, ClientError, ControllerError,
+        DISTRIBUTION_CONCURRENCY, ExactRecipeRunObservation, MAX_REJECTION_CONTEXT_CHARS,
+        ObjectPlacement, RecipeRunDisposition, StreamGovernor, WriteBehind,
+        clamp_inventory_request, controller_rejection_digest, is_rotation_conflict,
+        open_trusted_partial, partial_path, preallocate, range_end, valid_reported_hostname,
     };
     use crate::{
         oci::OciRuntime,
