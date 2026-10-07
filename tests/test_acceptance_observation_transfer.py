@@ -80,6 +80,29 @@ def test_verified_source_selects_transport_and_refuses_partial_then_recovers(
         )
         == expected
     )
+    # Receipt equality alone cannot distinguish 0 from the JSON float token
+    # 0.0. The actual source validator must reject each integral float counter.
+    for kind, field in (
+        ("chunk", "ordinal"),
+        ("complete", "chunks"),
+        ("complete", "bytes"),
+    ):
+        records = [json.loads(line) for line in response.content.splitlines()]
+        record = next(record for record in records if record["type"] == kind)
+        record[field] = float(record[field])
+        noncanonical = b"".join(
+            json.dumps(record).encode() + b"\n" for record in records
+        )
+        with pytest.raises(ContractSkew, match="source schema"):
+            selected.decode(
+                io.BytesIO(noncanonical), status=200, media_type=selected.media_type
+            )
+    assert (
+        selected.decode(
+            io.BytesIO(response.content), status=200, media_type=selected.media_type
+        )
+        == expected
+    )
     with pytest.raises(ContractSkew, match="status or media differs"):
         selected.decode(
             io.BytesIO(json.dumps(expected).encode()),

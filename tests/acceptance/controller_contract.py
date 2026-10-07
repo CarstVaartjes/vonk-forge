@@ -22,8 +22,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from jsonschema import Draft202012Validator, FormatChecker
-
+from cluster_profiles.control_client import source_schema_validator
 from cluster_profiles.observation_transfer_reader import (
     ObservationStream,
     receive_observation,
@@ -49,7 +48,7 @@ class ObservationResponseContract:
     record_max_bytes: int | None
 
     def _validate(self, value: object, schema: dict[str, object]) -> None:
-        validator = Draft202012Validator(schema, format_checker=FormatChecker())
+        validator = source_schema_validator(schema)
         if not validator.is_valid(value):
             raise ContractSkew(f"{self.label} observation violates its source schema")
 

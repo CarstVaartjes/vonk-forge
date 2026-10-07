@@ -373,9 +373,18 @@ def _control_openapi() -> dict[str, object]:
     return schema
 
 
+def source_schema_validator(schema: dict[str, object]) -> Draft202012Validator:
+    """Validate an explicit source graph with the canonical JSON token rules.
+
+    Acceptance may supply a verified historical release's schema here. This
+    factory never selects or falls back to the current bundled contract.
+    """
+    return _ControlValidator(schema, format_checker=FormatChecker())
+
+
 @lru_cache(maxsize=1)
 def _control_validator() -> Draft202012Validator:
-    return _ControlValidator(_control_openapi(), format_checker=FormatChecker())
+    return source_schema_validator(_control_openapi())
 
 
 def _path_pattern(template: str) -> re.Pattern[str]:
