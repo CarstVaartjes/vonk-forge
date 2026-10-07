@@ -6,7 +6,7 @@ from copy import deepcopy
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, Table, select, update
 from vonk_control.db import initialize_database
 from vonk_control.fleet_profile_adapter_conversion import (
     conversion_observation,
@@ -34,6 +34,14 @@ from .test_profile_continuity_postgres import (
 )
 from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 from .test_run_switch_operations import RecordingArtifactExecutor, _service
+
+
+def _persist_retained(session, row, progress):
+    """Seed bytes retained from the retired producer, without an active old writer."""
+    table = FleetProfileApplication.__table__
+    assert isinstance(table, Table)
+    session.execute(update(table).where(table.c.id == row.id).values(progress=progress))
+    session.expire(row, ["progress"])
 
 
 def _retained_stop(tmp_path, engine: Engine | None = None):
@@ -83,7 +91,7 @@ def _retained_stop(tmp_path, engine: Engine | None = None):
             child.pop("original_operation_id")
         progress = deepcopy(row.progress)
         progress["switch_adapter"] = old
-        row.progress = progress
+        _persist_retained(session, row, progress)
         original = deepcopy(row.progress)
         stop_id = pending.operation_id
         claims = {
@@ -191,7 +199,7 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
         assert row is not None
         progress = deepcopy(row.progress)
         progress["switch_adapter"] = old
-        row.progress = progress
+        _persist_retained(session, row, progress)
         assert try_convert_application(session, row, NOW).state == "converted"
         current = _persisted_profile_progress(row).switch_adapter
         assert current is not None and current.children == [receipt]
@@ -241,7 +249,7 @@ def test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retrie
                 progress["switch_adapter"]["position"] = 1
                 progress["switch_adapter"]["active_operation_id"] = None
                 progress["switch_adapter"]["active_kind"] = None
-            row.progress = progress
+            _persist_retained(session, row, progress)
             original = deepcopy(progress)
         session.flush()
         result = try_convert_application(session, row, NOW)

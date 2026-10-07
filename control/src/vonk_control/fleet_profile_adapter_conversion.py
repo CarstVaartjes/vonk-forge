@@ -32,7 +32,7 @@ from .fleet_profile_contract import (
     profile_switch_child_request_key,
 )
 from .lifecycle.evidence import BookkeepingReason
-from .models import FleetProfileApplication, Job, RecipeRun
+from .models import FleetProfileApplication, FleetProfileSelection, Job, RecipeRun
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
 from .strict_json import StrictModel
 
@@ -202,11 +202,139 @@ def _job_proof(
     return job
 
 
+def _accepted_review(row: FleetProfileApplication) -> FleetProfilePreview:
+    from .run_switch_operations import _digest
+
+    reviewed = FleetProfilePreview.model_validate_json(
+        canonical_message(row.plan), strict=True
+    )
+    decision = {
+        key: value
+        for key, value in row.plan.items()
+        if key in FleetProfileReviewedDecision.model_fields
+    }
+    if _digest(decision) != row.plan_digest:
+        raise _UnprovenJournal("accepted profile decision integrity differs from SQL")
+    if (reviewed.profile_id, reviewed.profile_digest, reviewed.plan_digest) != (
+        row.profile_id,
+        row.profile_digest,
+        row.plan_digest,
+    ):
+        raise _UnprovenJournal("accepted profile plan differs from its SQL identity")
+    return reviewed
+
+
+def _adopted_skip_is_proven(
+    session: Session,
+    row: FleetProfileApplication,
+    progress: FleetProfileApplicationProgress,
+    state: FleetProfileSwitchAdapterState,
+    reviewed: FleetProfilePreview,
+    index: int,
+) -> bool:
+    """Only current accepted adoption proves an old unissued out-of-scope skip."""
+    selection = session.get(FleetProfileSelection, 1)
+    if selection is None or selection.application_id == row.id:
+        return False
+    selected = session.get(FleetProfileApplication, selection.application_id)
+    if selected is None or selected.selection_generation != selection.generation:
+        return False
+    links = [
+        link
+        for link in _accepted_review(selected).effects.adopted
+        if link.application_id == row.id
+        and link.plan_digest == row.plan_digest
+        and link.workload_intent_ordinal == progress.workload_intent_ordinal
+    ]
+    if len(links) != 1:
+        return False
+    link = links[0]
+    retained: set[str] = set()
+    for assignment_id in link.assignment_ids:
+        assignment = next(
+            (item for item in state.assignments if item.id == assignment_id), None
+        )
+        if assignment is None:
+            return False
+        retained.update(node.node_id for node in assignment.nodes)
+    for stop in link.stops:
+        effect = next(
+            (effect for effect in reviewed.effects.runs if effect == stop.effect), None
+        )
+        if effect is None or stop.queue_index >= len(state.queue):
+            return False
+        item = state.queue[stop.queue_index]
+        records = (*state.pending_children, *state.children)
+        if (
+            item.kind != "stop"
+            or item.id != effect.run_id
+            or stop.request_key
+            != profile_switch_child_request_key(
+                row.id, stop.queue_index, item.kind, item.id
+            )
+        ):
+            return False
+        if not any(
+            record.queue_index == stop.queue_index
+            and record.operation_id == stop.operation_id
+            for record in records
+        ):
+            return False
+        retained.update(effect.node_ids)
+    if retained != set(link.node_ids):
+        return False
+    item = state.queue[index]
+    if (
+        session.scalar(
+            select(Job.id).where(
+                Job.request_id
+                == profile_switch_child_request_key(row.id, index, item.kind, item.id)
+            )
+        )
+        is not None
+    ):
+        return False
+    if item.kind in {"run", "install"}:
+        assignment = next(
+            (value for value in state.assignments if value.id == item.id), None
+        )
+        nodes = (
+            set() if assignment is None else {node.node_id for node in assignment.nodes}
+        )
+    elif item.kind == "stop":
+        effect = next(
+            (
+                value
+                for value in reviewed.effects.runs
+                if value.run_id == item.id and value.action == "stop"
+            ),
+            None,
+        )
+        nodes = (
+            set()
+            if effect is None
+            else set(
+                effect.profile_stop_scope.target_node_ids
+                if effect.profile_stop_scope is not None
+                else effect.node_ids
+            )
+        )
+    else:
+        removal = next(
+            (
+                value
+                for value in reviewed.effects.installations
+                if value.installation_id == item.id and value.action == "remove"
+            ),
+            None,
+        )
+        nodes = set() if removal is None else set(removal.node_ids)
+    return bool(nodes) and not nodes <= retained
+
+
 def _convert(
     session: Session, row: FleetProfileApplication
 ) -> FleetProfileApplicationProgress:
-    from .run_switch_operations import _digest
-
     raw = copy.deepcopy(row.progress)
     adapter = raw.get("switch_adapter")
     if not isinstance(adapter, dict) or adapter.get("schema_version") != 2:
@@ -234,22 +362,7 @@ def _convert(
     progress = FleetProfileApplicationProgress.model_validate_json(
         canonical_message(raw), strict=True
     )
-    reviewed = FleetProfilePreview.model_validate_json(
-        canonical_message(row.plan), strict=True
-    )
-    decision = {
-        key: value
-        for key, value in row.plan.items()
-        if key in FleetProfileReviewedDecision.model_fields
-    }
-    if _digest(decision) != row.plan_digest:
-        raise _UnprovenJournal("accepted profile decision integrity differs from SQL")
-    if (reviewed.profile_id, reviewed.profile_digest, reviewed.plan_digest) != (
-        row.profile_id,
-        row.profile_digest,
-        row.plan_digest,
-    ):
-        raise _UnprovenJournal("accepted profile plan differs from its SQL identity")
+    reviewed = _accepted_review(row)
     if (
         progress.intended_profile is None
         or state.assignments != progress.intended_profile.assignments
@@ -329,11 +442,14 @@ def _convert(
             ),
             None,
         )
-        if (
+        stopped = not (
             run is None
             or run.state != "stopped"
             or effect is None
             or run.installation_id != effect.installation_id
+        )
+        if not stopped and not _adopted_skip_is_proven(
+            session, row, progress, state, reviewed, index
         ):
             raise _UnprovenJournal(
                 "unrecorded preceding queue item has no exact completion proof"
