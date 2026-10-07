@@ -160,16 +160,24 @@ image lock, and reviewed upstream artifact pins. See the
   image; reused components or separately rebuilt images may have different
   build revisions. A refreshed source field alone does not prove new code runs.
 
-Install the repository hook once per checkout so the curated supply-chain
-evidence is regenerated and staged before each commit:
+Install the repository hook once per checkout:
 
 ```bash
 scripts/install-git-hooks
 ```
 
-The hook validates authored supply-chain inputs and runs the pinned Ruff lint,
-format, and Python type checks. It does not generate or stage inventory files.
-CI remains the authoritative verification and release evidence producer.
+Prepare the worktree environment explicitly with `scripts/build-control-wheel`
+and `uv sync --project control --frozen` before committing Python changes.
+The hook runs pinned Ruff lint and format checks on staged Python filenames,
+then Python typing for those files. Changes to shared type configuration,
+lockfiles, or the reviewed type baseline trigger the full type check.
+Documentation-only commits skip Python checks. Checks inspect working-tree
+content at staged paths, so fully stage the intended Python changes first.
+The hook never builds wheels, installs dependencies, accesses the network,
+modifies files, or stages generated inventory. Missing tools fail with the
+explicit setup commands. Supply-chain validation, builds and full verification
+remain in CI. See the [pre-commit file filtering guidance](https://pre-commit.com/#filtering-files-with-types)
+and [uv environment guidance](https://docs.astral.sh/uv/concepts/projects/sync/).
 
 ## Remove landed worktrees
 

@@ -33,7 +33,7 @@ BASELINE = ROOT / "tools/pyright-baseline.json"
 TYPECHECK_TIMEOUT_SECONDS = 600
 
 
-def _diagnostics() -> list[dict[str, object]]:
+def _diagnostics(files: list[str] | None = None) -> list[dict[str, object]]:
     # pyright is locked in the control dev group and resolves imports from
     # this same interpreter; its version check is the only network access it
     # would otherwise attempt.
@@ -46,6 +46,7 @@ def _diagnostics() -> list[dict[str, object]]:
                 "--outputjson",
                 "--pythonpath",
                 sys.executable,
+                *(files or []),
             ],
             cwd=ROOT,
             env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
@@ -174,15 +175,24 @@ def _write(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update", action="store_true", help="rewrite the baseline")
+    parser.add_argument("files", nargs="*", help="check only these repository files")
     args = parser.parse_args()
-
-    diagnostics = _diagnostics()
+    if args.update and args.files:
+        parser.error("--update requires a full repository check")
+    selected = {
+        Path(file).resolve().relative_to(ROOT).as_posix() for file in args.files
+    }
+    diagnostics = _diagnostics(args.files or None)
+    if selected:
+        diagnostics = [item for item in diagnostics if item["file"] in selected]
     counts = _counts(diagnostics)
     if args.update:
         _write(counts, _load(BASELINE))
         return 0
 
     exceptions = _load(BASELINE)
+    if selected:
+        exceptions = [entry for entry in exceptions if entry.get("file") in selected]
     problems = evaluate(counts, exceptions)
     for problem in problems:
         print(problem, file=sys.stderr)
