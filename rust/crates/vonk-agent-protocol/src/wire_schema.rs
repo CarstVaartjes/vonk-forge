@@ -234,3 +234,14 @@ pub(crate) fn validate_and_materialize(name: &str, value: &mut Value) -> Result<
     transform(&SCHEMA["$defs"][name], value, SchemaTransform::Defaults);
     Ok(())
 }
+
+#[cfg(test)]
+mod raw_integer_shape_tests {
+    use crate::FailureLogTail;
+
+    #[test]
+    fn generated_tail_rejects_private_number_objects_at_raw_json_boundary() {
+        let raw = br#"{"text":"tail","truncated":false,"dropped_bytes":{"$serde_json::private::Number":"2"},"dropped_lines":null}"#;
+        assert!(crate::parse_strict::<FailureLogTail>(raw).is_err());
+    }
+}
