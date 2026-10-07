@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 //! Actual generated wire parsers and durable agent result writer/restart reader.
-use serde::Deserialize;
 use std::{
     io::{self, Read},
     path::PathBuf,
@@ -13,17 +12,6 @@ use vonk_agent::{
     state::{BeginDecision, StateStore},
 };
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HttpRequest {
-    config: AgentConfig,
-    certificate: PathBuf,
-    chain: PathBuf,
-    private_key: PathBuf,
-    result: AgentResult,
-    #[serde(default)]
-    progress: Option<vonk_agent_protocol::AgentProgress>,
-}
 use vonk_agent_protocol::generated::{
     BoundedErrorResponse, FailureDiagnostics, RequestValidationProblem,
 };
@@ -68,23 +56,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             canonical_json(&parse_strict::<RequestValidationProblem>(&raw)?)?
         }
         Some("http" | "heartbeat") => {
-            let request: HttpRequest = serde_json::from_slice(&raw)?;
+            if args.len() != 5 {
+                return Err(
+                    "expected mode, configuration, certificate, chain and private-key paths".into(),
+                );
+            }
+            let config = AgentConfig::load(std::path::Path::new(&args[1]))?;
             let client = AgentHttpClient::from_identity_paths(
-                &request.config,
+                &config,
                 &IdentityPaths {
-                    certificate: request.certificate,
-                    chain: request.chain,
-                    private_key: request.private_key,
+                    certificate: PathBuf::from(&args[2]),
+                    chain: PathBuf::from(&args[3]),
+                    private_key: PathBuf::from(&args[4]),
                 },
             )?;
             if args.first().map(String::as_str) == Some("heartbeat") {
-                let progress = request.progress.ok_or("missing heartbeat progress")?;
+                let progress: vonk_agent_protocol::AgentProgress = parse_strict(&raw)?;
+                progress.validate()?;
                 let directive = client.heartbeat(&progress).await?;
                 println!("{}", String::from_utf8(canonical_json(&directive)?)?);
                 return Ok(());
             }
+            let result: AgentResult = parse_strict(&raw)?;
+            result.validate()?;
             let error = client
-                .submit_result(&request.result)
+                .submit_result(&result)
                 .await
                 .expect_err("peer must refuse result");
             let (status, summary, decision) = match error {

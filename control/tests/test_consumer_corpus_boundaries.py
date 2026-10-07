@@ -309,30 +309,37 @@ def test_real_agent_client_reads_bounded_422_and_preserves_503_status(
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     url = f"https://localhost:{server.server_port}"
-    request = {
-        "config": {
-            "enrollment_url": url,
-            "controller_url": url,
-            "ca_path": str(certs["ca_pem"]),
-            "ca_sha256": hashlib.sha256(
-                x509.load_pem_x509_certificate(
-                    certs["ca_pem"].read_bytes()
-                ).public_bytes(serialization.Encoding.DER)
-            ).hexdigest(),
-            "data_dir": str(tmp_path),
-            "node_id": NODE,
-            "fabric_address": None,
-            "fabric_bandwidth_mbps": None,
-        },
-        "certificate": str(certs["client_pem"]),
-        "chain": str(certs["chain_pem"]),
-        "private_key": str(certs["client_key"]),
-        "result": json.loads(agent_envelope(json.dumps(diagnostic()))),
+    # AgentConfig owns this on-disk TOML; stdin carries one canonical wire
+    # document, never a second handwritten HTTP/configuration envelope.
+    config = {
+        "enrollment_url": url,
+        "controller_url": url,
+        "ca_path": str(certs["ca_pem"]),
+        "ca_sha256": hashlib.sha256(
+            x509.load_pem_x509_certificate(certs["ca_pem"].read_bytes()).public_bytes(
+                serialization.Encoding.DER
+            )
+        ).hexdigest(),
+        "data_dir": str(tmp_path),
+        "node_id": NODE,
     }
-    if status == 200:
-        request["progress"] = json.loads(selected["text"])
+    config_path = tmp_path / "agent.toml"
+    config_path.write_text(
+        "".join(f"{key} = {json.dumps(value)}\n" for key, value in config.items())
+    )
+    config_path.chmod(0o600)
+    document = (
+        selected["text"] if status == 200 else agent_envelope(json.dumps(diagnostic()))
+    )
     try:
-        result = rust("heartbeat" if status == 200 else "http", json.dumps(request))
+        result = rust(
+            "heartbeat" if status == 200 else "http",
+            document,
+            str(config_path),
+            str(certs["client_pem"]),
+            str(certs["chain_pem"]),
+            str(certs["client_key"]),
+        )
         assert result.returncode == 0, result.stderr
         if status == 200:
             directive = AgentDirective.model_validate_json(result.stdout)
