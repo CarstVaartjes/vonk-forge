@@ -704,6 +704,14 @@
   ],
   "fail_closed": [
     {
+      "family": "recipe_operations.service-stop-replay",
+      "category": "already-retried",
+      "reason": "A duplicate continuation observes the immutable receipt for its request key and immediately returns the committed operation. The transaction unwinds before any withdrawal effect; the replay signal is caught before admission retry.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations.py", "_ServiceStopReplay", "RecipeOperationService._check_service_stop", "message", 1]
+      ]
+    },
+    {
       "family": "platform_observation.proven-retry",
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py. The exact authenticated capture route guards return canonical retryable 503 without inventing worker membership; a later request performs a new capture.",
@@ -3847,7 +3855,6 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-does-not-match-its-immutable-binding", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-is-unreadable", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-owner-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-is-no-longer-awaiting-withdrawal", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-already-has-issued-work", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-generation-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-absence-only-stop-no-longer-has-exact-absence-evide", 1],

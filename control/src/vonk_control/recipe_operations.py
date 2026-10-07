@@ -352,6 +352,18 @@ class _RouteNotWithdrawn(UnknownOutcomeError):
     """The run's route is listed again; withdraw it again before dispatching."""
 
 
+class _ServiceStopReplay(UnknownOutcomeError):
+    """A competing continuation already committed the request's exact receipt.
+
+    Unwind the withdrawal transaction before returning the observed operation;
+    this reconciled outcome never enters the admission retry loop.
+    """
+
+    def __init__(self, operation: RecipeOperationView) -> None:
+        self.operation = operation
+        super().__init__()
+
+
 class RecipeReconciliationBlocked(UnknownOutcomeError, RecipeOperationConflict):
     """A corrupt installation lacks exact, current cleanup authority."""
 
@@ -3077,6 +3089,8 @@ class RecipeOperationService:
                     profile_target_node_ids=profile_target_node_ids,
                     profile_application_id=profile_application_id,
                 )
+            except _ServiceStopReplay as replay:
+                return replay.operation
             except UnknownOutcomeError as error:
                 refused = error
                 if admission_wait_exhausted(error):
@@ -3275,9 +3289,11 @@ class RecipeOperationService:
             or job.state != LifecycleState.RUNNING.value
             or document.phases is not None
         ):
-            raise RecipeStopAuthorityRefused(
-                "accepted Stop is no longer awaiting withdrawal"
-            )
+            # The request lookup and immutable receipt validation precede this
+            # check. Another caller (or an earlier admission attempt) may have
+            # dispatched since our initial lookup. Observe its receipt without
+            # revalidating live withdrawal authority or repeating any effect.
+            raise _ServiceStopReplay(self._view(job, session=session))
         if (
             session.scalar(
                 select(AgentOperation.id)

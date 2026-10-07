@@ -5,7 +5,7 @@ import json
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -28,6 +28,7 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
+    LifecycleState,
     RecipeInstallPayload,
     RecipeStartPayload,
     RecipeStopPayload,
@@ -3353,6 +3354,101 @@ def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
         assert {child.payload["plan_digest"] for child in children} == {
             first_run.plan_digest
         }
+
+
+@pytest.mark.parametrize("dispatch_before_acceptance", [True, False])
+def test_duplicate_stop_replays_when_dispatch_wins_continuation_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    dispatch_before_acceptance: bool,
+) -> None:
+    """A committed duplicate wins at admission or before the withdrawal claim."""
+    withdrawn: list[str] = []
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, route_withdrawer=withdrawn.append
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    run = started_recipe(
+        sessions, service, installation.owner_id, nodes, request_id=str(uuid.uuid4())
+    )
+    plan = service.preview_stop(run.owner_id)
+    request_key = str(uuid.uuid4())
+    accept = service._accept_service_stop
+    winner_id: str | None = None
+
+    def duplicate() -> str:
+        return service.stop(
+            run.owner_id,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=request_key,
+        ).id
+
+    def raced_accept(
+        run_id: str,
+        *,
+        plan_digest: str,
+        actor: str,
+        request_id: str,
+        workload_intent_ordinal: int | None,
+        profile_target_node_ids: Sequence[str] | None,
+        profile_application_id: str | None,
+    ) -> Job:
+        nonlocal winner_id
+        # Restore first so the winning request follows the real execution path.
+        monkeypatch.setattr(service, "_accept_service_stop", accept)
+        if dispatch_before_acceptance:
+            winner_id = duplicate()
+        accepted = accept(
+            run_id,
+            plan_digest=plan_digest,
+            actor=actor,
+            request_id=request_id,
+            workload_intent_ordinal=workload_intent_ordinal,
+            profile_target_node_ids=profile_target_node_ids,
+            profile_application_id=profile_application_id,
+        )
+        if not dispatch_before_acceptance:
+            winner_id = duplicate()
+        return accepted
+
+    monkeypatch.setattr(service, "_accept_service_stop", raced_accept)
+    assert duplicate() == winner_id
+    assert withdrawn == [run.owner_id]
+    with sessions() as session:
+        assert (
+            len(
+                tuple(session.scalars(select(Job).where(Job.request_id == request_key)))
+            )
+            == 1
+        )
+        assert (
+            len(
+                tuple(
+                    session.scalars(
+                        select(AgentOperation).where(
+                            AgentOperation.parent_job_id == winner_id
+                        )
+                    )
+                )
+            )
+            == 1
+        )
+
+    assert winner_id is not None
+    service.record_node_result(winner_id, nodes[0], succeeded=True, evidence={})
+    assert service.get(winner_id).state == LifecycleState.SUCCEEDED.value
+    fresh_plan = service.preview_run(installation.owner_id, "qwen")
+    fresh = service.start(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh.id != winner_id
+    assert fresh.state == LifecycleState.RUNNING.value
 
 
 def test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite(
