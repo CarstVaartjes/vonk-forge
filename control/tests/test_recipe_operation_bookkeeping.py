@@ -600,7 +600,7 @@ def test_a_profile_stop_child_that_cannot_be_proven_is_retired_not_raised(
         )
         assert isinstance(outcome, Residue)
         assert outcome.reason is BookkeepingReason.EVIDENCE_MISMATCH
-        completion = service._complete_profile_jobrun_stop_in_session(
+        completion = service._complete_jobrun_stop_in_session(
             session, parent, (child,), now=NOW
         )
         assert isinstance(completion, Residue)
@@ -975,7 +975,7 @@ _OWNERS = {
     "_stored_compiled_plans",
     "_prepared_installation_id",
     "_prepared_install_read",
-    "_complete_profile_jobrun_stop_in_session",
+    "_complete_jobrun_stop_in_session",
     "queue_recovery_stop_in_session",
     "_project_node_result",
     "_uninstall_recipe",

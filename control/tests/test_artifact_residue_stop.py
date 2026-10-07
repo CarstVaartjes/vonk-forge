@@ -9,8 +9,8 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import event, select
 from vonk_agent_protocol import (
     AgentResult,
+    AgentResultState,
     ContainerRuntimeAction,
-    LifecycleState,
     canonical_message,
     host_helper_grant_signing_bytes,
 )
@@ -189,8 +189,8 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     restarted.record_result(
         AgentResult(
             fence=exact.fence,
-            state=LifecycleState.SUCCEEDED,
-            result=RecipeStopResult().model_dump(mode="json"),
+            state=AgentResultState.SUCCEEDED,
+            result=RecipeStopResult(),
         )
     )
     with pytest.raises(StaleAgentAttempt):
@@ -235,7 +235,7 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         )
     )
     plan = operations.preview_run(installation_id, "image-job")
-    assert plan.allowed, plan.reasons
+    assert plan.allowed
     fresh_run = operations.activate_job_run(
         plan,
         plan_digest=plan.plan_digest,
