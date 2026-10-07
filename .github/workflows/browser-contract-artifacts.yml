@@ -44,7 +44,7 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, pathlib, shutil, subprocess
           root = pathlib.Path("artifacts/browser-contracts")
-          paths = ["control/uv.lock", "control/openapi.json", "control/web/src/api/generated.d.ts", "control/web/src/api/runtime.generated.js", "control/web/src/api/runtime.generated.d.ts", "src/cluster_profiles/schemas/control-openapi.json", "src/cluster_profiles/generated_control"]
+          paths = ["control/uv.lock", "control/openapi.json", "control/web/src/api/generated.d.ts", "control/web/src/api/runtime.generated.js", "control/web/src/api/runtime.generated.d.ts", "src/cluster_profiles/schemas/control-openapi.json", "src/cluster_profiles/schemas/cli-update-contract.schema.json", "src/cluster_profiles/generated_control"]
           records = {}
           for name in paths:
               source = pathlib.Path(name)
