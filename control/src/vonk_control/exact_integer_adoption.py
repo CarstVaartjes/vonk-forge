@@ -189,17 +189,18 @@ def _sqlite_extensions(
     indexes = []
     triggers = []
     rows = connection.exec_driver_sql(
-        "SELECT type,name,sql FROM sqlite_master "
-        "WHERE (tbl_name=? AND type IN ('index','trigger')) OR type='view' ORDER BY name",
+        "SELECT type,name,sql,tbl_name FROM sqlite_master "
+        "WHERE (tbl_name=? AND type='index') OR type IN ('trigger','view') ORDER BY name",
         (table_name,),
     )
-    for kind, identity, definition in rows:
+    for kind, identity, definition, owning_table in rows:
         if definition is None and kind == "index":
             continue  # Table-owned UNIQUE/PK autoindexes are copied as constraints.
         if not isinstance(definition, str) or not isinstance(identity, str):
             raise TypeError(f"unreadable SQLite schema extension: {table_name}")
         if (
-            kind == "view"
+            kind in {"view", "trigger"}
+            and owning_table != table_name
             and re.search(
                 rf"(?<![A-Za-z0-9_]){table_name}(?![A-Za-z0-9_])",
                 definition,
@@ -225,7 +226,7 @@ def _sqlite_extensions(
             )
         if kind == "index":
             indexes.append((identity, definition))
-        elif kind == "trigger":
+        elif kind == "trigger" and owning_table == table_name:
             triggers.append(definition)
     return tuple(indexes), tuple(triggers)
 
