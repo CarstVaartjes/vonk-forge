@@ -99,6 +99,34 @@ def is_security_edge(path: str) -> bool:
     )
 
 
+def _enum_member_lines(source: str) -> set[int]:
+    """Lines where a contract enum defines its own members (the one allowed spelling)."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        bases = {
+            base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
+            for base in node.bases
+        }
+        if not any(name.endswith("Enum") for name in bases):
+            continue
+        for statement in node.body:
+            if isinstance(statement, (ast.Assign, ast.AnnAssign)) and isinstance(
+                statement.value, ast.Constant
+            ):
+                lines.update(
+                    range(
+                        statement.lineno, (statement.end_lineno or statement.lineno) + 1
+                    )
+                )
+    return lines
+
+
 def check_source(
     path: str,
     source: str,
@@ -120,6 +148,7 @@ def check_source(
         and not is_test
         and (python or path.endswith((".rs", ".ts", ".tsx")))
     ):
+        definitions = _enum_member_lines(source) if python else set()
         hits.extend(
             (line, "contract literal")
             for line in vocabulary.scan_source(
@@ -127,6 +156,7 @@ def check_source(
                 path=path,
                 words=vocabulary.contract_words() if words is None else words,
             )
+            if line not in definitions
         )
     if python and not is_test:
         if "mapping" in modes:
