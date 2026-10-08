@@ -505,7 +505,7 @@
       "count": 2
     },
     {
-      "path": "control/src/vonk_control/recipe_packages.py",
+      "path": "control/src/vonk_control/recipe_packages/__init__.py",
       "count": 5
     },
     {
@@ -2325,7 +2325,7 @@
       "decode_stored_phases": "091823c6a00a05c3a6e1df3de8a7d30e3110678baed13f429a91ef0e77ff31b3",
       "<module>": "0e3e44ddd9271d546db21141168524b8639ecaed7034e706dc0f5cc149cac2a2"
     },
-    "control/src/vonk_control/recipe_packages.py": {
+    "control/src/vonk_control/recipe_packages/__init__.py": {
       "_select_release": "b005492cd677be9ca46434128b6b01c29accbefe49e764597cf214fb4c8ce5f6",
       "RecipePackageHandle.recipe_identity": "d85ca395b109aed44948b5a11635e4016d5907be34018b5dd028296dc98266f3",
       "RecipePackageHandle.model_identities": "2e0740dd7138848b2da1ec33440dfd9972ae4c9f760bdc8e33024f0ede8c9f44",

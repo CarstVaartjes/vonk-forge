@@ -10,7 +10,9 @@ from importlib import resources
 import pytest
 from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
+from vonk_control.auth import CursorCodec
 from vonk_control.catalog_entities import (
     CatalogConflict,
     CatalogEntityService,
@@ -159,8 +161,10 @@ def test_recipe_resolution_requires_an_exact_active_model_revision(
         reference["slug"] = "missing-model"
     candidate = service.create_draft(recipe, actor="operator")
 
-    with pytest.raises(CatalogValidationError, match="model reference"):
+    with pytest.raises(CatalogValidationError, match="model reference") as caught:
         service.resolve(candidate.id, actor="operator")
+    assert isinstance(caught.value, InvalidRequestError)
+    assert caught.value.typed_reason is InvalidRequestReason.NOT_FOUND
 
     assert model_revision.state == "active"
 
@@ -466,3 +470,94 @@ def test_new_authorized_revision_supersedes_pending_candidate(
     accepted = service.resolve(latest.id, actor="operator", expected_revision=3)
     assert accepted.id == latest.id
     assert accepted.id != pending.id
+
+
+def test_new_revision_repairs_a_missing_head_without_guessing_history(
+    session: Session,
+    service: CatalogEntityService,
+) -> None:
+    draft = service.create_draft(_model(), actor="operator")
+    session.execute(delete(CatalogDocumentHead))
+    session.flush()
+    changed = copy.deepcopy(draft.document)
+    _metadata(changed)["description"] = "fresh accepted candidate"
+    successor = service.revise(draft.document_id, changed, actor="operator")
+    head = session.scalar(select(CatalogDocumentHead))
+    assert head is not None
+    assert head.candidate_revision_id == successor.id
+    assert head.active_revision_id is None
+    assert service.resolve(successor.id, actor="operator").id == successor.id
+
+
+def test_new_revision_repairs_an_empty_document_root(
+    session: Session,
+    service: CatalogEntityService,
+) -> None:
+    document = _model()
+    identity = ModelDefinition.model_validate(document).identity
+    root = CatalogDocument(
+        kind=document["kind"],
+        publisher=identity.publisher,
+        slug=identity.slug,
+        title="empty root",
+        created_by="operator",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    session.add(root)
+    session.flush()
+    candidate = service.revise(root.id, document, actor="operator")
+    assert candidate.revision_number == 1
+    assert service.resolve(candidate.id, actor="operator").id == candidate.id
+
+
+def test_recipe_resolution_rederives_missing_model_artifact_key(
+    session: Session,
+    service: CatalogEntityService,
+) -> None:
+    model = _model()
+    active_model = _resolve(service, model)
+    artifact_key = active_model.artifact_key
+    session.execute(
+        update(CatalogDocumentRevision)
+        .where(CatalogDocumentRevision.id == active_model.id)
+        .values(artifact_key=None)
+    )
+    session.expire(active_model)
+    active_recipe = _resolve(service, _recipe(model))
+    assert active_recipe.artifact_key is not None
+    assert active_model.artifact_key == artifact_key
+
+
+def test_imported_recipe_recreates_missing_lookup_root(
+    session: Session,
+    service: CatalogEntityService,
+) -> None:
+    from vonk_control.catalog_service import CatalogService
+
+    model = _model()
+    _resolve(service, model)
+    revision = _resolve(service, _recipe(model))
+    root_id = revision.document_id
+    session.execute(delete(CatalogDocument).where(CatalogDocument.id == root_id))
+    catalog = CatalogService(
+        sessionmaker(bind=session.get_bind()),
+        clock=lambda: NOW,
+        cursors=CursorCodec(b"x" * 32),
+    )
+    catalog._select_imported_recipe_head(session, revision)
+    session.flush()
+    root = session.get(CatalogDocument, root_id)
+    assert root is not None
+    assert (root.publisher, root.slug) == (revision.publisher, revision.slug)
+
+
+def test_explicit_activation_restores_only_the_named_missing_selection(
+    session: Session,
+    service: CatalogEntityService,
+) -> None:
+    revision = _resolve(service, _model())
+    session.execute(delete(CatalogDocumentHead))
+    assert service.resolve(revision.id, actor="operator").id == revision.id
+    head = session.scalar(select(CatalogDocumentHead))
+    assert head is not None and head.active_revision_id == revision.id

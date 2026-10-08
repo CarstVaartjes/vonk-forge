@@ -15,13 +15,14 @@ from pathlib import Path
 from threading import Event, Lock
 
 import httpx2
+from vonk_agent_protocol import UnknownOutcomeError, WaitReason
 
 
 class RangeResponseError(ValueError):
     """A range response does not describe the requested object bytes."""
 
 
-class RangeTruncatedError(httpx2.RemoteProtocolError):
+class RangeTruncatedError(UnknownOutcomeError, httpx2.RemoteProtocolError):
     """A valid range ended early; retry may resume its retained prefix."""
 
 
@@ -114,6 +115,7 @@ def download_ranges(
         counts[start] = size
     lock = Lock()
     abort = Event()
+    fallback = Event()
 
     def interrupted() -> bool:
         return stop_event.is_set() or abort.is_set()
@@ -121,13 +123,24 @@ def download_ranges(
     def transfer(start: int, end: int, path: Path) -> None:
         if interrupted():
             raise InterruptedError("range transfer interrupted")
-        offset = start + counts[start]
-        if offset > end:
-            return
-        # The gate bounds live streams only; a range that waits for a permit
-        # holds no connection and resumes from its retained prefix.
-        with stream_gate() if stream_gate is not None else nullcontext():
-            _transfer_body(start, end, path, offset)
+        # Three observations bound a short-body retry. Backoff holds neither
+        # the stream permit nor a connection; every attempt resumes bytes that
+        # the preceding response flushed durably.
+        for pause in (0.0, 0.05, 0.1):
+            if stop_event.wait(pause) or interrupted():
+                raise InterruptedError("range transfer interrupted")
+            offset = start + counts[start]
+            if offset > end:
+                return
+            try:
+                with stream_gate() if stream_gate is not None else nullcontext():
+                    _transfer_body(start, end, path, offset)
+                return
+            except RangeTruncatedError:
+                continue
+        # The sequential downloader is already the request's bounded fallback.
+        # Retained range prefixes remain reusable on a later range observation.
+        fallback.set()
 
     def _transfer_body(start: int, end: int, path: Path, offset: int) -> None:
         response = open_range(offset, end)
@@ -174,7 +187,8 @@ def download_ranges(
                             on_progress(sum(counts.values()))
                     if remaining:
                         raise RangeTruncatedError(
-                            "range response ended before requested bytes arrived"
+                            "range response ended before requested bytes arrived",
+                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
                         )
                 finally:
                     output.flush()
@@ -208,6 +222,8 @@ def download_ranges(
         raise failure
     if stop_event.is_set():
         raise InterruptedError("range transfer interrupted")
+    if fallback.is_set():
+        return False
     assembly = target.with_name(f"{target.name}.range-assembly")
     try:
         with assembly.open("wb") as output:

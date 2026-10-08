@@ -699,7 +699,13 @@ def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(
 ) -> None:
     sessions, service, reader, _item_value = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
-    with pytest.raises(CatalogSyncError, match="changed since"):
+    from vonk_agent_protocol import (
+        CatalogSyncCode,
+        InvalidRequestError,
+        InvalidRequestReason,
+    )
+
+    with pytest.raises(CatalogSyncError, match="changed since") as caught:
         sync.sync(
             request_key=str(uuid.uuid4()),
             trigger="manual",
@@ -708,6 +714,26 @@ def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(
         )
     with sessions() as session:
         assert session.scalars(select(CatalogDocumentRevision)).all() == []
+        assert (
+            session.scalar(
+                select(RecipeLibrarySyncRun).where(
+                    RecipeLibrarySyncRun.active_slot.is_not(None)
+                )
+            )
+            is None
+        )
+    assert isinstance(caught.value, InvalidRequestError)
+    assert caught.value.typed_reason is InvalidRequestReason.CONFLICT
+    typed = caught.value.typed_error()
+    assert typed is not None and typed.field == "expected_commit"
+    assert caught.value.code == CatalogSyncCode.PREVIEW_CHANGED
+    result = sync.sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit=reader.list().commit,
+    )
+    assert result.imported_count == 1
 
 
 def test_sync_marks_reader_failure_failed_and_releases_active_slot(
