@@ -14,6 +14,7 @@ GUARDS: tuple[str, ...] = (
     "tests/test_data_contract_guards.py",
     "tests/test_file_size_ratchet.py",
     "tests/test_git_hermeticity.py",
+    "tests/test_orm_mapping_guard.py",
     "tests/test_run_switch_patch_targets.py",
     "tests/test_no_prototype_model_authority.py",
     "tests/test_shell_destructive_guard.py",

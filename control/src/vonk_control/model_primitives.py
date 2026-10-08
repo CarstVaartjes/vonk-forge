@@ -16,7 +16,15 @@ from vonk_agent_protocol import (
 
 
 class Base(DeclarativeBase):
-    pass
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        # Preserve the pre-split mapper ordering identity. Keep __module__ intact
+        # so SQLAlchemy resolves deferred annotations in the implementation.
+        # SQLAlchemy orders independent mapper writes by module + class name;
+        # implementation-package names would insert RecipeBuild before its
+        # CatalogDocumentRevision even though their FK/metadata are unchanged.
+        if cls.__module__.startswith("vonk_control.models."):
+            cls.__mapper__._sort_key = f"vonk_control.models.{cls.__name__}"
 
 
 class _Utf8ByteLength(FunctionElement[int]):

@@ -135,7 +135,7 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/operation_api.py",
+      "path": "control/src/vonk_control/operation_api/openapi.py",
       "function": "admin_openapi_schema",
       "kind": "loop-without-deadline",
       "count": 1
@@ -1044,5 +1044,14 @@
       "reason": "resource-bound",
       "justification": "The runtime inspection future is selected against wait_ready_until and cancellation; the readiness owner enforces the immutable start deadline or current lease deadline and drops the observer at completion."
     }
-  ]
+  ],
+  "content_identities": {
+    "control/src/vonk_control/operation_api/openapi.py": {
+      "admin_openapi_schema": "9fd2dd68f65f8e139356a668e6c55a762689e243dca2d4092d9bcc154fbb4f49",
+      "admin_openapi_schema.collect": "696d1dbda1c6c02ef8e6d79e379d34c82c51cd6bf990b1bb4804a172690c9f1c",
+      "_contract_component_schemas": "46db43044c42cbe518b4e2a9d32cd7d5861581b04cb747bb05480ce8d31d7633",
+      "_stored_component_schemas": "8b8f88b43d25355d188fa7ca3497a15d02c63ec4ede53a978502abd45300ba4f",
+      "<module>": "a49e99b27c5a3a186b1ff26afe98c9fb0410d49b3f356bcaa70a4b3581df57de"
+    }
+  }
 }

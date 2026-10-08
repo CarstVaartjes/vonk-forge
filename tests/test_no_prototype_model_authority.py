@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_root_tests_do_not_import_control_implementation() -> None:
     contract_boundary_tests = {
+        # The ORM mapping guard inspects the owning Controller graph; it never
+        # defines a client-owned model or imports it in production code.
+        ROOT / "tests/test_orm_mapping_guard.py",
         ROOT / "tests/test_spark_lifecycle_runner.py",
         ROOT / "tests/acceptance/test_spark_lifecycle.py",
         # These source-bound acceptance tests serve the actual native producer

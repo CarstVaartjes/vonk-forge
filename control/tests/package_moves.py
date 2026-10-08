@@ -57,8 +57,7 @@ def identities(source: str) -> dict[str, str]:
         for node in nodes:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 name = scope + node.name
-                if not isinstance(node, ast.ClassDef):
-                    result[name] = digest([node])
+                result[name] = digest([node])
                 visit(node.body, name + ".")
 
     visit(tree.body)

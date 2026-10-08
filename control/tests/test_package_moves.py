@@ -402,6 +402,64 @@ def test_rust_split_carries_only_unique_matching_findings(tmp_path: Path) -> Non
     assert principles.history_gate(current, document, PackageMoves(tmp_path))
 
 
+def test_retention_class_moves_by_content_and_never_shares_allowance(
+    tmp_path: Path,
+) -> None:
+    source = 'class Row(Base):\n    __tablename__ = "rows"\n    value = mapped_column(String)\n'
+    package = tmp_path / Path(OLD).with_suffix("")
+    package.mkdir(parents=True)
+    target = tmp_path / NEW
+    target.write_text(source)
+    document = {
+        "debt": [
+            {
+                "path": OLD,
+                "function": "Row",
+                "kind": "table-without-delete-path",
+                "count": 1,
+            }
+        ],
+        "exceptions": [],
+        "content_identities": {OLD: identities(source)},
+    }
+    current = {**document, "debt": [{**document["debt"][0], "path": NEW}]}
+    moves = PackageMoves(tmp_path, document["content_identities"])
+    assert principles.history_gate(current, document, moves) == []
+    target.write_text(source.replace("String", "Integer"))
+    assert principles.history_gate(
+        current, document, PackageMoves(tmp_path, document["content_identities"])
+    )
+    target.write_text(source)
+    (package / "duplicate.py").write_text(source)
+    assert principles.history_gate(
+        current, document, PackageMoves(tmp_path, document["content_identities"])
+    )
+
+
+def test_undigested_retention_class_requires_the_same_finding(tmp_path: Path) -> None:
+    package = tmp_path / Path(OLD).with_suffix("")
+    package.mkdir(parents=True)
+    (tmp_path / NEW).write_text('class Row(Base):\n    __tablename__ = "rows"\n')
+    document = {
+        "debt": [
+            {
+                "path": OLD,
+                "function": "Row",
+                "kind": "table-without-delete-path",
+                "count": 1,
+            }
+        ],
+        "exceptions": [],
+    }
+    assert (
+        principles.relocate(document, PackageMoves(tmp_path))["debt"][0]["path"] == NEW
+    )
+    (tmp_path / NEW).write_text("class Row: pass")
+    assert (
+        principles.relocate(document, PackageMoves(tmp_path))["debt"][0]["path"] == OLD
+    )
+
+
 @pytest.mark.parametrize("old", ["rust/src/lib.rs", "rust/operations.rs"])
 def test_rust_facade_split_carries_findings_without_pooling_debt(tmp_path, old):
     """A retained facade must neither mint debt nor hide a duplicate owner."""

@@ -32,7 +32,7 @@ that no longer occurs fails as stale.
 | Route activation marker | `route_activation.py`; its state words from `GatewayRouteState` | none | none | `route_activation_words.py` (generated), loaded beside `route_activation.py` by the LiteLLM supervisor |
 | CLI token download | `CliTokenDownload` in `auth_api.py` | none | `components["schemas"]["CliTokenDownload"]` | none |
 | Published Model and Recipe | `vonk_forge_contracts` in the recipes checkout | none | `ModelDefinition`, `RecipeDefinition` in `generated.d.ts` | catalog, compiler |
-| Database rows | SQLAlchemy models, `control/src/vonk_control/models.py` | none | none | Controller |
+| Database rows | SQLAlchemy models, `control/src/vonk_control/models/` | none | none | Controller |
 | Global container-runtime policy | `vonk-forge-web` `schemas/`, copied to `schemas/global/` | allowlisted below (read as published) | none | none |
 
 Regenerate everything with `scripts/generate-agent-wire` (wire, installer
@@ -184,7 +184,7 @@ module defines its own.
 | `control/src/vonk_control/artifact_blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
 | `control/src/vonk_control/artifact_job_api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
 | `control/src/vonk_control/artifact_job_evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
-| `control/src/vonk_control/artifact_jobs.py` | declared | 10 | Durable, bounded, content-addressed artifact-producing recipe jobs. |
+| `control/src/vonk_control/artifact_jobs/contracts.py` | declared | 10 | Durable, bounded, content-addressed artifact-producing recipe jobs. |
 | `control/src/vonk_control/artifact_maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
 | `control/src/vonk_control/auth_api.py` | declared | 4 | Strict HTTP boundary for durable browser authentication. |
 | `control/src/vonk_control/ca_issuance_contract.py` | controller-contract | 7 | Exact accepted CA issuance binding, authenticated sign/observe request, durable receipt states and typed refusals. |
@@ -216,7 +216,7 @@ module defines its own.
 | `control/src/vonk_control/model_cache/provider_contracts.py` | declared | 3 | Durable, content-addressed model artifacts stored on the Controller NAS. |
 | `control/src/vonk_control/model_cache_contract.py` | controller-contract | 40 | Schema-2 contracts for the Controller-owned NAS model cache. |
 | `control/src/vonk_control/observation_transfer.py` | controller-contract | 5 | Canonical immutable observation transfer records; sequence, identity, byte count and final digest bind the original complete Fleet or platform payload. |
-| `control/src/vonk_control/operation_api.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
+| `control/src/vonk_control/operation_api/contracts.py` | declared | 20 | Strict, secret-free representations for routine administrative operations. |
 | `control/src/vonk_control/operation_blockers.py` | declared | 1 | One typed answer to "what is this operation waiting for?". |
 | `control/src/vonk_control/operation_contract.py` | controller-contract | 4 | Current nested contracts for durable Controller operations and progress. |
 | `control/src/vonk_control/operation_item_contract.py` | controller-contract | 3 | One operation of any family as Activity projects it: the typed item, its owner and the failure facts of its stored result. |
@@ -302,3 +302,5 @@ Run/Switch orchestration records are defined in `control/src/vonk_control/run_sw
 
 Controller capability availability and retryable refusals are owned by
 `control/src/vonk_control/capability_contract.py`.
+
+`operation_api/openapi.py` passes external OpenAPI and JSON Schema documents through `ExternalSchemaDocument`, annotated with `ExternalPassthrough`; application responses remain canonical registered models.

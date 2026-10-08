@@ -67,7 +67,12 @@ KINDS = frozenset(kind.value for kind in StateWriteKind)
 DICT_STATE_OWNERS = frozenset(
     {
         *AGENT_JOB_MODULES,
-        "control/src/vonk_control/artifact_jobs.py",
+        *(
+            path.relative_to(REPO_ROOT).as_posix()
+            for path in (REPO_ROOT / "control/src/vonk_control/artifact_jobs").glob(
+                "*.py"
+            )
+        ),
         "control/src/vonk_control/fleet_profiles/",
         "control/src/vonk_control/jobs.py",
         "control/src/vonk_control/model_cache/artifacts.py",
@@ -666,7 +671,10 @@ def scan_source(
 
     ``tree`` is the already parsed ``source`` (read-only) when the caller has it."""
 
-    if path.startswith(CORE_PREFIX) or path == MODELS_MODULE:
+    if path.startswith(CORE_PREFIX) or (
+        path == MODELS_MODULE
+        or path.startswith(MODELS_MODULE.removesuffix(".py") + "/")
+    ):
         return []
     collector = _Collector(path, tree if tree is not None else ast.parse(source))
     return sorted(collector.writes, key=lambda write: (write.line, write.function))
@@ -679,7 +687,10 @@ def scan_unresolved(
 
     Each entry is ``(function, variable, line)``."""
 
-    if path.startswith(CORE_PREFIX) or path == MODELS_MODULE:
+    if path.startswith(CORE_PREFIX) or (
+        path == MODELS_MODULE
+        or path.startswith(MODELS_MODULE.removesuffix(".py") + "/")
+    ):
         return []
     return _Collector(path, tree if tree is not None else ast.parse(source)).unresolved
 

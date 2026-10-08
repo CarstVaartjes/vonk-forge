@@ -15,6 +15,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = "tools/file-size-allowlist.json"
 LIMIT = 1500
+FOCUSED_PACKAGES = (
+    "control/src/vonk_control/operation_api/",
+    "control/src/vonk_control/artifact_jobs/",
+    "control/src/vonk_control/models/",
+)
+FOCUSED_LIMIT = 1000
 SOURCE_ROOTS = ("control/src", "src", "scripts", "control/web/src")
 # These outputs belong to the repository's client/wire generators.
 GENERATED_PREFIXES = ("src/cluster_profiles/generated_control/",)
@@ -70,6 +76,8 @@ def evaluate(
                 f"{path}: listed {ceiling}, actual {actual}; lower on shrink"
             )
     for path, count in counts.items():
+        if path.startswith(FOCUSED_PACKAGES) and count > FOCUSED_LIMIT:
+            problems.append(f"{path}: focused module exceeds {FOCUSED_LIMIT} lines")
         if count > LIMIT and path not in listed:
             problems.append(
                 f"{path}: unlisted source has {count} lines (limit {LIMIT})"
@@ -129,3 +137,10 @@ def test_scan_covers_authored_sources_and_excludes_generator_outputs(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#!/usr/bin/env python\n" + "line\n" * LIMIT)
     assert source_counts(tmp_path) == dict.fromkeys(authored, LIMIT + 1)
+
+
+@pytest.mark.parametrize("package", FOCUSED_PACKAGES)
+def test_focused_packages_cannot_regrow_monoliths(package: str) -> None:
+    path = package + "service.py"
+    assert evaluate({path: FOCUSED_LIMIT}, {}, {}) == []
+    assert evaluate({path: FOCUSED_LIMIT + 1}, {}, {})
