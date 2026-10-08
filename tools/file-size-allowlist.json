@@ -18,7 +18,6 @@
     "control/web/src/components/artifact-job-workspace.tsx": 1640,
     "control/web/src/pages/activity.tsx": 1674,
     "control/web/src/pages/library.css": 3366,
-    "rust/crates/vonk-agent/src/host_runtime.rs": 2089,
     "scripts/install-release-publication": 2176,
     "scripts/verify-agent-deb": 1836,
     "src/cluster_profiles/cli_render.py": 2062,

@@ -399,7 +399,7 @@
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "path": "rust/crates/vonk-agent/src/host_runtime/tests/responses.rs",
       "function": "helper_message_framing_refusal_names_the_message_contract",
       "kind": "rust-wait-without-deadline",
       "count": 1
@@ -573,13 +573,13 @@
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/tests/recipe_builder.rs",
+      "path": "rust/crates/vonk-agent/tests/recipe_builder/main.rs",
       "function": "drop",
       "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/tests/recipe_builder.rs",
+      "path": "rust/crates/vonk-agent/tests/recipe_builder/main.rs",
       "function": "start",
       "kind": "rust-wait-without-deadline",
       "count": 1
@@ -989,7 +989,7 @@
       "justification": "Pure fragment encoding of an immutable finite UTF-8 JSON token, not polling or an external wait. offset starts at zero and advances by min(available - len(pending), len(raw) - offset); pending is strictly below available on entry, and a full fragment yields then clears pending before the next iteration. Nonpositive available fails closed. allocation derives the actual 2 MiB per-record envelope including ordinal; no total snapshot byte/time cap is implied. The real large FleetSnapshot roundtrip checks every record bound and original full document, and the PostgreSQL slow-ASGI proof checks SQL release and threadpool encoding. Each emitted fragment yields to the transport; this classification does not claim CPU preemption or physical-worker coverage."
     },
     {
-      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "path": "rust/crates/vonk-agent/src/host_runtime/tests/observation.rs",
       "function": "drop",
       "kind": "rust-wait-without-deadline",
       "count": 1,
@@ -997,7 +997,7 @@
       "justification": "Only the inspection-test Gate cleanup joins its exact owned std::thread::JoinHandle after observing that same handle is_finished. The shared absolute cleanup deadline bounds prior completion polling; unfinished workers are not joined and their fixture is retained. Task abortion and semaphore return are separately checked before cleanup may claim completion. This is a completed-thread reap, not an external wait or evidence that an unresolved native effect ended."
     },
     {
-      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "path": "rust/crates/vonk-agent/src/host_runtime/tests/mod.rs",
       "function": "request_root_publication_has_no_permissive_intermediate_state",
       "kind": "rust-wait-without-deadline",
       "count": 1,
