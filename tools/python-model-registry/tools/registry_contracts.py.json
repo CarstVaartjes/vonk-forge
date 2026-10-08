@@ -1,0 +1,3 @@
+{
+  "modules": [{"kind": "controller-contract", "module": "tools/registry_contracts.py"}]
+}

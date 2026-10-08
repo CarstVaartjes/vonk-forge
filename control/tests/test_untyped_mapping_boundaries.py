@@ -7,7 +7,6 @@ from textwrap import dedent
 
 import pytest
 
-from .registry_storage import write_registry
 from .untyped_mapping_boundaries import (
     Site,
     evaluate_gate,
@@ -97,10 +96,17 @@ def test_permanent_entries_are_keyed_on_function_and_annotation() -> None:
 
 def test_loader_requires_a_reason(tmp_path: Path) -> None:
     entry = {"path": PATH, "function": "f", "annotation": "x", "count": 1}
-    path = tmp_path / "a.json"
-    write_registry(path, {"schema": 1, "permanent": [entry], "debt": []})
-    with pytest.raises(ValueError, match="written reason"):
-        load_allowlist(path)
+    from .registry_observation_cases import assert_replacement_recovers
+
+    broken = {"schema": 1, "permanent": [entry], "debt": []}
+    replacement = {
+        "schema": 1,
+        "permanent": [{**entry, "reason": "external passthrough content"}],
+        "debt": [],
+    }
+    assert assert_replacement_recovers(
+        load_allowlist, tmp_path / "allowance", broken, replacement
+    )
 
 
 def test_untyped_mapping_annotations_only_go_down() -> None:

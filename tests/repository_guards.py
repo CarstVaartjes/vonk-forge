@@ -34,6 +34,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_principle_history.py",
+        "Historical inventory observation retry with simulated subprocess replies.",
+    ),
+    (
         "tests/scripts/test_vm_cargo_hook.py",
         "VM cargo hook command and fault classification; no host services.",
     ),

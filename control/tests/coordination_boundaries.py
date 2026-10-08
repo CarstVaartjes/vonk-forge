@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .parsed_sources import memoized_scan, parsed_tree
-from .registry_storage import read_registry, write_registry
+from .registry_storage import observe_registry, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
@@ -764,9 +764,12 @@ def _baseline_identity(entry: object, where: str) -> dict[str, object]:
 
 
 def load_baseline(path: Path = BASELINE_PATH) -> list[dict[str, object]]:
-    """Read the reviewed baseline. A malformed baseline is a hard failure."""
+    """Read the reviewed baseline. Stored validation belongs to the bounded observation."""
 
-    document = read_registry(path)
+    return observe_registry(path, _validate_registry)
+
+
+def _validate_registry(document: dict, path: Path) -> list[dict[str, object]]:
     if not isinstance(document, dict):
         raise TypeError(f"{path}: baseline must be a schema-1 object")
     if document.get("schema") != 1:

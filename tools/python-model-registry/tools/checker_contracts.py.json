@@ -1,0 +1,8 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "tools/checker_contracts.py"
+    }
+  ]
+}

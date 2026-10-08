@@ -304,3 +304,9 @@ Controller capability availability and retryable refusals are owned by
 `control/src/vonk_control/capability_contract.py`.
 
 `operation_api/openapi.py` passes external OpenAPI and JSON Schema documents through `ExternalSchemaDocument`, annotated with `ExternalPassthrough`; application responses remain canonical registered models.
+
+`tools/checker_contracts.py` owns external Pyright reply decoding and the normalized `CheckerFinding` consumed by the type-check CLI. `CheckerPosition`, `CheckerRange`, `CheckerDiagnostic`, and `CheckerReport` validate nested replies before a checker observation is usable. These local tooling models are not Controller or agent wire payloads.
+
+`tools/registry_contracts.py` owns `RegistryManifest` (the complete module inventory and byte fingerprints) and `RegistryPublication` (the last complete view and the accepted replacement). These are local inventory storage contracts, not Controller or agent wire payloads.
+
+`CheckerBaseline` and `CheckerException` own the stored type-check allowances. Descriptive notes are preserved as data; the observed Pyright diagnostics determine source acceptance.

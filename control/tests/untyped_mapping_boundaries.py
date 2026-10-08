@@ -36,7 +36,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from .registry_storage import read_registry, write_registry
+from .registry_storage import RegistrySnapshot, observe_registry, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = (
@@ -167,7 +167,12 @@ def scan_sites(roots: Sequence[Path] = SOURCE_ROOTS) -> list[Site]:
 
 
 def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, list[dict[str, object]]]:
-    document = read_registry(path)
+    return observe_registry(path, _validate_registry)
+
+
+def _validate_registry(
+    document: dict, path: Path
+) -> dict[str, list[dict[str, object]]]:
     if not isinstance(document, dict) or document.get("schema") != 1:
         raise ValueError(f"{path}: allowlist must be a schema-1 object")
     permanent = document.get("permanent")
@@ -304,7 +309,11 @@ def update_debt(path: Path = ALLOWLIST_PATH) -> int:
     from .package_moves import record_identities
 
     document = record_identities(document, REPO_ROOT)
-    write_registry(path, document)
+    write_registry(
+        path,
+        document,
+        base=allowlist if isinstance(allowlist, RegistrySnapshot) else None,
+    )
     return sum(remaining.values())
 
 

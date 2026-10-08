@@ -18,7 +18,7 @@ from pathlib import Path
 import yaml
 
 from .parsed_sources import parse_file
-from .registry_storage import read_registry, write_registry
+from .registry_storage import RegistrySnapshot, observe_registry, write_registry
 
 ROOT = Path(__file__).resolve().parents[2]
 REASONS = frozenset(
@@ -995,7 +995,10 @@ def scan_sites(mode: str) -> list[Site]:
 
 
 def load_allowlist(path: Path) -> dict:
-    doc = read_registry(path)
+    return observe_registry(path, _validate_registry)
+
+
+def _validate_registry(doc: dict, path: Path) -> dict:
     if (
         doc.get("schema") != 1
         or not isinstance(doc.get("debt"), list)
@@ -1123,7 +1126,11 @@ def main(mode: str, argv: Sequence[str] | None = None) -> int:
     sites = scan_sites(mode)
     document = load_allowlist(path)
     if args == ["--lower"]:
-        write_registry(path, lower(document, sites))
+        write_registry(
+            path,
+            lower(document, sites),
+            base=document if isinstance(document, RegistrySnapshot) else None,
+        )
         return 0
     if args:
         raise ValueError("only --lower is supported")

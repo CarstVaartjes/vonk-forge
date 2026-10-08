@@ -30,7 +30,6 @@ from .coordination_boundaries import (
     scan_coordination_sites,
     scan_source,
 )
-from .registry_storage import write_registry
 
 #: The repository parse is shared setup, not the first test's own time.
 pytestmark = pytest.mark.usefixtures("parsed_repository")
@@ -352,10 +351,7 @@ def test_gate_rejects_a_new_site_and_a_stale_entry() -> None:
 def test_baseline_loader_rejects_an_unexplained_or_unknown_entry(
     tmp_path: Path,
 ) -> None:
-    def write(document: dict) -> Path:
-        path = tmp_path / "baseline.json"
-        write_registry(path, document)
-        return path
+    from .registry_observation_cases import assert_replacement_recovers
 
     entry = {
         "path": "control/src/sample.py",
@@ -364,13 +360,14 @@ def test_baseline_loader_rejects_an_unexplained_or_unknown_entry(
         "function": "run",
         "detail": "external call open",
     }
-    with pytest.raises(ValueError, match="written reason"):
-        load_baseline(write({"schema": 1, "sites": [entry]}))
-    with pytest.raises(ValueError, match="unknown site kind"):
-        load_baseline(
-            write({"schema": 1, "sites": [{**entry, "kind": "made-up", "reason": "x"}]})
+    replacement = {"schema": 1, "sites": [{**entry, "reason": "observed boundary"}]}
+    for broken in (
+        {"schema": 1, "sites": [entry]},
+        {"schema": 1, "sites": [{**entry, "kind": "made-up", "reason": "x"}]},
+    ):
+        assert assert_replacement_recovers(
+            load_baseline, tmp_path / "baseline", broken, replacement
         )
-    assert load_baseline(write({"schema": 1, "sites": [{**entry, "reason": "x"}]}))
 
 
 def test_rendered_baseline_round_trips() -> None:

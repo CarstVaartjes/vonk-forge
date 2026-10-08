@@ -81,7 +81,7 @@ from vonk_agent_protocol import (
 )
 
 from .parsed_sources import memoized_scan, parsed_tree
-from .registry_storage import read_registry, write_registry
+from .registry_storage import RegistrySnapshot, observe_registry, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
@@ -876,9 +876,12 @@ def relocate_document(document, moves=None):
 
 
 def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
-    """Read and validate the allowlist. A malformed entry is a hard failure."""
+    """Read and validate the allowlist. Stored validation belongs to the bounded observation."""
 
-    document = read_registry(path)
+    return observe_registry(path, _validate_registry)
+
+
+def _validate_registry(document: dict, path: Path) -> dict[str, object]:
     if not isinstance(document, dict) or document.get("schema") != 1:
         raise ValueError(f"{path}: allowlist must be a schema-1 object")
     for required in ("max_debt", "debt_ceiling", "scope", "categorized_raises"):
@@ -1198,7 +1201,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments and arguments[0] == "--write-baseline":
         updated = write_counts(document, waits, raises, guard)
         write_registry(
-            ALLOWLIST_PATH, json.loads(dump_document(updated, record_content=True))
+            ALLOWLIST_PATH,
+            json.loads(dump_document(updated, record_content=True)),
+            base=document if isinstance(document, RegistrySnapshot) else None,
         )
         print("lowered the recorded counts; new sites are never written")
         return 0

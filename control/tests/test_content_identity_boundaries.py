@@ -25,7 +25,6 @@ from .content_identity_boundaries import (
     scan_provenance_sites,
     scan_source,
 )
-from .registry_storage import write_registry
 
 #: The repository parse is shared setup, not the first test's own time.
 pytestmark = pytest.mark.usefixtures("parsed_repository")
@@ -192,24 +191,20 @@ def test_allowlist_loader_rejects_an_unexplained_or_unknown_entry(
         "expression": "a.build_id != b.build_id",
     }
 
-    def write(document: dict) -> Path:
-        path = tmp_path / "allowlist.json"
-        write_registry(path, document)
-        return path
+    from .registry_observation_cases import assert_replacement_recovers
 
-    with pytest.raises(ValueError, match="written reason"):
-        load_allowlist(write({"schema": 1, "sites": [{**entry, "reason": ""}]}))
-    with pytest.raises(ValueError, match="written reason"):
-        load_allowlist(write({"schema": 1, "sites": [entry]}))
-    with pytest.raises(ValueError, match="unknown site kind"):
-        load_allowlist(
-            write({"schema": 1, "sites": [{**entry, "kind": "x", "reason": "a b c d"}]})
+    replacement = {
+        "schema": 1,
+        "sites": [{**entry, "reason": "ownership lookup of a build"}],
+    }
+    for broken in (
+        {"schema": 1, "sites": [{**entry, "reason": ""}]},
+        {"schema": 1, "sites": [entry]},
+        {"schema": 1, "sites": [{**entry, "kind": "x", "reason": "a b c d"}]},
+    ):
+        assert assert_replacement_recovers(
+            load_allowlist, tmp_path / "allowlist", broken, replacement
         )
-    assert load_allowlist(
-        write(
-            {"schema": 1, "sites": [{**entry, "reason": "ownership lookup of a build"}]}
-        )
-    )
 
 
 def test_every_committed_entry_names_its_reason() -> None:

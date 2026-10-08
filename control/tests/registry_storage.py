@@ -1,15 +1,24 @@
-"""Module-local storage for reviewed static inventories (no checkout history).
+"""Coherent module inventories with bounded observation and crash reconciliation.
 
-Shards retain the registry's existing document shape. Global metadata owns empty
-containers and family descriptions; source paths own their entries. Policy and
-validation remain with the consuming scanner.
+The manifest defines completeness. A durable publication journal preserves the
+last committed view until atomic manifest replacement. Snapshot-derived edits
+are fenced by module content, while explicit replacement repairs unreadable
+local storage. Consumer validation belongs to the same observation budget.
 """
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
+import os
+import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
+
+from tools.registry_contracts import RegistryManifest, RegistryPublication
 
 
 def _source(value):
@@ -40,7 +49,9 @@ def _merge(left, right):
                     continue
             result.append(value)
         return result
-    return right
+    if left != right:
+        raise ValueError("registry shards have conflicting metadata")
+    return left
 
 
 def _split(value):
@@ -121,32 +132,262 @@ def _derive(document):
     return document
 
 
-def read_registry(path: Path) -> dict:
+class RegistryObservationUnavailable(RuntimeError):
+    """A bounded inventory observation ended without a complete document."""
+
+
+class RegistrySnapshot(dict):
+    """An observed document retaining the module bytes used to author changes."""
+
+    def __init__(
+        self, document: dict, fragments: dict[str, str], owner: Path | None = None
+    ):
+        super().__init__(document)
+        self.fragments = dict(fragments)
+        self.owner = owner
+
+
+def _manifest(fragments: dict[str, str]) -> RegistryManifest:
+    return RegistryManifest(
+        shards={
+            name: hashlib.sha256(text.encode("utf-8")).hexdigest()
+            for name, text in fragments.items()
+        }
+    )
+
+
+def _assemble(fragments: dict[str, str], owner: Path | None = None) -> RegistrySnapshot:
     document = {}
-    for shard in sorted(path.rglob("*.json")):
-        document = _merge(document, json.loads(shard.read_text(encoding="utf-8")))
-    return cast(dict, _derive(_sorted(document)))
+    for name, text in sorted(fragments.items()):
+        fragment = json.loads(text)
+        if not isinstance(fragment, dict):
+            raise TypeError(f"{name}: registry fragment is not an object")
+        document = _merge(document, fragment)
+    return RegistrySnapshot(cast(dict, _derive(_sorted(document))), fragments, owner)
 
 
-def write_registry(path: Path, document: dict) -> None:
-    # Serialize before effects. Source paths are supplied by the scanners, never
-    # by remote callers. Only files inside this registry are reconciled.
+def _read_once(path: Path) -> RegistrySnapshot:
+    try:
+        pending = RegistryPublication.model_validate_json(
+            (path / ".publication").read_bytes()
+        )
+    except FileNotFoundError:
+        pending = None
+    if pending is not None:
+        # A killed publisher leaves the last complete view in its durable
+        # journal. The manifest is the single visibility/commit point.
+        try:
+            current = RegistryManifest.model_validate_json(
+                (path / ".manifest").read_bytes()
+            )
+        except FileNotFoundError:
+            current = None
+        if current == pending.desired_manifest:
+            return _assemble(pending.desired, path.resolve())
+        if current != pending.previous_manifest or current is None:
+            raise ValueError("registry publication has no complete committed view")
+        return _assemble(pending.previous, path.resolve())
+    first = (path / ".manifest").read_bytes()
+    manifest = RegistryManifest.model_validate_json(first)
+    names = {p.relative_to(path).as_posix() for p in path.rglob("*.json")}
+    if names != set(manifest.shards):
+        raise ValueError("registry shard inventory is incomplete")
+    fragments = {
+        name: (path / name).read_text(encoding="utf-8") for name in manifest.shards
+    }
+    if _manifest(fragments) != manifest or (path / ".manifest").read_bytes() != first:
+        raise ValueError("registry changed during observation")
+    return _assemble(fragments, path.resolve())
+
+
+def read_registry(path: Path) -> RegistrySnapshot:
+    cause: Exception | None = None
+    for attempt in range(2):
+        try:
+            return _read_once(path)
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+            AttributeError,
+        ) as error:
+            cause = error
+            if attempt == 0:
+                time.sleep(0.01)
+    raise RegistryObservationUnavailable(
+        f"{path}: inventory unavailable after two observations: {cause}"
+    ) from cause
+
+
+def observe_registry[Observed](
+    path: Path, validate: Callable[[dict, Path], Observed]
+) -> Observed:
+    """Include the consumer's document decoding in the bounded observation."""
+    cause: Exception | None = None
+    for attempt in range(2):
+        try:
+            snapshot = _read_once(path)
+            result = validate(snapshot, path)
+            if isinstance(result, dict):
+                return cast(
+                    Observed,
+                    RegistrySnapshot(result, snapshot.fragments, snapshot.owner),
+                )
+            return result
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+            AttributeError,
+        ) as error:
+            cause = error
+            if attempt == 0:
+                time.sleep(0.01)
+    raise RegistryObservationUnavailable(
+        f"{path}: inventory unavailable after two observations: {cause}"
+    ) from cause
+
+
+def _atomic_write(target: Path, data: bytes) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".registry-", dir=target.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        directory = os.open(target.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def _publish(path: Path, pending: RegistryPublication) -> None:
+    for name, text in pending.desired.items():
+        target = path / name
+        try:
+            unchanged = target.read_bytes() == text.encode("utf-8")
+        except OSError:
+            unchanged = False
+        if not unchanged:
+            _atomic_write(target, text.encode("utf-8"))
+    for target in path.rglob("*.json"):
+        if target.relative_to(path).as_posix() not in pending.desired:
+            target.unlink(missing_ok=True)
+    _atomic_write(
+        path / ".manifest", pending.desired_manifest.model_dump_json().encode()
+    )
+    (path / ".publication").unlink(missing_ok=True)
+    # Crash leftovers are unpublished temporary bytes, never inventory entries.
+    for temporary in path.rglob(".registry-*"):
+        temporary.unlink(missing_ok=True)
+
+
+def _render(document: dict) -> dict[str, str]:
     document = json.loads(json.dumps(document))
     if "fail_closed" in document:
-        document.pop("max_debt")
-        document["debt_ceiling"].pop("total")
+        document.pop("max_debt", None)
+        document["debt_ceiling"].pop("total", None)
         document["debt_ceiling"].pop("unaudited", None)
-        document["categorized_raises"].pop("ceiling")
-    expected = {}
-    for owner, fragment in _split(document).items():
-        target = path / (owner + ".json")
-        expected[target] = (
-            json.dumps(_sorted(fragment), indent=2, sort_keys=True) + "\n"
-        )
-    for target, text in expected.items():
-        if not target.exists() or target.read_text(encoding="utf-8") != text:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text, encoding="utf-8")
-    for target in path.rglob("*.json"):
-        if target not in expected:
-            target.unlink()
+        document["categorized_raises"].pop("ceiling", None)
+    expected = {
+        owner + ".json": json.dumps(_sorted(fragment), indent=2, sort_keys=True) + "\n"
+        for owner, fragment in _split(document).items()
+    }
+    # Validate explicit replacement bytes and path ownership before effects.
+    _manifest(expected)
+    _assemble(expected)
+    return expected
+
+
+def write_registry(
+    path: Path, document: dict, *, base: RegistrySnapshot | None = None
+) -> None:
+    expected = _render(document)
+    if (
+        base is None
+        and isinstance(document, RegistrySnapshot)
+        and document.owner == path.resolve()
+    ):
+        base = document
+    cause: Exception | None = None
+    for attempt in range(2):
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            with (path / ".writer-lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Finish an accepted interrupted publication before considering
+                # a subsequent request. Kernel ownership ends on process death.
+                try:
+                    pending = RegistryPublication.model_validate_json(
+                        (path / ".publication").read_bytes()
+                    )
+                except FileNotFoundError:
+                    pending = None
+                if pending is not None:
+                    _publish(path, pending)
+                try:
+                    current = _read_once(path)
+                    previous = current.fragments
+                except (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    IndexError,
+                    AttributeError,
+                ):
+                    # An explicit, complete replacement can repair damaged local
+                    # observation. Never require reading a corrupt target first.
+                    if base is not None:
+                        raise
+                    previous = {}
+                desired = dict(expected)
+                if base is not None:
+                    desired = dict(previous)
+                    for name in base.fragments.keys() | expected.keys():
+                        old, new = base.fragments.get(name), expected.get(name)
+                        if old == new:
+                            continue
+                        if previous.get(name) not in (old, new):
+                            raise ValueError(
+                                f"{name}: newer module bytes supersede this snapshot"
+                            )
+                        if new is None:
+                            desired.pop(name, None)
+                        else:
+                            desired[name] = new
+                if desired == previous:
+                    return
+                pending = RegistryPublication(
+                    previous=previous,
+                    desired=desired,
+                    previous_manifest=_manifest(previous) if previous else None,
+                    desired_manifest=_manifest(desired),
+                )
+                _assemble(desired)
+                _atomic_write(path / ".publication", pending.model_dump_json().encode())
+                _publish(path, pending)
+                return
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+            AttributeError,
+        ) as error:
+            cause = error
+            if attempt == 0:
+                time.sleep(0.01)
+    raise RegistryObservationUnavailable(
+        f"{path}: publication unavailable after two attempts: {cause}"
+    ) from cause

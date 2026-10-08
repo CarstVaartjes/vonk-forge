@@ -16,17 +16,40 @@ from control.tests.principle_guards import ALLOWLISTS, history_gate, load_allowl
 from control.tests.registry_storage import _merge
 
 
-def _observe_git(command, *, check, timeout, **kwargs):
-    try:
-        result = subprocess.run(command, check=check, timeout=timeout, **kwargs)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return subprocess.run(command, check=check, timeout=timeout, **kwargs)
-    if result.returncode:
-        return subprocess.run(command, check=check, timeout=timeout, **kwargs)
-    return result
+def _observe_git(command, *, check, timeout, decode=None, **kwargs):
+    cause = None
+    for _attempt in range(2):
+        try:
+            result = subprocess.run(command, check=check, timeout=timeout, **kwargs)
+            if result.returncode:
+                raise subprocess.CalledProcessError(
+                    result.returncode, command, result.stdout, result.stderr
+                )
+            if decode is not None:
+                decode(result.stdout)
+            return result
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+            subprocess.SubprocessError,
+        ) as error:
+            cause = error
+    raise RuntimeError(
+        f"Git observation unavailable after two attempts: {cause}"
+    ) from cause
 
 
-def main() -> int:
+def _object(text):
+    document = json.loads(text)
+    if not isinstance(document, dict):
+        raise TypeError("historical inventory is not an object")
+    return document
+
+
+def _main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
     args = parser.parse_args()
@@ -50,6 +73,7 @@ def main() -> int:
             check=True,
         ).stdout.splitlines()
         if shards:
+            shards = [name for name in shards if name.endswith(".json")]
             document = {}
             for shard in sorted(shards):
                 text = _observe_git(
@@ -59,47 +83,63 @@ def main() -> int:
                     text=True,
                     timeout=10,
                     check=True,
+                    decode=lambda reply, previous=document: _merge(
+                        previous, _object(reply)
+                    ),
                 ).stdout
-                document = _merge(document, json.loads(text))
+                document = _merge(document, _object(text))
+            if not isinstance(document, dict):
+                raise TypeError("historical inventory is not an object")
             messages.extend(
                 f"{relative}: {message}"
                 for message in history_gate(load_allowlist(ROOT / relative), document)
             )
             continue
         historical = relative + ".json"
+        exists = _observe_git(
+            ["git", "ls-tree", args.base, "--", historical],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        if not exists.stdout.strip():
+            continue
         previous = _observe_git(
             ["git", "show", f"{args.base}:{historical}"],
             cwd=ROOT,
             capture_output=True,
             text=True,
             timeout=10,
-            check=False,
+            check=True,
+            decode=_object,
         )
-        if previous.returncode:
-            # Only first introduction is exempt. An unreadable existing blob
-            # (rather than a genuinely absent path) is a CI failure.
-            exists = _observe_git(
-                ["git", "ls-tree", args.base, "--", historical],
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=True,
-            )
-            if exists.stdout.strip():
-                raise RuntimeError(
-                    f"cannot read baseline {relative}: {previous.stderr}"
-                )
-            continue
         messages.extend(
             f"{relative}: {message}"
             for message in history_gate(
-                load_allowlist(ROOT / relative), json.loads(previous.stdout)
+                load_allowlist(ROOT / relative), _object(previous.stdout)
             )
         )
     for message in messages:
         print(message, file=sys.stderr)
     return int(bool(messages))
+
+
+def main() -> int:
+    try:
+        return _main()
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        IndexError,
+        RuntimeError,
+        subprocess.SubprocessError,
+    ) as error:
+        print(f"principle history observation unavailable: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

@@ -1,8 +1,0 @@
-{
-  "debt": [
-    {
-      "count": 5,
-      "path": "scripts/check-python-types"
-    }
-  ]
-}

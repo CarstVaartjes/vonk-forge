@@ -6,6 +6,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -166,3 +168,55 @@ def test_history_observation_retries_once_and_does_not_poison_a_fresh_read(monke
     assert len(calls) == 2
     assert module._git("show", "fixture") == "observed"
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("fault", ["json", "process", "structure"])
+def test_unreadable_existing_counts_are_not_reported_as_zero_and_fresh_read_recovers(
+    fault,
+):
+    module = _module()
+    reads = []
+
+    def read(path):
+        if path == module.WRITERS:
+            raise FileNotFoundError(path)
+        if path == module.BLOCKERS:
+            reads.append(path)
+            if len(reads) <= 2:
+                if fault == "process":
+                    raise subprocess.CalledProcessError(1, ["git", "show"])
+                return "unreadable" if fault == "json" else "{}"
+            return json.dumps(BLOCKERS)
+        raise FileNotFoundError(path)
+
+    with pytest.raises(RuntimeError):
+        module.counts_from(read)
+    assert len(reads) == 2
+    assert (
+        module.counts_from(read)["debt"]
+        == module.count_documents({"writers": []}, BLOCKERS)["debt"]
+    )
+    assert len(reads) == 3
+
+
+def test_existing_unreadable_optional_inventory_is_unknown_then_recovers():
+    module = _module()
+    reads = []
+
+    def read(path):
+        if path == module.WRITERS:
+            raise FileNotFoundError(path)
+        if path == module.BLOCKERS:
+            return json.dumps(BLOCKERS)
+        if path == module.INVENTORIES["untyped"]:
+            reads.append(path)
+            if len(reads) <= 2:
+                raise subprocess.CalledProcessError(1, ["git", "show"])
+            return json.dumps({"debt": [{"count": 4}]})
+        raise FileNotFoundError(path)
+
+    with pytest.raises(RuntimeError):
+        module.counts_from(read)
+    assert len(reads) == 2
+    assert module.counts_from(read)["untyped"] == 4
+    assert len(reads) == 3

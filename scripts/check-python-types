@@ -1,22 +1,10 @@
 #!/usr/bin/env -S uv run --project control --no-sync --offline python
-"""Fail when a Python type error appears outside the reviewed exception list.
+"""Observe Pyright diagnostics against typed, descriptive reviewed allowances.
 
-The repository does not type-check cleanly yet, but every surviving error is a
-deliberate one. `tools/pyright-baseline` lists each of them by file and
-pyright rule, with the count and the reason it is accepted, so the check is a
-reviewed allowlist rather than a per-file budget:
-
-* an error whose file and rule are not listed fails, so a new error cannot hide
-  behind an equal count in a file that already had one;
-* a listed error whose count changed fails in both directions, so a second
-  error of the same rule in the same file is caught and a fixed error must be
-  removed from the list;
-* a listed error that no longer occurs fails as stale, so the list cannot rot;
-* a listed error without a reason fails, so `--update` is not a way to accept an
-  error without saying why.
-
-Run `--update` to write the current errors, then write the reason for any new
-entry it adds.
+A complete checker reply is required before source errors are evaluated.
+Unavailable processes and malformed nested replies receive one re-observation.
+Stale allowances and missing descriptive notes cannot refuse clean source.
+The explicit update action preserves known notes and publishes current counts.
 """
 
 from __future__ import annotations
@@ -24,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -32,20 +21,53 @@ sys.dont_write_bytecode = True  # checks never create authored-tree cache files
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from control.tests.registry_storage import read_registry, write_registry
+from control.tests.registry_storage import observe_registry, write_registry
+from tools.checker_contracts import (
+    CheckerBaseline,
+    CheckerException,
+    CheckerFinding,
+    CheckerReport,
+)
 
 BASELINE = ROOT / "tools/pyright-baseline"
 TYPECHECK_TIMEOUT_SECONDS = 600
+SELECTED_TYPECHECK_TIMEOUT_SECONDS = 8
+CHECKER_CLEANUP_SECONDS = 2
 
 
-def _diagnostics(files: list[str] | None = None) -> list[dict[str, object]]:
-    # pyright is locked in the control dev group and resolves imports from
-    # this same interpreter; its version check is the only network access it
-    # would otherwise attempt.
-    # An unreadable checker outcome is observed once more; no result is cached.
+def _run_checker(
+    command: list[str], *, env: dict[str, str], timeout: float
+) -> subprocess.CompletedProcess[str]:
+    # Pyright launches Node. Killing only its Python wrapper leaves Node and
+    # inherited output pipes behind, so observation owns the entire process group.
+    with subprocess.Popen(
+        command,
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except BaseException:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.communicate(timeout=CHECKER_CLEANUP_SECONDS)
+            raise
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def _diagnostics(files: list[str] | None = None) -> list[CheckerFinding]:
+    # The complete process/reply/path observation has two attempts. No partial
+    # reply can become a clean result and no failure survives a fresh invocation.
+    cause: Exception | None = None
     for attempt in range(2):
         try:
-            completed = subprocess.run(
+            completed = _run_checker(
                 [
                     sys.executable,
                     "-m",
@@ -55,142 +77,104 @@ def _diagnostics(files: list[str] | None = None) -> list[dict[str, object]]:
                     sys.executable,
                     *[str((ROOT / file).resolve()) for file in files or []],
                 ],
-                cwd=ROOT,
                 env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=TYPECHECK_TIMEOUT_SECONDS,
+                timeout=(
+                    SELECTED_TYPECHECK_TIMEOUT_SECONDS
+                    if files
+                    else TYPECHECK_TIMEOUT_SECONDS
+                ),
             )
-        except subprocess.TimeoutExpired:
+            if completed.returncode not in (0, 1):
+                raise subprocess.CalledProcessError(
+                    completed.returncode,
+                    [sys.executable, "-m", "pyright"],
+                    output=completed.stdout,
+                    stderr=completed.stderr,
+                )
+            report = CheckerReport.model_validate_json(completed.stdout)
+            findings = []
+            for diagnostic in report.generalDiagnostics:
+                # Validate paths for all diagnostics, including warnings: a
+                # malformed peer reply is not evidence of an error-free check.
+                file = Path(diagnostic.file).resolve().relative_to(ROOT).as_posix()
+                if diagnostic.severity == "error":
+                    findings.append(
+                        CheckerFinding(
+                            file=file,
+                            rule=diagnostic.rule or "unknown",
+                            message=diagnostic.message,
+                            line=diagnostic.range.start.line + 1,
+                            column=diagnostic.range.start.character + 1,
+                        )
+                    )
+            if (completed.returncode == 1) != bool(findings):
+                raise ValueError("checker exit status disagrees with its report")
+            return findings
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            cause = error
             if attempt == 0:
                 continue
-            raise SystemExit(
-                f"pyright exceeded its {TYPECHECK_TIMEOUT_SECONDS}-second execution timeout; "
-                "type-check diagnostics are unavailable"
-            ) from None
-        try:
-            payload = json.loads(completed.stdout)
-        except json.JSONDecodeError:
-            if attempt == 0:
-                continue
-            print(completed.stdout[-4000:], file=sys.stderr)
-            print(completed.stderr[-4000:], file=sys.stderr)
-            raise SystemExit("pyright did not return a JSON report")
-        if not isinstance(payload, dict) or not isinstance(
-            payload.get("generalDiagnostics"), list
-        ):
-            if attempt == 0:
-                continue
-            raise SystemExit("pyright did not return a JSON report")
-        if completed.returncode not in (0, 1):
-            if attempt == 0:
-                continue
-            print(completed.stderr[-4000:], file=sys.stderr)
-            raise SystemExit(f"pyright failed with exit status {completed.returncode}")
-        break
-    diagnostics = []
-    for diagnostic in payload.get("generalDiagnostics", []):
-        if diagnostic.get("severity") != "error":
-            continue
-        diagnostics.append(
-            {
-                "file": Path(diagnostic["file"]).resolve().relative_to(ROOT).as_posix(),
-                "rule": diagnostic.get("rule") or "unknown",
-                "message": diagnostic.get("message", ""),
-                "line": diagnostic["range"]["start"]["line"] + 1,
-                "column": diagnostic["range"]["start"]["character"] + 1,
-            }
-        )
-    return diagnostics
+    raise SystemExit(f"type-check observation unavailable after two attempts: {cause}")
 
 
-def _counts(diagnostics: list[dict[str, object]]) -> dict[tuple[str, str], int]:
+def _counts(diagnostics: list[CheckerFinding]) -> dict[tuple[str, str], int]:
     counts: dict[tuple[str, str], int] = {}
     for diagnostic in diagnostics:
-        key = (str(diagnostic["file"]), str(diagnostic["rule"]))
+        key = (diagnostic.file, diagnostic.rule)
         counts[key] = counts.get(key, 0) + 1
     return counts
 
 
-def _load(path: Path) -> list[dict[str, object]]:
-    document = read_registry(path)
-    if not isinstance(document, dict) or document.get("schema_version") != 1:
-        raise SystemExit(f"{path} is not a schema_version 1 exception list")
-    exceptions = document.get("exceptions")
-    if not isinstance(exceptions, list):
-        raise SystemExit(f"{path} has no exceptions list")
-    return exceptions
+def _load(path: Path) -> list[CheckerException]:
+    return observe_registry(path, _validate_baseline)
+
+
+def _validate_baseline(document: dict, path: Path) -> list[CheckerException]:
+    return CheckerBaseline.model_validate_json(json.dumps(document)).exceptions
 
 
 def evaluate(
-    counts: dict[tuple[str, str], int], exceptions: list[dict[str, object]]
+    counts: dict[tuple[str, str], int], exceptions: list[CheckerException]
 ) -> list[str]:
-    """Return one message per way the current errors and the list disagree."""
-
-    problems: list[str] = []
-    listed: set[tuple[str, str]] = set()
-    for entry in exceptions:
-        file = str(entry.get("file", ""))
-        rule = str(entry.get("rule", ""))
-        key = (file, rule)
-        if key in listed:
-            problems.append(f"duplicate exception: {file} {rule}")
-            continue
-        listed.add(key)
-        expected = entry.get("count")
-        if not isinstance(expected, int) or expected < 1:
-            problems.append(f"exception has no positive count: {file} {rule}")
-            continue
-        if not str(entry.get("reason", "")).strip():
-            problems.append(f"exception has no reason: {file} {rule}")
-        actual = counts.get(key, 0)
+    """Use observed checker errors; stale descriptive allowances do not refuse."""
+    reviewed = {(entry.file, entry.rule): entry.count for entry in exceptions}
+    problems = []
+    for (file, rule), actual in sorted(counts.items()):
+        expected = reviewed.get((file, rule), 0)
         if actual > expected:
-            problems.append(
-                f"type errors increased: {file} {rule}: {expected} -> {actual}"
-            )
-        elif actual < expected:
-            problems.append(
-                f"stale exception (remove it with --update): {file} {rule}: "
-                f"{expected} -> {actual}"
-            )
-    for key in sorted(set(counts) - listed):
-        problems.append(f"unlisted type error: {key[0]} {key[1]} ({counts[key]})")
+            if expected:
+                problems.append(
+                    f"type errors increased: {file} {rule}: {expected} -> {actual}"
+                )
+            else:
+                problems.append(f"unlisted type error: {file} {rule} ({actual})")
     return problems
 
 
 def _write(
-    counts: dict[tuple[str, str], int], previous: list[dict[str, object]]
+    counts: dict[tuple[str, str], int], previous: list[CheckerException]
 ) -> None:
-    reasons = {
-        (str(entry.get("file", "")), str(entry.get("rule", ""))): str(
-            entry.get("reason", "")
-        )
-        for entry in previous
-    }
-    document = {
-        "schema_version": 1,
-        "exceptions": [
-            {
-                "file": file,
-                "rule": rule,
-                "count": count,
-                "reason": reasons.get((file, rule), ""),
-            }
+    reasons = {(entry.file, entry.rule): entry.reason for entry in previous}
+    document = CheckerBaseline(
+        schema_version=1,
+        exceptions=[
+            CheckerException(
+                file=file, rule=rule, count=count, reason=reasons.get((file, rule), "")
+            )
             for (file, rule), count in sorted(counts.items())
         ],
-    }
-    write_registry(BASELINE, document)
+    )
+    write_registry(BASELINE, document.model_dump(mode="json"))
     missing = sorted(
-        f"{entry['file']} {entry['rule']}"
-        for entry in document["exceptions"]
-        if not entry["reason"]
+        f"{entry.file} {entry.rule}"
+        for entry in document.exceptions
+        if not entry.reason
     )
     print(
         f"baseline updated: {sum(counts.values())} error(s) in {len(counts)} entry(s)"
     )
     if missing:
-        print("write a reason for:", file=sys.stderr)
+        print("entries without descriptive notes:", file=sys.stderr)
         for entry in missing:
             print(f"  {entry}", file=sys.stderr)
 
@@ -210,7 +194,7 @@ def main() -> int:
         (ROOT / file).resolve().relative_to(ROOT).as_posix() for file in args.files
     }
     if selected:
-        diagnostics = [item for item in diagnostics if item["file"] in selected]
+        diagnostics = [item for item in diagnostics if item.file in selected]
     counts = _counts(diagnostics)
     if args.update:
         _write(counts, _load(BASELINE))
@@ -218,21 +202,18 @@ def main() -> int:
 
     exceptions = _load(BASELINE)
     if selected:
-        exceptions = [entry for entry in exceptions if entry.get("file") in selected]
+        exceptions = [entry for entry in exceptions if entry.file in selected]
     problems = evaluate(counts, exceptions)
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:
-        reviewed = {
-            (str(entry.get("file", "")), str(entry.get("rule", ""))): entry.get("count")
-            for entry in exceptions
-        }
+        reviewed = {(entry.file, entry.rule): entry.count for entry in exceptions}
         for diagnostic in diagnostics:
-            key = (str(diagnostic["file"]), str(diagnostic["rule"]))
+            key = (diagnostic.file, diagnostic.rule)
             if counts[key] != reviewed.get(key):
                 print(
-                    f"{diagnostic['file']}:{diagnostic['line']}:{diagnostic['column']}: "
-                    f"{diagnostic['rule']}: {diagnostic['message']}",
+                    f"{diagnostic.file}:{diagnostic.line}:{diagnostic.column}: "
+                    f"{diagnostic.rule}: {diagnostic.message}",
                     file=sys.stderr,
                 )
         print(

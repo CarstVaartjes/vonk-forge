@@ -63,7 +63,7 @@ def main() -> int:
             [str(python), str(Path(__file__).resolve())],
             cwd=ROOT,
             check=False,
-            timeout=600,
+            timeout=1260 if full_types else 60,
         ).returncode
     check_env = {
         **os.environ,
@@ -101,7 +101,11 @@ def main() -> int:
     )
     for command in commands:
         result = subprocess.run(
-            command, cwd=ROOT, env=check_env, check=False, timeout=600
+            command,
+            cwd=ROOT,
+            env=check_env,
+            check=False,
+            timeout=1220 if full_types else 22,
         )
         if result.returncode:
             return result.returncode

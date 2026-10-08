@@ -479,9 +479,9 @@ def test_a_keep_entry_without_an_effect_or_action_is_refused(tmp_path) -> None: 
         entry = next(e for e in broken["operator_waits"] if e["verdict"] == "KEEP")  # type: ignore[attr-defined]
         entry[field] = value
         target = tmp_path / "broken.json"
-        write_registry(target, broken)
-        with pytest.raises(ValueError, match="KEEP needs"):
-            load_allowlist(target)
+        from .registry_observation_cases import assert_replacement_recovers
+
+        assert assert_replacement_recovers(load_allowlist, target, broken, document)
 
 
 def test_a_category_or_verdict_outside_the_vocabulary_is_refused(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -490,11 +490,11 @@ def test_a_category_or_verdict_outside_the_vocabulary_is_refused(tmp_path) -> No
     bad_category["fail_closed"][0]["category"] = "whatever"  # type: ignore[index]
     bad_verdict = copy.deepcopy(document)
     bad_verdict["operator_waits"][0]["verdict"] = "LATER"  # type: ignore[index]
-    for broken, message in ((bad_category, "category"), (bad_verdict, "verdict")):
+    for broken in (bad_category, bad_verdict):
         target = tmp_path / "broken.json"
-        write_registry(target, broken)
-        with pytest.raises(ValueError, match=message):
-            load_allowlist(target)
+        from .registry_observation_cases import assert_replacement_recovers
+
+        assert assert_replacement_recovers(load_allowlist, target, broken, document)
 
 
 def test_write_counts_lowers_and_never_adds() -> None:

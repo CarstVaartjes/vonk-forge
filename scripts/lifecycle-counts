@@ -112,16 +112,16 @@ def _writers_document(read: Reader) -> dict:
 
     try:
         return json.loads(read(WRITERS))
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except FileNotFoundError:
         return {"writers": []}
 
 
-def counts_from(read: Reader) -> dict[str, int]:
+def _counts_once(read: Reader) -> dict[str, int]:
     counts = count_documents(_writers_document(read), json.loads(read(BLOCKERS)))
     for key, path in INVENTORIES.items():
         try:
             document = json.loads(read(path))
-        except (FileNotFoundError, subprocess.CalledProcessError):
+        except FileNotFoundError:
             counts[key] = 0
             continue
         counts[key] = sum(
@@ -130,6 +130,26 @@ def counts_from(read: Reader) -> dict[str, int]:
             for e in document.get(group, [])
         )
     return counts
+
+
+def counts_from(read: Reader) -> dict[str, int]:
+    """Reobserve fetching, decoding and counting together; never invent zeros."""
+    cause: Exception | None = None
+    for _attempt in range(2):
+        try:
+            return _counts_once(read)
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            IndexError,
+            subprocess.SubprocessError,
+        ) as error:
+            cause = error
+    raise RuntimeError(
+        f"lifecycle counts unavailable after two observations: {cause}"
+    ) from cause
 
 
 def _git_once(*args: str) -> str:
@@ -159,15 +179,21 @@ def reader_for(ref: str | None) -> Reader:
         )
 
     def read(path: str) -> str:
-        shards = _git("ls-tree", "-r", "--name-only", ref, "--", path).splitlines()
-        if shards and all(shard.endswith(".json") for shard in shards):
+        # counts_from owns the combined fetch/decode retry budget. A successful
+        # Git command is not a successful JSON observation.
+        shards = _git_once("ls-tree", "-r", "--name-only", ref, "--", path).splitlines()
+        if shards and any(shard.endswith(".json") for shard in shards):
+            shards = [name for name in shards if name.endswith(".json")]
             document = {}
             for shard in sorted(shards):
-                document = _merge(document, json.loads(_git("show", f"{ref}:{shard}")))
+                document = _merge(
+                    document, json.loads(_git_once("show", f"{ref}:{shard}"))
+                )
             return json.dumps(_derive(document))
-        # Historical reporting only: pre-split commits own the old document.
         historical = path if path.endswith(".json") else path + ".json"
-        return _git("show", f"{ref}:{historical}")
+        if not _git_once("ls-tree", ref, "--", historical).strip():
+            raise FileNotFoundError(historical)
+        return _git_once("show", f"{ref}:{historical}")
 
     return read
 
@@ -238,8 +264,8 @@ def check(
     return messages
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+def _main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument("command", nargs="?", choices=("report", "check"))
     parser.add_argument("--ref", help="print the counts of this commit (default: tree)")
     parser.add_argument("--base", default="origin/main")
@@ -266,6 +292,22 @@ def main(argv: list[str] | None = None) -> int:
     if not messages:
         print(f"lifecycle counts: {render(before)} -> {render(after)}")
     return 1 if messages else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        IndexError,
+        RuntimeError,
+        subprocess.SubprocessError,
+    ) as error:
+        print(f"lifecycle count observation unavailable: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

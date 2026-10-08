@@ -22,7 +22,6 @@ from .principle_guards import (
     scan_sites,
     scan_source,
 )
-from .registry_storage import write_registry
 
 
 @pytest.mark.parametrize(
@@ -132,16 +131,16 @@ def test_exception_requires_fixed_reason_and_duplicate_keys_fail(tmp_path: Path)
     }
     doc = {"schema": 1, "debt": [], "exceptions": [entry]}
     path = tmp_path / "allow.json"
-    write_registry(path, doc)
-    with pytest.raises(ValueError, match="fixed reason"):
-        load_allowlist(path)
-    entry["reason"] = "security-edge"
-    write_registry(path, doc)
-    assert load_allowlist(path)["exceptions"]
-    doc["debt"] = [entry]
-    write_registry(path, doc)
-    with pytest.raises(ValueError, match="duplicate"):
-        load_allowlist(path)
+    from .registry_observation_cases import assert_replacement_recovers
+
+    replacement = {
+        "schema": 1,
+        "debt": [],
+        "exceptions": [{**entry, "reason": "security-edge"}],
+    }
+    assert assert_replacement_recovers(load_allowlist, path, doc, replacement)
+    duplicate = {**replacement, "debt": replacement["exceptions"]}
+    assert assert_replacement_recovers(load_allowlist, path, duplicate, replacement)
 
 
 @pytest.fixture(scope="session", params=list(ALLOWLISTS))
