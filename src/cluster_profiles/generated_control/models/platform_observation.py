@@ -10,11 +10,13 @@ from ..types import UNSET, Unset
 
 from ..models.platform_observation_worker_issue_type_0 import check_platform_observation_worker_issue_type_0
 from ..models.platform_observation_worker_issue_type_0 import PlatformObservationWorkerIssueType0
+from ..types import UNSET, Unset
 from typing import cast
 import datetime
 
 if TYPE_CHECKING:
   from ..models.api_runtime_observation import ApiRuntimeObservation
+  from ..models.capability_status import CapabilityStatus
   from ..models.worker_runtime_observation import WorkerRuntimeObservation
 
 
@@ -33,12 +35,14 @@ class PlatformObservation:
             observed_at (datetime.datetime):
             worker_issue (None | PlatformObservationWorkerIssueType0):
             workers (list[WorkerRuntimeObservation] | None):
+            capabilities (list[CapabilityStatus] | Unset):
      """
 
     api: ApiRuntimeObservation
     observed_at: datetime.datetime
     worker_issue: None | PlatformObservationWorkerIssueType0
     workers: list[WorkerRuntimeObservation] | None
+    capabilities: list[CapabilityStatus] | Unset = UNSET
 
 
 
@@ -46,6 +50,7 @@ class PlatformObservation:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.api_runtime_observation import ApiRuntimeObservation # noqa: PLC0415
+        from ..models.capability_status import CapabilityStatus # noqa: PLC0415
         from ..models.worker_runtime_observation import WorkerRuntimeObservation # noqa: PLC0415
         api = self.api.to_dict()
 
@@ -68,6 +73,15 @@ class PlatformObservation:
         else:
             workers = self.workers
 
+        capabilities: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.capabilities, Unset):
+            capabilities = []
+            for capabilities_item_data in self.capabilities:
+                capabilities_item = capabilities_item_data.to_dict()
+                capabilities.append(capabilities_item)
+
+
+
 
         field_dict: dict[str, Any] = {}
 
@@ -77,6 +91,8 @@ class PlatformObservation:
             "worker_issue": worker_issue,
             "workers": workers,
         })
+        if capabilities is not UNSET:
+            field_dict["capabilities"] = capabilities
 
         return field_dict
 
@@ -85,6 +101,7 @@ class PlatformObservation:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.api_runtime_observation import ApiRuntimeObservation # noqa: PLC0415
+        from ..models.capability_status import CapabilityStatus # noqa: PLC0415
         from ..models.worker_runtime_observation import WorkerRuntimeObservation # noqa: PLC0415
         d = dict(src_dict)
         api = ApiRuntimeObservation.from_dict(d.pop("api"))
@@ -138,11 +155,24 @@ class PlatformObservation:
         workers = _parse_workers(d.pop("workers"))
 
 
+        _capabilities = d.pop("capabilities", UNSET)
+        capabilities: list[CapabilityStatus] | Unset = UNSET
+        if _capabilities is not UNSET:
+            capabilities = []
+            for capabilities_item_data in _capabilities:
+                capabilities_item = CapabilityStatus.from_dict(capabilities_item_data)
+
+
+
+                capabilities.append(capabilities_item)
+
+
         platform_observation = cls(
             api=api,
             observed_at=observed_at,
             worker_issue=worker_issue,
             workers=workers,
+            capabilities=capabilities,
         )
 
         return platform_observation

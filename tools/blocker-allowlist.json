@@ -1370,6 +1370,10 @@
       "AgentUpgradeService._at_target": "1b429c2886b44eaa85cbdd0cab653cbfb80806110c2f5ea42fbbeea36a6288e2",
       "<module>": "915b41ef5795a7ad98d1efebdd0b2406f7be6cb5fa007082fe2010c4ba6d4aac"
     },
+    "control/src/vonk_control/agent_services.py": {
+      "build_agent_services": "55fbbaa9a0512e959fe18a87f757fbba99caed7a7fa9257226a8490c668a1fa0",
+      "build_agent_services.observe_contact": "008b522ecb49e2e1b496469a6be4d9a9e8842a5f483fbdb503ad33355895f00c"
+    },
     "control/src/vonk_control/api.py": {
       "_bounded_error_content": "b316ea52ec7e6fbc28d5e5ce8f99bb546fdfa920d740fd309c5c0d86c01b579c",
       "_validation_detail": "745c89073fa43458db5bf9de88fde563ccdbbde6fe18abb26ed6f1e8a55e5d5e",
@@ -1380,8 +1384,6 @@
       "_log_request_failure": "e009783878e5b77610aa06aac7851095200409871ed0e36114269f2af4bfead3",
       "_log_agent_rejection": "e5b55f4050190ba8919ec8f9fa8712770f69c2f5cdc4123934a255c991fe469c",
       "_bounded_request_body": "860603ad736eee48342c74372a154dfc337e82b14c8e836ac77ad370a3c533ff",
-      "build_agent_services": "55fbbaa9a0512e959fe18a87f757fbba99caed7a7fa9257226a8490c668a1fa0",
-      "build_agent_services.observe_contact": "008b522ecb49e2e1b496469a6be4d9a9e8842a5f483fbdb503ad33355895f00c",
       "SpaFiles.get_response": "f96c86bdd256f136cf53d1572cd381b264e8917093e61a234d60f27420af26a9",
       "JobQueue.enqueue": "a8b7d79abe0dd38b8050c75dc3dae85939d51459d1c81990149c819c0514971c",
       "JobQueue.get": "e3588c3634d46238df176afa6fabb6056122e2ed0383190c2cd08bcda706a4b4",
@@ -6404,8 +6406,7 @@
       "sites": [
         ["control/src/vonk_control/settings.py", "SettingsError", "Settings.agent_ca_provisioner_kid", "agent-ca-provisioner-public-jwk-has-no-kid", 2],
         ["control/src/vonk_control/settings.py", "SettingsError", "Settings.from_env_and_secrets", "database-url-must-use-postgresql", 1],
-        ["control/src/vonk_control/settings.py", "SettingsError", "Settings.from_env_and_secrets", "vonk-control-hostname-is-required-in-production", 1],
-        ["control/src/vonk_control/settings.py", "SettingsError", "Settings.from_env_and_secrets", "vonk-management-cidrs-or-vonk-nas-lan-ip-is-required-in-prod", 1],
+        ["control/src/vonk_control/settings.py", "SettingsError", "Settings._validated_control_hostname", "vonk-control-hostname-is-required-for-enrollment", 1],
         ["control/src/vonk_control/settings.py", "SettingsError", "_control_hostname", "vonk-control-hostname-must-be-a-dns-hostname", 1]
       ]
     },

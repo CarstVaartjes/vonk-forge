@@ -4114,6 +4114,85 @@
         "title": "CancelRequest",
         "type": "object"
       },
+      "CapabilityAvailability": {
+        "enum": [
+          "available",
+          "unavailable"
+        ],
+        "title": "CapabilityAvailability",
+        "type": "string"
+      },
+      "CapabilityReason": {
+        "enum": [
+          "capability.initializing",
+          "capability.configuration_invalid",
+          "capability.storage_unavailable",
+          "capability.dependency_unavailable"
+        ],
+        "title": "CapabilityReason",
+        "type": "string"
+      },
+      "CapabilityStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/CapabilityAvailability"
+          },
+          "capability": {
+            "$ref": "#/components/schemas/ControllerCapability"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CapabilityReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "capability",
+          "availability"
+        ],
+        "title": "CapabilityStatus",
+        "type": "object"
+      },
+      "CapabilityUnavailableReply": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/ControllerCapability"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CapabilityReason"
+          },
+          "retryable": {
+            "default": true,
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "capability",
+          "reason"
+        ],
+        "title": "CapabilityUnavailableReply",
+        "type": "object"
+      },
       "CapacityReservations": {
         "additionalProperties": false,
         "properties": {
@@ -5540,6 +5619,32 @@
         ],
         "title": "ControllerAssetState",
         "type": "object"
+      },
+      "ControllerCapability": {
+        "enum": [
+          "certificate-authority",
+          "enrollment-bootstrap",
+          "host-runtime-authority",
+          "model-cache",
+          "runtime-image-storage",
+          "artifact-storage",
+          "management-policy",
+          "fabric-policy",
+          "agent-presence",
+          "image-collection",
+          "route-publisher",
+          "recipe-routes",
+          "distribution",
+          "recipe-library",
+          "token-auth",
+          "cursor-auth",
+          "browser-auth",
+          "metrics-auth",
+          "agent-proxy-auth",
+          "gateway-keys"
+        ],
+        "title": "ControllerCapability",
+        "type": "string"
       },
       "ControllerErrorCode": {
         "description": "Generic Controller request and fleet-operation problem codes.",
@@ -19548,6 +19653,13 @@
         "properties": {
           "api": {
             "$ref": "#/components/schemas/ApiRuntimeObservation"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityStatus"
+            },
+            "title": "Capabilities",
+            "type": "array"
           },
           "observed_at": {
             "format": "date-time",
@@ -36646,7 +36758,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getartifactjobcapabilities"
                 }
               }
             },
@@ -36724,7 +36844,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getartifactjobbyrequestid"
                 }
               }
             },
@@ -36802,7 +36930,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getartifactjobstatus"
                 }
               }
             },
@@ -36920,7 +37056,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Cancelartifactjob"
                 }
               }
             },
@@ -37018,7 +37162,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Finalizeartifactjob"
                 }
               }
             },
@@ -37171,7 +37323,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Uploadartifactjobinput"
                 }
               }
             },
@@ -37246,6 +37406,24 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Downloadartifactjobresult"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -37350,7 +37528,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Submitartifactjob"
                 }
               }
             },
@@ -37421,6 +37607,24 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Downloadclitoken"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -37496,6 +37700,24 @@
               }
             },
             "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Loginbrowser"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [],
@@ -37538,6 +37760,24 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Logoutbrowser"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -37582,6 +37822,24 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getbrowsersession"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -37706,7 +37964,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getcliupdatecontract"
                 }
               }
             },
@@ -37762,7 +38028,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getfleetstatus"
                 }
               }
             },
@@ -37853,7 +38127,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Enrollfleetnode"
                 }
               }
             },
@@ -37941,7 +38223,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getfleetenrollment"
                 }
               }
             },
@@ -38039,7 +38329,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Revokefleetenrollment"
                 }
               }
             },
@@ -38106,7 +38404,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getfleetadmissionlocks"
                 }
               }
             },
@@ -38192,7 +38498,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Streamfleetevents"
                 }
               }
             },
@@ -38307,7 +38621,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Upgradefleet"
                 }
               }
             },
@@ -38385,7 +38707,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getfleetnode"
                 }
               }
             },
@@ -38541,7 +38871,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getfleetloginfo"
                 }
               }
             },
@@ -38649,7 +38987,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Reenrollfleetnode"
                 }
               }
             },
@@ -38747,7 +39093,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Removefleetnode"
                 }
               }
             },
@@ -38846,7 +39200,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Renamefleetnode"
                 }
               }
             },
@@ -38969,7 +39331,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getjob"
                 }
               }
             },
@@ -39083,7 +39453,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Resumejob"
                 }
               }
             },
@@ -39149,7 +39527,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Listgatewaykeys"
                 }
               }
             },
@@ -39233,7 +39619,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Creategatewaykey"
                 }
               }
             },
@@ -39322,7 +39716,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Revokegatewaykey"
                 }
               }
             },
@@ -39411,7 +39813,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Rollgatewaykey"
                 }
               }
             },
@@ -39676,7 +40086,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Listmodellibrary"
                 }
               }
             },
@@ -39767,7 +40185,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getmodeloperation"
                 }
               }
             },
@@ -39875,7 +40301,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Cancelmodeloperation"
                 }
               }
             },
@@ -39963,7 +40397,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getmodelrequest"
                 }
               }
             },
@@ -40041,7 +40483,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getmodel"
                 }
               }
             },
@@ -40150,7 +40600,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Downloadmodel"
                 }
               }
             },
@@ -40259,7 +40717,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Removemodel"
                 }
               }
             },
@@ -40358,7 +40824,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Reviewmodelremoval"
                 }
               }
             },
@@ -40496,7 +40970,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Listoperations"
                 }
               }
             },
@@ -40576,7 +41058,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getoperation"
                 }
               }
             },
@@ -40665,7 +41155,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getoperationevidence"
                 }
               }
             },
@@ -40721,7 +41219,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getplatformobservation"
                 }
               }
             },
@@ -40782,7 +41288,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Listprofiles"
                 }
               }
             },
@@ -40860,7 +41374,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getprofileapplication"
                 }
               }
             },
@@ -40968,7 +41490,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Cancelprofileapplication"
                 }
               }
             },
@@ -41076,7 +41606,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getprofileapplicationcancellation"
                 }
               }
             },
@@ -41153,7 +41691,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getprofile"
                 }
               }
             },
@@ -41250,7 +41796,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Autosaveprofile"
                 }
               }
             },
@@ -41319,7 +41873,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getprofiledefinition"
                 }
               }
             },
@@ -41416,7 +41978,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getprofileendpoints"
                 }
               }
             },
@@ -41525,7 +42095,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Loadprofile"
                 }
               }
             },
@@ -41614,7 +42192,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Previewprofile"
                 }
               }
             },
@@ -41693,7 +42279,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getprofileprogress"
                 }
               }
             },
@@ -41792,7 +42386,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getprofileapplicationbyrequest"
                 }
               }
             },
@@ -41900,7 +42502,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Applyrecipeinstallationreconciliation"
                 }
               }
             },
@@ -41998,7 +42608,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Previewrecipeinstallationreconciliation"
                 }
               }
             },
@@ -42325,7 +42943,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Listrecipelibrary"
                 }
               }
             },
@@ -42420,7 +43046,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getrecipeoperation"
                 }
               }
             },
@@ -42543,7 +43177,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Cancelrecipeoperation"
                 }
               }
             },
@@ -42651,7 +43293,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Retryrecipeoperation"
                 }
               }
             },
@@ -42743,7 +43393,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getreciperequest"
                 }
               }
             },
@@ -42821,7 +43479,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Listartifactjobsforrun"
                 }
               }
             },
@@ -42937,7 +43603,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Createartifactjob"
                 }
               }
             },
@@ -43023,7 +43697,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Updaterecipes"
                 }
               }
             },
@@ -43101,7 +43783,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getrecipe"
                 }
               }
             },
@@ -43210,7 +43900,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Downloadrecipe"
                 }
               }
             },
@@ -43319,7 +44017,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Removerecipe"
                 }
               }
             },
@@ -43427,7 +44133,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Reviewreciperemoval"
                 }
               }
             },
@@ -43505,7 +44219,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BoundedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CapabilityUnavailableReply"
+                    }
+                  ],
+                  "title": "Response 503 Getrunswitchoperation"
                 }
               }
             },

@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.failure_evidence_bundle import FailureEvidenceBundle
 from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
@@ -44,7 +45,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = FailureEvidenceBundle.from_dict(response.json())
 
@@ -74,9 +75,26 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return response_422
 
     if response.status_code == 503:
-        response_503 = BoundedErrorResponse.from_dict(response.json())
+        def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_503_type_0 = BoundedErrorResponse.from_dict(data)
 
 
+
+                return response_503_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_503_type_1 = CapabilityUnavailableReply.from_dict(data)
+
+
+
+            return response_503_type_1
+
+        response_503 = _parse_response_503(response.json())
 
         return response_503
 
@@ -86,7 +104,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -101,7 +119,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     attempt: int,
 
-) -> Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem]:
     """ Evidence
 
     Args:
@@ -113,7 +131,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem]
      """
 
 
@@ -135,7 +153,7 @@ def sync(
     client: AuthenticatedClient,
     attempt: int,
 
-) -> BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem | None:
     """ Evidence
 
     Args:
@@ -147,7 +165,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem
      """
 
 
@@ -164,7 +182,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     attempt: int,
 
-) -> Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem]:
     """ Evidence
 
     Args:
@@ -176,7 +194,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem]
      """
 
 
@@ -198,7 +216,7 @@ async def asyncio(
     client: AuthenticatedClient,
     attempt: int,
 
-) -> BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem | None:
     """ Evidence
 
     Args:
@@ -210,7 +228,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | FailureEvidenceBundle | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FailureEvidenceBundle | RequestValidationProblem
      """
 
 

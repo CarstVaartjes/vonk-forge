@@ -1121,6 +1121,38 @@
       "title": "CacheReferenceReason",
       "type": "string"
     },
+    "CapabilityReason": {
+      "enum": [
+        "capability.initializing",
+        "capability.configuration_invalid",
+        "capability.storage_unavailable",
+        "capability.dependency_unavailable"
+      ],
+      "title": "CapabilityReason",
+      "type": "string"
+    },
+    "CapabilityUnavailableReply": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "$ref": "#/$defs/ControllerCapability"
+        },
+        "reason": {
+          "$ref": "#/$defs/CapabilityReason"
+        },
+        "retryable": {
+          "default": true,
+          "title": "Retryable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "capability",
+        "reason"
+      ],
+      "title": "CapabilityUnavailableReply",
+      "type": "object"
+    },
     "CatalogCode": {
       "description": "Refusals of the recipe catalog and the recipe library documents.",
       "enum": [
@@ -2022,6 +2054,32 @@
       ],
       "title": "ConfirmPackageActivationOperation",
       "type": "object"
+    },
+    "ControllerCapability": {
+      "enum": [
+        "certificate-authority",
+        "enrollment-bootstrap",
+        "host-runtime-authority",
+        "model-cache",
+        "runtime-image-storage",
+        "artifact-storage",
+        "management-policy",
+        "fabric-policy",
+        "agent-presence",
+        "image-collection",
+        "route-publisher",
+        "recipe-routes",
+        "distribution",
+        "recipe-library",
+        "token-auth",
+        "cursor-auth",
+        "browser-auth",
+        "metrics-auth",
+        "agent-proxy-auth",
+        "gateway-keys"
+      ],
+      "title": "ControllerCapability",
+      "type": "string"
     },
     "ControllerErrorCode": {
       "description": "Generic Controller request and fleet-operation problem codes.",
@@ -10926,6 +10984,7 @@
     "ArtifactDistributionPayload": "vonk_agent_protocol.contracts.ArtifactDistributionPayload",
     "ArtifactDistributionResult": "vonk_agent_protocol.contracts.ArtifactDistributionResult",
     "BoundedErrorResponse": "vonk_control.operation_api.BoundedErrorResponse",
+    "CapabilityUnavailableReply": "vonk_control.capability_contract.CapabilityUnavailableReply",
     "ClaimRequest": "vonk_agent_protocol.claims.ClaimRequest",
     "CompiledArtifact": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifact",
     "CompiledArtifactMount": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifactMount",
@@ -11103,6 +11162,7 @@
     "ArtifactDistributionPayload": "#/$defs/ArtifactDistributionPayload",
     "ArtifactDistributionResult": "#/$defs/ArtifactDistributionResult",
     "BoundedErrorResponse": "#/$defs/BoundedErrorResponse",
+    "CapabilityUnavailableReply": "#/$defs/CapabilityUnavailableReply",
     "ClaimRequest": "#/$defs/ClaimRequest",
     "CompiledArtifact": "#/$defs/CompiledArtifact",
     "CompiledArtifactMount": "#/$defs/CompiledArtifactMount",

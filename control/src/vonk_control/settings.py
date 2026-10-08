@@ -325,16 +325,11 @@ class Settings:
             os.environ.get("VONK_DIRECT_FABRIC_CIDRS", ""),
             nas_lan_ip,
         )
-        control_hostname = _control_hostname(
-            os.environ.get("VONK_CONTROL_HOSTNAME", "")
+        # The hostname and network policy belong to enrollment/presence.
+        # Their missing configuration cannot take unrelated admin reads down.
+        control_hostname = (
+            os.environ.get("VONK_CONTROL_HOSTNAME", "").strip().lower().rstrip(".")
         )
-        if mode == "production":
-            if not control_hostname:
-                raise SettingsError("VONK_CONTROL_HOSTNAME is required in production")
-            if not management_cidrs:
-                raise SettingsError(
-                    "VONK_MANAGEMENT_CIDRS or VONK_NAS_LAN_IP is required in production"
-                )
         install_channel = os.environ.get("VONK_INSTALL_CHANNEL", "").strip()
         if install_channel not in {"dev", "stable"}:
             if install_channel:
@@ -371,18 +366,24 @@ class Settings:
 
     # Hostnames and origins derived from the one control hostname.
 
+    def _validated_control_hostname(self) -> str:
+        hostname = _control_hostname(self.control_hostname)
+        if not hostname:
+            raise SettingsError("VONK_CONTROL_HOSTNAME is required for enrollment")
+        return hostname
+
     @property
     def agent_service_hostnames(self) -> tuple[str, ...]:
-        host = self.control_hostname
+        host = self._validated_control_hostname()
         return (host, f"enroll.{host}", f"agents.{host}", f"registry.{host}")
 
     @property
     def agent_controller_origin(self) -> str:
-        return f"https://agents.{self.control_hostname}:8443"
+        return f"https://agents.{self._validated_control_hostname()}:8443"
 
     @property
     def agent_enrollment_origin(self) -> str:
-        return f"https://enroll.{self.control_hostname}:8443"
+        return f"https://enroll.{self._validated_control_hostname()}:8443"
 
     # Secret file locations (read by their consumers).
 
@@ -449,7 +450,7 @@ class Settings:
             )
         return value
 
-    @cached_property
+    @property
     def agent_ca_provisioner_kid(self) -> str:
         raw = _read_secret(self.agent_ca_provisioner_public_jwk_path)
         try:
@@ -460,7 +461,7 @@ class Settings:
             raise SettingsError("agent CA provisioner public JWK has no kid")
         return kid
 
-    @cached_property
+    @property
     def agent_ca_certificate_lifetime_seconds(self) -> int:
         return certificate_lifetime_from_step_ca_config(
             self.secrets_root / "step-ca" / "ca.json"

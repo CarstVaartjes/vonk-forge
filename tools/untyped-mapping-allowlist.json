@@ -1079,8 +1079,6 @@
       "_log_request_failure": "e009783878e5b77610aa06aac7851095200409871ed0e36114269f2af4bfead3",
       "_log_agent_rejection": "e5b55f4050190ba8919ec8f9fa8712770f69c2f5cdc4123934a255c991fe469c",
       "_bounded_request_body": "860603ad736eee48342c74372a154dfc337e82b14c8e836ac77ad370a3c533ff",
-      "build_agent_services": "55fbbaa9a0512e959fe18a87f757fbba99caed7a7fa9257226a8490c668a1fa0",
-      "build_agent_services.observe_contact": "008b522ecb49e2e1b496469a6be4d9a9e8842a5f483fbdb503ad33355895f00c",
       "SpaFiles.get_response": "f96c86bdd256f136cf53d1572cd381b264e8917093e61a234d60f27420af26a9",
       "JobQueue.enqueue": "a8b7d79abe0dd38b8050c75dc3dae85939d51459d1c81990149c819c0514971c",
       "JobQueue.get": "e3588c3634d46238df176afa6fabb6056122e2ed0383190c2cd08bcda706a4b4",
@@ -3484,6 +3482,10 @@
       "execute_http_check": "b0008cc70f07db2b425d7bcedb8ce5604e36c3ad62e1c2701b9f8a831e3f1b69",
       "execute_http_check.read_bounded": "123f71e3bbd439e890cbefa5b119d191e71e309ddaba1954662c94db912fe6c8",
       "<module>": "1b725250dde0e805bbd31886adcfef39f003cb10d38e2dcddecfe6e06c48406c"
+    },
+    "control/src/vonk_control/agent_services.py": {
+      "build_agent_services": "55fbbaa9a0512e959fe18a87f757fbba99caed7a7fa9257226a8490c668a1fa0",
+      "build_agent_services.observe_contact": "008b522ecb49e2e1b496469a6be4d9a9e8842a5f483fbdb503ad33355895f00c"
     }
   }
 }

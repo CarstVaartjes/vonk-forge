@@ -269,13 +269,11 @@ def build_recipe_image_availability(
     clock: Callable[[], datetime],
     max_parallel: int = 4,
     with_scheduler: bool = False,
+    storage: FilesystemRuntimeImageStorage | None = None,
 ) -> RecipeImageAvailabilityProduction:
     """Compose canonical catalog resolution, OCI storage, and image execution.
 
-    Catalog refresh is owned by the production app's automatic sync task.
-    Each request resolves its selected immutable revision from SQL, so a
-    refresh can advance the global head without changing an operation's
-    identity.  The optional scheduler only claims durable operations.
+    Requests resolve immutable catalog revisions; the optional scheduler
     """
 
     image_root = artifact_root or getattr(settings, "agent_artifact_root", None)
@@ -284,7 +282,9 @@ def build_recipe_image_availability(
             "recipe image artifact root is required",
             reason=InvalidRequestReason.INCOMPLETE,
         )
-    storage = FilesystemRuntimeImageStorage(image_root)
+    storage = (
+        storage if storage is not None else FilesystemRuntimeImageStorage(image_root)
+    )
     transport = OciLayoutImageTransport()
 
     def authority(

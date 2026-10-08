@@ -57,12 +57,13 @@ def test_production_defaults_and_derived_service_names(secrets_root: Path) -> No
     assert settings.controller_ca_path == secrets_root / "controller-ca"
 
 
-def test_production_requires_the_control_hostname(
+def test_enrollment_requires_the_control_hostname_without_stopping_settings(
     secrets_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("VONK_CONTROL_HOSTNAME")
+    settings = Settings.from_env_and_secrets()
     with pytest.raises(SettingsError, match="VONK_CONTROL_HOSTNAME"):
-        Settings.from_env_and_secrets()
+        _ = settings.agent_controller_origin
 
     monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "test")
     assert not Settings.from_env_and_secrets().agent_runtime_enabled
@@ -116,8 +117,7 @@ def test_management_networks_default_to_the_nas_lan(
     assert Settings.from_env_and_secrets().management_cidrs == "192.168.1.0/24"
 
     monkeypatch.delenv("VONK_NAS_LAN_IP")
-    with pytest.raises(SettingsError, match="VONK_MANAGEMENT_CIDRS"):
-        Settings.from_env_and_secrets()
+    assert Settings.from_env_and_secrets().management_cidrs == ""
 
 
 def test_invalid_operator_choices_fall_back_to_safe_defaults(
@@ -252,3 +252,35 @@ def test_compose_is_platform_neutral_and_only_caddy_publishes_ports() -> None:
     assert text.count("ports:") == 1
     assert "control-api:" in text and "control-worker:" in text
     assert "postgres:" in text and "caddy:" in text
+
+
+def test_ca_configuration_is_reread_after_a_rejected_value_is_repaired(secrets_root):
+    # Catches a successfully parsed but provider-invalid lifetime poisoning
+    # the same Settings object across every subsequent construction retry.
+    path = secrets_root / "step-ca" / "ca.json"
+    path.parent.mkdir()
+
+    def config(duration):
+        return json.dumps(
+            {
+                "authority": {
+                    "provisioners": [
+                        {
+                            "name": "vonk-forge-agent",
+                            "claims": {"defaultTLSCertDuration": duration},
+                        }
+                    ]
+                }
+            }
+        )
+
+    path.write_text(config("90s"))
+    settings = Settings.from_env_and_secrets()
+    assert settings.agent_ca_certificate_lifetime_seconds == 90
+    path.write_text(config("720h"))
+    assert settings.agent_ca_certificate_lifetime_seconds == 2592000
+    jwk = secrets_root / "agent-ca-provisioner-public-jwk"
+    jwk.write_text(json.dumps({"kid": "old-key"}))
+    assert settings.agent_ca_provisioner_kid == "old-key"
+    jwk.write_text(json.dumps({"kid": "repaired-key"}))
+    assert settings.agent_ca_provisioner_kid == "repaired-key"
