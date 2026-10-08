@@ -392,3 +392,27 @@ test.each(["bespoke", "generated"])(
     expect(cancel).toHaveBeenCalledOnce();
   },
 );
+
+test("gateway uncertainty preserves its reason and a fresh observation succeeds", async () => {
+  const { ErrorCategory, WaitReason } = await import("./vocabulary.generated");
+  let unavailable = true;
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(
+        JSON.stringify(
+          unavailable
+            ? { category: ErrorCategory.UNKNOWN, reason: WaitReason.OBSERVATION_UNAVAILABLE }
+            : { keys: [] },
+        ),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+  );
+  const client = new ApiClient();
+  await expect(client.gatewayKeys()).rejects.toMatchObject({
+    status: 200,
+    message: WaitReason.OBSERVATION_UNAVAILABLE,
+  });
+  unavailable = false;
+  await expect(client.gatewayKeys()).resolves.toEqual({ keys: [] });
+});
