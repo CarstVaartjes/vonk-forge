@@ -33,6 +33,8 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation
+from ..operation_contract import AvailabilityOperationFailure
+from ..recovery_policy import RecoveryPolicy
 from .catalog_helpers import _iso
 from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS
 from .errors import ModelCacheStorageError, _ArtifactWriterBusy
@@ -202,52 +204,80 @@ class RemovalReconcileMixin:
                 return
             if cache._payload_or_retire(operation, now=now) is None:
                 return
-            # The dependency's own hint is a floor; the core's bounded backoff
-            # is the schedule (one policy for every kind, one clock).
-            cache._lifecycle.settle(
-                operation,
-                Reported(
-                    Outcome.UNKNOWN,
-                    retry_after=now + timedelta(seconds=retry_after_seconds),
-                    reason=detail,
-                ),
-                now,
-                interrupted=True,
+            exhausted = (
+                cache._lifecycle.lifecycle(operation, now).retry_count + 1
+                >= RecoveryPolicy().max_failures
             )
-            next_retry = operation.next_action_at
-            assert next_retry is not None
-            delay = max(1, round((_aware(next_retry) - now).total_seconds()))
-            checkpoint = cache._removal_or_none(operation)
-            if checkpoint is None:
-                return
-            artifact_key = (
-                f"object:{checkpoint.delete_objects[checkpoint.object_index]}"
-                if checkpoint.object_index < len(checkpoint.delete_objects)
-                else f"set:{checkpoint.selected[checkpoint.set_index]}"
-                if checkpoint.set_index < len(checkpoint.selected)
-                else "removal-finalization"
-            )
-            checkpoint = checkpoint.model_copy(
-                update={
-                    "failure": _cache_failure(
-                        ModelCacheCode.REMOVAL_WAIT,
-                        "Automatic retry resumes this exact checkpoint when its "
-                        "storage or ownership dependency clears. " + detail,
-                        retryable=True,
-                        recovery="inspect",
-                        retry_time=_iso(next_retry),
-                        retry_after_seconds=delay,
-                        artifact_key=artifact_key,
-                    )
-                }
-            )
-            operation.progress = progress_document(
-                cache_phase(
-                    _operation_progress(operation), "reclaiming", now, waiting=True
+            if exhausted:
+                # Ending fences this executor; exact storage locks release its
+                # gates after this transaction, without asserting deletion.
+                cache._lifecycle.settle(
+                    operation,
+                    Reported(Outcome.FAILED, reason=detail),
+                    now,
                 )
-            )
-            operation.last_error = redact_text(detail)[:512]
-            _store_operation_payload(operation, "remove", checkpoint)
+                checkpoint = cache._removal_or_none(operation)
+                if checkpoint is not None:
+                    checkpoint = checkpoint.model_copy(
+                        update={
+                            "failure": AvailabilityOperationFailure(
+                                code=ModelCacheCode.REMOVAL_WAIT,
+                                detail=redact_text(detail)[:512],
+                                retryable=False,
+                                recovery_actions=[],
+                            )
+                        }
+                    )
+                    _store_operation_payload(operation, "remove", checkpoint)
+            else:
+                # The dependency's own hint is a floor; the core's bounded backoff
+                # is the schedule (one policy for every kind, one clock).
+                cache._lifecycle.settle(
+                    operation,
+                    Reported(
+                        Outcome.UNKNOWN,
+                        retry_after=now + timedelta(seconds=retry_after_seconds),
+                        reason=detail,
+                    ),
+                    now,
+                    interrupted=True,
+                )
+                next_retry = operation.next_action_at
+                assert next_retry is not None
+                delay = max(1, round((_aware(next_retry) - now).total_seconds()))
+                checkpoint = cache._removal_or_none(operation)
+                if checkpoint is None:
+                    return
+                artifact_key = (
+                    f"object:{checkpoint.delete_objects[checkpoint.object_index]}"
+                    if checkpoint.object_index < len(checkpoint.delete_objects)
+                    else f"set:{checkpoint.selected[checkpoint.set_index]}"
+                    if checkpoint.set_index < len(checkpoint.selected)
+                    else "removal-finalization"
+                )
+                checkpoint = checkpoint.model_copy(
+                    update={
+                        "failure": _cache_failure(
+                            ModelCacheCode.REMOVAL_WAIT,
+                            "Automatic retry resumes this exact checkpoint when its "
+                            "storage or ownership dependency clears. " + detail,
+                            retryable=True,
+                            recovery="inspect",
+                            retry_time=_iso(next_retry),
+                            retry_after_seconds=delay,
+                            artifact_key=artifact_key,
+                        )
+                    }
+                )
+                operation.progress = progress_document(
+                    cache_phase(
+                        _operation_progress(operation), "reclaiming", now, waiting=True
+                    )
+                )
+                operation.last_error = redact_text(detail)[:512]
+                _store_operation_payload(operation, "remove", checkpoint)
+        if exhausted:
+            cache.reconcile_removal_gates()
 
     def reconcile_requested_removals(self, *, limit: int = 64) -> int:
         """Accepted newer downloads fence older removers before transfer dispatch."""

@@ -35,8 +35,9 @@ from ..models import (
 from .catalog_helpers import _recipe_model_content_digests
 from .errors import (
     ModelCacheConflictRefused,
+    ModelCacheConflictUnknown,
     ModelCacheRemovalOwnerInvalid,
-    ModelCacheStorageRefused,
+    ModelCacheStorageUnknown,
 )
 from .persistence import _operation_removal
 from .source_helpers import _model_selector, _request_key
@@ -111,15 +112,18 @@ class RemovalReviewMixin:
                     existing, actor=actor, selector=normalized_selector
                 )
 
+        cache.reconcile_removal_gates()
         reviewed = cache.review_model_removal(normalized_selector)
         blockers = refusing_removal_blockers(reviewed)
         if blockers:
             first = blockers[0]
-            raise ModelCacheConflictRefused(
-                first.code,
-                first.detail,
-                recovery="retry" if first.retryable else None,
-            )
+            if first.retryable:
+                raise ModelCacheConflictUnknown(
+                    first.code,
+                    first.detail,
+                    recovery="retry",
+                )
+            raise ModelCacheConflictRefused(first.code, first.detail)
 
         try:
             with cache._lock, cache._session(write=True) as session:
@@ -375,7 +379,7 @@ class RemovalReviewMixin:
 
         The lifecycle gate is the authority for a live deletion fence. Each
         owner is then validated against its durable typed operation intent so
-        stale or malformed gate rows fail closed instead of disappearing from
+        stale or malformed gate rows remain unknown instead of disappearing from
         review output.
         """
 
@@ -419,7 +423,7 @@ class RemovalReviewMixin:
             ):
                 raise ModelCacheRemovalOwnerInvalid(
                     ArtifactLifecycleCode.REMOVAL_OWNER_UNRESOLVED,
-                    "a selected cache identity has an unreadable removal owner; retry after the owner is reconciled",
+                    "a selected cache identity has an unreadable removal owner",
                     retryable=True,
                 )
             cached = owners.get(owner_id)
@@ -583,7 +587,7 @@ class RemovalReviewMixin:
         )
         payload = _operation_removal(operation)
         if isinstance(payload, Residue) or not isinstance(operation.plan_digest, str):
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.REMOVAL_PLAN_INVALID,
                 "model removal child has no readable immutable plan",
             )
