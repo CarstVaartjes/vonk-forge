@@ -456,8 +456,12 @@ class ArtifactBlobStore:
             self._claim_reference_lock(descriptor, exclusive=exclusive)
             yield
         finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
+            # Closing is mandatory even when the explicit unlock fails. The
+            # descriptor owns the kernel fence; leaking it wedges fresh work.
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
 
     @staticmethod
     def _claim_reference_lock(descriptor: int, *, exclusive: bool) -> None:

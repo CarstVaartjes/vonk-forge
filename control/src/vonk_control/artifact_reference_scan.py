@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     RunState,
+    SecurityRefusalReason,
     WaitReason,
     canonical_message,
 )
@@ -30,6 +31,7 @@ from .artifact_lifecycle import (
     ArtifactLifecycleError,
     ArtifactReferenceIdentityStale,
     ArtifactReferenceUnsettled,
+    ArtifactReferenceUnverified,
     lock_reference_gates,
 )
 from .categorized_errors import InvalidValue
@@ -147,11 +149,24 @@ def require_model_sets_open(
     """
 
     requested = tuple(sorted(set(set_digests)))
+    expected_objects = tuple(sorted(set(object_digests)))
+    if expected_objects and len(requested) != 1:
+        raise InvalidValue(
+            "explicit model object identities require exactly one model set",
+            reason=InvalidRequestReason.CONFLICT,
+        )
+    # Validate all caller identities before creating even the first SQL gate.
+    set_identities = tuple(
+        ArtifactIdentity("model-set", digest) for digest in requested
+    )
+    expected_identities = tuple(
+        ArtifactIdentity("model-object", digest) for digest in expected_objects
+    )
     if not requested:
         return {}
     set_rows = lock_reference_gates(
         session,
-        (ArtifactIdentity("model-set", digest) for digest in requested),
+        set_identities,
         now=now,
     )
     if not allow_pending_removal and any(
@@ -170,12 +185,6 @@ def require_model_sets_open(
         )
     )
     objects_by_set = model_set_objects(session, existing_sets)
-    expected_objects = tuple(sorted(set(object_digests)))
-    if expected_objects and len(requested) != 1:
-        raise InvalidValue(
-            "explicit model object identities require exactly one model set",
-            reason=InvalidRequestReason.CONFLICT,
-        )
     if (
         expected_objects
         and existing_sets
@@ -186,7 +195,7 @@ def require_model_sets_open(
             "accepted model object identities disagree with the current model-set membership",
         )
     all_objects = {digest for values in objects_by_set.values() for digest in values}
-    all_objects.update(expected_objects)
+    all_objects.update(identity.sha256 for identity in expected_identities)
     object_identities = tuple(
         ArtifactIdentity("model-object", digest) for digest in sorted(all_objects)
     )
@@ -284,7 +293,7 @@ def model_set_reference_findings(
         )
     }
     if set(sets) != selected:
-        raise ArtifactReferenceUnsettled(
+        raise ArtifactReferenceUnverified(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
             "model-set owners could not be read; removal was deferred",
             retryable=True,
@@ -305,7 +314,7 @@ def model_set_reference_findings(
             encoded = canonical_message(profile.assignments)
             profile_bytes += len(encoded)
             if profile_bytes > _PROFILE_PAYLOAD_BUDGET:
-                raise ArtifactReferenceUnsettled(
+                raise ArtifactReferenceUnverified(
                     ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
                     f"saved-profile reference scan exceeded {_PROFILE_PAYLOAD_BUDGET} bytes; removal was deferred",
                     retryable=True,
@@ -343,7 +352,7 @@ def model_set_reference_findings(
                 )
                 revision = next(iter(revisions), None)
                 if revision is None:
-                    raise ArtifactReferenceUnsettled(
+                    raise ArtifactReferenceUnverified(
                         ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                         "saved-profile recipe selector has no readable active revision; removal was deferred",
                         retryable=True,
@@ -368,7 +377,7 @@ def model_set_reference_findings(
     except ArtifactLifecycleError:
         raise
     except Exception as error:
-        raise ArtifactReferenceUnsettled(
+        raise ArtifactReferenceUnverified(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
             "saved-profile references could not be validated; removal was deferred",
             retryable=True,
@@ -381,13 +390,13 @@ def model_set_reference_findings(
         try:
             owner_bytes += len(canonical_message(value))
         except (TypeError, ValueError) as error:
-            raise ArtifactReferenceUnsettled(
+            raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "accepted reference JSON is malformed; removal was deferred",
                 retryable=True,
             ) from error
         if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-            raise ArtifactReferenceUnsettled(
+            raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
                 f"accepted-reference scan exceeded {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes; removal was deferred",
                 retryable=True,
@@ -558,7 +567,7 @@ def runtime_image_reference_findings(
             encoded = canonical_message(profile.assignments)
             profile_bytes += len(encoded)
             if profile_bytes > _PROFILE_PAYLOAD_BUDGET:
-                raise ArtifactReferenceUnsettled(
+                raise ArtifactReferenceUnverified(
                     ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
                     f"saved-profile reference scan exceeded {_PROFILE_PAYLOAD_BUDGET} bytes; removal was deferred",
                     retryable=True,
@@ -595,7 +604,7 @@ def runtime_image_reference_findings(
                     .limit(1)
                 )
                 if revision is None:
-                    raise ArtifactReferenceUnsettled(
+                    raise ArtifactReferenceUnverified(
                         ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                         "saved-profile recipe selector has no readable active revision; removal was deferred",
                         retryable=True,
@@ -623,7 +632,7 @@ def runtime_image_reference_findings(
     except ArtifactLifecycleError:
         raise
     except Exception as error:
-        raise ArtifactReferenceUnsettled(
+        raise ArtifactReferenceUnverified(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
             "saved-profile references could not be validated; removal was deferred",
             retryable=True,
@@ -634,13 +643,13 @@ def runtime_image_reference_findings(
         try:
             owner_bytes += len(canonical_message(value))
         except (TypeError, ValueError) as error:
-            raise ArtifactReferenceUnsettled(
+            raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "accepted reference JSON is malformed; removal was deferred",
                 retryable=True,
             ) from error
         if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-            raise ArtifactReferenceUnsettled(
+            raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
                 f"accepted-reference scan exceeded {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes; removal was deferred",
                 retryable=True,
@@ -763,7 +772,7 @@ def runtime_image_reference_findings(
     ):
         installation = session.get(RecipeInstallation, run.installation_id)
         if installation is None:
-            raise ArtifactReferenceUnsettled(
+            raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "active run installation could not be read; removal was deferred",
                 retryable=True,
@@ -800,7 +809,7 @@ def runtime_image_reference_findings(
     ):
         payload = operation.payload
         if not isinstance(payload, Mapping):
-            raise ArtifactReferenceUnsettled(
+            raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "active artifact operation payload is malformed; removal was deferred",
                 retryable=True,
@@ -833,7 +842,7 @@ def runtime_image_reference_findings(
             try:
                 reference = read_runtime_image_reference_intent(raw_reference)
             except RuntimeImagePreparationError as error:
-                raise ArtifactReferenceUnsettled(
+                raise ArtifactReferenceUnverified(
                     ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                     "active runtime image reference intent is malformed; removal was deferred",
                     retryable=True,
@@ -845,11 +854,11 @@ def runtime_image_reference_findings(
                 attempt=operation.current_attempt,
                 claim_owner=claim_owner,
             ):
-                raise ArtifactReferenceUnsettled(
+                raise ArtifactReferenceUnverified(
                     ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                     "active runtime image reference intent is not owned by its current attempt; removal was deferred",
                     retryable=True,
-                    reason=WaitReason.STALE_PLAN,
+                    reason=SecurityRefusalReason.STALE_FENCE,
                 )
             account(reference)
             if reference.oci_archive_sha256 in selected:
@@ -917,7 +926,7 @@ def _profile_plan(value: object) -> FleetProfilePreview:
             FleetProfilePreview, canonical_message(value), strict=True, from_json=True
         )
     except (TypeError, ValueError, ValidationError) as error:
-        raise ArtifactReferenceUnsettled(
+        raise ArtifactReferenceUnverified(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
             "accepted profile plan is malformed; removal was deferred",
             retryable=True,
@@ -933,7 +942,7 @@ def _run_switch_plan(payload: Mapping[str, object]) -> RunSwitchPlan:
             from_json=True,
         )
     except (TypeError, ValueError, ValidationError) as error:
-        raise ArtifactReferenceUnsettled(
+        raise ArtifactReferenceUnverified(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
             "accepted Run/Switch plan is malformed; removal was deferred",
             retryable=True,
@@ -977,7 +986,7 @@ def _run_switch_runtime_image_intent(
             from_json=True,
         )
     except (TypeError, ValueError, ValidationError) as error:
-        raise ArtifactReferenceUnsettled(
+        raise ArtifactReferenceUnverified(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
             "active RunSwitch progress is malformed; image removal was deferred",
             retryable=True,
@@ -1018,11 +1027,11 @@ def _run_switch_runtime_image_intent(
         )
     )
     if not valid:
-        raise ArtifactReferenceUnsettled(
+        raise ArtifactReferenceUnverified(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
             "active RunSwitch image reference does not match its owner plan; image removal was deferred",
             retryable=True,
-            reason=WaitReason.STALE_PLAN,
+            reason=SecurityRefusalReason.STALE_FENCE,
         )
     return intent
 
