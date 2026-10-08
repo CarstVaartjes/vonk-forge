@@ -23,11 +23,6 @@
       "reason": "test harness: the shared-vector file layout of one integration test, not product data"
     },
     {
-      "file": "rust/crates/vonk-agent/examples/acceptance_certificate_renewal.rs",
-      "type": "Evidence",
-      "reason": "test harness: stdout provenance of the separately built hosted certificate-renewal acceptance peer, never installed or read as a production wire document; records the real native rotation clock, exact agent binary/build identity, certificate/key changes and fixed thirty-day lifetimes"
-    },
-    {
       "file": "rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs",
       "type": "PersistBindingInput",
       "reason": "test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones"
@@ -36,11 +31,6 @@
       "file": "rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs",
       "type": "SerializeInput",
       "reason": "test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones"
-    },
-    {
-      "file": "rust/crates/vonk-agent/examples/restart_recovery_probe.rs",
-      "type": "Request",
-      "reason": "test harness: stdin request of the restart-recovery probe, not product data"
     },
     {
       "file": "rust/crates/vonk-agent/src/base_images.rs",

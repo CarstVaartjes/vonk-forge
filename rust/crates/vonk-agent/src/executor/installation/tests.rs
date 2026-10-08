@@ -89,14 +89,17 @@ async fn uninstall_after_observation(damage: bool) {
         assert_eq!(unknown.state(), AgentResultState::Observing);
         assert!(installation.exists());
         assert!(stored_model.iter().all(|object| object.exists()));
-        fs::write(
-            installation.join("spec.json"),
-            serde_json::to_vec(&plan).unwrap(),
-        )
-        .unwrap();
     }
     let mut fresh = claim.clone();
     fresh.fence = Uuid::new_v4();
+    fresh.payload = serde_json::from_value(serde_json::json!({
+        "installation_id": installation_id,
+        "recipe_content_sha256": recipe_content_sha256,
+        "cleanup_model_content_sha256": model_content_sha256,
+        "plan_digest": "b".repeat(64),
+        "compiled_execution_plan": plan,
+    }))
+    .unwrap();
     let result = executor.execute(&fresh, lease_deadline, cancellation).await;
 
     assert_eq!(result.state(), AgentResultState::Succeeded);

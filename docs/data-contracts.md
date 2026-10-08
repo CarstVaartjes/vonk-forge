@@ -304,3 +304,7 @@ Controller capability availability and retryable refusals are owned by
 `control/src/vonk_control/capability_contract.py`.
 
 `operation_api/openapi.py` passes external OpenAPI and JSON Schema documents through `ExternalSchemaDocument`, annotated with `ExternalPassthrough`; application responses remain canonical registered models.
+
+Native renewal acceptance uses `NativeRenewalEvidence` and `RenewalHelperManifest`
+from the registered `vonk_agent_protocol.agent_state` module. The source journal
+is persisted before rotation; an absent replacement is an observation miss.

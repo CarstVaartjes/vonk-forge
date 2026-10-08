@@ -32,6 +32,16 @@ from typing import NamedTuple, Protocol, Self
 from urllib.parse import urlsplit
 
 import yaml
+from pydantic import ValidationError
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.agent_state import (
+    NativeRenewalAction,
+    NativeRenewalEvidence,
+    NativeRenewalReport,
+    NativeRenewalRequest,
+    RenewalHelperManifest,
+)
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.route_activation import (
     ROUTE_SHUTDOWN_SECONDS,
     ROUTE_STARTUP_SECONDS,
@@ -4379,87 +4389,183 @@ class SparkLifecycle:
         finally:
             shutil.rmtree(probe)
 
-    def _exercise_native_renewal(self) -> None:
-        helper = Path(self._required_environment("VONK_ACCEPTANCE_RENEWAL_HELPER"))
-        manifest_path = Path(
-            self._required_environment("VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST")
+    def _renewal_read[T](self, read: Callable[[], T], deadline: float) -> T | None:
+        """Safe reads and idempotent actions have one owning observation budget."""
+        while time.monotonic() < deadline:
+            try:
+                return read()
+            except (OSError, LifecycleError, ValidationError, json.JSONDecodeError):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(2, remaining))
+        return None
+
+    @staticmethod
+    def _renewal_complete(evidence: NativeRenewalEvidence) -> bool:
+        return (
+            evidence.source_lifetime_seconds == CERTIFICATE_LIFETIME_SECONDS
+            and evidence.replacement_lifetime_seconds == CERTIFICATE_LIFETIME_SECONDS
+            and evidence.replacement_certificate_sha256 is not None
+            and evidence.replacement_public_key_sha256 is not None
+            and evidence.source_certificate_sha256
+            != evidence.replacement_certificate_sha256
+            and evidence.source_public_key_sha256
+            != evidence.replacement_public_key_sha256
         )
-        manifest = _read_document(manifest_path, "native renewal helper manifest")
-        source_inputs = manifest.get("source_inputs")
-        if not isinstance(source_inputs, dict):
-            raise LifecycleError("native renewal helper inputs are invalid")
-        if (
-            set(source_inputs) != set(RENEWAL_HELPER_INPUTS)
-            or helper.is_symlink()
-            or not helper.is_file()
-            or hashlib.sha256(helper.read_bytes()).hexdigest()
-            != manifest.get("binary_sha256")
-        ):
-            raise LifecycleError("native renewal helper provenance is invalid")
-        for name in RENEWAL_HELPER_INPUTS:
-            if (
-                hashlib.sha256((REPOSITORY_ROOT / name).read_bytes()).hexdigest()
-                != source_inputs[name]
-            ):
-                raise LifecycleError("native renewal helper source input changed")
-        identity = self._self_test()
-        if manifest.get("build_digest") != identity.get("build_digest"):
-            raise LifecycleError("native renewal helper candidate build changed")
+
+    def _native_renewal_command(
+        self,
+        mode: NativeRenewalAction,
+        identity: AgentRuntimeIdentity,
+        deadline: float,
+    ) -> NativeRenewalEvidence | None:
         installed = Path("/usr/local/libexec/vonk-acceptance-certificate-renewal")
-        self._run_command(
-            ["sudo", "install", "-D", "-m", "0555", helper, installed],
-            cwd=REPOSITORY_ROOT,
-            timeout=30,
+
+        request = NativeRenewalRequest(
+            action=mode,
+            config_path=os.fspath(SPARK_CONFIG),
+            agent_path=os.fspath(AGENT_BINARY),
+            binary_sha256=identity.binary_digest,
+            build_digest=identity.build_digest,
         )
-        self._run_command(
-            ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"],
-            cwd=Path("/"),
-            timeout=30,
-        )
-        try:
+
+        def read() -> NativeRenewalEvidence:
             result = self._run_command(
                 [
                     "sudo",
                     "-u",
                     "vonk-agent",
                     installed,
-                    SPARK_CONFIG,
-                    AGENT_BINARY,
-                    str(identity["binary_digest"]),
-                    str(identity["build_digest"]),
+                    request.config_path,
+                    request.agent_path,
+                    request.binary_sha256,
+                    request.build_digest,
+                    request.action,
                 ],
                 cwd=Path("/"),
-                timeout=60,
+                timeout=max(1, min(60, int(deadline - time.monotonic()))),
                 report_failure_output=True,
             )
-        finally:
-            self._run_command(
-                ["sudo", "/usr/bin/systemctl", "start", "vonk-forge-agent.service"],
-                cwd=Path("/"),
-                timeout=30,
-            )
+            evidence = NativeRenewalEvidence.model_validate_json(result.stdout)
+            if mode == NativeRenewalAction.OBSERVE and not self._renewal_complete(
+                evidence
+            ):
+                raise LifecycleError("native renewal effect remains unobserved")
+            return evidence
+
+        if mode == NativeRenewalAction.OBSERVE:
+            return self._renewal_read(read, deadline)
+        # A timeout or malformed reply is unknown. Never repeat this rotation.
         try:
-            native = json.loads(result.stdout)
-        except json.JSONDecodeError as error:
-            raise LifecycleError(
-                "native renewal scheduling evidence is invalid"
-            ) from error
+            return read()
+        except (OSError, LifecycleError, ValidationError, json.JSONDecodeError):
+            return None
+
+    def _exercise_native_renewal(
+        self, deadline: float | None = None
+    ) -> NativeRenewalEvidence | None:
+        deadline = deadline or time.monotonic() + RENEWAL_OBSERVATION_SECONDS
+        helper = Path(self._required_environment("VONK_ACCEPTANCE_RENEWAL_HELPER"))
+        manifest_path = Path(
+            self._required_environment("VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST")
+        )
+        manifest = self._renewal_read(
+            lambda: RenewalHelperManifest.model_validate(
+                _read_document(manifest_path, "native renewal helper manifest")
+            ),
+            deadline,
+        )
+        if manifest is None:
+            return None
         if (
-            not isinstance(native, dict)
-            or native.get("scheduling_clock") != "certificate-derived-controlled-clock"
-            or native.get("source_agent_binary_sha256") != identity["binary_digest"]
-            or native.get("source_agent_build_digest") != identity["build_digest"]
-            or native.get("source_lifetime_seconds") != CERTIFICATE_LIFETIME_SECONDS
-            or native.get("replacement_lifetime_seconds")
-            != CERTIFICATE_LIFETIME_SECONDS
-            or native.get("source_certificate_sha256")
-            == native.get("replacement_certificate_sha256")
-            or native.get("source_public_key_sha256")
-            == native.get("replacement_public_key_sha256")
+            set(manifest.source_inputs) != set(RENEWAL_HELPER_INPUTS)
+            or helper.is_symlink()
         ):
-            raise LifecycleError("native renewal did not prove fixed-profile rekey")
+            raise LifecycleError("native renewal helper inputs are invalid")
+        binary = self._renewal_read(helper.read_bytes, deadline)
+        if binary is None:
+            return None
+        if hashlib.sha256(binary).hexdigest() != manifest.binary_sha256:
+            raise LifecycleError("native renewal helper provenance is invalid")
+        for name in RENEWAL_HELPER_INPUTS:
+            content = self._renewal_read((REPOSITORY_ROOT / name).read_bytes, deadline)
+            if content is None:
+                return None
+            if hashlib.sha256(content).hexdigest() != manifest.source_inputs[name]:
+                raise LifecycleError("native renewal helper source input changed")
+        identity = self._renewal_read(
+            lambda: AgentRuntimeIdentity.model_validate_json(
+                canonical_message(self._self_test())
+            ),
+            deadline,
+        )
+        if identity is None:
+            return None
+        if manifest.build_digest != identity.build_digest:
+            raise LifecycleError("native renewal helper candidate build changed")
+        installed = Path("/usr/local/libexec/vonk-acceptance-certificate-renewal")
+
+        def action(command: Sequence[str | Path]):
+            return self._renewal_read(
+                lambda: self._run_command(
+                    command,
+                    cwd=Path("/"),
+                    timeout=max(1, min(30, int(deadline - time.monotonic()))),
+                ),
+                deadline,
+            )
+
+        if action(["sudo", "install", "-D", "-m", "0555", helper, installed]) is None:
+            return None
+        try:
+            if (
+                action(
+                    ["sudo", "/usr/bin/systemctl", "stop", "vonk-forge-agent.service"]
+                )
+                is None
+            ):
+                return None
+            native = self._native_renewal_command(
+                NativeRenewalAction.RENEW, identity, deadline
+            )
+        finally:
+            # A separate bounded recovery budget keeps an exhausted observation
+            # from skipping the service restart that this canary owns.
+            self._renewal_read(
+                lambda: self._run_command(
+                    ["sudo", "/usr/bin/systemctl", "start", "vonk-forge-agent.service"],
+                    cwd=Path("/"),
+                    timeout=30,
+                ),
+                time.monotonic() + 60,
+            )
+        if native is None or not self._renewal_complete(native):
+            native = self._native_renewal_command(
+                NativeRenewalAction.OBSERVE, identity, deadline
+            )
+        if native is None:
+            return None
+        if native.source_agent_binary_sha256 != identity.binary_digest or (
+            native.source_agent_build_digest != identity.build_digest
+        ):
+            raise LifecycleError("native renewal helper candidate identity differs")
+        if not self._renewal_complete(native):
+            return None
         evidence = Path(self.arguments.output).parent / "renewal-scheduling-clock.json"
-        evidence.write_bytes(_canonical({"helper": manifest, "native": native}))
+        if (
+            self._renewal_read(
+                lambda: evidence.write_bytes(
+                    canonical_message(
+                        NativeRenewalReport(helper=manifest, native=native)
+                    )
+                ),
+                deadline,
+            )
+            is None
+        ):
+            return None
+        return native
 
     def _observe_renewal(self, node_id: str, serial_before: str) -> dict[str, object]:
         if (
@@ -4468,32 +4574,50 @@ class SparkLifecycle:
         ):
             raise LifecycleError("renewal identity is invalid")
         deadline = time.monotonic() + RENEWAL_OBSERVATION_SECONDS
-        self._exercise_native_renewal()
+        native = self._exercise_native_renewal(deadline)
         while time.monotonic() < deadline:
-            rows = self._psql(
-                "SELECT n.contact_certificate_serial,c.state,"
-                "(c.revoked_at IS NOT NULL)::int "
-                "FROM agent_nodes n JOIN agent_certificates c "
-                f"ON c.serial='{serial_before}' WHERE n.node_id='{node_id}'"
+            rows = self._renewal_read(
+                lambda: self._psql(
+                    "SELECT n.contact_certificate_serial,c.state,"
+                    "(c.revoked_at IS NOT NULL)::int "
+                    "FROM agent_nodes n JOIN agent_certificates c "
+                    f"ON c.serial='{serial_before}' WHERE n.node_id='{node_id}'"
+                ),
+                deadline,
             )
             if (
-                len(rows) == 1
+                native is not None
+                and rows is not None
+                and len(rows) == 1
                 and len(rows[0]) == 3
                 and rows[0][0] != serial_before
                 and SERIAL.fullmatch(rows[0][0]) is not None
                 and rows[0][1:] == ["revoked", "1"]
             ):
                 serial_after = rows[0][0]
-                identity = self._wait_for_agent_identity(
-                    package_version=str(self.graph["candidate_version"]), timeout=30
+                identity = self._renewal_read(
+                    lambda: self._wait_for_agent_identity(
+                        package_version=str(self.graph["candidate_version"]),
+                        timeout=max(1, min(30, int(deadline - time.monotonic()))),
+                    ),
+                    deadline,
                 )
                 if (
-                    identity.get("node_id") != node_id
+                    identity is None
+                    or identity.get("node_id") != node_id
                     or identity.get("serial") != serial_after
                 ):
-                    raise LifecycleError("renewed agent identity is inconsistent")
-                if not self._old_certificate_rejected(serial_before, serial_after):
-                    raise LifecycleError("retired agent certificate was not rejected")
+                    time.sleep(min(2, max(0, deadline - time.monotonic())))
+                    continue
+                rejected = self._renewal_read(
+                    lambda serial_after=serial_after: self._old_certificate_rejected(
+                        serial_before, serial_after
+                    ),
+                    deadline,
+                )
+                if rejected is not True:
+                    time.sleep(min(2, max(0, deadline - time.monotonic())))
+                    continue
                 before_proof = self._serial_proof(serial_before)
                 return {
                     "node_id": node_id,

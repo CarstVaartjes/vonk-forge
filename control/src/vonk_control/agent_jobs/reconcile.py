@@ -22,8 +22,8 @@ from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
-from .contracts import _GRANT_LIFETIME
 from .endings import end_unobserved_order
+from .ownership import observation_ownership
 from .persistence import _OrderStore
 from .retirement import operator_resume_candidates_in_session
 
@@ -93,14 +93,11 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                     StoredOperation.id,
                     StoredOperation.node_id,
                     StoredOperation.parent_job_id,
-                    StoredOperation.kind,
-                    StoredOperation.created_at,
                 )
                 .where(
                     or_(
                         lapsed_running_orders(now),
-                        (StoredOperation.kind == AgentOperation.RECIPE_UNINSTALL)
-                        & (StoredOperation.created_at <= now - _GRANT_LIFETIME)
+                        (StoredOperation.recovery_deadline <= now)
                         & StoredOperation.state.in_(aos.LIVE),
                     ),
                     StoredOperation.current_attempt > 0,
@@ -110,57 +107,62 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
             )
         )
     progressed = False
-    for operation_id, node_id, parent_job_id, kind, created_at in candidates:
+    for operation_id, node_id, parent_job_id in candidates:
         # Decide without a lock whether there is anything to do: an order
         # whose attempt is still live (an open launch budget, say) is looked
         # at every pass, and taking the node's rows for each look kept the
         # node busy for the admissions that need it.
-        expired_cleanup = kind == AgentOperation.RECIPE_UNINSTALL and _aware(
-            created_at
-        ) + _GRANT_LIFETIME <= _aware(now)
-        if not expired_cleanup and not self._sweep_would_act(operation_id, node_id):
+        if not self._sweep_would_act(operation_id, node_id):
             continue
         try:
-            with self._claim_lock, self._sessions.begin() as session:
+            with (
+                observation_ownership(self) as owned,
+                self._sessions.begin() as session,
+            ):
+                if not owned:
+                    continue
                 label_transaction(session, "order-sweep")
                 scopes = self._lock_operation_scopes(
                     session, (operation_id,), node_id, nowait=True
                 )
                 if scopes is None or scopes[operation_id][0] != parent_job_id:
                     continue
-                operation = session.scalar(
-                    select(StoredOperation)
-                    .where(StoredOperation.id == operation_id)
-                    .with_for_update(of=StoredOperation)
-                    .execution_options(populate_existing=True)
+                locked = lock_admission_rows(
+                    session,
+                    (
+                        AdmissionRowLock(
+                            "sweep-order",
+                            StoredOperation,
+                            select(StoredOperation).where(
+                                StoredOperation.id == operation_id
+                            ),
+                        ),
+                        AdmissionRowLock(
+                            "sweep-attempt",
+                            AgentOperationAttempt,
+                            select(AgentOperationAttempt).where(
+                                AgentOperationAttempt.operation_id == operation_id,
+                                AgentOperationAttempt.attempt
+                                == select(StoredOperation.current_attempt)
+                                .where(StoredOperation.id == operation_id)
+                                .scalar_subquery(),
+                            ),
+                        ),
+                    ),
                 )
+                operation = next(iter(locked["sweep-order"]), None)
                 node = session.get(AgentNode, node_id)
                 if operation is None or node is None or operation.state not in aos.LIVE:
                     continue
-                attempt = session.scalar(
-                    select(AgentOperationAttempt)
-                    .where(
-                        AgentOperationAttempt.operation_id == operation.id,
-                        AgentOperationAttempt.attempt == operation.current_attempt,
-                    )
-                    .with_for_update(of=AgentOperationAttempt)
+                attempt = next(
+                    (
+                        row
+                        for row in locked["sweep-attempt"]
+                        if row.attempt == operation.current_attempt
+                    ),
+                    None,
                 )
                 now = self._clock()
-                if operation.kind == AgentOperation.RECIPE_UNINSTALL and _aware(
-                    operation.created_at
-                ) + _GRANT_LIFETIME <= _aware(now):
-                    end_unobserved_order(
-                        self,
-                        session,
-                        operation,
-                        attempt,
-                        session.get(Job, parent_job_id),
-                        now,
-                        reason=WaitReason.CLEANUP_UNCONFIRMED,
-                        note="installation cleanup observation budget elapsed",
-                    )
-                    progressed = True
-                    continue
                 if operation.state != aos.RUNNING:
                     continue
                 if _attempt_is_live(operation, attempt, now) or (
@@ -186,11 +188,7 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
     with self._sessions() as session:
         operation = session.get(StoredOperation, operation_id)
         node = session.get(AgentNode, node_id)
-        if (
-            operation is None
-            or node is None
-            or operation.state != _LifecycleState.RUNNING
-        ):
+        if operation is None or node is None or operation.state not in aos.LIVE:
             return False
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
@@ -198,6 +196,10 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
                 AgentOperationAttempt.attempt == operation.current_attempt,
             )
         )
+        if operation.state in aos.PARKED:
+            return operation.recovery_deadline is not None and _aware(
+                operation.recovery_deadline
+            ) <= _aware(self._clock())
         return not (
             _attempt_is_live(operation, attempt, self._clock())
             or (
@@ -239,7 +241,12 @@ def _sweep_gone_targets(self: AgentJobService, limit: int) -> bool:
     changed = False
     for operation_id, node_id, parent_id in candidates:
         try:
-            with self._claim_lock, self._sessions.begin() as session:
+            with (
+                observation_ownership(self) as owned,
+                self._sessions.begin() as session,
+            ):
+                if not owned:
+                    continue
                 label_transaction(session, "gone-target")
                 rows = lock_admission_rows(
                     session,

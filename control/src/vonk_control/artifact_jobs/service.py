@@ -25,7 +25,7 @@ from ..categorized_errors import InvalidValue, MissingRecord
 from ..cluster_mappings import mapping_option_choices
 from ..compiled_artifact_contract import ParameterScalar
 from ..execution_plan_service import compile_job_invocation
-from ..lifecycle import CancelRequested, Effect
+from ..lifecycle import CancelRequested
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Damaged
 from ..models import (
@@ -405,26 +405,8 @@ class ArtifactJobService(OutputService):
                     "recipe run is not accepting jobs",
                     reason=InvalidRequestReason.NOT_READY,
                 )
-            adapter = ArtifactJobAdapter(session, clock=self._clock)
-            for prior in session.scalars(
-                select(ArtifactJob).where(
-                    ArtifactJob.run_id == run.id,
-                    ArtifactJob.id != artifact_job.id,
-                )
-            ):
-                evidence = read_result_evidence(prior.result_evidence)
-                damaged_evidence = (
-                    prior.result_evidence is not None and evidence is None
-                )
-                if (
-                    prior.state in ajs.LIVE
-                    or adapter.adopt(prior).effect is Effect.UNKNOWN
-                    or (prior.operation_id is not None and damaged_evidence)
-                ):
-                    raise ArtifactJobInvalid(
-                        "another artifact job already owns this run reservation",
-                        reason=InvalidRequestReason.CONFLICT,
-                    )
+            # Queue ownership and physical execution slots belong to agent_jobs.
+            # A prior request cannot become a second admission mutex here.
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (
                 _active_recipe_revision(session, installation.recipe_revision_id)

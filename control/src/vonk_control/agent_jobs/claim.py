@@ -582,6 +582,7 @@ def _claim_once(
             progress=resumable_progress,
         )
         if attempt is None:
+            self._aggregate_parent(session, operation.parent_job_id)
             return None  # the core refuses a claim the predicate let through
         self._refresh_parent_claim_refusal(session, operation, now)
         if operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value:

@@ -24,7 +24,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from vonk_agent_protocol import LifecycleState
+from sqlalchemy import select
+from vonk_agent_protocol import AgentOperation, LifecycleState, SecurityRefusalReason
+from vonk_control.categorized_errors import SecurityRefused
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.lifecycle import (
     STOP_BUDGET,
@@ -527,26 +529,47 @@ def test_every_conflict_of_the_phase_path_is_retried_unless_it_is_a_security_edg
 
 
 @pytest.mark.parametrize(
-    "code",
+    "reason",
     [
-        "run-switch.artifact-digest-verification-failed",
-        "run-switch.cleanup-nas-eviction-forbidden",
-        "run-switch.cleanup-reclaimed-digest-not-planned",
-        "run-switch.runtime-image-preparation-digest-mismatch",
+        SecurityRefusalReason.RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED,
+        SecurityRefusalReason.RUN_SWITCH_CLEANUP_NAS_EVICTION_FORBIDDEN,
+        SecurityRefusalReason.RUN_SWITCH_CLEANUP_RECLAIMED_DIGEST_NOT_PLANNED,
+        SecurityRefusalReason.RUN_SWITCH_RUNTIME_IMAGE_PREPARATION_DIGEST_MISMATCH,
     ],
 )
-def test_a_reviewed_destructive_or_digest_guard_ends_the_operation(
-    tmp_path: Path, code: str
+def test_explicit_security_guard_has_no_start_effect_and_admits_fresh_request(
+    tmp_path: Path, reason: SecurityRefusalReason
 ) -> None:
     executor = _ScriptedExecutor()
-    executor.faults["prepare"] = RunSwitchOperationConflict(code)
-    executor.faults["transfer"] = RunSwitchOperationConflict(code)
+    executor.faults["prepare"] = SecurityRefused(
+        "authority refused bytes or cleanup", reason=reason
+    )
+    executor.faults["transfer"] = executor.faults["prepare"]
     harness = _Harness(tmp_path, executor)
     for _ in range(3):
         harness.service.tick()
-    view = harness.view()
-    assert view.state == "failed"
-    assert _result(view).failure_code == code
+    assert harness.view().state == LifecycleState.FAILED
+    with harness.sessions() as session:
+        assert (
+            session.scalar(
+                select(Job.id).where(Job.kind == AgentOperation.RECIPE_START)
+            )
+            is None
+        )
+    executor.faults.clear()
+    request = _request(harness.sessions, harness.nodes[0])
+    reviewed = harness.service.preview(request, actor="admin")
+    assert reviewed.allowed
+    fresh = harness.service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            request_key=str(uuid.uuid4()),
+            plan_digest=reviewed.plan_digest,
+        ),
+        actor="admin",
+    )
+    assert fresh.operation_id != harness.id
+    assert fresh.state == LifecycleState.QUEUED
 
 
 def test_an_error_nobody_classified_is_retried_by_the_tick_guard(
@@ -570,11 +593,16 @@ def test_an_error_nobody_classified_is_retried_by_the_tick_guard(
     harness.service.tick()
     held = harness.view()
     assert _retrying(held), (held.state, held.status_reason)
-    assert _result(held).retry_reason == "run-switch.container-build-parent-invalid"
+    assert held.operation_id == harness.id
+    checkpoint = _result(held).phase_index
     state["raise"] = False
-    harness.advance_to_due()
-    harness.service.tick()
-    assert harness.view().state != "failed"
+    for _ in range(12):
+        harness.advance_to_due()
+        harness.service.tick()
+        if _result(harness.view()).phase_index > checkpoint:
+            break
+    assert _result(harness.view()).phase_index > checkpoint
+    assert harness.view().operation_id == held.operation_id
 
 
 def test_the_retry_clock_is_the_cores_and_resets_on_a_new_cause(tmp_path: Path) -> None:
@@ -763,7 +791,12 @@ def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(
     harness.service.tick()
     held = harness.view()
     assert _retrying(held), (held.state, held.status_reason)
+    checkpoint = _result(held).phase_index
     state["raise"] = False
-    harness.advance_to_due()
-    harness.service.tick()
-    assert harness.view().state != "failed"
+    for _ in range(12):
+        harness.advance_to_due()
+        harness.service.tick()
+        if _result(harness.view()).phase_index > checkpoint:
+            break
+    assert _result(harness.view()).phase_index > checkpoint
+    assert harness.view().operation_id == held.operation_id

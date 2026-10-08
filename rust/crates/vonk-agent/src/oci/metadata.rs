@@ -299,7 +299,12 @@ pub(super) fn materialized_model_bytes(
         .into_iter()
         .try_fold(0_u64, |total, artifact| {
             let path = models.join(&artifact.selection_id).join(&artifact.path);
-            let metadata = fs::symlink_metadata(path)?;
+            let metadata = match fs::symlink_metadata(path) {
+                Ok(metadata) => metadata,
+                // A prior bounded cleanup attempt may already have unlinked it.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(total),
+                Err(error) => return Err(error.into()),
+            };
             if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
                 return Err(OciError::Artifact);
             }

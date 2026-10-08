@@ -296,3 +296,158 @@ def test_native_renewal_helper_uses_candidate_content_identity(
         manifest_path.write_bytes(verified_manifest)
         with pytest.raises(FirstEffect):
             run._exercise_native_renewal()
+
+
+@pytest.mark.parametrize(
+    "fault", ["reply", "fields", "profile", "timeout", "read", "self-test", "service"]
+)
+def test_renewal_unknown_observes_once_issued_effect_and_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    """Catches malformed receipts causing a repeated rotation or skipped restart."""
+    _exercise_renewal_observation(tmp_path, monkeypatch, fault, exhaust=False)
+
+
+def test_renewal_observation_exhaustion_allows_a_fresh_invocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _exercise_renewal_observation(tmp_path, monkeypatch, "reply", exhaust=True)
+
+
+def _exercise_renewal_observation(tmp_path, monkeypatch, fault, *, exhaust):
+    import argparse
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    from vonk_agent_protocol.agent_state import (
+        NativeRenewalClock,
+        NativeRenewalEvidence,
+        RenewalHelperManifest,
+    )
+
+    import tests.acceptance.test_spark_lifecycle as canary
+
+    helper = tmp_path / "helper"
+    helper.write_bytes(b"verified native helper")
+    manifest = RenewalHelperManifest(
+        source_sha="a" * 40,
+        binary_sha256=hashlib.sha256(helper.read_bytes()).hexdigest(),
+        build_digest="sha256:" + "b" * 64,
+        source_inputs={
+            name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+            for name in canary.RENEWAL_HELPER_INPUTS
+        },
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(manifest.model_dump_json())
+    run = canary.SparkLifecycle.__new__(canary.SparkLifecycle)
+    run.arguments = argparse.Namespace(output=str(tmp_path / "report.json"))
+    monkeypatch.setattr(
+        run,
+        "_required_environment",
+        lambda name: (
+            str(helper)
+            if name == "VONK_ACCEPTANCE_RENEWAL_HELPER"
+            else str(manifest_path)
+        ),
+    )
+    elapsed = [0.0]
+    monkeypatch.setattr(
+        canary,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: elapsed[0],
+            sleep=lambda delay: elapsed.__setitem__(0, elapsed[0] + delay),
+        ),
+    )
+    identity = {
+        "architecture": "linux-arm64",
+        "semantic_version": "0.1.1",
+        "binary_digest": "c" * 64,
+        "build_digest": manifest.build_digest,
+    }
+    identity_reads = [0]
+
+    def self_test():
+        identity_reads[0] += 1
+        if fault == "self-test" and identity_reads[0] == 1:
+            raise canary.LifecycleError("self test observation unavailable")
+        return identity
+
+    monkeypatch.setattr(run, "_self_test", self_test)
+    if fault == "read":
+        original_read = Path.read_bytes
+        reads = [0]
+
+        def read(path):
+            if path == helper:
+                reads[0] += 1
+                if reads[0] == 1:
+                    raise OSError("temporary read unavailable")
+            return original_read(path)
+
+        monkeypatch.setattr(Path, "read_bytes", read)
+    evidence = NativeRenewalEvidence(
+        scheduling_clock=NativeRenewalClock.CERTIFICATE_DERIVED,
+        wall_clock_utc="2026-10-08T00:00:00Z",
+        scheduling_clock_utc="2026-11-01T00:00:00Z",
+        source_agent_binary_sha256=identity["binary_digest"],
+        source_agent_build_digest=identity["build_digest"],
+        source_certificate_sha256="d" * 64,
+        replacement_certificate_sha256="e" * 64,
+        source_public_key_sha256="f" * 64,
+        replacement_public_key_sha256="1" * 64,
+        source_lifetime_seconds=canary.CERTIFICATE_LIFETIME_SECONDS,
+        replacement_lifetime_seconds=canary.CERTIFICATE_LIFETIME_SECONDS,
+    )
+    rotations, observations, starts, stops = [], [], [], []
+    failing = [True]
+
+    def command(arguments, **kwargs):
+        if "--renew" in arguments:
+            rotations.append(tuple(arguments))
+            if failing[0] and fault == "timeout":
+                raise canary.LifecycleError("helper reply unavailable")
+            reply = (
+                "unreadable"
+                if failing[0] and fault == "reply"
+                else evidence.model_dump_json()
+            )
+            if failing[0] and fault == "fields":
+                reply = evidence.model_dump(exclude={"scheduling_clock"})
+                reply = json.dumps(reply)
+            if failing[0] and fault == "profile":
+                reply = evidence.model_copy(
+                    update={"source_lifetime_seconds": 0}
+                ).model_dump_json()
+        elif "--observe" in arguments:
+            observations.append(tuple(arguments))
+            reply = (
+                "unreadable" if failing[0] and exhaust else evidence.model_dump_json()
+            )
+        else:
+            if "start" in arguments:
+                starts.append(tuple(arguments))
+            if "stop" in arguments:
+                stops.append(tuple(arguments))
+                if failing[0] and fault == "service" and len(stops) == 1:
+                    raise canary.LifecycleError("service response unavailable")
+            reply = ""
+        return subprocess.CompletedProcess(arguments, 0, stdout=reply, stderr="")
+
+    monkeypatch.setattr(run, "_run_command", command)
+    observed = run._exercise_native_renewal(deadline=elapsed[0] + 10)
+    assert len(rotations) == 1 and len(starts) == 1
+    if exhaust:
+        assert observed is None
+        assert elapsed[0] <= 10
+        failing[0] = False
+        fresh = run._exercise_native_renewal(deadline=elapsed[0] + 10)
+        assert fresh is not None
+        assert len(rotations) == 2 and len(starts) == 2
+    else:
+        assert observed is not None
+        assert (tmp_path / "renewal-scheduling-clock.json").exists()
+        if fault in {"reply", "fields", "profile", "timeout"}:
+            assert len(observations) == 1

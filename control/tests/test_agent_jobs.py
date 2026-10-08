@@ -3899,7 +3899,7 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
         assert row is not None
         due = row.next_action_at
         assert row.current_attempt == 5 and row.payload == original_payload
-        if condition not in {"temporary", "expired"}:
+        if condition not in {"temporary", "expired", "unknown", "integrity-failure"}:
             assert due is None
             return
         assert due is not None

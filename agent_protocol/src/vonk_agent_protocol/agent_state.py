@@ -9,6 +9,7 @@ the one definition and ``scripts/generate-agent-wire`` generates the Rust type.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator
@@ -16,6 +17,7 @@ from pydantic import ConfigDict, Field, field_validator
 from .agent_words import HostHelperResponseStatus
 from .claims import AgentRuntimeIdentity
 from .compiled_execution_plan import CompiledPlacement
+from .contracts import AgentClaim
 from .helper_response import HostHelperProcessLogs
 from .host_helper import RecipeReconciliationIdentity, Uuid4Text
 from .package_upgrade import PackageActivationPhase, PackageRollbackAuthority
@@ -198,3 +200,79 @@ class PackageRollbackTransaction(WireModel):
     created_at: I64
     updated_at: I64
     outcome: str
+
+
+class NativeRenewalAction(StrEnum):
+    RENEW = "--renew"
+    OBSERVE = "--observe"
+
+
+class NativeRenewalRequest(WireModel):
+    """The hosted helper's command inputs, validated before renewal effects."""
+
+    action: NativeRenewalAction
+    config_path: str
+    agent_path: str
+    binary_sha256: Digest
+    build_digest: OciDigest
+
+
+class NativeRenewalClock(StrEnum):
+    CERTIFICATE_DERIVED = "certificate-derived-controlled-clock"
+
+
+class NativeRenewalEvidence(WireModel):
+    """Exact renewal source persisted before rotation and observed after it.
+
+    Missing replacement evidence is unknown, never permission to rotate again.
+    """
+
+    scheduling_clock: NativeRenewalClock
+    wall_clock_utc: str
+    scheduling_clock_utc: str
+    source_agent_binary_sha256: Digest
+    source_agent_build_digest: OciDigest
+    source_certificate_sha256: Digest
+    source_public_key_sha256: Digest
+    source_lifetime_seconds: I64
+    replacement_certificate_sha256: Digest | None = None
+    replacement_public_key_sha256: Digest | None = None
+    replacement_lifetime_seconds: I64 | None = None
+
+
+class RenewalHelperManifest(WireModel):
+    """Content closure of the hosted renewal peer."""
+
+    source_sha: str
+    binary_sha256: Digest
+    build_digest: OciDigest
+    source_inputs: dict[str, Digest]
+
+
+class NativeRenewalReport(WireModel):
+    """Verified helper closure and the exact observed renewal result."""
+
+    helper: RenewalHelperManifest
+    native: NativeRenewalEvidence
+
+
+class AgentExecutorProbeMode(StrEnum):
+    RECOVER = "recover"
+    DISTRIBUTION = "execute-distribution"
+    BUILD = "execute-build"
+    UNINSTALL = "execute-uninstall"
+
+
+class AgentExecutorProbeRequest(WireModel):
+    """CI peer request for the real journal, executor and storage boundary."""
+
+    mode: AgentExecutorProbeMode
+    data_root: str
+    node_id: str
+    claim: AgentClaim
+    controller_url: str | None = None
+    ca_sha256: Digest | None = None
+    ca_pem: str | None = None
+    certificate_pem: str | None = None
+    chain_pem: str | None = None
+    private_key_pem: str | None = None

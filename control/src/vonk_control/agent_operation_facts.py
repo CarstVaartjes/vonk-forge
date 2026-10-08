@@ -105,6 +105,10 @@ def stalled_interruptions(operation: StoredOperation) -> int:
 #: An ambiguous agent-package install can leave durable apt/dpkg recovery in
 #: progress; an automatic re-dispatch never overlaps it.  A stable dispatch
 #: contract, not a derivation from package-helper implementation timeouts.
+# One request's uncertainty budget, starting at its first failed observation.
+# This bounds executor ownership independently from standing desired state.
+AGENT_ORDER_RECOVERY_BUDGET = timedelta(hours=1)
+
 AGENT_UPGRADE_RECOVERY_FENCE = timedelta(seconds=960)
 
 

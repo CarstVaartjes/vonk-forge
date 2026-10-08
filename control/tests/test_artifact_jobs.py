@@ -16,6 +16,7 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
+    LifecycleState,
     OperationProgress,
     RecipeJobFile,
     RecipeJobInputFile,
@@ -1339,12 +1340,13 @@ def test_logical_job_run_blocks_stop_and_serializes_full_model_jobs(tmp_path) ->
     )
     assert operations.preview_stop(run_id).allowed
     second = create("00000000-0000-4000-8000-000000000109")
-    with pytest.raises(ArtifactJobError, match="owns this run reservation"):
-        service.submit(
-            second.id,
-            actor="operator",
-            request_id="00000000-0000-4000-8000-000000000110",
-        )
+    accepted = service.submit(
+        second.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000110",
+    )
+    assert accepted.operation_id != submitted.operation_id
+    assert accepted.state == LifecycleState.QUEUED
 
 
 def test_running_artifact_cancellation_waits_for_agent_ack_and_fences_late_result(

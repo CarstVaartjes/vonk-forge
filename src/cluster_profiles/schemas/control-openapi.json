@@ -27358,6 +27358,17 @@
             ],
             "title": "Cleanup Model Content Sha256"
           },
+          "compiled_execution_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledExecutionPlan"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "installation_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Installation Id",

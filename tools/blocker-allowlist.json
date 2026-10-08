@@ -1377,7 +1377,7 @@
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/claim.py": {
-      "_claim_once": "0ac3add66b4acebca88e002d37e48d6996c576b04a2d6e0ace6830713cfd3a7b",
+      "_claim_once": "623c45e2d8f9045fd82ab34da019fe812ee5f81a8abe805d6c5ef2620c60883c",
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/claim_authority.py": {
@@ -1407,7 +1407,7 @@
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/completion.py": {
-      "_report_event": "4bf011db4163521d158dcf3e975386b2908626e21d9eb92b02ab3420c8ef5235"
+      "_report_event": "bfc64a24199bf41afb3d5ad1757d9eb7e7b531cd9c8f7575842cd903ca292a5f"
     },
     "control/src/vonk_control/agent_jobs/contracts.py": {
       "SupersededAgentEffect": "9e74d6e33e55d56cf72dc29523d1832a16056631b3b9c132c6e1d182caa9a426",
@@ -1456,13 +1456,13 @@
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/persistence.py": {
-      "_OrderStore": "d02eec69af19021045f2f188713ff3812bcfd999e056c02436b2cf08eaf0457b",
+      "_OrderStore": "f23a92cf16a38e5dee7ff5d41a0b1cb97b39c54c776d0fdf3d058852254506d2",
       "_OrderStore.__init__": "50f70eb638413901cde7743e69c07a432f9fcd13a0f38faa1da7c9955ac78086",
       "_OrderStore.due": "5e8d3c170efac728d7d71ce534e6a7ae556290f6a854307f374c415bab319cac",
       "_OrderStore.save": "c3484285ccba40e3c2cbc3f0c9fc4726b29b7ac143f493f3daa4ba16a22a6fea",
-      "_OrderStore._save": "6f0306900c2603cbeb1a87048058606b3a24ca2ca8aa0145d8662389ca0e130c",
+      "_OrderStore._save": "0e79a9153ecb053aec053c33577189777746f2ccb4caaa6d1b08bd8f7a890b88",
       "_OrderStore.record_residue": "0918607c894f80eb7afbc16c79d48e56f978e7fee3cfdc3441202b8805d0d56e",
-      "<module>": "e06263134c294bc4f29ff4a943cc31027ea0e6f00b9624d798d2bb8f74161d4d"
+      "<module>": "6c96ef5c30040e75117268473379946bae5bf0e657c9b8eff2ebce42619626c5"
     },
     "control/src/vonk_control/agent_jobs/predicates.py": {
       "_refusal_reason": "ab689e95103aeb2b250300af872d3d23c4d30af5fbb94e1e37f127d8d8238abb",
@@ -1494,9 +1494,9 @@
     "control/src/vonk_control/agent_jobs/reconcile.py": {
       "reconcile_orders": "b3a585b6b9b2486f52cc79608ae65b975775228648c4cbe79b55b14d686993bf",
       "_order_reconciler": "aba04833e274f6b262b8a31591708bbf7da1a093d807d1146a75f495056abc37",
-      "_sweep_lapsed_attempts": "fb69258319f1a9e073d387d6e54dbc81884b31a74786b797f3c5cddbeafbf427",
-      "_sweep_would_act": "9604ba3bc3eea4db101a4a7df4ecb3c7f3800a0c776bb45b18e9e5ff0c6c0cdd",
-      "_sweep_gone_targets": "28c1f19ab04ba40829b77bc3b102a4fcc6187c20d1a6335ba5355d7250f4d9f0",
+      "_sweep_lapsed_attempts": "a26890a30b3e53b47be7dd1ef1399070a351a2a5d16ee29d1637616621307564",
+      "_sweep_would_act": "d81213bc2cc3f683b1904c293c0c77b011cd3af7fcf1d3207df411d1229c12b4",
+      "_sweep_gone_targets": "5da08e54336e0b61322a215f6c88df29fee4e769cd0a0c93f65d373591da6f84",
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/results.py": {
@@ -1516,7 +1516,7 @@
     },
     "control/src/vonk_control/agent_jobs/retry.py": {
       "superseded_cancellation_deadline": "653d62cb565f186b4b7d129058f72b9cd456f3b7f013436c753ae75b675a760b",
-      "_safe_retry_failure": "edc49da0cea37ffd7f218e5455c4278c0be0b526e3f512e1d92644868a553709",
+      "_safe_retry_failure": "4281aae19752246db3f92cec412dbe679180113f22a01393e8f8e397414db146",
       "_retry_authorized_for_current_attempt": "22376fb3cd3995cbc7016935d30f0019cbbf2d982dd2042686e873249126a94d",
       "_retry_not_authorized_for_current_attempt": "f3925ea30a630727977c089ce212783ffe9828974f5916ea7731f57309fed0fb",
       "_parked_retry_evidence": "46f318c8f943f2341d1d9aaba06b1a63d6e96eae0c9451b29ba2d5213e8e1062",
@@ -1787,18 +1787,18 @@
       "<module>": "0dfe7c12bf93107c93bc4b1cd4c647c7a283476ae9b416fd8b1e31970da2ecd8"
     },
     "control/src/vonk_control/artifact_jobs/service.py": {
-      "ArtifactJobService": "cb8500693677af1baacd5d66273bc30d1d2c9bf796ea3fe28e6fa526a09c45e4",
+      "ArtifactJobService": "545ec678cd856fb90ab6be990f00f2577759d5260e7f657910a53e551c86d099",
       "ArtifactJobService.reconcile_storage": "4483ad163fa85bff9d0e6fa275e790cb9a410b4d3b6595c002897a25410a2681",
       "ArtifactJobService._reconcile_storage_fenced": "86f568a4865455a0f394619dcc0f4354764b824416d011aca96f55892d76affa",
       "ArtifactJobService.create": "7aa3387e1b239e4d5aa72f66a059e5079563a17b1cbdc781b6c44f9411ae3f5d",
       "ArtifactJobService._create_in_session": "71ca1bc78f875e054bb00699bfafb2f4381bc1d35cf5abe67d1b4e9951af754c",
       "ArtifactJobService.capabilities": "95508cb294f804f5b92f8fc6c66aaf00f31a299f99452eb0852a5906fbe612c9",
-      "ArtifactJobService.submit": "39fce50f985dde93afd9c7cb73f51492ece202be8a7744f55aab7897ebd60195",
+      "ArtifactJobService.submit": "76fb3aa981e779c65fc5a9fc7a1ffaf46f0813db049e538be3afa5a87689f0cc",
       "ArtifactJobService.get": "978b7ab5cff845ceeb1ca7c1c1d64e2345fc40e4fdcaa6f13a1805f790288325",
       "ArtifactJobService.get_by_request_id": "3149eb334ee9355d8908000906840353148a28a311c1a1ada0d421617f6f0a93",
       "ArtifactJobService.list_for_run": "654bfea0a331dad844e517d29be24af45a64ecf90251354867cd7aabf45c6b52",
       "ArtifactJobService.cancel": "a16f336c0e1f00dc9d4988d79a1390524d9999c6ce3f4833d8e768509f5e6b21",
-      "<module>": "cb8500693677af1baacd5d66273bc30d1d2c9bf796ea3fe28e6fa526a09c45e4"
+      "<module>": "545ec678cd856fb90ab6be990f00f2577759d5260e7f657910a53e551c86d099"
     },
     "control/src/vonk_control/artifact_jobs/storage.py": {
       "ArtifactJobService": "1d73440a9c242cc8a8fb9b6c6bd9282acb81ab9e22b7dcf71804bbb5216741a0",
@@ -3235,13 +3235,13 @@
       "_legacy_retry_due": "be6e660947f99e7b5c7e2107b2ca83c73cd4978e6ad27377b75ae4f266558c38",
       "retry_scheduled": "ba80d3609661ef9b2849659585bf5612169731148d08e8f2771c11526bd22aa5",
       "cancel_requested_at": "bafde810089e76797d290d63b3c4bf214387a2c4ed6642e13766bd3c4d7fabd2",
-      "AgentOperationAdapter": "5bfb1c0f7da4dd53704f8baf2a879f8dae7de9cea820f54f1594aaed4b9a5a50",
+      "AgentOperationAdapter": "fcb9686d76e00fdff0958ae1910855a78c71fc7e4ba5756ab4ccbd6f6e454b2f",
       "AgentOperationAdapter.__init__": "52ca071660ae32fb74baa10a7709ec91ff964019b1ea5a4014d9debad220ccd3",
       "AgentOperationAdapter._read": "e3525784fa87432f9de0fdb4c53c2a90df2ff79fbb9c31a8a6ab4cab432d8b38",
       "AgentOperationAdapter.now": "0565c3db5fb3147ed7226126ab761c52b6b1ebe1dc76c7cf69f08d57a76ded95",
       "AgentOperationAdapter.attempt_of": "f3c11709c0d81724d3bc42df8dcc3af12fd8532dcddbcff76627e5b22cc142a2",
       "AgentOperationAdapter.adopt": "f5d404251321035e56bee9dea65f75a26a553caca46bdfa78a4d7eb9f66a7e98",
-      "AgentOperationAdapter.lifecycle": "a03e5473634f9d680fc10bebe6de274235712c7ff5f1f3cff1f94a28c2e12520",
+      "AgentOperationAdapter.lifecycle": "c376a60ce356dd33a6244c041d7078f9f492cb74b30c5e04084e8ab46ff1cf91",
       "AgentOperationAdapter.irreversible": "7a3baea4402bd291a069e8e389234ae2a4525505dc012d0ea171aa206563e01d",
       "AgentOperationAdapter.retry_not_before": "b5a5553aec23d4a9c54168ca2ece033dc74f9a1e20a63ee66fad8f898ec93d0c",
       "AgentOperationAdapter.execute": "d2378dd1cb0c2ce7c35c8c90c2482ac51db47728f499819c6a1334fa032a3748",
@@ -3249,15 +3249,15 @@
       "AgentOperationAdapter.stop": "9ab188d775995d4f18fccfd562994be30634926dbc5c86398592b9648f043b64",
       "AgentOperationAdapter.actions": "e0482b40103692ea3942d3452f614ffc96c42dd3510e7e63191e05169e4a07f0",
       "AgentOperationAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
-      "AgentOperationAdapter.apply": "aa548284df7d480d1a6fa864b6fbcb10891de1b15a086d39e92dc9d6229cd608",
+      "AgentOperationAdapter.apply": "15bafb239b496a2efc609a23708af29ed3092f040a346fcd60a3ae66be191cc1",
       "AgentOperationAdapter._stored": "835133237626ec1701ae517e6a207c657d5430386dbe06616de04f41fc7a05df",
-      "AgentOperationAdapter._scheduled_reason": "dd702c9ef0ec75af4c2258dcb06a6001f703d2011aa652962529e553bc2089d4",
+      "AgentOperationAdapter._scheduled_reason": "5b6174f8e5cfa6b77390b96302a08408ef5094f22281f0faefbd9d21ff53eead",
       "AgentOperationAdapter._fence_upgrade_attempt": "0fcb1a530a2426bec12fe1685aea648760f6e231c1e94b5cb9a8bc73dfbe2b45",
-      "AgentOperationAdapter.settle": "8c9b5f18d78b3e5fa419451faf8fde13fe0188770047ae706e1657ec49758c57",
+      "AgentOperationAdapter.settle": "a5df76e307a96dbd314ccf77da042a0f5db42d552519fb28fa8bf07b18a56109",
       "AgentOperationAdapter.settle.save": "a7adfd7f4bb9011f3a222e365e8ed9bf0df551f1157045ef50070ccb8c81469a",
       "AgentOperationAdapter.settle.residue": "b5b162ebde390ccf8ecf41518eae306502acb6657478d89d85d731d79af7beb1",
       "AgentOperationAdapter.decide": "87816bbb41914bb6ffed016c758dffdc93bf63bb13e0a83accdef3156e4c7c6c",
-      "AgentOperationAdapter.start_attempt": "4eac2cd1e121917c0967d7882b80825cdfab9920829bf8b2d4e256472ed551ba",
+      "AgentOperationAdapter.start_attempt": "f8f37da8c1db9c7173dd5b1317f7442c2aa4341ca7422d1a1a273aa54fefbbe3",
       "AgentOperationAdapter._attempt_of": "b3b78533f73d40701ede46cbbd3defbc54ef6e15c6404bf0c0b7d51d1c50abf5",
       "AgentOperationAdapter._parent_of": "4fce3b8a5eadf46920197d5b760c2c73decd2dca840b8f6a73ca7a8c07d584ec",
       "AgentOperationAdapter.reject_attempt": "4bb59ba17334644033b622986db28b6b8fd777bea3116ea70e84ff997106d213",
@@ -3269,15 +3269,15 @@
       "AgentOperationAdapter.expire_attempt": "8039016fc3c719e565ce665ee88ead433b5c8ebd978f9dbbdf224a91a912bc68",
       "AgentOperationAdapter.record_report": "b063c8ab915ba730164a16a1ab1c7dc074cd59d27bf72ee64b165d379dfbca52",
       "aggregate_parent_state": "c802a2922e01ed1656eb45f0cc26123684a8070c68ddf9034feff0bcb3817e7f",
-      "same_order": "f96c9d71691fff14d08049daf4400aeed997a72cc8dc14c1751786f836c224b8",
+      "same_order": "e39bcdc5a830dcf790c75bd7e40062a92915e87559dcf21eae5a53f5a82bdf96",
       "set_parent_state": "4f2d73a8c618f0cafceb1e842a0da1cd0a77daafd5522859e82651c9f78b76ca",
       "adopt_legacy_orders": "d0c873bb225316cd21308457398390af6b46093f23e52a5f8b8bbdde0e8f55d7",
       "lapsed_running_orders": "9b26656da6385a368c82e575c67095e21afee1cce1c91fc8c934370e2b05140c",
-      "parked_orders": "47bfcc8e626224a2c762e43dd3815936db6be029284223effd7af7f7b4a5fbd8",
-      "<module>": "6ef5e6d4098eabd6b0f600c62ec72735163fdb4666d17ce88f31c7052e677f3c"
+      "parked_orders": "58a298b65f65292f00c654924911302e8cbfea2c6a489a39b09dfb6aef59e0b3",
+      "<module>": "78bd9e3a2fbefda0f0a11c5f41c12c0a209802d0d467b803156014b65ab8ced5"
     },
     "control/src/vonk_control/lifecycle/artifact_job.py": {
-      "ArtifactJobAdapter": "8ed146c640fd5673546256eb3cd7179f03e08df9233a9929d6e851069bd4b246",
+      "ArtifactJobAdapter": "787a532f2cb64116d574519aeb0b50f62f4f1982d221c0351e4ff99e1b8fac49",
       "ArtifactJobAdapter.__init__": "6e3dbab0229ea2eb908bc028c63cd50ec53949f359cf7ad753c61a532c59f04f",
       "ArtifactJobAdapter.session": "e7fe82313c261e6e266264f5faba15894417f2055b38f35361a4a063b2c326e9",
       "ArtifactJobAdapter._read": "e3525784fa87432f9de0fdb4c53c2a90df2ff79fbb9c31a8a6ab4cab432d8b38",
@@ -3287,8 +3287,8 @@
       "ArtifactJobAdapter.mark_ready": "eb279d7d862911ae4e1fc053d1f99d2356e96d187d1e6b9992f70c0e39112fc8",
       "ArtifactJobAdapter.mark_submitted": "0e804d4ccb123048183bedc881c34a356082bf07e8404fd502cd02d71294d2a8",
       "ArtifactJobAdapter.adopt": "ea26f4bb7ca56081c68f3b3743e68d8ca57e000509144a0878560418f34847fb",
-      "ArtifactJobAdapter.lifecycle": "45fb71e198140b1c0b48d7e865c1fb9b7cfda7ea118961c85254cce87790635f",
-      "ArtifactJobAdapter._effect": "97d0e457fb31c6b0fb9fbad2d3115b077dcc47d22281d2be6a889bfd08e9cca8",
+      "ArtifactJobAdapter.lifecycle": "843d840d49f584730d01642e17e48f7754e6105f4b35921097e3189a581353e2",
+      "ArtifactJobAdapter._effect": "01f0dccbe7e99c25346fdb1bf3816f10c6a034d2f8d1e69a116819bc5322cea4",
       "ArtifactJobAdapter.irreversible": "3cd8063cb7c4e1774e12e1999a644dc4ba6564a4dfc3bd8beff7a32750be9d0e",
       "ArtifactJobAdapter.retry_not_before": "b44b940ce07854e720fe4db639b99915d3439138008f5c5c760051a7032df7bb",
       "ArtifactJobAdapter.execute": "29e70a6e80ecde2561f7a3ecceffa83b26c1b831aa7329f4f70289db820c6b97",
@@ -3302,18 +3302,19 @@
       "ArtifactJobAdapter.apply": "1bc83556de183981bc78afc5ec10c0b326864fc6b193a6eadd81f2206ae1de5c",
       "ArtifactJobAdapter._stored_state": "cf599b10ad7be9c4681d10189c47ad6030970dbfcdef798f2c13350aee5917e8",
       "ArtifactJobAdapter._default_reason": "09899dd306c710b0e9f4c0a709d29c03e23b971a53fad3bd4f352da1e9316ee5",
-      "ArtifactJobAdapter._evidence": "ee3356e225353bce8fa74890625d969bd3b9073d49b92dd906857fb9a4aa53b2",
+      "ArtifactJobAdapter._evidence": "4fdd20f3d3ffb001db0be6ed37026936a25436e699983cad5a8f6426fce50c4a",
       "ArtifactJobAdapter.settle": "9fa7b0f7a390cb73c7dd0c09be4d0d074c3e38e220a1e81981e3671dfd63a62e",
       "ArtifactJobAdapter.settle.save": "8cef71b979f47ee9797aea5e16814950f422ad2b93d97be70f85fe21c0ecb156",
       "ArtifactJobAdapter.settle.residue": "06377473ad6559ff6cb4b6325562b9c0e0b0627ff96858dd2d1d204037d8f3d7",
       "ArtifactJobAdapter.confirm_stopped": "4865d9bacaa2928048abbaa36e679c750fc9fc95aefca594569002de0174ef86",
-      "ArtifactJobAdapter.project": "0f75eaba5e75a6362349f24e18a722ea99dc0b28883edaaf9f3056c1a0f10e94",
-      "ArtifactJobAdapter._ended_effect": "8f57b91f607d04e1b4a273ff77dfd06ce45f118f15009df5700647fc710f6811",
-      "ArtifactJobAdapter.project_for_order": "839099f3e7c0315b3c368f8d9979cf60ea09ba55cc29e6123f91c3455d8ee67f",
-      "ArtifactJobAdapter.reconcile": "7fc7fe1d947fe4c41b7cc49b6e493331b8f6e0f1fdf277d46b760d68a6802a88",
+      "ArtifactJobAdapter.project": "c7691a77527814568dc5fd7eef417956f215bdc66439a83715158db83081f3ad",
+      "ArtifactJobAdapter._ended_effect": "89ca2b0f2b854654bd6cda617b15b155928fd70f0643a3993bba56a8d9cc2cee",
+      "ArtifactJobAdapter.project_for_order": "0fc550fe94774f0c54fd127ccc9cf52c645119e4d0fc4e2920e983796196e5e0",
+      "ArtifactJobAdapter.reconcile": "b06943232f9ef35e3862db9c81ab4ca1982a9f9e1e391d92271df104b3310992",
+      "_observe_job": "3a07d4b485af5f77037a4786f065d0219c16a43c4855fc1c53b9712844f32c29",
       "_with_effect": "9412cea7ff488408172bde41bc286446489f60f49218a4dd747179e20cd26eda",
       "transition_of": "d0c10288d17c55c8f2bc7e73a3f2f8b72ce924c4ecb84ca928a5939093ceb6dc",
-      "<module>": "a48dc676b65ff80f702765971626b8dca2bede1ba91b3049a0f543322f70d635"
+      "<module>": "659ad8334fdb032bd3abefb5ba19dbdab0f3db0aa07d94cba9e87f06a51cf7d4"
     },
     "control/src/vonk_control/lifecycle/recipe_operation.py": {
       "_when": "0feb37714b26b6d4004ed1105879957dc6719a12879c152d414fc2f788498936",
@@ -4839,13 +4840,13 @@
       "<module>": "a705de7498a8ca17d85df7b77fe3abe063d52c3c5f94c4d4c5daef9ececa6589"
     },
     "control/src/vonk_control/recipe_operations/result_consumption.py": {
-      "ResultConsumptionMixin": "0843db5fd46e27ebd69796f9ccc631fe774803188b46d3a4069e796a7fad0f17",
+      "ResultConsumptionMixin": "e0e33377fef6ae5ba800b962a4d81fa1464c7b4f5aff69c482cac7a5b96779ac",
       "ResultConsumptionMixin.record_node_result": "0fef451a4e193d62720a1dda2a1e088bd29bfbe4cf52c50f3cc557efb82bf0db",
       "ResultConsumptionMixin._record_node_result_once": "cf78daaed5edc3d13a080b6da32dc91a02e45c5c1081d8cf198dc30b28a4c720",
-      "ResultConsumptionMixin.consume_agent_result": "4bcd2645bbecc3e61918aa59a0c27843e6665785c0f130ad349769bcba06e700",
+      "ResultConsumptionMixin.consume_agent_result": "aca9112ff1b2f7d6d9d1044843f2eba551d6dc7b022e5e0faab7a25df5543dcd",
       "ResultConsumptionMixin._reconciliation_job_complete": "34f4b7a962e2563468d998e5aa17d8de14f69404bd25f14f1752a27048b11fe9",
       "ResultConsumptionMixin._apply_build_cleanup": "61a1cb617e48b4f8fc3538263b6950398a6cecb4f0c80fea569b9b621d5e7d89",
-      "<module>": "807421465571c9f0cd4fa5aca4d9b01612abe3682ac0fab7e3e4db6e9cb04b78"
+      "<module>": "284ca474443472cb33189df81bca9a555a14743ce2dcce139a8e74d85e0890f2"
     },
     "control/src/vonk_control/recipe_operations/results.py": {
       "_validated_result": "d297c40ac3b5fb0a3d8bda645e2dcd7a30a7e3af9a8166b69271979e090faa49",
@@ -4942,12 +4943,12 @@
       "<module>": "a14daed068ef142f635b61547bda6c0e9b8e1c57aa0ca26a15f772cc935a311d"
     },
     "control/src/vonk_control/recipe_operations/uninstall.py": {
-      "UninstallMixin": "b3b7dd77532c2b0704688e8ab74412568b6f74499ace93e2971d6d88d501b2d0",
+      "UninstallMixin": "8e32601d3311ef90cf522110a53604de831e30a28b1d6e14d77953fa0f75a291",
       "UninstallMixin._reconcile_installation_once": "ebf8dc56877dd3ccb9b5ec80fb2c5e54dffa212e711975d6251606b4080d5fde",
       "UninstallMixin.reconcile_installation": "a5ac48a24138370e15e8b22263f45069cf12728affe9495068d458d8e7578ce1",
-      "UninstallMixin.uninstall": "308d55cfa0724fad66dc9aafaff848df1375b46a73d2680b295e615a2c6da8bd",
+      "UninstallMixin.uninstall": "f9d8b92381ed500845e407e537537dea8108592d3fc7594b82359bfc7f507a67",
       "UninstallMixin.abandon_never_installed": "589f93eef1303d4d44a0fa7003c54e53b932443cf0cd92fcb6e38400447cb0e4",
-      "<module>": "57ed9cc9522b3aada8373c5fc9ce42ad665c49d096298f23053043bdfc535767"
+      "<module>": "52f349a821f87964331bbce49d97d8b3addeedf2aeca5f8116dc40e4125e60c4"
     },
     "control/src/vonk_control/recipe_packages/__init__.py": {
       "RecipePackageHandle": "ca3233fb75f05a7781e8ac992a1d7a008649f0003281f5b478dc653b6e4fb4e3",
@@ -7712,7 +7713,6 @@
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService.list_for_run", "artifact-job-list-limit-is-invalid", 1],
         ["control/src/vonk_control/artifact_jobs/inputs.py", "ArtifactJobInvalid", "ArtifactJobService.put_input_stream", "artifact-input-content-length-does-not-match", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobInvalid", "ArtifactJobService.result_blob", "artifact-job-result-is-not-available", 1],
-        ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "another-artifact-job-already-owns-this-run-reservation", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "artifact-job-is-not-ready", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "artifact-job-was-submitted-under-another-request-identity", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService.submit", "recipe-job-workload-identity-is-unavailable", 1],

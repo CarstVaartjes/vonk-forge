@@ -16,13 +16,14 @@ from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
+    LifecycleState,
     OutcomeDone,
     OutcomeKind,
     RecipeStopResult,
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobError, ArtifactJobResponse
+from vonk_control.artifact_jobs import ArtifactJobResponse
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -209,29 +210,55 @@ def test_waiting_for_operator_must_advertise_stop(tmp_path) -> None:
     assert ok.supported_actions == ("stop",)
 
 
-def test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it(tmp_path) -> None:
-    _sessions, _ops, service, agent_jobs, clock, submitted, _claim, _run = _issued_job(
-        tmp_path, 320
+def test_a_lapsed_job_ends_without_reissue_and_admits_a_fresh_job(tmp_path) -> None:
+    """Catches unknown effects turning into an endless owner or a false stop."""
+    sessions, operations, service, agent_jobs, clock, submitted, claim, run_id = (
+        _issued_job(tmp_path, 320)
     )
+    operations._clock = clock
+    service._clock = clock
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
-    # The agent can no longer report: observed first, never a bare wait.
-    state = _drive(service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR)
-    waiting = service.get(submitted.id)
-    assert state == ajs.NEEDS_OPERATOR
-    assert waiting.supported_actions == ("stop",)
-
-    service.cancel(
-        submitted.id, actor="operator", request_id=CANCEL_KEY, reason="lost job"
-    )
-    assert _cancelling(service.get(submitted.id))
-    assert _drive(service, agent_jobs, clock, submitted.id, until="cancelled") == (
-        "cancelled"
-    )
+    for _ in range(60):
+        if service.get(submitted.id).state in ajs.ENDED:
+            break
+        clock.advance(seconds=120)
+        agent_jobs.reconcile_orders()
+    assert service.get(submitted.id).state in ajs.ENDED
+    assert service.get(submitted.id).state != LifecycleState.SUCCEEDED
     ended = service.get(submitted.id)
     assert ended.supported_actions == ()
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
+    with sessions() as session:
+        operation = fenced_operation(sessions, claim)
+        assert operation.current_attempt == 1  # Never repeats the user's job.
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == LifecycleState.RUNNING
+    restarted = AgentJobService(sessions, clock=clock)
+    operations._agent_jobs = restarted
+    fresh = submitted_artifact_job(service, run_id, request_suffix=321)
+    assert fresh.operation_id != submitted.operation_id
+    assert fresh.state == LifecycleState.QUEUED
+
+
+def test_a_live_job_does_not_block_fresh_submission_or_share_its_execution_slot(
+    tmp_path,
+):
+    """Admission is queued; a healthy first executor retains the physical slot."""
+    sessions, operations, service, jobs, clock, original, claim, run_id = _issued_job(
+        tmp_path, 322
+    )
+    operations._clock = clock
+    service._clock = clock
+    fresh = submitted_artifact_job(service, run_id, request_suffix=323)
+    assert fresh.operation_id != original.operation_id
+    assert fresh.state == LifecycleState.QUEUED
+    assert (
+        claim_agent(jobs, fenced_operation(sessions, claim).node_id, "serial-0") is None
+    )
+    assert service.get(original.id).state == LifecycleState.RUNNING
+    assert fenced_operation(sessions, claim).current_attempt == 1
 
 
 def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp_path):
@@ -243,13 +270,12 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     service._clock = clock
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
-    assert _drive(
-        service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR
-    ) == (ajs.NEEDS_OPERATOR)
+    assert (
+        _drive(service, agent_jobs, clock, submitted.id, until=ajs.OBSERVING)
+        == ajs.OBSERVING
+    )
     waiting = service.get(submitted.id)
     assert waiting.supported_actions == ("stop",)
-    with pytest.raises(ArtifactJobError, match="owns this run reservation"):
-        submitted_artifact_job(service, run_id, request_suffix=902)
 
     # A restarted Controller retains the same authoritative rows and receipt fence.
     restarted = AgentJobService(sessions, clock=clock)
@@ -261,7 +287,7 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     restarted.set_result_consumer(consume)
     operations._agent_jobs = restarted
     restarted.reconcile_orders()
-    assert service.get(submitted.id).state == ajs.NEEDS_OPERATOR
+    assert service.get(submitted.id).state == ajs.OBSERVING
     plan = operations.preview_stop(run_id)
     assert plan.allowed
     stop_key = "00000000-0000-4000-8000-000000000905"
@@ -669,3 +695,53 @@ def test_a_new_job_is_born_preparing_with_no_state() -> None:
     assert job.state is None and job.preparation == ajs.READY
     ArtifactJobAdapter.mark_submitted(job, "op", NOW)
     assert job.state == ajs.QUEUED and job.preparation is None
+
+
+@pytest.mark.postgres
+def test_busy_job_projection_does_not_hold_up_other_jobs_or_fresh_admission(
+    tmp_path, postgres_engine
+) -> None:
+    """A blocking FOR UPDATE would stall this pass at the first occupied job."""
+    from threading import Event, Thread
+
+    sessions, _, _, service, run_id, _ = running_artifact_service(
+        tmp_path, engine=postgres_engine
+    )
+    first = submitted_artifact_job(service, run_id, request_suffix=901)
+    second = submitted_artifact_job(service, run_id, request_suffix=911)
+    with sessions.begin() as session:
+        for view in (first, second):
+            job = session.get(ArtifactJob, view.id)
+            assert job is not None
+            operation = session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == job.operation_id
+                )
+            )
+            assert operation is not None
+            operation.state = LifecycleState.CANCELLED
+    completed = Event()
+    with sessions.begin() as occupied:
+        occupied.scalar(
+            select(ArtifactJob).where(ArtifactJob.id == first.id).with_for_update()
+        )
+
+        def observe() -> None:
+            ArtifactJobAdapter(sessions=sessions, clock=lambda: NOW).reconcile()
+            completed.set()
+
+        observer = Thread(target=observe)
+        observer.start()
+        try:
+            assert completed.wait(timeout=2)
+            assert service.get(second.id).state == LifecycleState.CANCELLED
+            fresh = submitted_artifact_job(service, run_id, request_suffix=921)
+            assert fresh.id not in {first.id, second.id}
+            assert fresh.state == LifecycleState.QUEUED
+        finally:
+            # Release the actual PostgreSQL lock before joining a failed worker.
+            occupied.rollback()
+            observer.join(timeout=5)
+    assert not observer.is_alive()
+    ArtifactJobAdapter(sessions=sessions, clock=lambda: NOW).reconcile()
+    assert service.get(first.id).state == LifecycleState.CANCELLED

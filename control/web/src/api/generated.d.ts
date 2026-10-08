@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 697288b9821d65f1b0067698a94a88c603312ef851369ce5d907a8401efdf163. Do not edit.
+// Generated from canonical OpenAPI SHA256 d1a5ec1a9bfc47eb139a0fea39a1bf95a3eeefb89aec7e03e750411ba4d4df08. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -10063,6 +10063,8 @@ export interface components {
         RecipeUninstallPayload: {
             /** Cleanup Model Content Sha256 */
             cleanup_model_content_sha256: string | null;
+            /** @default null */
+            compiled_execution_plan: components["schemas"]["CompiledExecutionPlan"] | null;
             /** Installation Id */
             installation_id: string;
             /** Plan Digest */

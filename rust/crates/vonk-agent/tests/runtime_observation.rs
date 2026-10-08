@@ -360,7 +360,7 @@ fn uninstall_with_model_cleanup_frees_the_store_objects_nothing_else_links() {
     assert!(objects.iter().all(|digest| store.join(digest).exists()));
 
     assert_eq!(
-        runtime.reclaim_unshared_model_objects(&objects),
+        runtime.reclaim_unshared_model_objects(&objects).unwrap(),
         (objects.len() * "model bytes".len()) as u64
     );
     assert!(objects.iter().all(|digest| !store.join(digest).exists()));

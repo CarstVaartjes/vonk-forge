@@ -5,11 +5,9 @@ from pathlib import Path
 import pytest
 from vonk_agent_protocol import (
     LifecycleState,
-    SecurityRefusalError,
     SecurityRefusalReason,
 )
 from vonk_control.categorized_errors import SecurityRefused
-from vonk_control.failure_classification import error_code
 
 from .test_run_switch_background_image import (
     _background_image_switch,
@@ -22,6 +20,7 @@ from .test_run_switch_background_image import (
     "diagnostic",
     [
         "peer disconnected",
+        f"{SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED}! diagnostic only",
         f"{SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED}: peer disconnected",
         f"{SecurityRefusalReason.TUF_SIGNATURE_INVALID}: diagnostic only",
     ],
@@ -30,8 +29,11 @@ def test_transport_diagnostics_do_not_prevent_recovery(
     tmp_path: Path, diagnostic: str
 ) -> None:
     """Catches prose becoming authority and stranding the accepted load."""
+    inner = RuntimeError(diagnostic)
+    outer = ValueError("transport observation unavailable")
+    outer.__cause__ = inner
     switch = _background_image_switch(
-        tmp_path, failures=[RuntimeError(diagnostic)], old_receipt="missing-adapter"
+        tmp_path, failures=[outer], old_receipt="missing-adapter"
     )
     try:
         _drive_until(switch, _past_image)
@@ -50,25 +52,6 @@ def test_transport_diagnostics_do_not_prevent_recovery(
         switch.worker.composite.close()
 
 
-def test_wrapping_and_punctuation_do_not_create_authority() -> None:
-    """A dotted diagnostic may name a denial without being an authenticated denial."""
-    inner = RuntimeError(f"{SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED}: prose")
-    outer = ValueError("peer reply unavailable")
-    outer.__cause__ = inner
-    assert error_code(outer) is None
-    assert error_code(RuntimeError(str(inner).replace(":", "!"))) is None
-
-
-def test_wrapping_preserves_explicit_authority_denial() -> None:
-    inner = SecurityRefusalError(
-        "peer reply unavailable",
-        reason=SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED,
-    )
-    outer = ValueError("transport observation unavailable")
-    outer.__cause__ = inner
-    assert error_code(outer) == inner.typed_reason
-
-
 def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admission(
     tmp_path: Path,
 ) -> None:
@@ -81,14 +64,11 @@ def test_explicit_authority_denial_has_no_start_effect_and_allows_fresh_admissio
 
     from .test_run_switch_operations import _request
 
-    switch = _background_image_switch(
-        tmp_path,
-        copy_failures=[
-            SecurityRefused(
-                "denied", reason=SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED
-            )
-        ],
+    outer = ValueError("wrapped peer denial")
+    outer.__cause__ = SecurityRefused(
+        "denied", reason=SecurityRefusalReason.HOST_HELPER_AUTHORITY_DENIED
     )
+    switch = _background_image_switch(tmp_path, copy_failures=[outer])
     try:
         _drive_until(switch, lambda view: view.state == LifecycleState.FAILED)
         ended = switch.view()

@@ -57,6 +57,11 @@ class AgentOperation(Base):
     observe_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    #: Immutable recovery cap, started by the first uncertain report or lease lapse.
+    #: Queue age and healthy execution never consume this observation budget.
+    recovery_deadline: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
     #: Legacy retry encoding, replaced by ``next_action_at``.  Read only by the
     #: lifecycle adapter's ``adopt`` (and the startup adoption) for rows written
     #: before the core; nothing writes them any more.  Dropped once no deployed

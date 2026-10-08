@@ -159,7 +159,7 @@ def _due(
         row.id, max(count, 1), now, retry_after=not_before, ongoing_intent=True
     )
     assert scheduled is not None  # ongoing_intent never exhausts
-    return scheduled
+    return min(scheduled, row.recovery_deadline) if row.recovery_deadline else scheduled
 
 
 def _retry(
@@ -225,7 +225,8 @@ def _park(
         reason=reason or row.reason,
     )
     if (
-        adapter.irreversible(row)
+        row.recovery_deadline is None
+        and adapter.irreversible(row)
         and not blind_retry_is_safe(row, adapter)
         and row.observe_count >= OBSERVE_BUDGET
         and adapter.actions(waiting)
@@ -257,6 +258,8 @@ def _uncertain(
 ) -> Decision:
     """Rules 1 and 2 for an effect that may or may not have happened."""
 
+    if row.recovery_deadline is not None and now >= row.recovery_deadline:
+        return _observe(row, now, reason)
     if blind_retry_is_safe(row, adapter, effect):
         return _retry(
             row,
@@ -475,6 +478,23 @@ def _observed(
         )
     if row.state not in {State.OBSERVING, State.NEEDS_OPERATOR}:
         return Decision(row)
+    if (
+        row.recovery_deadline is not None
+        and now >= row.recovery_deadline
+        and event.effect is not Effect.ESTABLISHED
+    ):
+        why = event.reason or row.reason or "request recovery observation exhausted"
+        return Decision(
+            replace(
+                row,
+                state=State.FAILED,
+                effect=event.effect,
+                next_action_at=None,
+                lease_deadline=None,
+                reason=why,
+            ),
+            (RecordResidue(why),),
+        )
     match event.effect:
         case Effect.ESTABLISHED:
             return Decision(
@@ -544,6 +564,12 @@ def _tick(row: Lifecycle, adapter: KindAdapter, now: datetime) -> Decision:
         return _advance_cancel(row, now, observed=None)
     if row.next_action_at is not None and row.next_action_at > now:
         return Decision(row)
+    if (
+        row.recovery_deadline is not None
+        and now >= row.recovery_deadline
+        and row.state is not State.RUNNING
+    ):
+        return _observe(row, now, row.reason)
     commands: tuple[Command, ...]
     match row.state:
         case State.QUEUED | State.BACKOFF:

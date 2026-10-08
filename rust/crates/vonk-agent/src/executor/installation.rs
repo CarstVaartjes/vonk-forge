@@ -229,9 +229,29 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 );
             }
             Err(error) => {
+                if request.compiled_execution_plan.is_none() {
+                    return unconfirmed(
+                        WaitReason::CleanupUnconfirmed,
+                        "installation identity observation is unavailable",
+                        UnknownEvidence::at(FailureStage::InstallationValidation)
+                            .because(error.safe_category()),
+                    );
+                }
+                // The exact accepted plan can restore unreadable discovery.
+                // Its repair below validates custody before any metadata write.
+            }
+        }
+        if let Some(plan) = request.compiled_execution_plan.as_ref() {
+            // Cleanup discovery comes from the accepted Controller claim, even
+            // when damaged local JSON happens to parse as another valid plan.
+            if let Err(error) = self.runtime.repair_uninstall_spec(
+                &installation_id,
+                &request.recipe_content_sha256,
+                plan,
+            ) {
                 return unconfirmed(
                     WaitReason::CleanupUnconfirmed,
-                    "installation identity observation is unavailable",
+                    "installation discovery repair is unconfirmed",
                     UnknownEvidence::at(FailureStage::InstallationValidation)
                         .because(error.safe_category()),
                 );
@@ -308,26 +328,22 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after runtime cache cleanup");
         }
-        // The Controller authorizes model cleanup only when no other
-        // installation of this model is left on the Spark. Name the
-        // store objects before the installation's own record is gone.
-        let store_objects = request
-            .cleanup_model_content_sha256
-            .as_deref()
-            .and_then(|model_content_sha256| {
-                self.runtime
-                    .model_store_objects(
-                        &installation_id,
-                        &request.recipe_content_sha256,
-                        model_content_sha256,
-                    )
-                    .ok()
-            })
-            .unwrap_or_default();
-        if let Err(error) = self
-            .runtime
-            .finalize_uninstall(&installation_id, &request.recipe_content_sha256)
-        {
+        // The installation plan remains the discovery record until every exact
+        // cleanup target was reclaimed or observed to have another live link.
+        let removed = match request.cleanup_model_content_sha256.as_deref() {
+            Some(model) => self
+                .runtime
+                .uninstall_with_model_cleanup(
+                    &installation_id,
+                    &request.recipe_content_sha256,
+                    model,
+                )
+                .map(|_| ()),
+            None => self
+                .runtime
+                .finalize_uninstall(&installation_id, &request.recipe_content_sha256),
+        };
+        if let Err(error) = removed {
             return unconfirmed(
                 WaitReason::CleanupUnconfirmed,
                 "installation removal is unconfirmed",
@@ -335,8 +351,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .because(error.safe_category()),
             );
         }
-        // Freeing space is best effort and never fails the uninstall.
-        self.runtime.reclaim_unshared_model_objects(&store_objects);
         if *cancellation.borrow() {
             return cancelled("controller cancellation observed after uninstallation settled");
         }
