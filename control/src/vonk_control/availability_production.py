@@ -774,7 +774,7 @@ def build_recipe_image_availability(
                     now=clock(),
                     resolution=resolution,
                 )
-            except UnknownOutcomeError as error:
+            except (UnknownOutcomeError, RecipeImageAvailabilityError) as error:
                 code = str(getattr(error, "code", ""))
                 if code in _BUILDER_ADMISSION_CODES:
                     skipped[candidate_id] = (code, str(error)[:200])
@@ -892,7 +892,7 @@ def build_recipe_image_availability(
                     selected_plan = recipe_builds.persist_plan_in_session(
                         session, prepared, now=clock()
                     )
-                except UnknownOutcomeError as error:
+                except (UnknownOutcomeError, RecipeImageAvailabilityError) as error:
                     code = str(getattr(error, "code", ""))
                     if code in _BUILDER_ADMISSION_CODES:
                         skipped[candidate_id] = (code, str(error)[:200])
@@ -950,7 +950,7 @@ def build_recipe_image_availability(
                 prepared = recipe_builds.prepare_plan(
                     revision_id, builder_node_id, now=clock(), resolution=resolution
                 )
-            except UnknownOutcomeError as error:
+            except (UnknownOutcomeError, RecipeImageAvailabilityError) as error:
                 return _planning_failure(error)
             with sessions.begin() as session:
                 service._require_claim(session, claim)
@@ -958,7 +958,7 @@ def build_recipe_image_availability(
                     selected_plan = recipe_builds.persist_plan_in_session(
                         session, prepared, now=clock()
                     )
-                except UnknownOutcomeError as error:
+                except (UnknownOutcomeError, RecipeImageAvailabilityError) as error:
                     session.rollback()
                     return _planning_failure(error)
         if selected_plan is None:
@@ -1237,14 +1237,14 @@ def _capacity_wait(
     )
 
 
-def _planning_failure(error: UnknownOutcomeError) -> BuildUnsettled:
-    """The Recipe build plan could not be prepared or stored: a capacity wait
-    when the builder is full or has no fresh inventory, else unavailable."""
+def _planning_failure(error: Exception) -> BuildUnsettled:
+    """Planning failed: a capacity wait if the builder is full, else unavailable."""
 
     code = str(getattr(error, "code", ""))
+    reason = getattr(error, "typed_reason", None) or WaitReason.OBSERVATION_UNAVAILABLE
     if code in _BUILDER_ADMISSION_CODES:
-        # Keep the builder's own reason visible: "full" and "no fresh
-        # inventory" need different operator attention.
+        # Keep the builder's own reason visible: "full" and "no fresh inventory"
+        # need different operator attention.
         blockers = [make_blocker(code, str(error)[:200])]
         detail = (
             "selected Recipe builder is currently unavailable or full "
@@ -1257,7 +1257,7 @@ def _planning_failure(error: UnknownOutcomeError) -> BuildUnsettled:
         return BuildUnsettled(
             RecipeImageCode.BUILD_CAPACITY_WAIT,
             detail[:512],
-            reason=error.typed_reason or WaitReason.OBSERVATION_UNAVAILABLE,
+            reason=reason,
             retryable=True,
             recovery_actions=("resume", "retry"),
             blockers=tuple(blockers),
@@ -1265,7 +1265,7 @@ def _planning_failure(error: UnknownOutcomeError) -> BuildUnsettled:
     return BuildUnsettled(
         code or RecipeImageCode.BUILD_UNAVAILABLE,
         str(error)[:512],
-        reason=error.typed_reason or WaitReason.OBSERVATION_UNAVAILABLE,
+        reason=reason,
         retryable=True,
     )
 
