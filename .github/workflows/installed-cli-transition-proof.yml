@@ -74,7 +74,7 @@ jobs:
       - name: Prove manifest refusal, signed bootstrap and installed NDJSON command
         shell: bash
         env:
-          VONK_SIGNED_UPDATE_PROOF: '1'
+          VONK_SIGNED_UPDATE_LANE_ENABLED: '1'
           VONK_SIGNED_UPDATE_CACHE: ${{ runner.temp }}/signed-update-cache
         run: |
           set -euo pipefail
