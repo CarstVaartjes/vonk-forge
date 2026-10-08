@@ -11,9 +11,12 @@ or proves recovery: unreviewed sites are bookkeeping debt.
 from __future__ import annotations
 
 import re
+import time
+import tomllib
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
+
+from vonk_agent_protocol import UnknownOutcomeError, WaitReason
 
 from .blocker_boundaries import REPO_ROOT, RaiseSite
 
@@ -202,13 +205,10 @@ def scan_rust_source(source: str, *, path: str) -> list[RaiseSite]:
             "0"
         ]:
             continue
-        if kind == "Err":
-            # Match arms, let/if-let/while-let patterns and alternatives construct
-            # nothing. Guarded match arms also end at =>, not a statement.
-            if texts[end + 1 : end + 2] in (["=>"], ["="], ["|"], ["if"]):
-                continue
-            if i > 0 and texts[i - 1] == "|":
-                continue
+        # Match/let patterns construct nothing. A preceding | can also be
+        # a closure delimiter; only the following pattern syntax excludes Err.
+        if kind == "Err" and texts[end + 1 : end + 2] in (["=>"], ["="], ["|"], ["if"]):
+            continue
         argument = tokens[opening + 1 : end]
         # Stable token identity rather than line numbers: moves do not erase debt.
         # Literal text participates so distinct refusals cannot share a count.
@@ -221,56 +221,137 @@ def scan_rust_source(source: str, *, path: str) -> list[RaiseSite]:
     return sites
 
 
-@lru_cache(maxsize=512)
-def _scan_file(module: Path, stamp: tuple[int, int]) -> tuple[RaiseSite, ...]:
-    return tuple(
-        scan_rust_source(
-            module.read_text(encoding="utf-8"),
-            path=module.relative_to(REPO_ROOT).as_posix(),
-        )
-    )
+def _module_files(
+    module: Path, source: str, *, crate_root: bool = False
+) -> tuple[Path, ...]:
+    """Follow production module declarations, including visibility and path attrs.
 
-
-@lru_cache(maxsize=512)
-def _test_module_roots(module: Path, stamp: tuple[int, int]) -> tuple[Path, ...]:
-    """Resolve external cfg(test) modules using Rust's module-file layout."""
-    tokens = tokenize(module.read_text(encoding="utf-8"))
+    cfg(test) membership belongs to the declaration, never its filename. Other
+    cfg predicates are included conservatively across supported platform builds.
+    A missing declared module is an incomplete observation, not an empty module.
+    """
+    tokens = tokenize(source)
+    pairs = _pairs(tokens)
     texts = [token.text if not token.literal else "<literal>" for token in tokens]
     base = (
         module.parent
-        if module.name in {"lib.rs", "main.rs", "mod.rs"}
+        if crate_root or module.name in {"lib.rs", "main.rs", "mod.rs"}
         else module.with_suffix("")
     )
-    roots = []
-    for i in range(len(texts) - 9):
-        if (
-            texts[i : i + 8] == ["#", "[", "cfg", "(", "test", ")", "]", "mod"]
-            and texts[i + 9] == ";"
-        ):
-            roots.extend((base / (texts[i + 8] + ".rs"), base / texts[i + 8]))
-    return tuple(roots)
+    files: list[Path] = []
+
+    def visit(start: int, stop: int, directory: Path) -> None:
+        i = start
+        attributes: list[list[Token]] = []
+        while i < stop:
+            if texts[i : i + 2] == ["#", "["]:
+                end = pairs[i + 1]
+                attribute = tokens[i + 2 : end]
+                if attribute and attribute[0].text == "cfg_attr":
+                    raise ValueError(
+                        "conditional module attributes require configuration evidence"
+                    )
+                attributes.append(attribute)
+                i = end + 1
+                continue
+            if texts[i] == "pub":
+                i += 1
+                if texts[i : i + 1] == ["("]:
+                    i = pairs[i] + 1
+                continue
+            if texts[i] == "mod" and i + 2 < stop:
+                name, delimiter = texts[i + 1 : i + 3]
+                test_only = any(
+                    [token.text for token in attribute] == ["cfg", "(", "test", ")"]
+                    for attribute in attributes
+                )
+                overrides = [
+                    attribute[2].text
+                    for attribute in attributes
+                    if len(attribute) == 3
+                    and [token.text for token in attribute[:2]] == ["path", "="]
+                    and attribute[2].literal
+                ]
+                if delimiter == ";" and not test_only:
+                    if overrides:
+                        files.append(directory / overrides[-1])
+                    else:
+                        direct = directory / (name + ".rs")
+                        nested = directory / name / "mod.rs"
+                        # Choosing the declared path retains disappearance as a
+                        # read failure; it cannot silently erase its endings.
+                        files.append(direct if direct.exists() else nested)
+                elif delimiter == "{" and not test_only:
+                    visit(i + 3, pairs[i + 2], directory / name)
+                if delimiter == "{":
+                    i = pairs[i + 2] + 1
+                else:
+                    i += 3
+                attributes = []
+                continue
+            if texts[i : i + 2] == ["include", "!"]:
+                raise ValueError(
+                    "included Rust source requires module membership evidence"
+                )
+            attributes = []
+            # Nested function/macro bodies do not declare crate module files.
+            i = pairs[i] + 1 if i in pairs else i + 1
+
+    visit(0, len(tokens), base)
+    return tuple(path.resolve() for path in files)
+
+
+def _crate_entries(root: Path) -> tuple[Path, ...]:
+    entries = {root / name for name in ("lib.rs", "main.rs") if (root / name).is_file()}
+    manifest = root.parent / "Cargo.toml"
+    if manifest.is_file():
+        document = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        for target in [document.get("lib", {}), *document.get("bin", [])]:
+            if "path" in target:
+                entries.add(root.parent / target["path"])
+        if document.get("package", {}).get("autobins", True):
+            entries.update((root / "bin").glob("*.rs"))
+            entries.update((root / "bin").glob("*/main.rs"))
+    if not entries:
+        raise FileNotFoundError(root)
+    return tuple(sorted(entry.resolve() for entry in entries))
+
+
+def _scan_rust_raises_once(roots: tuple[Path, ...]) -> list[RaiseSite]:
+    sites: list[RaiseSite] = []
+    visited: set[Path] = set()
+    entries = {entry for root in roots for entry in _crate_entries(root)}
+    pending = sorted(entries)
+    while pending:
+        module = pending.pop()
+        if module in visited:
+            continue
+        visited.add(module)
+        source = module.read_text(encoding="utf-8")
+        # One read supplies membership and endings, so an intervening file
+        # replacement cannot mix two observations of the same module.
+        sites.extend(
+            scan_rust_source(source, path=module.relative_to(REPO_ROOT).as_posix())
+        )
+        pending.extend(_module_files(module, source, crate_root=module in entries))
+    return sorted(sites, key=lambda site: (site.path, site.line))
 
 
 def scan_rust_raises(roots: tuple[Path, ...] = RUST_ROOTS) -> list[RaiseSite]:
-    sites: list[RaiseSite] = []
-    for root in roots:
-        modules = sorted(root.rglob("*.rs"))
-        stamps = {
-            module: (module.stat().st_size, module.stat().st_mtime_ns)
-            for module in modules
-        }
-        excluded = tuple(
-            path
-            for module in modules
-            for path in _test_module_roots(module, stamps[module])
-        )
-        for module in modules:
-            if any(module == path or module.is_relative_to(path) for path in excluded):
-                continue
-            if module.name in {"tests.rs", "test_support.rs"} or {
-                "tests",
-                "test_support",
-            }.intersection(module.relative_to(root).parts):
-                continue
-            sites.extend(_scan_file(module, stamps[module]))
-    return sites
+    """Reread incomplete observations; never publish a partial/zero inventory.
+
+    This read-only owner allows three complete observation attempts. Exhaustion
+    carries the shared unknown outcome, with no persisted state or busy marker;
+    a fresh invocation starts its own budget against the current source bytes.
+    """
+    for attempt in range(2):
+        try:
+            return _scan_rust_raises_once(roots)
+        except (OSError, UnicodeError, ValueError, TypeError, AttributeError):
+            time.sleep(0.01 * (attempt + 1))
+    try:
+        return _scan_rust_raises_once(roots)
+    except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as error:
+        raise UnknownOutcomeError(
+            str(error), reason=WaitReason.OBSERVATION_UNAVAILABLE
+        ) from error

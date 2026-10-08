@@ -1,16 +1,7 @@
-"""Regression fixtures for Rust endings and the shared only-falling ratchet."""
+"""Scanner-output and bounded source-observation regression fixtures."""
 
 import pytest
 
-from .blocker_boundaries import evaluate_raise_gate, write_counts
-from .blocker_classifier import (
-    DEBT,
-    INPUT,
-    RETRIED,
-    SECURITY,
-    classify,
-    propose_families,
-)
 from .blocker_rust import scan_rust_source, tokenize
 
 PATH = "rust/crates/vonk-agent/src/fixture.rs"
@@ -25,37 +16,11 @@ PATH = "rust/crates/vonk-agent/src/fixture.rs"
         'fn stored() { ensure!(receipt.is_some(), "missing receipt"); }',
     ],
 )
-def test_category_words_do_not_prove_a_boundary_or_a_retry(source: str) -> None:
-    """Catches message heuristics laundering local state or unproven recovery."""
+def test_error_words_do_not_change_scanner_coverage(source: str) -> None:
+    """All explicit ending forms remain visible regardless of diagnostic words."""
     sites = scan_rust_source(source, path=PATH)
     assert len(sites) == 1
-    assert classify(sites[0]).category == DEBT
-
-
-@pytest.mark.parametrize("category", [SECURITY, INPUT, RETRIED, DEBT])
-def test_reviewed_categories_share_the_same_site_ratchet(category: str) -> None:
-    """Catches a Rust-only exception to the reviewed occurrence ceiling."""
-    fixtures = {
-        SECURITY: "fn ingress() { if !signature_verified { return Err(Denied); } }",
-        INPUT: "fn caller_input() { if input.is_empty() { return Err(Invalid); } }",
-        RETRIED: "fn observe_once() { Err(Unknown) } fn bounded_owner() { for attempt in 0..3 { if observe_once().is_ok() { break; } } }",
-        DEBT: "fn stored() { if !receipt.exists() { return Err(Missing); } }",
-    }
-    sites = scan_rust_source(fixtures[category], path=PATH)
-    document = {
-        "fail_closed": [{"category": category, "sites": [[*sites[0].identity, 1]]}],
-        "scope": {"audited_paths": []},
-        "debt_ceiling": {"total": 0, "unaudited": int(category == DEBT)},
-        "operator_waits": [],
-        "max_debt": 0,
-        "categorized_raises": {"grandfathered": {}, "ceiling": 0},
-    }
-    assert evaluate_raise_gate(sites, document) == []
-    assert evaluate_raise_gate(sites * 2, document)
-    assert evaluate_raise_gate([], document)
-    lowered = write_counts(document, [], [])
-    assert lowered["fail_closed"] == []
-    assert evaluate_raise_gate(sites, lowered)
+    assert sites[0].path == PATH
 
 
 def test_comments_literals_lifetimes_and_nested_token_trees() -> None:
@@ -88,20 +53,21 @@ fn product() { Err(Denied) }
     assert [s.function for s in scan_rust_source(source, path=PATH)] == ["product"]
 
 
-def test_distinct_endings_and_new_files_cannot_hide_in_existing_family() -> None:
+def test_distinct_endings_and_paths_preserve_separate_scanner_identities() -> None:
     sites = scan_rust_source("fn end() { Err(First); Err(Second) }", path=PATH)
-    families = propose_families(sites, {"fail_closed": []})
-    recorded = families[0]["sites"]
-    assert isinstance(recorded, list)
-    assert len(recorded) == 2
+    assert [site.code for site in sites] == ["First", "Second"]
     other = scan_rust_source("fn end() { Err(First) }", path=PATH + ".rs")
-    assert propose_families(other, {"fail_closed": families})
+    assert sites[0].identity != other[0].identity
 
 
 @pytest.mark.parametrize("source", ["fn f() {", "/* unclosed", 'r##"unclosed'])
 def test_malformed_scanner_input_cannot_silently_erase_inventory(source: str) -> None:
-    with pytest.raises(ValueError):
-        scan_rust_source(source, path=PATH)
+    published = None
+    try:
+        published = scan_rust_source(source, path=PATH)
+    except ValueError:
+        pass
+    assert published is None
 
 
 def test_multiline_literals_preserve_source_lines() -> None:
@@ -129,25 +95,25 @@ fn observe() {
     ]
 
 
-def test_relocated_rust_debt_uses_rust_tokens_not_python_ast() -> None:
-    """A package move must carry the exact Rust ending rather than losing debt."""
+def test_relocated_rust_ending_uses_real_package_discovery(tmp_path) -> None:
+    """An unchanged function moved to a module retains its inventory identity."""
     from .blocker_boundaries import relocate_document
+    from .package_moves import PackageMoves
 
     source = "fn end() { Err(Missing) }"
+    original = tmp_path / PATH
+    original.parent.mkdir(parents=True)
+    original.write_text(source)
     site = scan_rust_source(source, path=PATH)[0]
-    destination = "rust/crates/vonk-agent/src/moved.rs"
-
-    class Move:
-        def function(self, path, function, matches_site):
-            assert matches_site(source, function)
-            return destination
-
-        def scope(self, path, function):
-            return function
-
+    package = original.with_suffix("")
+    package.mkdir()
+    destination = package / "moved.rs"
+    original.rename(destination)
+    destination_path = destination.relative_to(tmp_path).as_posix()
     document = {"fail_closed": [{"sites": [[*site.identity, 1]]}]}
-    moved = relocate_document(document, Move())
-    assert moved["fail_closed"][0]["sites"] == [[destination, *site.identity[1:], 1]]
+    moved = relocate_document(document, PackageMoves(tmp_path))
+    derived = scan_rust_source(destination.read_text(), path=destination_path)
+    assert moved["fail_closed"][0]["sites"] == [[*derived[0].identity, 1]]
 
 
 def test_process_failure_codes_are_endings_but_task_abort_is_not() -> None:
@@ -156,8 +122,8 @@ def test_process_failure_codes_are_endings_but_task_abort_is_not() -> None:
     assert [s.exception_class for s in sites] == ["ExitCode::FAILURE", "ExitCode::from"]
 
 
-def test_file_changes_invalidate_the_inventory_cache(tmp_path, monkeypatch) -> None:
-    """A subsequent ending cannot disappear behind a prior cached file parse."""
+def test_file_changes_are_observed_on_the_next_scan(tmp_path, monkeypatch) -> None:
+    """A subsequent ending cannot disappear behind an earlier file observation."""
     from . import blocker_rust
 
     monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
@@ -186,3 +152,156 @@ def test_external_test_modules_are_excluded_by_cfg_not_only_filename(
     (root / "fixture.rs").write_text("fn helper() { Err(TestOnly) }")
     sites = blocker_rust.scan_rust_raises((root,))
     assert [site.function for site in sites] == ["product"]
+
+
+def test_closure_tails_construct_errors_while_alternative_patterns_do_not() -> None:
+    """Closure delimiters must not be confused with pattern alternatives."""
+    source = """
+fn observe() {
+    let empty = || Err(Empty);
+    let argument = |arg| Err(arg);
+    match value { Err(First) | Err(Second) => (), _ => () }
+}
+"""
+    sites = scan_rust_source(source, path=PATH)
+    assert [(site.function, site.code, site.line) for site in sites] == [
+        ("observe", "Empty", 3),
+        ("observe", "arg", 4),
+    ]
+
+
+def test_module_membership_overrides_names_and_resolves_visibility_and_paths(
+    tmp_path, monkeypatch
+) -> None:
+    """Production tests/test_support modules count; attributed test modules do not."""
+    from . import blocker_rust
+
+    monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
+    root = tmp_path / "src"
+    root.mkdir()
+    (root / "main.rs").write_text(
+        "mod tests;\n"
+        "pub(crate) mod test_support;\n"
+        '#[cfg(test)] #[allow(dead_code)] #[path = "fixture.rs"] pub mod fixture;\n'
+        '#[path = "live.rs"] pub mod renamed;\n'
+    )
+    (root / "tests.rs").write_text("fn production_named_tests() { Err(One) }")
+    support = root / "test_support"
+    support.mkdir()
+    (support / "mod.rs").write_text("fn production_support() { Err(Two) }")
+    (root / "fixture.rs").write_text("fn fixture() { Err(TestOnly) }")
+    (root / "live.rs").write_text("fn renamed() { Err(Three) }")
+    # Unreferenced files do not establish module membership either.
+    (root / "orphan.rs").write_text("fn orphan() { Err(Unreachable) }")
+    sites = blocker_rust.scan_rust_raises((root,))
+    assert {site.function for site in sites} == {
+        "production_named_tests",
+        "production_support",
+        "renamed",
+    }
+
+
+def test_inline_module_resolves_external_production_child(
+    tmp_path, monkeypatch
+) -> None:
+    from . import blocker_rust
+
+    monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
+    root = tmp_path / "src"
+    (root / "outer").mkdir(parents=True)
+    (root / "main.rs").write_text("mod outer { pub mod child; }")
+    (root / "outer" / "child.rs").write_text("fn child() { Err(Observed) }")
+    assert [site.function for site in blocker_rust.scan_rust_raises((root,))] == [
+        "child"
+    ]
+
+
+def test_incomplete_module_observation_rereads_then_admits_fresh_scan(
+    tmp_path, monkeypatch
+) -> None:
+    """Missing/damaged source cannot become zero debt or poison the next scan."""
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    from . import blocker_rust
+
+    monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
+    root = tmp_path / "src"
+    root.mkdir()
+    (root / "main.rs").write_text("mod child;")
+    child = root / "child.rs"
+    original_read = type(child).read_text
+    reads = []
+
+    def read(path, *args, **kwargs):
+        reads.append(path)
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(child), "read_text", read)
+    for damaged in (
+        None,
+        "fn child() {",
+        '#[cfg_attr(test, path = "other.rs")] mod next;',
+    ):
+        if damaged is not None:
+            child.write_text(damaged)
+        reads.clear()
+        published = None
+        try:
+            published = blocker_rust.scan_rust_raises((root,))
+        except UnknownOutcomeError:
+            pass
+        assert published is None
+        assert reads.count(root / "main.rs") == 3
+        child.write_text("fn child() { Err(Observed) }")
+        fresh = blocker_rust.scan_rust_raises((root,))
+        assert [(site.function, site.code) for site in fresh] == [("child", "Observed")]
+
+
+def test_transient_read_loss_recovers_inside_the_observation_budget(
+    tmp_path, monkeypatch
+) -> None:
+    from . import blocker_rust
+
+    monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
+    root = tmp_path / "src"
+    root.mkdir()
+    entry = root / "main.rs"
+    entry.write_text("fn execute() { Err(Observed) }")
+    original_read = type(entry).read_text
+    calls = 0
+
+    def read(path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise FileNotFoundError(path)
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(entry), "read_text", read)
+    sites = blocker_rust.scan_rust_raises((root,))
+    assert [(site.function, site.code) for site in sites] == [("execute", "Observed")]
+    assert calls == 2
+    assert blocker_rust.scan_rust_raises((root,)) == sites
+
+
+def test_cargo_declared_binary_and_automatic_binary_are_product_roots(
+    tmp_path, monkeypatch
+) -> None:
+    from . import blocker_rust
+
+    monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
+    root = tmp_path / "src"
+    (root / "bin").mkdir(parents=True)
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "fixture"\n[[bin]]\nname = "probe"\npath = "src/probe.rs"\n'
+    )
+    (root / "main.rs").write_text("fn main() { Err(Main) }")
+    (root / "probe.rs").write_text("mod child; fn probe() { Err(Probe) }")
+    (root / "child.rs").write_text("fn child() { Err(Child) }")
+    (root / "bin" / "automatic.rs").write_text("fn automatic() { Err(Automatic) }")
+    assert {site.function for site in blocker_rust.scan_rust_raises((root,))} == {
+        "main",
+        "probe",
+        "child",
+        "automatic",
+    }
