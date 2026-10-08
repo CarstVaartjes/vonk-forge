@@ -13,7 +13,14 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    SecurityRefusalError,
+    SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
+)
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
@@ -92,7 +99,7 @@ def compile_job_invocation(
     resolved = resolve_recipe_entities(session, revision.document)
     models = resolved.models
     if build is None:
-        raise ExecutionPlanCompilationError("job build receipt is unavailable")
+        raise ExecutionPlanEvidenceUnknown("job build receipt is unavailable")
     runtime_spec = compile_runtime_spec(
         recipe,
         recipe_digest=revision.content_digest,
@@ -159,8 +166,25 @@ def compile_job_invocation(
     return compiled.to_compiled_launch_payload(runtime_spec, placement=placement)
 
 
-class ExecutionPlanCompilationError(ValueError):
-    """Canonical launch facts and verified Controller receipts cannot agree."""
+class ExecutionPlanCompilationError(InvalidRequestError, ValueError):
+    """Caller-supplied compilation inputs fail validation before effects."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail, reason=InvalidRequestReason.INCOMPLETE)
+
+
+class ExecutionPlanReceiptRefused(SecurityRefusalError, ValueError):
+    """Unverified image evidence cannot enter an executable plan."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail, reason=SecurityRefusalReason.DIGEST_MISMATCH)
+
+
+class ExecutionPlanEvidenceUnknown(UnknownOutcomeError, ValueError):
+    """The preparation owner must re-observe unavailable receipt evidence."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail, reason=WaitReason.RECEIPT_MISSING)
 
 
 RuntimeImageResolver = Callable[
@@ -262,12 +286,12 @@ class ControllerExecutionPlanService:
                 model_objects = model_source.verified_model_objects_for_set(
                     artifact_set_sha256, manifest
                 )
-        except UnknownOutcomeError:
+        except (UnknownOutcomeError, SecurityRefusalError):
             # Unconfirmed storage or bookkeeping keeps its type: the admitting
             # owner observes it again instead of reading a verdict on the plan.
             raise
         except Exception as error:
-            raise ExecutionPlanCompilationError(
+            raise ExecutionPlanEvidenceUnknown(
                 "verified model artifact-set receipt is unavailable"
             ) from error
 
@@ -276,6 +300,8 @@ class ControllerExecutionPlanService:
         world_size = _world_size(recipe)
         result: dict[str, WireCompiledExecutionPlan] = {}
         if build is None:
+            # No selected build is an incomplete compilation request. Storage
+            # uncertainty for a selected receipt retains its unknown type.
             raise ExecutionPlanCompilationError("recipe build receipt is unavailable")
         package = _build_package(build)
         for node in sorted(mapping_nodes, key=lambda item: (item.rank, item.node_id)):
@@ -303,7 +329,7 @@ class ControllerExecutionPlanService:
                     runtime_spec,
                     placement=placement,
                 )
-            except UnknownOutcomeError:
+            except (UnknownOutcomeError, SecurityRefusalError):
                 raise
             except (
                 CompiledExecutionPlanError,
@@ -334,12 +360,12 @@ class ControllerExecutionPlanService:
             receipt = self._runtime_image_resolver(document, image_digest, runtime_spec)
             value = _runtime_image_receipt(receipt)
         else:
-            raise ExecutionPlanCompilationError(
+            raise ExecutionPlanEvidenceUnknown(
                 "verified OCI archive receipt is unavailable for the selected runtime image"
             )
         image = value
         if image.image_digest != image_digest:
-            raise ExecutionPlanCompilationError(
+            raise ExecutionPlanReceiptRefused(
                 "runtime image receipt does not match the compiled runtime image"
             )
         return image
@@ -355,7 +381,7 @@ def _runtime_image_receipt(receipt: RuntimeImageReceipt) -> VerifiedRuntimeImage
     """
 
     if not isinstance(receipt, RuntimeImageReceipt):
-        raise ExecutionPlanCompilationError("runtime image receipt is invalid")
+        raise ExecutionPlanReceiptRefused("runtime image receipt is invalid")
     try:
         return VerifiedRuntimeImage(
             image_digest=receipt.image_digest,
@@ -366,7 +392,7 @@ def _runtime_image_receipt(receipt: RuntimeImageReceipt) -> VerifiedRuntimeImage
             runtime_interface_label=receipt.runtime_interface_label,
         )
     except ValueError as error:
-        raise ExecutionPlanCompilationError(
+        raise ExecutionPlanReceiptRefused(
             "verified runtime image receipt is invalid"
         ) from error
 
@@ -377,7 +403,7 @@ def _build_package(build: RecipeBuild) -> dict[str, object]:
         or not isinstance(build.image_digest, str)
         or not isinstance(build.build_input_sha256, str)
     ):
-        raise ExecutionPlanCompilationError(
+        raise ExecutionPlanEvidenceUnknown(
             "successful Controller build receipt is unavailable"
         )
     return {

@@ -1284,12 +1284,12 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
     from .route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from .run_admission import RunAdmissionService
-    from .runtime_image_preparation import (
-        FilesystemRuntimeImageStorage,
-        OciLayoutImageTransport,
+    from .runtime_image_preparation.preparation import (
         make_runtime_image_receipt_preparer,
         stored_runtime_image_resolver,
     )
+    from .runtime_image_preparation.storage import FilesystemRuntimeImageStorage
+    from .runtime_image_preparation.transport import OciLayoutImageTransport
     from .telemetry import TelemetryRepository
     from .worker_memory import read_worker_memory_report, worker_memory_report_path
 

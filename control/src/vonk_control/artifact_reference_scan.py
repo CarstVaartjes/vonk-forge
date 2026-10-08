@@ -63,8 +63,8 @@ from .run_switch_contract import (
 )
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
-    read_runtime_image_reference_intent,
 )
+from .runtime_image_preparation.contracts import read_runtime_image_reference_intent
 from .strict_json import read_stored_model
 
 _ACTIVE_PROFILE_APPLICATIONS = job_states.words(
