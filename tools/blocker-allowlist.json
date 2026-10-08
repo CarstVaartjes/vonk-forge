@@ -1789,7 +1789,7 @@
     "control/src/vonk_control/catalog_service.py": {
       "_capture_import_document": "d146da92b97cd114f41bb00c3eb0645af8203419551473a7d9c5a90e2a19a3c9",
       "CatalogService.__init__": "778e955cb50d683f69019d560ef38d127ad6d0674b0c7a1580519e6d87b52d77",
-      "CatalogService.store_source_bundle": "2fdbf41ba46a999899f5ba9bfb1a55fe8e4aec7fa2913471cfd0ac1ad14e155a",
+      "CatalogService.store_source_bundle": "ceea2943aebcba265e3730449101467ba4cf99e739c3d0dedf7f9ea0557c35ec",
       "CatalogService.get_recipe": "e2b12f54ea50c22d3ca837ca588a834780a3a04e4cc573d5402e504db2f29235",
       "CatalogService.recipe_catalog_local_revisions": "4ea275b58766d34073c3d748bfded58268d071d9c4c1dc0a46f63986a230cd5f",
       "CatalogService.retract_recipes_absent_from": "8e8c733675a94359685958eea332f61d6fde5aaa79370a02e97204658e988d83",
@@ -1808,7 +1808,7 @@
       "_release_version": "25fae76e14508224df8918aac0093b8ddfa7bafdd260d918e5ffea54818b06d8",
       "_package_handle_metadata": "a3b83fea8b2a2aacd4cccd4cfebd3724be75371b413fe8c6a42c8f8b3163a023",
       "_actor": "4cd7a803231c3ba9ae9aecc2672ff2961362f434839937c847dfc0fb3db9e990",
-      "<module>": "44814e72ceca0713cc1723b9486a08d6048f1a1ff579d6b0763d2cb7128f1a4b"
+      "<module>": "0146fe908ff2791b5107a1bbcba5c3366c78cbc927601bd3ad009c6f879803cc"
     },
     "control/src/vonk_control/catalog_sync.py": {
       "_controller_marker": "fac49c47d66d2d5657a7ebb737c994f6027b24834c9acaa0b39e51802b528dca",
@@ -3598,18 +3598,18 @@
       "RecipeBuildService.bind_storage_demands": "2f2c792b05cb8b59dc724b2320a9f332aa385269a7d6ec9978ee43426038bc59",
       "RecipeBuildService._stored_archive_present": "868a8143694003f27dfe5683523a0f0be991dc493964eb94c9274a5096ad7d40",
       "RecipeBuildService._succeeded_build_available": "4dd1344abe882a9171ffccf8f3bbf7174f9c3ff8b23d7bb114006d3e2d47806c",
-      "RecipeBuildService._verified_bundle": "55c1381d061a56ef96ea4d9cc47b402b44fc9f259f989c8a15893e7d106ce06d",
-      "RecipeBuildService._verified_bundle.read": "61ceba5d8a26f354011914e99e319603e5a9dad0b1837baaca20f05a97bca2d8",
+      "RecipeBuildService._verified_bundle": "df67082f92f76b3ca058dd9fd41d1177acaf91cbb4054612213908ce296bdbbf",
+      "RecipeBuildService._verified_bundle.read": "40f048227f1be5097a4b102c86ba7b20b4b14b7108ae286c868c7b6552c25421",
       "RecipeBuildService._verified_bundle.damaged": "52ec268c64835651309ac62c8599489e11e7e935268fa469b5ca12b81d8e38a1",
-      "RecipeBuildService._heal_source_bundle": "2e5a724e0fdda788e308cbe9074060d909e42d6438c5e65478128ad81abc74af",
+      "RecipeBuildService._heal_source_bundle": "6a04e8b955c9902ca64c0daac4eff971278844a0fba01c5284ee1e25bd4bc45a",
       "RecipeBuildService.check_source": "89b6b41462967836a9049369545b4b355ec969954bc7c8e2f35c9ce0b808e721",
-      "RecipeBuildService._check_source_once": "01c92eeb67021eb159f65c70bdc4181018d9833df182b3cd7b47733d99bce6ad",
+      "RecipeBuildService._check_source_once": "a376ea03a72c493f62bfe358322516befe8beb560af2fe874169b5526b79d480",
       "RecipeBuildService.resolve": "066f234775c57f296bd0b0ae91cc6659b982a5ebf8960707696b6f9993acbbc4",
-      "RecipeBuildService._resolve_once": "be6f155ee85ffb5105414c5dfae1754e851cfa752ccf1eaf2647fac18d347b16",
+      "RecipeBuildService._resolve_once": "908fbe3a8d7e0a82ce287daaad819a62391682e75f2e0dafec080fba2001eb03",
       "RecipeBuildService._admit_spark_build": "5771a928c4bb1f68948bf5a7764df6b78ab22509fc0531859d4c24f83db97558",
       "RecipeBuildService._usable_prebuilt": "ff52fa747cfb401344c0658fe4033ec5347f53d8ca4ff5ac4f742bb05a5142eb",
       "RecipeBuildService.prepare_plan": "e2a77ac9eff76c68cae58dee90ca4dd0a59828ac77d82e95f59ed489df12b7e5",
-      "RecipeBuildService._prepare_plan_once": "e30c2e59501773e4532d8fdec6a173e64bd0b63ba8a9b017ef783754e941896a",
+      "RecipeBuildService._prepare_plan_once": "a74e4e66b3ac28fb4a57aa27d2ac5bc373e808f81efbd8bc802cb41665123431",
       "RecipeBuildService.plan": "55cb64393025fd98a4962ec9b8301cd9e73e60232bbc199cfeee3b9e042ad4d6",
       "RecipeBuildService.reusable_build_id": "b46c72fad4a5b361a4d97f5f291866eef1ae5505376252b57d13c373309c1fab",
       "RecipeBuildService.persist_plan_in_session": "de4ed0a27c555aef35c003f53126b678d684a9d5f0cf4368db74a7eab5ed2230",
@@ -3624,7 +3624,7 @@
       "_has_build_receipt": "a24bd7e531123889316c0bdeb20bf3c89c6ab944b4bb7e9f40185be889dc44bd",
       "_reopen_build_attempt": "40a27eacecc9e3837ff642c0c46659092456f974f8fc2e8f285ce608336d3c4d",
       "_digest": "6073c487755ee8fff97be9c815bfb4b393de66792aa9e00a7c279356ccc2cee4",
-      "<module>": "6d2dddab285bff67083ea4a7dd159de2733aa2c0d9f69815acc2be06ab70c310"
+      "<module>": "de80e8a7b0003e02594d5dfe220b1bdbb6a9a3217dc72009dec34be48ebd82dd"
     },
     "control/src/vonk_control/recipe_execution_contract.py": {
       "RecipeExecutionContractError.__init__": "da4f86129107958663ce2754468e9afd0fd49464d36dff1ed2db4998ed04d23a",
@@ -4907,6 +4907,7 @@
     "control/src/vonk_control/source_bundles.py": {
       "SourceBundleError.__init__": "06ab90ae5bc35f0122db8964da3c01771488bc97f1a32a1d76104decbe165e2d",
       "SourceBundleRefused.__init__": "91d06a590c921802e2b467cc08124a9ef126544f9962be7b02080f224c09aacd",
+      "SourceBundleIntegrityRefused.__init__": "c2e450f1e4faa1bdc1940858e582e427cdab7b8c183cd2eef628ad2e162c9ba2",
       "SourceBundleUnknown.__init__": "b3a2c5af977a778d179a1f5b1b591fcb880f19bb4ef9f00ab0acf7fe5506794a",
       "SourceBundleInvalid.__init__": "2a2d61563116111a06331cc7909439f0662a30ddd48cf540c2dc1dbaac572bc7",
       "GeneratedSourceBundle.sha256": "3a20423b746ea1850ccdf5f0d60f3d43b2785fb04ef22899b60d5b3e8c83b41d",
@@ -4915,22 +4916,23 @@
       "inspect_source_bundle": "ff41a272daeeb5ed4ddc3e66eef2d9b00fdd609070a57933aac6475a4c71e212",
       "SourceBundleStore.__init__": "32cbad232f5fe6e4a0887d2befd0883e24b85554f7a2e4784862a9a9336519c8",
       "SourceBundleStore.put": "0f43377b7a5569bb8c836e74851bd9895918446531a2cefd1ae43c10ce613b24",
-      "SourceBundleStore._put": "4f333d939a98087ce388e49607e6992a9276b029c04237e4f6b9e6e9022cdd9f",
-      "SourceBundleStore.get": "9451d13a865b8daea12660eed3d3e478e853790dd238f8c15df538d81371d087",
+      "SourceBundleStore._put": "1b2ae5d01b48b6ee0fd7a0cc680726cf3294c5bb889885b2676b26883ac61292",
+      "SourceBundleStore.get": "ad116cecd1d5ba2054094802c3a9c288a4331c28bc61bd4ac89d06202404e372",
       "SourceBundleStoreProtocol.put": "20edd8adbb9575edbe8c96e082d891c948bd2e3e8fc7af6f72d2dce38574e5b1",
       "SourceBundleStoreProtocol.get": "88af06c1049eb3581c8367321ebac646cb55e60171359ce600ba7866ca5f2a93",
       "DatabaseSourceBundleStore.__init__": "b5a09f9099407669656e4ba4e160127283cfb77f75a4892647467f2f6c7816c4",
-      "DatabaseSourceBundleStore.put": "319f31401045c47df39c20f7f209230073442a61cb47089c52951d974411de89",
-      "DatabaseSourceBundleStore.get": "d87b0d9a26eb8297e42b0229c35a214a36efe1537d8ee989d761f3bb5c71b7c4",
+      "DatabaseSourceBundleStore.put": "300eda72696cb31ced9e992524f1251bff9a1a30d609aa122043b634863dc367",
+      "DatabaseSourceBundleStore.get": "5aea18e9953e77f7fba90fd467a76dffd9d12ca0be137a77abe3516f19ac80c2",
+      "_observe_archive": "e4ef37fb766f04a9f6d990fb6582c9ffd3597f9bb33a32dfc0acb96858de592a",
       "_stored_manifest_matches": "3020a29f1393f0a6a0fce2571dca8f488d6d23a8a3babfbb5984161004b716e0",
-      "_stored_archive_verifies": "30e8fa3e5a326ff525b921db21bd4301676ee0e759d708e8fa031a32bcef2e5e",
+      "_stored_archive_verifies": "f0dfb6fd5c869d55cd92b999555062dc89de7b5bb372c7552a234eef3275df9f",
       "parse_source_bundle_manifest": "0bf4bea48741e7c9e17473146e472132b3ebc3a739a9e7ce8ed7948a14e4c0b8",
       "_validate_digest": "83ec95015f39adee8f8c6fce692e7e261af06390b4ac79a6f76a538873226cde",
       "_generated_bundle": "8b28e4800d0494524dc3797904ae3fff904219f6c9258dde411350acd0e29682",
       "_read_archive": "7ef4aa4310f2ee8e4b526c52124115910cc19ab6c01cd4bc086f263a015d3b5a",
       "_inspect_archive": "48ff3b30ae01d6fd423fc4f7ce72401493498de5d3bf7d69d77fdde44a92dc4f",
       "_safe_path": "22c86fbd4d686cd966299829c1838e9b88203d950d417538d7a9539db20603f5",
-      "<module>": "c4b8e7f920cc272c9a47eaff42f9715dc25929c3e0d199e1a0162bd71e94b897"
+      "<module>": "2d0060ee8544851bf11c55ae0a6c5d93cc5d82008248972d3812d57d701fcd24"
     },
     "control/src/vonk_control/source_policy.py": {
       "SourcePolicyReport.describe": "d3522877aaf904b4da51ec3195a8201d3a24b1a0a8ce2a3331ccafddc139fa30",
@@ -6617,36 +6619,32 @@
       "category": "bookkeeping-debt",
       "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.not_found", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_generated_bundle", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "DatabaseSourceBundleStore.get", "bundle.not_found", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.not_found", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "_observe_archive", "stored-source-bundle-cannot-be-verified", 1]
       ]
     },
     {
       "family": "source_bundles.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request. Rejects a nonbinary caller-provided bundle stream at ingress.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request. Rejects a nonbinary caller-provided bundle stream at ingress. An unreadable regular member is malformed archive input; local archive observations translate parser failures to typed unknown outcomes.",
       "sites": [
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_read_archive", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_safe_path", "bundle.path_too_long", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "_read_archive", "bundle.empty", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "generate_source_bundle", "bundle.empty", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleInvalid", "generate_source_bundle", "bundle.empty", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.read_failed", 1]
       ]
     },
     {
       "family": "source_bundles.security-edge",
       "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class SourceBundleError verifies content at its ingress.",
+      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class SourceBundleError verifies content at its ingress. Incoming source identity mismatch is a typed security refusal; damaged local observations are excluded.",
       "sites": [
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.manifest_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.get", "bundle.storage_collision", 2],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "DatabaseSourceBundleStore.put", "bundle.digest_mismatch", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore._put", "bundle.digest_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore._put", "bundle.digest_mismatch", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.digest_invalid", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.storage_collision", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.duplicate_path", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.entry_forbidden", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.expanded_too_large", 1],
@@ -6660,7 +6658,9 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "generate_source_bundle", "bundle.file_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "parse_source_bundle_manifest", "bundle.manifest_invalid", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.get", "source-bundle-storage-access-was-denied", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.put", "source-bundle-storage-access-was-denied", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleRefused", "SourceBundleStore.put", "source-bundle-storage-access-was-denied", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleIntegrityRefused", "DatabaseSourceBundleStore.put", "source-bundle-digest-does-not-match", 1],
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleIntegrityRefused", "SourceBundleStore._put", "source-bundle-digest-does-not-match", 1]
       ]
     },
     {
@@ -8129,10 +8129,8 @@
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_stale", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.network_capability_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._check_source_once", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.contract_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.node_unknown", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_disk", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_memory", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_missing", 1],
@@ -8140,7 +8138,6 @@
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.plan_invalid", 5],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.runtime_changed", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._resolve_once", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 1],
