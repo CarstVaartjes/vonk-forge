@@ -22,6 +22,8 @@ from vonk_agent_protocol.compiled_execution_plan import (
 )
 
 from .bounded_retry import bounded_attempts
+from .capabilities import CapabilityRegistry
+from .capability_contract import ControllerCapability
 from .jobs import JobService
 from .logging import log_event, redact_text
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
@@ -396,6 +398,7 @@ def assemble_production_worker(
     | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
+    capabilities: CapabilityRegistry | None = None,
 ) -> Worker:
     """Compose the worker-owned recipe and maintenance runtime."""
 
@@ -406,7 +409,10 @@ def assemble_production_worker(
     from .catalog_revision_collection import CatalogRevisionCollector
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
-    from .distribution import build_distribution_service_from_components
+    from .distribution import (
+        DistributionService,
+        build_distribution_service_from_components,
+    )
     from .distribution_executor import CompositeDistributionPhaseExecutor
     from .fleet_profiles import build_production_fleet_profile_service
     from .install_admission import (
@@ -428,14 +434,19 @@ def assemble_production_worker(
     from .terminal_history_collection import TerminalHistoryCollector
     from .unused_storage_collection import UnusedStorageCollector
 
+    registry = capabilities or CapabilityRegistry(clock=clock)
     if model_cache is not None:
         if agent_artifact_root is None:
             raise ValueError("agent artifact root is required with model cache")
-        distribution = build_distribution_service_from_components(
-            model_cache,
-            sessions,
-            agent_artifact_root,
-            clock=clock,
+        distribution = registry.guard(
+            ControllerCapability.DISTRIBUTION,
+            DistributionService,
+            lambda: build_distribution_service_from_components(
+                model_cache,
+                sessions,
+                agent_artifact_root,
+                clock=clock,
+            ),
         )
         artifact_phase_executor = CompositeDistributionPhaseExecutor(
             sessions,
@@ -459,7 +470,11 @@ def assemble_production_worker(
     # availability service writes, so prefer its explicit root.
     image_cache_root = recipe_image_artifact_root or agent_artifact_root
     runtime_archive_storage = (
-        FilesystemRuntimeImageStorage(image_cache_root)
+        registry.guard(
+            ControllerCapability.RUNTIME_IMAGE_STORAGE,
+            FilesystemRuntimeImageStorage,
+            lambda: FilesystemRuntimeImageStorage(image_cache_root),
+        )
         if image_cache_root is not None
         else None
     )
@@ -558,8 +573,10 @@ def assemble_production_worker(
         prebuilt_importer = PrebuiltImageImporter(
             sessions, image_cache_root, clock=clock
         )
-        image_store_collector = ImageStoreCollector(
-            sessions, image_cache_root, clock=clock
+        image_store_collector = registry.guard(
+            ControllerCapability.IMAGE_COLLECTION,
+            ImageStoreCollector,
+            lambda: ImageStoreCollector(sessions, image_cache_root, clock=clock),
         )
         worker_background_services += (
             prebuilt_importer.tick,
@@ -580,6 +597,7 @@ def assemble_production_worker(
             clock=clock,
             max_parallel=recipe_image_parallel_preparations,
             with_scheduler=True,
+            storage=runtime_archive_storage,
         )
         assert image_production.scheduler is not None
         fleet_profiles.bind_preparation_starter(
@@ -621,9 +639,12 @@ def assemble_production_worker(
     artifact_jobs = ArtifactJobService(
         sessions,
         recipe_operations=lifecycle,
-        blob_store=ArtifactBlobStore(
-            artifact_job_root,
-            max_stored_bytes=artifact_job_storage_max_bytes,
+        blob_store=registry.guard(
+            ControllerCapability.ARTIFACT_STORAGE,
+            ArtifactBlobStore,
+            lambda: ArtifactBlobStore(
+                artifact_job_root, max_stored_bytes=artifact_job_storage_max_bytes
+            ),
         ),
         clock=clock,
         retention_seconds=artifact_job_retention_seconds,
@@ -699,6 +720,7 @@ if __name__ == "__main__":
     )
 
     configure_controller_logging()
+    capabilities = CapabilityRegistry()
     settings = Settings.from_env_and_secrets()
     wait_for_database(settings.database_url)
     sessions = session_factory(build_engine(settings.database_url, component="worker"))
@@ -707,9 +729,13 @@ if __name__ == "__main__":
         return datetime.now(UTC)
 
     jobs = JobService(sessions, clock=clock)
-    address_policy = ManagementAddressPolicy.parse(
-        settings.management_cidrs,
-        forbidden_cidrs=settings.direct_fabric_cidrs,
+    address_policy = capabilities.guard(
+        ControllerCapability.MANAGEMENT_POLICY,
+        ManagementAddressPolicy,
+        lambda: ManagementAddressPolicy.parse(
+            settings.management_cidrs,
+            forbidden_cidrs=settings.direct_fabric_cidrs,
+        ),
     )
 
     agent_jobs = AgentJobService(
@@ -717,25 +743,42 @@ if __name__ == "__main__":
         clock=clock,
     )
     route_root = Path("/routes")
-    publisher = AtomicRouteBundlePublisher(
-        route_root,
-        await_supervisor_ack=FileSupervisorAcknowledger(
-            Path("/supervisor/ack.json"),
-            clock=clock,
+    publisher = capabilities.guard(
+        ControllerCapability.ROUTE_PUBLISHER,
+        AtomicRouteBundlePublisher,
+        lambda: AtomicRouteBundlePublisher(
+            route_root,
+            await_supervisor_ack=FileSupervisorAcknowledger(
+                Path("/supervisor/ack.json"),
+                clock=clock,
+            ),
         ),
     )
-    runtime_image_storage = FilesystemRuntimeImageStorage(settings.agent_artifact_root)
-    model_cache = ModelCacheService(
-        sessions,
-        settings.model_cache_root,
-        reserve_bytes=MODEL_CACHE_RESERVE_BYTES,
-        max_parallel_downloads=MODEL_CACHE_PARALLEL_DOWNLOADS,
-        max_download_streams=MODEL_CACHE_MAX_DOWNLOAD_STREAMS,
-        clock=clock,
-        huggingface_token_path=settings.huggingface_token_path,
-        runtime_archive_available=runtime_image_storage.build_archive_available,
+    runtime_image_storage = capabilities.guard(
+        ControllerCapability.RUNTIME_IMAGE_STORAGE,
+        FilesystemRuntimeImageStorage,
+        lambda: FilesystemRuntimeImageStorage(settings.agent_artifact_root),
     )
-    model_cache.resume_operations()
+
+    def build_cache() -> ModelCacheService:
+        cache = ModelCacheService(
+            sessions,
+            settings.model_cache_root,
+            reserve_bytes=MODEL_CACHE_RESERVE_BYTES,
+            max_parallel_downloads=MODEL_CACHE_PARALLEL_DOWNLOADS,
+            max_download_streams=MODEL_CACHE_MAX_DOWNLOAD_STREAMS,
+            clock=clock,
+            huggingface_token_path=settings.huggingface_token_path,
+            runtime_archive_available=runtime_image_storage.build_archive_available,
+        )
+        return cache
+
+    model_cache = capabilities.guard(
+        ControllerCapability.MODEL_CACHE,
+        ModelCacheService,
+        build_cache,
+        initialize=lambda cache: cache.resume_operations(),
+    )
     runtime_image_transport = OciLayoutImageTransport()
     prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
         runtime_image_storage,
@@ -748,6 +791,7 @@ if __name__ == "__main__":
         runtime_image_resolver=stored_runtime_image_resolver(runtime_image_storage),
     )
     worker = assemble_production_worker(
+        capabilities=capabilities,
         distributed_start_timeout_seconds=DISTRIBUTED_START_TIMEOUT_SECONDS,
         jobs=jobs,
         sessions=sessions,

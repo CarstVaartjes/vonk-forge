@@ -17,6 +17,8 @@ from cluster_profiles.runtime_identity import (
     packaged_runtime_identity,
 )
 
+from .capabilities import CapabilityRegistry
+from .capability_contract import CapabilityStatus
 from .models import ControlProcessHeartbeat
 from .observation_capture import begin_observation_capture
 from .platform_observation_errors import ObservationCaptureUnavailable
@@ -40,6 +42,7 @@ class WorkerRuntimeObservation(StrictModel):
 
 
 class PlatformObservation(StrictModel):
+    capabilities: list[CapabilityStatus] = Field(default_factory=list)
     observed_at: datetime
     api: ApiRuntimeObservation
     workers: list[WorkerRuntimeObservation] | None
@@ -57,8 +60,13 @@ class CapturedPlatformObservation:
 
 class PlatformObserver:
     def __init__(
-        self, sessions: sessionmaker[Session], *, clock: Callable[[], datetime]
+        self,
+        sessions: sessionmaker[Session],
+        *,
+        clock: Callable[[], datetime],
+        capabilities: CapabilityRegistry | None = None,
     ):
+        self._capabilities = capabilities
         self._sessions = sessions
         self._clock = clock
 
@@ -109,6 +117,7 @@ class PlatformObserver:
             if row.completed_at is not None
         ]
         observation = PlatformObservation(
+            capabilities=self._capabilities.statuses() if self._capabilities else [],
             observed_at=now,
             api=ApiRuntimeObservation(
                 source_sha=identity.source_sha,

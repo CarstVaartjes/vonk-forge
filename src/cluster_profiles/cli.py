@@ -31,7 +31,8 @@ from .cli_outcome import (
     Observation,
     Submission,
 )
-from .cli_render import progress_line, render_payload, terminal_text
+from .cli_presentations import PRESENTATIONS
+from .cli_render import progress_line, terminal_text
 from .cli_update import (
     CliUpdateError,
     begin_interactive_update_check,
@@ -560,7 +561,8 @@ def _emit(
         and getattr(args, "outcome_context", None) == "preview"
     )
     with redirect_stdout(sys.stderr if error or preview_only else sys.stdout):
-        render_payload(
+        noun = getattr(args, "command", None) or "profile"
+        PRESENTATIONS[(noun, getattr(args, f"{noun}_action", None))](
             safe,
             getattr(args, "command", None) or "profile",
             wide=getattr(args, "wide", False),

@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 73f0c0bc220b68bb4eefecc20b26b7b5b035143a951df6f022150a4d4bcc3e83. Do not edit.
+// Generated from canonical OpenAPI SHA256 a97ce0818c6793e04dbfb40a57ed4600d6d4bc0b837048ebf495d7f1abe5d0a1. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -2547,6 +2547,34 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /**
+         * CapabilityAvailability
+         * @enum {string}
+         */
+        CapabilityAvailability: "available" | "unavailable";
+        /**
+         * CapabilityReason
+         * @enum {string}
+         */
+        CapabilityReason: "capability.initializing" | "capability.configuration_invalid" | "capability.storage_unavailable" | "capability.dependency_unavailable";
+        /** CapabilityStatus */
+        CapabilityStatus: {
+            availability: components["schemas"]["CapabilityAvailability"];
+            capability: components["schemas"]["ControllerCapability"];
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            reason?: components["schemas"]["CapabilityReason"] | null;
+        };
+        /** CapabilityUnavailableReply */
+        CapabilityUnavailableReply: {
+            capability: components["schemas"]["ControllerCapability"];
+            reason: components["schemas"]["CapabilityReason"];
+            /**
+             * Retryable
+             * @default true
+             */
+            retryable: boolean;
+        };
         /** CapacityReservations */
         CapacityReservations: {
             /** Disk Bytes */
@@ -3027,6 +3055,11 @@ export interface components {
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
+        /**
+         * ControllerCapability
+         * @enum {string}
+         */
+        ControllerCapability: "certificate-authority" | "enrollment-bootstrap" | "host-runtime-authority" | "model-cache" | "runtime-image-storage" | "artifact-storage" | "management-policy" | "fabric-policy" | "agent-presence" | "image-collection" | "route-publisher" | "recipe-routes" | "distribution" | "recipe-library" | "token-auth" | "cursor-auth" | "browser-auth" | "metrics-auth" | "agent-proxy-auth" | "gateway-keys";
         /**
          * ControllerErrorCode
          * @description Generic Controller request and fleet-operation problem codes.
@@ -7496,6 +7529,8 @@ export interface components {
         /** PlatformObservation */
         PlatformObservation: {
             api: components["schemas"]["ApiRuntimeObservation"];
+            /** Capabilities */
+            capabilities?: components["schemas"]["CapabilityStatus"][];
             /**
              * Observed At
              * Format: date-time
@@ -13026,7 +13061,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13084,7 +13119,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13142,7 +13177,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13224,7 +13259,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13300,7 +13335,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13385,7 +13420,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13419,6 +13454,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13496,7 +13540,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13546,6 +13590,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13608,6 +13661,15 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                };
+            };
         };
     };
     logoutBrowser: {
@@ -13653,6 +13715,15 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
+                };
+            };
         };
     };
     getBrowserSession: {
@@ -13689,6 +13760,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13800,7 +13880,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13847,7 +13927,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13916,7 +13996,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -13983,7 +14063,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14059,7 +14139,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14115,7 +14195,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14174,7 +14254,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14252,7 +14332,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14310,7 +14390,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14374,7 +14454,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14454,7 +14534,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14530,7 +14610,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14601,7 +14681,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14663,7 +14743,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14743,7 +14823,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14799,7 +14879,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14868,7 +14948,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -14935,7 +15015,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15002,7 +15082,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15062,7 +15142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15129,7 +15209,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15209,7 +15289,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15276,7 +15356,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15334,7 +15414,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15414,7 +15494,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15494,7 +15574,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15570,7 +15650,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15623,7 +15703,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15681,7 +15761,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15741,7 +15821,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15788,7 +15868,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15835,7 +15915,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15893,7 +15973,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -15973,7 +16053,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16050,7 +16130,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16099,7 +16179,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16170,7 +16250,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16219,7 +16299,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16279,7 +16359,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16359,7 +16439,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16426,7 +16506,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16484,7 +16564,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16552,7 +16632,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16632,7 +16712,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16708,7 +16788,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16772,7 +16852,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16830,7 +16910,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16910,7 +16990,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -16990,7 +17070,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17048,7 +17128,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17106,7 +17186,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17188,7 +17268,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17257,7 +17337,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17315,7 +17395,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17395,7 +17475,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17475,7 +17555,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17553,7 +17633,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };
@@ -17611,7 +17691,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["BoundedErrorResponse"] | components["schemas"]["CapabilityUnavailableReply"];
                 };
             };
         };

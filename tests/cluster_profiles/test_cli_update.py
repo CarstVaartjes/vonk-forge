@@ -111,6 +111,9 @@ def _signed_publication(
     channel: str = "stable",
     wheel: bytes | None = None,
     omit_images: bool = False,
+    schema_version: int = 2,
+    omit_cli_digest: bool = False,
+    additive_descriptor: bool = False,
     wheel_name: str = "vonk_cluster_profiles-0.1.1-py3-none-any.whl",
 ) -> tuple[Path, dict[str, bytes]]:
     key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
@@ -188,7 +191,7 @@ def _signed_publication(
         "size": len(wheel),
     }
     release = {
-        "schema_version": 2,
+        "schema_version": schema_version,
         "channel": channel,
         "generation": generation,
         "version": "1.2.3",
@@ -200,6 +203,10 @@ def _signed_publication(
         "artifacts": artifacts,
         "bootstraps": bootstraps,
     }
+    if additive_descriptor:
+        artifacts["cli-wheel"]["media_type"] = "application/zip"
+    if omit_cli_digest:
+        del artifacts["cli-wheel"]["sha256"]
     if omit_images:
         del release["images"]
     release_raw = (
@@ -210,7 +217,7 @@ def _signed_publication(
         + b"\n"
     )
     claims = (
-        f"schema_version=2\nchannel={channel}\n"
+        f"schema_version={schema_version}\nchannel={channel}\n"
         f"generation={generation}\nversion=1.2.3\nsource_sha={source_sha}\n"
         f"expires_at={int(time.time()) + 3600}\n"
         f"release_path={prefix}/release.json\n"
@@ -364,10 +371,12 @@ def test_update_rejects_tampered_release_before_wheel_install(
         )
 
 
-def test_update_rejects_signed_release_missing_required_current_fields(
+def test_update_rejects_signed_release_missing_cli_digest(
     tmp_path: Path,
 ) -> None:
-    key, objects = _signed_publication(tmp_path, source_sha="b" * 40, omit_images=True)
+    key, objects = _signed_publication(
+        tmp_path, source_sha="b" * 40, omit_cli_digest=True
+    )
     with pytest.raises(cli_update.CliUpdateError, match="schema|invalid"):
         cli_update.run_update(
             channel="stable",
@@ -1320,3 +1329,114 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
         finally:
             listener.close()
             engine.dispose()
+
+
+@pytest.mark.parametrize("schema_version", [2, 3])
+def test_update_installs_across_release_format_changes(
+    tmp_path, monkeypatch, schema_version
+):
+    from jsonschema import Draft202012Validator, ValidationError
+
+    key, objects = _signed_publication(
+        tmp_path,
+        source_sha="b" * 40,
+        schema_version=schema_version,
+        additive_descriptor=True,
+    )
+    # Freeze the pre-ca installer schema without depending on repository history.
+    old_schema = json.loads(
+        Path("schemas/install-release-manifest.schema.json").read_text()
+    )
+    images = old_schema["$defs"]["InstallerReleaseImages"]
+    del images["properties"]["ca"]
+    images["required"].remove("ca")
+    release_raw = next(v for k, v in objects.items() if k.endswith("release.json"))
+    with pytest.raises(ValidationError):
+        Draft202012Validator(old_schema).validate(json.loads(release_raw))
+    old_schema_path = tmp_path / "install-release-manifest.schema.json"
+    old_schema_path.write_text(json.dumps(old_schema))
+    packaged = cli_update.files("cluster_profiles")
+
+    class OlderPackage:
+        def joinpath(self, path):
+            if path == "schemas/install-release-manifest.schema.json":
+                return old_schema_path
+            return packaged.joinpath(path)
+
+    monkeypatch.setattr(cli_update, "files", lambda package: OlderPackage())
+    monkeypatch.setattr(
+        cli_update,
+        "current_build",
+        lambda: {"version": "0.1.1", "source_sha": "c" * 40},
+    )
+    monkeypatch.setattr(cli_update.shutil, "which", lambda command: "/verified/uv")
+    installed = []
+
+    def install(command, **kwargs):
+        installed.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli_update.subprocess, "run", install)
+    result = cli_update.run_update(
+        channel="stable",
+        origin="https://install.vonkforge.ai",
+        apply=True,
+        public_key=key,
+        download=lambda url, maximum: objects[url],
+        compatibility_observation=_controller_observation,
+    )
+    assert result["updated"] is True and len(installed) == 1
+    request_update = cli_update.run_update
+    fresh = request_update(
+        channel="stable",
+        origin="https://install.vonkforge.ai",
+        apply=False,
+        public_key=key,
+        download=lambda url, maximum: objects[url],
+    )
+    assert fresh["update_available"] is True
+
+
+@pytest.mark.parametrize("target", ["release.json", "cli-wheel"])
+def test_update_refuses_tampered_bytes_then_allows_fresh_update(
+    tmp_path, monkeypatch, target
+):
+    key, objects = _signed_publication(tmp_path, source_sha="b" * 40, schema_version=3)
+    url = (
+        next(
+            k for k in objects if k.endswith("release.json") if target == "release.json"
+        )
+        if target == "release.json"
+        else next(k for k in objects if k.endswith(".whl"))
+    )
+    original = objects[url]
+    objects[url] = original + b"tampered"
+    installed = []
+    monkeypatch.setattr(
+        cli_update,
+        "current_build",
+        lambda: {"version": "0.1.1", "source_sha": "c" * 40},
+    )
+    monkeypatch.setattr(cli_update.shutil, "which", lambda command: "/verified/uv")
+
+    def install(command, **kwargs):
+        installed.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli_update.subprocess, "run", install)
+
+    def update():
+        return cli_update.run_update(
+            channel="stable",
+            origin="https://install.vonkforge.ai",
+            apply=True,
+            public_key=key,
+            download=lambda url, maximum: objects[url],
+            compatibility_observation=_controller_observation,
+        )
+
+    with pytest.raises(cli_update.CliUpdateError, match="digest"):
+        update()
+    assert not installed
+    objects[url] = original
+    assert update()["updated"] is True and len(installed) == 1

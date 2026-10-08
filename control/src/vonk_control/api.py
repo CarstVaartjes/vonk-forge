@@ -36,7 +36,6 @@ from fastapi.exception_handlers import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import (
@@ -65,7 +64,6 @@ from .artifact_jobs import ArtifactJobService
 from .auth import (
     MUTATION_ROLES,
     Actor,
-    AgentSource,
     AuthError,
     CursorError,
     TokenCodec,
@@ -155,8 +153,6 @@ from .recipe_packages import RecipePackageClient
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .run_switch_operations import RunSwitchOperationService
 from .settings import (
-    AGENT_CA_PROVISIONER_NAME,
-    AGENT_CA_URL,
     AGENT_RELEASE_API_URL,
     ARTIFACT_JOB_RETENTION_SECONDS,
     ARTIFACT_JOB_STORAGE_MAX_BYTES,
@@ -373,133 +369,12 @@ async def _bounded_request_body(request: Request, maximum: int) -> bytes:
     return bounded
 
 
-def build_agent_services(
-    settings: Any,
-    sessions: Any,
-    clock: Callable[[], Any],
-    *,
-    distribution: Any | None = None,
-    model_cache: Any | None = None,
-) -> AgentApiServices:
-    """Construct the fail-closed production agent runtime from one provider."""
-    from .agent_jobs import AgentJobService
-    from .enrollment import EnrollmentService
-    from .enrollment_bootstrap import EnrollmentBootstrapConfig
-    from .host_helper_authority import (
-        HostHelperGrantIssuer,
-        HostRuntimeAuthorityService,
-    )
-    from .presence import AgentPresenceService, ManagementAddressPolicy
-    from .step_ca import StepCertificateAuthority
+from typing import cast
 
-    if distribution is None and model_cache is not None:
-        from .distribution import build_distribution_service_from_components
-
-        distribution = build_distribution_service_from_components(
-            model_cache,
-            sessions,
-            settings.agent_artifact_root,
-            clock=clock,
-        )
-    if distribution is not None:
-        attach_sessions = getattr(distribution, "attach_sessions", None)
-        if callable(attach_sessions):
-            attach_sessions(sessions)
-
-    if not settings.agent_runtime_enabled:
-        # Local development still needs the durable operation queue and fleet
-        # presence service, but deliberately has no enrollment or certificate
-        # authority.  Agent HTTP routes stay disabled by production_app.
-        operations = AgentJobService(
-            sessions,
-            clock=clock,
-        )
-        policy = ManagementAddressPolicy.parse(
-            settings.management_cidrs or "127.0.0.1/32",
-            forbidden_cidrs=settings.direct_fabric_cidrs,
-        )
-        presence = AgentPresenceService(sessions, policy, clock=clock)
-        return AgentApiServices(
-            enrollment=None,
-            operations=operations,
-            sessions=sessions,
-            clock=clock,
-            presence=presence,
-            artifact_root=settings.agent_artifact_root,
-            source_bundles=DatabaseSourceBundleStore(sessions),
-            distribution=distribution,
-        )
-
-    bootstrap = EnrollmentBootstrapConfig.from_paths(
-        controller_endpoint=settings.agent_controller_origin,
-        enrollment_endpoint=settings.agent_enrollment_origin,
-        controller_ca_path=settings.controller_ca_path,
-        controller_address=settings.nas_lan_ip,
-        service_hostnames=(
-            settings.agent_service_hostnames if settings.nas_lan_ip else ()
-        ),
-        installer_url=(
-            "https://install.vonkforge.ai/dev/spark"
-            if settings.install_channel == "dev"
-            else "https://install.vonkforge.ai/spark"
-        ),
-    )
-    authority = StepCertificateAuthority(
-        ca_url=AGENT_CA_URL,
-        root_certificate_path=settings.agent_ca_root_path,
-        intermediate_certificate_path=settings.agent_intermediate_certificate_path,
-        provisioner_name=AGENT_CA_PROVISIONER_NAME,
-        provisioner_kid=settings.agent_ca_provisioner_kid,
-        credential_path=settings.agent_ca_credential_path,
-        provisioner_public_jwk_path=settings.agent_ca_provisioner_public_jwk_path,
-        certificate_lifetime_seconds=settings.agent_ca_certificate_lifetime_seconds,
-    )
-    settings.agent_artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
-    presence = AgentPresenceService(
-        sessions,
-        ManagementAddressPolicy.parse(
-            settings.management_cidrs,
-            forbidden_cidrs=settings.direct_fabric_cidrs,
-        ),
-        clock=clock,
-    )
-    operations = AgentJobService(
-        sessions,
-        clock=clock,
-    )
-
-    def observe_contact(session: Session, source: AgentSource) -> None:
-        presence.observe_in_session(session, source)
-
-    operations.set_contact_consumer(observe_contact)
-    host_runtime_key_path = settings.host_runtime_grant_private_key_path
-    if host_runtime_key_path is None:
-        raise RuntimeError("host runtime authority key is unavailable")
-    host_runtime_authority = HostRuntimeAuthorityService(
-        sessions,
-        HostHelperGrantIssuer.from_private_key_file(host_runtime_key_path, clock=clock),
-        clock=clock,
-    )
-    return AgentApiServices(
-        enrollment=EnrollmentService(sessions, authority, clock=clock),
-        operations=operations,
-        sessions=sessions,
-        clock=clock,
-        presence=presence,
-        artifact_root=settings.agent_artifact_root,
-        source_bundles=DatabaseSourceBundleStore(sessions),
-        distribution=distribution,
-        host_runtime_authority=host_runtime_authority,
-        fabric_policy=(
-            ManagementAddressPolicy.parse(
-                settings.direct_fabric_cidrs,
-                forbidden_cidrs=settings.management_cidrs,
-            )
-            if settings.direct_fabric_cidrs
-            else None
-        ),
-        bootstrap=bootstrap,
-    )
+from .agent_services import build_agent_services
+from .auth import CursorCodec
+from .capabilities import CapabilityRegistry
+from .capability_contract import CapabilityUnavailableReply, ControllerCapability
 
 
 class SpaFiles(StaticFiles):
@@ -557,10 +432,10 @@ def create_app(
     library_projection: Any | None = None,
     now: Callable[[], int] = lambda: int(time.time()),
     metrics: MetricsRegistry | None = None,
-    metrics_token: str | None = None,
+    metrics_token: str | Callable[[], str] | None = None,
     metrics_refresh: Callable[[], None] | None = None,
     agent: AgentApiServices | None = None,
-    trusted_agent_proxy_auth: bytes = b"",
+    trusted_agent_proxy_auth: bytes | Callable[[], bytes] = b"",
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
     operations: OperationApiServices | None = None,
     catalog: CatalogService | None = None,
@@ -583,17 +458,38 @@ def create_app(
         version="1.0",
         docs_url=None,
         redoc_url=None,
-        responses=bounded_error_responses(422),
+        responses=bounded_error_responses(422, 503),
         lifespan=lifespan,
     )
     app.router.route_class = ControllerAPIRoute
-    cursor_codec = tokens.cursor_codec()
+    from .capabilities import RecoveringService
+
+    cursor_codec = (
+        cast(
+            CursorCodec,
+            RecoveringService(
+                ControllerCapability.CURSOR_AUTH,
+                CursorCodec,
+                tokens.cursor_codec,
+                lambda: datetime.now(UTC),
+            ),
+        )
+        if isinstance(tokens, RecoveringService)
+        else tokens.cursor_codec()
+    )
 
     @app.exception_handler(StarletteHTTPException)
     async def canonical_agent_http_error(
         request: Request, error: StarletteHTTPException
     ) -> Response:
         from .library_api import SelectorAmbiguityHTTPError
+
+        if isinstance(error.detail, CapabilityUnavailableReply):
+            return Response(
+                error.detail.model_dump_json(),
+                status_code=503,
+                media_type="application/json",
+            )
 
         cause = error.__context__
         if error.status_code >= 500 and cause is not None:
@@ -992,7 +888,12 @@ def create_app(
         if metrics is None or metrics_token is None:
             raise HTTPException(status_code=404, detail="not found")
         authorization = request.headers.get("authorization", "")
-        if not secrets.compare_digest(authorization, f"Bearer {metrics_token}"):
+        expected_metrics_token = (
+            metrics_token() if callable(metrics_token) else metrics_token
+        )
+        if not secrets.compare_digest(
+            authorization, f"Bearer {expected_metrics_token}"
+        ):
             raise HTTPException(status_code=401, detail="authentication required")
         if metrics_refresh is not None:
             metrics_refresh()
@@ -1361,6 +1262,7 @@ async def _close_model_cache(model_cache: ModelCacheService) -> None:
 
 def production_app(settings: Settings | None = None) -> FastAPI:
     configure_controller_logging()
+    capabilities = CapabilityRegistry()
     from sqlalchemy import func, select
 
     from .agent_upgrades import AgentUpgradeService
@@ -1395,13 +1297,25 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url, component="api"))
     # Planning, profile choices, and preparation share the same managed OCI root.
-    runtime_image_storage = FilesystemRuntimeImageStorage(settings.agent_artifact_root)
+    runtime_image_storage = capabilities.guard(
+        ControllerCapability.RUNTIME_IMAGE_STORAGE,
+        FilesystemRuntimeImageStorage,
+        lambda: FilesystemRuntimeImageStorage(settings.agent_artifact_root),
+    )
 
     def clock() -> datetime:
         return datetime.now(UTC)
 
-    token_codec = TokenCodec(settings.token_signing_key)
-    cursor_codec = token_codec.cursor_codec()
+    token_codec = capabilities.guard(
+        ControllerCapability.TOKEN_AUTH,
+        TokenCodec,
+        lambda: TokenCodec(settings.token_signing_key),
+    )
+    cursor_codec = capabilities.guard(
+        ControllerCapability.CURSOR_AUTH,
+        CursorCodec,
+        token_codec.cursor_codec,
+    )
     job_service = JobService(sessions, clock=clock)
     database_bundles = DatabaseSourceBundleStore(sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
@@ -1423,23 +1337,33 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         sessions,
         clock=clock,
     )
-    model_cache = ModelCacheService(
-        sessions,
-        settings.model_cache_root,
-        reserve_bytes=MODEL_CACHE_RESERVE_BYTES,
-        max_parallel_downloads=MODEL_CACHE_PARALLEL_DOWNLOADS,
-        max_download_streams=MODEL_CACHE_MAX_DOWNLOAD_STREAMS,
-        clock=clock,
-        huggingface_token_path=settings.huggingface_token_path,
-        runtime_archive_available=runtime_image_storage.build_archive_available,
+
+    def build_cache() -> ModelCacheService:
+        cache = ModelCacheService(
+            sessions,
+            settings.model_cache_root,
+            reserve_bytes=MODEL_CACHE_RESERVE_BYTES,
+            max_parallel_downloads=MODEL_CACHE_PARALLEL_DOWNLOADS,
+            max_download_streams=MODEL_CACHE_MAX_DOWNLOAD_STREAMS,
+            clock=clock,
+            huggingface_token_path=settings.huggingface_token_path,
+            runtime_archive_available=runtime_image_storage.build_archive_available,
+        )
+        return cache
+
+    model_cache = capabilities.guard(
+        ControllerCapability.MODEL_CACHE,
+        ModelCacheService,
+        build_cache,
+        initialize=lambda cache: cache.resume_operations(),
     )
-    model_cache.resume_operations()
 
     agent_services = build_agent_services(
         settings,
         sessions,
         clock,
         model_cache=model_cache,
+        capabilities=capabilities,
     )
     runtime_image_transport = OciLayoutImageTransport()
     prepare_runtime_image_receipt = make_runtime_image_receipt_preparer(
@@ -1453,20 +1377,28 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         runtime_image_resolver=stored_runtime_image_resolver(runtime_image_storage),
     )
 
-    recipe_route_runtime = AtomicRouteBundlePublisher(
-        Path("/routes"),
-        await_supervisor_ack=FileSupervisorAcknowledger(
-            Path("/supervisor/ack.json"), clock=clock
+    recipe_route_runtime = capabilities.guard(
+        ControllerCapability.ROUTE_PUBLISHER,
+        AtomicRouteBundlePublisher,
+        lambda: AtomicRouteBundlePublisher(
+            Path("/routes"),
+            await_supervisor_ack=FileSupervisorAcknowledger(
+                Path("/supervisor/ack.json"), clock=clock
+            ),
         ),
     )
-    recipe_routes = RecipeRouteService(
-        sessions,
-        publisher=AtomicRecipeRoutePublisher(recipe_route_runtime),
-        management_policy=ManagementAddressPolicy.parse(
-            settings.management_cidrs,
-            forbidden_cidrs=settings.direct_fabric_cidrs,
+    recipe_routes = capabilities.guard(
+        ControllerCapability.RECIPE_ROUTES,
+        RecipeRouteService,
+        lambda: RecipeRouteService(
+            sessions,
+            publisher=AtomicRecipeRoutePublisher(recipe_route_runtime),
+            management_policy=ManagementAddressPolicy.parse(
+                settings.management_cidrs,
+                forbidden_cidrs=settings.direct_fabric_cidrs,
+            ),
+            clock=clock,
         ),
-        clock=clock,
     )
     recipe_builds = RecipeBuildService(
         sessions,
@@ -1528,17 +1460,26 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             clock=clock,
         ),
     )
-    artifact_jobs = ArtifactJobService(
-        sessions,
-        recipe_operations=recipe_operations,
-        blob_store=ArtifactBlobStore(
-            settings.state_path / "artifact-jobs" / "blobs",
-            max_stored_bytes=ARTIFACT_JOB_STORAGE_MAX_BYTES,
-        ),
-        clock=clock,
-        retention_seconds=ARTIFACT_JOB_RETENTION_SECONDS,
+
+    def build_artifact_jobs() -> ArtifactJobService:
+        service = ArtifactJobService(
+            sessions,
+            recipe_operations=recipe_operations,
+            blob_store=ArtifactBlobStore(
+                settings.state_path / "artifact-jobs" / "blobs",
+                max_stored_bytes=ARTIFACT_JOB_STORAGE_MAX_BYTES,
+            ),
+            clock=clock,
+            retention_seconds=ARTIFACT_JOB_RETENTION_SECONDS,
+        )
+        return service
+
+    artifact_jobs = capabilities.guard(
+        ControllerCapability.ARTIFACT_STORAGE,
+        ArtifactJobService,
+        build_artifact_jobs,
+        initialize=lambda service: service.reconcile_storage(),
     )
-    artifact_jobs.reconcile_storage()
     from .fleet_profiles import build_production_fleet_profile_service
 
     fleet_profiles = build_production_fleet_profile_service(
@@ -1632,11 +1573,15 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             else max(0, int(time.time()) - restore_completed_at)
         )
 
-    recipe_library = RecipePackageClient(
-        cache_root=settings.state_path / "recipe-library-packages",
-        api_url=RECIPE_LIBRARY_API_URL,
-        asset_url=RECIPE_LIBRARY_ASSET_URL,
-        release=settings.recipe_library_release,
+    recipe_library = capabilities.guard(
+        ControllerCapability.RECIPE_LIBRARY,
+        RecipePackageClient,
+        lambda: RecipePackageClient(
+            cache_root=settings.state_path / "recipe-library-packages",
+            api_url=RECIPE_LIBRARY_API_URL,
+            asset_url=RECIPE_LIBRARY_ASSET_URL,
+            release=settings.recipe_library_release,
+        ),
     )
     catalog_service = CatalogService(
         sessions,
@@ -1659,6 +1604,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         model_cache=model_cache,
         clock=clock,
         max_parallel=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
+        storage=runtime_image_storage,
     )
     # A load asks for the preparation it needs instead of stopping at its absence.
     fleet_profiles.bind_preparation_starter(
@@ -1671,11 +1617,17 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     automatic_sync_task: asyncio.Task[None] | None = None
     automatic_sync_stop = asyncio.Event()
 
-    gateway_keys = GatewayKeyService()
+    gateway_keys = capabilities.guard(
+        ControllerCapability.GATEWAY_KEYS,
+        GatewayKeyService,
+        GatewayKeyService,
+        check=lambda service: service.check_health(),
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         nonlocal automatic_sync_task
+        capabilities.start_recovery()
         automatic_sync_task = asyncio.create_task(
             run_automatic_sync(
                 managed_catalog_sync,
@@ -1690,7 +1642,11 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             automatic_sync_stop.set()
-            await default_key_task
+            await capabilities.stop_recovery()
+            try:
+                await default_key_task
+            except HTTPException:
+                pass
             if automatic_sync_task is not None:
                 await automatic_sync_task
             await _close_model_cache(model_cache)
@@ -1698,18 +1654,37 @@ def production_app(settings: Settings | None = None) -> FastAPI:
             recipe_library.close()
             agent_upgrades.close()
 
+    browser_auth = capabilities.guard(
+        ControllerCapability.BROWSER_AUTH,
+        BrowserAuthService,
+        lambda: BrowserAuthService(
+            sessions, token_signing_key=settings.token_signing_key, clock=clock
+        ),
+    )
+    metrics_secret = capabilities.provider(
+        ControllerCapability.METRICS_AUTH,
+        str,
+        lambda: settings.metrics_token,
+    )
+    proxy_secret = capabilities.provider(
+        ControllerCapability.AGENT_PROXY_AUTH,
+        bytes,
+        lambda: settings.agent_proxy_auth,
+    )
     app = create_app(
-        platform_observer=PlatformObserver(sessions, clock=clock),
+        platform_observer=PlatformObserver(
+            sessions, clock=clock, capabilities=capabilities
+        ),
         jobs=job_service,
         tokens=token_codec,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
         metrics=metrics,
-        metrics_token=settings.metrics_token,
+        metrics_token=metrics_secret.require_service,
         metrics_refresh=refresh_metrics,
         agent=(agent_services if settings.agent_runtime_enabled else None),
-        trusted_agent_proxy_auth=settings.agent_proxy_auth,
+        trusted_agent_proxy_auth=proxy_secret.require_service,
         operations=register_model_cache_operation_provider(
             durable_operation_services(
                 sessions,
@@ -1729,11 +1704,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         catalog=catalog_service,
         recipe_library=recipe_library,
         managed_catalog_sync=managed_catalog_sync,
-        browser_auth=BrowserAuthService(
-            sessions,
-            token_signing_key=settings.token_signing_key,
-            clock=clock,
-        ),
+        browser_auth=browser_auth,
         recipe_operations=recipe_operations,
         run_switch_operations=run_switch_operations,
         artifact_jobs=artifact_jobs,
@@ -1750,6 +1721,8 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         gateway_keys=gateway_keys,
         lifespan=lifespan,
     )
+    app.state.capabilities = capabilities
+
     web_root = Path(__file__).resolve().parent / "web"
     if web_root.is_dir():
         app.mount("/", SpaFiles(directory=web_root, html=True), name="admin-web")

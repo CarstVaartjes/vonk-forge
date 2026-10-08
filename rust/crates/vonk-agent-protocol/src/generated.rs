@@ -1113,6 +1113,64 @@ impl ::std::convert::TryFrom<::std::string::String> for CacheReferenceReason {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum CapabilityReason {
+    #[serde(rename = "capability.initializing")]
+    CapabilityInitializing,
+    #[serde(rename = "capability.configuration_invalid")]
+    CapabilityConfigurationInvalid,
+    #[serde(rename = "capability.storage_unavailable")]
+    CapabilityStorageUnavailable,
+    #[serde(rename = "capability.dependency_unavailable")]
+    CapabilityDependencyUnavailable,
+}
+impl ::std::fmt::Display for CapabilityReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CapabilityInitializing => f.write_str("capability.initializing"),
+            Self::CapabilityConfigurationInvalid => f.write_str("capability.configuration_invalid"),
+            Self::CapabilityStorageUnavailable => f.write_str("capability.storage_unavailable"),
+            Self::CapabilityDependencyUnavailable => {
+                f.write_str("capability.dependency_unavailable")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for CapabilityReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "capability.initializing" => Ok(Self::CapabilityInitializing),
+            "capability.configuration_invalid" => Ok(Self::CapabilityConfigurationInvalid),
+            "capability.storage_unavailable" => Ok(Self::CapabilityStorageUnavailable),
+            "capability.dependency_unavailable" => Ok(Self::CapabilityDependencyUnavailable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CapabilityReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CapabilityReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct CapabilityUnavailableReply {
+    pub capability: ControllerCapability,
+    pub reason: CapabilityReason,
+    pub retryable: bool,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CatalogCode {
     #[serde(rename = "catalog.actor")]
     CatalogActor,
@@ -1526,6 +1584,76 @@ pub struct ClaimRequest {
     pub protocol_version: u32,
     pub runtime_identity: AgentRuntimeIdentity,
     pub wait_seconds: u32,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CliReleaseArtifacts {
+    #[serde(rename = "cli-wheel")]
+    pub cli_wheel: CliWheelProjection,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CliReleaseProjection {
+    pub artifacts: CliReleaseArtifacts,
+    pub channel: CliReleaseProjectionChannel,
+    pub generation: ::std::string::String,
+    pub schema_version: crate::integer::Integer,
+    pub source_sha: ::std::string::String,
+    pub version: ::std::string::String,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum CliReleaseProjectionChannel {
+    #[serde(rename = "dev")]
+    Dev,
+    #[serde(rename = "stable")]
+    Stable,
+}
+impl ::std::fmt::Display for CliReleaseProjectionChannel {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Dev => f.write_str("dev"),
+            Self::Stable => f.write_str("stable"),
+        }
+    }
+}
+impl ::std::str::FromStr for CliReleaseProjectionChannel {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "dev" => Ok(Self::Dev),
+            "stable" => Ok(Self::Stable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CliReleaseProjectionChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CliReleaseProjectionChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CliWheelProjection {
+    pub path: ::std::string::String,
+    pub sha256: ::std::string::String,
+    pub size: u32,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
@@ -1964,6 +2092,117 @@ pub struct ConfirmPackageActivationOperation {
     pub package_sha256: ::std::string::String,
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ControllerCapability {
+    #[serde(rename = "certificate-authority")]
+    CertificateAuthority,
+    #[serde(rename = "enrollment-bootstrap")]
+    EnrollmentBootstrap,
+    #[serde(rename = "host-runtime-authority")]
+    HostRuntimeAuthority,
+    #[serde(rename = "model-cache")]
+    ModelCache,
+    #[serde(rename = "runtime-image-storage")]
+    RuntimeImageStorage,
+    #[serde(rename = "artifact-storage")]
+    ArtifactStorage,
+    #[serde(rename = "management-policy")]
+    ManagementPolicy,
+    #[serde(rename = "fabric-policy")]
+    FabricPolicy,
+    #[serde(rename = "agent-presence")]
+    AgentPresence,
+    #[serde(rename = "image-collection")]
+    ImageCollection,
+    #[serde(rename = "route-publisher")]
+    RoutePublisher,
+    #[serde(rename = "recipe-routes")]
+    RecipeRoutes,
+    #[serde(rename = "distribution")]
+    Distribution,
+    #[serde(rename = "recipe-library")]
+    RecipeLibrary,
+    #[serde(rename = "token-auth")]
+    TokenAuth,
+    #[serde(rename = "cursor-auth")]
+    CursorAuth,
+    #[serde(rename = "browser-auth")]
+    BrowserAuth,
+    #[serde(rename = "metrics-auth")]
+    MetricsAuth,
+    #[serde(rename = "agent-proxy-auth")]
+    AgentProxyAuth,
+    #[serde(rename = "gateway-keys")]
+    GatewayKeys,
+}
+impl ::std::fmt::Display for ControllerCapability {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CertificateAuthority => f.write_str("certificate-authority"),
+            Self::EnrollmentBootstrap => f.write_str("enrollment-bootstrap"),
+            Self::HostRuntimeAuthority => f.write_str("host-runtime-authority"),
+            Self::ModelCache => f.write_str("model-cache"),
+            Self::RuntimeImageStorage => f.write_str("runtime-image-storage"),
+            Self::ArtifactStorage => f.write_str("artifact-storage"),
+            Self::ManagementPolicy => f.write_str("management-policy"),
+            Self::FabricPolicy => f.write_str("fabric-policy"),
+            Self::AgentPresence => f.write_str("agent-presence"),
+            Self::ImageCollection => f.write_str("image-collection"),
+            Self::RoutePublisher => f.write_str("route-publisher"),
+            Self::RecipeRoutes => f.write_str("recipe-routes"),
+            Self::Distribution => f.write_str("distribution"),
+            Self::RecipeLibrary => f.write_str("recipe-library"),
+            Self::TokenAuth => f.write_str("token-auth"),
+            Self::CursorAuth => f.write_str("cursor-auth"),
+            Self::BrowserAuth => f.write_str("browser-auth"),
+            Self::MetricsAuth => f.write_str("metrics-auth"),
+            Self::AgentProxyAuth => f.write_str("agent-proxy-auth"),
+            Self::GatewayKeys => f.write_str("gateway-keys"),
+        }
+    }
+}
+impl ::std::str::FromStr for ControllerCapability {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "certificate-authority" => Ok(Self::CertificateAuthority),
+            "enrollment-bootstrap" => Ok(Self::EnrollmentBootstrap),
+            "host-runtime-authority" => Ok(Self::HostRuntimeAuthority),
+            "model-cache" => Ok(Self::ModelCache),
+            "runtime-image-storage" => Ok(Self::RuntimeImageStorage),
+            "artifact-storage" => Ok(Self::ArtifactStorage),
+            "management-policy" => Ok(Self::ManagementPolicy),
+            "fabric-policy" => Ok(Self::FabricPolicy),
+            "agent-presence" => Ok(Self::AgentPresence),
+            "image-collection" => Ok(Self::ImageCollection),
+            "route-publisher" => Ok(Self::RoutePublisher),
+            "recipe-routes" => Ok(Self::RecipeRoutes),
+            "distribution" => Ok(Self::Distribution),
+            "recipe-library" => Ok(Self::RecipeLibrary),
+            "token-auth" => Ok(Self::TokenAuth),
+            "cursor-auth" => Ok(Self::CursorAuth),
+            "browser-auth" => Ok(Self::BrowserAuth),
+            "metrics-auth" => Ok(Self::MetricsAuth),
+            "agent-proxy-auth" => Ok(Self::AgentProxyAuth),
+            "gateway-keys" => Ok(Self::GatewayKeys),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ControllerCapability {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ControllerCapability {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ControllerErrorCode {
@@ -16333,6 +16572,92 @@ impl<'de> ::serde::Deserialize<'de> for CacheReferenceReason {
         })
     }
 }
+impl CapabilityReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CapabilityInitializing => "capability.initializing",
+            Self::CapabilityConfigurationInvalid => "capability.configuration_invalid",
+            Self::CapabilityStorageUnavailable => "capability.storage_unavailable",
+            Self::CapabilityDependencyUnavailable => "capability.dependency_unavailable",
+        }
+    }
+}
+impl ::std::ops::Deref for CapabilityReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CapabilityReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CapabilityReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CapabilityReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("CapabilityReason"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "capability.initializing")]
+            CapabilityInitializing,
+            #[serde(rename = "capability.configuration_invalid")]
+            CapabilityConfigurationInvalid,
+            #[serde(rename = "capability.storage_unavailable")]
+            CapabilityStorageUnavailable,
+            #[serde(rename = "capability.dependency_unavailable")]
+            CapabilityDependencyUnavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CapabilityInitializing => Self::CapabilityInitializing,
+            Raw::CapabilityConfigurationInvalid => Self::CapabilityConfigurationInvalid,
+            Raw::CapabilityStorageUnavailable => Self::CapabilityStorageUnavailable,
+            Raw::CapabilityDependencyUnavailable => Self::CapabilityDependencyUnavailable,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CapabilityUnavailableReply {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("CapabilityUnavailableReply"),
+        )?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub capability: ControllerCapability,
+            pub reason: CapabilityReason,
+            pub retryable: bool,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            capability: raw.capability,
+            reason: raw.reason,
+            retryable: raw.retryable,
+        })
+    }
+}
 impl CatalogCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -16825,6 +17150,90 @@ impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
             protocol_version: raw.protocol_version,
             runtime_identity: raw.runtime_identity,
             wait_seconds: raw.wait_seconds,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CliReleaseArtifacts {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("CliReleaseArtifacts"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+        struct Raw {
+            #[serde(rename = "cli-wheel")]
+            pub cli_wheel: CliWheelProjection,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            cli_wheel: raw.cli_wheel,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CliReleaseProjection {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("CliReleaseProjection"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+        struct Raw {
+            pub artifacts: CliReleaseArtifacts,
+            pub channel: CliReleaseProjectionChannel,
+            pub generation: ::std::string::String,
+            pub schema_version: crate::integer::Integer,
+            pub source_sha: ::std::string::String,
+            pub version: ::std::string::String,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            artifacts: raw.artifacts,
+            channel: raw.channel,
+            generation: raw.generation,
+            schema_version: raw.schema_version,
+            source_sha: raw.source_sha,
+            version: raw.version,
+        })
+    }
+}
+impl CliReleaseProjectionChannel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Stable => "stable",
+        }
+    }
+}
+impl ::std::ops::Deref for CliReleaseProjectionChannel {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CliReleaseProjectionChannel {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CliReleaseProjectionChannel {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CliWheelProjection {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("CliWheelProjection"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+        struct Raw {
+            pub path: ::std::string::String,
+            pub sha256: ::std::string::String,
+            pub size: u32,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            path: raw.path,
+            sha256: raw.sha256,
+            size: raw.size,
         })
     }
 }
@@ -17450,6 +17859,132 @@ impl<'de> ::serde::Deserialize<'de> for ConfirmPackageActivationOperation {
             attempt_nonce: raw.attempt_nonce,
             package_sha256: raw.package_sha256,
             type_: raw.type_,
+        })
+    }
+}
+impl ControllerCapability {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::CertificateAuthority => "certificate-authority",
+            Self::EnrollmentBootstrap => "enrollment-bootstrap",
+            Self::HostRuntimeAuthority => "host-runtime-authority",
+            Self::ModelCache => "model-cache",
+            Self::RuntimeImageStorage => "runtime-image-storage",
+            Self::ArtifactStorage => "artifact-storage",
+            Self::ManagementPolicy => "management-policy",
+            Self::FabricPolicy => "fabric-policy",
+            Self::AgentPresence => "agent-presence",
+            Self::ImageCollection => "image-collection",
+            Self::RoutePublisher => "route-publisher",
+            Self::RecipeRoutes => "recipe-routes",
+            Self::Distribution => "distribution",
+            Self::RecipeLibrary => "recipe-library",
+            Self::TokenAuth => "token-auth",
+            Self::CursorAuth => "cursor-auth",
+            Self::BrowserAuth => "browser-auth",
+            Self::MetricsAuth => "metrics-auth",
+            Self::AgentProxyAuth => "agent-proxy-auth",
+            Self::GatewayKeys => "gateway-keys",
+        }
+    }
+}
+impl ::std::ops::Deref for ControllerCapability {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ControllerCapability {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ControllerCapability {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ControllerCapability {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ControllerCapability"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "certificate-authority")]
+            CertificateAuthority,
+            #[serde(rename = "enrollment-bootstrap")]
+            EnrollmentBootstrap,
+            #[serde(rename = "host-runtime-authority")]
+            HostRuntimeAuthority,
+            #[serde(rename = "model-cache")]
+            ModelCache,
+            #[serde(rename = "runtime-image-storage")]
+            RuntimeImageStorage,
+            #[serde(rename = "artifact-storage")]
+            ArtifactStorage,
+            #[serde(rename = "management-policy")]
+            ManagementPolicy,
+            #[serde(rename = "fabric-policy")]
+            FabricPolicy,
+            #[serde(rename = "agent-presence")]
+            AgentPresence,
+            #[serde(rename = "image-collection")]
+            ImageCollection,
+            #[serde(rename = "route-publisher")]
+            RoutePublisher,
+            #[serde(rename = "recipe-routes")]
+            RecipeRoutes,
+            #[serde(rename = "distribution")]
+            Distribution,
+            #[serde(rename = "recipe-library")]
+            RecipeLibrary,
+            #[serde(rename = "token-auth")]
+            TokenAuth,
+            #[serde(rename = "cursor-auth")]
+            CursorAuth,
+            #[serde(rename = "browser-auth")]
+            BrowserAuth,
+            #[serde(rename = "metrics-auth")]
+            MetricsAuth,
+            #[serde(rename = "agent-proxy-auth")]
+            AgentProxyAuth,
+            #[serde(rename = "gateway-keys")]
+            GatewayKeys,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CertificateAuthority => Self::CertificateAuthority,
+            Raw::EnrollmentBootstrap => Self::EnrollmentBootstrap,
+            Raw::HostRuntimeAuthority => Self::HostRuntimeAuthority,
+            Raw::ModelCache => Self::ModelCache,
+            Raw::RuntimeImageStorage => Self::RuntimeImageStorage,
+            Raw::ArtifactStorage => Self::ArtifactStorage,
+            Raw::ManagementPolicy => Self::ManagementPolicy,
+            Raw::FabricPolicy => Self::FabricPolicy,
+            Raw::AgentPresence => Self::AgentPresence,
+            Raw::ImageCollection => Self::ImageCollection,
+            Raw::RoutePublisher => Self::RoutePublisher,
+            Raw::RecipeRoutes => Self::RecipeRoutes,
+            Raw::Distribution => Self::Distribution,
+            Raw::RecipeLibrary => Self::RecipeLibrary,
+            Raw::TokenAuth => Self::TokenAuth,
+            Raw::CursorAuth => Self::CursorAuth,
+            Raw::BrowserAuth => Self::BrowserAuth,
+            Raw::MetricsAuth => Self::MetricsAuth,
+            Raw::AgentProxyAuth => Self::AgentProxyAuth,
+            Raw::GatewayKeys => Self::GatewayKeys,
         })
     }
 }
@@ -32483,6 +33018,15 @@ impl<'de> ::serde::Deserialize<'de> for WaitVerdict {
             Raw::FixAction => Self::FixAction,
             Raw::Derived => Self::Derived,
         })
+    }
+}
+impl From<&CliWheelProjection> for InstallerReleaseObject {
+    fn from(value: &CliWheelProjection) -> Self {
+        Self {
+            path: value.path.clone(),
+            sha256: value.sha256.clone(),
+            size: value.size,
+        }
     }
 }
 impl From<&ExpiredRenewRequest> for RenewRequest {

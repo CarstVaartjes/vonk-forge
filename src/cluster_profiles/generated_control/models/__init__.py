@@ -97,6 +97,10 @@ from .cache_removal_review import CacheRemovalReview
 from .cache_removal_review_resource_kind import CacheRemovalReviewResourceKind
 from .cached_resource_estimate import CachedResourceEstimate
 from .cancel_request import CancelRequest
+from .capability_availability import CapabilityAvailability
+from .capability_reason import CapabilityReason
+from .capability_status import CapabilityStatus
+from .capability_unavailable_reply import CapabilityUnavailableReply
 from .capacity_reservations import CapacityReservations
 from .catalog_code import CatalogCode
 from .catalog_problem import CatalogProblem
@@ -142,6 +146,7 @@ from .conditional_post_stop_memory_check import ConditionalPostStopMemoryCheck
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
+from .controller_capability import ControllerCapability
 from .controller_error_code import ControllerErrorCode
 from .desired_assignment_state import DesiredAssignmentState
 from .distributed_recovery_marker import DistributedRecoveryMarker
@@ -986,6 +991,10 @@ __all__ = (
     "CacheRemovalReview",
     "CacheRemovalReviewResourceKind",
     "CancelRequest",
+    "CapabilityAvailability",
+    "CapabilityReason",
+    "CapabilityStatus",
+    "CapabilityUnavailableReply",
     "CapacityReservations",
     "CatalogCode",
     "CatalogProblem",
@@ -1031,6 +1040,7 @@ __all__ = (
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
+    "ControllerCapability",
     "ControllerErrorCode",
     "DesiredAssignmentState",
     "DistributedRecoveryMarker",
