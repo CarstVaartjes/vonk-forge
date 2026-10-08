@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+chrono.workspace = true
 hex.workspace = true
 ring.workspace = true
 rustix = { workspace = true, features = ["param"] }

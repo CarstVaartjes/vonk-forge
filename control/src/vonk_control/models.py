@@ -2055,6 +2055,7 @@ class RunNode(Base):
         DateTime(timezone=True)
     )
     observation_endpoint_ready: Mapped[bool | None] = mapped_column(Boolean)
+    observation_failure_diagnostics: Mapped[JsonValue | None] = mapped_column(JSON)
     #: When a running endpoint owner's own readiness probe first failed in
     #: the current unbroken run of failures; ``None`` while it answers.
     observation_unready_since: Mapped[datetime | None] = mapped_column(

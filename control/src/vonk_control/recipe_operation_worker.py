@@ -216,6 +216,7 @@ class RecipeOperationWorker:
                 for node in missing:
                     node.state = "failed"
                     node.observation_process_running = None
+                    node.observation_failure_diagnostics = None
                     node.observation_observed_at = None
                     node.updated_at = now
                 run.route_state = RouteState.WITHDRAWN

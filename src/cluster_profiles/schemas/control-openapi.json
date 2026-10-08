@@ -6455,6 +6455,7 @@
       "FailureCode": {
         "description": "Closed codes of a definite failed outcome reported by the agent.",
         "enum": [
+          "workload.host_memory_exhausted",
           "operation_failed",
           "operation_cancelled",
           "agent_upgrade_failed",
@@ -26491,6 +26492,16 @@
               }
             ],
             "title": "Endpoint"
+          },
+          "preload_diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "RecipeStartResult",
@@ -28161,6 +28172,16 @@
             "const": "run-node",
             "title": "Entity Kind",
             "type": "string"
+          },
+          "failure_diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "node_id": {
             "maxLength": 128,
@@ -43163,6 +43184,9 @@
     ],
     "run_nodes.endpoint": [
       "StoredRunEndpoint"
+    ],
+    "run_nodes.observation_failure_diagnostics": [
+      "FailureDiagnostics"
     ],
     "run_switch_journal_repair_pending.progress": [
       "RunSwitchJournalRepairPendingState"

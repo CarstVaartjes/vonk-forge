@@ -533,7 +533,7 @@ pub struct RunInspection {
     /// The running container's bounded tail, when the caller asked for it.
     pub logs: Option<Box<HostHelperProcessLogs>>,
     /// Why the requested tail could not be read; never both `logs` and this.
-    pub log_error: Option<&'static str>,
+    pub log_error: Option<String>,
 }
 
 const LEGACY_RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 2;
@@ -997,7 +997,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Ok(RunInspection {
                 running: self.runtime_run_container_running(run_id)?,
                 logs: None,
-                log_error: Some("the run identity was too short to authorise reading its output"),
+                log_error: Some(
+                    "the run identity was too short to authorise reading its output".into(),
+                ),
             });
         }
         self.runtime_run_inspect_detail(&request.arguments, true, true)
@@ -2850,13 +2852,24 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     ))),
                     None,
                 ),
-                Ok(_) => (None, Some("the container log command failed")),
-                Err(_) => (None, Some("the container log command did not run")),
+                Ok(_) => (None, Some("the container log command failed".into())),
+                Err(_) => (None, Some("the container log command did not run".into())),
             };
             return Ok(RunInspection {
                 running: true,
                 logs,
                 log_error,
+            });
+        }
+        if *running == "false"
+            && !capture_failure
+            && let Some(evidence) =
+                crate::host_memory_guard::load_evidence(&self.roots.data, container_id)
+        {
+            return Ok(RunInspection {
+                running: false,
+                logs: None,
+                log_error: Some(crate::host_memory_guard::summary(&evidence)),
             });
         }
         if *running == "false" && capture_failure {
@@ -2908,6 +2921,32 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Ok(_) => Err("the container exit inspection failed"),
             Err(_) => Err("the container exit inspection did not run"),
         };
+        let exit = exit.map(|mut exit| {
+            // Names can be reused by a new attempt; evidence is keyed to the
+            // exact immutable container id, never to a run name.
+            let id = if target.len() == 64 && target.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                Some(target.to_owned())
+            } else {
+                self.runner
+                    .run_with_timeout(
+                        Path::new("/usr/bin/docker"),
+                        &[
+                            "inspect".into(),
+                            "--format".into(),
+                            "{{.Id}}".into(),
+                            target.into(),
+                        ],
+                        Duration::from_secs(1),
+                    )
+                    .ok()
+                    .filter(|output| output.success)
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            };
+            exit.host_memory = id
+                .as_deref()
+                .and_then(|id| crate::host_memory_guard::load_evidence(&self.roots.data, id));
+            exit
+        });
         (logs, exit)
     }
 
@@ -4987,6 +5026,7 @@ mod tests {
             exit_code: Some(137),
             oom_killed: Some(true),
             error: String::new(),
+            host_memory: None,
         };
         let logs: Vec<Result<CommandOutput, String>> = vec![
             Ok(output(true, "", "")),

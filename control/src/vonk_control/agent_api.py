@@ -1068,7 +1068,9 @@ def install_agent_routes(
                         # its process result remains valid evidence for
                         # Controller-owned recovery.
                         node.state = "failed"
-                    elif node.state != "failed":
+                    else:
+                        # Failure is an observation, not a latch: fresh live
+                        # evidence can recover a rank still owned by this run.
                         # A running process whose own health probe fails is
                         # failed only once that has lasted the grace period;
                         # one missed probe never takes a workload down.
@@ -1109,7 +1111,16 @@ def install_agent_routes(
                                 service="control-api",
                                 run_id=run.id,
                                 node_id=identity.node_id,
-                                reason="workload process is not running",
+                                reason=(
+                                    "workload.host_memory_exhausted: ran out of memory on hardware"
+                                    if evidence.failure_diagnostics
+                                    and any(
+                                        item.name == "exit_cause"
+                                        and item.value == "host_memory_exhausted"
+                                        for item in evidence.failure_diagnostics.preflight
+                                    )
+                                    else "workload process is not running"
+                                ),
                             )
                     node.observation_unready_since = (
                         (node.observation_unready_since or observed_at)
@@ -1120,6 +1131,13 @@ def install_agent_routes(
                     )
                     node.observed_run_generation = run.run_generation
                     node.observation_process_running = evidence.process_running
+                    node.observation_failure_diagnostics = (
+                        evidence.failure_diagnostics.model_dump(
+                            mode="json", exclude_none=True
+                        )
+                        if not evidence.process_running and evidence.failure_diagnostics
+                        else None
+                    )
                     node.observation_observed_at = observed_at
                     node.observation_endpoint_ready = (
                         evidence.endpoint_ready if owner else None

@@ -437,8 +437,9 @@ impl<R> RecipeExecutor<'_, R> {
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
                 };
                 match boundary
-                    .inspect_recipe_run_for_observation(vec![run_id.to_owned()])
+                    .inspect_recipe_run_evidence_for_observation(vec![run_id.to_owned()])
                     .await
+                    .map(|report| report.running)
                 {
                     Ok(false) => Ok(ExactRecipeRunObservation {
                         run_id: uuid::Uuid::parse_str(run_id)
@@ -446,6 +447,7 @@ impl<R> RecipeExecutor<'_, R> {
                         run_generation,
                         process_running: false,
                         endpoint_ready: Some(false),
+                        failure_diagnostics: None,
                     }),
                     Ok(true) => Err(skip("the container is running")),
                     Err(_) => Err(skip("the container could not be inspected")),
@@ -512,8 +514,8 @@ impl<R> RecipeExecutor<'_, R> {
                     request_root: &request_root,
                     helper_socket: Path::new("/run/vonk-forge-package-helper/package-helper.sock"),
                 };
-                let process_running = boundary
-                    .inspect_recipe_run_for_observation(plan.arguments)
+                let inspection = boundary
+                    .inspect_recipe_run_evidence_for_observation(plan.arguments)
                     .await
                     .inspect_err(|error| {
                         eprintln!(
@@ -522,6 +524,12 @@ impl<R> RecipeExecutor<'_, R> {
                             error.preflight_code()
                         );
                     })?;
+                let process_running = inspection.running;
+                let failure_diagnostics = inspection.log_error.as_deref()
+                    .filter(|detail| !process_running && detail.split_whitespace().any(|token| token == "exit_cause=host_memory_exhausted"))
+                    .map(|detail| {
+                    crate::failure_evidence::from_failure(&AgentOperation::RecipeStart, &Failure::new(FailureCode::WorkloadHostMemoryExhausted.as_str()).diagnostic(detail))
+                });
                 // A stopped process of a run this Controller never owned (for
                 // example after its database was rebuilt) is retired locally
                 // instead of being reported forever.
@@ -549,6 +557,7 @@ impl<R> RecipeExecutor<'_, R> {
                     run_generation: plan.run_generation,
                     process_running,
                     endpoint_ready,
+                    failure_diagnostics,
                 })
             })
             .buffer_unordered(BACKGROUND_RUN_INSPECTION_CONCURRENCY)
@@ -1092,7 +1101,10 @@ pub fn recipe_start_result(request: &RecipeStartRequest) -> RecipeStartResult {
         }
         _ => None,
     };
-    RecipeStartResult { endpoint }
+    RecipeStartResult {
+        endpoint,
+        preload_diagnostics: None,
+    }
 }
 
 pub fn distribution_success(evidence: DistributionDownloadEvidence) -> ExecutionResult {
@@ -1494,23 +1506,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(plan) => plan,
                     Err(_) => return failed_job(&request, 1, started, "job invocation is invalid"),
                 };
-                if self
-                    .runtime
-                    .ensure_memory_available(
-                        request.placement().reserved_memory_bytes,
-                        request.placement().memory_floor_bytes,
-                        "unified",
-                        Path::new("/proc/meminfo"),
-                    )
-                    .is_err()
-                {
-                    return failed_job(
-                        &request,
-                        1,
-                        started,
-                        "local memory capacity changed after job admission",
-                    );
-                }
+                // Kit peak is an estimate, never an admission veto. The host
+                // guard observes actual wedge precursors independently.
+                let preload_diagnostics = self.runtime.report_preload_memory(
+                    request.placement().reserved_memory_bytes,
+                    Path::new("/proc/meminfo"),
+                );
                 if *cancellation.borrow() {
                     return cancelled_job(&request, started, "controller cancellation requested");
                 }
@@ -1823,7 +1824,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                     return cancelled_job(&request, started, "controller cancellation requested");
                 }
-                let receipt =
+                let mut receipt =
                     job_receipt(&request, exit_code, started, output_manifest, exit_reason);
                 if job_scope_cleanup.finish().is_err() {
                     return failed_job(
@@ -1834,6 +1835,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     );
                 }
                 if exit_code == 0 {
+                    receipt.diagnostics = Some(preload_diagnostics);
                     ExecutionResult::done(receipt)
                 } else {
                     job_failure(receipt, job_evidence)
@@ -2026,6 +2028,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 ExecutionResult::done(RecipeReconcileResult::default())
             }
             RecipeOperationRequest::Start(request) => {
+                let preload_diagnostics = self.runtime.report_preload_memory(
+                    request.placement().reserved_memory_bytes,
+                    Path::new("/proc/meminfo"),
+                );
                 self.report_phase(claim, ProgressPhase::Starting).await;
                 let installation_id = request.installation_id.to_string();
                 let phase_deadline = match request
@@ -2149,18 +2155,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         }
                     }
                 } else {
-                    if self
-                        .runtime
-                        .ensure_memory_available(
-                            request.placement().reserved_memory_bytes,
-                            request.placement().memory_floor_bytes,
-                            "unified",
-                            Path::new("/proc/meminfo"),
-                        )
-                        .is_err()
-                    {
-                        return failed("local memory capacity changed after run admission");
-                    }
+                    // Kit peak is an estimate, never an admission veto. The host
+                    // guard observes actual wedge precursors independently.
                     match inspection_identity.as_ref().map_or_else(
                         || {
                             self.runtime
@@ -2239,18 +2235,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     // The retained plan and an independent Docker listing prove
                     // this exact run never reached a running container.
-                    if self
-                        .runtime
-                        .ensure_memory_available(
-                            request.placement().reserved_memory_bytes,
-                            request.placement().memory_floor_bytes,
-                            "unified",
-                            Path::new("/proc/meminfo"),
-                        )
-                        .is_err()
-                    {
-                        return failed("local memory capacity changed after run admission");
-                    }
+                    // Kit peak is an estimate, never an admission veto. The host
+                    // guard observes actual wedge precursors independently.
                     acl_transition = match self
                         .runtime
                         .begin_installation_acl_transition(&installation_id)
@@ -2466,7 +2452,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             }
                         };
                     }
-                    let success = recipe_start_success(&request);
+                    let mut result = recipe_start_result(&request);
+                    result.preload_diagnostics = Some(preload_diagnostics.clone());
+                    let success = ExecutionResult::done(result);
                     if *cancellation.borrow() {
                         return self
                             .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
@@ -2558,7 +2546,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         evidence,
                     );
                 }
-                let success = recipe_start_success(&request);
+                let mut result = recipe_start_result(&request);
+                result.preload_diagnostics = Some(preload_diagnostics.clone());
+                let success = ExecutionResult::done(result);
                 if *cancellation.borrow() {
                     return self
                         .cancel_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds)
@@ -2912,6 +2902,13 @@ fn runtime_observation_failure(error: &crate::host_runtime::HostRuntimeError) ->
         error.process_logs(),
         diagnostic.as_deref(),
     ));
+    if diagnostic.as_deref().is_some_and(|detail| {
+        detail
+            .split_whitespace()
+            .any(|token| token == "exit_cause=host_memory_exhausted")
+    }) {
+        failure = failure.code(FailureCode::WorkloadHostMemoryExhausted);
+    }
     if let Some(diagnostic) = &diagnostic {
         failure = failure.diagnostic(diagnostic.clone());
     }
@@ -3176,8 +3173,16 @@ fn job_failure(
         "exit_state_unavailable=\"helper reported no detail\" logs_unavailable=\"not captured\""
             .to_owned()
     });
+    let code = if diagnostic
+        .split_whitespace()
+        .any(|token| token == "exit_cause=host_memory_exhausted")
+    {
+        FailureCode::WorkloadHostMemoryExhausted
+    } else {
+        FailureCode::RecipeJobRunFailed
+    };
     let mut failure = Failure::new(reason)
-        .code(FailureCode::RecipeJobRunFailed)
+        .code(code)
         .diagnostic(diagnostic.chars().take(480).collect::<String>())
         .receipt(receipt);
     if let Some(logs) = logs {
@@ -3903,6 +3908,37 @@ mod tests {
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
     #[test]
+    fn host_memory_safety_stop_is_a_typed_capacity_failure() {
+        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code: HelperErrorCode::RuntimeProcessExited,
+            diagnostic: Some("observed_at=2026-10-08T00:00:00+00:00 reason=workload.host_memory_exhausted exit_cause=host_memory_exhausted mem_available_bytes=1 memory_full_avg10=99 trigger=sustained_full_psi sustained_ms=3000".into()),
+            process_logs: None,
+        };
+        let ExecutionResult::Failed(failure) = runtime_observation_failure(&error) else {
+            panic!("expected failure");
+        };
+        assert_eq!(failure.code, Some(FailureCode::WorkloadHostMemoryExhausted));
+        let diagnostics = crate::failure_evidence::from_failure(
+            &vonk_agent_protocol::generated::AgentOperation::RecipeStart,
+            &failure,
+        );
+        assert_eq!(
+            diagnostics.category,
+            crate::failure_evidence::FailureCategory::Capacity
+        );
+        assert!(
+            diagnostics
+                .preflight
+                .iter()
+                .any(|p| p.name == "exit_cause" && p.value == "host_memory_exhausted")
+        );
+        // Fresh success uses the normal operation path; no ban survives ending.
+        assert!(matches!(
+            recipe_install_success(0),
+            ExecutionResult::Done(_)
+        ));
+    }
+    #[test]
     fn readiness_identity_uses_controller_digest_forms() {
         let value: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../control/tests/fixtures/compiled_workload_v2.json"
@@ -4153,6 +4189,7 @@ mod tests {
             run_generation: 3,
             process_running: true,
             endpoint_ready: None,
+            failure_diagnostics: None,
         }
     }
 
@@ -4218,6 +4255,7 @@ mod tests {
                     run_generation: plan.run_generation,
                     process_running: true,
                     endpoint_ready: Some(true),
+                    failure_diagnostics: None,
                 })
             }));
             state

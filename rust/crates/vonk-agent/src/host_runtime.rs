@@ -330,17 +330,16 @@ impl HostRuntimeBoundary<'_> {
             .map(|report| report.running)
     }
 
-    pub async fn inspect_recipe_run_for_observation(
+    pub async fn inspect_recipe_run_evidence_for_observation(
         &self,
         arguments: Vec<String>,
-    ) -> Result<bool, HostRuntimeError> {
+    ) -> Result<RunInspectionReport, HostRuntimeError> {
         let permit = background_inspection_slots()
             .acquire_owned()
             .await
             .map_err(|_| HostRuntimeError::HelperProtocol(HelperProtocolCause::HelperCallJoin))?;
         self.inspect_recipe_run_report_with_permit(arguments, false, Some(permit))
             .await
-            .map(|report| report.running)
     }
 
     /// Like `inspect_recipe_run`, and when `include_logs` is set also reads the
@@ -414,7 +413,15 @@ impl HostRuntimeBoundary<'_> {
             ))?;
         // A tail was never volunteered: only a request that asked for it may
         // receive one, and the reason it is missing is typed.
-        if !include_logs && (response.process_logs.is_some() || response.diagnostic.is_some()) {
+        let safety_stop = !running
+            && response.diagnostic.as_deref().is_some_and(|detail| {
+                detail
+                    .split_whitespace()
+                    .any(|token| token == "exit_cause=host_memory_exhausted")
+            });
+        if !include_logs
+            && (response.process_logs.is_some() || response.diagnostic.is_some() && !safety_stop)
+        {
             return Err(HostRuntimeError::HelperProtocol(
                 HelperProtocolCause::InspectionOutcome,
             ));
@@ -1259,7 +1266,10 @@ mod tests {
                 };
                 let arguments = vec![Uuid::new_v4().to_string()];
                 if background {
-                    boundary.inspect_recipe_run_for_observation(arguments).await
+                    boundary
+                        .inspect_recipe_run_evidence_for_observation(arguments)
+                        .await
+                        .map(|report| report.running)
                 } else {
                     boundary
                         .inspect_recipe_run_report(arguments, true)

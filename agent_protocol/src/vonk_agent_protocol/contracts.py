@@ -186,6 +186,7 @@ class RecipeStartResult(WireModel):
     """The serving rank reports its endpoint; every other rank reports ``{}``."""
 
     endpoint: str | None = None
+    preload_diagnostics: FailureDiagnostics | None = None
 
 
 class ArtifactDistributionResult(WireModel):
@@ -1150,6 +1151,10 @@ class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
                     "helper_error_code",
                     "helper_exit_code",
                 )
+            )
+            + (
+                ("result", "preload_diagnostics"),
+                ("result", "result", "preload_diagnostics"),
             ),
         ),
     )

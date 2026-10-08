@@ -19,6 +19,7 @@ from vonk_agent_protocol.contracts import (
     RecipeBuildRequest,
 )
 from vonk_agent_protocol.distribution import DistributionObject
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.inventory import Capability, NetworkInterface
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
@@ -139,6 +140,7 @@ bind(
 )
 bind("model_cache_sets", "protected_reasons", list[CacheReferenceReason])
 bind("run_nodes", "endpoint", StoredRunEndpoint, nullable=True)
+bind("run_nodes", "observation_failure_diagnostics", FailureDiagnostics, nullable=True)
 bind(
     "route_publications",
     "activation_marker",

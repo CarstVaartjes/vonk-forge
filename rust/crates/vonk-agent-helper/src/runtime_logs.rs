@@ -269,6 +269,7 @@ pub struct ContainerExit {
     /// The runtime's own start/exit error (`exec format error`, a missing
     /// executable, a refused device), empty when it recorded none.
     pub error: String,
+    pub host_memory: Option<vonk_agent_protocol::failure_evidence::FailureDiagnostics>,
 }
 
 /// Format for `docker container inspect --format`, read back by `parse_exit`.
@@ -295,6 +296,7 @@ pub fn parse_exit(output: &[u8]) -> Option<ContainerExit> {
         exit_code: Some(exit_code),
         oom_killed,
         error,
+        host_memory: None,
     })
 }
 
@@ -302,6 +304,7 @@ pub fn parse_exit(output: &[u8]) -> Option<ContainerExit> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitCause {
     OomKilled,
+    HostMemoryExhausted,
     BadArguments,
     MissingFile,
     UnsupportedGpuArch,
@@ -315,6 +318,7 @@ impl ExitCause {
     pub fn token(self) -> &'static str {
         match self {
             Self::OomKilled => "oom_killed",
+            Self::HostMemoryExhausted => "host_memory_exhausted",
             Self::BadArguments => "bad_arguments",
             Self::MissingFile => "missing_file",
             Self::UnsupportedGpuArch => "unsupported_gpu_arch",
@@ -333,6 +337,9 @@ fn has(text: &str, needles: &[&str]) -> bool {
 /// Classify from the exit state first (it is authoritative), then from the
 /// container's own words.  Only the retained tails are read.
 pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLogs>) -> ExitCause {
+    if exit.is_some_and(|exit| exit.host_memory.is_some()) {
+        return ExitCause::HostMemoryExhausted;
+    }
     let output = logs
         .map(|logs| format!("{}\n{}", logs.stdout.text, logs.stderr.text).to_lowercase())
         .unwrap_or_default();
@@ -408,6 +415,11 @@ pub fn exit_summary(
     logs: Option<&HostHelperProcessLogs>,
     log_error: Option<&'static str>,
 ) -> String {
+    if let Ok(state) = exit
+        && let Some(evidence) = &state.host_memory
+    {
+        return crate::host_memory_guard::summary(evidence);
+    }
     let cause = classify(exit.ok(), logs);
     let mut parts = Vec::new();
     match exit {
@@ -708,6 +720,7 @@ mod tests {
             exit_code: Some(code),
             oom_killed: Some(oom),
             error: error.to_owned(),
+            host_memory: None,
         }
     }
 
@@ -787,6 +800,7 @@ mod tests {
                 exit_code: Some(1),
                 oom_killed: Some(false),
                 error: String::new(),
+                host_memory: None,
             }),
             Err("inspect failed"),
         ];

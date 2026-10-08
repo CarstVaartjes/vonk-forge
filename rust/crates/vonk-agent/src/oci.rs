@@ -30,7 +30,7 @@ use vonk_agent_protocol::{
 pub use vonk_agent_protocol::generated::RecipeRunObservationCheckpoint;
 
 use crate::{
-    inventory::{available_disk_bytes, available_memory_bytes},
+    inventory::available_disk_bytes,
     process::{ProcessError, ProcessRunner},
     workloads::{
         CompiledExecutionPlan, CompiledRuntimePlacement, WorkloadError, managed_path,
@@ -456,23 +456,49 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(())
     }
 
-    pub fn ensure_memory_available(
+    pub fn report_preload_memory(
         &self,
-        required_bytes: u64,
-        memory_floor_bytes: u64,
-        memory_kind: &str,
+        peak_bytes: u64,
         meminfo_path: &Path,
-    ) -> Result<(), OciError> {
-        let required = required_bytes
-            .checked_add(memory_floor_bytes)
-            .ok_or(OciError::Capacity)?;
-        if available_memory_bytes(self.runner, meminfo_path, memory_kind)
-            .map_err(|_| OciError::Capacity)?
-            < required
-        {
-            return Err(OciError::Capacity);
-        }
-        Ok(())
+    ) -> vonk_agent_protocol::failure_evidence::FailureDiagnostics {
+        let available = fs::read_to_string(meminfo_path).ok().and_then(|text| {
+            text.lines().find_map(|line| {
+                line.strip_prefix("MemAvailable:")?
+                    .split_whitespace()
+                    .next()?
+                    .parse::<u64>()
+                    .ok()?
+                    .checked_mul(1024)
+            })
+        });
+        // Informational estimate only. GPU driver queries can block under
+        // pressure; this path needs only the host's physical memory snapshot.
+        let margin = vonk_agent_protocol::host_memory_guard_policy::PRELOAD_MARGIN_BYTES;
+        let warning = available.is_none_or(|bytes| bytes < peak_bytes.saturating_add(margin));
+        let mut diagnostics =
+            crate::failure_evidence::collect("workload.preload_memory", "capacity", &[], &[]);
+        diagnostics.preflight = [
+            (
+                "mem_available_bytes",
+                available.map_or_else(|| "unknown".into(), |bytes| bytes.to_string()),
+            ),
+            ("declared_peak_bytes", peak_bytes.to_string()),
+            ("margin_bytes", margin.to_string()),
+            ("below_estimated_peak", warning.to_string()),
+            ("informational_only", "true".into()),
+        ]
+        .into_iter()
+        .map(
+            |(name, value)| vonk_agent_protocol::failure_evidence::FailureProperty {
+                name: name.into(),
+                value,
+            },
+        )
+        .collect();
+        eprintln!(
+            "vonk-agent: workload.preload_memory available_bytes={available:?} declared_peak_bytes={peak_bytes} margin_bytes={margin} warning={warning}; informational_only=true"
+        );
+        diagnostics
     }
 
     pub fn install(
@@ -3113,163 +3139,31 @@ mod tests {
         }
     }
 
-    struct SeparateMemoryRunner {
-        total_mib: u64,
-        free_mib: u64,
-    }
-
-    impl ProcessRunner for SeparateMemoryRunner {
-        fn run(
-            &self,
-            program: Program,
-            _: &[String],
-            _: Duration,
-        ) -> Result<ProcessOutput, ProcessError> {
-            assert_eq!(program, Program::NvidiaSmi);
-            Ok(ProcessOutput {
-                success: true,
-                stdout: format!(
-                    "NVIDIA RTX, {}, {}, 590.44\n",
-                    self.total_mib, self.free_mib
-                )
-                .into_bytes(),
-                stderr: vec![],
-            })
-        }
-    }
-
     #[test]
-    fn declared_recipe_reserve_is_the_only_agent_memory_floor() {
+    fn preload_estimates_never_refuse_tight_kits_or_unknown_readings() {
         let directory = tempdir().unwrap();
         let meminfo = directory.path().join("meminfo");
-        // This is 122,999,999,488 bytes: enough for the 120 GB GLM demand and
-        // its declared 2 GB reserve, with almost 1 GB left over.
-        fs::write(
-            &meminfo,
-            "MemTotal: 134217728 kB\nMemAvailable: 120117187 kB\n",
-        )
-        .unwrap();
         let runtime = OciRuntime {
             runner: &Gb10MemoryRunner,
             data_root: directory.path(),
         };
-
+        fs::write(&meminfo, "MemAvailable: 1 kB\n").unwrap();
+        let warning = runtime.report_preload_memory(128 * 1024_u64.pow(3), &meminfo);
         assert!(
-            runtime
-                .ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo)
-                .is_ok()
+            warning
+                .preflight
+                .iter()
+                .any(|p| p.name == "below_estimated_peak" && p.value == "true")
         );
-
-        // 119,140,625 KiB is exactly 122,000,000,000 bytes: demand plus the
-        // declared reserve must fit at the inclusive boundary.
-        fs::write(
-            &meminfo,
-            "MemTotal: 134217728 kB\nMemAvailable: 119140625 kB\n",
-        )
-        .unwrap();
+        // A new attempt remains admitted; absent bookkeeping is informational.
+        let unknown =
+            runtime.report_preload_memory(128 * 1024_u64.pow(3), &directory.path().join("absent"));
         assert!(
-            runtime
-                .ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo)
-                .is_ok()
+            unknown
+                .preflight
+                .iter()
+                .any(|p| p.name == "mem_available_bytes" && p.value == "unknown")
         );
-
-        fs::write(
-            &meminfo,
-            "MemTotal: 134217728 kB\nMemAvailable: 119140624 kB\n",
-        )
-        .unwrap();
-        assert!(matches!(
-            runtime.ensure_memory_available(120_000_000_000, 2_000_000_000, "unified", &meminfo),
-            Err(OciError::Capacity)
-        ));
-    }
-
-    #[test]
-    fn host_only_demand_fits_without_counting_separate_vram() {
-        let directory = tempdir().unwrap();
-        let meminfo = directory.path().join("meminfo");
-        fs::write(
-            &meminfo,
-            "MemTotal: 134217728 kB\nMemAvailable: 50331648 kB\n",
-        )
-        .unwrap();
-        let runtime = OciRuntime {
-            runner: &SeparateMemoryRunner {
-                total_mib: 65_536,
-                free_mib: 8_192,
-            },
-            data_root: directory.path(),
-        };
-
-        assert!(
-            runtime
-                .ensure_memory_available(17 * 1024_u64.pow(3), 0, "host", &meminfo)
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn accelerator_only_demand_fits_without_counting_separate_host_ram() {
-        let directory = tempdir().unwrap();
-        let meminfo = directory.path().join("meminfo");
-        fs::write(
-            &meminfo,
-            "MemTotal: 134217728 kB\nMemAvailable: 8388608 kB\n",
-        )
-        .unwrap();
-        let runtime = OciRuntime {
-            runner: &SeparateMemoryRunner {
-                total_mib: 65_536,
-                free_mib: 49_152,
-            },
-            data_root: directory.path(),
-        };
-
-        assert!(
-            runtime
-                .ensure_memory_available(17 * 1024_u64.pow(3), 0, "accelerator", &meminfo)
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn unified_separate_demand_needs_both_pools_and_shared_uses_host_capacity() {
-        let directory = tempdir().unwrap();
-        let meminfo = directory.path().join("meminfo");
-        fs::write(
-            &meminfo,
-            "MemTotal: 134217728 kB\nMemAvailable: 8388608 kB\n",
-        )
-        .unwrap();
-        let separate_runner = SeparateMemoryRunner {
-            total_mib: 65_536,
-            free_mib: 49_152,
-        };
-        let separate = OciRuntime {
-            runner: &separate_runner,
-            data_root: directory.path(),
-        };
-        assert!(matches!(
-            separate.ensure_memory_available(17 * 1024_u64.pow(3), 0, "unified", &meminfo),
-            Err(OciError::Capacity)
-        ));
-
-        fs::write(
-            &meminfo,
-            "MemTotal: 134217728 kB\nMemAvailable: 50331648 kB\n",
-        )
-        .unwrap();
-        let shared = OciRuntime {
-            runner: &Gb10MemoryRunner,
-            data_root: directory.path(),
-        };
-        for memory_kind in ["host", "accelerator", "unified"] {
-            assert!(
-                shared
-                    .ensure_memory_available(17 * 1024_u64.pow(3), 0, memory_kind, &meminfo)
-                    .is_ok()
-            );
-        }
     }
 
     fn digest(value: &[u8]) -> String {
