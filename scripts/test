@@ -11,7 +11,8 @@ usage() {
 Usage: scripts/test SUITE [--markers EXPR] [--shard I/N] [--durations FILE] [-- PYTEST_ARGS...]
 
 SUITE is one of:
-  repository  tests/
+  guards      fast cross-area checks in tests/repository_guards.py
+  repository  tests/, excluding guards
   control     control/tests, except the built-image checks and the Rust wire
               bridges (those run in their own lanes)
   compose     deploy/compose/tests
@@ -48,6 +49,11 @@ done
 case "$suite" in
     # selection: which tests; parallel: how they run. prefix: pytest reports
     # control/tests node IDs relative to control/, its rootdir.
+    guards)
+        guard_paths=$(python3 scripts/repository-guards)
+        paths=() selection=() parallel=(-n 0) prefix= suite_markers=
+        while IFS= read -r path; do paths+=("$path"); done <<< "$guard_paths"
+        ;;
     repository)
         paths=(tests) selection=() parallel=(-n auto --dist loadfile) prefix= suite_markers=
         ;;
@@ -67,6 +73,15 @@ case "$suite" in
         exit 2
         ;;
 esac
+# Guards have their own unconditional CI job; exclude exactly its reviewed
+# file/node selection before both collection and execution of the heavy suite.
+if [[ "$suite" == repository ]]; then
+    guard_exclusions=$(python3 scripts/repository-guards --exclusions)
+    while IFS= read -r exclusion; do
+        selection+=("$exclusion")
+    done <<< "$guard_exclusions"
+fi
+
 if [[ -n "$suite_markers" && -n "$markers" ]]; then
     selection+=(-m "($suite_markers) and ($markers)")
 elif [[ -n "$suite_markers$markers" ]]; then

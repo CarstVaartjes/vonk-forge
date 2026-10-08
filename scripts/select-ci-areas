@@ -207,12 +207,15 @@ def main() -> int:
     if arguments.github_output:
         for area in AREAS:
             print(f"{area}={str(selected[area]).lower()}")
+        print("guards=true")
         print(f"lane={str(lane).lower()}")
         print(f"any={str(any(selected.values())).lower()}")
     else:
         print(
             json.dumps(
-                {**selected, "lane": lane}, sort_keys=True, separators=(",", ":")
+                {**selected, "guards": True, "lane": lane},
+                sort_keys=True,
+                separators=(",", ":"),
             )
         )
     return 0

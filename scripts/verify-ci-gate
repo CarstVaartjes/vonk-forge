@@ -49,7 +49,7 @@ def verify(
     if selector_result != "success":
         errors.append(f"selector result is {selector_result!r}, expected 'success'")
 
-    required_success = {"lint", "supply-chain"}
+    required_success = {"lint", "supply-chain", "repository-guards"}
     for job in required_success:
         if results.get(job) != "success":
             errors.append(f"{job} result is {results.get(job)!r}, expected 'success'")

@@ -764,6 +764,28 @@ jobs:
             "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
             "$BASELINE_VERSION" "$VERSION"
 
+  repository-guards:
+    name: Repository guards
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Install shell guard prerequisite
+        uses: ./.github/actions/apt-install
+        with:
+          packages: shellcheck
+      - name: Run reviewed repository guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          guard_list="$RUNNER_TEMP/repository-guards.txt"
+          python3 scripts/repository-guards > "$guard_list"
+          mapfile -t guards < "$guard_list"
+          uv run --project control --frozen python -m pytest -q -p no:cacheprovider -n 0 "${guards[@]}"
+
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
     needs: changes
@@ -1141,7 +1163,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1169,6 +1191,7 @@ jobs:
           RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
           RUST_PLATFORM_RESULT: ${{ needs.rust-platform.result }}
           WIRE_RESULT: ${{ needs.controller-spark-wire.result }}
+          REPOSITORY_GUARDS_RESULT: ${{ needs.repository-guards.result }}
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           CONTROL_IMAGE_BUILD_RESULT: ${{ needs.control-image-build.result }}
@@ -1197,6 +1220,7 @@ jobs:
             --result "rust-tests=$RUST_TESTS_RESULT" \
             --result "rust-platform=$RUST_PLATFORM_RESULT" \
             --result "controller-spark-wire=$WIRE_RESULT" \
+            --result "repository-guards=$REPOSITORY_GUARDS_RESULT" \
             --result "repository=$REPOSITORY_RESULT" \
             --result "control=$CONTROL_RESULT" \
             --result "control-image-build=$CONTROL_IMAGE_BUILD_RESULT" \
