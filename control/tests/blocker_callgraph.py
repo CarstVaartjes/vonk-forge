@@ -259,6 +259,10 @@ class _Facts:
     raises: dict[str, list[Tries]] = field(default_factory=lambda: defaultdict(list))
     dynamic: list[Tries] = field(default_factory=list)
     escapes: set[Function] = field(default_factory=set)
+    forwarded_escapes: set[tuple[Function, str]] = field(default_factory=set)
+    forwarded_aliases: list[tuple[tuple[Function, str], tuple[Function, str]]] = field(
+        default_factory=list
+    )
     attr_stores: list[
         tuple[tuple[str, str], str, set[Function], tuple[Function, str] | None]
     ] = field(default_factory=list)
@@ -477,8 +481,13 @@ class CallGraph:
                     for parent in self._classes_named(module, base):
                         if parent.name != base:
                             self.children[parent.name].append(cls)
-                if "Protocol" in cls.bases:
-                    cls.is_protocol = True
+                module = self.modules[cls.path]
+                cls.is_protocol = any(
+                    base == "Protocol"
+                    or module.imports.get(base)
+                    in {("typing", "Protocol"), ("typing_extensions", "Protocol")}
+                    for base in cls.bases
+                )
         self._collect_factories()
 
     def _collect_factories(self) -> None:
@@ -1209,7 +1218,15 @@ class CallGraph:
             if site.args or site.cb_param or site.cb_attrs or site.cb_attr_name
         ]
         stores = [store for facts in self.facts.values() for store in facts.attr_stores]
-        for _ in range(12):
+        # Binding sets only grow. Each changing pass adds a function to a
+        # finite slot, so this domain bounds convergence without hiding long
+        # forwarding chains (including their unknown-consumer escapes).
+        slots = sum(len(info.params) for info in self.info.values())
+        slots += sum(len(facts.forwarded_aliases) for facts in self.facts.values())
+        slots += sum(len(cls.fields) for cls in self.class_by_key.values()) + len(
+            stores
+        )
+        for _ in range(len(self.functions) * slots + 1):
             changed = False
             for site in active:
                 for target in self._site_targets(site):
@@ -1221,6 +1238,12 @@ class CallGraph:
                     for constructor in self._constructors(cls):
                         if any(arg.refs or arg.forward for arg in site.args):
                             changed |= self._bind_args(site, constructor)
+            for facts in self.facts.values():
+                for alias, source in facts.forwarded_aliases:
+                    incoming = self._bind.get(source, set())
+                    if not incoming <= self._bind[alias]:
+                        self._bind[alias] |= incoming
+                        changed = True
             for key, attr, refs, forward in stores:
                 bound = self._attr_bind[(key, attr)]
                 incoming = set(refs)
@@ -1254,6 +1277,8 @@ class CallGraph:
                 for cls in site.ctors:
                     for constructor in self._constructors(cls):
                         self._add_edge(function, constructor, site.tries, "constructor")
+            for key in facts.forwarded_escapes:
+                facts.escapes |= self._bind.get(key, set())
             for escaped in facts.escapes:
                 self.entries.setdefault(escaped, "reference-escape")
             if facts.dynamic:
@@ -1413,6 +1438,8 @@ class _Walker:
         self.facts = _Facts()
         self.env = graph.env(function)
         self.aliases: dict[str, set[Function]] = {}
+        self.forward_aliases: dict[str, tuple[Function, str]] = {}
+        self.fallback_aliases: set[str] = set()
         self.callee_ids: set[int] = set()
         self.arg_of: dict[int, tuple[_Site, _Arg]] = {}
         self.assign_of: dict[int, ast.AST] = {}
@@ -1477,7 +1504,10 @@ class _Walker:
             self.call(node, tries)
         elif isinstance(node, ast.Name):
             if isinstance(node.ctx, ast.Load) and (
-                node.id in self.graph.function_names or node.id in self.aliases
+                node.id in self.graph.function_names
+                or node.id in self.aliases
+                or node.id in self.forward_aliases
+                or node.id in self.info.params
             ):
                 self.reference(node)
             return
@@ -1523,6 +1553,8 @@ class _Walker:
     def refs(
         self, node: ast.AST
     ) -> tuple[set[Function], tuple[Function, str] | None, list[ClassInfo]]:
+        if isinstance(node, ast.Name) and node.id in self.forward_aliases:
+            return set(self.aliases.get(node.id, ())), self.forward_aliases[node.id], []
         return self.graph._function_refs(node, self.function, self.env, self.aliases)
 
     def reference(self, node: ast.Name | ast.Attribute) -> None:
@@ -1530,8 +1562,10 @@ class _Walker:
             return
         if id(node) in self.arg_of or id(node) in self.assign_of:
             return
-        refs, _forward, _classes = self.refs(node)
+        refs, forward, _classes = self.refs(node)
         self.facts.escapes |= refs
+        if forward is not None:
+            self.facts.forwarded_escapes.add(forward)
 
     def assign(self, node: ast.Assign | ast.AnnAssign) -> None:
         value = node.value
@@ -1567,6 +1601,16 @@ class _Walker:
                         refs = refs | self.graph._constructors(item)
                     self.facts.attr_stores.append((cls.key, target.attr, refs, forward))
             elif isinstance(target, ast.Name):
+                if isinstance(value, ast.Name):
+                    _refs, forward, _classes = self.refs(value)
+                    if forward is not None:
+                        alias = (self.function, target.id)
+                        self.forward_aliases[target.id] = alias
+                        self.facts.forwarded_aliases.append((alias, forward))
+                    if value.id in self.fallback_aliases:
+                        self.fallback_aliases.add(target.id)
+                if self.untyped_getattr(value):
+                    self.fallback_aliases.add(target.id)
                 found = self.alias_of(value)
                 if found:
                     self.aliases.setdefault(target.id, set()).update(found)
@@ -1609,6 +1653,17 @@ class _Walker:
             and value.func.id == "getattr"
             and len(value.args) >= 2
             and self.literal_names(value.args[1]) is None
+        )
+
+    def untyped_getattr(self, value: ast.AST) -> bool:
+        """A literal dispatch with no receiver type is only method-name evidence."""
+        return (
+            isinstance(value, ast.Call)
+            and isinstance(value.func, ast.Name)
+            and value.func.id == "getattr"
+            and len(value.args) >= 2
+            and self.literal_names(value.args[1]) is not None
+            and not self.graph.type_of(value.args[0], self.function, self.env)
         )
 
     def getattr_targets(self, value: ast.AST) -> set[Function]:
@@ -1688,6 +1743,8 @@ class _Walker:
                     # the future, with the ``try`` context of its ``result()``.
                     continue
                 self.facts.escapes |= arg.refs
+                if arg.forward is not None:
+                    self.facts.forwarded_escapes.add(arg.forward)
                 for cls in arg.classes:
                     self.facts.escapes |= self.graph._constructors(cls)
 
@@ -1712,11 +1769,12 @@ class _Walker:
             self.inline.add(id(task))
             self.visit(task.body, tries)
             return index
-        refs, _forward, _classes = self.refs(task)
-        if not refs:
+        refs, forward, _classes = self.refs(task)
+        if not refs and forward is None:
             return -1
         self.assign_of[id(task)] = node
         site.static = set(refs)
+        site.cb_param = forward
         site.external = False
         return index
 
@@ -1733,17 +1791,36 @@ class _Walker:
             self.argument(site, node.orelse, index, keyword)
         elif isinstance(node, ast.Name | ast.Attribute):
             refs, forward, classes = self.refs(node)
+            safe = (
+                site.node is not None
+                and isinstance(site.node.func, ast.Name)
+                and site.node.func.id in _BUILTIN_SAFE_CALLEES
+            )
+            if (
+                isinstance(node, ast.Name)
+                and node.id in self.fallback_aliases
+                and not safe
+            ):
+                self.facts.escapes |= refs
             for cls in classes:
                 refs = refs | self.graph._constructors(cls)
             argument = _Arg(index, keyword, refs, forward, classes)
             self.arg_of[id(node)] = (site, argument)
             site.args.append(argument)
         elif isinstance(node, ast.Call) and self.getattr_targets(node):
-            site.args.append(_Arg(index, keyword, self.getattr_targets(node), None, []))
+            refs = self.getattr_targets(node)
+            if self.untyped_getattr(node):
+                self.facts.escapes |= refs
+            site.args.append(_Arg(index, keyword, refs, None, []))
 
     def resolve_callee(self, func: ast.AST, site: _Site, tries: Tries) -> None:
         graph = self.graph
         if isinstance(func, ast.Name):
+            if func.id in self.forward_aliases:
+                site.cb_param = self.forward_aliases[func.id]
+                site.static = set(self.aliases.get(func.id, ()))
+                site.fallback = func.id in self.fallback_aliases
+                return
             current: Function | None = self.function
             while current is not None:
                 info = graph.info[current]
@@ -1752,6 +1829,7 @@ class _Walker:
                     return
                 if current is self.function and func.id in self.aliases:
                     site.static = set(self.aliases[func.id])
+                    site.fallback = func.id in self.fallback_aliases
                     if func.id in self.dynamic_names:
                         self.facts.dynamic.append(tries)
                     return
@@ -1782,6 +1860,7 @@ class _Walker:
             targets = self.getattr_targets(func)
             if targets:
                 site.static = targets
+                site.fallback = self.untyped_getattr(func)
             elif self.is_dynamic_getattr(func):
                 self.facts.dynamic.append(tries)
             return
