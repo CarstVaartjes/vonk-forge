@@ -12,7 +12,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from starlette.responses import Response
 from vonk_control.artifact_job_api import ArtifactJobCreate, install_artifact_job_routes
-from vonk_control.artifact_job_evidence import ArtifactJobResultEvidence
+from vonk_control.artifact_job_evidence import (
+    ArtifactJobResultEvidence,
+    dump_result_evidence,
+    read_result_evidence,
+)
 from vonk_control.artifact_jobs import (
     ArtifactJobResponse,
     ArtifactJobService,
@@ -509,3 +513,19 @@ def test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes(
             blob.storage_key, blob.sha256, blob.size_bytes
         )
     assert blob_path is not None and blob_path.read_bytes() == content
+
+
+def test_result_evidence_preserves_current_values_without_field_presence() -> None:
+    """Evidence persistence must serialize values, rather than field-set history.
+
+    This contract has no collection defaults; mutate its backing values in place
+    to exercise the same distinction without inventing production evidence fields.
+    """
+    evidence = ArtifactJobResultEvidence()
+    vars(evidence).update(recoverable=False, active_scope_may_remain=False)
+    assert not evidence.model_fields_set
+    document = dump_result_evidence(evidence)
+    assert document is not None
+    assert document["recoverable"] is False
+    assert document["active_scope_may_remain"] is False
+    assert read_result_evidence(json.loads(json.dumps(document))) == evidence

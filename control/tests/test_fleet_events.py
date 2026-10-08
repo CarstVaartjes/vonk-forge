@@ -11,7 +11,7 @@ from sqlalchemy import CheckConstraint, Table, create_engine, event, func, selec
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import RecipeStopPayload, canonical_message
+from vonk_agent_protocol import LifecycleState, RecipeStopPayload, canonical_message
 from vonk_control import fleet_events as fleet_event_module
 from vonk_control import models
 from vonk_control.auth import TokenCodec
@@ -19,6 +19,7 @@ from vonk_control.db import session_factory
 from vonk_control.fleet_event_contract import (
     FleetEventPayload,
     JobPayload,
+    RunNodePayload,
     _FleetEventModel,
 )
 from vonk_control.fleet_events import (
@@ -968,3 +969,37 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
         ("operation-state", "waiting-for-operator"),
         ("operation-state", "queued"),
     ]
+
+
+def test_outbox_preserves_current_values_without_field_presence(sessions) -> None:
+    """Fleet payloads have scalar defaults: persistence still owns their values."""
+    node_id = "spk_" + "a" * 32
+    payload = RunNodePayload(
+        entity_kind="run-node",
+        entity_id="run-node-1",
+        run_id="run-1",
+        node_id=node_id,
+        rank=0,
+        role="leader",
+        state=LifecycleState.RUNNING,
+        reserved_memory_bytes=0,
+    )
+    vars(payload).update(observed_memory_bytes=0)
+    assert "observed_memory_bytes" not in payload.model_fields_set
+    repository = FleetEventRepository(sessions, clock=lambda: NOW)
+    with sessions.begin() as session:
+        recorded = repository.append_in_session(
+            session,
+            FleetEventDraft(
+                event_type="recipe-state",
+                node_id=node_id,
+                entity_kind=payload.entity_kind,
+                entity_id=payload.entity_id,
+                payload=payload,
+            ),
+        )
+        row = session.get(models.FleetStreamEvent, recorded.id)
+        assert row is not None
+        assert row.payload["observed_memory_bytes"] == 0
+    replay = repository.replay_after(0, NOW, limit=1)
+    assert replay.events[0].payload == payload

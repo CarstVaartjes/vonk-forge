@@ -15,12 +15,20 @@ from uuid import uuid4
 
 import pytest
 from pydantic import BaseModel
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import DistributionObject, LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    DistributionObject,
+    LifecycleState,
+    OperationMemberProgress,
+    OperationProgress,
+    ProgressPhase,
+    canonical_message,
+)
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
+from vonk_control import distribution_executor as executor_module
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -1765,3 +1773,48 @@ def test_zero_byte_model_download_records_the_already_verified_set() -> None:
     assert result.operation_id is None
     assert result.result is not None and _receipt_json(result.result)["skipped"] is True
     assert adopted == [manifest]
+
+
+@pytest.mark.parametrize(
+    "initial", [True, False], ids=["create-child", "refresh-child"]
+)
+def test_child_persistence_retains_in_place_default_members(
+    agent_system,  # noqa: F811
+    monkeypatch,
+    initial,
+):
+    """Both child writers must retain mutations nested in their typed receipt."""
+    original = executor_module._child_receipt
+    member = OperationMemberProgress(member_id=NODE_A, phase=ProgressPhase.TRANSFER)
+    writes = []
+
+    def mutated_receipt(*args, **kwargs):
+        receipt = original(*args, **kwargs)
+        operation = OperationProgress(phase=ProgressPhase.TRANSFER)
+        operation.members.append(member)
+        assert "members" not in operation.model_fields_set
+        receipt.progress.operation = operation
+        return receipt
+
+    def check_written_receipt(session, _context):
+        rows = session.new if initial else session.dirty
+        for row in rows:
+            if isinstance(row, Job) and row.result is not None:
+                stored = (
+                    session.connection()
+                    .execute(select(Job.result).where(Job.id == row.id))
+                    .scalar_one()
+                )
+                receipt = read_stored_model(RunSwitchDistributionChildResult, stored)
+                if receipt.progress.operation is not None:
+                    writes.append(receipt)
+                    assert receipt.progress.operation.members == [member]
+
+    monkeypatch.setattr(executor_module, "_child_receipt", mutated_receipt)
+    sessions = agent_system[1].sessions
+    event.listen(sessions, "after_flush", check_written_receipt)
+    try:
+        test_partial_child_replays_and_aggregates_cached_target(agent_system)
+    finally:
+        event.remove(sessions, "after_flush", check_written_receipt)
+    assert writes, "the selected persistence writer must be exercised"
