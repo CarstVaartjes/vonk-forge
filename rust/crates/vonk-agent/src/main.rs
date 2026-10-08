@@ -18,7 +18,7 @@ use vonk_agent::{
         run_once_with_claim_hook,
     },
     inventory::{
-        Inventory, InventoryCollector, InventoryError, STATE_DATABASE_DISK_RESERVE_BYTES,
+        InventoryCollector, InventoryError, STATE_DATABASE_DISK_RESERVE_BYTES,
         disk_reserve_degraded, prepare_state_database_reserve,
     },
     oci::OciRuntime,
@@ -31,6 +31,9 @@ use vonk_agent::{
     state::{StateStore, backoff_delay},
     systemd_notify,
 };
+
+#[cfg(test)]
+use vonk_agent::inventory::Inventory;
 
 #[derive(Parser)]
 #[command(
@@ -49,6 +52,15 @@ struct Cli {
 enum Command {
     Run,
     SelfTest,
+    #[command(hide = true)]
+    CollectInventory {
+        #[arg(long)]
+        store_path: PathBuf,
+        #[arg(long)]
+        fabric_address: Option<std::net::IpAddr>,
+        #[arg(long)]
+        fabric_bandwidth_mbps: Option<u64>,
+    },
     VerifyReadiness {
         #[arg(long, default_value = "/run/vonk-forge-agent/readiness.json")]
         receipt: PathBuf,
@@ -97,6 +109,25 @@ async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
+        Command::CollectInventory {
+            store_path,
+            fabric_address,
+            fabric_bandwidth_mbps,
+        } => {
+            let inventory = InventoryCollector {
+                runner: &SystemProcessRunner,
+                meminfo_path: Path::new("/proc/meminfo"),
+                store_path: &store_path,
+                egress_binary_path: Path::new("/usr/lib/vonk-forge/vonk-build-egress"),
+                fabric_address,
+                fabric_bandwidth_mbps,
+            }
+            .collect()?;
+            let request = inventory.to_request(chrono::Utc::now().into());
+            let bytes = vonk_agent_protocol::canonical_json(&request)?;
+            use std::io::Write;
+            std::io::stdout().write_all(&bytes)?;
+        }
         Command::SelfTest => {
             let config = AgentConfig::load(&cli.config)?;
             let identity = self_test::run(
@@ -226,6 +257,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     .await;
     inventory.abort();
     let _ = inventory.await;
+    vonk_agent::inventory::stop_process().await;
     match outcome {
         LaneExitWithRotation::Control(result) => result,
         LaneExitWithRotation::Rotation(Ok(Ok(()))) => Ok(()),
@@ -248,7 +280,6 @@ async fn run_control_lane(
     let mut failures = 0_u32;
     let mut readiness_published = false;
     loop {
-        state.restore_custody();
         if !active_identity_is_valid(config)? {
             // The rotation lane is renewing it; never present an expired
             // certificate to the Controller for work in the meantime.
@@ -377,20 +408,23 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                     || {
                         let config = config.clone();
                         async move {
-                            vonk_agent::inventory::collect_owned(move || {
-                                InventoryCollector {
-                                    runner: &SystemProcessRunner,
-                                    meminfo_path: Path::new("/proc/meminfo"),
-                                    store_path: &config.data_dir,
-                                    egress_binary_path: Path::new(
-                                        "/usr/lib/vonk-forge/vonk-build-egress",
-                                    ),
-                                    fabric_address: config.fabric_address,
-                                    fabric_bandwidth_mbps: config.fabric_bandwidth_mbps,
-                                }
-                                .collect()
-                            })
-                            .await
+                            let executable = std::env::current_exe()?;
+                            let mut arguments = vec![
+                                "collect-inventory".to_owned(),
+                                "--store-path".to_owned(),
+                                config.data_dir.to_string_lossy().into_owned(),
+                            ];
+                            if let Some(address) = config.fabric_address {
+                                arguments
+                                    .extend(["--fabric-address".to_owned(), address.to_string()]);
+                            }
+                            if let Some(speed) = config.fabric_bandwidth_mbps {
+                                arguments.extend([
+                                    "--fabric-bandwidth-mbps".to_owned(),
+                                    speed.to_string(),
+                                ]);
+                            }
+                            vonk_agent::inventory::collect_process(&executable, &arguments).await
                         }
                     },
                     &mut failures,
@@ -419,19 +453,17 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                 vonk_agent::network::collect_optional(config.controller_url.clone()).await;
             inventory.network_interfaces = evidence.interfaces;
             inventory.nas_route_interface = evidence.nas_route_interface;
-            if disk_reserve_degraded(inventory.disk_available_bytes)
-                || !inventory.state_database_reserve_held
-            {
+            if disk_reserve_degraded(inventory.disk_free_bytes) {
                 eprintln!(
                     "vonk-agent: degraded: {} bytes remain on the state database filesystem; the {} byte reserve is not held",
-                    inventory.disk_available_bytes, STATE_DATABASE_DISK_RESERVE_BYTES
+                    inventory.disk_free_bytes, STATE_DATABASE_DISK_RESERVE_BYTES
                 );
                 systemd_notify::notify(&format!(
                     "STATUS=Degraded: {} bytes free on state database filesystem; 64 MiB reserve is not held",
-                    inventory.disk_available_bytes,
+                    inventory.disk_free_bytes,
                 ));
             }
-            match client.report_inventory(&inventory).await {
+            match client.report_inventory_request(inventory).await {
                 Ok(()) => {
                     failures = 0;
                     inventory_reported_at = Some(Instant::now());
@@ -465,21 +497,20 @@ fn inventory_retry_delay(failures: u32, minimum: u64, maximum: u64) -> Duration 
     jittered_backoff(failures, minimum, maximum)
 }
 
-// A private /dev cannot acquire nodes created after namespace construction.
 // Bound every failed inventory attempt, including malformed/failed GPU probes.
 fn prerequisite_restart_due(elapsed: Duration) -> bool {
     elapsed >= Duration::from_secs(300)
 }
 
-async fn collect_inventory_until_ready<Collect, Collected>(
+async fn collect_inventory_until_ready<Collect, Collected, Observation>(
     mut collect: Collect,
     failures: &mut u32,
     minimum: u64,
     maximum: u64,
-) -> Result<Inventory, InventoryError>
+) -> Result<Observation, InventoryError>
 where
     Collect: FnMut() -> Collected,
-    Collected: Future<Output = Result<Inventory, InventoryError>>,
+    Collected: Future<Output = Result<Observation, InventoryError>>,
 {
     let started = tokio::time::Instant::now();
     let deadline = started + Duration::from_secs(300);
@@ -789,7 +820,7 @@ mod tests {
         let mut failures = 0;
         let result = collect_inventory_until_ready(
             || async {
-                Err(InventoryError::PrerequisiteUnavailable(
+                Err::<Inventory, _>(InventoryError::PrerequisiteUnavailable(
                     "NVIDIA GPU discovery",
                 ))
             },
@@ -817,7 +848,7 @@ mod tests {
             let _ = collect_inventory_until_ready(
                 || async {
                     attempted.set(true);
-                    Err(InventoryError::PrerequisiteUnavailable("GPU observation"))
+                    Err::<Inventory, _>(InventoryError::PrerequisiteUnavailable("GPU observation"))
                 },
                 &mut failures,
                 1,
@@ -1131,46 +1162,5 @@ mod tests {
             outcome,
             LaneExitWithRotation::Control("control finished")
         ));
-    }
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn timed_out_blocking_inventory_cannot_accumulate_workers_and_recovers() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
-        let started = Arc::new(AtomicUsize::new(0));
-        let (release, blocked) = std::sync::mpsc::channel();
-        let count = started.clone();
-        let first = vonk_agent::inventory::collect_owned(move || {
-            count.fetch_add(1, Ordering::SeqCst);
-            blocked.recv_timeout(Duration::from_secs(2)).unwrap();
-            Ok(test_inventory())
-        });
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), first)
-                .await
-                .is_err()
-        );
-        for _ in 0..10 {
-            let count = started.clone();
-            let next = vonk_agent::inventory::collect_owned(move || {
-                count.fetch_add(1, Ordering::SeqCst);
-                Ok(test_inventory())
-            })
-            .await;
-            assert!(next.is_err());
-        }
-        assert_eq!(started.load(Ordering::SeqCst), 1);
-        release.send(()).unwrap();
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-        let recovered = loop {
-            let result = vonk_agent::inventory::collect_owned(|| Ok(test_inventory())).await;
-            if let Ok(value) = result {
-                break value;
-            }
-            assert!(tokio::time::Instant::now() < deadline);
-            tokio::time::sleep(Duration::from_millis(1)).await;
-        };
-        assert_eq!(recovered, test_inventory());
     }
 }

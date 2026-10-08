@@ -1008,7 +1008,7 @@ async fn damaged_local_deadline_does_not_cancel_verified_renewal_or_fresh_claims
         results: Arc::new(Mutex::new(Vec::new())),
     };
     let executor = DamagedDeadlineExecutor {
-        path,
+        path: path.clone(),
         observed: HeartbeatGatedExecutor {
             heartbeats,
             minimum: 2,
@@ -1032,6 +1032,16 @@ async fn damaged_local_deadline_does_not_cancel_verified_renewal_or_fresh_claims
     .await
     .unwrap();
     assert!(state.pending_results().unwrap().is_empty());
+    drop(state);
+    let mut state = StateStore::open_recovered(&path, NODE_ID).unwrap();
+    let persisted: String = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT deadline FROM operations LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let persisted = DateTime::parse_from_rfc3339(&persisted).unwrap();
+    assert!(persisted >= executor.observed.observed_deadline.lock().unwrap().unwrap());
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
     client.claim.lock().unwrap().replace(fresh);
@@ -1057,6 +1067,9 @@ async fn damaged_receipt_and_failed_projection_writes_do_not_gate_fresh_success(
         let db = rusqlite::Connection::open(&path).unwrap();
         db.execute("UPDATE result_rejections SET retry_due_at='broken'", [])
             .unwrap();
+        // Inject on-disk schema damage before writing the wrong SQL storage
+        // class: STRICT normally rejects TEXT before our reader can see it.
+        db.execute_batch("PRAGMA writable_schema=ON; UPDATE sqlite_schema SET sql=replace(sql, ' STRICT', '') WHERE name='operations'; PRAGMA writable_schema=RESET;").unwrap();
         db.execute(
             "UPDATE operations SET result_json=?1",
             rusqlite::params![damaged],
@@ -1236,5 +1249,53 @@ async fn silent_non_start_renewal_ends_at_immutable_budget_and_fresh_work_succee
         .await
         .unwrap();
     assert!(fresh_executor.observed_deadline.lock().unwrap().is_some());
+    assert!(state.pending_results().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn projections_removed_after_startup_are_rebuilt_before_fresh_success() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let mut state = StateStore::open(&path, NODE_ID).unwrap();
+    let old = completed_install_result(&mut state);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE result_rejections; DROP TABLE result_reconciliation;")
+        .unwrap();
+    let mut fresh = claim();
+    fresh.fence = Uuid::new_v4();
+    let fresh_fence = fresh.fence;
+    let client = RecordingClient {
+        cancel_requested: false,
+        claim: Arc::new(Mutex::new(Some(fresh))),
+        fail_heartbeat: false,
+        heartbeats: Arc::new(Mutex::new(Vec::new())),
+        results: Arc::new(Mutex::new(Vec::new())),
+    };
+    let executor = HeartbeatGatedExecutor {
+        heartbeats: client.heartbeats.clone(),
+        minimum: 0,
+        observed_deadline: Arc::new(Mutex::new(None)),
+    };
+    run_once(&client, &mut state, &executor, None, 0, None)
+        .await
+        .unwrap();
+    let submitted = client.results.lock().unwrap();
+    assert!(submitted.iter().any(|result| result == &old));
+    assert!(submitted.iter().any(|result| result.fence == fresh_fence
+        && matches!(
+            result.result,
+            vonk_agent_protocol::generated::AgentResultResult::OutcomeDone(_)
+        )));
+    drop(submitted);
+    // The old effect is delivered from its exact receipt, never dispatched.
+    assert!(state.pending_results().unwrap().is_empty());
+    drop(state);
+    let mut state = StateStore::open_recovered(&path, NODE_ID).unwrap();
+    let mut newer = claim();
+    newer.fence = Uuid::new_v4();
+    client.claim.lock().unwrap().replace(newer);
+    run_once(&client, &mut state, &executor, None, 0, None)
+        .await
+        .unwrap();
     assert!(state.pending_results().unwrap().is_empty());
 }

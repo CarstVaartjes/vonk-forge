@@ -299,8 +299,10 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
     // Releasing the peer is not proof that the blocking owner has returned
     // its permit. Re-observe through the same producer until a fresh native
     // inspection succeeds; leaked ownership would exhaust this budget.
-    tokio::time::timeout(Duration::from_secs(2), async {
+    let recovery_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    tokio::time::timeout_at(recovery_deadline, async {
         loop {
+            assert!(tokio::time::Instant::now() < recovery_deadline);
             if matches!(spawn(true).await.unwrap(), Ok(true)) {
                 break;
             }

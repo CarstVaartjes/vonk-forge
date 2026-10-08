@@ -204,24 +204,124 @@ pub enum InventoryError {
     Parse,
 }
 
-// One producer retains the slot through blocking work even if its async
-// observer times out. A later round cannot accumulate another stuck worker.
-static INVENTORY_PRODUCER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+// The collector runs in an owned subprocess: a blocked filesystem syscall must
+// not strand a Tokio blocking thread or permit another collector to accumulate.
+// A killed process remains in this slot until the OS confirms it was reaped.
+static INVENTORY_PROCESS: tokio::sync::Mutex<
+    Option<(
+        tokio::process::Child,
+        tokio::time::Instant,
+        rustix::process::Pid,
+    )>,
+> = tokio::sync::Mutex::const_new(None);
+const INVENTORY_PROCESS_BUDGET: Duration = Duration::from_secs(60);
+const INVENTORY_OUTPUT_BYTES: u64 = 64 * 1024;
 
-pub async fn collect_owned(
-    collect: impl FnOnce() -> Result<Inventory, InventoryError> + Send + 'static,
-) -> Result<Inventory, InventoryError> {
-    let permit = INVENTORY_PRODUCER
-        .try_acquire()
-        .map_err(|_| InventoryError::PrerequisiteUnavailable("inventory producer observation"))?;
-    tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        collect()
-    })
-    .await
-    .unwrap_or(Err(InventoryError::PrerequisiteUnavailable(
-        "inventory worker",
-    )))
+pub async fn collect_process(
+    executable: &Path,
+    arguments: &[String],
+) -> Result<vonk_agent_protocol::generated::InventoryRequest, InventoryError> {
+    collect_process_with_budget(executable, arguments, INVENTORY_PROCESS_BUDGET).await
+}
+
+async fn collect_process_with_budget(
+    executable: &Path,
+    arguments: &[String],
+    budget: Duration,
+) -> Result<vonk_agent_protocol::generated::InventoryRequest, InventoryError> {
+    use tokio::io::AsyncReadExt;
+    let unavailable = || InventoryError::PrerequisiteUnavailable("inventory producer observation");
+    let mut slot = INVENTORY_PROCESS.try_lock().map_err(|_| unavailable())?;
+    if let Some((child, deadline, group)) = slot.as_mut() {
+        let exited = child.try_wait()?.is_some();
+        if !exited || !process_group_gone(*group) {
+            if exited || tokio::time::Instant::now() >= *deadline {
+                let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
+            }
+            return Err(unavailable());
+        }
+        *slot = None;
+    }
+    let child = tokio::process::Command::new(executable)
+        .args(arguments)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .process_group(0)
+        .spawn()?;
+    let group = child
+        .id()
+        .and_then(|pid| i32::try_from(pid).ok())
+        .and_then(rustix::process::Pid::from_raw)
+        .ok_or_else(unavailable)?;
+    let deadline = tokio::time::Instant::now() + budget;
+    *slot = Some((child, deadline, group));
+    let Some((child, _, group)) = slot.as_mut() else {
+        return Err(unavailable());
+    };
+    let observe = async {
+        let mut bytes = Vec::new();
+        child
+            .stdout
+            .as_mut()
+            .ok_or_else(unavailable)?
+            .take(INVENTORY_OUTPUT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .await?;
+        if bytes.len() as u64 > INVENTORY_OUTPUT_BYTES {
+            return Err(InventoryError::Parse);
+        }
+        let exited = tokio::time::timeout_at(deadline, child.wait())
+            .await
+            .map_err(|_| unavailable())??;
+        if !exited.success() {
+            return Err(unavailable());
+        }
+        vonk_agent_protocol::parse_strict(&bytes).map_err(|_| InventoryError::Parse)
+    };
+    let result = tokio::time::timeout_at(deadline, observe).await;
+    // Cancellation/timeout never loses ownership. A subsequent bounded pass
+    // reaps the old process before a fresh observer can run.
+    match result {
+        Ok(result) => {
+            if child.try_wait()?.is_some() && process_group_gone(*group) {
+                *slot = None;
+            } else {
+                let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
+            }
+            result
+        }
+        Err(_) => {
+            let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
+            Err(unavailable())
+        }
+    }
+}
+
+fn process_group_gone(group: rustix::process::Pid) -> bool {
+    matches!(
+        rustix::process::test_kill_process_group(group),
+        Err(rustix::io::Errno::SRCH)
+    )
+}
+
+/// Service shutdown signals the owned observer and allows a bounded reap.
+/// An uninterruptible child stays owned by the service cgroup, never mistaken
+/// for successful cleanup or permission to launch a second observer.
+pub async fn stop_process() {
+    if let Ok(mut slot) = INVENTORY_PROCESS.try_lock()
+        && let Some((child, _, group)) = slot.as_mut()
+    {
+        let _ = rustix::process::kill_process_group(*group, rustix::process::Signal::KILL);
+        if tokio::time::timeout(Duration::from_secs(1), child.wait())
+            .await
+            .is_ok_and(|result| result.is_ok())
+            && process_group_gone(*group)
+        {
+            *slot = None;
+        }
+    }
 }
 
 pub struct InventoryCollector<'a, R> {
@@ -566,4 +666,88 @@ fn text(value: &[u8]) -> Result<String, InventoryError> {
         return Err(InventoryError::Parse);
     }
     Ok(value.to_owned())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod process_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn blocked_os_collector_is_killed_reaped_and_a_fresh_wire_observation_succeeds() {
+        let root = tempfile::tempdir().unwrap();
+        let fifo = root.path().join("blocked");
+        rustix::fs::mknodat(
+            rustix::fs::CWD,
+            &fifo,
+            rustix::fs::FileType::Fifo,
+            rustix::fs::Mode::from_raw_mode(0o600),
+            0,
+        )
+        .unwrap();
+        let pid_file = root.path().join("collector.pid");
+        let blocked = vec![
+            "-c".to_owned(),
+            "printf '%s' \"$$\" > \"$1\"; exec /bin/cat \"$2\"".to_owned(),
+            "collector".to_owned(),
+            pid_file.to_string_lossy().into_owned(),
+            fifo.to_string_lossy().into_owned(),
+        ];
+        assert!(
+            collect_process_with_budget(Path::new("/bin/sh"), &blocked, Duration::from_secs(1))
+                .await
+                .is_err()
+        );
+        let pid = fs::read_to_string(&pid_file)
+            .unwrap()
+            .parse::<i32>()
+            .unwrap();
+        let request = vonk_agent_protocol::generated::InventoryRequest {
+            schema_version: 1,
+            observed_at: chrono::Utc::now().into(),
+            disk_total_bytes: 100,
+            disk_free_bytes: 50,
+            host_memory_total_bytes: 100,
+            host_memory_free_bytes: 50,
+            gpu_memory_total_bytes: 100,
+            gpu_memory_free_bytes: 50,
+            gpu_count: 1,
+            memory_pool: MemoryPool::Shared,
+            artifact_store_read_only: false,
+            capabilities: vec![],
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+            network_interfaces: None,
+            nas_route_interface: None,
+            nvidia_driver_version: "590".into(),
+            container_runtime_version: "29".into(),
+        };
+        let wire = root.path().join("inventory.json");
+        fs::write(
+            &wire,
+            vonk_agent_protocol::canonical_json(&request).unwrap(),
+        )
+        .unwrap();
+        let arguments = vec![wire.to_string_lossy().into_owned()];
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        let fresh = loop {
+            if let Ok(request) = collect_process_with_budget(
+                Path::new("/bin/cat"),
+                &arguments,
+                Duration::from_secs(1),
+            )
+            .await
+            {
+                break request;
+            }
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert_eq!(fresh, request);
+        // The original blocking filesystem observer released its OS process,
+        // rather than merely dropping a future and substituting a closure.
+        assert!(
+            rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap())
+                .is_err()
+        );
+    }
 }

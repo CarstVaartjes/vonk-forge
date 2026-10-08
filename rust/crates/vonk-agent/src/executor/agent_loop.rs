@@ -96,6 +96,7 @@ where
     E: Executor,
     F: FnOnce() -> Result<(), LoopError>,
 {
+    state.restore_custody();
     let now = Utc::now();
     // Delivery has one request-sized budget per pass, independent of backlog.
     // Losing an upload response retains custody; it never authorizes replayed

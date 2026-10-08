@@ -200,13 +200,21 @@ impl StateStore {
     }
 
     pub fn restore_custody(&mut self) {
-        if !self.durable_custody {
-            match Self::open_recovered(&self.path, &self.node_id) {
-                Ok(restored) => *self = restored,
-                Err(error) => {
-                    eprintln!("vonk-agent: durable custody observation deferred: {error}")
-                }
+        // Close the previous connection before any quarantine rename: it must
+        // not keep writing the old WAL after the main file is detached. A
+        // bounded open reconstructs missing projections after startup too.
+        let replacement = match Connection::open_in_memory() {
+            Ok(connection) => connection,
+            Err(error) => {
+                eprintln!("vonk-agent: custody observer unavailable: {error}");
+                return;
             }
+        };
+        drop(std::mem::replace(&mut self.connection, replacement));
+        self.durable_custody = false;
+        match Self::open_recovered(&self.path, &self.node_id) {
+            Ok(restored) => *self = restored,
+            Err(error) => eprintln!("vonk-agent: durable custody observation deferred: {error}"),
         }
     }
 
@@ -286,7 +294,9 @@ impl StateStore {
             StateError::Identity | StateError::ResultState | StateError::Protocol(_) => true,
             StateError::Database(rusqlite::Error::SqliteFailure(code, _)) => matches!(
                 code.code,
-                rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase
+                rusqlite::ErrorCode::DatabaseCorrupt
+                    | rusqlite::ErrorCode::NotADatabase
+                    | rusqlite::ErrorCode::Unknown
             ),
             _ => false,
         };
@@ -450,19 +460,10 @@ impl StateStore {
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: String = transaction
-            .query_row(
-                "SELECT deadline FROM operations WHERE fence=?1 AND state='running'",
-                [request.fence.to_string()],
-                |row| row.get(0),
-            )
-            .optional()?
-            .ok_or(StateError::Stale)?;
-        let current =
-            DateTime::parse_from_rfc3339(&current).map_err(|_| StateError::ResultState)?;
-        if directive.deadline < current {
-            return Err(StateError::Stale);
-        }
+        // The client verified correlation and the renewal owner selected this
+        // directive. Local deadline bytes are disposable bookkeeping, never a
+        // second authority gate. Overwrite under the exact running fence even
+        // when the previous projection is unreadable or spuriously newer.
         let changed = transaction.execute(
             "UPDATE operations SET deadline=?2 WHERE fence=?1 AND state='running'",
             params![request.fence.to_string(), directive.deadline.to_rfc3339()],

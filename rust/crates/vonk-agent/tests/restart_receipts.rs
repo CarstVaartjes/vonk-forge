@@ -480,6 +480,14 @@ fn damaged_suppression_is_a_miss_and_preserves_receipt_and_fresh_admission() {
     connection
         .execute("UPDATE result_rejections SET retry_due_at='unreadable'", [])
         .unwrap();
+    // Fail the actual projection cleanup, rather than replacing the store.
+    // The damaged suppression must remain a miss even while DELETE fails.
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_suppression_cleanup BEFORE DELETE ON result_rejections
+             BEGIN SELECT RAISE(FAIL, 'injected projection storage failure'); END;",
+        )
+        .unwrap();
     assert!(
         state
             .result_rejection(&result, Utc::now())
@@ -488,12 +496,36 @@ fn damaged_suppression_is_a_miss_and_preserves_receipt_and_fresh_admission() {
     );
     assert_eq!(
         state.pending_results().unwrap(),
-        vec![(AgentOperation::RecipeStop, result)]
+        vec![(AgentOperation::RecipeStop, result.clone())]
     );
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
     assert_eq!(
         state.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
+    state
+        .finish(&fresh, ExecutionResult::done(RecipeStopResult::default()))
+        .unwrap();
+    connection
+        .execute_batch("DROP TRIGGER reject_suppression_cleanup")
+        .unwrap();
+    assert!(
+        state
+            .result_rejection(&result, Utc::now())
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(state.pending_results().unwrap().len(), 2);
+    drop(state);
+    let mut reopened = StateStore::open_recovered(&path, NODE_ID).unwrap();
+    assert_eq!(
+        reopened.begin(&original, Utc::now()).unwrap(),
+        BeginDecision::Replay(Box::new(result))
+    );
+    fresh.fence = Uuid::new_v4();
+    assert_eq!(
+        reopened.begin(&fresh, Utc::now()).unwrap(),
         BeginDecision::Execute
     );
 }
