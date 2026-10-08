@@ -374,7 +374,7 @@ def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp
 def test_platform_capture_failure_bytes_preserve_retry_through_cli(
     tmp_path, monkeypatch
 ):
-    from vonk_control import api
+    from vonk_control.api import application as api
     from vonk_control.platform_observation_errors import ObservationCaptureUnavailable
 
     def unreadable_capture():

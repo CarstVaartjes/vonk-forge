@@ -19,6 +19,13 @@ FOCUSED_PACKAGES = (
     "control/src/vonk_control/operation_api/",
     "control/src/vonk_control/artifact_jobs/",
     "control/src/vonk_control/models/",
+    "control/src/vonk_control/recipe_builds/",
+    "control/src/vonk_control/distributed_recovery/",
+    "control/src/vonk_control/unused_storage_collection/",
+    "control/src/vonk_control/library_projection/",
+    "control/src/vonk_control/api/",
+    "control/src/vonk_control/fleet_projection/",
+    "control/src/vonk_control/agent_api/",
 )
 FOCUSED_LIMIT = 1000
 SOURCE_ROOTS = ("control/src", "src", "scripts", "control/web/src")
