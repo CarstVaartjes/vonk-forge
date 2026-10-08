@@ -9,12 +9,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "EnrollmentRateLimiter.admit",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/enrollment_body.py",
       "function": "_json_string_end",
       "kind": "loop-without-deadline",
@@ -23,12 +17,6 @@
     {
       "path": "control/src/vonk_control/enrollment_body.py",
       "function": "_scan_enrollment_grants",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "_sha256_path",
       "kind": "loop-without-deadline",
       "count": 1
     },
@@ -143,12 +131,6 @@
     {
       "path": "control/src/vonk_control/pki.py",
       "function": "_read_regular_secret_file",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/prebuilt_images.py",
-      "function": "PrebuiltImageImporter._renew",
       "kind": "loop-without-deadline",
       "count": 1
     },
@@ -931,6 +913,24 @@
       "function": "_png_metadata",
       "kind": "loop-without-deadline",
       "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/common.py",
+      "function": "EnrollmentRateLimiter.admit",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/common.py",
+      "function": "_sha256_path",
+      "kind": "loop-without-deadline",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/prebuilt_images.py",
+      "function": "PrebuiltImageImporter._renew",
+      "kind": "loop-without-deadline",
+      "count": 1
     }
   ],
   "exceptions": [
@@ -1040,12 +1040,90 @@
     }
   ],
   "content_identities": {
+    "control/src/vonk_control/agent_api/common.py": {
+      "_log_evidence_dropped": "f29e4b35acb7907008e3d75500e2925b3bcba6969844f9af88e7e7cc947ba946",
+      "_log_evidence_warnings": "5ab77d387e76027051e35147864a66a77c9e6682fc901c60119a0b859593acf3",
+      "_strict_json_datetime": "91dfcc0b4a1e1b780f2da6df279a9894ceed934033d33cfe6dbbdd4f685c54fd",
+      "AgentApiServices": "7a417335112ce0a28c70ac6a30fb34164d18113b003c7969a1f4daee9e46ba72",
+      "EnrollmentRateLimiter": "52fe9e7b68fbe4c14b26c4388281f673747c652aa9814532ffc55ed55082a833",
+      "EnrollmentRateLimiter.__init__": "b3d557791aa0a4bbbb659728b5a75151e21a82814537c8bdef08038f0e1fd692",
+      "EnrollmentRateLimiter.admit": "2780575ed32724da9a2b3331b9edd6ea9f122627515eadfe1a95c8b0213d5558",
+      "EnrollmentGrantResponse": "4dc439605eeef593d534904748385c0e7b18e6d4a20eeeeb7d2ac2d9c38b0bd8",
+      "AgentGrantRequest": "92a4dc3c187e150d0331460ac38de2ebd2e472fddc9a265dc2b57a79f3d971d5",
+      "HostRuntimeGrantRequest": "52a1d998844af929cf4911fd227af77778f264ce9912442c3bbc5f48d57060d8",
+      "HostRuntimeGrantRequest.runtime_binding": "35a6fd72a13a41042ef26f3d4c917f9ae098146ce3dac5f24ab54ba51d62b6c8",
+      "PackageActivationGrantRequest": "f63f4d5270f26315f196e3d7ac1cd88df86c9f7d021376dcc71ba6214d5910e3",
+      "AgentUpgradeGrantRequest": "23f94b338afcbad2342856715660a1ae11e828676afc5eefb0f325b31545bf8d",
+      "HostHelperGrantResponse": "658c0694532349bf49db03a43fcc760e2aa6ad0146803792a99fd52698d016b4",
+      "_host_grant_response": "9ca7d66b603ccbe7e136b6ff100af17edd135085fa543a03ff1517015c2c651f",
+      "_wire": "f0b0320dac12d86b105d006d714986df8881c8614ba403b9d6a5cb141ad6194f",
+      "_now": "67dc007c5635ac1e8ab9e24f33e72c196795a809ce55c7ed4c5a18cffafdf419",
+      "_issued_response": "08a31e51182ef955851a3074c6128673f955a08cc15674ba8af9c91af70a999b",
+      "_json_response": "092d7c5ee5ac57997818d6ddfcb2ebf739565ef137c252ed1a48795db7309045",
+      "_require_services": "6ebe2a76b34d095a911e5ca2242360d24487b9fea40bc74d72022abca3f1cb6e",
+      "_require_enrollment": "be833ffa26a020e9931969f9fb2ce24f7351235d664372ae24c26cdeebd6f99b",
+      "_scope_identity": "12cdb2b97797816259d9d8561e94e2102f4895b188374ed7de300e93a0fcd2b1",
+      "active_agent_identity": "a3c7238532a9a49744e31217f916070677a5a402a57c6204ad44d99ce8367267",
+      "activation_agent_identity": "1696aacbd6131a191f56d3b66c85a572c6ff2b055b49df37742d86ecdb7f963f",
+      "_agent_identity_state": "45fedb32f8530bb35a043c48a02e86eec14e6d8a28554f6e50415d1c68c76041",
+      "_authenticated_identity": "40f58f270c2556ad7f34f10ffd7330ce3448874dfffd1fd6ed40ade7bc1dda60",
+      "_authenticated_activation_identity": "39ea4e02c2b9d08fb7512b572430d1c11a958b9512eaa0a651b4353a38b7ac17",
+      "_body_node_matches": "bfff9a922bb34d304830508d65a80f52ee1cb9caf0bd0273f656bec236158469",
+      "_validated_authenticated_source": "b42a3dc79b906c0946622e3ef3705e0aa99dea3fedd3c25dfcae8dae9765a1b6",
+      "_EnrollmentGrantScan": "7f809ceaf10f98e98b33751f6953b10055c3b24468bf044e81140f74b12f9a7a",
+      "_references_digest": "87af9b7445ef99e481b57efa86b99ecd13bf17bd8d280873f2064cffa77983e0",
+      "_sha256_path": "b36317e29d9ba817218deeca021dee275d8ecc37ce346a56f673830c897f8f12",
+      "RecipeImageUploadHeaders": "5485541cc1db8022b5917f719be61f8fdfa63a8ec58f2a964909b4905a1df0e9",
+      "RecipeImageUploadStatus": "bce22f41685c415c8cc8b660640c94687adb7deffecf0bd175a92ab4016dca9f",
+      "RecipeImageUploadStatus.response": "2301e49885d0f5039c6ce1dd99ac1863522556e3d412c49c6e22c4885f554dba",
+      "_prepare_recipe_image_upload": "310e40241cc4396be9fd7dec9264fa9c85abcf65071d2a2b7a97f8c985d25b33",
+      "_flush_and_sync": "6bbc447a7685d1fcf85ed2653beb07cf2d5877997f2bc605999516525254243c",
+      "_commit_recipe_image_upload": "1a440b928ae5652174433b7fea14c06c110c183e6e2e6ee3d4ba26aa24864a42",
+      "_unlink_if_present": "2a7aab7a0fc6f3441f648bb060f8500e792c7c657e6952d2d3727296585a4a4f",
+      "_owned_artifact": "40500b94ec9f65e5ea34c113a8c3b62a210bbfba1b52b139e151c97680647550",
+      "_served_from_edge": "2848f994f4197d39ee27cf6793b79a0468109bbb53594380be19c118d77e8ae2",
+      "_range": "99fc96f6b1c58449414bb6c37b6af1d1763d1f5dd5a8feff697205d3bc3e6ce6",
+      "<module>": "1c9989969eac7ab367679af48db9e657cd79791184e82887ee7933ba7cafb74a"
+    },
     "control/src/vonk_control/operation_api/openapi.py": {
       "admin_openapi_schema": "9fd2dd68f65f8e139356a668e6c55a762689e243dca2d4092d9bcc154fbb4f49",
       "admin_openapi_schema.collect": "696d1dbda1c6c02ef8e6d79e379d34c82c51cd6bf990b1bb4804a172690c9f1c",
       "_contract_component_schemas": "46db43044c42cbe518b4e2a9d32cd7d5861581b04cb747bb05480ce8d31d7633",
       "_stored_component_schemas": "8b8f88b43d25355d188fa7ca3497a15d02c63ec4ede53a978502abd45300ba4f",
       "<module>": "a49e99b27c5a3a186b1ff26afe98c9fb0410d49b3f356bcaa70a4b3581df57de"
+    },
+    "control/src/vonk_control/prebuilt_images.py": {
+      "PrebuiltDecision": "d1429d424ba8b6b772ac20212881c02e69966d10cd623ca14f2161b6e07cd08a",
+      "PrebuiltDecision.used": "541ea1bda9032677b6c660aef258029739b4b248636d3cc5788f95d2471243f7",
+      "PrebuiltDecision.__str__": "9c77ca629033c8a065a0fd2ef604892135060c11097d4dd67570c689f3c3fa1c",
+      "executable_build_key": "a3f7ec678c9df399f5b2fe91b871153f2bc3ba385561f6299a9420d15a93cc34",
+      "package_build_intent": "0499ec1649ea492f1498aadd402b1d1bc8f85c7c08017f1814ec5ff59fc5005f",
+      "_scalar": "22e88adbd8d8219918071462442c5074bf1db952a4a4fd8923c983e76c29ca0c",
+      "podman_build_arguments": "b7cb5cef8d57cf68cf001a65a5abce2bea15e99ab0cae8083170ce9c8baf5423",
+      "write_library_image_plan": "3cfd8391e3ab49affea16d0fb9cbf2b21fa0d83b6bcacf7b5f3c96fb4055bb61",
+      "_library_recipe": "4bc95571723440c32e6c405d7d723ec592bddbaaaf11871283675610ea062927",
+      "_require_source_policy": "fca4f199c13dd0e704774ac5680607e636abce1c881f10f64641187b805c07ea",
+      "_reason": "8df9a7dc5b43bb303288f34b0728f349b46f646813df45a17058c78dff853c80",
+      "library_source_policy_failures": "d182f053d2ac321f083a9ea3f4b823ae5bded54bfd382b4a78fd4e1a0d3f4e36",
+      "_bundle_relative": "201650b23267d0d5dc7f0f2c8f775e882627d7e54e3a3a570a6ad6b2b4a8e745",
+      "prebuilt_reference": "0e6c3e0f3ecabb00245a0c17c9662c8570c017d724fcd1dafd2447e41d27566f",
+      "policy_prebuilt_reference": "8c60a37c2beeb7a6e4f5e713f49a77db905b3a78b5dbc2a82fb4d21dbff97b9c",
+      "PrebuiltImageImporter": "db96c3c83515cbf29826dcb003354fde98852efb316a0e927d718c57ad51a5fb",
+      "PrebuiltImageImporter.__init__": "a02f59bd439f98df005a87c2ab9f41c760fa3c41fe6aa93dd5e84ae068c5a501",
+      "PrebuiltImageImporter.close": "9b2b387b1331a01c8674603b64939526af56271a00a63f4e5b5646db742c3109",
+      "PrebuiltImageImporter.tick": "7bd97362e92cc0bf9b93c594f4c8b28783584a2040c9f1b76e740ab3972f9a12",
+      "PrebuiltImageImporter.run_pending": "1965fbb89ad5555691449a560a2d22db1f92744fcc2851d4434a6b278fe876f6",
+      "PrebuiltImageImporter._uploaded_build": "81f61165d758b1472695864b1eeac84d56bde1b65f4b6e788ea9496ac8870f9a",
+      "PrebuiltImageImporter.convert_upload": "54b227f786a84f5e41dc89b81378f9ce1e9e8bb61ba4c16061c767a5d735022d",
+      "PrebuiltImageImporter._claim": "32aed7171c487c992f4e66c4d25ae24499ebe95cdfb56882d8d80bd4fe1a4340",
+      "PrebuiltImageImporter._renew": "05be576f51b2c8a23a12e3e49464dbd2ee8661f75fecc00da8fe1e688418be51",
+      "PrebuiltImageImporter.run": "f846d4ed120b1987776de089b230238cae7294532e2ff4ee9573dd69dc2a2df1",
+      "PrebuiltImageImporter._fail": "f3e9afa1c83571b9cf1f2c28cc2329764d0d2480f5e94cfe53462e2d25f16826",
+      "PrebuiltImageImporter._release": "59401191b5db3e56621b7071fa1dc323b931ded40689fde1f79e1f03c05d1453",
+      "PrebuiltImageImporter._finish": "5919d383953e90730814915e736ab4e7ac65cc89a5c59dd943f4d681aa4f05d8",
+      "prebuilt_failed": "df066d56a29cc4f5166e821be240005a356cbeedabf65f393639c843e6a1ec66",
+      "_aware": "47943ba2641bbf829747d9b7fb65d824a7528541f1192f5cafdad8cb6e21f5fe",
+      "<module>": "433bcc409116130afe28a1cf2c843fa33fe2ac8eebd4b81c23a48c3d9c0f4401"
     },
     "src/cluster_profiles/control_client/transfers.py": {
       "ControlClient": "e5c5eb3e12060e768fe776c66324ac3b9ce47c9fdf0c974be5d3c8b5386af7ae",

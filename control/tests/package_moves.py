@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import re
 from collections import Counter
@@ -85,6 +86,8 @@ class PackageMoves:
             {} if recorded is None else recorded, strict=True
         )
         self._targets: dict[str, dict[str, dict[str, str]]] = {}
+        self._candidates: dict[str, list] = {}
+        self._candidate_stamps: dict[str, tuple] = {}
 
     def targets(self, path: str) -> dict[str, dict[str, str]]:
         if path in self._targets:
@@ -152,21 +155,51 @@ class PackageMoves:
             return matches[0] if len(matches) == 1 else path
         if old.exists() or old.suffix != ".py" or not package.is_dir():
             return path
-        previous = self.recorded.get(path, {})
-        digest = previous.get(function)
+        return self._python_function(path, function, matches_site)[0]
+
+    def scope(self, path: str, function: str) -> str:
+        """Keep registry scopes attached to the concrete callable after extraction."""
+        if "." not in function:
+            # Some scanners deliberately register both a leaf and a qualified scope.
+            return function
+        return self._python_function(path, function, lambda source, name: True)[1]
+
+    def _python_function(self, path, function, matches_site):
+        old = self.root / path
+        package = old.with_suffix("")
+        if old.exists() or old.suffix != ".py" or not package.is_dir():
+            return path, function
+        digest = self.recorded.get(path, {}).get(function)
         matches = []
-        for file in sorted(package.rglob("*.py")):
-            source = file.read_text()
-            for name, current in identities(source).items():
+        files = sorted(package.rglob("*.py"))
+        stamp = tuple(
+            (file, file.stat().st_mtime_ns, file.stat().st_size) for file in files
+        )
+        if self._candidate_stamps.get(path) != stamp:
+            self._candidate_stamps[path] = stamp
+            self._candidates[path] = [
+                (
+                    file,
+                    source,
+                    identities(source),
+                    extracted_identities(source, package),
+                )
+                for file in files
+                for source in [file.read_text()]
+            ]
+        for file, source, current, extracted in self._candidates[path]:
+            for name, value in current.items():
                 if name.rsplit(".", 1)[-1] != function.rsplit(".", 1)[-1]:
                     continue
                 if digest is not None:
-                    eligible = current == digest
+                    eligible = digest in {value, extracted.get(name)}
                 else:
-                    eligible = matches_site is not None and matches_site(source, name)
+                    eligible = matches_site is not None and (
+                        matches_site(source, name) or matches_site(source, function)
+                    )
                 if eligible:
-                    matches.append(file.relative_to(self.root).as_posix())
-        return matches[0] if len(matches) == 1 else path
+                    matches.append((file.relative_to(self.root).as_posix(), name))
+        return matches[0] if len(matches) == 1 else (path, function)
 
     def paths(self, path: str) -> list[str]:
         return list(self.targets(path)) or [path]
@@ -194,3 +227,62 @@ class PackageMoves:
                 if remainder := budget - sum(eligible.values()):
                     result[path] = remainder
         return result
+
+
+def extracted_identities(source: str, package: Path) -> dict[str, str]:
+    """Recognize a method extraction by its unchanged body, not by Git history.
+
+    An explicit self type replaces the class namespace's implicit receiver type.
+    Relative imports gain one level when their owner becomes a package. New local
+    imports of extracted siblings replace former same-module globals. These are
+    the only structural normalizations; changed effects keep a different digest.
+    """
+    siblings = {file.stem for file in package.glob("*.py")}
+
+    class RestoreExtraction(ast.NodeTransformer):
+        def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef):
+            self.generic_visit(node)
+            if node.args.args and node.args.args[0].arg == "self":
+                if node.args.args[0].annotation is not None and node.body:
+                    first = node.body[0]
+                    if (
+                        isinstance(first, ast.Expr)
+                        and isinstance(first.value, ast.Constant)
+                        and isinstance(first.value.value, str)
+                    ):
+                        lines = first.value.value.split("\n")
+                        first.value.value = "\n".join(
+                            [
+                                lines[0],
+                                *[
+                                    "    " + line if line else line
+                                    for line in lines[1:]
+                                ],
+                            ]
+                        )
+                node.args.args[0].annotation = None
+            return node
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ImportFrom(self, node):
+            if node.level == 1 and node.module in siblings:
+                return None
+            if node.level > 1:
+                node.level -= 1
+            return node
+
+    tree = RestoreExtraction().visit(copy.deepcopy(ast.parse(source)))
+    result: dict[str, str] = {}
+
+    def visit(nodes, scope=""):
+        for node in nodes:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                name = scope + node.name
+                result[name] = hashlib.sha256(
+                    ast.dump(ast.Module(body=[node], type_ignores=[])).encode()
+                ).hexdigest()
+                visit(node.body, name + ".")
+
+    visit(tree.body)
+    return result

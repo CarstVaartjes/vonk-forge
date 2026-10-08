@@ -22,15 +22,19 @@ def _imports(path: Path) -> set[str]:
 
 
 def test_production_api_and_worker_do_not_import_direct_runtime_or_subprocess() -> None:
-    for name in ("api.py", "worker.py"):
-        path = PACKAGE / name
-        imports = _imports(path)
-        source = path.read_text()
-        assert "subprocess" not in imports
-        assert "vonk_control.runtime" not in imports
-        assert "vonk_control.legacy_runtime" not in imports
-        assert "RuntimeHandlers" not in source
-        assert "LegacyRuntimeHandlers" not in source
+    for name in ("api", "worker"):
+        # A module split into a package is checked file by file.
+        module = PACKAGE / f"{name}.py"
+        paths = [module] if module.exists() else sorted((PACKAGE / name).rglob("*.py"))
+        assert paths, name
+        for path in paths:
+            imports = _imports(path)
+            source = path.read_text()
+            assert "subprocess" not in imports
+            assert "vonk_control.runtime" not in imports
+            assert "vonk_control.legacy_runtime" not in imports
+            assert "RuntimeHandlers" not in source
+            assert "LegacyRuntimeHandlers" not in source
 
     worker = (PACKAGE / "worker.py").read_text()
     worker_imports = _imports(PACKAGE / "worker.py")

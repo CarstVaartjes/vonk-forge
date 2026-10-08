@@ -3,7 +3,7 @@
   "note": "Reviewed constructors without external startup effects, plus required core configuration/database wiring. New direct constructors must be isolated; allowances only fall. See docs/controller-startup-inventory.md.",
   "boundaries": [
     {
-      "path": "control/src/vonk_control/api.py",
+      "path": "control/src/vonk_control/api/production.py",
       "scope": "production_app",
       "pure_or_core_calls": [
         "AgentUpgradeService",

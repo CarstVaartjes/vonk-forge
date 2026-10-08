@@ -1,0 +1,156 @@
+"""Agent api: enrollment concerns."""
+
+from __future__ import annotations
+
+import json
+import re
+
+from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import ValidationError
+from vonk_agent_protocol.enrollment import (
+    EnrollmentBootstrapResponse,
+    EnrollmentSubmitRequest,
+    IssuedCertificateResponse,
+)
+
+from ..contract_graph import raw_json_body
+from ..enrollment import (
+    CertificateResponseCapacityRefused,
+    EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
+)
+from ..enrollment_body import (
+    _bounded_enrollment_body,
+    _consume_enrollment_denial,
+    _scan_enrollment_grants,
+)
+from ..operation_api import bounded_error_responses
+from .common import (
+    AgentApiServices,
+    EnrollmentRateLimiter,
+    _issued_response,
+    _json_response,
+    _require_enrollment,
+    _require_services,
+)
+
+
+def install_enrollment_routes(
+    agent: APIRouter, services: AgentApiServices | None, limiter: EnrollmentRateLimiter
+) -> None:
+    @agent.get(
+        "/bootstrap",
+        response_model=EnrollmentBootstrapResponse,
+        responses=bounded_error_responses(503),
+    )
+    def enrollment_bootstrap() -> Response:
+        required = _require_services(services)
+        if required.bootstrap is None:
+            raise HTTPException(
+                status_code=503,
+                detail="agent enrollment bootstrap is unavailable",
+            )
+        if required.host_runtime_authority is None:
+            raise HTTPException(
+                status_code=503,
+                detail="host runtime authority is unavailable",
+            )
+        helper_public_key = required.host_runtime_authority.public_key_document.get(
+            "public_key"
+        )
+        if (
+            not isinstance(helper_public_key, str)
+            or re.fullmatch(r"[0-9a-f]{64}", helper_public_key) is None
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="host runtime authority is unavailable",
+            )
+        return _json_response(
+            EnrollmentBootstrapResponse(
+                controller_endpoint=required.bootstrap.controller_endpoint,
+                enrollment_endpoint=required.bootstrap.enrollment_endpoint,
+                ca_fingerprint=required.bootstrap.ca_fingerprint,
+                ca_pem=required.bootstrap.ca_pem,
+                controller_address=required.bootstrap.controller_address,
+                service_hostnames=list(required.bootstrap.service_hostnames),
+                host_helper_authority_public_key=helper_public_key,
+            )
+        )
+
+    @agent.post("/enroll", response_model=IssuedCertificateResponse)
+    @raw_json_body(EnrollmentSubmitRequest)
+    async def enroll(request: Request) -> Response:
+        required = _require_services(services)
+        if not limiter.admit():
+            raise HTTPException(
+                status_code=429, detail="enrollment rate limit exceeded"
+            )
+        raw = await _bounded_enrollment_body(request, required)
+        scan = _scan_enrollment_grants(raw)
+        content_type = request.headers.get("content-type", "")
+        if (
+            re.fullmatch(
+                r"application/json(?:\s*;\s*charset=(?:utf-8|utf8))?",
+                content_type,
+                re.IGNORECASE,
+            )
+            is None
+        ):
+            _consume_enrollment_denial(required, scan.tokens)
+            raise HTTPException(
+                status_code=415,
+                detail="enrollment content type must be application/json",
+            )
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (TypeError, UnicodeDecodeError, ValueError, RecursionError):
+            _consume_enrollment_denial(required, scan.tokens)
+            raise HTTPException(
+                status_code=422, detail="enrollment request must be JSON"
+            ) from None
+        if not isinstance(body, dict):
+            _consume_enrollment_denial(required, scan.tokens)
+            raise HTTPException(
+                status_code=422, detail="enrollment request must be a JSON object"
+            )
+        if scan.top_level_keys != 1:
+            _consume_enrollment_denial(required, scan.tokens)
+            raise HTTPException(status_code=422, detail="enrollment grant is ambiguous")
+        try:
+            submitted = EnrollmentSubmitRequest.model_validate(body)
+        except ValidationError:
+            _consume_enrollment_denial(required, scan.tokens)
+            if scan.tokens:
+                # Keep the enrollment oracle closed: a discoverable grant is
+                # consumed and reported as denied even when the request shape
+                # is malformed.  The canonical model handles valid requests;
+                # this branch preserves the bounded burn-on-invalid policy.
+                raise HTTPException(
+                    status_code=403, detail="enrollment denied"
+                ) from None
+            raise HTTPException(
+                status_code=422, detail="enrollment request is invalid"
+            ) from None
+        try:
+            csr_bytes = submitted.csr.encode("ascii")
+        except UnicodeEncodeError:
+            _consume_enrollment_denial(required, scan.tokens)
+            raise HTTPException(
+                status_code=422, detail="CSR must be ASCII PEM"
+            ) from None
+        try:
+            outcome = _require_enrollment(required).submit(
+                submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
+            )
+        except CertificateResponseCapacityRefused as error:
+            return _json_response(
+                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
+                status_code=422,
+            )
+        except EnrollmentIssuanceUncertain as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except EnrollmentDenied as error:
+            _consume_enrollment_denial(required, scan.tokens)
+            raise HTTPException(status_code=403, detail=str(error)) from None
+        return _json_response(_issued_response(outcome))

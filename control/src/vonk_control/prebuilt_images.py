@@ -410,7 +410,7 @@ def _require_source_policy(
     bundle: GeneratedSourceBundle,
     source_sha256: str | None,
 ) -> None:
-    from .recipe_builds import inspect_package_source_policy
+    from .recipe_builds.common import inspect_package_source_policy
     from .source_policy import SourcePolicyError
 
     report = inspect_package_source_policy(
