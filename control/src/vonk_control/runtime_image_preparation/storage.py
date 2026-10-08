@@ -414,9 +414,9 @@ class FilesystemRuntimeImageStorage:
         warning naming its digest instead of failing every lookup that happens
         to walk past it.  ``read_receipt`` for that exact digest stays strict.
         Temporary read failures defer only their receipt while other verified
-        candidates remain eligible. If none match, unresolved read uncertainty
-        reaches the caller for observation and bounded retry, never as a miss
-        that could trigger a needless rebuild or transfer.
+        candidates remain eligible. An unreadable receipt without stored image
+        bytes cannot decide reuse and is a miss. Otherwise unresolved read
+        uncertainty reaches the caller for observation and bounded retry.
         Access refusals remain immediate and are never treated as scan misses.
         """
 
@@ -431,6 +431,11 @@ class FilesystemRuntimeImageStorage:
             except _ReceiptDocumentRejected as rejection:
                 self._discard_rejected_receipt(receipt_path, rejection)
             except RuntimeImagePreparationUnknown as error:
+                candidate_digest = receipt_path.name.removesuffix(".receipt.json")
+                if _SHA256.fullmatch(candidate_digest) is None:
+                    continue
+                if self._stored_image(candidate_digest) is None:
+                    continue
                 deferred = error
                 if self._first_report(receipt_path):
                     _LOGGER.warning(

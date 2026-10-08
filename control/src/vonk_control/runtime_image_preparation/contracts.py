@@ -106,7 +106,6 @@ class RuntimeImagePreparationUnknown(UnknownOutcomeError, RuntimeImagePreparatio
         reason: WaitReason | None = WaitReason.OBSERVATION_UNAVAILABLE,
         **fields: Any,
     ) -> None:
-        fields.setdefault("retryable", True)
         RuntimeImagePreparationError.__init__(self, *args, **fields)
         self.typed_reason = reason
 
@@ -335,6 +334,7 @@ def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RECEIPT_UNAVAILABLE,
             "runtime image receipt could not be read",
+            retryable=True,
             reason=WaitReason.RECEIPT_MISSING,
         ) from error
     except UnicodeDecodeError as error:

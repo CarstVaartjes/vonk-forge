@@ -38,6 +38,16 @@ def test_unreadable_unrelated_receipt_is_a_miss_then_fresh_preparation_succeeds(
         )
         is None
     )
+    for archive_sha256 in (None, ARCHIVE_DIGEST):
+        assert (
+            storage.find_build(
+                "a" * 64,
+                expected_architecture="linux/arm64",
+                expected_runtime_interface="vonk.runtime.v1",
+                expected_archive_sha256=archive_sha256,
+            )
+            is None
+        )
     receipt = _prepare(storage=storage)
     assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
 

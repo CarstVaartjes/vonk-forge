@@ -300,7 +300,9 @@ class ControllerExecutionPlanService:
         world_size = _world_size(recipe)
         result: dict[str, WireCompiledExecutionPlan] = {}
         if build is None:
-            raise ExecutionPlanEvidenceUnknown("recipe build receipt is unavailable")
+            # No selected build is an incomplete compilation request. Storage
+            # uncertainty for a selected receipt retains its unknown type.
+            raise ExecutionPlanCompilationError("recipe build receipt is unavailable")
         package = _build_package(build)
         for node in sorted(mapping_nodes, key=lambda item: (item.rank, item.node_id)):
             try:
