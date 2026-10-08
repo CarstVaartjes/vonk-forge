@@ -286,8 +286,14 @@ pub fn prepare_setup_with_authority(
     let mut repair_helper_authority = None;
     if !matches!(plan, ApplyOperation::Fresh { .. }) {
         let config = paired_configuration(&paths.config, paths)?;
-        if !safe_existing_file(&paths.firewall_config, paths.required_owner).unwrap_or(false)
-            || installed_firewall_configuration(paths).is_err()
+        // The firewall is deliberately root-private. Its absence or readable
+        // damage needs repair; a permission-limited observation is deferred to
+        // the privileged consumer, which validates it before using it.
+        let private_firewall = fs::read(&paths.firewall_config)
+            .is_err_and(|error| error.kind() == io::ErrorKind::PermissionDenied);
+        if !private_firewall
+            && (!safe_existing_file(&paths.firewall_config, paths.required_owner).unwrap_or(false)
+                || installed_firewall_configuration(paths).is_err())
         {
             let firewall = FirewallConfig::collect(
                 &request.firewall_inputs,

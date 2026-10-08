@@ -720,13 +720,18 @@ fn stale_bootstrap_observation_is_refetched_before_effects() {
     let prepared = result.unwrap();
     assert!(!install_paths.config.exists());
     assert!(!install_paths.helper_authority.exists());
-    assert!(
+    assert!(runner.commands.iter().all(|command| matches!(
+        command.program.to_str(),
+        Some("/usr/bin/curl" | "/usr/sbin/ip")
+    )));
+    assert_eq!(
         runner
             .commands
             .iter()
-            .all(|command| command.program == std::path::Path::new("/usr/bin/curl"))
+            .filter(|command| command.program == std::path::Path::new("/usr/bin/curl"))
+            .count(),
+        3
     );
-    assert_eq!(runner.commands.len(), 3);
     let mut handoff = RecordingRunner::default();
     handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
         .unwrap();

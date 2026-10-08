@@ -323,182 +323,24 @@ The commit hook passes changed Python paths and checks only their diagnostics
 and reviewed exceptions. CI retains the full check, including errors in
 unchanged consumers. Partial checks cannot update the repository baseline.
 
-The coordination boundaries are checked by
-`control/tests/coordination_boundaries.py`, which the control suite runs over
-`control/src` in `test_coordination_boundaries.py`. It
-detects defined syntax patterns for transactions spanning external work and
-artifact locks acquired inside transactions, blockingly, or more than one at a
-time. Passing this scan establishes only its checked patterns; real PostgreSQL
-and process tests establish the exercised concurrency and recovery behavior.
-`tools/coordination-baseline.json` is a reviewed allowlist like
-the pyright baseline: an unreviewed site fails, a baseline site that no longer
-occurs fails as stale, and every entry carries a written reason. A stale entry
-means its recorded violation no longer occurs, so delete it after reviewing the
-change; it does not prove every runtime path safe.
-Run `--write-baseline` after a fix to see exactly which entries disappeared.
-The scanner's one-lock and nesting rules apply to locks that guard managed
-storage. Two distinctions keep that honest. An in-process concurrency guard --
-one that serialises this process's own work -- is a different resource class and
-is listed by name in `GUARD_LOCK_NAMES` with its justification in the plan; a
-lock that is not listed is still scanned as an artifact lock, so a new lock
-cannot silently opt out. Separately, a blocking `flock` on a descriptor from an
-`O_EXCL` create is provably private and cannot contend, so it is not reported;
-a blocking `flock` on a shared file still is.
+New syntax is checked by `scripts/check-added-lines`, which compares the working
+source against the merge base with `origin/main` (or the explicit PR/merge-group
+base in CI). Only added lines can fail. The adapter supplies a unified diff to
+`control/tests/added_line_guards.py`; scanners and fixture tests never read Git.
+There are no debt counts, category ledgers, baseline updates, or PR count reports.
 
-Provenance is never compared as identity. `control/tests/content_identity_boundaries.py`,
-run over `control/src` by `test_content_identity_boundaries.py`, flags every
-comparison (`==`, `!=`, `in`, a query `.where(...)`, `.in_()` or `.filter_by()`)
-that touches a provenance field: `build_id`, `recipe_revision_id`, `recipe_id`,
-`distribution_publisher`, `distribution_slug`, `distribution_content_sha256`,
-`runtime_adapter*`, a slug beside the rest of a catalog identity, and the
-builder binary inside a build-input comparison. Sameness of an image, a model
-file or a build is decided in `vonk_control/content_identity.py`, which the scan
-does not read. Anywhere else a site must be named in
-`tools/content-identity-allowlist.json` with a written reason (a security edge,
-or ownership, cancellation, retention or navigation by id). Entries are keyed on
-file, function and expression, never a line number, an unlisted site fails, and
-an entry whose site is gone fails as stale. `test_content_identity_gates.py`
-shows the other half: one image presented through different provenance passes
-review, install plan, install, start and the profile checks. Comparisons of a
-literal (`is None`, `== "vllm"`) are existence and selector checks and are not
-sites.
+The guards reject new handwritten contract literals, untyped mapping annotations,
+provenance comparisons, security refusals outside ingress owners, unbounded waits,
+read refusals, imperative remedy text, missing retention policy, anti-principle
+test assertions, and the existing coordination syntax violations. Small fixtures
+prove that added violations fail, untouched old occurrences do not, and bounded
+waits and security ingress remain valid. Detection is a syntax check; behavior,
+process and PostgreSQL tests establish recovery and fresh admission.
 
-Lifecycle state has one writer. `vonk_control/lifecycle/` holds the shared
-lifecycle core: one pure `transition(row, event, adapter, now)` that encodes
-the rules of the blocker audit (retry never-executed and idempotent work,
-observe an uncertain effect first, no operator wait without an advertised
-action, a cancel always completes, supersede instead of block, fail open and
-fence closed), one `KindAdapter` protocol per kind, and one reconcile loop that
-is off until a kind has moved onto the core. Two scanners guard it, both run by the control suite.
-`control/tests/lifecycle_writer_boundaries.py` finds every write to a
-lifecycle state (`x.state = ...` on a lifecycle row, a `["state"]` store in a
-module that owns one, `update(Model).values(state=...)`, a constructor,
-`_set_application_state`) outside the core and allows none: there is no
-allowlist, and a new writer fails with the place to move it. `control/tests/blocker_boundaries.py`
-finds every place that produces `needs-operator` (or the agent's `waiting-for-operator`) (Python and the Rust
-agent) and every fail-closed raise in all of `control/src` (a raise of any
-exception class defined there, found through the class bases), and compares them
-with `tools/blocker-allowlist.json`: an operator wait needs a verdict and an
-advertised action (`KEEP` needs an irreversible effect), a raise belongs to a
-`security-edge`, `input-validation`, `already-retried` or `bookkeeping-debt`
-family, and `max_debt` / `debt_ceiling.total` only fall. The ten audited modules
-(`scope.audited_paths`), where the debt is being paid down, keep
-`debt_ceiling.total`; the bookkeeping debt of every other module has its own
-`debt_ceiling.unaudited`, which also only falls. Both scanners take
-`--list`; the blocker scanner's `--write-baseline` lowers the recorded counts after a fix; a new
-site always needs a reviewed entry by hand.
-`control/tests/blocker_classifier.py` proposes the category of a new raise by
-rule (exception class, then message): `--classify-new` appends one family per
-module and category for the sites the allowlist does not list, `--summary` counts
-every raise in `control/src` by category and names the ones that are not a family
-(builtin `ValueError`/`KeyError`/`TypeError`, `HTTPException`, factory functions).
-Read the proposal and move any site it got wrong before committing it.
-The same scanner guards the error categories: a `raise` in a lifecycle or
-operation path (`scope.guard_paths`: `control/src/vonk_control/lifecycle/` and the
-modules that own an operation) must use a class derived from
-`SecurityRefusalError`, `InvalidRequestError` or `UnknownOutcomeError`
-(`vonk_agent_protocol`), not a bare `RuntimeError`, `ValueError` or a family
-`Conflict`. Raises that predate the rule are grandfathered per module in
-`categorized_raises.grandfathered`; a module's count and
-`categorized_raises.ceiling` only fall, and an unlisted module may not raise an
-uncategorized error. Converting a raise lowers the count (`--write-baseline`).
-
-The ways a bookkeeping raise leaves a lifecycle path, in the order to try them:
-a reader of a stored document *returns* `Damaged` (`lifecycle/evidence.py`) and
-`read_or_rebuild` rebuilds it from evidence or retires it as `Residue`, so no
-exception crosses the caller; a request that meets a try-lock refusal repeats its
-whole transaction through `bounded_attempts` (`bounded_retry.py`, with
-`admission_attempts` for admission contention) and re-raises the last refusal
-only after the attempts are spent; and a loop that genuinely retries or reports
-an unknown outcome to the lifecycle core is declared in `retry_loops`, with the
-reason it retries, so the AST proof in `control/tests/blocker_retries.py` moves
-the raises it reaches to the module's `proven-retry` family. The proof walks the
-call graph of `control/tests/blocker_callgraph.py` backwards from the raise and
-credits it only when *every* call path from an entry (route, tick, a function
-nobody calls, a reference that escapes to a thread) ends in a registered loop
-that catches the class without re-raising: a path through a handler that swallows
-it, or around the loop's `try`, keeps the raise as debt. The graph follows calls
-on annotated attributes and parameters (a Protocol reaches every implementation),
-callbacks bound to the parameter they fill, and `getattr` of a literal name; a
-`getattr` of a computed name needs a `call_edges` entry (`path`, `function`,
-`calls`, `reason`), which keeps the `try` context of the dynamic call. A call on a
-receiver nothing types is read as a call of every method of that name (a name
-defined on four classes or more is taken for a library call). After a change to
-the code or to `retry_loops`, `python -m control.tests.blocker_classifier
---rebalance` moves proven debt out and unproven credit back to debt, then
-`--write-baseline` records the counts: the debt ceiling rises when credit is
-withdrawn. A raise that decides
-a destructive effect (a removal gate, an uninstall or stop authority, a lease
-fence, a reviewed-intent integrity check) stays a `bookkeeping-debt` entry.
-
-A PR that touches lifecycle, raise or allowlist files reports the movement.
-`scripts/lifecycle-counts` prints the four numbers (writers, operator waits,
-raises, debt) read from the two allowlists, which the ratchets above hold equal
-to the code; `scripts/lifecycle-counts report --base origin/main` prints the
-`before:` / `after:` block for the PR description (see
-`.github/pull_request_template.md`). The `Lifecycle counts` workflow runs
-`scripts/lifecycle-counts check` on every PR: if the diff touches a covered file
-the description must carry both lines and they must equal the counts at the
-merge base and at the head. It checks the report is true; the ratchets decide
-whether a rise is acceptable.
-
-A third ratchet keeps the vocabulary the contract owns out of hand-written code.
-`control/tests/vocabulary_literals.py` finds string literals equal to a word of
-`vonk_agent_protocol.lifecycle_vocabulary` in the Python sources
-(`control/src`, `agent_protocol/src`, `src/cluster_profiles`) outside the contract
-modules and the Controller's legacy adapter: a *distinctive* word (it contains `-`,
-`_` or `.`, such as `waiting-for-operator`, `stop-unconfirmed`, `operation_cancelled`)
-or one of the stored state words `queued`, `running`, `succeeded`, `failed`,
-`cancelled`. `tools/vocabulary-literals-baseline.json` records what predates the
-guard per file, and a new literal, a higher count or an unlowered count fails; the
-same test requires the web app (`control/web/src`, except generated files and tests)
-to spell none and to import `vocabulary.generated.ts` instead.
-
-Two more tiers are flat at zero and have no baseline. `reason_code` finds a string
-equal to a member of a reason-code enum (`vonk_agent_protocol.reason_codes`:
-blockers, refusals, warnings and attention codes grouped by domain), or a message
-that starts with one (`"run-switch.plan_blocked: ..."`), anywhere in `control/src`
-and the web app. `code_position` finds a *free-string code*: a string constant or
-f-string in the `code=` / `*_code=` keyword of a call, the first argument of
-`make_blocker`, the code argument of an error class or helper that takes one, a
-`code` / `*_CODE` class or module attribute, or a `code` parameter default. It
-catches a new code that is not in any enum yet, so the code has to be added to its
-domain enum first. The CLI ships without the contract package and spells the codes
-it renders; `test_the_cli_spells_only_contract_codes` keeps those equal to members.
-
-The `legacy_state` tier keeps the retired state spellings that are ordinary
-words (`waiting`, `partial`, `cancelling`, `expired`) out of lifecycle code: a literal
-equal to one of them in a statement that also names a state (`row.state`, `state=`,
-`*_STATES`, `State.X`) counts. The migration is finished, so its baseline is empty and
-`test_no_lifecycle_code_spells_a_retired_state_word` keeps it so. A fourth tier,
-`machine_state`, applies the same context rule to the plain words of the contract's
-other state machines (`installed`, `uninstalled`, `withdrawn`, `published`,
-`stopped`, `verified`, ...; see
-`agent_protocol/src/vonk_agent_protocol/state_machines.py`); its baseline is empty,
-and the distinctive words of those machines (`withdrawal-pending`, `not-yet-valid`)
-are caught by the first tier. There is no exception list: a certificate, an
-enrollment grant, an installation record, a distribution assignment, an endpoint or a
-catalog sync speaks its contract enum like everything else. `waiting-for-operator` is
-found in any context by the distinctive tier. Only the contract's alias table
-(`STATE_ALIASES`) may spell the retired words; the CLI, which ships without the
-contract, keeps its one copy in `cli_states.py`, and a test keeps it equal to the
-contract.
-
-The Rust agent has
-the equivalent check in `rust/crates/vonk-agent/tests/protocol_literals.rs`: no
-vocabulary word (the lifecycle enums and every enum `ReasonCodeVocabulary` publishes,
-including `RuntimePreflightFindingCode` and `HelperErrorCode`) in a string literal of
-the agent, helper or protocol crates, no `json!` result body outside tests, and one
-struct literal of the runtime preflight finding (the constructor that takes a
-`RuntimePreflightFindingCode` member), so a new free-string finding code fails.
-`ProgressPhase` and `HostHelperResponseStatus` are guarded in every spelling, plain
-words included; `FailureStage` is guarded by its type (every stage parameter takes the
-enum). A `#[cfg(test)]` item is skipped wherever it stands, so code after an early test
-module is scanned too. `VOCABULARY_RESIDUE` is empty; a word that is a tool's output or
-a file's content goes to `FOREIGN_MEANINGS` with its reason. The Python ratchet has a
-flat `progress_phase` tier: a phase spelled by hand in the `phase=` of
-`OperationProgress`/`OperationMemberProgress`, in a progress-shaped dict or in a
-comparison with a progress phase fails.
+The model registry, pyright exceptions, Rust serde and TypeScript shape registries,
+and generated wire/client/vocabulary checks retain their existing contracts.
+Controller startup and sparse-serialization exceptions remain semantic registries.
+Lifecycle writer ownership remains checked without a baseline.
 
 The lifecycle also has a hardware canary that nothing in CI runs:
 `scripts/lifecycle-canary` drives one load, one cancel during start and one

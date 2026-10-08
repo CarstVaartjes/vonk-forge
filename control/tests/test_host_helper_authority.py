@@ -1139,6 +1139,7 @@ def upgrade_payload():
 def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity():
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
     from vonk_agent_protocol.package_upgrade import (
+        PackageActivationOutcome,
         PackageActivationPhase,
         PackageActivationReceipt,
     )
@@ -1160,7 +1161,7 @@ def test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity()
         phase=PackageActivationPhase.ARMED,
         created_at=int(NOW.timestamp()),
         updated_at=int(NOW.timestamp()),
-        outcome="watchdog_armed",
+        outcome=PackageActivationOutcome.AWAITING_CONTROLLER_ACTIVATION,
     )
     identity = AgentRuntimeIdentity(
         architecture="linux-arm64",

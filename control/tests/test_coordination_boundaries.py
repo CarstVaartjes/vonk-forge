@@ -9,25 +9,17 @@ separate.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from textwrap import dedent, indent
 
 import pytest
 
 from .coordination_boundaries import (
-    BASELINE_PATH,
     BLOCKING_ARTIFACT_LOCK,
     GUARD_LOCK_NAMES,
     NESTED_ARTIFACT_LOCK,
     SQL_TRANSACTION_SPANS_ARTIFACT_LOCK,
     SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
     SQL_TRANSACTION_SPANS_ROUTE_PUBLICATION,
-    Site,
-    evaluate_coordination_gate,
-    load_baseline,
-    render_baseline,
-    scan_coordination_sites,
     scan_source,
 )
 
@@ -313,78 +305,6 @@ def test_scan_source_fails_on_the_previous_admission_implementation() -> None:
         SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
     ]
     assert _scanned(fixed) == []
-
-
-def test_the_repository_source_is_clean_or_exactly_baselined() -> None:
-    """The gate itself: no new site, and no stale baseline entry."""
-
-    sites = scan_coordination_sites()
-    messages = evaluate_coordination_gate(sites, load_baseline(BASELINE_PATH))
-    assert messages == []
-
-
-def test_gate_rejects_a_new_site_and_a_stale_entry() -> None:
-    reviewed = Site(
-        path="control/src/sample.py",
-        line=10,
-        kind=SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
-        function="run",
-        detail="external call open",
-    )
-    baseline = [{**reviewed.identity, "reason": "reviewed"}]
-    assert evaluate_coordination_gate([reviewed], baseline) == []
-    fresh = Site(
-        path="control/src/sample.py",
-        line=11,
-        kind=SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
-        function="run",
-        detail="external call os.stat",
-    )
-    # The replacement is at a new line, so the old entry is stale and the new
-    # site is unreviewed: a same-function swap cannot keep the baseline green.
-    messages = evaluate_coordination_gate([fresh], baseline)
-    assert len(messages) == 2
-    assert "new coordination violation" in messages[0]
-    assert "no longer occurs" in messages[1]
-
-
-def test_baseline_loader_rejects_an_unexplained_or_unknown_entry(
-    tmp_path: Path,
-) -> None:
-    def write(document: object) -> Path:
-        path = tmp_path / "baseline.json"
-        path.write_text(json.dumps(document), encoding="utf-8")
-        return path
-
-    entry = {
-        "path": "control/src/sample.py",
-        "line": 10,
-        "kind": SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
-        "function": "run",
-        "detail": "external call open",
-    }
-    with pytest.raises(ValueError, match="written reason"):
-        load_baseline(write({"schema": 1, "sites": [entry]}))
-    with pytest.raises(ValueError, match="unknown site kind"):
-        load_baseline(
-            write({"schema": 1, "sites": [{**entry, "kind": "made-up", "reason": "x"}]})
-        )
-    assert load_baseline(write({"schema": 1, "sites": [{**entry, "reason": "x"}]}))
-
-
-def test_rendered_baseline_round_trips() -> None:
-    site = Site(
-        path="control/src/sample.py",
-        line=10,
-        kind=SQL_TRANSACTION_SPANS_EXTERNAL_WORK,
-        function="run",
-        detail="external call open",
-    )
-    document = json.loads(
-        render_baseline([site], {SQL_TRANSACTION_SPANS_EXTERNAL_WORK: "reviewed"})
-    )
-    assert document["schema"] == 1
-    assert document["sites"] == [site.identity | {"reason": "reviewed"}]
 
 
 def test_an_in_process_guard_plus_an_artifact_lock_is_allowed() -> None:

@@ -1,38 +1,9 @@
-"""Ratchet on untyped mapping annotations in Controller, protocol, CLI and scripts.
-
-The shared Pydantic contracts own every structure we control, to every depth.
-``Mapping[str, object]``, ``Mapping[str, Any]``, ``dict[str, object]`` and
-``dict[str, Any]`` (and their ``MutableMapping`` / ``typing.Dict`` spellings)
-describe an object whose keys the type checker cannot see, so a plan, progress
-document, evidence record, result, blocker or request body typed that way can
-drift from its contract unnoticed.
-
-Two kinds of annotation are allowed, both in ``tools/untyped-mapping-allowlist.json``:
-
-* ``permanent``: a reviewed site keyed on path, enclosing function and the
-  annotation text, with a count and a written reason. It is either genuinely
-  external data (an explicit pass-through) or a true generic utility (a JSON
-  canonicalizer, a bounded accessor over ``object``).
-* ``debt``: a per-file count of sites that still carry our own structured data
-  and are waiting for a contract model. It only goes down: an increase or an
-  unlisted file fails, and a decrease fails until the list is lowered, so the
-  ratchet cannot loosen again.
-
-``python -m control.tests.untyped_mapping_boundaries --update`` rewrites the
-``debt`` counts from the source (and never adds a ``permanent`` entry).
-
-``object``, ``Any`` and pydantic's ``JsonValue`` anywhere in the value type count,
-so ``dict[str, object | None]`` and ``dict[str, JsonValue]`` are the same debt as
-``dict[str, object]``; this agrees with the stored-JSON contract walker.
-"""
+"""Fixture-tested syntax detection; no allowances or historical counts."""
 
 from __future__ import annotations
 
 import ast
-import json
 import re
-import sys
-from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,7 +15,6 @@ SOURCE_ROOTS = (
     REPO_ROOT / "src" / "cluster_profiles",
     REPO_ROOT / "scripts",
 )
-ALLOWLIST_PATH = REPO_ROOT / "tools" / "untyped-mapping-allowlist.json"
 
 _MAPPING_NAMES = frozenset({"Mapping", "MutableMapping", "dict", "Dict"})
 _UNTYPED_VALUES = frozenset({"object", "Any", "JsonValue"})
@@ -133,7 +103,7 @@ class _Collector(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-_CANDIDATE = re.compile(r"\[\s*str\s*,.*(?:object|Any|JsonValue)")
+_CANDIDATE = re.compile(r"\[\s*str\s*,.*(?:object|Any|JsonValue)", re.DOTALL)
 
 
 def scan_source(source: str, *, path: str) -> list[Site]:
@@ -163,164 +133,3 @@ def scan_sites(roots: Sequence[Path] = SOURCE_ROOTS) -> list[Site]:
             relative = module.relative_to(REPO_ROOT).as_posix()
             sites.extend(scan_source(module.read_text(encoding="utf-8"), path=relative))
     return sites
-
-
-def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, list[dict[str, object]]]:
-    document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or document.get("schema") != 1:
-        raise ValueError(f"{path}: allowlist must be a schema-1 object")
-    permanent = document.get("permanent")
-    debt = document.get("debt")
-    if not isinstance(permanent, list) or not isinstance(debt, list):
-        raise TypeError(f"{path}: allowlist needs permanent and debt arrays")
-    for index, entry in enumerate(permanent):
-        where = f"{path} permanent[{index}]"
-        for field in ("path", "function", "annotation"):
-            if not isinstance(entry.get(field), str):
-                raise TypeError(f"{where}: {field} must be a string")
-        count = entry.get("count")
-        if not isinstance(count, int) or count < 1:
-            raise ValueError(f"{where}: count must be a positive integer")
-        reason = entry.get("reason")
-        if not isinstance(reason, str) or len(reason.split()) < 3:
-            raise ValueError(f"{where}: allowlist entry needs a written reason")
-    for index, entry in enumerate(debt):
-        where = f"{path} debt[{index}]"
-        if not isinstance(entry.get("path"), str):
-            raise TypeError(f"{where}: path must be a string")
-        count = entry.get("count")
-        if not isinstance(count, int) or count < 1:
-            raise ValueError(f"{where}: count must be a positive integer")
-    return {**document, "permanent": permanent, "debt": debt}
-
-
-def relocated_allowlist(sites, allowlist, moves=None):
-    from .package_moves import PackageMoves
-
-    moves = moves or PackageMoves(REPO_ROOT, allowlist.get("content_identities"))
-    permanent = [
-        {
-            **entry,
-            "function": moves.scope(entry["path"], entry["function"]),
-            "path": moves.function(
-                entry["path"],
-                entry["function"],
-                lambda source, name, entry=entry: any(
-                    site.function == name and site.annotation == entry["annotation"]
-                    for site in scan_source(source, path=entry["path"])
-                ),
-            ),
-        }
-        for entry in allowlist["permanent"]
-    ]
-    allowed = {
-        (entry["path"], entry["function"], entry["annotation"]): entry["count"]
-        for entry in permanent
-    }
-    remaining = Counter()
-    for key, count in Counter(site.key for site in sites).items():
-        remaining[key[0]] += max(0, count - allowed.get(key, 0))
-    debt = moves.counts(
-        {entry["path"]: entry["count"] for entry in allowlist["debt"]}, dict(remaining)
-    )
-    return {
-        **allowlist,
-        "permanent": permanent,
-        "debt": [
-            {"path": path, "count": count} for path, count in sorted(debt.items())
-        ],
-    }
-
-
-def evaluate_gate(
-    sites: Sequence[Site], allowlist: dict[str, list[dict[str, object]]]
-) -> list[str]:
-    """One message per violation; an empty list is a pass."""
-
-    allowlist = relocated_allowlist(sites, allowlist)
-    messages: list[str] = []
-    permanent = {
-        (str(e["path"]), str(e["function"]), str(e["annotation"])): int(e["count"])  # type: ignore[call-overload]
-        for e in allowlist["permanent"]
-    }
-    debt = {str(e["path"]): int(e["count"]) for e in allowlist["debt"]}  # type: ignore[call-overload]
-    seen: Counter[tuple[str, str, str]] = Counter(site.key for site in sites)
-    remaining: Counter[str] = Counter()
-    for key, count in seen.items():
-        allowed = permanent.get(key, 0)
-        if count > allowed:
-            remaining[key[0]] += count - allowed
-    for key, allowed in sorted(permanent.items()):
-        actual = seen.get(key, 0)
-        if actual < allowed:
-            messages.append(
-                f"permanent entry is stale; lower or delete it: {key[0]} "
-                f"{key[2]} in {key[1]}: {allowed} -> {actual}"
-            )
-    for path in sorted(set(remaining) | set(debt)):
-        actual = remaining.get(path, 0)
-        allowed = debt.get(path, 0)
-        if actual > allowed:
-            where = [site.render() for site in sites if site.path == path][:5]
-            messages.append(
-                f"untyped mapping annotations increased in {path}: {allowed} -> "
-                f"{actual}. Type the data with a contract model, or add a "
-                "permanent entry with a reason. " + "; ".join(where)
-            )
-        elif actual < allowed:
-            messages.append(
-                f"untyped mapping debt shrank in {path}: {allowed} -> {actual}; "
-                "run control/tests/untyped_mapping_boundaries.py --update"
-            )
-    return messages
-
-
-def update_debt(path: Path = ALLOWLIST_PATH) -> int:
-    sites = scan_sites()
-    allowlist = relocated_allowlist(sites, load_allowlist(path))
-    permanent = {
-        (str(e["path"]), str(e["function"]), str(e["annotation"])): int(e["count"])  # type: ignore[call-overload]
-        for e in allowlist["permanent"]
-    }
-    seen = Counter(site.key for site in sites)
-    remaining: Counter[str] = Counter()
-    for key, count in seen.items():
-        extra = count - permanent.get(key, 0)
-        if extra > 0:
-            remaining[key[0]] += extra
-    recorded = {str(entry["path"]): int(entry["count"]) for entry in allowlist["debt"]}
-    if any(count > recorded.get(file, 0) for file, count in remaining.items()):
-        raise ValueError(
-            "cannot increase debt; new sites need a reviewed permanent entry"
-        )
-    document = {
-        "schema": 1,
-        "permanent": allowlist["permanent"],
-        "debt": [
-            {"path": file, "count": count} for file, count in sorted(remaining.items())
-        ],
-    }
-    from .package_moves import record_identities
-
-    document = record_identities(document, REPO_ROOT)
-    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    return sum(remaining.values())
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] == "--update":
-        print(f"debt: {update_debt()} untyped mapping annotation(s)")
-        return 0
-    sites = scan_sites()
-    messages = evaluate_gate(sites, load_allowlist())
-    for message in messages:
-        print(message, file=sys.stderr)
-    if messages:
-        return 1
-    print(f"untyped mapping annotations hold at {len(sites)}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

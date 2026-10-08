@@ -590,6 +590,7 @@ mod tests {
         let staging = create_staging_directory(root.path()).unwrap();
         assert!(staging.is_dir());
         let target = root.path().join("compose");
+        fs::write(&target, b"original").unwrap();
         for content in [b"first".as_slice(), b"second".as_slice()] {
             atomic_replace(&target, content, 0o600).unwrap();
             assert_eq!(fs::read(&target).unwrap(), content);
