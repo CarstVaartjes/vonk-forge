@@ -9,7 +9,7 @@ command sites, not executions of parametrized tests.
 
 | File | Initial classification and disposition |
 | --- | --- |
-| `control/tests/principle_guards.py` | real-repo-state: `show origin/main` and `rev-parse`; historical comparisons moved to `scripts/check-principle-history`, invoked by the CI Ruff job against the explicit fetched base. Current-tree allowlist checks and synthetic history-gate tests remain hermetic. |
+| `control/tests/principle_guards.py` | real-repo-state: `show origin/main` and `rev-parse`; CI now supplies a patch through `scripts/check-added-lines` against the explicit fetched PR base. Scanners inspect added lines and tests use text fixtures; no historical ledger comparison remains. |
 | `control/tests/test_fresh_launch_catalog_postgres_acceptance.py` | real-repo-state: recipe checkout `rev-parse`; removed the unused HEAD lookup. The canonical index supplies and validates its immutable `source_commit`. |
 | `control/tests/test_profile_effect_consumer_contract_postgres.py` | real-repo-state: platform and recipes `rev-parse`; platform build identity is an explicit workflow input, recipe checkout verification stays in the existing workflow step. |
 | `tests/acceptance/test_spark_lifecycle.py` | real-repo-state: `rev-parse` and two `diff` commands; removed checkout-state checks. The helper manifest already binds the requested source identity and hashes every relevant source input and the helper binary; candidate identity is checked separately. |
