@@ -74,6 +74,12 @@ from .prebuilt_images import (
     prebuilt_failed,
 )
 from .profile_capacity import profile_build_memory_claims
+from .recipe_build_receipts import (
+    BuildCandidate,
+    CompletedRecipeBuild,
+    PreparedBuildLookup,
+    PreparedBuildReceipt,
+)
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     build_plan_document,
@@ -577,60 +583,6 @@ class RecipeBuildResolution:
         return _digest(self.input_intent | {"builder_binary_digest": binary_digest})
 
 
-@dataclass(frozen=True, slots=True)
-class CompletedRecipeBuild:
-    build_id: str
-    image_digest: str
-    oci_layout_sha256: str
-    image_bytes: int
-
-
-@dataclass(frozen=True, slots=True)
-class _BuildCandidate:
-    """Plain snapshot of one succeeded build row, safe to use after commit.
-
-    Managed storage is consulted only after the reading transaction has ended,
-    so a candidate carries the values that decision needs instead of keeping an
-    ORM instance alive across storage I/O.
-    """
-
-    build_id: str
-    builder_node_id: str
-    build_input_sha256: str
-    builder_binary_digest: str
-    image_digest: str
-    oci_layout_sha256: str
-    image_bytes: int
-
-
-class PreparedBuildReceipt(Protocol):
-    """Verified filesystem identity of one prepared Controller build."""
-
-    build_id: str
-    build_input_sha256: str | None
-    image_digest: str
-    oci_archive_sha256: str
-    image_bytes: int
-
-
-class PreparedBuildLookup(Protocol):
-    """Answer whether exact build bytes are already prepared on disk.
-
-    The lookup is keyed by the executable build input identity the receipt
-    recorded beside the archive. It is the reuse owner, so it never consults the
-    SQL build index and never falls back to a weaker key.
-    """
-
-    def __call__(
-        self,
-        build_input_sha256: str,
-        *,
-        expected_architecture: str,
-        expected_runtime_interface: str,
-        expected_archive_sha256: str | None = None,
-    ) -> PreparedBuildReceipt | None: ...
-
-
 class SourceBundleRederiver(Protocol):
     """Produce a source bundle's archive again from the evidence the Controller kept.
 
@@ -809,11 +761,9 @@ class RecipeBuildService:
 
     def check_source(self, recipe_revision_id: str) -> SourcePolicyReport:
         """Re-observe uncertain build facts after releasing each reading session.
-
         Unknown outcomes are re-observed with a fixed attempt budget and bounded
-        backoff. Exact request inputs survive every attempt; security and input
-        refusals escape immediately. Exhaustion retains the typed cause for
-        the owning lifecycle's next observation, without holding resources.
+        backoff and exact inputs. Security/input refusals escape immediately;
+        exhaustion preserves the typed cause and releases resources.
         """
         last_error: UnknownOutcomeError | None = None
         for delay in _BUILD_OBSERVATION_DELAYS:
@@ -852,13 +802,7 @@ class RecipeBuildService:
         )
 
     def resolve(self, recipe_revision_id: str) -> RecipeBuildResolution:
-        """Re-observe uncertain build facts after releasing each reading session.
-
-        Unknown outcomes are re-observed with a fixed attempt budget and bounded
-        backoff. Exact request inputs survive every attempt; security and input
-        refusals escape immediately. Exhaustion retains the typed cause for
-        the owning lifecycle's next observation, without holding resources.
-        """
+        """Re-observe with the bounded, resource-free policy in ``check_source``."""
         last_error: UnknownOutcomeError | None = None
         for delay in _BUILD_OBSERVATION_DELAYS:
             if delay:
@@ -950,7 +894,7 @@ class RecipeBuildService:
 
         # Read a bounded snapshot and commit before touching managed storage:
         # a database transaction contains database work only.
-        candidates: list[_BuildCandidate] = []
+        candidates: list[BuildCandidate] = []
         with self._sessions() as session:
             rows = session.scalars(
                 select(RecipeBuild)
@@ -990,7 +934,7 @@ class RecipeBuildService:
                 assert candidate.oci_layout_sha256 is not None
                 assert candidate.image_bytes is not None
                 candidates.append(
-                    _BuildCandidate(
+                    BuildCandidate(
                         build_id=candidate.id,
                         builder_node_id=candidate.builder_node_id,
                         build_input_sha256=candidate.build_input_sha256,
@@ -1001,7 +945,7 @@ class RecipeBuildService:
                     )
                 )
 
-        cached: _BuildCandidate | None = None
+        cached: BuildCandidate | None = None
         prepared: PreparedBuildReceipt | None = None
         receipt_pending = False
         stale_receipt = False
@@ -1213,13 +1157,7 @@ class RecipeBuildService:
         now: datetime,
         resolution: RecipeBuildResolution | None = None,
     ) -> RecipeBuildPlan:
-        """Re-observe uncertain build facts after releasing each reading session.
-
-        Unknown outcomes are re-observed with a fixed attempt budget and bounded
-        backoff. Exact request inputs survive every attempt; security and input
-        refusals escape immediately. Exhaustion retains the typed cause for
-        the owning lifecycle's next observation, without holding resources.
-        """
+        """Re-observe with the bounded, resource-free policy in ``check_source``."""
         last_error: UnknownOutcomeError | None = None
         for delay in _BUILD_OBSERVATION_DELAYS:
             if delay:
