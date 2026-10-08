@@ -296,26 +296,26 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch locked crates
         run: scripts/retry-dependency-fetch cargo fetch --locked
-      # The probe build is the longest step; the Python contract checks do not
-      # need it, so they run while Cargo compiles.
-      - parallel:
-          - name: Build Rust wire probes
-            run: >-
-              uv run --project control --frozen
-              python scripts/tests/run_agent_wire_contracts.py --build-only
-          # The response witness validates every 2xx body these API tests
-          # produce against its declared schema; the tests themselves also
-          # run in the control suite.
-          - name: Witness Controller API responses against their contracts
-            run: |
-              set -euo pipefail
-              uv run --project control --frozen pytest -q \
-                control/tests/test_api_response_witness.py \
-                control/tests/test_artifact_job_api.py \
-                control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned \
-                control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
-                control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
-                --api-response-witness="$RUNNER_TEMP/api-response-witnesses.json"
+      # Keep runner steps serial: even run-only parallel groups can race on
+      # GITHUB_EVENT_PATH with later @actions/github consumers. The workflow
+      # event-context guard also covers composite actions and artifact uploads.
+      - name: Build Rust wire probes
+        run: >-
+          uv run --project control --frozen
+          python scripts/tests/run_agent_wire_contracts.py --build-only
+      # The response witness validates every 2xx body these API tests
+      # produce against its declared schema; the tests themselves also
+      # run in the control suite.
+      - name: Witness Controller API responses against their contracts
+        run: |
+          set -euo pipefail
+          uv run --project control --frozen pytest -q \
+            control/tests/test_api_response_witness.py \
+            control/tests/test_artifact_job_api.py \
+            control/tests/test_fleet_profile_api.py::test_profile_operator_routes_are_singular_and_unversioned \
+            control/tests/test_fleet_profile_api.py::test_profile_mutation_role_is_declared_for_final_route \
+            control/tests/test_production_app_recipe_image_api.py::test_production_app_recipe_download_auth_and_status \
+            --api-response-witness="$RUNNER_TEMP/api-response-witnesses.json"
       - name: Attribute catalog wire validation cost with the actual compiled probe
         env:
           VONK_WIRE_PROBE_TIMINGS: "1"
@@ -358,28 +358,29 @@ jobs:
         uses: ./.github/actions/apt-install
         with:
           packages: aptly aardvark-dns crun dbus-user-session fuse-overlayfs netavark podman slirp4netns uidmap
-      - parallel:
-          - name: Test bounded aptly state compaction
-            env:
-              VONK_CI_PREREQUISITES: needs_aptly
-            run: >-
-              uv run --project control --frozen
-              pytest -q tests/scripts/test_agent_apt_compaction_integration.py
-          - name: Test Spark rootless Podman OCI import
-            run: >-
-              cargo test --locked -p vonk-agent --test recipe_builder
-              faithful_untagged_oci_layout_loads_with_spark_podman -- --exact
-          - name: Verify controller host-helper authority
-            run: >-
-              uv run --project control --frozen pytest -q
-              control/tests/test_host_helper_authority.py
-          - name: Record GPU node service exposure
-            shell: bash
-            run: |
-              set -euo pipefail
-              install -d -m 0755 artifacts
-              scripts/verify-agent-systemd --json \
-                | tee artifacts/vonk-forge-systemd-security.json
+      # Runner-managed parallel steps share GITHUB_EVENT_PATH with later
+      # artifact uploads; keep these serial (test_workflow_event_context.py).
+      - name: Test bounded aptly state compaction
+        env:
+          VONK_CI_PREREQUISITES: needs_aptly
+        run: >-
+          uv run --project control --frozen
+          pytest -q tests/scripts/test_agent_apt_compaction_integration.py
+      - name: Test Spark rootless Podman OCI import
+        run: >-
+          cargo test --locked -p vonk-agent --test recipe_builder
+          faithful_untagged_oci_layout_loads_with_spark_podman -- --exact
+      - name: Verify controller host-helper authority
+        run: >-
+          uv run --project control --frozen pytest -q
+          control/tests/test_host_helper_authority.py
+      - name: Record GPU node service exposure
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 0755 artifacts
+          scripts/verify-agent-systemd --json \
+            | tee artifacts/vonk-forge-systemd-security.json
       - name: Exercise build egress from the hardened agent service
         shell: bash
         run: |

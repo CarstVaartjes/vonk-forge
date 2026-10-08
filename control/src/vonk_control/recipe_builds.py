@@ -61,7 +61,6 @@ from .models import (
     AgentNode,
     CatalogDocumentRevision,
     RecipeBuild,
-    RecipeSourceBundle,
     ResourceReservation,
 )
 from .prebuilt_images import (
@@ -97,6 +96,7 @@ from .runtime_adapters import (
 from .source_bundles import (
     GeneratedSourceBundle,
     SourceBundleError,
+    SourceBundleIntegrityRefused,
     SourceBundleRefused,
     SourceBundleStoreProtocol,
     SourceBundleUnknown,
@@ -687,10 +687,10 @@ class RecipeBuildService:
         a damaged stored copy is not a recipe fault. A bundle that cannot be
         read, or that lacks the build's Dockerfile, is derived again from the
         recipe package's closure and stored through the same ingress check (the
-        digest must match), then read again. Only what is still invalid after
-        that fresh verification is the recipe's own fault; when it cannot be
-        derived at all the build waits (a library sync restores it) instead of
-        being refused.
+        digest must match), then read again. Incomplete local evidence after
+        that fresh verification remains unknown; when it cannot be
+        derived at all the build remains unknown and the bounded request retry
+        observes it again.
         """
 
         dockerfile = build.get("dockerfile")
@@ -700,9 +700,11 @@ class RecipeBuildService:
         def read() -> GeneratedSourceBundle | SourceBundleError:
             try:
                 return self._bundles.get(source_sha256)
-            except SourceBundleUnknown:
-                raise
-            except SourceBundleRefused as error:
+            except SourceBundleUnknown as error:
+                if error.code in _UNHEALABLE_BUNDLE_CODES:
+                    raise
+                return error
+            except (SourceBundleRefused, SourceBundleIntegrityRefused) as error:
                 raise RecipeBuildRefused(
                     error.code, str(error), reason=error.typed_reason
                 ) from error
@@ -719,13 +721,12 @@ class RecipeBuildService:
             healed = self._heal_source_bundle(projected, context_path, source_sha256)
             if healed:
                 loaded = read()
-            elif isinstance(loaded, SourceBundleError):
+            if isinstance(loaded, SourceBundleError):
                 raise RecipeBuildUnknown(loaded.code, str(loaded)) from loaded
-            else:
+            if damaged(loaded):
                 raise RecipeBuildUnknown(
                     RecipeBuildCode.SOURCE_UNAVAILABLE,
-                    "stored source bundle lacks the recipe Dockerfile and cannot "
-                    "be derived again yet",
+                    "source bundle evidence remains incomplete after rederivation",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
         if isinstance(loaded, SourceBundleError):
@@ -747,7 +748,7 @@ class RecipeBuildService:
             self._bundles.put(source_sha256, io.BytesIO(archive))
         except SourceBundleUnknown:
             raise
-        except SourceBundleRefused as error:
+        except (SourceBundleRefused, SourceBundleIntegrityRefused) as error:
             raise RecipeBuildRefused(
                 error.code, str(error), reason=error.typed_reason
             ) from error
@@ -789,12 +790,6 @@ class RecipeBuildService:
             document = _canonical_recipe_document(revision.document)
             build = _canonical_build(document, projected)
             source_sha256 = _source_bundle_handle(projected)
-            if session.get(RecipeSourceBundle, source_sha256) is None:
-                raise RecipeBuildUnknown(
-                    RecipeBuildCode.SOURCE_UNAVAILABLE,
-                    "verified source bundle is unavailable",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
         bundle = self._verified_bundle(projected, build, source_sha256)
         return inspect_build_source_policy(
             _source_policy_document(document, build, source_sha256), bundle
@@ -836,12 +831,6 @@ class RecipeBuildService:
             build = _canonical_build(document, projected)
             adapter = _resolved_adapter(projected)
             source_sha256 = _source_bundle_handle(projected)
-            if session.get(RecipeSourceBundle, source_sha256) is None:
-                raise RecipeBuildUnknown(
-                    RecipeBuildCode.SOURCE_UNAVAILABLE,
-                    "verified source bundle is unavailable",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
 
         bundle = self._verified_bundle(projected, build, source_sha256)
         try:
@@ -1205,13 +1194,6 @@ class RecipeBuildService:
             # is checked against fresh host inventory below.
             assert node.binary_digest is not None
             builder_binary_digest = node.binary_digest
-            stored = session.get(RecipeSourceBundle, source_sha256)
-            if stored is None:
-                raise RecipeBuildUnknown(
-                    RecipeBuildCode.SOURCE_UNAVAILABLE,
-                    "verified source bundle is unavailable",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
         bundle = self._verified_bundle(projected, build, source_sha256)
         try:
             policy = enforce_build_source_policy(

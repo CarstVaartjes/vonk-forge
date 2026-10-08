@@ -18,6 +18,8 @@ const DISK_POLL_INTERVAL: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Program {
     Curl,
+    Getent,
+    Ip,
     Docker,
     NvidiaCtk,
     NvidiaSmi,
@@ -30,6 +32,8 @@ pub enum Program {
 impl Program {
     fn path(self) -> &'static str {
         match self {
+            Self::Getent => "/usr/bin/getent",
+            Self::Ip => "/usr/sbin/ip",
             Self::Curl => "/usr/bin/curl",
             Self::Docker => "/usr/bin/docker",
             Self::NvidiaCtk => "/usr/bin/nvidia-ctk",
