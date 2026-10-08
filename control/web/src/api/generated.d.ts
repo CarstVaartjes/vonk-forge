@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 18fb363dc1d0ac06c9a1286433de023c9e1311d5a85a53dff9a776c4c462f67e. Do not edit.
+// Generated from canonical OpenAPI SHA256 fbcff7cf53af2b27c880e6fa059ed6f664a1c502694e1e1517e9a2f533d0ac90. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -10943,24 +10943,6 @@ export interface components {
              */
             subphase: "target-copy";
         };
-        /**
-         * RunSwitchDistributionEndedResult
-         * @description A missing durable distribution child; no node effect is asserted.
-         */
-        RunSwitchDistributionEndedResult: {
-            error_code: components["schemas"]["DistributionCode"];
-            /**
-             * Phase
-             * @constant
-             */
-            phase: "transfer";
-            reason: components["schemas"]["WaitReason"];
-            /**
-             * Subphase
-             * @constant
-             */
-            subphase: "target-copy";
-        };
         /** RunSwitchFinalVerifyResult */
         RunSwitchFinalVerifyResult: {
             /** Final Verified */
@@ -11317,7 +11299,7 @@ export interface components {
             /** Failure Code */
             failure_code?: string | null;
             /** Final Observation */
-            final_observation?: components["schemas"]["RunSwitchDistributionEndedResult"] | components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"] | null;
+            final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"] | null;
             /** Final Verify Started At */
             final_verify_started_at?: (number | ExactNumber) | null;
             /**
@@ -11347,7 +11329,7 @@ export interface components {
              */
             phase_index: number;
             /** Phase Results */
-            phase_results?: (components["schemas"]["RunSwitchDistributionEndedResult"] | components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
+            phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
             /**
              * Phase Retry Generation
              * @default 0
@@ -14902,7 +14884,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GatewayKeyList"];
+                    "application/json": components["schemas"]["GatewayKeyList"] | components["schemas"]["UnknownError"];
                 };
             };
             /** @description Unauthorized */
@@ -14962,7 +14944,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GatewayKeyCreated"];
+                    "application/json": components["schemas"]["GatewayKeyCreated"] | components["schemas"]["UnknownError"];
+                };
+            };
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnknownError"];
                 };
             };
             /** @description Unauthorized */
@@ -15001,6 +14992,15 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
@@ -15029,7 +15029,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GatewayKeyRevoked"];
+                    "application/json": components["schemas"]["GatewayKeyRevoked"] | components["schemas"]["UnknownError"];
                 };
             };
             /** @description Unauthorized */
@@ -15050,15 +15050,6 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -15066,6 +15057,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
             /** @description Service Unavailable */
@@ -15096,7 +15096,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GatewayKeyCreated"];
+                    "application/json": components["schemas"]["GatewayKeyCreated"] | components["schemas"]["UnknownError"];
                 };
             };
             /** @description Unauthorized */
@@ -15117,15 +15117,6 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -15133,6 +15124,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
             /** @description Service Unavailable */

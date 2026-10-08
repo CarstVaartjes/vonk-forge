@@ -12,6 +12,7 @@ from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.gateway_key_revoked import GatewayKeyRevoked
 from ...models.request_validation_problem import RequestValidationProblem
+from ...models.unknown_error import UnknownError
 from typing import cast
 
 
@@ -36,11 +37,28 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem | None:
     if response.status_code == 200:
-        response_200 = GatewayKeyRevoked.from_dict(response.json())
+        def _parse_response_200(data: object) -> GatewayKeyRevoked | UnknownError:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_200_type_0 = GatewayKeyRevoked.from_dict(data)
 
 
+
+                return response_200_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_200_type_1 = UnknownError.from_dict(data)
+
+
+
+            return response_200_type_1
+
+        response_200 = _parse_response_200(response.json())
 
         return response_200
 
@@ -58,19 +76,19 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
 
         return response_403
 
-    if response.status_code == 404:
-        response_404 = BoundedErrorResponse.from_dict(response.json())
-
-
-
-        return response_404
-
     if response.status_code == 422:
         response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
         return response_422
+
+    if response.status_code == 502:
+        response_502 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_502
 
     if response.status_code == 503:
         def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
@@ -102,7 +120,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -116,7 +134,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem]:
     """ Revoke Gateway Key
 
     Args:
@@ -127,7 +145,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem]
      """
 
 
@@ -147,7 +165,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem | None:
     """ Revoke Gateway Key
 
     Args:
@@ -158,7 +176,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem
      """
 
 
@@ -173,7 +191,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem]:
     """ Revoke Gateway Key
 
     Args:
@@ -184,7 +202,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem]
      """
 
 
@@ -204,7 +222,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem | None:
     """ Revoke Gateway Key
 
     Args:
@@ -215,7 +233,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyRevoked | UnknownError | RequestValidationProblem
      """
 
 

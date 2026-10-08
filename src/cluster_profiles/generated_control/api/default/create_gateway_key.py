@@ -13,6 +13,7 @@ from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.gateway_key_create_request import GatewayKeyCreateRequest
 from ...models.gateway_key_created import GatewayKeyCreated
 from ...models.request_validation_problem import RequestValidationProblem
+from ...models.unknown_error import UnknownError
 from typing import cast
 
 
@@ -43,13 +44,37 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError | None:
     if response.status_code == 201:
-        response_201 = GatewayKeyCreated.from_dict(response.json())
+        def _parse_response_201(data: object) -> GatewayKeyCreated | UnknownError:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_201_type_0 = GatewayKeyCreated.from_dict(data)
 
 
+
+                return response_201_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_201_type_1 = UnknownError.from_dict(data)
+
+
+
+            return response_201_type_1
+
+        response_201 = _parse_response_201(response.json())
 
         return response_201
+
+    if response.status_code == 202:
+        response_202 = UnknownError.from_dict(response.json())
+
+
+
+        return response_202
 
     if response.status_code == 401:
         response_401 = BoundedErrorResponse.from_dict(response.json())
@@ -78,6 +103,13 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
 
 
         return response_422
+
+    if response.status_code == 502:
+        response_502 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_502
 
     if response.status_code == 503:
         def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
@@ -109,7 +141,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -123,7 +155,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: GatewayKeyCreateRequest,
 
-) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError]:
     """ Create Gateway Key
 
     Args:
@@ -134,7 +166,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError]
      """
 
 
@@ -154,7 +186,7 @@ def sync(
     client: AuthenticatedClient,
     body: GatewayKeyCreateRequest,
 
-) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError | None:
     """ Create Gateway Key
 
     Args:
@@ -165,7 +197,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError
      """
 
 
@@ -180,7 +212,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: GatewayKeyCreateRequest,
 
-) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError]:
     """ Create Gateway Key
 
     Args:
@@ -191,7 +223,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError]
      """
 
 
@@ -211,7 +243,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: GatewayKeyCreateRequest,
 
-) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError | None:
     """ Create Gateway Key
 
     Args:
@@ -222,7 +254,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | GatewayKeyCreated | UnknownError | RequestValidationProblem | UnknownError
      """
 
 
