@@ -50,6 +50,7 @@ from ..recipe_image_removal_contract import (
     RecipeCacheRemovalModelChild,
     RecipeCacheRemovalOwner,
 )
+from ..recovery_policy import RecoveryPolicy
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImagePreparationUnknown,
@@ -609,6 +610,8 @@ def _record_recipe_removal_failure(
             retry_attempts = checkpoint.retry_attempts
             retry_time: str | None = None
             delay: int | None = None
+            if retryable and retry_attempts + 1 >= RecoveryPolicy().max_failures:
+                retryable = False
             if retryable:
                 retry_attempts += 1
                 # The core's bounded backoff decides when; the owner's

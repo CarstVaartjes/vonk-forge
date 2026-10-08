@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, cast
 
@@ -14,7 +15,12 @@ from vonk_agent_protocol import (
     ModelCacheCode,
 )
 
-from ..artifact_lifecycle import ArtifactIdentity, has_pending_removal
+from ..artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactReferenceUnsettled,
+    has_pending_removal,
+    lock_reference_gates,
+)
 from ..bounded_json import require_sequence
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
@@ -24,6 +30,7 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import progress_document
 from ..models import ModelCacheOperation
+from ..settings import DATABASE_WAIT_BUDGETS
 from ..strict_json import serialize_json_value
 from .artifacts import (
     ArtifactSetManifest,
@@ -33,7 +40,11 @@ from .artifacts import (
     _unique_artifacts,
 )
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
-from .errors import ModelCacheConflictInvalid, ModelCacheConflictRefused
+from .errors import (
+    ModelCacheConflictInvalid,
+    ModelCacheConflictRefused,
+    ModelCacheConflictUnknown,
+)
 from .persistence import _cache_failure, _write_operation_payload
 from .source_helpers import _model_selector, _request_key
 from .views import CacheOperationView
@@ -131,91 +142,129 @@ class DownloadAdmissionMixin:
                 failure=None if capacity is None else capacity[0],
             ),
         )
-        try:
-            with cache._lock, cache._session(write=True) as session:
-                replay = cache._download_replay(
-                    session,
-                    request_key,
-                    actor=actor,
-                    selector=selector,
-                    force=force,
-                    artifact_set_sha256=set_digest,
-                    plan_digest=requested_plan,
-                )
-                if replay is not None:
-                    return replay
-                else:
-                    now = cache._clock()
-                    cache._require_model_sets_open(
+        deadline = (
+            time.monotonic()
+            + DATABASE_WAIT_BUDGETS.patient_admission_lock_timeout_ms / 1000
+        )
+        delay = 0.01
+        while True:
+            try:
+                with cache._lock, cache._session(write=True) as session:
+                    replay = cache._download_replay(
                         session,
-                        (set_digest,),
-                        now=now,
-                        object_digests=tuple(
-                            item.sha256 for item in manifest.artifacts
-                        ),
-                        allow_pending_removal=True,
-                    )
-                    cache._ensure_set(session, manifest)
-                    operation = ModelCacheAdapter.new_operation(
-                        request_key=request_key,
-                        schema_version=SCHEMA_VERSION,
-                        kind="download",
-                        next_action_at=wait_until,
-                        attempt=1,
+                        request_key,
+                        actor=actor,
+                        selector=selector,
+                        force=force,
                         artifact_set_sha256=set_digest,
                         plan_digest=requested_plan,
-                        payload=serialize_json_value(payload),
-                        progress=progress_document(
-                            cache._progress(
-                                manifest,
-                                phase="queued",
-                                expected_bytes=transfer.total_bytes,
-                            )
-                        ),
-                        actor=actor,
-                        created_at=now,
-                        updated_at=now,
                     )
-                    if has_pending_removal(
-                        session,
-                        (
-                            ArtifactIdentity("model-set", set_digest),
-                            *(
-                                ArtifactIdentity("model-object", item.sha256)
-                                for item in manifest.artifacts
-                            ),
-                        ),
-                    ):
-                        cache._store_failure(
-                            operation,
-                            _cache_failure(
-                                ArtifactLifecycleCode.DELETION_IN_PROGRESS,
-                                "Waiting for the prior model removal fence to settle",
-                                retryable=True,
-                                recovery="retry",
-                            ),
+                    if replay is not None:
+                        return replay
+                    else:
+                        now = cache._clock()
+                        # Serialize metadata repair under the exact set gate before
+                        # reading derived membership. Byte verification stays in storage.
+                        lock_reference_gates(
+                            session,
+                            (ArtifactIdentity("model-set", set_digest),),
+                            now=now,
                         )
-                    session.add(operation)
-                    session.flush()
-                    operation_id = operation.id
-        except IntegrityError:
-            # A borrowed transaction belongs to its caller. Only recover here
-            # after our own transaction has rolled back and released its locks.
-            if isinstance(cache._sessions, Session):
-                raise
-            with cache._session() as session:
-                replay = cache._download_replay(
-                    session,
-                    request_key,
-                    actor=actor,
-                    selector=selector,
-                    force=force,
-                    artifact_set_sha256=set_digest,
-                    plan_digest=requested_plan,
-                )
-                if replay is None:
+                        cache._ensure_set(session, manifest)
+                        session.flush()
+                        cache._require_model_sets_open(
+                            session,
+                            (set_digest,),
+                            now=now,
+                            object_digests=tuple(
+                                item.sha256 for item in manifest.artifacts
+                            ),
+                            allow_pending_removal=True,
+                        )
+                        operation = ModelCacheAdapter.new_operation(
+                            request_key=request_key,
+                            schema_version=SCHEMA_VERSION,
+                            kind="download",
+                            next_action_at=wait_until,
+                            attempt=1,
+                            artifact_set_sha256=set_digest,
+                            plan_digest=requested_plan,
+                            payload=serialize_json_value(payload),
+                            progress=progress_document(
+                                cache._progress(
+                                    manifest,
+                                    phase="queued",
+                                    expected_bytes=transfer.total_bytes,
+                                )
+                            ),
+                            actor=actor,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                        if has_pending_removal(
+                            session,
+                            (
+                                ArtifactIdentity("model-set", set_digest),
+                                *(
+                                    ArtifactIdentity("model-object", item.sha256)
+                                    for item in manifest.artifacts
+                                ),
+                            ),
+                        ):
+                            cache._store_failure(
+                                operation,
+                                _cache_failure(
+                                    ArtifactLifecycleCode.DELETION_IN_PROGRESS,
+                                    "Waiting for the prior model removal fence to settle",
+                                    retryable=True,
+                                    recovery="retry",
+                                ),
+                            )
+                        session.add(operation)
+                        session.flush()
+                        operation_id = operation.id
+            except (ArtifactReferenceUnsettled, ModelCacheConflictUnknown) as error:
+                if isinstance(cache._sessions, Session):
                     raise
-                return replay
+                # The failed transaction has released every gate. Re-enter normal
+                # replay before touching metadata so identical intent is adopted.
+                remaining = deadline - time.monotonic()
+                if not getattr(error, "retryable", True) or remaining <= 0:
+                    with cache._session() as session:
+                        replay = cache._download_replay(
+                            session,
+                            request_key,
+                            actor=actor,
+                            selector=selector,
+                            force=force,
+                            artifact_set_sha256=set_digest,
+                            plan_digest=requested_plan,
+                        )
+                        if replay is not None:
+                            return replay
+                    cache._reference_unknown(error)
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 2, 0.05)
+                continue
+            except IntegrityError:
+                # A borrowed transaction belongs to its caller. Only recover here
+                # after our own transaction has rolled back and released its locks.
+                if isinstance(cache._sessions, Session):
+                    raise
+                with cache._session() as session:
+                    replay = cache._download_replay(
+                        session,
+                        request_key,
+                        actor=actor,
+                        selector=selector,
+                        force=force,
+                        artifact_set_sha256=set_digest,
+                        plan_digest=requested_plan,
+                    )
+                    if replay is None:
+                        raise
+                    return replay
+            break
         if interrupt_after_bytes is not None:
             cache._run_download(
                 operation_id,

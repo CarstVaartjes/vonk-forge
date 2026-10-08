@@ -5,7 +5,7 @@ from __future__ import annotations
 import stat
 from typing import TYPE_CHECKING, cast
 
-from vonk_agent_protocol import AssetAvailability, ModelCacheCode
+from vonk_agent_protocol import AssetAvailability
 
 from ..cache_removal_review import AssetDisposition, CacheRemovalAsset
 from ..model_cache_ranges import range_partial_bytes
@@ -13,7 +13,6 @@ from ..models import ModelCacheSet
 from . import constants
 from .artifacts import _unique_artifacts
 from .constants import _PARALLEL_RANGE_WORKERS
-from .errors import ModelCacheStorageRefused
 from .views import ModelCacheRemovalScope
 
 if TYPE_CHECKING:
@@ -43,26 +42,17 @@ class RemovalScopeMixin:
                 if manifest is None:
                     # Destructive guard: without a readable manifest the exact
                     # objects of the scope are unknown, so nothing is removed.
-                    raise ModelCacheStorageRefused(
-                        ModelCacheCode.REMOVAL_SCOPE_UNAVAILABLE,
-                        f"selected model set {set_digest} is no longer available",
-                    )
+                    return _unknown_removal_assets(scope)
                 specs = _unique_artifacts(manifest.artifacts)
                 expected = {
                     digest: spec.expected_bytes for digest, spec in specs.items()
                 }
                 if set(expected) != set(memberships_by_set.get(set_digest, ())):
-                    raise ModelCacheStorageRefused(
-                        ModelCacheCode.REMOVAL_SCOPE_INVALID,
-                        f"model set {set_digest} membership disagrees with its manifest",
-                    )
+                    return _unknown_removal_assets(scope)
                 for digest, expected_bytes in expected.items():
                     previous = expected_by_object.setdefault(digest, expected_bytes)
                     if previous != expected_bytes:
-                        raise ModelCacheStorageRefused(
-                            ModelCacheCode.REMOVAL_SCOPE_INVALID,
-                            f"model object {digest} has inconsistent expected lengths",
-                        )
+                        return _unknown_removal_assets(scope)
                 expected_by_set[set_digest] = expected
 
         object_status: dict[str, tuple[AssetAvailability, int | None]] = {}
@@ -175,10 +165,7 @@ class RemovalScopeMixin:
         for digest in scope.selected_objects:
             expected_bytes = expected_by_object.get(digest)
             if expected_bytes is None:
-                raise ModelCacheStorageRefused(
-                    ModelCacheCode.REMOVAL_SCOPE_INVALID,
-                    f"model object {digest} has no validated manifest length",
-                )
+                return _unknown_removal_assets(scope)
             availability, available_bytes = object_status[digest]
             disposition: AssetDisposition = (
                 "remove" if digest in delete_objects else "retain-shared"
@@ -194,3 +181,28 @@ class RemovalScopeMixin:
                 )
             )
         return tuple(assets)
+
+
+def _unknown_removal_assets(
+    scope: ModelCacheRemovalScope,
+) -> tuple[CacheRemovalAsset, ...]:
+    """Project incomplete local membership without inventing lengths or bytes."""
+    sets = tuple(
+        CacheRemovalAsset(
+            kind="model-set",
+            sha256=digest,
+            availability=AssetAvailability.UNKNOWN,
+            disposition="remove",
+        )
+        for digest in scope.selected_sets
+    )
+    objects = tuple(
+        CacheRemovalAsset(
+            kind="model-object",
+            sha256=digest,
+            availability=AssetAvailability.UNKNOWN,
+            disposition="remove" if digest in scope.delete_objects else "retain-shared",
+        )
+        for digest in scope.selected_objects
+    )
+    return (*sets, *objects)

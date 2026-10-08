@@ -552,13 +552,13 @@
     },
     "control/src/vonk_control/api/production.py": {
       "_close_model_cache": "3de19469b91f0e1a1df8a90c5d9189d468100c831c90b78bd9a182204cb9579a",
-      "production_app": "5f1b2a4ccc4674a057bf31e47705ef9ff0d7306aa31010d0e83561857507997e",
+      "production_app": "69a87adbd854ad789f7e8ecfebb5fbad98b1b81fd032fc2090d729be0b52f2b9",
       "production_app.clock": "3c87c7fecd6efb5bf9a23b9256ee2cf26c0be1d7b831864e8bc856c1538e0dba",
       "production_app.build_cache": "948c3e7d9b1ac2a7754013491fbc75a505a55c2afc4f73e7e2c4a3ef35628054",
       "production_app.build_artifact_jobs": "4c060fb9071db6525f6b00b04f34bbdf69feb911acdf0127aead9c8c0832cc48",
       "production_app.consume_agent_result": "7a81b5bc855cd0ef6226f12d62d761eeef766e27f855376c92026e359d2a50f5",
       "production_app.refresh_metrics": "6010a6955dfb9d83961b17c53ca8835afb64b6db803a02f1499d0ef482828bcf",
-      "production_app.lifespan": "ca193439180e46443df8efa9edf3ebb9f825644e160ad0b77b577f0d832d2c9e"
+      "production_app.lifespan": "aa11e5aba024977601e66aa3cce0f0ecc081b571e75b51d0669799bea8492254"
     },
     "control/src/vonk_control/artifact_jobs/contracts.py": {
       "ArtifactJobError": "c73fd2ae7abcabeb4a15c98d655a505d96625f68f54474a8487ed25948755a24",
@@ -610,7 +610,7 @@
       "<module>": "0dfe7c12bf93107c93bc4b1cd4c647c7a283476ae9b416fd8b1e31970da2ecd8"
     },
     "control/src/vonk_control/artifact_jobs/storage.py": {
-      "ArtifactJobService": "114289a699c9a8d966ac0e11dc4353d82e9daeced8266160ac741e24b9a72ae5",
+      "ArtifactJobService": "1d73440a9c242cc8a8fb9b6c6bd9282acb81ab9e22b7dcf71804bbb5216741a0",
       "ArtifactJobService.__init__": "0c2dd8eb9d47b393dff5b5bd53ddb09b902f477cca3e2541996928043a5869ae",
       "ArtifactJobService._reject_result": "d5a3e0ab84848b3abb2012f21b0b28f726249dbbf59a226275dcc5b29333d375",
       "ArtifactJobService._authorized_agent_job": "d2c195fca89858b4300b7c84e6d593471a5f723038d812190f8ddf08c50cbf1c",
@@ -618,7 +618,7 @@
       "ArtifactJobService._job_node_in_session": "533d0038840a6f804dad421cda6e15a9b299aac0ce7869db4af91e204cb113fa",
       "ArtifactJobService._job_node_in_session.planned_endpoints": "01f65fe8c8912dbcfeffc4044a17d12a695bf271ab57db95e5f2681c432a0374",
       "ArtifactJobService._job_node_in_session.mapped_endpoints": "e9ca899d932752cd08230d1ceee1aa2898280f6cf3a2869b45050cc22135c17e",
-      "ArtifactJobService._put_blob_in_session": "8f797a25be97d3ef81296e1a899854d9c074563f7e99e6f9755d71e6c2298fb6",
+      "ArtifactJobService._put_blob_in_session": "7f05690cdec803adee477ef61fea14838ac2fa47fefde2f1792f4df387124723",
       "ArtifactJobService._file_in_session": "e483d9c522a5f430a68d5e7417f1c41e73a736ec6a95238b7742b1ba61ffbc74",
       "ArtifactJobService._stored_input_manifest": "7888ce8637cd57f15c8317a5621d9272ce83a736f9b84f7e80377945953157b8",
       "ArtifactJobService._stored_input_manifest.rebuild": "b7cfb422214974a90f873e5bfb6d06cebba298d5eff4cf957cd6229a161d3cd7",
@@ -629,7 +629,7 @@
       "ArtifactJobService._stored_contract": "4e6ac3c7f849549a2789bbe3d16f452cba6fca4c752c5a238e04f2acdbfc674c",
       "ArtifactJobService._stored_contract.rebuild": "389fbc87e226b4aff640331bd7d4ea9aa3c8c4f5890000aa2d3cfc295310aa1f",
       "ArtifactJobService._view_in_session": "df2c9c0485b0c58274250dfab49c9f393897d1a5a4f5508109a57a18103c6b57",
-      "<module>": "114289a699c9a8d966ac0e11dc4353d82e9daeced8266160ac741e24b9a72ae5"
+      "<module>": "1d73440a9c242cc8a8fb9b6c6bd9282acb81ab9e22b7dcf71804bbb5216741a0"
     },
     "control/src/vonk_control/availability_production.py": {
       "AvailabilityInvalid": "2f0e138ed94f6fec11b4090a99e4a0c2c5826fcc96fadd84552a40d1bf17c411",
@@ -1709,26 +1709,27 @@
       "<module>": "094b9eabc13a35b1ee16b1af19614f27623b881b2e9a263ba14df9c1e7488f93"
     },
     "control/src/vonk_control/model_cache/download.py": {
-      "DownloadMixin": "3ff925b0df57a0f9250386ddd6594c72ea9ccfa03c281e7c14fb3eb7402cc620",
+      "DownloadMixin": "077696289a21959cae73281f13431dad98c7bcb9e95d0742b4a38b3ac078fa79",
       "DownloadMixin._require_transfer_running": "d3693dca5163956729db3e68661a35d6ae095c2558ca57cf8b6daafd0999a246",
       "DownloadMixin._stream_gate": "d8d592951cc4b693bbcb5c693f36eb908cb8e57c4cd620f8b373ee1fc0a6afc1",
       "DownloadMixin._download_sequential": "b5cf1beaa60a8b3d799dc488da3efeaceec7865728c9b01aa21e89256bf7bb76",
       "DownloadMixin._complete_download": "be491fc7d3c3bcb3309daba7b145c528c0cd65281899f14cf07d9ce3fda9e3bf",
       "DownloadMixin._publication_allowed": "99d0c006addc8a52a5d1925adbac6c083a2528d0462f8844bda888c05fa7a621",
-      "DownloadMixin._require_model_sets_open": "17690f34140c4e2043d9fc9c2c280c8feff3287329b4b576b64ec0dbf2919bca",
+      "DownloadMixin._require_model_sets_open": "88eef9f677fb187af48d2ef3f13f33f90bef131402f4372b2e8909f3ee1c370c",
+      "DownloadMixin._reference_unknown": "bf576b55f93ed789f3ecb7a424fce48d91c1259d6b812b6938d85d07a5b97518",
       "DownloadMixin._validate_http_download": "773f47e5e15c277b46dbe7e9ea0f7827aae23c78c1f5042b6a2037b22c3a924a",
       "DownloadMixin._download_parallel_ranges": "7bb754973522c0b64643c84fa922d674f4a7a328b6a1c0585af68bcfaf8e4f83",
       "DownloadMixin._open_source": "fc2f99dd8aaac4a53a9d1c8a4998fe0be13a3ca400d08d9d7aeb3d2fec2f84b2",
-      "<module>": "a7bcdd92bec8e8e761c07ddfda7320157a72795a5ec9d75b2759df4e651ed72e"
+      "<module>": "1d1b03fe114494d7eb9a1107123f145ff0fe9f80636bd90af1075ec29afdd450"
     },
     "control/src/vonk_control/model_cache/download_admission.py": {
-      "DownloadAdmissionMixin": "42d2f0528aff6ca6602b621873ccb1364280ea01476bf742e5ffa7912fc09f16",
-      "DownloadAdmissionMixin.start_download": "0eed79bd4c8bae7749d6b4f6d893d94f5a46e8e45345a0502a7d655e6945c9b4",
+      "DownloadAdmissionMixin": "d30b9ab8216fc1bfd97d47c6534747cff89b891145bf9d6b0a150030cc406589",
+      "DownloadAdmissionMixin.start_download": "436b31021305ed34a198804a1e49a14d9aaccf2876763091b96bc40d9ce2144d",
       "DownloadAdmissionMixin._download_replay": "cc8abf78d195dd0ffa5fc04dd8401c9a0d269bd0005132d3ec8c5db61b40a906",
       "DownloadAdmissionMixin._resolve_requested_manifest": "aff5e082c0e6038ff133974d1b7a4fa170f4f1381c048d456f539e0a08779808",
       "DownloadAdmissionMixin.download_preview": "227609d9216aa7d8d1aa50d8d51a51e43164a9c4741bcb746d889f43241413ac",
       "DownloadAdmissionMixin._download_preview_for_manifest": "8f33bf91d375f72680b93c3610774005230aa981f94ffda7e0dd2f42c78dc3c9",
-      "<module>": "419d369b3ea2f30c1ab14e4dde7e9cfa67ee37c786916591b69bf78566cce7f8"
+      "<module>": "0ffb7b7e771269e30fe0466e65e7b7e0c9fde1e9197ac2f1b661504ed83484e6"
     },
     "control/src/vonk_control/model_cache/failure.py": {
       "FailureMixin": "98877d7ad6515250686e34a3bd8f19bc64019944532117d403528af7e27ffea9",
@@ -1763,16 +1764,16 @@
       "<module>": "ae3de08f949ace803c0598bac0e61970a40f3a21c31948391cb8188c9a852efb"
     },
     "control/src/vonk_control/model_cache/removal_acceptance.py": {
-      "RemovalAcceptanceMixin": "cf4ca6398a6256ad92bd02fbda9c5bbf80416a2c8519fd3357cbcc969e9fae9f",
+      "RemovalAcceptanceMixin": "fdee5519413e01c0f3dd98911b8826cb155b81bf1392c5de4e8cf02e01dfdcf8",
       "RemovalAcceptanceMixin._model_removal_by_request": "17fcf2767c1f190e93d6f21fc280746a96e5d8720c12c4371efde228ad16f985",
       "RemovalAcceptanceMixin._replay_model_removal": "536eb76113581e78c3544ae5b40ee578006dc9f749da79710646f37e6e8d5549",
-      "RemovalAcceptanceMixin._accept_model_removal": "de6a27aad9e884213f29aa160b4ace54f7ec2c3e7cd3c90ecd4a2def9d2fd92b",
+      "RemovalAcceptanceMixin._accept_model_removal": "20ea5f72d03562d7f0fed5f46c15b601a7e52efdfca1fc6371f3a9d4675ac45e",
       "RemovalAcceptanceMixin._model_removal_progress": "cb44c23e8addfa966a0797b7467856c4afa15fd240399f18489cbc8cfacdd413",
       "RemovalAcceptanceMixin._model_storage_lock": "d4b697a75c3fff4fc6e9e4f3eb02f378528236e5b238d8acacfe4c8ffd57a4fb",
       "RemovalAcceptanceMixin._model_object_size": "183e417e2ebceaccb333c0cc7ae8d73e89fe2a6de4bd979da4ae58a15034d01f",
       "RemovalAcceptanceMixin._remove_model_object_files": "0155d4b52480d2454548d9d5f52b15a2123fb7acae08bef54a3ae0507e10f133",
       "RemovalAcceptanceMixin._remove_model_partial_set": "33545193b91781abdcbf10c94a7558db8c38b3aa78531bfe0a795801281c5480",
-      "<module>": "45085609833faf01bcc98583ad9075a1e684df33133e34c9283bbe6521329f79"
+      "<module>": "c0cfc76fd57c0e838da5fe9ca3d6c7fb5ff52f986fb1852833c8837ee957afda"
     },
     "control/src/vonk_control/model_cache/repair.py": {
       "RepairMixin": "cf007e32e6d68d88c9c2bd97a77d3cd85957d4b32b32e7696854f30789acd21c",
@@ -1831,7 +1832,7 @@
       "<module>": "a54c79059264447fb655cb5b8914170efc0f6597d4825a4857fbbbcaa6718339"
     },
     "control/src/vonk_control/model_cache/transfer.py": {
-      "TransferMixin": "01c7e84c6e6e788f31c968fa4d1f6d54ac866fcaa57e9e1bdaff0e7825c63c4a",
+      "TransferMixin": "370123261f116fbf5675fcd395efd170ccf676e45959616194b5778e4adec73d",
       "TransferMixin._managed_cached_objects": "c1c783d09b529317a0fced19681f1d6295341c04f2525b73b59d22391ad00046",
       "TransferMixin._stored_object_bytes": "9cf970538992f195e326901cc1b043940e6eff860f63112f044b32198a54144b",
       "TransferMixin._partial_bytes": "96fbae7e892b9d49b6ce69b11ba7b22936477c7867833d871812d3e58abe40d4",
@@ -1841,12 +1842,12 @@
       "TransferMixin._start_transfer": "5177b13959a66c6eb341a90a8fbcca59218035e6e79425d5fdd85d267eb5561a",
       "TransferMixin._operation_transfer_snapshot": "39e983de60ec29213d6dcc549280eb7584286e0f70bab3aa48af0989dcf479ca",
       "TransferMixin._transfer_state_for_operation": "c41e43e9f94ee16d0cefa552d4a5466c495ac8762508d89157ccbb97c5dfa44d",
-      "TransferMixin._ensure_set": "aaf9071bf02f0786e41f1f069cef7f87db9669e4ec5c5ad758e916bdcc3a3382",
+      "TransferMixin._ensure_set": "634ecebebfe458d97f999648084e23dc576b64fda6a630f02ccc29e733b373af",
       "TransferMixin._progress": "3d09c00ac51a45213b0b1f3528aa5076aff29cacd475a1156958c0d61ab20ed9",
       "TransferMixin._run_download": "ab01e0c324859154411d71a310f9a0000358e5a7e8c0936bbe0f1c832a3f52e2",
       "TransferMixin._download_one_unique": "4591625529a2ddd5ef1d1ed45089299283f05ece8a82007b11ae5e6edf623e58",
       "TransferMixin._download_locked": "933041a25762939960b8d0d1dec78e4656bc228931997e774acca919fe6f7b7b",
-      "<module>": "1563d0897afa4faab99d967f62901270de0cda904949c20da88b2440dfdd192c"
+      "<module>": "d1950adc6c39a0c4156231d0172d81d6d56c246c33bd5233df8ab1a3703d0b4a"
     },
     "control/src/vonk_control/model_cache_api.py": {
       "_model_operator_response": "a71804a26c62bc937b770acdf5731806baa4127df9f46f280bf943678797677f",
@@ -2323,7 +2324,7 @@
       "_resolve_recipe_selector_in_session": "c40001dfb275636c4dc436a9c81c93406bf8b5eab5ab570b7290536b8dc30eb7",
       "start_selector": "5ba06b5bbdf0f1c26658f608e55e6a79cd7679d12beb79b80a5feea962029f37",
       "_removal_payload_digest": "d505fadec4edfc2efc75b1ba2ea4adce799cb1ae7407af608d773dc9de7087f1",
-      "_read_removal_owner": "ad107e574bea523059b3e2f24a21d732ce5a6d7819a521fe310fc5bfa9c3899c",
+      "_read_removal_owner": "3409641f95878dcc2c9d78e192fa600d97da4e403e0cd4b17a2c694f24446ca7",
       "_read_removal_intent": "9a2920ea1963d1e422e47386762183a337899b8d6fe6c072c7dcfe16b41a2f92",
       "_removal_progress_document": "826ed26b899f35623d4f0d4549b880ce2b97df1fd499d24e0493ef49b0036bb5",
       "_read_removal_result": "7ac6f530a27c0186c79a59544469914704f40bc665bc69fb99da19f3853a9dc7",
@@ -2354,7 +2355,7 @@
       "_complete_recipe_image_removal": "7d563e789215c67b6fed706c28878d612b47213572a6a8fdcb6fca899812726e",
       "_advance_recipe_model_child": "f6534c738798356a055edaeb6e655affa8a121f722af6686a40f16e74b3398e1",
       "_complete_recipe_model_child": "f3ba43fd0bb5a5e98cefe28167b75d1a0593ff0664db10877ec57523e018f0e3",
-      "_record_recipe_removal_failure": "8b60daf766d90be886a5983d514127d3461f76402c611f0de67e485f2a22b19d",
+      "_record_recipe_removal_failure": "dbb7958a15532020e54b7bcb1c25d69e59959a9fa2a12ca04888be3ea384b685",
       "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df"
     },
     "control/src/vonk_control/recipe_image_availability/requests.py": {
@@ -2858,7 +2859,7 @@
       "<module>": "3e2753ae577176d0b7162a5ab910904d60d4ddcbc2caa87da1e6e5eb525a6668"
     },
     "src/cluster_profiles/controller_cli/parser.py": {
-      "add_controller_commands": "55eeff83a69015bd76614b59190c6fbd1039c670dd310265ef7f04bf97773e37"
+      "add_controller_commands": "fe56b188ec9acffe21a6e9247edc10f793bae81826d1c8f3154f743a58a96aa6"
     },
     "src/cluster_profiles/controller_cli/run.py": {
       "_run": "926fff936e453bd8dbcb82d5d11598252b121b3b8d32f038e36cff98ceaf6eee",
