@@ -34,6 +34,7 @@ from vonk_agent_protocol import (
     InstallVonkDebOperation,
     PackageRollbackAuthority,
     RecipeStopPayload,
+    SecurityRefusalReason,
     SignedHostHelperGrant,
     canonical_message,
 )
@@ -3864,9 +3865,12 @@ def test_expired_renewal_endpoint_requires_enrolled_key_without_mtls(tmp_path, f
         )
     else:
         assert response.status_code == 403
-        assert (
-            response.json()["detail"]["reason_code"] == "agent.expired_renewal_refused"
+        expected = (
+            SecurityRefusalReason.AGENT_EXPIRED_RENEWAL_GRACE_EXHAUSTED
+            if failure == "grace"
+            else SecurityRefusalReason.AGENT_EXPIRED_RENEWAL_REFUSED
         )
+        assert response.json()["detail"]["reason_code"] == expected.value
     # The proof-only exemption must never admit expired identity to work.
     assert client.post("/agent/claim", json={}).status_code == 401
     assert (
