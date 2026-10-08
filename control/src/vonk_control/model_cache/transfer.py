@@ -7,8 +7,9 @@ import stat
 from typing import TYPE_CHECKING, cast
 
 import httpx2
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ModelCacheCode, OperationMemberProgress
+from vonk_agent_protocol import OperationMemberProgress
 
 from ..categorized_faults import OperationInterrupted
 from ..model_cache_contract import (
@@ -38,7 +39,7 @@ from .constants import (
     _USE_MANIFEST_BYTES,
     SCHEMA_VERSION,
 )
-from .errors import ModelCacheConflictRefused, ModelCacheError, _ArtifactWriterBusy
+from .errors import ModelCacheError, _ArtifactWriterBusy
 from .persistence import _manifest_of, _operation_cancellation, _store_operation_payload
 
 if TYPE_CHECKING:
@@ -279,15 +280,27 @@ class TransferMixin:
             # or recipe revision may have different notes, capabilities,
             # roles, or requested digests without changing any bytes.
             stored = cache._stored_manifest(row)
-            if stored is None:
+            if stored is None or stored.digest != manifest.digest:
                 # The stored provenance document is damaged and nothing else
                 # re-derives it: the manifest in hand (same key) replaces it.
                 row.manifest = manifest.document()
-            elif stored.digest != manifest.digest:
-                raise ModelCacheConflictRefused(
-                    ModelCacheCode.IDENTITY_CONFLICT,
-                    "artifact-set digest resolves to different immutable content",
+                row.expected_bytes = manifest.expected_bytes
+                row.verified_bytes = 0
+                row.verified_at = None
+                session.execute(
+                    delete(ModelCacheSetArtifact).where(
+                        ModelCacheSetArtifact.artifact_set_sha256 == set_digest
+                    )
                 )
+        row.expected_bytes = manifest.expected_bytes
+        session.execute(
+            delete(ModelCacheSetArtifact).where(
+                ModelCacheSetArtifact.artifact_set_sha256 == set_digest,
+                ModelCacheSetArtifact.artifact_key.not_in(
+                    tuple(spec.key for spec in manifest.artifacts)
+                ),
+            )
+        )
         for spec in manifest.artifacts:
             # SQL owns membership only. The object's identity, size, and
             # availability are the manifest and the managed-storage receipt.
@@ -304,6 +317,9 @@ class TransferMixin:
                         path=spec.path,
                     )
                 )
+            else:
+                membership.artifact_sha256 = spec.sha256
+                membership.path = spec.path
         return row
 
     def _progress(
