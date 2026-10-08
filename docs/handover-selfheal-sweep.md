@@ -54,3 +54,19 @@ path. The supplied text alone cannot establish a Controller refusal or a
 missing profile. Its read retry needs bounded scheduling and a visible cause;
 failed pin observation must not become an unrelated permanent download gate.
 No recipes files were edited by this track.
+
+## Stop adoption CI repair
+
+The standalone clear observation deadline does not retire profile-owned Stop
+children. Those children are durable exact effects carried by replacement
+applications and startup repair; their original creation time is not an
+observer deadline. Existing profile cancellation and exact authority checks
+continue to own retirement. No new contract or persistence field is needed.
+
+Both PostgreSQL adoption files reproduced the two CI failures before the fix.
+After the fix, those files plus the track's observation/download regressions
+pass (10 tests). The replacement regression additionally polls after the old
+observation budget expires, before any fresh receipt, and proves that the
+same original Stop remains pending and then completes on the fresh receipt.
+Standalone expiry, disappeared targets, truthful route retention and fresh
+request admission remain covered by the selfheal regressions.

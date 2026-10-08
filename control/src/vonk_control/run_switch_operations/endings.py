@@ -55,13 +55,22 @@ class EndingsMixin:
     ) -> bool:
         """End an absent target or expired stop observer without inventing effects.
 
-        The accepted request time owns the stop observation budget, including
-        child waits and exceptions before final verification. It survives a
+        A standalone clear's accepted request time owns its observation budget,
+        including child waits and exceptions before final verification. It survives a
         restart and changing retry causes. The runtime owner still reconciles
         issued stops; ending its observer cannot withdraw a serving route or
         certify that physical capacity is free.
         """
-        if plan.action != ProfileSwitchChildKind.STOP or progress.cancellation:
+        if (
+            plan.action != ProfileSwitchChildKind.STOP
+            or progress.cancellation
+            or progress.profile_application_id is not None
+        ):
+            # A profile child is the durable Stop effect, shared by continuing
+            # assignments and replacement/startup adoption. Its creation time
+            # is not the lifetime of any one observer. Profile cancellation and
+            # exact Stop authority own its retirement; a standalone clear's
+            # observation budget must never retire this reusable effect.
             return False
         deadline = _aware(job.created_at) + timedelta(
             seconds=_FINAL_VERIFICATION_MAX_SECONDS
