@@ -898,13 +898,6 @@
       "reason": "Operator-reviewed image of a profile load (the _require_profile_runtime_image edge): the accepted image's reviewed build is compared with the build the preview selected, and a restored installation must be the one the review named; a change asks for a new review."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations/run_planning.py",
-      "function": "RunPlanningMixin._preview_run",
-      "kind": "provenance_comparison",
-      "expression": "recipe_build_id != expected_image.build_id",
-      "reason": "Operator-reviewed image of a profile load (the _require_profile_runtime_image edge): the accepted image's reviewed build is compared with the build the preview selected, and a restored installation must be the one the review named; a change asks for a new review."
-    },
-    {
       "path": "control/src/vonk_control/run_switch_operations/resolution.py",
       "function": "ResolutionMixin._resolve_mapping",
       "kind": "provenance_comparison",
@@ -917,27 +910,6 @@
       "kind": "provenance_comparison",
       "expression": "selected.recipe_revision_id == revision.id",
       "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
-    },
-    {
-      "path": "control/src/vonk_control/run_switch_operations/artifact_validation.py",
-      "function": "_validate_artifact_execution",
-      "kind": "provenance_comparison",
-      "expression": "evidence.verified_build_id != plan.recipe_build_id",
-      "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
-    },
-    {
-      "path": "control/src/vonk_control/run_switch_operations/artifact_validation.py",
-      "function": "_validate_artifact_execution",
-      "kind": "provenance_comparison",
-      "expression": "verification.verified_build_id != plan.recipe_build_id",
-      "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
-    },
-    {
-      "path": "control/src/vonk_control/run_switch_operations/image_receipts.py",
-      "function": "effective_build_receipt",
-      "kind": "provenance_comparison",
-      "expression": "result.build_id != expected_build_id",
-      "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
     },
     {
       "path": "control/src/vonk_control/runtime_image_preparation/contracts.py",

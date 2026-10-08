@@ -496,36 +496,11 @@ def demote_unproven(document: dict[str, object]) -> int:
 
 
 def promote_proven(document: dict[str, object]) -> int:
-    """Move every proven unknown-outcome bookkeeping-debt site to ``proven-retry``.
+    """Never discharge behavioral debt merely because a catch loop exists.
 
-    A debt site moves only when its class is an unknown outcome and the proof
-    holds on every call path; the move is the whole credit, and it is undone by
-    ``demote_unproven`` the moment the proof stops holding.
+    The call graph establishes exception reachability, not recovery: a loop may
+    reread the same damaged document forever. A product fix and an outcome
+    regression must justify reviewed classification changes. This tool can
+    demote unsupported credit, but cannot automatically grant it.
     """
-
-    families: list[dict[str, object]] = document["fail_closed"]  # type: ignore[assignment]
-    unknown = unknown_classes()
-    moved: dict[str, list[list[object]]] = defaultdict(list)
-    for family in families:
-        if family["category"] != "bookkeeping-debt":
-            continue
-        keep = []
-        for site in family["sites"]:  # type: ignore[attr-defined]
-            if site[1] in unknown and proven(document, site[0], site[1], site[2]):
-                moved[site[0]].append(site)
-            else:
-                keep.append(site)
-        family["sites"] = keep
-    by_name = {str(family["family"]): family for family in families}
-    for path, sites in sorted(moved.items()):
-        family = _family(
-            families,
-            by_name,
-            f"{_stem(path)}.proven-retry",
-            "already-retried",
-            PROVEN_FAMILY_REASON,
-        )
-        family["sites"].extend(sites)  # type: ignore[attr-defined]
-        family["sites"].sort(key=lambda site: tuple(site[:4]))  # type: ignore[attr-defined]
-    document["fail_closed"] = [f for f in families if f["sites"]]
-    return sum(len(sites) for sites in moved.values())
+    return 0

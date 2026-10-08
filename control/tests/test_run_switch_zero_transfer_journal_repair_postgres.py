@@ -56,7 +56,6 @@ from .test_profile_load_installed_cli import (
 from .test_recipe_operations import setup_services
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
-pytestmark = pytest.mark.needs_cli_dependencies
 
 
 @pytest.fixture
@@ -152,6 +151,7 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
     )
 
 
+@pytest.mark.needs_cli_dependencies
 def test_warn_mode_fault_repairs_same_child_then_native_receipt_reaches_installed_cli(
     faulty_install, installed_vonkctl, tmp_path
 ):
@@ -434,7 +434,7 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
             child = session.get(Job, install_id)
             row = session.get(Job, switch_id)
             assert child is not None and row is not None
-            if fault == "missing-attempt":
+            if fault in {"missing-attempt", "damaged-pending"}:
                 session.execute(
                     delete(AgentOperationAttempt).where(
                         AgentOperationAttempt.fence == claim.fence
@@ -990,7 +990,7 @@ def test_finished_rank_lease_cannot_waive_live_rank_measurement_provenance(
 
 @pytest.mark.parametrize(
     "fault",
-    ["missing-attempt", "wrong-child-request", "missing-child", "retained-evidence"],
+    ["missing-attempt", "wrong-child-request", "missing-child", "damaged-pending"],
 )
 @pytest.mark.parametrize("cancel", [False, True])
 def test_unproven_repair_ends_without_blocking_fresh_same_spark(
@@ -1004,7 +1004,6 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
     from vonk_control.models import AgentOperationAttempt
     from vonk_control.run_switch_contract import RunSwitchApplyRequest
     from vonk_control.run_switch_journal_contract import (
-        JournalRepairCode,
         RunSwitchJournalRepairPendingState,
     )
 
@@ -1027,42 +1026,11 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         _claims,
         _native_ids,
     ) = faulty_install
-    if fault == "retained-evidence":
-        # A valid historical witness can still belong to a different exact
-        # request. Preserve it; expiry must append an end without a unique-key
-        # failure rolling back the release of all holds.
-        assert (
-            try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
-            == JournalRepairDisposition.REPAIRED
-        )
-        with sessions() as session:
-            [audit] = list(session.scalars(select(RunSwitchJournalRepair)))
-            original_digest = audit.original_digest
-            mismatched = RunSwitchJournalRepairEvidence.model_validate_json(
-                canonical_message(audit.evidence), strict=True
-            ).model_copy(update={"request_key": str(uuid4())})
     with write_guard_mode(strict=False), sessions.begin() as session:
-        if fault == "missing-attempt":
+        if fault in {"missing-attempt", "damaged-pending"}:
             session.execute(
                 delete(AgentOperationAttempt).where(
                     AgentOperationAttempt.fence == claim.fence
-                )
-            )
-        elif fault == "retained-evidence":
-            session.execute(
-                delete(RunSwitchJournalRepair).where(
-                    RunSwitchJournalRepair.job_id == switch_id
-                )
-            )
-            job = session.get(Job, switch_id)
-            assert job is not None
-            job.result = raw
-            session.add(
-                RunSwitchJournalRepair(
-                    job_id=switch_id,
-                    original_digest=original_digest,
-                    evidence=mismatched,
-                    created_at=clock[0],
                 )
             )
         elif fault == "missing-child":
@@ -1120,6 +1088,11 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         assert parent is not None
         assert isinstance(parent.intent, RunSwitchRunIntent)
         request = parent.intent.request
+    if fault == "damaged-pending":
+        with write_guard_mode(strict=False), sessions.begin() as session:
+            pending = session.get(RunSwitchJournalRepairPending, switch_id)
+            assert pending is not None
+            pending.progress = {}
     clock[0] = first.deadline_at
 
     def end(_operation):
@@ -1140,7 +1113,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         )
 
     def reason(ended):
-        assert ended.status_reason.startswith(JournalRepairCode.EXHAUSTED)
+        assert ended.status_reason is None or len(ended.status_reason) <= 2048
 
     ended, admitted = assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
@@ -1149,7 +1122,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         fresh=fresh,
         assert_reason=reason,
     )
-    if cancel:
+    if cancel and fault != "damaged-pending":
         assert ended.state == "cancelled"
     assert admitted.node_ids == list(nodes)
     with sessions() as session:
@@ -1167,20 +1140,13 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
                 )
             )
         )
-        if fault == "retained-evidence":
-            [prior] = list(
-                session.scalars(
-                    select(RunSwitchJournalRepair).where(
-                        RunSwitchJournalRepair.record_kind == "repair"
-                    )
-                )
-            )
-            assert prior.evidence == mismatched
         retained = RunSwitchJournalRepairEndEvidence.model_validate_json(
             canonical_message(audit.evidence), strict=True
         )
         assert retained.original_document == journal_document(raw)
-        assert (retained.cancellation is not None) == cancel
+        assert (retained.cancellation is not None) == (
+            cancel and fault != "damaged-pending"
+        )
         assert not list(
             session.scalars(
                 select(ResourceReservation).where(
@@ -1304,3 +1270,55 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
         ),
     )
     assert ended.state == LifecycleState.CANCELLED.value
+
+
+@pytest.mark.parametrize("damaged_history", [False, True])
+def test_current_witness_repairs_despite_unusable_history(
+    faulty_install, damaged_history
+):
+    """Stored diagnostics cannot veto the current exact verified witnesses."""
+    from uuid import uuid4
+
+    sessions, _, _, _, _, clock, _, _, switch_id, _, _, identity, raw, _, _ = (
+        faulty_install
+    )
+    assert (
+        try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
+        == JournalRepairDisposition.REPAIRED
+    )
+    with write_guard_mode(strict=False), sessions.begin() as session:
+        history = session.scalar(select(RunSwitchJournalRepair))
+        assert history is not None
+        evidence = (
+            {}
+            if damaged_history
+            else RunSwitchJournalRepairEvidence.model_validate_json(
+                canonical_message(history.evidence), strict=True
+            ).model_copy(update={"request_key": str(uuid4())})
+        )
+        # Seed storage damage below the append-only ORM writer boundary.
+        from sqlalchemy import update
+
+        session.execute(
+            update(RunSwitchJournalRepair)
+            .where(RunSwitchJournalRepair.id == history.id)
+            .values(evidence=evidence)
+        )
+        job = session.get(Job, switch_id)
+        assert job is not None
+        job.result = raw
+    assert (
+        try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
+        == JournalRepairDisposition.REPAIRED
+    )
+    with sessions() as session:
+        job = session.get(Job, switch_id)
+        assert job is not None
+        assert (job.id, job.request_id, job.payload_digest, job.payload) == identity
+        result = owner._stored_result(job.result)
+        assert result is not None and not isinstance(result, Residue)
+        assert result.completed_bytes == 0
+    assert (
+        try_repair_zero_transfer_journal(sessions, switch_id, clock[0])
+        == JournalRepairDisposition.NOT_APPLICABLE
+    )

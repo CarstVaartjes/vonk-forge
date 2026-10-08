@@ -644,19 +644,12 @@ def _try_repair_once(
                         created_at=now,
                     )
                 )
-            else:
-                retained = read_row_column(previous, "evidence")
-                if (
-                    not isinstance(retained, RunSwitchJournalRepairEvidence)
-                    or retained.model_copy(update={"recorded_at": now}) != evidence
-                ):
-                    job.status_reason = f"{REPAIR_WAIT}: retained repair evidence does not match the current exact source"
-                    return JournalRepairDisposition.DEFERRED
+            # Historical diagnostics never veto current verified witnesses.
+            # An existing row may be unreadable or describe an earlier sample;
+            # neither changes the accepted request or the proof above.
             pending = session.get(RunSwitchJournalRepairPending, operation_id)
             if pending is not None:
-                retained_state = RunSwitchJournalRepairPendingState.model_validate_json(
-                    canonical_message(pending.progress), strict=True
-                )
+                _, retained_state = _pending(session, job, now)
                 if retained_state.cancellation is not None:
                     corrected["cancellation"] = retained_state.cancellation.model_dump(
                         mode="json"
@@ -703,9 +696,22 @@ def _pending(
         row = RunSwitchJournalRepairPending(job_id=job.id, progress=state)
         session.add(row)
     else:
-        state = RunSwitchJournalRepairPendingState.model_validate_json(
-            canonical_message(row.progress), strict=True
-        )
+        try:
+            state = RunSwitchJournalRepairPendingState.model_validate_json(
+                canonical_message(row.progress), strict=True
+            )
+        except (TypeError, ValueError):
+            # The clock is local bookkeeping, never authority. Damage cannot
+            # reset the budget: use the accepted request's durable creation time.
+            # Only the independently readable canonical checkpoint can recover
+            # cancellation; do not infer it from damaged diagnostics.
+            progress = _candidate(job)
+            state = RunSwitchJournalRepairPendingState(
+                deadline_at=job.created_at + REPAIR_BUDGET,
+                next_attempt_at=now,
+                cancellation=progress.cancellation if progress is not None else None,
+            )
+            row.progress = state
     return row, state
 
 
@@ -801,9 +807,7 @@ def try_repair_zero_transfer_journal(
         row = session.get(RunSwitchJournalRepairPending, operation_id)
         if row is None:
             return result
-        state = RunSwitchJournalRepairPendingState.model_validate_json(
-            canonical_message(row.progress), strict=True
-        )
+        _, state = _pending(session, job, now)
         if result == JournalRepairDisposition.REPAIRED:
             if state.cancellation is not None:
                 progress = RunSwitchOperationResult.model_validate_json(

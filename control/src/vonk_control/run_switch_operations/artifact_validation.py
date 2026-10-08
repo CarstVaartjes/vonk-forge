@@ -145,15 +145,6 @@ def _validate_artifact_execution(
                 _phase_result(result, phase=phase), strict=True
             )
         except (TypeError, ValidationError, RunSwitchRetryLater) as error:
-            if (
-                plan.recipe_build_id is not None
-                and isinstance(raw_result, Mapping)
-                and evidence.verified_build_id != plan.recipe_build_id
-            ):
-                raise RunSwitchRetryLater(
-                    RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
-                    reason=WaitReason.SCOPE_CHANGED,
-                ) from error
             raise RunSwitchRetryLater(
                 RunSwitchCode.ARTIFACT_VERIFICATION_RESULT_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
@@ -162,10 +153,17 @@ def _validate_artifact_execution(
             raise RunSwitchRefused(
                 SecurityRefusalReason.RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED.value
             )
-        if verification.verified_build_id != plan.recipe_build_id:
-            # A build performed by the same high-level operation has no OCI
-            # output digest at preview time.  The distribution adapter must
-            # bind its verification receipt to the exact durable build row.
+        # Build row IDs identify producers, not image bytes. Bind verification
+        # to the reviewed content whenever that content was known at acceptance.
+        verified_image = ImageContent(
+            image_digest=verification.verified_image_digest,
+            archive_sha256=verification.verified_oci_layout_sha256,
+        )
+        wanted_image = expected_image or ImageContent(
+            image_digest=plan.image_digest,
+            archive_sha256=plan.build.oci_layout_sha256,
+        )
+        if differing_image_fields(wanted_image, verified_image):
             raise RunSwitchRetryLater(
                 RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
                 reason=WaitReason.SCOPE_CHANGED,

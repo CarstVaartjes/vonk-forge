@@ -805,13 +805,15 @@ def test_recursion_does_not_hide_an_unlooped_entry() -> None:
 # ------------------------------------------------------ the repository itself
 
 
-def test_the_allowlist_credits_exactly_what_the_proof_proves(
+def test_retry_credit_requires_proof_but_syntax_cannot_discharge_debt(
     retry_proof_graph: object,
 ) -> None:
     document = copy.deepcopy(load_allowlist())
-    # Nothing credited is unproven (the gate), and nothing proven is left as debt.
+    # A syntactic retry loop is necessary for credit, but cannot prove healing.
     assert evaluate_retry_gate(document) == []
+    before = copy.deepcopy(document)
     assert promote_proven(document) == 0
+    assert document == before
 
 
 def test_cancellation_has_its_own_bounded_retry(

@@ -9,8 +9,6 @@ from typing import cast as typing_cast
 
 from vonk_agent_protocol import (
     InstallationState,
-    InvalidRequestReason,
-    ProfileReasonCode,
     RunAdmissionCode,
     RunSwitchCode,
 )
@@ -54,7 +52,6 @@ from ..run_switch_observation_contract import (
 )
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision
-from .errors import RunSwitchRequestInvalid
 from .identity_helpers import _primary_model_digest
 from .image_receipts import _require_profile_runtime_image
 from .planning_helpers import _as_reason, _now, _resource_reason, _settings_view
@@ -295,24 +292,22 @@ class RunPlanningMixin:
                 if expected_image is not None
                 else runtime_storage.image_digest
             )
-            if expected_image is not None and profile_application_id is not None:
-                if recipe_build_id != expected_image.build_id:
-                    raise RunSwitchRequestInvalid(
-                        f"{ProfileReasonCode.RUNTIME_IMAGE_CHANGED}: selected build differs from the accepted image; review and load the profile again",
-                        reason=InvalidRequestReason.CONFLICT,
-                    )
-                if runtime_storage.image_digest is not None:
-                    _require_profile_runtime_image(
-                        expected_image,
-                        RunSwitchObservedImageIdentity(
-                            image_digest=runtime_storage.image_digest,
-                            oci_layout_sha256=runtime_storage.oci_layout_sha256,
-                            image_bytes=runtime_storage.image_bytes,
-                            build_id=recipe_build_id,
-                            architecture="linux-arm64",
-                            runtime_interface=RUNTIME_INTERFACE,
-                        ),
-                    )
+            if (
+                expected_image is not None
+                and profile_application_id is not None
+                and runtime_storage.image_digest is not None
+            ):
+                _require_profile_runtime_image(
+                    expected_image,
+                    RunSwitchObservedImageIdentity(
+                        image_digest=runtime_storage.image_digest,
+                        oci_layout_sha256=runtime_storage.oci_layout_sha256,
+                        image_bytes=runtime_storage.image_bytes,
+                        build_id=recipe_build_id,
+                        architecture="linux-arm64",
+                        runtime_interface=RUNTIME_INTERFACE,
+                    ),
+                )
             if installation is None:
                 if service._phase_executor is None:
                     blockers.append(

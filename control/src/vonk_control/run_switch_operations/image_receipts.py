@@ -156,8 +156,6 @@ def effective_build_receipt(
             )
         )
     for result in candidates:
-        if expected_build_id is not None and result.build_id != expected_build_id:
-            continue
         if expected_input is not None and result.build_input_sha256 not in {
             None,
             expected_input,
@@ -175,7 +173,6 @@ def _require_profile_runtime_image(
     """Compare observed identity fields with the accepted image, naming drift."""
     actual = observed
     values = (
-        ("build_id", expected.build_id, actual.build_id),
         ("image_digest", expected.image_digest, actual.image_digest),
         ("oci_layout_sha256", expected.oci_layout_sha256, actual.oci_layout_sha256),
         ("image_bytes", expected.image_bytes, actual.image_bytes),

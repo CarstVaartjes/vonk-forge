@@ -17,9 +17,9 @@ bookkeeping that should become *unknown*: observe, reconcile, continue.
 ``python -m control.tests.blocker_classifier --summary`` prints the counts per
 category and rule; ``--classify-new`` appends the proposed families; ``--demote-unproven`` moves
 every already-retried unknown-outcome site without a proven retry loop to debt;
-``--promote-proven`` moves every debt site whose retry is proven on every call
-path to its module's ``proven-retry`` family; ``--rebalance`` does both (demote
-first), so the allowlist says exactly what the proof says.
+``--promote-proven`` never grants credit from syntax alone; product behavior
+and outcome regressions must justify reviewed changes. ``--rebalance`` demotes
+unsupported credit and preserves unresolved behavioral debt.
 """
 
 from __future__ import annotations

@@ -260,3 +260,38 @@ def test_the_operator_reviewed_image_accepts_a_receipt_recorded_by_another_build
             {"runtime_image": {**receipt, "image_digest": "sha256:" + "e" * 64}},
             expected_image=expected,
         )
+
+
+def test_verification_accepts_equal_image_from_another_build_and_rejects_changed_bytes():
+    """A different producer row cannot veto independently verified image content."""
+    from vonk_agent_protocol.agent_words import ProfileChildPhase
+    from vonk_control.run_switch_contract import RunSwitchVerifyResult
+
+    image = "sha256:" + "b" * 64
+    archive = "a" * 64
+    plan = RunSwitchPlan.model_construct(
+        image_digest=image,
+        recipe_build_id=str(uuid4()),
+        build=SimpleNamespace(oci_layout_sha256=archive),
+    )
+    phase = RunSwitchPhase.model_construct(
+        kind=ProfileChildPhase.VERIFY, subphase=ProfileChildPhase.TARGET_COPY
+    )
+    receipt = RunSwitchVerifyResult(
+        phase=ProfileChildPhase.VERIFY.value,
+        subphase=ProfileChildPhase.TARGET_COPY.value,
+        verified=True,
+        verified_digests=[],
+        verified_build_id=str(uuid4()),
+        verified_image_digest=image,
+        verified_oci_layout_sha256=archive,
+    )
+    _validate_artifact_execution(plan, phase, receipt)
+    with pytest.raises(RunSwitchOperationConflict):
+        _validate_artifact_execution(
+            plan,
+            phase,
+            receipt.model_copy(update={"verified_oci_layout_sha256": "c" * 64}),
+        )
+    # A valid subsequent observation remains acceptable after the failed sample.
+    _validate_artifact_execution(plan, phase, receipt)
