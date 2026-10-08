@@ -12,8 +12,10 @@ harmless, and a missing receipt or a full disk is a wait that heals, never an en
 from __future__ import annotations
 
 import fcntl
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -37,6 +39,7 @@ from vonk_control.lifecycle.model_cache import (
 from vonk_control.model_cache import ModelCacheConflict, ModelCacheService
 from vonk_control.models import ModelCacheOperation, ModelCacheSet
 
+from .non_blocking import assert_ended_without_blocking
 from .test_model_cache import (
     _artifact,
     _download,
@@ -306,6 +309,13 @@ def test_cancelling_a_queued_download_ends_it_at_once(cache, tmp_path):
         assert cache_set is not None and cache_set.state == "incomplete"
     assert service._object_path(str(artifact["sha256"])).exists() is False
 
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _queue(service, tmp_path, str(uuid.uuid4()))[0],
+    )
+
 
 def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
     """Rule 4: after the stop budget the row is cancelled, effect unknown, never waiting."""
@@ -344,6 +354,13 @@ def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
     assert "unconfirmed" in (stored.last_error or "")  # the residue record
     assert stored.observe_count == 0 and stored.completed_at is not None
     assert service.get_operation(operation.id).state == "cancelled"
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _queue(service, tmp_path, str(uuid.uuid4()))[0],
+    )
 
 
 def test_a_cancel_settles_after_a_restart(cache, tmp_path):

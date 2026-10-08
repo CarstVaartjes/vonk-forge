@@ -27,6 +27,7 @@ from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache_contract import (
     ModelCacheDownloadPayload,
     ModelCacheOperationProgress,
+    ModelCacheUpstreamRevision,
     parse_model_cache_payload,
 )
 from vonk_control.models import (
@@ -1072,7 +1073,7 @@ def test_failed_upstream_metadata_check_does_not_hide_catalog_update(
     )
     revision = require_mapping(revisions[0], "cache update upstream revision")
     assert revision["status"] == "check-failed"
-    assert revision["latest_revision"] is None
+    assert ModelCacheUpstreamRevision.model_validate(revision).latest_revision is None
     assert revision["error_code"]
     service.close()
 
@@ -1111,12 +1112,19 @@ def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypat
     service, _ = _service(tmp_path, sessions)
     release = threading.Event()
     calls = []
-    monkeypatch.setattr("vonk_control.model_cache._UPSTREAM_CHECK_SECONDS", 0.05)
+    monkeypatch.setattr(
+        "vonk_control.model_cache.updates._UPSTREAM_CHECK_SECONDS", 0.05
+    )
 
     def check(repository, revision):
         calls.append(repository)
         release.wait(2)
-        return {"status": "current"}
+        return ModelCacheUpstreamRevision(
+            repository=repository,
+            pinned_revision=revision,
+            status="current",
+            checked_at=NOW.isoformat(),
+        )
 
     monkeypatch.setattr(service, "_check_upstream_revision", check)
     keys = [(f"acme/model-{index}", "a" * 40) for index in range(12)]
@@ -1127,7 +1135,7 @@ def test_upstream_page_budget_bounds_concurrency_and_latency(tmp_path, monkeypat
         assert len(calls) == 4
         assert list(result) == keys
         assert all(
-            row["error_code"] == "model_cache.upstream_check_budget_exhausted"
+            row.error_code == "model_cache.upstream_check_budget_exhausted"
             for row in result.values()
         )
     finally:

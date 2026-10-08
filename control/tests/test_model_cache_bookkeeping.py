@@ -13,8 +13,10 @@ observed, is *unknown*, never a reason to stop a load.  Three families:
 # ruff: noqa: F811 - tests take the imported ``cache`` fixture by name
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from vonk_agent_protocol import LifecycleState
@@ -30,6 +32,7 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
 )
 
+from .non_blocking import assert_ended_without_blocking
 from .test_model_cache import (
     _artifact,
     _download,
@@ -151,9 +154,19 @@ def test_one_unreadable_download_never_stops_the_claim_loop(cache, tmp_path: Pat
     claimed = service._claim_operations(limit=5, respect_backoff=False)
     assert [operation_id for operation_id, _kind in claimed] == [healthy.id]
     retired = service.get_operation(broken.id)  # the view reads without raising
-    assert retired.state == "failed"
     assert "persisted-state-damaged" in str(retired.last_error)
     assert retired.failure is not None
+
+    def reason(receipt):
+        assert receipt.failure is not None and receipt.failure["code"]
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        retired,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _queue(service, tmp_path, str(uuid.uuid4()), b"a")[0],
+        assert_reason=reason,
+    )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -266,8 +279,8 @@ def test_unsafe_artifact_paths_are_still_refused(cache, tmp_path: Path):
         assert refused.value.code == "model_cache.artifact_missing"
 
 
-def test_requests_naming_nothing_still_get_a_defined_refusal(cache):
-    service, _sessions = cache
+def test_requests_naming_nothing_still_get_a_defined_refusal(cache, tmp_path):
+    service, sessions = cache
     unknown = "00000000-0000-4000-8000-00000000b040"
     with pytest.raises(ModelCacheNotFound) as missing_operation:
         service.get_operation(unknown)
@@ -282,3 +295,16 @@ def test_requests_naming_nothing_still_get_a_defined_refusal(cache):
             unknown, actor="test", request_key="bad", reason="not a uuid"
         )
     assert malformed.value.code == "model_cache.cancellation_invalid"
+
+    accepted, _artifact_document = _queue(service, tmp_path, str(uuid.uuid4()))
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        accepted,
+        end=lambda receipt: service.cancel_operation(
+            receipt.id,
+            actor="test",
+            request_key=str(uuid.uuid4()),
+            reason="valid request after refusals",
+        ),
+        fresh=lambda _world: _queue(service, tmp_path, str(uuid.uuid4()))[0],
+    )
