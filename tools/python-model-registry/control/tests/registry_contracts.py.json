@@ -1,0 +1,8 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/tests/registry_contracts.py"
+    }
+  ]
+}

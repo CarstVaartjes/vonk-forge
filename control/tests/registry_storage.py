@@ -18,7 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from tools.registry_contracts import RegistryManifest, RegistryPublication
+from .registry_contracts import RegistryManifest, RegistryPublication
 
 
 def _source(value):

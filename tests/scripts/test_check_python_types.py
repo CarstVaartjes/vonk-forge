@@ -333,9 +333,6 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
         tmp_path / "tools/pyright-baseline", {"schema_version": 1, "exceptions": []}
     )
     shutil.copy2(
-        ROOT / "tools/registry_contracts.py", tmp_path / "tools/registry_contracts.py"
-    )
-    shutil.copy2(
         ROOT / "tools/checker_contracts.py", tmp_path / "tools/checker_contracts.py"
     )
     helper_package = tmp_path / "control/tests"
@@ -343,6 +340,10 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
     shutil.copy2(
         ROOT / "control/tests/registry_storage.py",
         helper_package / "registry_storage.py",
+    )
+    shutil.copy2(
+        ROOT / "control/tests/registry_contracts.py",
+        helper_package / "registry_contracts.py",
     )
     shutil.copy2(SCRIPT, tmp_path / "scripts/check-python-types")
     shutil.copy2(
