@@ -3,6 +3,8 @@
 from .activation_marker import ActivationMarker
 from .activation_marker_state import ActivationMarkerState
 from .admission_code import AdmissionCode
+from .agent_client_decision import AgentClientDecision
+from .agent_diagnostic_operation import AgentDiagnosticOperation
 from .agent_evidence_code import AgentEvidenceCode
 from .agent_failure_kind import AgentFailureKind
 from .agent_failure_result import AgentFailureResult
@@ -12,6 +14,7 @@ from .agent_operation_change import AgentOperationChange
 from .agent_operation_payload import AgentOperationPayload
 from .agent_package_source import AgentPackageSource
 from .agent_result_state import AgentResultState
+from .agent_transport_kind import AgentTransportKind
 from .agent_upgrade_diagnostics_response import AgentUpgradeDiagnosticsResponse
 from .agent_upgrade_identity_response import AgentUpgradeIdentityResponse
 from .agent_upgrade_package import AgentUpgradePackage
@@ -458,6 +461,7 @@ from .observation_transfer_error import ObservationTransferError
 from .observation_transfer_start import ObservationTransferStart
 from .observation_transfer_start_resource import ObservationTransferStartResource
 from .observed_assignment_state import ObservedAssignmentState
+from .oci_failure_category import OciFailureCategory
 from .offline_stop_intent import OfflineStopIntent
 from .operation_blocker import OperationBlocker
 from .operation_blocker_severity import OperationBlockerSeverity
@@ -657,6 +661,7 @@ from .recipe_revision_intent import RecipeRevisionIntent
 from .recipe_revision_projection import RecipeRevisionProjection
 from .recipe_role_resources import RecipeRoleResources
 from .recipe_run_change import RecipeRunChange
+from .recipe_run_disposition_value import RecipeRunDispositionValue
 from .recipe_run_payload import RecipeRunPayload
 from .recipe_runtime import RecipeRuntime
 from .recipe_runtime_argument import RecipeRuntimeArgument
@@ -897,6 +902,8 @@ __all__ = (
     "ActivationMarker",
     "ActivationMarkerState",
     "AdmissionCode",
+    "AgentClientDecision",
+    "AgentDiagnosticOperation",
     "AgentEvidenceCode",
     "AgentFailureKind",
     "AgentFailureResult",
@@ -906,6 +913,7 @@ __all__ = (
     "AgentOperationPayload",
     "AgentPackageSource",
     "AgentResultState",
+    "AgentTransportKind",
     "AgentUpgradeDiagnosticsResponse",
     "AgentUpgradeIdentityResponse",
     "AgentUpgradePackage",
@@ -1352,6 +1360,7 @@ __all__ = (
     "ObservationTransferStart",
     "ObservationTransferStartResource",
     "ObservedAssignmentState",
+    "OciFailureCategory",
     "OfflineStopIntent",
     "OperationBlocker",
     "OperationBlockerSeverity",
@@ -1551,6 +1560,7 @@ __all__ = (
     "RecipeRevisionProjection",
     "RecipeRoleResources",
     "RecipeRunChange",
+    "RecipeRunDispositionValue",
     "RecipeRunPayload",
     "RecipeRuntime",
     "RecipeRuntimeArgument",

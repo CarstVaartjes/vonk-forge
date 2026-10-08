@@ -627,7 +627,7 @@ fn enum_string_impl(item: &syn::ItemEnum) -> Option<Vec<Item>> {
         arms.push(quote! { Self::#name => #text });
     }
     Some(vec![
-        parse_quote! { impl #ident { pub fn as_str(&self) -> &'static str { match self { #(#arms),* } } } },
+        parse_quote! { impl #ident { pub const fn as_str(&self) -> &'static str { match self { #(#arms),* } } } },
         parse_quote! { impl ::std::ops::Deref for #ident { type Target = str; fn deref(&self) -> &str { self.as_str() } } },
         parse_quote! { impl ::std::cmp::PartialEq<str> for #ident { fn eq(&self, other: &str) -> bool { self.as_str() == other } } },
         parse_quote! { impl ::std::cmp::PartialEq<&str> for #ident { fn eq(&self, other: &&str) -> bool { self.as_str() == *other } } },

@@ -2,6 +2,50 @@
 // vonk_agent_protocol.lifecycle_vocabulary and
 // vonk_agent_protocol.reason_codes. Do not edit.
 
+export const RecipeRunDispositionValue = {
+  UNOWNED: "unowned",
+} as const;
+export type RecipeRunDispositionValue = (typeof RecipeRunDispositionValue)[keyof typeof RecipeRunDispositionValue];
+
+export const AgentClientDecision = {
+  RETRY: "retry",
+  RECORD: "record",
+  EXIT: "exit",
+  DEFER: "defer",
+} as const;
+export type AgentClientDecision = (typeof AgentClientDecision)[keyof typeof AgentClientDecision];
+
+export const AgentTransportKind = {
+  TIMEOUT: "timeout",
+  CONNECT: "connect",
+  BODY: "body",
+  PROTOCOL: "protocol",
+  UNKNOWN: "unknown",
+} as const;
+export type AgentTransportKind = (typeof AgentTransportKind)[keyof typeof AgentTransportKind];
+
+export const OciFailureCategory = {
+  STORAGE_PERMISSION_DENIED: "storage-permission-denied",
+  STORAGE_NOT_FOUND: "storage-not-found",
+  PROCESS: "process",
+  WORKLOAD: "workload",
+  RUNTIME: "runtime",
+  IMAGE_DIGEST: "image-digest",
+  ARTIFACT: "artifact",
+  STORAGE: "storage",
+  METADATA: "metadata",
+  CAPACITY: "capacity",
+  RECONCILIATION_BUSY: "reconciliation-busy",
+} as const;
+export type OciFailureCategory = (typeof OciFailureCategory)[keyof typeof OciFailureCategory];
+
+export const AgentDiagnosticOperation = {
+  CONTROLLER_REQUEST: "controller.request",
+  WORKLOAD_PRELOAD_MEMORY: "workload.preload_memory",
+  MODEL_MATERIALIZATION_COPY_FALLBACK: "model.materialization_copy_fallback",
+} as const;
+export type AgentDiagnosticOperation = (typeof AgentDiagnosticOperation)[keyof typeof AgentDiagnosticOperation];
+
 export const ProfileInstallationPolicy = {
   KEEP_CACHED: "keep-cached",
   EXACT: "exact",
