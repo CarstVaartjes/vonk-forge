@@ -234,7 +234,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 258,
+    "total": 251,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -245,6 +245,46 @@
   },
   "retry_loops": [
     {
+      "path": "control/src/vonk_control/agent_jobs/evidence.py",
+      "function": "_exact_service_stop_receipt_covers_start",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "This exact Stop observer returns False for unreadable accepted Start evidence, retaining the issued old effect. AgentJobService.assess_superseded_agent_effects_in_session returns typed UNCERTAIN_EFFECT with persisted observation due, so FleetProfileService re-observes the same journal; the AgentJobService claim gate retains the old active mutation and each next AgentClaim re-reads the healed receipt. The connected PostgreSQL pending-effect proof exercises partial and nine damaged receipts, repair, the same profile continuation and a fresh native Start claim without changing the old attempt."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/reconcile.py",
+      "function": "_sweep_gone_targets",
+      "catches": [
+        "AdmissionLockBusy"
+      ],
+      "reason": "The bounded gone-target sweep releases its transaction on a busy admission lock; the next worker pass rechecks target authority and retries the same order."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/reconcile.py",
+      "function": "_sweep_lapsed_attempts",
+      "catches": [
+        "AdmissionLockBusy"
+      ],
+      "reason": "The lapsed-attempt sweep skips a node whose admission lock is busy and the next pass retries it."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/results.py",
+      "function": "fail",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/results.py",
+      "function": "succeed",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    },
+    {
       "path": "control/src/vonk_control/agent_upgrades.py",
       "function": "AgentUpgradeService.current_package",
       "catches": [
@@ -252,6 +292,30 @@
         "AgentUpgradeRetryLater"
       ],
       "reason": "The signed release is fetched again a bounded number of times with pauses that outlast the few steps of a release publication before the requester is told to retry."
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "_close_model_cache",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Shutdown retries model-cache checkpointing on the bounded request pause schedule, then releases the lifespan so durable unfinished transfers resume after Controller restart."
+    },
+    {
+      "path": "control/src/vonk_control/attempt_residues.py",
+      "function": "AttemptResidueReconciler._incomplete_installations",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "An unknown leftover uninstall retains the exact installation, logs its next attempt and continues other candidates; the tick re-observes and retries it after a five second backoff."
+    },
+    {
+      "path": "control/src/vonk_control/attempt_residues.py",
+      "function": "AttemptResidueReconciler._never_installed_plans",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Unknown abandonment retains the plan, logs its next attempt and continues other plans; the tick re-observes the retained plan after a five second backoff."
     },
     {
       "path": "control/src/vonk_control/availability_production.py",
@@ -344,6 +408,14 @@
     },
     {
       "path": "control/src/vonk_control/install_admission.py",
+      "function": "InstallAdmissionService.accept_install",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Direct acceptance re-observes receipts and retries the exact installation plan from a fresh transaction on the bounded admission schedule; exhausted attempts report retryable uncertainty."
+    },
+    {
+      "path": "control/src/vonk_control/install_admission.py",
       "function": "InstallAdmissionService.plan_install",
       "catches": [
         "UnknownOutcomeError"
@@ -351,12 +423,28 @@
       "reason": "An unknown outcome of the compiled-plan provider (a receipt, storage or bookkeeping that cannot be confirmed now) is recorded as waiting-for-evidence blockers instead of a verdict; require_admissible turns them into InstallAdmissionBusy, which every admitting owner retries (the run-switch advance loop, the pending-admission observation)."
     },
     {
-      "path": "control/src/vonk_control/model_cache/scheduler.py",
-      "function": "SchedulerMixin._advance_background_operations",
+      "path": "control/src/vonk_control/model_cache/availability.py",
+      "function": "AvailabilityMixin.cached_artifact_file",
       "catches": [
-        "UnknownOutcomeError"
+        "ModelCacheConflictUnknown"
       ],
-      "reason": "A background download that ends with an unknown outcome keeps its durable operation: the typed handler records the failure, the operation settles through the core's bounded backoff and the claim loop resumes the same transfer on a later worker tick."
+      "reason": "The exact observation is retried through bounded_attempts, releasing responses and transactions between attempts. Missing provider files retain the durable lifecycle source-gone budget; exhausted requests carry the typed retry hint and hold no new claim."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/github.py",
+      "function": "GithubMixin._open_github_release_asset",
+      "catches": [
+        "ModelCacheStorageUnknown"
+      ],
+      "reason": "The exact observation is retried through bounded_attempts, releasing responses and transactions between attempts. Missing provider files retain the durable lifecycle source-gone budget; exhausted requests carry the typed retry hint and hold no new claim."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/http.py",
+      "function": "HttpMixin._open_http_response",
+      "catches": [
+        "ModelCacheStorageUnknown"
+      ],
+      "reason": "The exact observation is retried through bounded_attempts, releasing responses and transactions between attempts. Missing provider files retain the durable lifecycle source-gone budget; exhausted requests carry the typed retry hint and hold no new claim."
     },
     {
       "path": "control/src/vonk_control/model_cache/removal_execution.py",
@@ -365,15 +453,6 @@
         "_ArtifactWriterBusy"
       ],
       "reason": "A busy artifact writer defers the model removal with a retry delay and the removal pass advances it again."
-    },
-    {
-      "path": "control/src/vonk_control/model_cache/transfer.py",
-      "function": "TransferMixin._run_download",
-      "catches": [
-        "OperationInterrupted",
-        "ModelCacheError"
-      ],
-      "reason": "A cooperative stop is recorded as a resumable partial and any other cache error is recorded through the failure path; both report an unknown outcome to the cache operation's lifecycle, which retries the exact transfer with bounded backoff."
     },
     {
       "path": "control/src/vonk_control/model_cache/removal_reconcile.py",
@@ -392,13 +471,69 @@
       "reason": "The recurring worker tick and run_pending pass re-inventory accepted waiting requests after disposable cursor wrap; a busy exact storage lock retains the accepted receipt and the old removal fence, and the next pass retries the same canonical intent."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability/removal_execution.py",
-      "function": "_advance_recipe_image_removal",
+      "path": "control/src/vonk_control/model_cache/scheduler.py",
+      "function": "SchedulerMixin._advance_background_operations",
       "catches": [
-        "RuntimeImagePreparationError",
-        "RecipeImageAvailabilityError"
+        "UnknownOutcomeError"
       ],
-      "reason": "A removal step that meets unconfirmed evidence (a changed reference, a published length that differs) records the failure on the removal checkpoint with a five second retry floor and leaves the image in place; the next pass retries the same step when it is due."
+      "reason": "A background download that ends with an unknown outcome keeps its durable operation: the typed handler records the failure, the operation settles through the core's bounded backoff and the claim loop resumes the same transfer on a later worker tick."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/scheduler.py",
+      "function": "SchedulerMixin._finish_background_success",
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "reason": "A busy publication fence is handed to _defer_artifact_writer, which releases the lease and persists the dependency wait before the lifecycle worker retries it on bounded backoff."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/split_transfer.py",
+      "function": "SplitTransferMixin._sample_transfer.observe",
+      "catches": [
+        "OperationInterrupted"
+      ],
+      "reason": "A stopped transfer hands its typed end to the lifecycle owner after preserving partial bytes. Cancellation and shutdown break the bounded observation immediately; no callback can retain a lease or busy writer after the owner settles it."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/transfer.py",
+      "function": "TransferMixin._run_download",
+      "catches": [
+        "OperationInterrupted",
+        "ModelCacheError"
+      ],
+      "reason": "A cooperative stop is recorded as a resumable partial and any other cache error is recorded through the failure path; both report an unknown outcome to the cache operation's lifecycle, which retries the exact transfer with bounded backoff."
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/updates.py",
+      "function": "UpdatesMixin._check_upstream_revision",
+      "catches": [
+        "ModelCacheError"
+      ],
+      "reason": "A provider failure ends this bounded metadata observation with check-failed and a typed code, without changing catalog state or holding a claim; subsequent requested or periodic checks observe it again."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.check_source",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.prepare_plan",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.resolve",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
     },
     {
       "path": "control/src/vonk_control/recipe_image_availability/cancellation.py",
@@ -418,6 +553,51 @@
       "reason": "A claim lost to a newer attempt or a cancel returns without writing; an unknown outcome is recorded by _fail and the lifecycle core schedules the next attempt on its bounded backoff, so the claim loop runs the operation again."
     },
     {
+      "path": "control/src/vonk_control/recipe_image_availability/failure_projection.py",
+      "function": "_view",
+      "catches": [
+        "UnknownOutcomeError",
+        "ModelCacheError",
+        "SQLAlchemyError",
+        "OSError",
+        "ValueError"
+      ],
+      "reason": "Each read observes the exact model child anew; unavailable bookkeeping returns typed residue beside the last observed child and verified image result. The execution owner retains its canonical bounded retry path."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/projection.py",
+      "function": "get_operator_operation",
+      "catches": [
+        "RecipeImageAvailabilityUnknown"
+      ],
+      "reason": "Each read re-observes the accepted record and projects a typed unavailable reason without refusing the read. The worker ends unreadable owners and reconciles their exact gates under storage locks."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+      "function": "reconcile_requested_removals.validate",
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "reason": "Every bounded worker pass re-observes this exact request and removal owner. Unreadable destructive intent is not executed; the removal worker retires damaged owners and the storage-fenced reaper releases their gates."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_completion.py",
+      "function": "_finish_recipe_removal",
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "reason": "The recurring worker pass records reference uncertainty on the canonical removal checkpoint, releases its transaction and retries after bounded lifecycle backoff; terminal effects end and dead gates are reconciled under storage locks."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_execution.py",
+      "function": "_advance_recipe_image_removal",
+      "catches": [
+        "RuntimeImagePreparationError",
+        "RecipeImageAvailabilityError"
+      ],
+      "reason": "A removal step that meets unconfirmed evidence (a changed reference, a published length that differs) records the failure on the removal checkpoint with a five second retry floor and leaves the image in place; the next pass retries the same step when it is due."
+    },
+    {
       "path": "control/src/vonk_control/recipe_image_availability/removal_execution.py",
       "function": "advance_removals",
       "catches": [
@@ -426,12 +606,29 @@
       "reason": "The cache-removal pass runs on every worker tick over every queued, running or backing-off removal; an owner whose evidence is unreadable or changed is skipped for this pass, nothing is removed, and the same row is read again on the next pass, so it never blocks the rows after it."
     },
     {
+      "path": "control/src/vonk_control/recipe_image_availability/requests.py",
+      "function": "_start_request",
+      "catches": [
+        "RecipeImageAvailabilityUnknown"
+      ],
+      "reason": "Admission reconciles the same request on bounded exponential backoff for at most 250 milliseconds; exhaustion returns a typed failed observation with no accepted effect, locks or claims. A new request is always eligible."
+    },
+    {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService._cancel_build",
       "catches": [
         "RecipeBuildOwnershipBusy"
       ],
       "reason": "A build cancellation that meets a lock another writer holds repeats its transaction a bounded number of times with short jittered pauses; the cancellation request key makes a repeat idempotent."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService._stop_service_run_once",
+      "catches": [
+        "_RouteNotWithdrawn",
+        "UnknownOutcomeError"
+      ],
+      "reason": "Competing publication is re-withdrawn and exact native dispatch retried a bounded number of times. After acceptance, a canonical unknown outcome is handed to _defer_accepted_service_stop, which preserves the same root and reviewed effects and persists updated_at; reconcile_pending_service_stops resumes that exact root after its five-second due interval without retaining a transaction across publication."
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
@@ -475,6 +672,14 @@
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.reconcile_pending_service_stops",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "One oldest due accepted Stop per worker pass retries its exact durable request. A deferred row retains original bytes, claims and meaningful cause and advances its next-attempt clock, releasing transactions before publication and allowing other due rows to advance."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.reconcile_retired_operations",
       "catches": [
         "RecipeOperationConflict",
@@ -497,6 +702,38 @@
         "UnknownOutcomeError"
       ],
       "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations.py",
+      "function": "RecipeOperationService.stop",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Canonical logical and service Stop admission retry unknown outcomes through bounded admission_attempts. An accepted service Stop remains the exact same durable Job on publication failure; worker continuation retries it without changing the reviewed effects."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_update_batches.py",
+      "function": "RecipeUpdateBatches._run_once",
+      "catches": [
+        "RecipeImageAvailabilityUnknown"
+      ],
+      "reason": "Unknown child admission leaves the frozen child pending with a persisted bounded retry delay regardless of an unset retryable hint; the next batch claim resumes the same request identity."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_update_batches.py",
+      "function": "RecipeUpdateBatches.run",
+      "catches": [
+        "RecipeUpdateClaimLost"
+      ],
+      "reason": "An expired, replaced, deleted or cancelled parent ends this stale invocation without writing; the current owner retains committed children and continues independently."
+    },
+    {
+      "path": "control/src/vonk_control/run_admission.py",
+      "function": "RunAdmissionService.accept_run",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Direct acceptance retries the exact run plan after the failed transaction releases its locks, with the bounded admission pause schedule."
     },
     {
       "path": "control/src/vonk_control/run_switch_operations.py",
@@ -525,43 +762,19 @@
     },
     {
       "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService.tick",
+      "function": "RunSwitchOperationService._refresh_blocked_plan",
       "catches": [
         "UnknownOutcomeError"
       ],
-      "reason": "The worker tick contains one operation's unknown outcome: the failure is logged, _hold_after_advance_failure keeps the checkpoint and schedules a bounded retry that names its cause, and the rest of the batch advances; the next tick picks the operation up when due."
+      "reason": "Unknown build or cleanup evidence retains the accepted plan and records bounded lifecycle backoff; the next worker tick refreshes the same authorized intent when due."
     },
     {
-      "path": "control/src/vonk_control/worker.py",
-      "function": "Worker._run_housekeeping",
+      "path": "control/src/vonk_control/run_switch_operations.py",
+      "function": "RunSwitchOperationService._select_build",
       "catches": [
         "UnknownOutcomeError"
       ],
-      "reason": "A housekeeping task whose outcome is unknown is logged and contained; the worker pass runs the same task again on its next pass."
-    },
-    {
-      "path": "control/src/vonk_control/worker.py",
-      "function": "Worker.run_once",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "The worker pass contains one source's unknown outcome: the failure is logged, the pass moves on to the other sources and the heartbeat, and the failed source runs again on the next pass; no source state is ended by it."
-    },
-    {
-      "path": "control/src/vonk_control/install_admission.py",
-      "function": "InstallAdmissionService.accept_install",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Direct acceptance re-observes receipts and retries the exact installation plan from a fresh transaction on the bounded admission schedule; exhausted attempts report retryable uncertainty."
-    },
-    {
-      "path": "control/src/vonk_control/run_admission.py",
-      "function": "RunAdmissionService.accept_run",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Direct acceptance retries the exact run plan after the failed transaction releases its locks, with the bounded admission pause schedule."
+      "reason": "An unknown builder receipt ends this preview with a waiting plan without choosing an alternative builder; accepted blocked plans re-enter preview through the timed plan-refresh tick until the same exact evidence becomes available."
     },
     {
       "path": "control/src/vonk_control/run_switch_operations.py",
@@ -573,11 +786,11 @@
     },
     {
       "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._refresh_blocked_plan",
+      "function": "RunSwitchOperationService.tick",
       "catches": [
         "UnknownOutcomeError"
       ],
-      "reason": "Unknown build or cleanup evidence retains the accepted plan and records bounded lifecycle backoff; the next worker tick refreshes the same authorized intent when due."
+      "reason": "The worker tick contains one operation's unknown outcome: the failure is logged, _hold_after_advance_failure keeps the checkpoint and schedules a bounded retry that names its cause, and the rest of the batch advances; the next tick picks the operation up when due."
     },
     {
       "path": "control/src/vonk_control/unused_storage_collection.py",
@@ -588,36 +801,12 @@
       "reason": "Unknown removal retains the item, records its next attempt and continues other items; the next timed sweep re-observes the references and retries the retained item after its scan interval."
     },
     {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "function": "RecipeUpdateBatches.run",
-      "catches": [
-        "RecipeUpdateClaimLost"
-      ],
-      "reason": "An expired, replaced, deleted or cancelled parent ends this stale invocation without writing; the current owner retains committed children and continues independently."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_update_batches.py",
-      "function": "RecipeUpdateBatches._run_once",
-      "catches": [
-        "RecipeImageAvailabilityUnknown"
-      ],
-      "reason": "Unknown child admission leaves the frozen child pending with a persisted bounded retry delay regardless of an unset retryable hint; the next batch claim resumes the same request identity."
-    },
-    {
-      "path": "control/src/vonk_control/api.py",
-      "function": "_close_model_cache",
+      "path": "control/src/vonk_control/worker.py",
+      "function": "Worker._run_housekeeping",
       "catches": [
         "UnknownOutcomeError"
       ],
-      "reason": "Shutdown retries model-cache checkpointing on the bounded request pause schedule, then releases the lifespan so durable unfinished transfers resume after Controller restart."
-    },
-    {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._select_build",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "An unknown builder receipt ends this preview with a waiting plan without choosing an alternative builder; accepted blocked plans re-enter preview through the timed plan-refresh tick until the same exact evidence becomes available."
+      "reason": "A housekeeping task whose outcome is unknown is logged and contained; the worker pass runs the same task again on its next pass."
     },
     {
       "path": "control/src/vonk_control/worker.py",
@@ -628,153 +817,12 @@
       "reason": "Shutdown retries each unknown checkpoint on the bounded request pause schedule, continues closing other owned executors, then releases the process so durable claims resume on restart."
     },
     {
-      "path": "control/src/vonk_control/attempt_residues.py",
-      "function": "AttemptResidueReconciler._incomplete_installations",
+      "path": "control/src/vonk_control/worker.py",
+      "function": "Worker.run_once",
       "catches": [
         "UnknownOutcomeError"
       ],
-      "reason": "An unknown leftover uninstall retains the exact installation, logs its next attempt and continues other candidates; the tick re-observes and retries it after a five second backoff."
-    },
-    {
-      "path": "control/src/vonk_control/attempt_residues.py",
-      "function": "AttemptResidueReconciler._never_installed_plans",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Unknown abandonment retains the plan, logs its next attempt and continues other plans; the tick re-observes the retained plan after a five second backoff."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.stop",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Canonical logical and service Stop admission retry unknown outcomes through bounded admission_attempts. An accepted service Stop remains the exact same durable Job on publication failure; worker continuation retries it without changing the reviewed effects."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._stop_service_run_once",
-      "catches": [
-        "_RouteNotWithdrawn",
-        "UnknownOutcomeError"
-      ],
-      "reason": "Competing publication is re-withdrawn and exact native dispatch retried a bounded number of times. After acceptance, a canonical unknown outcome is handed to _defer_accepted_service_stop, which preserves the same root and reviewed effects and persists updated_at; reconcile_pending_service_stops resumes that exact root after its five-second due interval without retaining a transaction across publication."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.reconcile_pending_service_stops",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "One oldest due accepted Stop per worker pass retries its exact durable request. A deferred row retains original bytes, claims and meaningful cause and advances its next-attempt clock, releasing transactions before publication and allowing other due rows to advance."
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs/reconcile.py",
-      "function": "_sweep_lapsed_attempts",
-      "catches": [
-        "AdmissionLockBusy"
-      ],
-      "reason": "The lapsed-attempt sweep skips a node whose admission lock is busy and the next pass retries it."
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs/results.py",
-      "function": "fail",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs/results.py",
-      "function": "succeed",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs/evidence.py",
-      "function": "_exact_service_stop_receipt_covers_start",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "This exact Stop observer returns False for unreadable accepted Start evidence, retaining the issued old effect. AgentJobService.assess_superseded_agent_effects_in_session returns typed UNCERTAIN_EFFECT with persisted observation due, so FleetProfileService re-observes the same journal; the AgentJobService claim gate retains the old active mutation and each next AgentClaim re-reads the healed receipt. The connected PostgreSQL pending-effect proof exercises partial and nine damaged receipts, repair, the same profile continuation and a fresh native Start claim without changing the old attempt."
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs/reconcile.py",
-      "function": "_sweep_gone_targets",
-      "catches": [
-        "AdmissionLockBusy"
-      ],
-      "reason": "The bounded gone-target sweep releases its transaction on a busy admission lock; the next worker pass rechecks target authority and retries the same order."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService.check_source",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService.resolve",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService.prepare_plan",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability/requests.py",
-      "function": "_start_request",
-      "catches": [
-        "RecipeImageAvailabilityUnknown"
-      ],
-      "reason": "Admission reconciles the same request on bounded exponential backoff for at most 250 milliseconds; exhaustion returns a typed failed observation with no accepted effect, locks or claims. A new request is always eligible."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability/failure_projection.py",
-      "function": "_view",
-      "catches": [
-        "UnknownOutcomeError",
-        "ModelCacheError",
-        "SQLAlchemyError",
-        "OSError",
-        "ValueError"
-      ],
-      "reason": "Each read observes the exact model child anew; unavailable bookkeeping returns typed residue beside the last observed child and verified image result. The execution owner retains its canonical bounded retry path."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability/removal_completion.py",
-      "function": "_finish_recipe_removal",
-      "catches": [
-        "RecipeImageAvailabilityError"
-      ],
-      "reason": "The recurring worker pass records reference uncertainty on the canonical removal checkpoint, releases its transaction and retries after bounded lifecycle backoff; terminal effects end and dead gates are reconciled under storage locks."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability/projection.py",
-      "function": "get_operator_operation",
-      "catches": [
-        "RecipeImageAvailabilityUnknown"
-      ],
-      "reason": "Each read re-observes the accepted record and projects a typed unavailable reason without refusing the read. The worker ends unreadable owners and reconciles their exact gates under storage locks."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
-      "function": "reconcile_requested_removals.validate",
-      "catches": [
-        "RecipeImageAvailabilityError"
-      ],
-      "reason": "Every bounded worker pass re-observes this exact request and removal owner. Unreadable destructive intent is not executed; the removal worker retires damaged owners and the storage-fenced reaper releases their gates."
+      "reason": "The worker pass contains one source's unknown outcome: the failure is logged, the pass moves on to the other sources and the heartbeat, and the failed source runs again on the next pass; no source state is ended by it."
     }
   ],
   "call_edges": [
@@ -4091,47 +4139,6 @@
       ]
     },
     {
-      "family": "availability.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/model_cache/availability.py", "ModelCacheConflictUnknown", "AvailabilityMixin.cached_artifact_file_once", "model_cache.artifact_unverified", 1]
-      ]
-    },
-    {
-      "family": "download.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/model_cache/download.py", "_ArtifactWriterBusy", "DownloadMixin._publication_allowed", "message", 1]
-      ]
-    },
-    {
-      "family": "github.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageUnknown", "GithubMixin._open_github_release_asset_once", "model_cache.source_unavailable", 2],
-        ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageUnknown", "GithubMixin._raise_github_http_status", "model_cache.source_unavailable", 1]
-      ]
-    },
-    {
-      "family": "http.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageUnknown", "HttpMixin._open_http_response_once", "model_cache.source_unavailable", 1]
-      ]
-    },
-    {
-      "family": "split_transfer.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/model_cache/split_transfer.py", "OperationInterrupted", "SplitTransferMixin._sample_transfer.observe_once", "model-download-stopped-partial-files-preserved", 1]
-      ]
-    },
-    {
       "family": "download.proven-retry",
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
@@ -4143,7 +4150,8 @@
         ["control/src/vonk_control/model_cache/download.py", "OperationInterrupted", "DownloadMixin._complete_download", "model-download-stopped-partial-files-preserved", 1],
         ["control/src/vonk_control/model_cache/download.py", "OperationInterrupted", "DownloadMixin._complete_download", "model-download-was-removed-during-verification", 1],
         ["control/src/vonk_control/model_cache/download.py", "OperationInterrupted", "DownloadMixin._download_sequential", "download-interrupted-at-a-durable-checkpoint", 1],
-        ["control/src/vonk_control/model_cache/download.py", "OperationInterrupted", "DownloadMixin._require_transfer_running", "model-download-stopped-partial-files-preserved", 1]
+        ["control/src/vonk_control/model_cache/download.py", "OperationInterrupted", "DownloadMixin._require_transfer_running", "model-download-stopped-partial-files-preserved", 1],
+        ["control/src/vonk_control/model_cache/download.py", "_ArtifactWriterBusy", "DownloadMixin._publication_allowed", "message", 1]
       ]
     },
     {
@@ -4151,6 +4159,8 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
+        ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageUnknown", "GithubMixin._open_github_release_asset_once", "model_cache.source_unavailable", 2],
+        ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageUnknown", "GithubMixin._raise_github_http_status", "model_cache.source_unavailable", 1],
         ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageUnknown", "GithubMixin._validate_github_release_asset", "model_cache.source_unavailable", 1]
       ]
     },
@@ -4170,7 +4180,8 @@
         ["control/src/vonk_control/model_cache/split_transfer.py", "OperationInterrupted", "SplitTransferMixin._append_part", "model-download-stopped-partial-files-preserved", 1],
         ["control/src/vonk_control/model_cache/split_transfer.py", "OperationInterrupted", "SplitTransferMixin._download_artifact", "model-download-was-removed-during-verification", 1],
         ["control/src/vonk_control/model_cache/split_transfer.py", "OperationInterrupted", "SplitTransferMixin._download_split", "model-download-cancelled-during-assembly", 1],
-        ["control/src/vonk_control/model_cache/split_transfer.py", "OperationInterrupted", "SplitTransferMixin._download_split", "model-download-was-removed-during-assembly", 1]
+        ["control/src/vonk_control/model_cache/split_transfer.py", "OperationInterrupted", "SplitTransferMixin._download_split", "model-download-was-removed-during-assembly", 1],
+        ["control/src/vonk_control/model_cache/split_transfer.py", "OperationInterrupted", "SplitTransferMixin._sample_transfer.observe_once", "model-download-stopped-partial-files-preserved", 1]
       ]
     },
     {
@@ -4182,6 +4193,22 @@
         ["control/src/vonk_control/model_cache/transfer.py", "OperationInterrupted", "TransferMixin._download_locked", "model-download-cancellation-was-accepted-partial-files-pres", 1],
         ["control/src/vonk_control/model_cache/transfer.py", "OperationInterrupted", "TransferMixin._run_download", "model-download-was-removed-before-publication", 1],
         ["control/src/vonk_control/model_cache/transfer.py", "_ArtifactWriterBusy", "TransferMixin._download_one_unique", "message", 2]
+      ]
+    },
+    {
+      "family": "availability.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/model_cache/availability.py", "ModelCacheConflictUnknown", "AvailabilityMixin.cached_artifact_file_once", "model_cache.artifact_unverified", 1]
+      ]
+    },
+    {
+      "family": "http.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageUnknown", "HttpMixin._open_http_response_once", "model_cache.source_unavailable", 1]
       ]
     }
   ]
