@@ -80,6 +80,24 @@ fn inconsistent_network_evidence_never_fails_the_mandatory_report() {
 }
 
 #[test]
+fn wholly_invalid_network_evidence_is_unknown_and_a_fresh_report_is_valid() {
+    use vonk_agent_protocol::generated::AgentEvidenceCode;
+    let mut request = valid_inventory();
+    request.network_interfaces = Some(vec![interface("bad name", None)]);
+    request.nas_route_interface = Some("bad name".to_owned());
+    let warnings = clamp_inventory_request(&mut request);
+    assert!(warnings.contains(&AgentEvidenceCode::AgentEvidenceInventoryNetworkDropped));
+    assert_eq!(request.network_interfaces, None);
+    assert_eq!(request.nas_route_interface, None);
+    request.validate().unwrap();
+    let mut fresh = valid_inventory();
+    fresh.network_interfaces = Some(vec![interface("enP7s7", Some(1000))]);
+    fresh.nas_route_interface = Some("enP7s7".to_owned());
+    assert!(clamp_inventory_request(&mut fresh).is_empty());
+    fresh.validate().unwrap();
+}
+
+#[test]
 fn an_oversized_interface_list_keeps_the_nas_route() {
     let mut request = valid_inventory();
     request.network_interfaces = Some(
