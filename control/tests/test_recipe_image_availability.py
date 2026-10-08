@@ -22,8 +22,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, OperationProgress
-from vonk_control import artifact_reference_scan
+from vonk_agent_protocol import LifecycleState, OperationProgress, UnknownOutcomeError
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
 from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
@@ -1324,8 +1323,8 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_recipe_removal_reference_scan_enforces_accumulated_owner_budget(
-    tmp_path: Path, monkeypatch
+def test_damaged_reference_owner_is_unknown_and_reobserved_after_repair(
+    tmp_path: Path,
 ) -> None:
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'reference-budget.sqlite'}")
     Base.metadata.create_all(engine)
@@ -1366,12 +1365,21 @@ def test_recipe_removal_reference_scan_enforces_accumulated_owner_budget(
                 updated_at=now,
             )
         )
-    monkeypatch.setattr(artifact_reference_scan, "MAX_ARTIFACT_OWNER_SCAN_BYTES", 1)
 
     with sessions() as session, pytest.raises(ArtifactLifecycleError) as refused:
         runtime_image_reference_reasons(session, (ARCHIVE_SHA,))
 
-    assert refused.value.code == "artifact.reference_scan_limited"
+    assert isinstance(refused.value, UnknownOutcomeError)
+    with sessions.begin() as session:
+        application = session.get(
+            FleetProfileApplication, "00000000-0000-4000-8000-000000000032"
+        )
+        assert application is not None
+        session.delete(application)
+    with sessions() as session:
+        assert runtime_image_reference_reasons(session, (ARCHIVE_SHA,)) == {
+            ARCHIVE_SHA: ()
+        }
     engine.dispose()
 
 
@@ -1469,7 +1477,7 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_oversized_removal_owner_does_not_hold_up_later_request(
+def test_damaged_removal_owner_does_not_hold_up_later_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sessions, _, service, selector = _empty_recipe_removal_owner(tmp_path)
@@ -1477,14 +1485,13 @@ def test_oversized_removal_owner_does_not_hold_up_later_request(
     good_key = "00000000-0000-4000-8000-000000000036"
     remove_after_review(service, selector, actor="operator", request_id=bad_key)
     remove_after_review(service, selector, actor="operator", request_id=good_key)
-    monkeypatch.setattr(artifact_reference_scan, "MAX_ARTIFACT_OWNER_SCAN_BYTES", 4096)
     with sessions.begin() as session:
         bad = session.scalar(select(Job).where(Job.request_id == bad_key))
         assert bad is not None
         bad.payload = dict(bad.payload) | {"padding": "x" * 5000}
         bad.updated_at = datetime.now(UTC) - timedelta(seconds=1)
 
-    # The oversized owner is read tolerantly and no longer holds the queue.
+    # The damaged owner ends without retaining the queue.
     assert service.advance_removals(limit=2) == 2
 
     with sessions() as session:

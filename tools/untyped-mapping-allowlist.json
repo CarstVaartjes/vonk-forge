@@ -1313,20 +1313,20 @@
       "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
       "_reason_projection": "e0a699c0788ea845ed78a90710c66e67389da9f008120a254923cdd4efbde9f6",
       "require_model_sets_open": "7583efc05f8747752f4263fda58846c4a79262cf301f0b72d4f2aef3e00ee5f1",
-      "model_set_objects": "b3f846270636729ad6febbaed69899eb1b6eafd11e8e2f31b900e31083f384e6",
-      "model_set_reference_findings": "7c529d61d49520df58c92c92be6b886f7b345e43d0e1ad44af0a2047c72a4614",
-      "model_set_reference_findings.account": "c5de4b2edbb2889b7ba2165ab12edcc276514a31e898805b99a220ef665425e2",
+      "model_set_objects": "86defa957598efdcf30e1cdc89b1c5b552d363355c3fcb51a296a3919e0acae8",
+      "model_set_reference_findings": "033de2f9afb74bd939918228458b3b91ae5686aee1fad2a5182ea2c4e38d18a8",
+      "model_set_reference_findings.account": "7d865f6be624426b3bb165d5f9015904eb47db52f9d35894c9eb67ae57d11e5d",
       "model_set_reference_reasons": "8873ed7b1fc4d46fc3d0e5cf89d05bcfe552753b64a3118776d35d1212fbfd09",
-      "runtime_image_reference_findings": "d5ea92af243d87c5f52b4be9f9b1448d7f92dbc70f9e909e0c08c486a590167a",
-      "runtime_image_reference_findings.account": "c5de4b2edbb2889b7ba2165ab12edcc276514a31e898805b99a220ef665425e2",
+      "runtime_image_reference_findings": "d2b7885d5c85236cb389aebf87a71dd7e9f07b64e21737ef75f821ee773584cb",
+      "runtime_image_reference_findings.account": "7d865f6be624426b3bb165d5f9015904eb47db52f9d35894c9eb67ae57d11e5d",
       "runtime_image_reference_reasons": "d6257e372269c4a0b0d0f994dc63dab9dd19628c1d80f0f08c5cfc22fb660fa0",
       "_profile_plan": "f53cfb9815a01ceed12fd48007b24ef041141bc9abf34322a6d8c25e80dc88ac",
       "_run_switch_plan": "f47b603ad0780c160723e72250e87b3001baebb324b13dc9a6740ec074ff873c",
       "_stated": "8940aad2e7963e3364e059cc7bd2f16977accb8175772896cd669201a59c02b2",
       "_approved_images": "cc6fe9d4e74ac91302ee391791b76a1ca6928aafd9e451848fa15d4025417d51",
-      "_run_switch_runtime_image_intent": "a61f991d320dc9354b0b5ab2daa7891340c3cf2a4b46786e6f9369cb6b327d30",
+      "_run_switch_runtime_image_intent": "77cbc5ff80f44353e4d8c5ee3815965d0750577cea59b66d984493641e5449aa",
       "_run_switch_kinds": "b0d724aa893828e9c1fd3c716a56044fe570bd707fb6559663461170da1919d5",
-      "<module>": "7ed3a28a64581ec153a059fe5bbc0ba862461b9ea9afea6065be98d78a9beba0"
+      "<module>": "d905505307ccf9ba355c376c7942de1a71b79e49ba871c56a55fb7ffa084262d"
     },
     "control/src/vonk_control/auth.py": {
       "AuthError": "a98db1c1eacac25aa6c728dacf9b94ba57f01f768a3c31a6cbc54d2ba029fa74",
@@ -1420,7 +1420,7 @@
       "_canonical_content": "5092fda759d143bb3de0f8437e9d0de5a750c1e79235e9b6f2c74ac472465082",
       "cache_removal_review_digest": "44da2e1fe32bb3605d1d02532930099302a68e3e9f6b78d2c1c2a6c09e2372cf",
       "seal_cache_removal_review": "36f195507b15fd2e3b04aa00078a23a7d283a9e39cc5a9ae1711a34d1e46c2f7",
-      "refusing_removal_blockers": "0d9cf376fdc48664f1b56ce13c8c31e0555f9460d0ee555233bf9a551596eb92",
+      "refusing_removal_blockers": "8c737a3970c9bbdae375834cb496ed0d897eba2c6b2241ebef8d3fa1a0895a7a",
       "<module>": "1a244c756213e9123ab41bdc1921e7d158c96edc99b0ad028ad173cd4d42ce81"
     },
     "control/src/vonk_control/catalog_entities.py": {
@@ -2109,13 +2109,13 @@
       "<module>": "55365dd466b4453d24a3f27cd70bd023f7ba30a8a2e539a9dfeb23747452be97"
     },
     "control/src/vonk_control/model_cache/download_admission.py": {
-      "DownloadAdmissionMixin": "42d2f0528aff6ca6602b621873ccb1364280ea01476bf742e5ffa7912fc09f16",
-      "DownloadAdmissionMixin.start_download": "0eed79bd4c8bae7749d6b4f6d893d94f5a46e8e45345a0502a7d655e6945c9b4",
+      "DownloadAdmissionMixin": "d30b9ab8216fc1bfd97d47c6534747cff89b891145bf9d6b0a150030cc406589",
+      "DownloadAdmissionMixin.start_download": "436b31021305ed34a198804a1e49a14d9aaccf2876763091b96bc40d9ce2144d",
       "DownloadAdmissionMixin._download_replay": "cc8abf78d195dd0ffa5fc04dd8401c9a0d269bd0005132d3ec8c5db61b40a906",
       "DownloadAdmissionMixin._resolve_requested_manifest": "aff5e082c0e6038ff133974d1b7a4fa170f4f1381c048d456f539e0a08779808",
       "DownloadAdmissionMixin.download_preview": "227609d9216aa7d8d1aa50d8d51a51e43164a9c4741bcb746d889f43241413ac",
       "DownloadAdmissionMixin._download_preview_for_manifest": "8f33bf91d375f72680b93c3610774005230aa981f94ffda7e0dd2f42c78dc3c9",
-      "<module>": "419d369b3ea2f30c1ab14e4dde7e9cfa67ee37c786916591b69bf78566cce7f8"
+      "<module>": "0ffb7b7e771269e30fe0466e65e7b7e0c9fde1e9197ac2f1b661504ed83484e6"
     },
     "control/src/vonk_control/model_cache/inventory.py": {
       "InventoryMixin": "500ce12d79c5a07fe737e26f6e46c58adc650d0b42e2dbb0d1ffc6f94d18fec4",
