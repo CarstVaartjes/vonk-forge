@@ -39624,7 +39624,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GatewayKeyList"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GatewayKeyList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnknownError"
+                    }
+                  ],
+                  "title": "Response Listgatewaykeys"
                 }
               }
             },
@@ -39706,11 +39714,29 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GatewayKeyCreated"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GatewayKeyCreated"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnknownError"
+                    }
+                  ],
+                  "title": "Response Creategatewaykey"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnknownError"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "401": {
             "content": {
@@ -39751,6 +39777,16 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           },
           "503": {
             "content": {
@@ -39803,7 +39839,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GatewayKeyRevoked"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GatewayKeyRevoked"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnknownError"
+                    }
+                  ],
+                  "title": "Response Revokegatewaykey"
                 }
               }
             },
@@ -39829,16 +39873,6 @@
             },
             "description": "Forbidden"
           },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
           "422": {
             "content": {
               "application/json": {
@@ -39848,6 +39882,16 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           },
           "503": {
             "content": {
@@ -39900,7 +39944,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GatewayKeyCreated"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/GatewayKeyCreated"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnknownError"
+                    }
+                  ],
+                  "title": "Response Rollgatewaykey"
                 }
               }
             },
@@ -39926,16 +39978,6 @@
             },
             "description": "Forbidden"
           },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
           "422": {
             "content": {
               "application/json": {
@@ -39945,6 +39987,16 @@
               }
             },
             "description": "Unprocessable Content"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           },
           "503": {
             "content": {

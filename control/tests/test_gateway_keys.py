@@ -4,8 +4,10 @@ import json
 import stat
 
 import httpx2
+import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from vonk_agent_protocol import ErrorCategory, UnknownError, WaitReason
 from vonk_control.auth import Actor
 from vonk_control.gateway_keys import GatewayKeyService, install_gateway_key_routes
 
@@ -106,7 +108,10 @@ def test_roll_replaces_the_secret_and_keeps_name_and_models():
     assert body["name"] == "ci" and body["models"] == ["qwen"]
     assert body["key"] != first["key"]
     assert [item["name"] for item in client.get("/api/key").json()["keys"]] == ["ci"]
-    assert client.post("/api/key/missing/roll").status_code == 404
+    assert (
+        UnknownError.model_validate(client.post("/api/key/missing/roll").json()).reason
+        is WaitReason.SCOPE_CHANGED
+    )
 
 
 def test_roll_that_fails_to_create_keeps_the_old_key_working():
@@ -115,7 +120,10 @@ def test_roll_that_fails_to_create_keeps_the_old_key_working():
     first = client.post("/api/key", json={"name": "ci", "models": ["qwen"]}).json()
     litellm.fail_generate_after = litellm.counter
 
-    assert client.post("/api/key/ci/roll").status_code == 503
+    assert (
+        UnknownError.model_validate(client.post("/api/key/ci/roll").json()).reason
+        is WaitReason.OBSERVATION_UNAVAILABLE
+    )
 
     assert list(litellm.keys) == ["ci"]
     assert litellm.keys["ci"]["key"] == first["key"]
@@ -150,7 +158,10 @@ def test_create_list_and_revoke_client_keys():
 
     assert client.post("/api/key/ci/revoke").json() == {"name": "ci"}
     assert set(litellm.keys) == {"laptop"}
-    assert client.post("/api/key/ci/revoke").status_code == 404
+    assert (
+        UnknownError.model_validate(client.post("/api/key/ci/revoke").json()).reason
+        is WaitReason.SCOPE_CHANGED
+    )
 
 
 def test_only_administrators_create_or_revoke_keys():
@@ -161,7 +172,7 @@ def test_only_administrators_create_or_revoke_keys():
     assert client.get("/api/key").status_code == 200
 
 
-def test_unreachable_litellm_is_a_bounded_503():
+def test_unreachable_litellm_returns_bounded_typed_observation():
     def refuse(request: httpx2.Request) -> httpx2.Response:
         raise httpx2.ConnectError("refused", request=request)
 
@@ -171,7 +182,10 @@ def test_unreachable_litellm_is_a_bounded_503():
         transport=httpx2.MockTransport(refuse),
     )
     response = _client(service).get("/api/key")
-    assert response.status_code == 503
+    assert response.status_code == 200
+    assert (
+        UnknownError.model_validate(response.json()).category is ErrorCategory.UNKNOWN
+    )
     assert MASTER not in response.text
 
 
@@ -228,3 +242,94 @@ def test_the_default_key_is_asked_for_again_until_the_gateway_answers() -> None:
 
     asyncio.run(run())
     assert service.attempts == 3
+
+
+@pytest.mark.parametrize("failure", ["lost", "invalid", "http-error"])
+def test_lost_create_reply_reconciles_exact_secret_without_replaying_effect(failure):
+    """Catches abandoning an executed create or generating a second secret on retry."""
+    litellm = FakeLiteLlm()
+    calls = []
+
+    def lost_reply(request):
+        response = litellm.handle(request)
+        if request.url.path == "/key/generate":
+            calls.append(request)
+            if failure == "lost":
+                raise httpx2.ReadError("reply lost", request=request)
+            return httpx2.Response(500 if failure == "http-error" else 200, json={})
+        return response
+
+    service = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(lost_reply)
+    )
+    from vonk_control.gateway_keys import GatewayKeyCreated
+
+    created = service.create("first")
+    assert isinstance(created, GatewayKeyCreated)
+    assert created.key == litellm.keys["first"]["key"]
+    assert len(calls) == 1
+    assert not isinstance(service.list_keys(), UnknownError)
+
+
+def test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted():
+    """Catches returning 503 or keeping a busy alias after a failed create attempt."""
+    from dataclasses import replace
+
+    from vonk_agent_protocol import AgentOperation, LifecycleState
+    from vonk_control.gateway_keys import GatewayKeyCreated
+    from vonk_control.lifecycle.types import Lifecycle
+
+    from .non_blocking import assert_ended_without_blocking
+
+    litellm = FakeLiteLlm()
+    litellm.fail_generate_after = 0
+    service = _service(litellm)
+    observed = []
+
+    def end(operation):
+        result = service.create("first")
+        assert isinstance(result, UnknownError)
+        observed.append(result)
+        litellm.fail_generate_after = None
+        return replace(operation, state=LifecycleState.FAILED)
+
+    def fresh(_world):
+        created = service.create("first")
+        assert isinstance(created, GatewayKeyCreated)
+        assert created.key == litellm.keys["first"]["key"]
+        return Lifecycle(
+            id="fresh", kind=AgentOperation.RECIPE_START, state=LifecycleState.SUCCEEDED
+        )
+
+    def assert_released():
+        assert not isinstance(service.list_keys(), UnknownError)
+
+    def assert_reason(_operation):
+        assert observed[0].reason is WaitReason.OBSERVATION_UNAVAILABLE
+
+    assert_ended_without_blocking(
+        service,
+        Lifecycle(id="first", kind=AgentOperation.RECIPE_START),
+        end=end,
+        fresh=fresh,
+        request_key=lambda operation: operation.id,
+        assert_released=assert_released,
+        assert_reason=assert_reason,
+    )
+
+
+def test_gateway_denial_is_not_softened_to_bookkeeping_unknown():
+    """Catches adopting a credential refusal into the normal uncertainty result."""
+    denied = [True]
+    litellm = FakeLiteLlm()
+
+    def handle(request):
+        return httpx2.Response(403) if denied[0] else litellm.handle(request)
+
+    service = GatewayKeyService(
+        master_key=lambda: MASTER, transport=httpx2.MockTransport(handle)
+    )
+    client = _client(service)
+    assert client.get("/api/key").status_code == 403
+    denied[0] = False
+    assert client.get("/api/key").json() == {"keys": []}
