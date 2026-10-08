@@ -301,20 +301,13 @@ fn stop_managed(
         return Err("invalid container id".into());
     }
     let output = docker(runner, &["inspect", "--format", IDENTITY_FORMAT, id])?;
-    let pid = managed_identity(&String::from_utf8_lossy(&output), id)
+    managed_identity(&String::from_utf8_lossy(&output), id)
         .ok_or("not a managed running container")?;
     // The typed event is already captured in the pending command. Emergency
-    // SIGKILL must precede filesystem sync/logging: pressure can stall those
+    // KILL precedes filesystem sync/logging: pressure can stall those
     // bookkeeping paths, and preserving host responsiveness takes priority.
-    // Verify the process belongs to the exact Docker cgroup before signalling
-    // its own group. Never signal a shared host group. Docker KILL also reaches
-    // container init when it is not its group's leader.
-    if fs::read_to_string(format!("/proc/{pid}/cgroup")).is_ok_and(|cgroup| cgroup.contains(id))
-        && let Some(pid) = rustix::process::Pid::from_raw(pid)
-        && rustix::process::getpgid(Some(pid)).ok() == Some(pid)
-    {
-        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
-    }
+    // Signalling goes through the existing Docker kill/stop actions, so the
+    // helper needs no CAP_KILL beyond its declared capability boundary.
     let killed = docker(runner, &["kill", "--signal", "KILL", id]);
     let stopped = docker(runner, &["stop", "--time", "0", id]);
     if let Err(error) = publish(root, id, value) {
