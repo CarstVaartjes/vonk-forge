@@ -180,11 +180,24 @@ def run_in_control(root: Path) -> None:
         environment = root / environment
     ensure_control(root, environment)
     if Path(sys.prefix).resolve() != environment.resolve():
-        os.execv(
+        # Like ``uv run``: the environment's console scripts (code generators)
+        # resolve before any system copy.
+        binaries = str(environment / "bin")
+        os.execve(
             str(environment / "bin/python"),
             [
                 str(environment / "bin/python"),
                 str(Path(sys.argv[0]).resolve()),
                 *sys.argv[1:],
             ],
+            {
+                **os.environ,
+                "VIRTUAL_ENV": str(environment),
+                "PATH": os.pathsep.join(
+                    [
+                        binaries,
+                        *filter(None, os.environ.get("PATH", "").split(os.pathsep)),
+                    ]
+                ),
+            },
         )
