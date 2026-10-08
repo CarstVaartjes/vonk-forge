@@ -756,8 +756,7 @@ class StepCertificateAuthority(CertificateAuthority):
                         raise StepCAError("CA authorization denied")
                     if response.status_code >= 500:
                         raise StepCAUnavailable("step-ca provider is unavailable")
-                    if sign_refusal:
-                        raise StepCAError("CA returned an invalid refusal response")
+                    # An unreadable reply is an unknown outcome, never a refusal.
                     raise StepCAUnavailable(
                         f"step-ca request failed with status {response.status_code}"
                     )

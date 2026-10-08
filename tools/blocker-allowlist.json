@@ -5999,7 +5999,7 @@
       "StepCAUnavailable": "0ad2240459ea89e627d5804e38889d47573363c7adde0642673e85e61fbc53ea",
       "StepCAUnavailable.__init__": "d543d26ba24cbba016ec0e3a3e2d435c42e7d06e17d2c5e7c73d28d5b401570d",
       "StepCAIssuancePending": "d0c0012a3e4e6003b91dc1748660925c7e85a95008c0a3d73ee092e607bc64c9",
-      "StepCertificateAuthority": "d474974189a73ffc0ce884ba085a9c3e64e8ba58668ada9fa76a6b3f19dfa1c6",
+      "StepCertificateAuthority": "ef99ad25b7c82686db5839bbd926ae75574038673ef5ce9c68f64bbf8399f4c4",
       "StepCertificateAuthority.__init__": "6a29380afd6baf7c560fbeab0230f54b9fe0dcbdf349e855fb519613d176ca10",
       "StepCertificateAuthority.prepare_request": "41e6b112978621aa5d9ad66ec8887bc7441e0a7ac90b583465e623c3d36c8c5c",
       "StepCertificateAuthority.issue_node": "ceedfb0601a723b607a4733724b6cf0a11b946f0af6b946ce638e76a655d8cf3",
@@ -6014,7 +6014,7 @@
       "StepCertificateAuthority._token": "ab8926f9d3d1327ceb494231514f93a418e8afbbd9edfde4cb9448fcc85ac6cb",
       "StepCertificateAuthority._json_request": "c75ec7a28c1c502cd86b512308e96671190922b03dd1eeb61dbf0738c29b3285",
       "StepCertificateAuthority._validate_sign_response_capacity": "8f1d0fdb6db6ac30615c6af42e167393f0be72ecbf6149f318820eae6d29f699",
-      "StepCertificateAuthority._request": "6590b130f5315a8949aab143fcc53c8c96b003327368b98696cee12edb7c75d1",
+      "StepCertificateAuthority._request": "9a4b952f49bfc15278450a2bb5dc14d40b39c9a9a2810372ac062450a0103714",
       "_signature_verifying_key": "ab4d2636b62a3dc6b59f6f0923ff9b23e1cd93f6762b4c286b2e971be0c64172",
       "_one_certificate": "5faa26381884724f154c00b066b2993580230a18910fba89190fc5d35118e634",
       "_verify_ca_chain": "02b432c891c3daf9a23794deeb4db4ca3fbe6db10cfa280742280ee4bd9ec7a4",
@@ -6022,7 +6022,7 @@
       "_is_ok": "be409a4b8538033101a130135a6f52fa1eba5f4ba1575d0a3ee5217c9f596525",
       "_jwk_thumbprint": "980236714b705f091bb0749383d1be714be4e2773b638bd89d141341d6555811",
       "_validate_crl_freshness": "323f4d3c0b294161d33c92d56e4170ddeb967606d34b0ed968ada330426c927e",
-      "<module>": "b45f8f92689c1ec79948d6b4648cfa376591749cf7e156c3fb5a93611a887be1"
+      "<module>": "4dd90691d3191b2cadab36d6a962e52b32c32d97dc8c41be3bd615cc6a8b34de"
     },
     "control/src/vonk_control/strict_json.py": {
       "_serialized_field_name": "151bb9bbaf2c39c68e75ee889a325d0fdca084f5e1bc21e865d8e49cf08cfe71",
@@ -9355,7 +9355,6 @@
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class StepCAError guards a security boundary.",
       "sites": [
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "ca-refused-exact-certificate-request", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "ca-returned-an-invalid-refusal-response", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-redirects-are-forbidden", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-response-is-too-large", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "ca-certificate-differs-from-the-accepted-exact-effect", 1],
