@@ -2666,6 +2666,8 @@ impl ::std::convert::TryFrom<::std::string::String>
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum FailureCode {
+    #[serde(rename = "workload.host_memory_exhausted")]
+    WorkloadHostMemoryExhausted,
     #[serde(rename = "operation_failed")]
     OperationFailed,
     #[serde(rename = "operation_cancelled")]
@@ -2698,6 +2700,7 @@ pub enum FailureCode {
 impl ::std::fmt::Display for FailureCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
+            Self::WorkloadHostMemoryExhausted => f.write_str("workload.host_memory_exhausted"),
             Self::OperationFailed => f.write_str("operation_failed"),
             Self::OperationCancelled => f.write_str("operation_cancelled"),
             Self::AgentUpgradeFailed => f.write_str("agent_upgrade_failed"),
@@ -2721,6 +2724,7 @@ impl ::std::str::FromStr for FailureCode {
     type Err = self::error::ConversionError;
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
+            "workload.host_memory_exhausted" => Ok(Self::WorkloadHostMemoryExhausted),
             "operation_failed" => Ok(Self::OperationFailed),
             "operation_cancelled" => Ok(Self::OperationCancelled),
             "agent_upgrade_failed" => Ok(Self::AgentUpgradeFailed),
@@ -8747,6 +8751,8 @@ pub struct RecipeRunObservationDirectoryStamp {
 pub struct RecipeRunObservationWire {
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub endpoint_ready: ::std::option::Option<bool>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub failure_diagnostics: ::std::option::Option<FailureDiagnostics>,
     pub process_running: bool,
     pub run_generation: u64,
     pub run_id: ::uuid::Uuid,
@@ -8834,6 +8840,8 @@ impl ::std::convert::TryFrom<::std::string::String> for RecipeStartPayloadPhase 
 pub struct RecipeStartResult {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub endpoint: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub preload_diagnostics: ::std::option::Option<FailureDiagnostics>,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -17436,6 +17444,7 @@ impl ::std::cmp::PartialEq<&str> for ExecuteContainerRuntimeRequestOperationActi
 impl FailureCode {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::WorkloadHostMemoryExhausted => "workload.host_memory_exhausted",
             Self::OperationFailed => "operation_failed",
             Self::OperationCancelled => "operation_cancelled",
             Self::AgentUpgradeFailed => "agent_upgrade_failed",
@@ -17487,6 +17496,8 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
             PartialOrd,
         )]
         enum Raw {
+            #[serde(rename = "workload.host_memory_exhausted")]
+            WorkloadHostMemoryExhausted,
             #[serde(rename = "operation_failed")]
             OperationFailed,
             #[serde(rename = "operation_cancelled")]
@@ -17519,6 +17530,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
+            Raw::WorkloadHostMemoryExhausted => Self::WorkloadHostMemoryExhausted,
             Raw::OperationFailed => Self::OperationFailed,
             Raw::OperationCancelled => Self::OperationCancelled,
             Raw::AgentUpgradeFailed => Self::AgentUpgradeFailed,
@@ -25070,6 +25082,8 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
         struct Raw {
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub endpoint_ready: ::std::option::Option<bool>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub failure_diagnostics: ::std::option::Option<FailureDiagnostics>,
             pub process_running: bool,
             pub run_generation: u64,
             pub run_id: ::uuid::Uuid,
@@ -25078,6 +25092,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeRunObservationWire {
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             endpoint_ready: raw.endpoint_ready,
+            failure_diagnostics: raw.failure_diagnostics,
             process_running: raw.process_running,
             run_generation: raw.run_generation,
             run_id: raw.run_id,
@@ -25178,11 +25193,14 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartResult {
         struct Raw {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub endpoint: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub preload_diagnostics: ::std::option::Option<FailureDiagnostics>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             endpoint: raw.endpoint,
+            preload_diagnostics: raw.preload_diagnostics,
         })
     }
 }

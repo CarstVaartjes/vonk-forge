@@ -1237,6 +1237,22 @@
       "count": 1,
       "reason": "resource-bound",
       "justification": "The actual separate writer owns a cloned fixture path and reports its result over recv_timeout using one unchanged absolute 30-second budget. Its exact JoinHandle is joined only after that same handle is_finished; deadline/error paths retain the fixture rather than removing files under an unresolved writer. The isolated parent has the same total elapsed budget, reserves its last second for exact-child kill/try_wait reaping, and reports an unreaped child as failure. No scoped-thread implicit join or unconditional child wait remains; all unsafe-intermediate and atomic publication assertions remain."
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/host_memory_guard.rs",
+      "function": "kernel_events",
+      "kind": "rust-loop-without-deadline",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "Process-lifetime supervisor of the one `journalctl -k -f` follower that feeds the host memory guard; the guard itself never waits on it, it only try_sends into a capacity-1 channel. Each iteration spawns or reaps exactly one child: a previous follower is killed and reaped under a 1-second wait_timeout, a failed spawn or EOF sleeps 2 seconds before retry, and each journal line is read through take(4096) so no record grows unboundedly. The loop ends only when the helper process exits, by design, because losing the kernel signal would silently disable the guard."
+    },
+    {
+      "path": "rust/crates/vonk-agent-helper/src/host_memory_guard.rs",
+      "function": "spawn",
+      "kind": "rust-loop-without-deadline",
+      "count": 2,
+      "reason": "resource-bound",
+      "justification": "Two process-lifetime guard threads, each a fixed-cadence sampler rather than an external wait: every iteration performs one bounded step (a /proc read, or a docker inventory/stop through the helper's timeout-bounded CommandRunner), receives with recv_timeout of one sample interval, and sleeps SAMPLE_INTERVAL (250 ms) so there is no hot retry. Pending stops are a BTreeMap bounded by the managed-container inventory and are dropped when a successful enumeration shows the container gone. The loops end only with the helper process, by design: a guard that exits would silently disable host protection."
     }
   ]
 }

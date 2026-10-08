@@ -2621,6 +2621,7 @@
     "FailureCode": {
       "description": "Closed codes of a definite failed outcome reported by the agent.",
       "enum": [
+        "workload.host_memory_exhausted",
         "operation_failed",
         "operation_cancelled",
         "agent_upgrade_failed",
@@ -8450,6 +8451,17 @@
           ],
           "title": "Endpoint Ready"
         },
+        "failure_diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "process_running": {
           "title": "Process Running",
           "type": "boolean"
@@ -8596,6 +8608,17 @@
           ],
           "default": null,
           "title": "Endpoint"
+        },
+        "preload_diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailureDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "RecipeStartResult",

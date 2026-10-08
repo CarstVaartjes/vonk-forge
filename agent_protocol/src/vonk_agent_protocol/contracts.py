@@ -186,6 +186,7 @@ class RecipeStartResult(WireModel):
     """The serving rank reports its endpoint; every other rank reports ``{}``."""
 
     endpoint: str | None = None
+    preload_diagnostics: FailureDiagnostics | None = None
 
 
 class ArtifactDistributionResult(WireModel):

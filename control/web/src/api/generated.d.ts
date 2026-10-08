@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 504d9c6b820e2c8c4f818ea5c173ee6ddac886f22ad310947221ca5d582d8e1e. Do not edit.
+// Generated from canonical OpenAPI SHA256 ae0c28f8b048466e928651887f95edd926600344fc565aa100db154de79c8cba. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -3379,7 +3379,7 @@ export interface components {
          * @description Closed codes of a definite failed outcome reported by the agent.
          * @enum {string}
          */
-        FailureCode: "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "recipe_reconciliation_dependency_unavailable" | "retained_container_foreign";
+        FailureCode: "workload.host_memory_exhausted" | "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "recipe_reconciliation_dependency_unavailable" | "retained_container_foreign";
         /** FailureDiagnostics */
         FailureDiagnostics: {
             /**
@@ -9690,6 +9690,7 @@ export interface components {
         RecipeStartResult: {
             /** Endpoint */
             endpoint?: string | null;
+            preload_diagnostics?: components["schemas"]["FailureDiagnostics"] | null;
         };
         /** RecipeStopParent */
         RecipeStopParent: {
@@ -10308,6 +10309,7 @@ export interface components {
              * @constant
              */
             entity_kind: "run-node";
+            failure_diagnostics?: components["schemas"]["FailureDiagnostics"] | null;
             /** Node Id */
             node_id: string;
             /** Observed Memory Bytes */

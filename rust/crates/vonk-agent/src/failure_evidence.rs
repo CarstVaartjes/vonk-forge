@@ -547,11 +547,9 @@ pub fn from_failure(operation: &AgentOperation, failure: &Failure) -> FailureDia
             value.preflight.push(property);
         }
     }
-    if failure
-        .diagnostic
-        .as_deref()
-        .is_some_and(|text| text.contains("exit_cause=oom_killed"))
-    {
+    if failure.diagnostic.as_deref().is_some_and(|text| {
+        text.contains("exit_cause=oom_killed") || text.contains("exit_cause=host_memory_exhausted")
+    }) {
         value.category = FailureCategory::Capacity;
     }
     value
@@ -572,10 +570,27 @@ fn exit_properties(failure: &Failure) -> Vec<FailureProperty> {
     if let Some(text) = failure.diagnostic.as_deref() {
         for token in text.split_whitespace() {
             if let Some((key, value)) = token.split_once('=')
-                && matches!(key, "exit_code" | "exit_cause" | "oom_killed")
-                && value
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                && matches!(
+                    key,
+                    "exit_code"
+                        | "exit_cause"
+                        | "oom_killed"
+                        | "reason"
+                        | "trigger"
+                        | "mem_available_bytes"
+                        | "memory_full_avg10"
+                        | "sustained_ms"
+                        | "observed_at"
+                        | "pressure_started_at"
+                )
+                && value.chars().all(|c| {
+                    c.is_ascii_alphanumeric()
+                        || c == '_'
+                        || c == '-'
+                        || c == '.'
+                        || c == ':'
+                        || c == '+'
+                })
             {
                 push(key, value.to_owned());
             }

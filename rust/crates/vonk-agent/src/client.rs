@@ -4734,6 +4734,7 @@ mod tests {
             run_generation: i64::MAX as u64,
             process_running: false,
             endpoint_ready: None,
+            failure_diagnostics: None,
         }];
         let (client, server) = observation_client(204).await;
         client

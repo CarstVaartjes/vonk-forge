@@ -260,6 +260,7 @@ fn run() -> Result<(), String> {
     .with_runtime_request_owner(agent_uid);
     executor.prepare_package_custody().map_err(display)?;
     let executor = Arc::new(executor);
+    vonk_agent_helper::host_memory_guard::spawn(Path::new(DATA_ROOT).to_path_buf());
 
     let mut sockets = sd_listen_fds::get().map_err(display)?;
     if sockets.len() != 1 {
@@ -388,7 +389,7 @@ fn handle(
             HelperResponse {
                 // Why a requested tail is missing; never an empty tail that
                 // reads like a workload with nothing to say.
-                diagnostic: inspected.log_error.map(str::to_owned),
+                diagnostic: inspected.log_error,
                 process_logs: inspected.logs.map(|logs| *logs),
                 schema_version: 1,
                 request_id: Some(inspection.request_id),

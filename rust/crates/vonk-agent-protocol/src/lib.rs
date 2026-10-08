@@ -39,6 +39,7 @@ pub use operation_progress::{
 };
 
 pub mod failure_evidence;
+pub mod host_memory_guard_policy;
 
 pub mod passthrough;
 pub use passthrough::{revalidate, validate_generated};

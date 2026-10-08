@@ -2399,11 +2399,35 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
             json={"observed_at": observed_at.isoformat(), "runs": list(runs)},
         )
 
+    from vonk_agent_protocol.failure_evidence import (
+        FailureDiagnostics,
+        FailureLogTail,
+        FailureProperty,
+    )
+
+    empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
+    diagnostics = FailureDiagnostics(
+        collected_at=clock.now.isoformat(),
+        phase="workload.host_memory_guard",
+        category="capacity",
+        stdout=empty,
+        stderr=empty,
+        versions=[],
+        sandbox=[],
+        storage=[],
+        collector_errors=[],
+        preflight=[
+            FailureProperty(name="reason", value="workload.host_memory_exhausted"),
+            FailureProperty(name="exit_cause", value="host_memory_exhausted"),
+            FailureProperty(name="mem_available_bytes", value="1"),
+        ],
+    )
     run: dict[str, object] = {
         "run_id": run_id,
         "run_generation": 2,
         "process_running": False,
         "endpoint_ready": None,
+        "failure_diagnostics": diagnostics.model_dump(mode="json", exclude_none=True),
     }
     stale_generation = report(run | {"run_generation": 1})
     assert stale_generation.status_code == 422
@@ -2425,6 +2449,23 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         assert node.observed_run_generation == 2
         assert node.observation_process_running is False
         assert node.observation_observed_at is not None
+        # Wrong implementation: background inspection drops the safety cause,
+        # leaving a hardware OOM indistinguishable from an ordinary exit.
+        restored = FailureDiagnostics.model_validate_json(
+            json.dumps(node.observation_failure_diagnostics)
+        )
+        assert restored == diagnostics
+
+    # New live evidence clears the old failure; it cannot poison a recovered run.
+    assert (
+        report(run | {"process_running": True, "failure_diagnostics": None}).status_code
+        == 204
+    )
+    with services.sessions() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert node is not None
+        assert node.state == "running"
+        assert node.observation_failure_diagnostics is None
 
 
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
