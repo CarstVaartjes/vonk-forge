@@ -87,13 +87,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<(), OperationError> {
         self.runtime_reconcile_installation_inner(identity)
             .map_err(|error| match error {
-                OperationError::Io(error) if retryable_reconciliation_storage_io(&error) => {
+                OperationError::Io(_) => {
                     OperationError::InstallationReconciliationStorageUnavailable
                 }
-                // Permission failures, missing identity and other unexpected
-                // I/O refusals stay terminal rather than masquerading as a
-                // wait that could become successful after retry.
-                OperationError::Io(_) => OperationError::UnsafePath,
                 error => error,
             })
     }
@@ -116,57 +112,43 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Some(rustix::process::geteuid().as_raw()),
         )?;
         self.require_no_unclassified_installation_runtime(&installation_id)?;
-        if let Some(receipt) = existing {
-            if receipt.schema_version != INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION
-                || receipt.identity != *identity
-            {
-                return Err(OperationError::InvalidArtifact);
-            }
-            let installation = self
-                .roots
-                .agent_data
-                .join("installations")
-                .join(&installation_id);
-            match self.validate_reconciliation_installation_metadata(identity) {
-                Ok((device, inode))
-                    if (device, inode)
-                        == (receipt.installation_device, receipt.installation_inode) =>
-                {
-                    match fs::symlink_metadata(installation.join("runtime-cache")) {
-                        Ok(_) => return Err(OperationError::InvalidArtifact),
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(error) => return Err(OperationError::Io(error)),
-                    }
-                }
-                Err(OperationError::UnsafePath)
-                    if matches!(
-                        fs::symlink_metadata(&installation),
-                        Err(ref error) if error.kind() == std::io::ErrorKind::NotFound
-                    ) => {}
-                _ => return Err(OperationError::InvalidArtifact),
-            }
-        } else {
-            let (installation_device, installation_inode) =
-                self.validate_reconciliation_installation_metadata(identity)?;
-            // The helper owns the root-only runtime-cache ACL. Clear only this
-            // private installation cache under the same start/reconcile fence,
-            // before publishing the durable runtime tombstone. Shared model
-            // cache data lives outside `installations` and is preserved.
-            self.runtime_installation_cleanup_bound(
-                &installation_id,
-                Some((installation_device, installation_inode)),
-            )?;
-            write_helper_reconciliation_receipt(
-                &root,
-                &receipt_path,
-                &InstallationReconciliationReceipt {
-                    schema_version: INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION,
-                    identity: identity.clone(),
-                    installation_device,
-                    installation_inode,
-                },
-            )?;
+        let installation = self
+            .roots
+            .agent_data
+            .join("installations")
+            .join(&installation_id);
+        if matches!(fs::symlink_metadata(&installation),
+            Err(ref error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            // Absence is complete even when a previous receipt was lost.
+            return Ok(());
         }
+        let (installation_device, installation_inode) =
+            self.validate_reconciliation_installation_metadata(identity)?;
+        if let Some(receipt) = existing
+            && receipt.identity == *identity
+            && (receipt.installation_device, receipt.installation_inode)
+                != (installation_device, installation_inode)
+            && fs::symlink_metadata(installation.join("runtime-cache")).is_ok()
+        {
+            // Do not delete an unproven replacement under an older receipt.
+            // This attempt ends unknown; the receipt is never a START gate.
+            return Err(OperationError::InstallationReconciliationStorageUnavailable);
+        }
+        self.runtime_installation_cleanup_bound(
+            &installation_id,
+            Some((installation_device, installation_inode)),
+        )?;
+        write_helper_reconciliation_receipt(
+            &root,
+            &receipt_path,
+            &InstallationReconciliationReceipt {
+                schema_version: INSTALLATION_RECONCILIATION_RECEIPT_SCHEMA_VERSION,
+                identity: identity.clone(),
+                installation_device,
+                installation_inode,
+            },
+        )?;
         Ok(())
     }
 }
@@ -262,13 +244,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         installation_id: &str,
     ) -> Result<(), OperationError> {
+        // Cleanup history is disposable, not standing authority over a later
+        // signed START. Generation fencing and current launch validation own
+        // stale-effect rejection. Retire the old checkpoint without gating it.
         let root = self.installation_reconciliation_root()?;
         let path = root.join(format!("{installation_id}.json"));
-        if read_helper_reconciliation_receipt(&path, Some(rustix::process::geteuid().as_raw()))?
-            .is_some()
-        {
-            return Err(OperationError::InvalidArtifact);
-        }
+        let _ = fs::remove_file(path);
         Ok(())
     }
 }
@@ -287,10 +268,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "{{.ID}}\t{{.State}}\t{{.Names}}\t{{.Label \"ai.vonkforge.managed\"}}\t{{.Label \"ai.vonkforge.installation-id\"}}".to_owned(),
         ])?;
         if !output.success || output.stdout.len() as u64 > MAX_COMMAND_OUTPUT_BYTES {
-            return Err(OperationError::CommandFailed);
+            return Err(OperationError::InstallationReconciliationStorageUnavailable);
         }
-        let rows =
-            std::str::from_utf8(&output.stdout).map_err(|_| OperationError::InvalidArtifact)?;
+        let rows = std::str::from_utf8(&output.stdout)
+            .map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)?;
         for row in rows.lines().filter(|row| !row.trim().is_empty()) {
             let fields = row.split('\t').collect::<Vec<_>>();
             if fields.len() != 5
@@ -306,7 +287,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         | "removing"
                 )
             {
-                return Err(OperationError::InvalidArtifact);
+                return Err(OperationError::InstallationReconciliationStorageUnavailable);
             }
             let is_vonk_named = fields[2].split(',').any(|name| name.starts_with("vonk-"));
             let managed = fields[3] == "true";
@@ -315,7 +296,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 // losing the labels that bind it to an installation. Do not
                 // infer that it is unrelated just because the target label is
                 // missing.
-                return Err(OperationError::InvalidArtifact);
+                return Err(OperationError::InstallationReconciliationStorageUnavailable);
             }
             if !managed {
                 continue;
@@ -335,16 +316,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     .map(str::trim)
                     .find(|name| name.strip_prefix("vonk-").is_some());
                 let Some(run_name) = run_name else {
-                    return Err(OperationError::InvalidArtifact);
+                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
                 };
                 let Some(run_id) = run_name.strip_prefix("vonk-") else {
-                    return Err(OperationError::InvalidArtifact);
+                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
                 };
                 let Ok(parsed_run_id) = uuid::Uuid::parse_str(run_id) else {
-                    return Err(OperationError::InvalidArtifact);
+                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
                 };
                 if parsed_run_id.to_string() != run_id || !matches!(fields[1], "exited" | "dead") {
-                    return Err(OperationError::InvalidArtifact);
+                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
                 }
                 let removed = self.run_docker(&[
                     "container".to_owned(),
@@ -352,15 +333,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     fields[0].to_owned(),
                 ])?;
                 if !removed.success || removed.exit_code != Some(0) {
-                    return Err(OperationError::CommandFailed);
+                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
                 }
                 continue;
             };
             if found_installation != fields[4] {
-                return Err(OperationError::InvalidArtifact);
+                return Err(OperationError::InstallationReconciliationStorageUnavailable);
             }
             if found_installation == installation_id {
-                return Err(OperationError::InvalidArtifact);
+                return Err(OperationError::InstallationReconciliationBusy);
             }
         }
         Ok(())

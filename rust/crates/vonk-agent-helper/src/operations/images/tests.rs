@@ -166,56 +166,81 @@ fn runtime_consumes_post_image_entrypoint_marker_before_docker() {
 }
 
 #[test]
-fn an_image_the_previous_agent_loaded_keeps_its_installation_startable() {
-    // Wrong implementation: after the layered image store landed, the
-    // schema-2 receipt of an image loaded from an archive was refused,
-    // so an installation the previous agent started could not be
-    // restarted or recovered without a reinstall.
+fn damaged_receipts_rebuild_from_digest_qualified_docker_content() {
+    // Wrong implementation: a disposable receipt refused a verified live image.
+    for damaged in [None, Some(b"broken".to_vec()), Some(vec![b'x'; 4096])] {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        let manifest = "a".repeat(64);
+        let config = "c".repeat(64);
+        let reference = format!("localhost/vonk/compiled-runtime-{manifest}@sha256:{manifest}");
+        let runner = PullRunner::default();
+        runner
+            .images
+            .lock()
+            .unwrap()
+            .insert(reference.clone(), format!("sha256:{config}"));
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+        ensure_private_directory(&roots.runtime_image_receipts, None).unwrap();
+        if let Some(bytes) = damaged {
+            fs::write(roots.runtime_image_receipts.join(&manifest), bytes).unwrap();
+        }
+        let arguments = vec![
+            manifest.clone(),
+            format!("sha256:{manifest}"),
+            format!("sha256:{manifest}"),
+            reference,
+            "10001:10001".to_owned(),
+        ];
+        executor.runtime_image_inspect(&arguments).unwrap();
+        executor.runtime_image_inspect(&arguments).unwrap();
+        let receipt: RuntimeImageReceipt =
+            parse_strict(&fs::read(roots.runtime_image_receipts.join(&manifest)).unwrap()).unwrap();
+        assert_eq!(receipt.image_config_id, format!("sha256:{config}"));
+        assert!(
+            !runner
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|call| call[0] == "pull")
+        );
+    }
+}
+
+#[test]
+fn tag_only_content_is_a_miss_then_exact_signed_pull_repairs_it() {
+    // Wrong implementation: labels on an arbitrary tag blessed it as the manifest.
     let temp = tempfile::tempdir().unwrap();
     let roots = ManagedRoots::under(temp.path());
-    fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
-    let executor =
-        OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
-    let archive = "a".repeat(64);
-    let index = format!("sha256:{}", "b".repeat(64));
-    let platform = format!("sha256:{}", "c".repeat(64));
-    let config = format!("sha256:{}", "d".repeat(64));
-    let local = format!("localhost/vonk/compiled-runtime-{archive}@{platform}");
-    fs::write(
-        roots.runtime_image_receipts.join(&archive),
-        serde_json::to_vec(&serde_json::json!({
-            "archive_bytes": 4096,
-            "archive_config_id": config,
-            "archive_identity": {
-                "bytes": 4096, "changed_nanoseconds": 0, "changed_seconds": 1,
-                "device": 2, "inode": 3, "modified_nanoseconds": 0,
-                "modified_seconds": 1,
-            },
-            "archive_sha256": archive,
-            "image_config_id": config,
-            "local_image_reference": local,
-            "platform_manifest_digest": platform,
-            "registry_index_digest": index,
-            "schema_version": 2,
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
+    let manifest = "a".repeat(64);
+    let config = "c".repeat(64);
+    let local = format!("localhost/vonk/compiled-runtime-{manifest}");
+    let reference = format!("{local}@sha256:{manifest}");
+    let runner = PullRunner {
+        pulled_config: format!("sha256:{config}"),
+        ..PullRunner::default()
+    };
+    runner
+        .images
+        .lock()
+        .unwrap()
+        .insert(local, format!("sha256:{}", "d".repeat(64)));
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+    let arguments = vec![
+        manifest.clone(),
+        format!("sha256:{manifest}"),
+        format!("sha256:{manifest}"),
+        reference,
+        "10001:10001".to_owned(),
+    ];
+    assert!(executor.runtime_image_inspect(&arguments).is_err());
+    assert!(!roots.runtime_image_receipts.join(&manifest).exists());
     executor
-        .require_image_receipt(&archive, &index, &platform, &local, &config)
+        .runtime_image_pull(&pull_arguments(&manifest, &config))
         .unwrap();
-    let other = format!("sha256:{}", "e".repeat(64));
-    assert!(
-        executor
-            .require_image_receipt(&archive, &index, &platform, &local, &other)
-            .is_err()
-    );
-    assert!(
-        executor
-            .require_image_receipt(&archive, &other, &platform, &local, &config)
-            .is_err()
-    );
+    executor.runtime_image_inspect(&arguments).unwrap();
 }
 
 #[test]

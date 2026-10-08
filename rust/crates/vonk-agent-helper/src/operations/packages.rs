@@ -6,7 +6,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     pub fn prepare_package_custody(&self) -> Result<(), OperationError> {
         let _install_guard = self
             .package_install
-            .lock()
+            .try_lock()
             .map_err(|_| OperationError::CommandFailed)?;
         if !self.roots.package_custody.is_absolute() {
             return Err(OperationError::UnsafePath);
@@ -23,35 +23,44 @@ impl<R: CommandRunner> OperationExecutor<R> {
             fs::read_dir(&self.roots.package_custody)?.collect::<Result<Vec<_>, _>>()?;
         invocations.sort_by_key(fs::DirEntry::file_name);
         for invocation in invocations {
-            let name = invocation.file_name();
-            let name = name.to_str().ok_or(OperationError::UnsafePath)?;
-            if !lower_hex(name, 32) {
-                return Err(OperationError::UnsafePath);
+            // An unproven entry remains inert. It must not veto cleanup of an
+            // independent entry or admission into a fresh private namespace.
+            if let Err(error) = self.clean_package_candidate(&invocation) {
+                eprintln!("package custody entry observation unavailable: {error}");
             }
-            let directory = invocation.path();
-            require_exact_directory(&directory, self.required_owner_uid, 0o700)?;
-            let mut candidates = fs::read_dir(&directory)?.collect::<Result<Vec<_>, _>>()?;
-            if candidates.len() > 1 {
-                return Err(OperationError::UnsafePath);
-            }
-            if let Some(candidate) = candidates.pop() {
-                let candidate_name = candidate.file_name();
-                let candidate_name = candidate_name
-                    .to_str()
-                    .and_then(|value| value.strip_suffix(".deb"))
-                    .ok_or(OperationError::UnsafePath)?;
-                if !lower_hex(candidate_name, 64) {
-                    return Err(OperationError::UnsafePath);
-                }
-                let metadata = fs::symlink_metadata(candidate.path())?;
-                if !safe_custody_file(&metadata, self.required_owner_uid, metadata.len()) {
-                    return Err(OperationError::UnsafePath);
-                }
-                fs::remove_file(candidate.path())?;
-            }
-            fs::remove_dir(directory)?;
         }
         sync_directory(&self.roots.package_custody)
+    }
+
+    fn clean_package_candidate(&self, invocation: &fs::DirEntry) -> Result<(), OperationError> {
+        let name = invocation.file_name();
+        let name = name.to_str().ok_or(OperationError::UnsafePath)?;
+        if !lower_hex(name, 32) {
+            return Err(OperationError::UnsafePath);
+        }
+        let directory = invocation.path();
+        require_exact_directory(&directory, self.required_owner_uid, 0o700)?;
+        let mut candidates = fs::read_dir(&directory)?.collect::<Result<Vec<_>, _>>()?;
+        if candidates.len() > 1 {
+            return Err(OperationError::UnsafePath);
+        }
+        if let Some(candidate) = candidates.pop() {
+            let name = candidate.file_name();
+            let name = name
+                .to_str()
+                .and_then(|value| value.strip_suffix(".deb"))
+                .ok_or(OperationError::UnsafePath)?;
+            if !lower_hex(name, 64) {
+                return Err(OperationError::UnsafePath);
+            }
+            let metadata = fs::symlink_metadata(candidate.path())?;
+            if !safe_custody_file(&metadata, self.required_owner_uid, metadata.len()) {
+                return Err(OperationError::UnsafePath);
+            }
+            fs::remove_file(candidate.path())?;
+        }
+        fs::remove_dir(directory)?;
+        Ok(())
     }
 }
 
@@ -65,7 +74,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<(), OperationError> {
         let _install_guard = self
             .package_install
-            .lock()
+            .try_lock()
             .map_err(|_| OperationError::CommandFailed)?;
         require_safe_directory(&self.roots.incoming, self.package_owner_uid)?;
         let incoming = self.roots.incoming.join(format!("{digest}.deb"));
@@ -162,7 +171,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut digest = Sha256::new();
         let mut consumed = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
+        // Package preparation shares the host package operation's 120-second
+        // budget; a growing or slow source cannot occupy its owner forever.
+        let deadline = Instant::now() + Duration::from_secs(120);
         loop {
+            if Instant::now() >= deadline {
+                return Err(OperationError::CommandFailed);
+            }
             let count = source
                 .read(&mut buffer)
                 .map_err(|_| OperationError::InvalidArtifact)?;

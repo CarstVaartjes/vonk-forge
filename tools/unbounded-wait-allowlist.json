@@ -219,12 +219,6 @@
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent-helper/src/operations/packages.rs",
-      "function": "take_package_custody",
-      "kind": "rust-loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "rust/crates/vonk-agent-helper/src/package_command.rs",
       "function": "drain",
       "kind": "rust-loop-without-deadline",

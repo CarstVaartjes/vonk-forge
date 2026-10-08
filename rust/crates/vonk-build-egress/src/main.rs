@@ -4,7 +4,8 @@ use std::{
     collections::BTreeSet,
     io::{self, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
-    process::ExitCode,
+    os::{fd::OwnedFd, unix::net::UnixStream},
+    process::{Command, ExitCode, Stdio},
     sync::{
         Arc,
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -35,22 +36,33 @@ fn main() -> ExitCode {
 
 fn run(arguments: Vec<String>) -> Result<(), String> {
     if arguments == ["--probe"] {
-        let mut stream = TcpStream::connect_timeout(
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let stream = TcpStream::connect_timeout(
             &"127.0.0.1:18080"
                 .parse()
                 .map_err(|_| "probe address is invalid")?,
-            Duration::from_secs(2),
+            deadline.saturating_duration_since(Instant::now()),
         )
         .map_err(|_| "proxy is unavailable")?;
-        stream
-            .write_all(b"GET http://proxy.invalid/ HTTP/1.1\r\nHost: proxy.invalid\r\n\r\n")
-            .map_err(|_| "proxy probe write failed")?;
-        let mut response = [0_u8; 16];
-        let read = stream
-            .read(&mut response)
-            .map_err(|_| "proxy probe read failed")?;
-        if read < 12 || !response.starts_with(b"HTTP/1.1 403") {
-            return Err("proxy probe response is invalid".to_owned());
+        probe(stream, deadline).map_err(|_| "proxy probe unavailable")?;
+        return Ok(());
+    }
+    // Isolate the system resolver in a killable process. A stalled libc/NSS
+    // lookup cannot retain a worker or accumulate abandoned resolver threads.
+    if let [mode, host, port] = arguments.as_slice()
+        && mode == "--resolve"
+    {
+        let port = port
+            .parse::<u16>()
+            .map_err(|_| "resolver port is invalid")?;
+        let addresses = (host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|_| "resolver unavailable")?;
+        for (index, address) in addresses.enumerate() {
+            if index >= MAX_RESOLVED_ADDRESSES {
+                return Err("resolver answer exceeds bound".to_owned());
+            }
+            println!("{address}");
         }
         return Ok(());
     }
@@ -112,8 +124,8 @@ fn handle(mut client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
     };
     let addresses = match resolve_public(&request.host, request.port) {
         Ok(value) => value,
-        Err(()) => {
-            reject(client, 403);
+        Err(status) => {
+            reject(client, status);
             return Ok(());
         }
     };
@@ -323,15 +335,114 @@ fn blocked_metadata_name(value: &str) -> bool {
         || value.starts_with("metadata.")
 }
 
-fn resolve_public(host: &str, port: u16) -> Result<Vec<SocketAddr>, ()> {
+fn resolve_public(host: &str, port: u16) -> Result<Vec<SocketAddr>, u16> {
+    let mut command = Command::new(std::env::current_exe().map_err(|_| 502_u16)?);
+    command.args(["--resolve", host, &port.to_string()]);
+    let output =
+        resolver_output(&mut command, Instant::now() + CONNECT_TIMEOUT).map_err(|_| 502_u16)?;
+    let text = std::str::from_utf8(&output).map_err(|_| 502_u16)?;
     let mut addresses = BTreeSet::new();
-    for address in (host, port).to_socket_addrs().map_err(|_| ())? {
-        addresses.insert(address);
+    for line in text.lines() {
+        addresses.insert(line.parse::<SocketAddr>().map_err(|_| 502_u16)?);
         if addresses.len() > MAX_RESOLVED_ADDRESSES {
-            return Err(());
+            return Err(502);
         }
     }
-    validate_resolved(addresses)
+    validate_resolved(addresses).map_err(|_| 403)
+}
+
+fn resolver_output(command: &mut Command, deadline: Instant) -> Result<Vec<u8>, ()> {
+    let (mut output_stream, child_output) = UnixStream::pair().map_err(|_| ())?;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(OwnedFd::from(child_output)))
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| ())?;
+    // Command retains its configured descriptors after spawning. Drop its
+    // writer so EOF really means that every child writer has closed.
+    command.stdout(Stdio::null());
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err(());
+                }
+                return read_resolver_output(&mut output_stream, deadline);
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(
+                    Duration::from_millis(10)
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+            _ => {
+                let _ = child.kill();
+                let reap_deadline = Instant::now() + Duration::from_secs(1);
+                while Instant::now() < reap_deadline {
+                    match child.try_wait() {
+                        Ok(None) => thread::sleep(Duration::from_millis(10)),
+                        _ => break,
+                    }
+                }
+                return Err(());
+            }
+        }
+    }
+}
+
+fn read_resolver_output(stream: &mut UnixStream, deadline: Instant) -> Result<Vec<u8>, ()> {
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(());
+        }
+        stream.set_read_timeout(Some(remaining)).map_err(|_| ())?;
+        let count = stream.read(&mut buffer).map_err(|_| ())?;
+        if count == 0 {
+            return Ok(output);
+        }
+        if output.len() + count > 4096 {
+            return Err(());
+        }
+        output.extend_from_slice(&buffer[..count]);
+    }
+}
+
+fn probe(mut stream: TcpStream, deadline: Instant) -> io::Result<()> {
+    let mut request = &b"GET http://proxy.invalid/ HTTP/1.1\r\nHost: proxy.invalid\r\n\r\n"[..];
+    while !request.is_empty() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        stream.set_write_timeout(Some(remaining))?;
+        let written = stream.write(request)?;
+        if written == 0 {
+            return Err(io::ErrorKind::WriteZero.into());
+        }
+        request = &request[written..];
+    }
+    let mut response = [0_u8; 12];
+    let mut received = 0;
+    while received < response.len() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        stream.set_read_timeout(Some(remaining))?;
+        let count = stream.read(&mut response[received..])?;
+        if count == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        received += count;
+    }
+    if !response.starts_with(b"HTTP/1.1 403") {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
+    Ok(())
 }
 
 fn validate_resolved(addresses: BTreeSet<SocketAddr>) -> Result<Vec<SocketAddr>, ()> {
@@ -480,6 +591,12 @@ fn copy_bounded(
 }
 
 fn reject(mut stream: TcpStream, status: u16) {
+    if stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .is_err()
+    {
+        return;
+    }
     let reason = match status {
         400 => "Bad Request",
         403 => "Forbidden",
@@ -498,6 +615,65 @@ fn reject(mut stream: TcpStream, status: u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn silent_probe_ends_and_a_fresh_probe_completes() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = TcpStream::connect(address).unwrap();
+        let (silent, _) = listener.accept().unwrap();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(250));
+            drop(silent);
+        });
+        let started = Instant::now();
+        assert!(probe(client, started + Duration::from_millis(50)).is_err());
+        assert!(started.elapsed() < Duration::from_millis(200));
+        let client = TcpStream::connect(address).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        server.write_all(b"HTTP/1.1 403 Forbidden\r\n").unwrap();
+        probe(client, Instant::now() + Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    fn a_retained_resolver_writer_cannot_extend_the_deadline() {
+        let (mut reader, retained_writer) = UnixStream::pair().unwrap();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(250));
+            drop(retained_writer);
+        });
+        let started = Instant::now();
+        assert!(read_resolver_output(&mut reader, started + Duration::from_millis(50)).is_err());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        let (mut reader, mut writer) = UnixStream::pair().unwrap();
+        writer.write_all(b"1.1.1.1:443\n").unwrap();
+        drop(writer);
+        assert_eq!(
+            read_resolver_output(&mut reader, Instant::now() + Duration::from_secs(1)).unwrap(),
+            b"1.1.1.1:443\n"
+        );
+    }
+
+    #[test]
+    fn stalled_resolver_is_reaped_and_fresh_work_is_admitted() {
+        let started = Instant::now();
+        assert!(
+            resolver_output(
+                Command::new("/bin/sleep").arg("10"),
+                started + Duration::from_millis(50)
+            )
+            .is_err()
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            resolver_output(
+                Command::new("/bin/echo").arg("1.1.1.1:443"),
+                Instant::now() + Duration::from_secs(1)
+            )
+            .unwrap(),
+            b"1.1.1.1:443\n"
+        );
+    }
 
     #[test]
     fn rejects_private_reserved_and_metadata_destinations() {

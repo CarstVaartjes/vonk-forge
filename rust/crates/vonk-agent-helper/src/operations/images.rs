@@ -42,14 +42,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)?
             && runtime_identity_valid(&inspected)
         {
-            return self
-                .write_image_receipt(RuntimeImageReceipt {
-                    schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
-                    platform_manifest_digest: manifest_digest.to_owned(),
-                    image_config_id: inspected.0,
-                    local_image_reference: image_reference.to_owned(),
-                })
-                .map_err(|_| OperationError::RuntimeImageReceiptFailed);
+            let _ = self.write_image_receipt(RuntimeImageReceipt {
+                schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+                platform_manifest_digest: manifest_digest.to_owned(),
+                image_config_id: inspected.0,
+                local_image_reference: image_reference.to_owned(),
+            });
+            return Ok(());
         }
         let remote = format!("{registry}/vonk/runtime@{manifest_digest}");
         let pulled = self
@@ -95,18 +94,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !runtime_identity_valid(&inspected) {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
-        self.write_image_receipt(RuntimeImageReceipt {
+        let _ = self.write_image_receipt(RuntimeImageReceipt {
             schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
             platform_manifest_digest: manifest_digest.to_owned(),
             image_config_id: inspected.0,
             local_image_reference: image_reference.to_owned(),
-        })
-        .map_err(|error| match error {
-            OperationError::Io(_) | OperationError::InvalidArtifact => {
-                OperationError::RuntimeImageReceiptFailed
-            }
-            other => other,
-        })
+        });
+        Ok(())
     }
 }
 
@@ -137,7 +131,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || inspected.3 != "v1"
             || inspected.4 != *user
         {
-            return Err(OperationError::InvalidArtifact);
+            return Err(OperationError::RuntimeImageInspectFailed);
         }
         self.require_image_receipt(
             archive_sha256,
@@ -155,7 +149,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         image: &str,
     ) -> Result<RuntimeImageInspection, OperationError> {
         self.inspect_runtime_image_if_present(image)?
-            .ok_or(OperationError::InvalidArtifact)
+            .ok_or(OperationError::RuntimeImageInspectFailed)
     }
 }
 
@@ -189,7 +183,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map(|value| value.split('\t').map(str::to_owned).collect::<Vec<_>>())
             .unwrap_or_default();
         if output.exit_code != Some(0) || fields.len() != 5 || !valid_oci_digest(&fields[0]) {
-            return Err(OperationError::InvalidArtifact);
+            return Err(OperationError::RuntimeImageInspectFailed);
         }
         Ok(Some((
             fields[0].clone(),
@@ -207,7 +201,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         image_reference: &str,
     ) -> Result<(RuntimeImageInspection, String), OperationError> {
         self.inspect_runtime_image_for_reference_if_present(image_reference)?
-            .ok_or(OperationError::InvalidArtifact)
+            .ok_or(OperationError::RuntimeImageInspectFailed)
     }
 }
 
@@ -239,11 +233,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         receipt: RuntimeImageReceipt,
     ) -> Result<(), OperationError> {
-        fs::create_dir_all(&self.roots.runtime_image_receipts)?;
-        fs::set_permissions(
-            &self.roots.runtime_image_receipts,
-            fs::Permissions::from_mode(0o700),
-        )?;
+        ensure_private_directory(&self.roots.runtime_image_receipts, self.required_owner_uid)?;
         let address = receipt
             .platform_manifest_digest
             .strip_prefix("sha256:")
@@ -261,12 +251,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
         body.push(b'\n');
         // A re-pull of the same image may report a new daemon object (after a
         // prune, or on another image store), so the newest pull's receipt wins.
-        let staged = path.with_extension("tmp");
+        let staged = self
+            .roots
+            .runtime_image_receipts
+            .join(format!(".receipt-{}.tmp", uuid::Uuid::new_v4()));
         {
             let mut file = OpenOptions::new()
                 .write(true)
-                .create(true)
-                .truncate(true)
+                .create_new(true)
+                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+                .mode(0o600)
                 .open(&staged)?;
             file.write_all(&body)?;
             file.sync_all()?;
@@ -293,30 +287,38 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        let matches = match self.read_image_receipt(archive_sha256)? {
-            StoredImageReceipt::Current(receipt) => {
-                receipt.schema_version == RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
-                    && platform_manifest_digest.strip_prefix("sha256:") == Some(archive_sha256)
-                    && registry_index_digest == platform_manifest_digest
-                    && receipt.platform_manifest_digest == platform_manifest_digest
-                    && receipt.local_image_reference == local_image_reference
-                    && receipt.image_config_id == image_config_id
-            }
-            // An image the previous agent loaded from an archive: its receipt
-            // is keyed by the archive digest and names both registry digests.
-            // The installation that names it keeps starting until it is
-            // replaced; the image itself is still compared live.
-            StoredImageReceipt::Legacy(receipt) => {
-                receipt.archive_sha256 == archive_sha256
-                    && receipt.registry_index_digest == registry_index_digest
-                    && receipt.platform_manifest_digest == platform_manifest_digest
-                    && receipt.local_image_reference == local_image_reference
-                    && receipt.image_config_id == image_config_id
-            }
-        };
-        if !matches {
-            return Err(OperationError::InvalidArtifact);
+        if platform_manifest_digest.strip_prefix("sha256:") != Some(archive_sha256)
+            || registry_index_digest != platform_manifest_digest
+            || parse_local_image_reference(local_image_reference)?.1 != platform_manifest_digest
+        {
+            return Err(OperationError::InvalidOperation);
         }
+        if let Ok(receipt) = self.read_image_receipt(archive_sha256)
+            && receipt.schema_version == RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
+            && receipt.platform_manifest_digest == platform_manifest_digest
+            && receipt.local_image_reference == local_image_reference
+            && receipt.image_config_id == image_config_id
+        {
+            return Ok(());
+        }
+        // A tag and its labels do not prove content identity. Docker resolving
+        // the digest-qualified reference does: its verified store binds that
+        // manifest to the inspected object. Rebuild disposable metadata only
+        // from this observation, never from the tag fallback.
+        let Some(inspected) = self.inspect_runtime_image_if_present(local_image_reference)? else {
+            return Err(OperationError::RuntimeImageInspectFailed);
+        };
+        if inspected.0 != image_config_id {
+            return Err(OperationError::RuntimeImageInspectFailed);
+        }
+        // Receipt publication is best effort; the verified daemon observation
+        // above is enough for this request and later reads can reconstruct it.
+        let _ = self.write_image_receipt(RuntimeImageReceipt {
+            schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+            platform_manifest_digest: platform_manifest_digest.to_owned(),
+            image_config_id: image_config_id.to_owned(),
+            local_image_reference: local_image_reference.to_owned(),
+        });
         Ok(())
     }
 }
@@ -325,7 +327,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn read_image_receipt(
         &self,
         archive_sha256: &str,
-    ) -> Result<StoredImageReceipt, OperationError> {
+    ) -> Result<RuntimeImageReceipt, OperationError> {
         let path = self.roots.runtime_image_receipts.join(archive_sha256);
         let metadata = fs::symlink_metadata(&path).map_err(|_| OperationError::InvalidArtifact)?;
         if metadata.file_type().is_symlink()
@@ -339,16 +341,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidArtifact);
         }
-        let body = fs::read(path).map_err(|_| OperationError::InvalidArtifact)?;
-        if let Ok(receipt) = serde_json::from_slice::<RuntimeImageReceipt>(&body) {
-            return Ok(StoredImageReceipt::Current(receipt));
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
+            .open(path)
+            .map_err(|_| OperationError::RuntimeImageInspectFailed)?;
+        if artifact_identity(&file.metadata()?) != artifact_identity(&metadata) {
+            return Err(OperationError::RuntimeImageInspectFailed);
         }
-        let legacy: LegacyRuntimeImageReceipt =
-            serde_json::from_slice(&body).map_err(|_| OperationError::InvalidArtifact)?;
-        if legacy.schema_version != LEGACY_RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION {
-            return Err(OperationError::InvalidArtifact);
+        let mut body = Vec::new();
+        Read::by_ref(&mut file).take(2049).read_to_end(&mut body)?;
+        if body.len() > 2048 {
+            return Err(OperationError::RuntimeImageInspectFailed);
         }
-        Ok(StoredImageReceipt::Legacy(legacy))
+        serde_json::from_slice(&body).map_err(|_| OperationError::RuntimeImageInspectFailed)
     }
 }
 

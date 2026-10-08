@@ -243,7 +243,6 @@ const ROOT_COMMAND_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/b
 pub use vonk_agent_protocol::generated::HostOperationOutcome as OperationOutcome;
 
 use vonk_agent_protocol::generated::{
-    HostArchiveRuntimeImageReceipt as LegacyRuntimeImageReceipt,
     HostRuntimeImageReceipt as RuntimeImageReceipt, InstallationReconciliationReceipt,
     RuntimeGenerationFence,
 };
@@ -270,14 +269,6 @@ pub struct RunInspection {
     pub logs: Option<Box<HostHelperProcessLogs>>,
     /// Why the requested tail could not be read; never both `logs` and this.
     pub log_error: Option<String>,
-}
-
-const LEGACY_RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 2;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum StoredImageReceipt {
-    Current(RuntimeImageReceipt),
-    Legacy(LegacyRuntimeImageReceipt),
 }
 
 #[derive(Clone, Copy)]
