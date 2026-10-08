@@ -10,12 +10,10 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import select, true
 from sqlalchemy.exc import IntegrityError
 from vonk_agent_protocol import (
-    InvalidRequestReason,
     LifecycleState,
     ModelCacheCode,
     RecipeImageCode,
     WaitReason,
-    canonical_message,
 )
 from vonk_forge_contracts import document_sha256
 
@@ -26,9 +24,6 @@ from ..artifact_lifecycle import (
     RemovalOwnerKind,
     reserve_removal_owners,
     supersede_removal_nowait,
-)
-from ..artifact_reference_scan import (
-    MAX_ARTIFACT_OWNER_SCAN_BYTES,
 )
 from ..cache_removal_review import (
     refusing_removal_blockers,
@@ -104,6 +99,7 @@ def remove_selector(
                 with_model=with_model,
             )
 
+    self.reconcile_removal_gates()
     observed_review = self.review_removal(selector, with_model=with_model)
     observed_blockers = refusing_removal_blockers(observed_review)
     if observed_blockers:
@@ -285,14 +281,6 @@ def remove_selector(
                 plan=plan,
                 checkpoint=checkpoint,
             )
-            owner_bytes = len(canonical_message(owner.model_dump(mode="json")))
-            if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-                raise RecipeImageAvailabilityInvalid(
-                    RecipeImageCode.REMOVAL_SCOPE_LIMITED,
-                    "recipe removal owner is "
-                    f"{owner_bytes} bytes; limit is {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes",
-                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
-                )
             now = self._clock()
             now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
             operation = self._lifecycle.new_job(
@@ -324,7 +312,7 @@ def remove_selector(
                 with_model=with_model,
             )
     except ArtifactLifecycleError as error:
-        raise RecipeImageAvailabilityRefused(
+        raise RecipeImageAvailabilityUnknown(
             error.code,
             error.detail,
             retryable=error.retryable,

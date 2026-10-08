@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 import pytest
-from sqlalchemy import Engine, Table, and_, or_, select
+from sqlalchemy import Engine, Table, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.cache_removal_review import CacheRemovalReview
 from vonk_control.model_cache import (
     CacheOperationView,
-    ModelCacheConflict,
     ModelCacheService,
 )
 from vonk_control.models import (
@@ -151,7 +150,7 @@ def _one_model(tmp_path: Path, slug: str, data: bytes = b"abc") -> ModelDefiniti
     )
 
 
-def test_model_removal_reference_scan_failure_rolls_back_and_same_key_recovers(
+def test_model_removal_reference_scan_failure_keeps_bytes_and_same_owner_recovers(
     postgres_engine: Engine,
     tmp_path: Path,
 ) -> None:
@@ -175,53 +174,6 @@ def test_model_removal_reference_scan_failure_rolls_back_and_same_key_recovers(
         cast(Table, FleetProfileSelection.__table__).drop(postgres_engine)
         cast(Table, FleetProfileApplication.__table__).drop(postgres_engine)
         cast(Table, FleetProfile.__table__).drop(postgres_engine)
-        with pytest.raises(ModelCacheConflict) as unavailable:
-            _remove_model(
-                service,
-                selector,
-                actor="operator",
-                request_key=request_key,
-                model_content_sha256=digest,
-            )
-        assert unavailable.value.code == "artifact.reference_scan_failed"
-        scan_review = service.review_model_removal(selector)
-        assert any(
-            blocker.code == "artifact.reference_scan_failed"
-            and blocker.retryable
-            and "retry" in blocker.recovery_actions
-            for blocker in scan_review.blockers
-        )
-
-        with sessions() as session:
-            assert (
-                session.scalar(
-                    select(ModelCacheOperation).where(
-                        ModelCacheOperation.request_key == request_key
-                    )
-                )
-                is None
-            )
-            assert session.get(ModelCacheSet, set_digest) is not None
-            gates = list(
-                session.scalars(
-                    select(ArtifactLifecycleGate).where(
-                        or_(
-                            and_(
-                                ArtifactLifecycleGate.artifact_kind == "model-set",
-                                ArtifactLifecycleGate.artifact_sha256 == set_digest,
-                            ),
-                            and_(
-                                ArtifactLifecycleGate.artifact_kind == "model-object",
-                                ArtifactLifecycleGate.artifact_sha256 == object_digest,
-                            ),
-                        )
-                    )
-                )
-            )
-        assert all(gate.removal_owner_id is None for gate in gates)
-        assert object_path.read_bytes() == b"abc"
-
-        Base.metadata.create_all(postgres_engine)
         accepted = _remove_model(
             service,
             selector,
@@ -229,6 +181,16 @@ def test_model_removal_reference_scan_failure_rolls_back_and_same_key_recovers(
             request_key=request_key,
             model_content_sha256=digest,
         )
+        assert accepted.id
+        assert service.advance_removals(limit=1) == 0
+        with sessions() as session:
+            assert session.get(ModelCacheOperation, accepted.id) is not None
+            assert session.get(ModelCacheSet, set_digest) is not None
+        assert object_path.read_bytes() == b"abc"
+
+        Base.metadata.create_all(postgres_engine)
+        # The same accepted intent resumes automatically when observation heals.
+        service._clock = lambda: datetime.now(UTC) + timedelta(minutes=1)
         settled = _settle_removal(service, accepted)
         assert settled.state == "succeeded"
         assert not object_path.exists()

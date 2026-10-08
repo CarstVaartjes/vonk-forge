@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from io import BufferedReader
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, NoReturn, cast
 from urllib.parse import unquote, urlsplit
 
 import httpx2
@@ -28,7 +28,7 @@ from .artifacts import ArtifactSpec
 from .catalog_helpers import _github_release_asset_binding
 from .constants import _CHUNK_BYTES, _GITHUB_API_HOST, _PARALLEL_RANGE_WORKERS
 from .errors import (
-    ModelCacheConflictRefused,
+    ModelCacheConflictUnknown,
     ModelCacheError,
     ModelCacheResolutionError,
     ModelCacheStorageError,
@@ -280,11 +280,18 @@ class DownloadMixin:
                 allow_pending_removal=allow_pending_removal,
             )
         except ArtifactLifecycleError as error:
-            raise ModelCacheConflictRefused(
-                error.code,
-                error.detail,
-                recovery="retry" if error.retryable else None,
-            ) from error
+            DownloadMixin._reference_unknown(error)
+
+    @staticmethod
+    def _reference_unknown(
+        error: ArtifactLifecycleError | ModelCacheConflictUnknown,
+    ) -> NoReturn:
+        raise ModelCacheConflictUnknown(
+            error.code,
+            error.detail,
+            retry_after_seconds=1,
+            recovery="retry" if getattr(error, "retryable", True) else None,
+        ) from error
 
     def _validate_http_download(self, spec: ArtifactSpec) -> None:
         cache = cast("ModelCacheService", self)

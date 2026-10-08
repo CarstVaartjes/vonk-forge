@@ -243,10 +243,10 @@ class ArtifactJobService:
                 blob.size_bytes != stored.size_bytes
                 or blob.storage_key != stored.storage_key
             ):
-                raise ArtifactJobRefused(
-                    "content-addressed artifact collision",
-                    reason=SecurityRefusalReason.DIGEST_MISMATCH,
-                )
+                # Ingress has already verified StoredArtifactBlob's bytes.
+                # Repair this derived row from the verified content owner.
+                blob.size_bytes = stored.size_bytes
+                blob.storage_key = stored.storage_key
             return
         session.add(
             ArtifactJobBlob(

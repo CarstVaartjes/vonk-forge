@@ -30,7 +30,7 @@ from .executor_verification import ExecutorVerificationMixin
 from .interfaces import RunSwitchArtifactPhaseExecutor
 
 if TYPE_CHECKING:
-    from ..distribution_executor import _ChildView
+    from ..distribution_executor.receipts import _ChildView
 
 
 class RecipeLifecyclePhaseExecutor(

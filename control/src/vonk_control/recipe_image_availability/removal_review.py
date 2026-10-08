@@ -56,7 +56,7 @@ from .contracts import (
     SCHEMA_VERSION,
     ModelCacheRemovalCoordinator,
     RecipeImageAvailabilityInvalid,
-    RecipeImageAvailabilityRefused,
+    RecipeImageAvailabilityUnknown,
     _iso,
     _RecipeRemovalSelection,
 )
@@ -449,24 +449,24 @@ def _model_removal_assets(
     observed: dict[tuple[str, str], CacheRemovalAsset] = {}
     for asset in assets:
         if not isinstance(asset, CacheRemovalAsset):
-            raise RecipeImageAvailabilityRefused(
+            raise RecipeImageAvailabilityUnknown(
                 ModelCacheCode.REVIEW_INVALID,
                 "ModelCache returned an invalid typed asset status",
             )
         identity = (asset.kind, asset.sha256)
         if identity in observed:
-            raise RecipeImageAvailabilityRefused(
+            raise RecipeImageAvailabilityUnknown(
                 ModelCacheCode.REVIEW_INVALID,
                 "ModelCache returned duplicate reviewed asset identities",
             )
         if expected.get(identity) != asset.disposition:
-            raise RecipeImageAvailabilityRefused(
+            raise RecipeImageAvailabilityUnknown(
                 ModelCacheCode.REVIEW_INVALID,
                 "ModelCache asset status does not match the exact removal scope",
             )
         observed[identity] = asset
     if set(observed) != set(expected):
-        raise RecipeImageAvailabilityRefused(
+        raise RecipeImageAvailabilityUnknown(
             ModelCacheCode.REVIEW_INVALID,
             "ModelCache asset status is incomplete for the exact removal scope",
         )
@@ -607,7 +607,7 @@ def review_removal(
                 )
             )
     except ArtifactLifecycleError as error:
-        raise RecipeImageAvailabilityRefused(
+        raise RecipeImageAvailabilityUnknown(
             error.code,
             error.detail,
             retryable=error.retryable,

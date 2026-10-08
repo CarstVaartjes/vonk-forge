@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 804741d20327d06276243ce74a743bc8732ebb7f6d13b32ac696fa5a9d46da9f. Do not edit.
+// Generated from canonical OpenAPI SHA256 4196ac82da0009db05db378ffd66f7da20a2202dcee5ea9e110110c357a13cf4. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -10943,6 +10943,24 @@ export interface components {
              */
             subphase: "target-copy";
         };
+        /**
+         * RunSwitchDistributionEndedResult
+         * @description A missing durable distribution child; no node effect is asserted.
+         */
+        RunSwitchDistributionEndedResult: {
+            error_code: components["schemas"]["DistributionCode"];
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "transfer";
+            reason: components["schemas"]["WaitReason"];
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "target-copy";
+        };
         /** RunSwitchFinalVerifyResult */
         RunSwitchFinalVerifyResult: {
             /** Final Verified */
@@ -11299,7 +11317,7 @@ export interface components {
             /** Failure Code */
             failure_code?: string | null;
             /** Final Observation */
-            final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"] | null;
+            final_observation?: components["schemas"]["RunSwitchDistributionEndedResult"] | components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"] | null;
             /** Final Verify Started At */
             final_verify_started_at?: (number | ExactNumber) | null;
             /**
@@ -11329,7 +11347,7 @@ export interface components {
              */
             phase_index: number;
             /** Phase Results */
-            phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
+            phase_results?: (components["schemas"]["RunSwitchDistributionEndedResult"] | components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
             /**
              * Phase Retry Generation
              * @default 0

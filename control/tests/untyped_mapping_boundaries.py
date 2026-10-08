@@ -201,6 +201,7 @@ def relocated_allowlist(sites, allowlist, moves=None):
     permanent = [
         {
             **entry,
+            "function": moves.scope(entry["path"], entry["function"]),
             "path": moves.function(
                 entry["path"],
                 entry["function"],

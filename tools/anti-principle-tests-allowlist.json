@@ -579,12 +579,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_distribution.py",
-      "function": "test_distribution_rejects_unassigned_wrong_node_and_corrupt_object",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_distribution_executor.py",
       "function": "test_abandon_closes_only_a_parked_distribution_child",
       "kind": "operator-wait-assertion",
@@ -3492,7 +3486,7 @@
     "control/tests/test_distribution.py": {
       "_assignment": "bd67f2ef4a818efda9491aa896c506913279bde2f9e104d2ad8d86b37c7e35e2",
       "test_controller_serves_one_verified_assignment_to_two_nodes": "9d352467e8c387f18cc255068d8ad8e0154c52d12366878f54572fc02ac5dd71",
-      "test_distribution_rejects_unassigned_wrong_node_and_corrupt_object": "451a9446e0328511d03602676fa247c491b6f725add325b365dfba9aa7d0522b",
+      "test_distribution_rejects_unassigned_wrong_node_and_corrupt_object": "3201cc922889b23708ad8a69b247f30ad2d520c3ce121c7afe5e5de7b7fac8a9",
       "test_distribution_assignment_survives_controller_service_restart": "ac65fca61facdd08f8fafd62ee0353e2f0ddf9c9032bf517e7c3c2b205e607d6",
       "test_separate_api_process_serves_worker_registered_model_files": "50e5e19fa1553a1f67c7fe4ca6b8f190191b187ead95f7297cecb34d1aa00424",
       "test_separate_api_process_serves_worker_registered_model_files.Cache": "08fc2292a16aa967ab968231d8dbed510faf4cd5afb9f36965c957828491b21d",
