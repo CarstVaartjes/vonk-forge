@@ -40,7 +40,7 @@ from .provider import _ADAPTER
 from .result_helpers import _persisted_result, _read_progress
 
 if TYPE_CHECKING:
-    from ..distribution_executor import _ChildView
+    from ..distribution_executor.receipts import _ChildView
     from .service import RunSwitchOperationService
 
 
@@ -89,7 +89,7 @@ class EndingsMixin:
         self, operation_id: str
     ) -> RecipeOperationView | _ChildView | RunSwitchOperation | None:
         service = typing_cast("RunSwitchOperationService", self)
-        from ..distribution_executor import _ChildView
+        from ..distribution_executor.receipts import _ChildView
 
         getter = getattr(service._phase_executor, "get", None)
         if callable(getter):

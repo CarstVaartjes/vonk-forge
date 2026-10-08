@@ -405,7 +405,20 @@ def test_persisted_models_and_prebuilt_oci_are_reused_a_b_a_without_hf_credentia
         )
         with pytest.raises(DistributionError) as error:
             distribution.register(wrong_set)
-        assert error.value.code == "distribution.model_set_mismatch"
+        from vonk_agent_protocol import UnknownOutcomeError
+
+        assert isinstance(error.value, UnknownOutcomeError)
+        # A miss cannot poison the valid assignment or the next request.
+        distribution.register(assignments[0])
+        assert (
+            _read_object(
+                distribution,
+                node_id=NODE_A,
+                plan_digest=plan_digest,
+                digest=str(artifacts[0]["sha256"]),
+            )
+            == model_payload
+        )
 
         assert (
             restarted_cache.cached_artifact_file(

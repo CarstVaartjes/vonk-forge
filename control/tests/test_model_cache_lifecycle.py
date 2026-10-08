@@ -465,7 +465,9 @@ def test_a_lost_receipt_is_reverified_not_final(cache, tmp_path):
 
     with pytest.raises(ModelCacheConflict) as refused:
         service.resolve_verified_artifact_set(set_digest)
-    assert refused.value.code == "model_cache.coverage_incomplete"
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    assert isinstance(refused.value, UnknownOutcomeError)
     assert refused.value.recovery == "reverify"
     assert refused.value.retry_after_seconds  # the consumer retries; nothing ended
     with sessions() as session:
@@ -504,7 +506,9 @@ def test_an_unverified_object_is_reverified_not_final(cache, tmp_path):
     service._object_path(str(artifact["sha256"])).unlink()
     with pytest.raises(ModelCacheConflict) as refused:
         service.cached_artifact_file(set_digest, str(artifact["sha256"]), "weights.bin")
-    assert refused.value.code == "model_cache.artifact_unverified"
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    assert isinstance(refused.value, UnknownOutcomeError)
     assert refused.value.recovery == "reverify"
     service.run_pending()
     path, size, digest = service.cached_artifact_file(

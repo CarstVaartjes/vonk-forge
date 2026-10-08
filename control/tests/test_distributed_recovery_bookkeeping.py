@@ -29,9 +29,12 @@ _BOUNDARY = frozenset({"recovery_start_plan", "enforce_recovery_deadline", "_awa
 
 
 def test_the_recovery_derivation_does_not_raise_a_refusal_for_bookkeeping() -> None:
-    tree = ast.parse(Path(recovery_module.__file__).read_text())
+    trees = [
+        ast.parse(path.read_text())
+        for path in Path(recovery_module.__file__).parent.glob("*.py")
+    ]
     raising: dict[str, int] = {}
-    for function in ast.walk(tree):
+    for function in (node for tree in trees for node in ast.walk(tree)):
         if not isinstance(function, ast.FunctionDef):
             continue
         for node in ast.walk(function):

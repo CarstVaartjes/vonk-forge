@@ -25,7 +25,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
-from vonk_control.distribution_executor import _ChildView
+from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.install_admission import (

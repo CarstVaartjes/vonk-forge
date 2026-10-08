@@ -22,10 +22,13 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from vonk_agent_protocol import LifecycleState
+from vonk_control.artifact_lifecycle import ArtifactIdentity, lock_reference_gates
 from vonk_control.auth import Actor
 from vonk_control.model_cache import (
     CacheOperationView,
     ModelCacheConflict,
+    ModelCacheConflictUnknown,
     ModelCacheService,
 )
 from vonk_control.models import Base, Job, ModelCacheOperation
@@ -200,6 +203,47 @@ def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
         assert (
             session.scalar(select(func.count()).select_from(ModelCacheOperation)) == 1
         )
+
+
+def test_model_reference_contention_ends_bounded_and_fresh_request_admits(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    """An unrelated owner cannot leave the next request behind an admission gate."""
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine)
+    service = ModelCacheService(
+        sessions, tmp_path / "models", reserve_bytes=0, fixture_sources=True
+    )
+    artifact = _artifact(tmp_path, b"bounded contention", model_content_sha256="a" * 64)
+    manifest = service.resolve_artifact_set(
+        model_content_sha256="a" * 64, artifacts=[artifact]
+    )
+    with sessions.begin() as session:
+        service._ensure_set(session, manifest)
+    preview = service.download_preview(artifact_set_sha256=manifest.digest)
+    with sessions.begin() as session:
+        lock_reference_gates(
+            session,
+            (ArtifactIdentity("model-set", manifest.digest),),
+            now=datetime.now(UTC),
+        )
+        with pytest.raises(ModelCacheConflictUnknown) as caught:
+            service.start_download(
+                actor="operator",
+                request_key=str(uuid.uuid4()),
+                artifact_set_sha256=manifest.digest,
+                plan_digest=str(preview["plan_digest"]),
+            )
+        assert caught.value.retry_after_seconds == 1
+    fresh = service.start_download(
+        actor="operator",
+        request_key=str(uuid.uuid4()),
+        artifact_set_sha256=manifest.digest,
+        plan_digest=str(preview["plan_digest"]),
+    )
+    assert fresh.state == LifecycleState.QUEUED
+    service.run_pending()
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize("different_intent", [False, True])
