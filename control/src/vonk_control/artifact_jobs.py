@@ -68,6 +68,7 @@ from .compiled_artifact_contract import (
     compile_artifact_contract,
 )
 from .execution_plan_service import compile_job_invocation
+from .job_documents import RecipeJobRunParent
 from .library_contract import UuidId
 from .lifecycle import CancelRequested, Effect, Outcome, Reported
 from .lifecycle.agent_operation import AgentOperationAdapter
@@ -99,6 +100,7 @@ from .recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
+from .stored_json import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 
 MAX_INPUT_FILES = 32
@@ -718,20 +720,18 @@ def _artifact_submission_in_session(
 
     if artifact_job.operation_id is None:
         return None
-    operation_id = artifact_job.operation_id
 
     def read() -> Job | Damaged:
-        submission = session.get(Job, operation_id)
+        submission = session.get(Job, artifact_job.operation_id)
         if submission is None or submission.kind != "recipe.job.run.v1":
             return Damaged("artifact job submission owner is invalid")
-        payload = submission.payload
-        if not isinstance(payload, Mapping):
-            return Damaged("artifact job submission owner is invalid")
-        payload_digest = hashlib.sha256(canonical_message(payload)).hexdigest()
+        payload = read_row_column(submission, "payload")
         if (
-            payload_digest != submission.payload_digest
-            or payload.get("owner_kind") != "artifact-job"
-            or payload.get("owner_id") != artifact_job.id
+            not isinstance(payload, RecipeJobRunParent)
+            or payload.owner_kind != "artifact-job"
+            or payload.owner_id != artifact_job.id
+            or hashlib.sha256(canonical_message(payload)).hexdigest()
+            != submission.payload_digest
         ):
             return Damaged("artifact job submission owner is invalid")
         _UUID_ID_ADAPTER.validate_python(submission.request_id, strict=True)

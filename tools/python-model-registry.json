@@ -375,6 +375,10 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/recipe_operations/contracts.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/recipe_packages.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
@@ -415,6 +419,10 @@
       "reason": "Canonical observations and retained identities for restart-safe run-switch recovery."
     },
     {
+      "module": "control/src/vonk_control/run_switch_operations/contracts.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/runtime_image_preparation.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
@@ -439,10 +447,6 @@
     },
     {
       "module": "control/src/vonk_control/worker_memory_contract.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/run_switch_operations/contracts.py",
       "kind": "controller-contract"
     }
   ],

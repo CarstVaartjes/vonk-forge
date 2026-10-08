@@ -411,7 +411,7 @@ def _prove(
         not isinstance(child_parent, RecipeInstallParent)
         or child.request_id != str(uuid.uuid5(uuid.UUID(key), "runtime-install"))
         or child.actor != job.actor
-        or child.payload_digest != _digest(child.payload)
+        or child.payload_digest != _digest(child_parent)
         or child_parent.workload_intent_ordinal != parent.workload_intent_ordinal
         or child_parent.owner_kind != "installation"
         or tuple(sorted(child.targets)) != tuple(sorted(job.targets))
@@ -731,7 +731,7 @@ def record_repair_cancellation(
             )
             if progress.cancellation is None:
                 progress.cancellation = cancellation
-                job.result = progress.model_dump(mode="json", exclude_none=True)
+                job.result = progress.model_dump(mode="json")
                 job.updated_at = cancellation.requested_at
             return
         row, state = _pending(session, job, cancellation.requested_at)
@@ -810,7 +810,7 @@ def try_repair_zero_transfer_journal(
                     canonical_message(job.result), strict=True
                 )
                 progress.cancellation = state.cancellation
-                job.result = progress.model_dump(mode="json", exclude_none=True)
+                job.result = progress.model_dump(mode="json")
             session.delete(row)
         elif result == JournalRepairDisposition.DEFERRED:
             state.attempts += 1

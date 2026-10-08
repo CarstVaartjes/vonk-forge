@@ -44,6 +44,7 @@ from .job_documents import (
     RecoveryStartItem,
     StartPhaseOperation,
     StopPhaseOperation,
+    controller_recipe_document,
 )
 from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .lifecycle.job import JobAdapter
@@ -1289,7 +1290,7 @@ def _validate_singleton_recovery_start_origin(
         or not isinstance(stop_parent, RecipeStopParent)
         or stop_parent.workload_intent_ordinal != workload_intent_ordinal
         or stop.payload_digest
-        != hashlib.sha256(canonical_message(stop.payload)).hexdigest()
+        != hashlib.sha256(canonical_message(stop_parent)).hexdigest()
     ):
         return _unproven(
             run.id, _MISMATCH, "singleton recovery Stop has stale exact run authority"
@@ -1352,7 +1353,7 @@ def _start_binds_current_run_plan(session: Session, start: Job, run: RecipeRun) 
         and parent.plan_digest == run.plan_digest
         and plan.plan_digest == run.plan_digest
         and start.payload_digest
-        == hashlib.sha256(canonical_message(start.payload)).hexdigest()
+        == hashlib.sha256(canonical_message(parent)).hexdigest()
     )
 
 
@@ -1730,9 +1731,8 @@ def _enqueue_recovery_stop(
         return _unproven(
             run.id, _MISMATCH, "distributed recovery start authority was superseded"
         )
-    job_payload = serialize_json_value(
-        parent.model_copy(update={"workload_intent_ordinal": start_ordinal})
-    )
+    parent = parent.model_copy(update={"workload_intent_ordinal": start_ordinal})
+    job_payload = controller_recipe_document(parent)
     job = JobAdapter.new_job(
         state="running",
         id=job_id,
@@ -1741,7 +1741,7 @@ def _enqueue_recovery_stop(
         actor="system:distributed-recovery",
         authority_revision=run.plan_digest.removeprefix("sha256:"),
         targets=targets,
-        payload_digest=hashlib.sha256(canonical_message(job_payload)).hexdigest(),
+        payload_digest=hashlib.sha256(canonical_message(parent)).hexdigest(),
         payload=job_payload,
         created_at=now,
         updated_at=now,

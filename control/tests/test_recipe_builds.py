@@ -4,7 +4,6 @@ import copy
 import hashlib
 import io
 import json
-from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -82,7 +81,7 @@ class RecordingQueue:
         node_id: str,
         operation: str,
         authority_revision: str,
-        payload: Mapping[str, object],
+        payload: object,
         *,
         operation_id: str,
     ) -> AgentOperation:
@@ -94,7 +93,7 @@ class RecordingQueue:
             node_id=node_id,
             kind=operation,
             payload_digest="f" * 64,
-            payload=dict(payload),
+            payload=json.loads(canonical_message(payload)),
             authority_revision=authority_revision,
             workload_intent_ordinal=parent.payload.get("workload_intent_ordinal"),
             state="queued",

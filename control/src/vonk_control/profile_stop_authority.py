@@ -40,6 +40,7 @@ from .models import (
     RunNode,
 )
 from .recipe_stop_payloads import stop_payload_from_job_run
+from .stored_json import read_row_column
 from .strict_json import StrictJSONModel, read_stored_model
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -410,7 +411,9 @@ def validate_profile_stop_owner(
             or linked.kind != "recipe.stop"
             or linked.request_id != expected_key
             or linked.payload_digest
-            != hashlib.sha256(canonical_message(linked.payload)).hexdigest()
+            != hashlib.sha256(
+                canonical_message(read_row_column(linked, "payload"))
+            ).hexdigest()
         ):
             raise ProfileStopAuthorityError(
                 "profile Stop linked child identity changed"
@@ -640,7 +643,9 @@ def validate_jobrun_stop_source(
         or source_job.payload.get("owner_id") != artifact.id
         or source_job.authority_revision != stop.recipe_content_sha256
         or source_job.payload_digest
-        != hashlib.sha256(canonical_message(source_job.payload)).hexdigest()
+        != hashlib.sha256(
+            canonical_message(read_row_column(source_job, "payload"))
+        ).hexdigest()
         or source_operation.parent_job_id != source_job.id
         or source_operation.node_id != target.node_id
         or source_operation.kind != "recipe.job.run.v1"
@@ -724,7 +729,9 @@ def validate_run_jobrun_stop_target(
         or installation.recipe_revision_id != scope.recipe_revision_id
         or stop_parent.kind != "recipe.stop"
         or stop_parent.payload_digest
-        != hashlib.sha256(canonical_message(stop_parent.payload)).hexdigest()
+        != hashlib.sha256(
+            canonical_message(read_row_column(stop_parent, "payload"))
+        ).hexdigest()
         or accepted.owner_kind != "run"
         or accepted.owner_id != scope.run_id
         or accepted.execution_mode != "one-shot-jobs"
@@ -840,7 +847,9 @@ def validate_profile_jobrun_stop_target(
         if (
             stop_parent.kind != "recipe.stop"
             or stop_parent.payload_digest
-            != hashlib.sha256(canonical_message(stop_parent.payload)).hexdigest()
+            != hashlib.sha256(
+                canonical_message(read_row_column(stop_parent, "payload"))
+            ).hexdigest()
             or stop_parent.payload.get("owner_kind") != "run"
             or stop_parent.payload.get("owner_id") != run.id
             or typed_parent.plan_digest != authorization.stop_plan_digest

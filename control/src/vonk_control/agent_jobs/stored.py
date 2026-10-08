@@ -37,16 +37,18 @@ def column_is_document(row: object, column: str) -> bool:
 
 
 def column_message(row: object, column: str) -> bytes:
-    """Validated stored bytes for exact receipt comparisons and digest verification.
+    """Validated bytes for exact receipt comparisons and digest verification.
 
-    Validation must not rewrite the accepted document: optional nulls and
-    timestamp spellings belong to its bound digest. Typed projections are for
-    semantic reads, not for reconstructing already accepted receipt bytes.
-
-    A damaged column has no valid canonical bytes. The empty sentinel cannot
-    match any accepted JSON document and is never stored or sent to an agent.
+    Controller recipe parents are stored in full but bind their canonical typed
+    encoding. Agent orders and other accepted documents retain their bound wire
+    bytes, including timestamp spellings. A damaged column has no valid bytes.
     """
+    from ..job_documents import _RecipeParent
+    from ..profile_stop_authority import ProfileJobRunStopJob
+
     value = read_row_column(row, column)
-    return (
-        b"" if isinstance(value, Residue) else canonical_message(getattr(row, column))
-    )
+    if isinstance(value, Residue):
+        return b""
+    if isinstance(value, _RecipeParent | ProfileJobRunStopJob):
+        return canonical_message(value)
+    return canonical_message(getattr(row, column))

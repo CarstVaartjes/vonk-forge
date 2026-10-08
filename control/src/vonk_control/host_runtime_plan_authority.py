@@ -57,7 +57,8 @@ from .recipe_stop_payloads import (
     stop_payload_from_job_run,
     stop_payload_from_start,
 )
-from .strict_json import read_stored_model
+from .stored_json import read_row_column
+from .strict_json import read_stored_model, serialize_json_value
 
 
 class RuntimePlanAuthorityError(ValueError):
@@ -766,7 +767,9 @@ def _validate_child_record(
     if (
         operation.node_id != node_id
         or operation.parent_job_id != parent.id
-        or hashlib.sha256(canonical_message(parent.payload)).hexdigest()
+        or hashlib.sha256(
+            canonical_message(read_row_column(parent, "payload"))
+        ).hexdigest()
         != parent.payload_digest
         or hashlib.sha256(canonical_message(operation.payload)).hexdigest()
         != operation.payload_digest
@@ -776,7 +779,10 @@ def _validate_child_record(
             "lifecycle operation record is inconsistent",
             reason=SecurityRefusalReason.HELPER_REQUEST_PLAN_BINDING_INVALID,
         )
-    phases = parent.payload.get("phases")
+    parent_document = serialize_json_value(read_row_column(parent, "payload"))
+    phases = (
+        parent_document.get("phases") if isinstance(parent_document, Mapping) else None
+    )
     if not isinstance(phases, list):
         raise RuntimePlanEvidenceUnavailable(
             "lifecycle operation manifest is missing",

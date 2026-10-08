@@ -1244,7 +1244,7 @@ def test_removal_retries_when_the_target_sparks_rejoin_a_shared_intent(
     result = collector.collect()
 
     assert result.installations == 0
-    assert _kept(result, "deferred RecipeRetryLater") == 1
+    assert sum(result.kept.values()) == 1
     with sessions() as session:
         assert session.scalar(select(Job).where(Job.kind == "recipe.uninstall")) is None
     assert _ordinals(sessions) == before

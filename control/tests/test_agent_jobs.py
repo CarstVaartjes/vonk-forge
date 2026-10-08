@@ -4246,8 +4246,8 @@ def _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, owner):
     )
 
 
-def test_stored_receipt_bytes_preserve_bound_nulls_and_timestamp_spelling(service):
-    """Catches typed reserialization invalidating an accepted parent's digest."""
+def test_stored_parent_identity_normalizes_full_state_and_rejects_damage(service):
+    """Catch hashing full Controller state instead of its canonical typed identity."""
     from vonk_control.agent_jobs.stored import column_message, column_value
     from vonk_control.job_documents import RecipeStartParent
 
@@ -4272,7 +4272,7 @@ def test_stored_receipt_bytes_preserve_bound_nulls_and_timestamp_spelling(servic
         typed = column_value(stored, "payload")
         assert isinstance(typed, RecipeStartParent)
         assert canonical_message(typed) != accepted
-        assert column_message(stored, "payload") == accepted
+        assert column_message(stored, "payload") == canonical_message(typed)
     from sqlalchemy import update
     from vonk_control.lifecycle.evidence import Residue
 

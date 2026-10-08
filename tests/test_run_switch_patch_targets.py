@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-FACADE = "vonk_control.run_switch_operations"
+FACADES = frozenset(
+    {"vonk_control.run_switch_operations", "vonk_control.recipe_operations"}
+)
 
 
 def facade_patch_lines(source: str) -> list[int]:
@@ -63,7 +65,7 @@ def facade_patch_lines(source: str) -> list[int]:
             owner = resolve(node.args[0]).rsplit(".", 1)[0]
         else:
             continue
-        if owner == FACADE:
+        if owner in FACADES:
             failures.append(node.lineno)
     return failures
 
@@ -80,6 +82,8 @@ def test_control_tests_never_patch_run_switch_facade_reexports() -> None:
 @pytest.mark.parametrize(
     "source",
     [
+        'from vonk_control import recipe_operations as owner\nmonkeypatch.setattr(owner, "helper", fake)',
+        'monkeypatch.setattr("vonk_control.recipe_operations.helper", fake)',
         'from vonk_control import run_switch_operations as owner\nfault.setattr(owner, "helper", fake)',
         'import vonk_control.run_switch_operations as owner\nmonkeypatch.setattr(owner, "helper", fake)',
         'import vonk_control.run_switch_operations\nmonkeypatch.setattr(vonk_control.run_switch_operations, "helper", fake)',

@@ -9,7 +9,6 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-import vonk_control.recipe_operations as recipe_operations_module
 from sqlalchemy import select
 from vonk_agent_protocol import AgentResult
 from vonk_control.agent_jobs import AgentJobService
@@ -23,6 +22,9 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
+from vonk_control.recipe_operations import (
+    reconciliation_authority as recipe_operations_module,
+)
 from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.run_switch_contract import (
     RunSwitchCleanupApplyRequest,

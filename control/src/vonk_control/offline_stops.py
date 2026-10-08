@@ -39,6 +39,7 @@ def is_deferred_stop(job: Job | None, operation: AgentOperation) -> bool:
 
     from .job_documents import RecipeStopParent
     from .profile_stop_authority import ProfileJobRunStopJob
+    from .stored_json import read_row_column
     from .strict_json import read_stored_model
 
     if (
@@ -47,7 +48,9 @@ def is_deferred_stop(job: Job | None, operation: AgentOperation) -> bool:
         or operation.kind != "recipe.stop"
         or operation.node_id not in deferred_stop_nodes(job)
         or job.payload_digest
-        != hashlib.sha256(canonical_message(job.payload)).hexdigest()
+        != hashlib.sha256(
+            canonical_message(read_row_column(job, "payload"))
+        ).hexdigest()
     ):
         return False
     parent = (

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from importlib import import_module
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -20,11 +21,11 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
-from vonk_control import agent_jobs, install_admission, recipe_operations, run_admission
+from vonk_control import agent_jobs, install_admission, run_admission
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.install_admission import InstallAdmissionBusy, InstallAdmissionService
 from vonk_control.model_cache import ModelCacheService
-from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_operations import RecipeOperationService, result_consumption
 from vonk_control.run_admission import RunAdmissionBusy, RunAdmissionService
 
 
@@ -142,7 +143,9 @@ def test_node_result_retries_the_same_evidence(monkeypatch):
             raise InstallAdmissionBusy("cleanup queue is busy")
         return "projected"
 
-    monkeypatch.setattr(recipe_operations, "admission_attempts", lambda: iter(range(3)))
+    monkeypatch.setattr(
+        result_consumption, "admission_attempts", lambda: iter(range(3))
+    )
     monkeypatch.setattr(service, "_record_node_result_once", once, raising=False)
     assert (
         service.record_node_result(
@@ -226,7 +229,11 @@ def test_recipe_request_retries_raw_admission_contention(method, once, monkeypat
             raise AdmissionLockBusy("node writer is busy")
         return "accepted"
 
-    monkeypatch.setattr(recipe_operations, "admission_attempts", lambda: iter(range(3)))
+    monkeypatch.setattr(
+        import_module(getattr(service, method).__module__),
+        "admission_attempts",
+        lambda: iter(range(3)),
+    )
     monkeypatch.setattr(service, once, attempt)
     assert (
         getattr(service, method)(
@@ -444,7 +451,11 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
             )
         return result
 
-    monkeypatch.setattr(recipe_operations, "admission_attempts", lambda: iter(range(3)))
+    monkeypatch.setattr(
+        import_module(getattr(service, method).__module__),
+        "admission_attempts",
+        lambda: iter(range(3)),
+    )
     monkeypatch.setattr(service, once, lose_response)
     result = getattr(service, method)(
         plan, plan_digest=plan.plan_digest, actor="operator", request_id="2" * 36

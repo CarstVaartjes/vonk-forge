@@ -26,7 +26,6 @@ from vonk_agent_protocol import (
     recipe_job_manifest_sha256,
 )
 from vonk_control import artifact_job_states as ajs
-from vonk_control import recipe_operations as recipe_operations_module
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.artifact_blob_store import (
     ArtifactBlobStore,
@@ -60,6 +59,7 @@ from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
 )
+from vonk_control.recipe_operations import job_activation as recipe_operations_module
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
