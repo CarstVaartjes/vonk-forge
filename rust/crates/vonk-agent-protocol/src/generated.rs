@@ -2746,6 +2746,12 @@ pub struct ExpiredRenewRequest {
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum FailureCode {
+    #[serde(rename = "hook.vm_busy")]
+    HookVmBusy,
+    #[serde(rename = "hook.vm_process_killed")]
+    HookVmProcessKilled,
+    #[serde(rename = "hook.vm_timeout")]
+    HookVmTimeout,
     #[serde(rename = "workload.host_memory_exhausted")]
     WorkloadHostMemoryExhausted,
     #[serde(rename = "operation_failed")]
@@ -2780,6 +2786,9 @@ pub enum FailureCode {
 impl ::std::fmt::Display for FailureCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
+            Self::HookVmBusy => f.write_str("hook.vm_busy"),
+            Self::HookVmProcessKilled => f.write_str("hook.vm_process_killed"),
+            Self::HookVmTimeout => f.write_str("hook.vm_timeout"),
             Self::WorkloadHostMemoryExhausted => f.write_str("workload.host_memory_exhausted"),
             Self::OperationFailed => f.write_str("operation_failed"),
             Self::OperationCancelled => f.write_str("operation_cancelled"),
@@ -2804,6 +2813,9 @@ impl ::std::str::FromStr for FailureCode {
     type Err = self::error::ConversionError;
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
+            "hook.vm_busy" => Ok(Self::HookVmBusy),
+            "hook.vm_process_killed" => Ok(Self::HookVmProcessKilled),
+            "hook.vm_timeout" => Ok(Self::HookVmTimeout),
             "workload.host_memory_exhausted" => Ok(Self::WorkloadHostMemoryExhausted),
             "operation_failed" => Ok(Self::OperationFailed),
             "operation_cancelled" => Ok(Self::OperationCancelled),
@@ -18300,6 +18312,9 @@ impl<'de> ::serde::Deserialize<'de> for ExpiredRenewRequest {
 impl FailureCode {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::HookVmBusy => "hook.vm_busy",
+            Self::HookVmProcessKilled => "hook.vm_process_killed",
+            Self::HookVmTimeout => "hook.vm_timeout",
             Self::WorkloadHostMemoryExhausted => "workload.host_memory_exhausted",
             Self::OperationFailed => "operation_failed",
             Self::OperationCancelled => "operation_cancelled",
@@ -18352,6 +18367,12 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
             PartialOrd,
         )]
         enum Raw {
+            #[serde(rename = "hook.vm_busy")]
+            HookVmBusy,
+            #[serde(rename = "hook.vm_process_killed")]
+            HookVmProcessKilled,
+            #[serde(rename = "hook.vm_timeout")]
+            HookVmTimeout,
             #[serde(rename = "workload.host_memory_exhausted")]
             WorkloadHostMemoryExhausted,
             #[serde(rename = "operation_failed")]
@@ -18386,6 +18407,9 @@ impl<'de> ::serde::Deserialize<'de> for FailureCode {
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
+            Raw::HookVmBusy => Self::HookVmBusy,
+            Raw::HookVmProcessKilled => Self::HookVmProcessKilled,
+            Raw::HookVmTimeout => Self::HookVmTimeout,
             Raw::WorkloadHostMemoryExhausted => Self::WorkloadHostMemoryExhausted,
             Raw::OperationFailed => Self::OperationFailed,
             Raw::OperationCancelled => Self::OperationCancelled,

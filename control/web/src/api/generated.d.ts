@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 e13c356f5f5d962f9fb80d261473ad17872ad026969d0b95214bdaf8de01aee4. Do not edit.
+// Generated from canonical OpenAPI SHA256 eab6cbb27e43e4286d7ce7dc7126a65a789eb270e55e9120b8deccfcf8ceb136. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -3379,7 +3379,7 @@ export interface components {
          * @description Closed codes of a definite failed outcome reported by the agent.
          * @enum {string}
          */
-        FailureCode: "workload.host_memory_exhausted" | "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "recipe_reconciliation_dependency_unavailable" | "retained_container_foreign";
+        FailureCode: "hook.vm_busy" | "hook.vm_process_killed" | "hook.vm_timeout" | "workload.host_memory_exhausted" | "operation_failed" | "operation_cancelled" | "agent_upgrade_failed" | "artifact_distribution_failed" | "recipe_build_failed" | "recipe_job_run_failed" | "recipe_install_failed" | "recipe_start_failed" | "recipe_stop_failed" | "recipe_uninstall_failed" | "runtime_observation_unavailable" | "installation_reconciliation_busy" | "recipe_reconciliation_dependency_unavailable" | "retained_container_foreign";
         /** FailureDiagnostics */
         FailureDiagnostics: {
             /**

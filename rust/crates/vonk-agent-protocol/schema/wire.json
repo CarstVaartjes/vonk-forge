@@ -2753,6 +2753,9 @@
     "FailureCode": {
       "description": "Closed codes of a definite failed outcome reported by the agent.",
       "enum": [
+        "hook.vm_busy",
+        "hook.vm_process_killed",
+        "hook.vm_timeout",
         "workload.host_memory_exhausted",
         "operation_failed",
         "operation_cancelled",

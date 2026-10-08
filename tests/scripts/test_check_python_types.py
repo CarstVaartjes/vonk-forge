@@ -283,6 +283,10 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
     shutil.copy2(
         ROOT / "scripts/check-staged-python", tmp_path / "scripts/check-staged-python"
     )
+    shutil.copy2(
+        ROOT / "scripts/hook_words_generated.py",
+        tmp_path / "scripts/hook_words_generated.py",
+    )
     # This fixture tests check dispatch, not dependency acquisition.
     helper = tmp_path / "scripts/check_environment.py"
     helper.write_text(
@@ -346,6 +350,9 @@ def test_non_python_check_failure_still_blocks_the_commit(
 
     monkeypatch.setattr(module, "ensure_web", lambda root: None)
     monkeypatch.setattr(module, "run", refuse)
+    monkeypatch.setattr(
+        module, "run_vm_cargo", lambda command, deadline: refuse(command)
+    )
     with pytest.raises(subprocess.CalledProcessError):
         module.main()
 

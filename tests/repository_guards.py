@@ -28,6 +28,10 @@ GUARDS: tuple[str, ...] = (
 
 SCOPED: tuple[tuple[str, str], ...] = (
     (
+        "tests/scripts/test_vm_cargo_hook.py",
+        "VM cargo hook command and fault classification; no host services.",
+    ),
+    (
         "tests/acceptance/test_candidate_recipe_e2e.py",
         "Physical acceptance harness; belongs to the acceptance lane.",
     ),
