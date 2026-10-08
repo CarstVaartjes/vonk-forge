@@ -16,7 +16,10 @@ if __name__ == "__main__":
     run_in_control(ROOT)
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
 
-from vonk_agent_protocol.installer_release import InstallerReleaseManifest
+from vonk_agent_protocol.installer_release import (
+    CliReleaseProjection,
+    InstallerReleaseManifest,
+)
 
 OUTPUT = ROOT / "schemas/install-release-manifest.schema.json"
 
@@ -28,9 +31,19 @@ def rendered() -> str:
     return json.dumps(schema, sort_keys=True, indent=2) + "\n"
 
 
+CLI_OUTPUT = ROOT / "src/cluster_profiles/schemas/cli-release-projection.schema.json"
+
+
+def rendered_cli_projection() -> str:
+    schema = CliReleaseProjection.model_json_schema()
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    return json.dumps(schema, sort_keys=True, indent=2) + "\n"
+
+
 def main() -> None:
     argparse.ArgumentParser(description=__doc__).parse_args()
     OUTPUT.write_text(rendered())
+    CLI_OUTPUT.write_text(rendered_cli_projection())
 
 
 if __name__ == "__main__":

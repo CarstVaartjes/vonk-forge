@@ -101,12 +101,12 @@ def _verify(key: rsa.RSAPublicKey, content: bytes, signature: bytes) -> None:
 
 def _validate_release(release: object, release_raw: bytes) -> dict[str, object]:
     schema_resource = files("cluster_profiles").joinpath(
-        "schemas/install-release-manifest.schema.json"
+        "schemas/cli-release-projection.schema.json"
     )
     if not schema_resource.is_file():
         schema_resource = (
-            Path(__file__).resolve().parents[2]
-            / "schemas/install-release-manifest.schema.json"
+            Path(__file__).resolve().parent
+            / "schemas/cli-release-projection.schema.json"
         )
     try:
         schema = json.loads(schema_resource.read_text(encoding="utf-8"))
@@ -190,7 +190,10 @@ def _signed_release(
             if key_name != name:
                 raise CliUpdateError("current release manifest is invalid")
             fields[name] = value
-        if fields["schema_version"] != "2" or fields["channel"] != channel:
+        if (
+            re.fullmatch(r"[2-9]|[1-9][0-9]+", fields["schema_version"]) is None
+            or fields["channel"] != channel
+        ):
             raise CliUpdateError("current release manifest is invalid")
         if not _GENERATION.fullmatch(fields["generation"]) or not _SOURCE.fullmatch(
             fields["source_sha"]
@@ -227,7 +230,7 @@ def _signed_release(
             release.get(name) != fields[name]
             for name in ("channel", "generation", "version", "source_sha")
         )
-        or release.get("schema_version") != 2
+        or release.get("schema_version") != int(fields["schema_version"])
     ):
         raise CliUpdateError("immutable release identity is inconsistent")
     artifacts = release.get("artifacts")

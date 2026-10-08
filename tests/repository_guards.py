@@ -8,6 +8,7 @@ Do not add a whole-tree scan to SCOPED: select its file or node in GUARDS.
 
 GUARDS: tuple[str, ...] = (
     "tests/test_ci_apt_install.py",
+    "tests/cluster_profiles/test_cli_render.py::test_every_controller_command_has_a_registered_presentation",
     "tests/test_controller_startup_guard.py",
     "tests/test_data_contract_guards.py",
     "tests/test_file_size_ratchet.py",

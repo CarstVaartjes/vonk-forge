@@ -16,6 +16,7 @@ STANDALONE_SCHEMAS = {
 PACKAGE_ONLY_SCHEMAS = {
     "control-openapi.json",
     "cli-update-contract.schema.json",
+    "cli-release-projection.schema.json",
 }
 
 

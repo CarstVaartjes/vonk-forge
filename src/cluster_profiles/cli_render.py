@@ -11,7 +11,9 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from . import cli_states
+from .cli_platform_render import render_platform
 from .cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
+from .generated_control.models.platform_observation import PlatformObservation
 
 
 def terminal_text(value: str) -> str:
@@ -1909,11 +1911,12 @@ def render_payload(
         _field("Authorized read", payload.get("authorized_read"))
         client = _object(payload.get("client"), "client")
         _field("CLI version", client.get("version"))
+    elif noun == "platform":
+        render_platform(PlatformObservation.from_dict(payload))
     elif noun == "fleet":
         if action is None:
             _fleet_overview(payload, wide=wide)
         elif action == "rename":
-            # The Controller answers a rename with the Spark's identity only.
             print(
                 f"Renamed {_text(payload.get('id'))} to {_text(payload.get('display_name'))}."
             )
@@ -1947,8 +1950,6 @@ def render_payload(
         ):
             print("All Sparks already run the current agent; nothing to upgrade.")
         elif action == "resume":
-            # The Controller answers a resume with the job's identity and its
-            # new state only; the work itself is followed through progress.
             job_id = payload.get("id")
             print(
                 f"Resumed job {_text(job_id)}; it is now {_text(payload.get('state'))}."
@@ -2014,7 +2015,6 @@ def render_payload(
         elif action == "preview":
             _preview(payload)
         elif action in {"progress", "load", "cancel"}:
-            # These return the profile application, not the saved profile.
             _application(payload)
         elif action == "export":
             _field("Profile", payload.get("profile"))

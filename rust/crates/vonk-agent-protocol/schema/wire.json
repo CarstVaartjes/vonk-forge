@@ -1304,6 +1304,96 @@
       "title": "ClaimRequest",
       "type": "object"
     },
+    "CliReleaseArtifacts": {
+      "description": "Only the artifact consumed by the self-updater; other artifacts may grow.",
+      "properties": {
+        "cli-wheel": {
+          "$ref": "#/$defs/CliWheelProjection"
+        }
+      },
+      "required": [
+        "cli-wheel"
+      ],
+      "title": "CliReleaseArtifacts",
+      "type": "object",
+      "x-vonk-ignore-unknown": true
+    },
+    "CliReleaseProjection": {
+      "description": "Signed updater ingress, independent of the complete installer graph.\n\nFuture installer schemas remain updateable through this stable projection.\nIgnored fields stay covered by the original bytes' signature and digest.",
+      "properties": {
+        "artifacts": {
+          "$ref": "#/$defs/CliReleaseArtifacts"
+        },
+        "channel": {
+          "enum": [
+            "dev",
+            "stable"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "generation": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Generation",
+          "type": "string"
+        },
+        "schema_version": {
+          "minimum": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Source Sha",
+          "type": "string"
+        },
+        "version": {
+          "pattern": "^[0-9A-Za-z](?:[0-9A-Za-z.+:~-]{0,126}[0-9A-Za-z])?$",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "channel",
+        "generation",
+        "version",
+        "source_sha",
+        "artifacts"
+      ],
+      "title": "CliReleaseProjection",
+      "type": "object",
+      "x-vonk-ignore-unknown": true
+    },
+    "CliWheelProjection": {
+      "description": "Validate wheel identity and bounds while allowing signed descriptor metadata.",
+      "properties": {
+        "path": {
+          "pattern": "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "title": "CliWheelProjection",
+      "type": "object",
+      "x-vonk-ignore-unknown": true
+    },
     "ClusterMappingCode": {
       "description": "Refusals of a cluster mapping (recipe-to-Spark assignment) request.",
       "enum": [
@@ -10938,6 +11028,9 @@
     "ActivationMarker": [
       "ActivationManifest"
     ],
+    "CliWheelProjection": [
+      "InstallerReleaseObject"
+    ],
     "ExpiredRenewRequest": [
       "RenewRequest"
     ],
@@ -10989,6 +11082,9 @@
     "BoundedErrorResponse": "vonk_control.operation_api.BoundedErrorResponse",
     "CapabilityUnavailableReply": "vonk_control.capability_contract.CapabilityUnavailableReply",
     "ClaimRequest": "vonk_agent_protocol.claims.ClaimRequest",
+    "CliReleaseArtifacts": "vonk_agent_protocol.installer_release.CliReleaseArtifacts",
+    "CliReleaseProjection": "vonk_agent_protocol.installer_release.CliReleaseProjection",
+    "CliWheelProjection": "vonk_agent_protocol.installer_release.CliWheelProjection",
     "CompiledArtifact": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifact",
     "CompiledArtifactMount": "vonk_agent_protocol.compiled_execution_plan.CompiledArtifactMount",
     "CompiledEndpoint": "vonk_agent_protocol.compiled_execution_plan.CompiledEndpoint",
@@ -11167,6 +11263,9 @@
     "BoundedErrorResponse": "#/$defs/BoundedErrorResponse",
     "CapabilityUnavailableReply": "#/$defs/CapabilityUnavailableReply",
     "ClaimRequest": "#/$defs/ClaimRequest",
+    "CliReleaseArtifacts": "#/$defs/CliReleaseArtifacts",
+    "CliReleaseProjection": "#/$defs/CliReleaseProjection",
+    "CliWheelProjection": "#/$defs/CliWheelProjection",
     "CompiledArtifact": "#/$defs/CompiledArtifact",
     "CompiledArtifactMount": "#/$defs/CompiledArtifactMount",
     "CompiledEndpoint": "#/$defs/CompiledEndpoint",
