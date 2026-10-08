@@ -754,7 +754,7 @@ def test_generated_transport_rejects_malformed_raw_response(
 def test_observation_callback_hides_arbitrary_validation_exception_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cluster_profiles import control_client
+    from cluster_profiles.control_client import client as control_client
 
     valid = {
         "authority_revision": "a" * 64,
@@ -1019,7 +1019,7 @@ def test_artifact_output_download_preserves_an_existing_destination(
 def test_artifact_output_download_cleans_temporary_file_after_disk_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cluster_profiles import control_client
+    from cluster_profiles.control_client import transfers as control_client
 
     content = b"verified output"
     digest = hashlib.sha256(content).hexdigest()
