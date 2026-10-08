@@ -11,7 +11,6 @@ from pathlib import Path
 
 from vonk_agent_protocol import (
     RuntimeImageCode,
-    UnknownOutcomeError,
     WaitReason,
 )
 
@@ -392,19 +391,7 @@ class FilesystemRuntimeImageStorage:
                 expected_runtime_interface
             ),
         )
-        if expected_archive_sha256 is None:
-            receipts = self._iter_receipts()
-        else:
-            try:
-                receipts = (self.read_receipt(expected_archive_sha256),)
-            except UnknownOutcomeError as error:
-                retire_as_unknown(
-                    "runtime-image.receipt",
-                    expected_archive_sha256,
-                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
-                    str(error),
-                )
-                return None
+        receipts = self._iter_receipts(expected_archive_sha256)
         for receipt in receipts:
             if receipt.build_input_sha256 != build_input_sha256:
                 continue
@@ -417,7 +404,9 @@ class FilesystemRuntimeImageStorage:
             return receipt
         return None
 
-    def _iter_receipts(self) -> Iterable[RuntimeImageReceipt]:
+    def _iter_receipts(
+        self, archive_sha256: str | None = None
+    ) -> Iterable[RuntimeImageReceipt]:
         """Yield every receipt the current contract can parse.
 
         A scan spans unrelated archives and recipes, so a file this contract
@@ -425,17 +414,24 @@ class FilesystemRuntimeImageStorage:
         warning naming its digest instead of failing every lookup that happens
         to walk past it.  ``read_receipt`` for that exact digest stays strict.
         Temporary read failures defer only their receipt while other verified
-        candidates remain eligible. Unavailable metadata proves no reusable candidate; the requesting owner
-        prepares its exact image through the ordinary bounded worker path.
+        candidates remain eligible. If none match, unresolved read uncertainty
+        reaches the caller for observation and bounded retry, never as a miss
+        that could trigger a needless rebuild or transfer.
         Access refusals remain immediate and are never treated as scan misses.
         """
 
+        deferred: RuntimeImagePreparationUnknown | None = None
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
+            if archive_sha256 is not None and receipt_path.name != (
+                f"{archive_sha256}.receipt.json"
+            ):
+                continue
             try:
                 yield _load_receipt_document(receipt_path)
             except _ReceiptDocumentRejected as rejection:
                 self._discard_rejected_receipt(receipt_path, rejection)
             except RuntimeImagePreparationUnknown as error:
+                deferred = error
                 if self._first_report(receipt_path):
                     _LOGGER.warning(
                         "deferred runtime image receipt %s: %s; %s",
@@ -443,6 +439,8 @@ class FilesystemRuntimeImageStorage:
                         error.code,
                         error.detail,
                     )
+        if deferred is not None:
+            raise deferred
 
     def _discard_rejected_receipt(
         self, receipt_path: Path, rejection: _ReceiptDocumentRejected
