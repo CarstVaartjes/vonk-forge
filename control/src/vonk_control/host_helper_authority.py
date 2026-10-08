@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import AgentProtocolError, canonical_message
+from vonk_agent_protocol import AgentOperation, AgentProtocolError, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.contracts import AgentUpgradePayload
 from vonk_agent_protocol.host_helper import (
@@ -239,7 +239,14 @@ class HostRuntimeAuthorityService:
         ContainerRuntimeAction.RUNTIME_PREFLIGHT: frozenset({"runtime.preflight.v1"}),
         # A registry pull of a pinned runtime image from the Controller's
         # layered image store, as part of distributing it to a Spark.
-        ContainerRuntimeAction.IMAGE_PULL: frozenset({"artifact.distribution.v1"}),
+        ContainerRuntimeAction.IMAGE_PULL: frozenset(
+            {
+                AgentOperation.ARTIFACT_DISTRIBUTION.value,
+                AgentOperation.RECIPE_INSTALL.value,
+                AgentOperation.RECIPE_START.value,
+                AgentOperation.RECIPE_JOB_RUN.value,
+            }
+        ),
         ContainerRuntimeAction.IMAGE_INSPECT: frozenset({"recipe.install"}),
         ContainerRuntimeAction.RUN_INSPECT: frozenset({"recipe.start"}),
         ContainerRuntimeAction.START: frozenset({"recipe.start", "recipe.job.run.v1"}),

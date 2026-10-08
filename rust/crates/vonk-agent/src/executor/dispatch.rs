@@ -11,7 +11,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
         if claim.operation == AgentOperation::ArtifactDistributionV1 {
-            return self.execute_distribution(claim).await;
+            return self
+                .execute_distribution(claim, lease_deadline, cancellation)
+                .await;
         }
         let request = match RecipeOperationRequest::parse(claim) {
             Ok(request) => request,
@@ -29,10 +31,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 self.execute_build(claim, cancellation, request).await
             }
             RecipeOperationRequest::JobRun(request) => {
-                self.execute_job_run(claim, cancellation, request).await
+                self.execute_job_run(claim, lease_deadline, cancellation, request)
+                    .await
             }
             RecipeOperationRequest::Install(request) => {
-                self.execute_install(claim, cancellation, request).await
+                self.execute_install(claim, lease_deadline, cancellation, request)
+                    .await
             }
             RecipeOperationRequest::Reconcile(request) => {
                 self.execute_reconcile(claim, cancellation, request).await

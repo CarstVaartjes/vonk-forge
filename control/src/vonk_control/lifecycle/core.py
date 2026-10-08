@@ -12,10 +12,9 @@ seven rules of the blocker audit (section 5.2), each of which is a test in
    or a retryable failure of irreversible, possibly executed work is observed;
    an established effect succeeds, none retries, unknown is observed again at a
    bounded rate.
-3. **No operator wait without an advertised action.**  ``needs-operator`` is only
-   built by :func:`_park`, which requires an irreversible kind, an effect that is
-   still unknown after the observation budget, and a non-empty
-   ``adapter.actions(row)``.  Otherwise the row keeps observing.
+3. **Unknown effects have a finite observation budget.** The request ends with
+   residue when observation is exhausted. It never blindly replays an
+   irreversible effect and does not retain the queue head for an operator.
 4. **A cancel always completes.**  The request is monotonic.  Work that never ran
    is cancelled at once; other work is stopped (idempotently) and observed until
    stopped, and after ``STOP_BUDGET`` unconfirmed stops it is cancelled anyway
@@ -65,15 +64,13 @@ from .types import (
     Tick,
 )
 
-#: How many observations of an irreversible, unknown effect precede an operator
-#: wait (rule 3).  Idempotent kinds never wait: they are retried (rule 1).
+#: Observations of an irreversible unknown effect before ending with residue.
 OBSERVE_BUDGET = 8
 #: How many stops of a cancelled row are issued before it is cancelled with a
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
 #: to ``STOP_BUDGET`` ticks.
 STOP_BUDGET = 6
-#: Stable jittered backoff, shared with the rest of the Controller.  The rate is
-#: bounded, not the lifetime: work with a current intent is always retried.
+#: Stable jittered backoff and persisted attempt ceiling for owning requests.
 RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
 _RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
@@ -174,6 +171,12 @@ def _retry(
     """Rule 1: schedule the next attempt; never an operator wait."""
 
     count = row.retry_count + 1
+    if count >= RECOVERY.max_failures:
+        # The owning adapter persists retry_count (agent orders derive it from
+        # their durable attempt ordinal). Restart cannot replenish this budget.
+        # Observe once more before ending; uncertain effects remain residue,
+        # never permission to replay or delete a possibly executed workload.
+        return _observe(replace(row, retry_count=count), now, reason)
     return Decision(
         replace(
             row,
@@ -206,46 +209,6 @@ def _observe(row: Lifecycle, now: datetime, reason: str | None) -> Decision:
     )
 
 
-def _park(
-    row: Lifecycle, adapter: KindAdapter, now: datetime, reason: str | None
-) -> Decision:
-    """The only constructor of ``needs-operator`` (rule 3).
-
-    An operator wait needs an irreversible kind, an effect that is still unknown
-    after the observation budget, and an advertised action.  Without one the
-    row keeps observing at a bounded rate.
-    """
-
-    waiting = replace(
-        row,
-        state=State.NEEDS_OPERATOR,
-        next_action_at=None,
-        lease_deadline=None,
-        effect=Effect.UNKNOWN,
-        reason=reason or row.reason,
-    )
-    if (
-        adapter.irreversible(row)
-        and not blind_retry_is_safe(row, adapter)
-        and row.observe_count >= OBSERVE_BUDGET
-        and adapter.actions(waiting)
-    ):
-        return Decision(waiting)
-    count = max(row.observe_count, 1)
-    return Decision(
-        replace(
-            row,
-            state=State.OBSERVING,
-            observe_count=count,
-            next_action_at=_due(row, count, now),
-            lease_deadline=None,
-            effect=Effect.UNKNOWN,
-            reason=reason or row.reason,
-        ),
-        (Observe(),),
-    )
-
-
 def _uncertain(
     row: Lifecycle,
     adapter: KindAdapter,
@@ -269,13 +232,30 @@ def _uncertain(
     return _observe(row, now, reason)
 
 
+def _end_recovery(row: Lifecycle, effect: Effect) -> Decision:
+    why = row.reason or "recovery budget exhausted with the effect unconfirmed"
+    return Decision(
+        replace(
+            row,
+            state=State.FAILED,
+            effect=effect,
+            next_action_at=None,
+            lease_deadline=None,
+            reason=why,
+        ),
+        (RecordResidue(why),) if effect is Effect.UNKNOWN else (),
+    )
+
+
 def _unknown_after_observation(
     row: Lifecycle, adapter: KindAdapter, now: datetime, reason: str | None
 ) -> Decision:
+    if row.retry_count >= RECOVERY.max_failures or row.attempt >= RECOVERY.max_failures:
+        return _end_recovery(row, Effect.UNKNOWN)
     if not adapter.irreversible(row) or blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=reason)
     if row.observe_count >= OBSERVE_BUDGET:
-        return _park(row, adapter, now, reason)
+        return _end_recovery(row, Effect.UNKNOWN)
     return Decision(
         replace(
             row,
@@ -487,6 +467,11 @@ def _observed(
                 )
             )
         case Effect.NONE | Effect.STOPPED:
+            if (
+                row.retry_count >= RECOVERY.max_failures
+                or row.attempt >= RECOVERY.max_failures
+            ):
+                return _end_recovery(row, event.effect)
             return _retry(row, now, adapter, effect=Effect.NONE, reason=event.reason)
         case _:
             return _unknown_after_observation(row, adapter, now, event.reason)
@@ -582,6 +567,6 @@ def _reevaluate_parked(row: Lifecycle, adapter: KindAdapter, now: datetime) -> D
         return _retry(row, now, adapter, effect=Effect.NONE, reason=row.reason)
     if blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=row.reason)
-    if not adapter.actions(row):
-        return _observe(replace(row, observe_count=0), now, row.reason)
-    return Decision(replace(row, next_action_at=None))
+    if row.observe_count >= OBSERVE_BUDGET:
+        return _end_recovery(row, Effect.UNKNOWN)
+    return _observe(row, now, row.reason)

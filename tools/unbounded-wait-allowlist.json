@@ -1029,14 +1029,6 @@
       "justification": "Progress observation is owned by the byte-bounded image upload with its one-hour HTTP deadline; sender closure drains the snapshot and a heartbeat-sized join timeout aborts the reporter."
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor/distribution.rs",
-      "function": "execute_distribution",
-      "kind": "rust-loop-without-deadline",
-      "count": 1,
-      "reason": "resource-bound",
-      "justification": "Progress observation is owned by the bounded object transfer and three-attempt retry; sender closure drains the snapshot and a heartbeat-sized join timeout aborts the reporter."
-    },
-    {
       "path": "rust/crates/vonk-agent/src/executor/start.rs",
       "function": "execute_start",
       "kind": "rust-loop-without-deadline",

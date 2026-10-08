@@ -29,32 +29,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         if spec.validate().is_err() {
             return failed("compiled execution plan is invalid");
         }
-        if *cancellation.borrow() {
-            return cancelled("controller cancelled before installation preparation");
-        }
-        if self
-            .prepare_installation(
-                claim,
-                &spec,
-                &installation_id,
-                spec.artifacts
-                    .iter()
-                    .map(|artifact| artifact.size_bytes)
-                    .sum(),
-                &cancellation,
-            )
-            .await
-            .is_err()
-        {
-            return temporary_runtime_observation_failure();
-        }
-        if !self
-            .runtime
-            .load_spec(&installation_id)
-            .is_ok_and(|installed| same_installed_workload(&installed, &spec))
-        {
-            return temporary_runtime_observation_failure();
-        }
         let Some(endpoint) = spec.endpoint.as_ref() else {
             return failed("installed recipe is not a persistent service");
         };
@@ -63,6 +37,28 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         else {
             return failed("start plan has no serving address");
         };
+        if *cancellation.borrow() {
+            return cancelled("controller cancelled before installation preparation");
+        }
+        if let Err(result) = self
+            .prepare_installation(
+                claim,
+                &spec,
+                &installation_id,
+                &lease_deadline,
+                &cancellation,
+            )
+            .await
+        {
+            return result;
+        }
+        if !self
+            .runtime
+            .load_spec(&installation_id)
+            .is_ok_and(|installed| same_installed_workload(&installed, &spec))
+        {
+            return temporary_runtime_observation_failure();
+        }
         let placement = spec.runtime.placement.clone();
         let run_id = request.run_id.to_string();
         let inspection_identity = Some(RecipeRunStartIdentity {
@@ -140,9 +136,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             ) {
                 Ok(plan) => plan,
                 Err(_) => {
-                    return failed(
-                        "retained workload identity does not match collective readiness",
-                    );
+                    return temporary_runtime_observation_failure();
                 }
             }
         } else {
@@ -185,7 +179,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             {
                 Ok(transition) => Some(transition),
                 Err(_) => {
-                    return failed("installed model custody changed before runtime start");
+                    return temporary_runtime_observation_failure();
                 }
             }
         };
@@ -234,7 +228,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             {
                 Ok(transition) => Some(transition),
                 Err(_) => {
-                    return failed("installed model custody changed before resumed runtime start");
+                    return temporary_runtime_observation_failure();
                 }
             };
             runtime_result = run_until_cancelled(
@@ -333,13 +327,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 .await
                 .is_err()
         {
-            if let Err(uncertain) = self
-                .stop_start_run(claim, &run_id, spec.lifecycle.stop_timeout_seconds, false)
-                .await
-            {
-                return uncertain;
-            }
-            return failed("installed model custody changed during runtime start");
+            // An ACL/receipt observation gap is not evidence that this exact
+            // running workload must be stopped. Reobserve the retained run.
+            return temporary_runtime_observation_failure();
         }
         if *cancellation.borrow() {
             return self

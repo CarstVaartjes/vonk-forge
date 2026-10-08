@@ -172,9 +172,33 @@ pub(super) fn valid_oci_digest(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(valid_sha256)
 }
 
-async fn isolate_managed_entry(path: &Path) -> Result<(), ClientError> {
+pub(super) async fn isolate_managed_entry(path: &Path) -> Result<(), ClientError> {
     let isolated = path.with_extension(format!("{}.damaged", uuid::Uuid::new_v4()));
     tokio::fs::rename(path, isolated)
+        .await
+        .map_err(|_| ClientError::Retryable)?;
+    sync_parent(path.parent().ok_or(ClientError::Retryable)?).await
+}
+
+/// Rebuild a managed directory without following a damaged projection.
+pub(super) async fn ensure_managed_directory(path: &Path) -> Result<(), ClientError> {
+    match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata)
+            if metadata.is_dir()
+                && !metadata.file_type().is_symlink()
+                && metadata.uid() == rustix::process::geteuid().as_raw()
+                && metadata.mode() & 0o022 == 0 =>
+        {
+            return Ok(());
+        }
+        Ok(_) => isolate_managed_entry(path).await?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(ClientError::Retryable),
+    }
+    tokio::fs::create_dir(path)
+        .await
+        .map_err(|_| ClientError::Retryable)?;
+    tokio::fs::set_permissions(path, fs::Permissions::from_mode(0o700))
         .await
         .map_err(|_| ClientError::Retryable)?;
     sync_parent(path.parent().ok_or(ClientError::Retryable)?).await

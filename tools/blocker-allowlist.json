@@ -1377,7 +1377,7 @@
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/claim.py": {
-      "_claim_once": "0ac3add66b4acebca88e002d37e48d6996c576b04a2d6e0ace6830713cfd3a7b",
+      "_claim_once": "e02063b2750a076c494c69431cf0ff90c4d76387e5f436ff9c2a4286b9cdb89b",
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/claim_authority.py": {
@@ -1407,7 +1407,7 @@
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/completion.py": {
-      "_report_event": "69e8993ac93f03fc9bd60c2f050f74975e7d8ac2ca99cb0907fa56e1e5c0e124"
+      "_report_event": "9ef3ca1e3c76564ce43aeb8a54893b0ce2e056dc8242ae7886b028e07812a5d5"
     },
     "control/src/vonk_control/agent_jobs/contracts.py": {
       "SupersededAgentEffect": "9e74d6e33e55d56cf72dc29523d1832a16056631b3b9c132c6e1d182caa9a426",
@@ -1434,7 +1434,7 @@
       "_profile_stop_covers_jobrun_mutations": "24e36a4701706d42756b6c9d296838eee103a4a08a7ce1fd772d9f8f814e8710"
     },
     "control/src/vonk_control/agent_jobs/heartbeat.py": {
-      "heartbeat": "2e772b8a6c5d616bc9d381a3a0dc94dad79c39a409e8f0aa899ce3e594d854b7",
+      "heartbeat": "3c36e8dbaeb9a249852799f40a1e5b1134bf1b7544812309fdedafc81c0a94bf",
       "known_superseded_cancellation": "33960eb99b9a6347620fbabfafe67df778829f6b40659c78aac8a675643e6aaa",
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
@@ -1516,13 +1516,13 @@
     },
     "control/src/vonk_control/agent_jobs/retry.py": {
       "superseded_cancellation_deadline": "653d62cb565f186b4b7d129058f72b9cd456f3b7f013436c753ae75b675a760b",
-      "_safe_retry_failure": "edc49da0cea37ffd7f218e5455c4278c0be0b526e3f512e1d92644868a553709",
+      "_safe_retry_failure": "69761186f4c7df851f9d545dfd0ead0ee9f63f44538303fd58042e9117846a0b",
       "_retry_authorized_for_current_attempt": "22376fb3cd3995cbc7016935d30f0019cbbf2d982dd2042686e873249126a94d",
       "_retry_not_authorized_for_current_attempt": "f3925ea30a630727977c089ce212783ffe9828974f5916ea7731f57309fed0fb",
       "_parked_retry_evidence": "46f318c8f943f2341d1d9aaba06b1a63d6e96eae0c9451b29ba2d5213e8e1062",
       "_abandon_operation": "e08c487f0af6dde533893100d87e4e8f6833d032bcd5c06e9e361acb5c147372",
       "abandon_idempotent_job_in_session": "cf652c2310e3c630ef990ad90fb241d2179645563ddb4a9b49152ba99ce1bc9f",
-      "_renew_distribution_grant": "7207e80b66dbe6bc980f67cf981bc1fda1d9de6a5c5a4a78dabb681c45ddd9c3",
+      "_renew_distribution_grant": "9a22a7f6c85214616e6f29f2c27a279ee0671b1a53c8e3e0b6e414431037f8a8",
       "schedule_agent_upgrade_retry": "7ba49bbc7bafb5b31088df62201ae6f8b46d1eff900f5e1fe747c0e134f33bb1",
       "agent_upgrade_in_flight": "ba4fab955036fd6c5e20cdd5ab4395a78d64f313c9ecbf993402eb1ac6786699",
       "other_agent_upgrade_in_flight": "b5733129567174821102baf95d06a0f6a7695e33eb8f8e52c2453e25568366a4"
@@ -2363,13 +2363,14 @@
       "_may_replace": "95d947960468027caef976809148e74419ebc3b35d71c21f6ddfb558711faf71",
       "_may_replace.grant": "112211900deb895b4a305ee7183eedb33223d74e39205d736e20305d534ab69c",
       "_still_stored": "410dc4a0a2535d4a7f8e9534b847ce6f61ab6a354eb8b5d5bcf27a95aee7c99f",
-      "DistributionService": "2f56f0978ce947185e3a4beb4a23bf98daf490e83625b9d07699fef6585cb708",
+      "DistributionService": "1a40ab6b795714a87dd99bc76bf4981abacec5c8cd555f2504a58becd7148bf7",
       "DistributionService.__init__": "8896ae50844172f1de6745dddf2108a6855fdd9417eaf4e44c5549a130599dd9",
       "DistributionService.attach_sessions": "ce7416c53ea1b730694d0026a652eca7b8afb551dc9740f1d1ff0dd16af0523b",
       "DistributionService.register": "42781085f4bbce824115e0be82e8d0c94dc2137042e3c7872e6145723e829149",
       "DistributionService._register_row": "cf29bb549deed58623b996d7ab0cf06eded4c65fd16dba18775617660615744e",
       "DistributionService._from_row": "82876d0778eabb9510e565cfe60616bb8ddd39d385056f107105a440e30faa45",
       "DistributionService.revoke": "3f7810ef9d529c98ee8f005ff712e61bd0a210e281c98177e8f4673067a41976",
+      "DistributionService.prepare_request_delivery": "1ebdde83fe42be71e837ac1664c6148c84aea00647c7a0ca699ea47fe7773459",
       "DistributionService.authorize": "73538bd0b15b782ef8aa005d99b4f13b68b3689b5b4cce819c13b646e4480f43",
       "DistributionService._authorize_uncached": "a47b6c307cea275c4a6ebbfd28ec912fda60dbc629402ab56eef91eabde1f430",
       "DistributionService.locate_object": "b4d473a2a0cb304610529a018010a4e72fde24039541f2ff1f7d2c3bc820e983",
@@ -2377,7 +2378,7 @@
       "record_distributed_runtime_image": "cd13be509addbbc48fb3a6ae09f0b2681f1e8ef318ae344818ed037d1f443552",
       "build_distribution_service": "90d71fa5561622844c14f716149298ade8a3dd91eb26ce66e64ddd667684da07",
       "build_distribution_service_from_components": "cfe34867778564e9f3aa745892abd7d0cadd3713b5474b0a6617d4d6e4e5f5f7",
-      "<module>": "f2a084030b92bc396ab446c275b3d528dcb87f06b53b14fbcc6e159ef43a4877"
+      "<module>": "dc17ea64bbe9ccb4f293b72a60e693537cbc3b01f9487c9171818711dfdefef6"
     },
     "control/src/vonk_control/distribution_executor/preparation.py": {
       "CompositeDistributionPhaseExecutor": "4d2bbdb3158ae64621d41874bb509c4b538081425decbdf30b3a22668edc3d96",
@@ -3060,14 +3061,14 @@
       "HostHelperGrantIssuer.public_key_document": "c34da7b5326eec57dd444474d84a1b877326cec592f35da7ee3e43adf4a91277",
       "HostHelperGrantIssuer.issue_grant": "f0e056d3127fcb6fa99242ba83ab6fbcb15ee8fc0ce7a7cfb26976ee8efd750c",
       "HostHelperGrantIssuer._now": "def9f87bcb6da9aa97c69682f6a11afb8a08003dd971a5efa120621e8d9619e5",
-      "HostRuntimeAuthorityService": "cb3033b96b3c43006c399ba129b604bc30ed9ecb9cb920fb987d17b57583e330",
+      "HostRuntimeAuthorityService": "7bcdbc9d5936e198e02e2d96721b0efd6ac9bf6d242a2147ab2d09418eec2f6f",
       "HostRuntimeAuthorityService.__init__": "951f4c08916ae8eb95016b227fc1edf160f6bf37765cf6d2df38fe7761eee218",
       "HostRuntimeAuthorityService.public_key_document": "6c3afecc4098963918d41a2e7790bb4dc4f0ebdc890a99ec4e0ae615637888bb",
       "HostRuntimeAuthorityService.issue_grant": "ad2a9a22d769097ab415b49d5b145d92f5e8376731bf04b4a3be1e21de8ff3f2",
       "HostRuntimeAuthorityService.issue_agent_upgrade_grant": "895daa59e90d82300446abafc8e0c5d00514a65bb1f960f4254ab721115c6486",
       "HostRuntimeAuthorityService.issue_package_activation_grant": "698e4c3994a2cd14948ddb40bf011b603aa3dcd48a8186b5fea0484baaf319b9",
       "HostRuntimeAuthorityService._check_attempt": "2d197ddc02e6c433367f63be3af1027ea80c57003478a9c7042358801243eb9f",
-      "<module>": "f82c515f5eae4a0e32c41b283bdc5cbc754d6c3acc37233addbf0f8bed47d9a4"
+      "<module>": "1bb8a936af2f3edcd50620e0277c42bdaaf9a29202b4b0ac80f176ca560cc196"
     },
     "control/src/vonk_control/host_runtime_plan_authority.py": {
       "RuntimePlanAuthorityError": "48deb54a3dfecc3796ffe0262e8aba4308992fe079929f5a1146a81b98543e98",
@@ -9371,7 +9372,8 @@
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "ModelCacheObjectSource._open_cache_object", "distribution.object_unavailable", 3],
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.open_object", "distribution.model_set_identity_unavailable", 1],
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.register", "distribution.model_set_identity_unavailable", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.register", "distribution.runtime_image_mismatch", 1]
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.register", "distribution.runtime_image_mismatch", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.prepare_request_delivery", "distribution.model_set_identity_unavailable", 2]
       ]
     },
     {

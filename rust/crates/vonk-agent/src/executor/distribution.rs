@@ -3,7 +3,12 @@
 use super::*;
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
-    pub(super) async fn execute_distribution(&self, claim: &AgentClaim) -> ExecutionResult {
+    pub(super) async fn execute_distribution(
+        &self,
+        claim: &AgentClaim,
+        lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        cancellation: tokio::sync::watch::Receiver<bool>,
+    ) -> ExecutionResult {
         if claim.validate().is_err() {
             return failed("artifact distribution claim is invalid");
         }
@@ -12,143 +17,137 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         else {
             return failed("artifact distribution request is invalid");
         };
-        if request.validate().is_err() {
-            return failed("artifact distribution plan identity is invalid");
-        }
         self.report_phase(claim, ProgressPhase::Preparing).await;
-        let deadline = tokio::time::Instant::now() + remaining_lease(claim.deadline);
-        let (cancel_sender, mut cancellation) = tokio::sync::watch::channel(false);
-        let destination = self.runtime.data_root.join("distribution");
-        let (progress_sender, mut progress_receiver) =
-            tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
-        let progress_client = self.client.clone();
-        let progress_claim = claim.clone();
-        let mut progress_task = tokio::spawn(async move {
-            // Progress is a snapshot, not an event log. Coalesce fast
-            // transfer updates instead of accumulating an unbounded queue
-            // of heartbeat requests before image import can begin.
-            let mut completed_bytes = 0_u64;
-            let mut completed_items = 0_u64;
-            let mut cadence = tokio::time::interval(Duration::from_secs(1));
-            cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            while progress_receiver.changed().await.is_ok() {
-                cadence.tick().await;
-                let Some(item) = progress_receiver.borrow_and_update().clone() else {
-                    continue;
-                };
-                // Retries rescan durable objects from the beginning. Keep the
-                // operation-wide high-water mark while those objects replay.
-                progress_client.set_progress_phase(progress_claim.fence, item.phase);
-                completed_bytes = completed_bytes.max(item.bytes);
-                completed_items = completed_items.max(item.completed_items);
-                let progress = AgentProgress {
-                    fence: progress_claim.fence,
-                    progress: Some(OperationProgress {
-                        completed_items: Some(completed_items.into()),
-                        total_items: Some(item.total_items.into()),
-                        object_sha256: Some(item.object_sha256),
-                        kind: Some(item.kind),
-                        completed_bytes: completed_bytes.into(),
-                        total_bytes: item.total_bytes.map(Into::into),
-                        total_bytes_known: item.total_bytes.is_some(),
-                        ..phase_progress(item.phase)
-                    }),
-                };
-                if let Ok(directive) = progress_client.heartbeat(&progress).await
-                    && directive.cancel_requested
-                {
-                    cancel_sender.send_replace(true);
-                    break;
-                }
+        let manifest = run_with_authority(
+            self.client.distribution_manifest(&request.plan_digest),
+            lease_deadline.clone(),
+            cancellation.clone(),
+            Duration::from_secs(75),
+        )
+        .await;
+        let assignment = match manifest {
+            Some(Ok(value)) => value,
+            Some(Err(error)) => return distribution_failure_result(&error),
+            None if *cancellation.borrow() => {
+                return cancelled("controller cancelled distribution");
             }
-        });
-        let download = run_until_cancelled(
-            tokio::time::timeout_at(deadline, async {
-                let mut result = None;
+            None => return temporary_runtime_observation_failure(),
+        };
+        // Bytes bound transfer time independently of the renewable lease. The
+        // Controller also caps redispatch using the durable attempt count.
+        let bytes = assignment
+            .objects
+            .iter()
+            .map(|object| object.bytes)
+            .sum::<u64>();
+        let budget = Duration::from_secs(75 + bytes.div_ceil(1024 * 1024));
+        let destination = self.runtime.data_root.join("distribution");
+        let download = run_with_authority(
+            async {
                 for attempt in 0..3_u32 {
-                    let progress_sender = progress_sender.clone();
                     let current = self
                         .client
                         .download_distribution_with_progress(
                             &request.plan_digest,
                             &destination,
-                            move |item| {
-                                progress_sender.send_replace(Some(item));
+                            |item| {
+                                self.client.set_progress_phase(claim.fence, item.phase);
+                                self.client.set_progress_bytes(
+                                    claim.fence,
+                                    item.bytes,
+                                    item.total_bytes.unwrap_or(bytes),
+                                );
                             },
                         )
                         .await;
                     match current {
-                        Ok(value) => {
-                            result = Some(Ok(value));
-                            break;
-                        }
-                        Err(error)
+                        Err(ref error)
                             if error.retryable()
                                 && error.retry_after_seconds().is_none()
                                 && attempt < 2 =>
                         {
-                            tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64))
+                            tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt + 1)))
                                 .await;
                         }
-                        Err(error) => {
-                            result = Some(Err(error));
-                            break;
-                        }
+                        result => return result,
                     }
                 }
-                result.expect("bounded distribution retry always records a result")
-            }),
-            &mut cancellation,
+                unreachable!("the final bounded transfer attempt returns")
+            },
+            lease_deadline.clone(),
+            cancellation.clone(),
+            budget,
         )
         .await;
-        // The reporter exits only when every sender is dropped. Keep it
-        // alive through retries, then close it before waiting; otherwise
-        // a finished transfer can wait forever before pulling its image.
-        drop(progress_sender);
-        if tokio::time::timeout(
-            crate::client::HEARTBEAT_REQUEST_TIMEOUT + Duration::from_secs(1),
-            &mut progress_task,
-        )
-        .await
-        .is_err()
-        {
-            progress_task.abort();
-        }
-        match download {
-            None => cancelled("controller cancelled during distribution"),
-            Some(Err(_)) => temporary_runtime_observation_failure(),
-            Some(Ok(Ok(evidence))) => {
-                // Models are in place; the runtime image comes from the
-                // Controller's layered store, pulling only missing layers.
-                let pulled = tokio::time::timeout_at(
-                    deadline,
-                    self.pull_runtime_image(
-                        claim,
-                        &evidence.oci_image_digest,
-                        &evidence.oci_image_config_digest,
-                    ),
-                )
-                .await;
-                let pulled = match pulled {
-                    Ok(value) => value,
-                    Err(_) => return temporary_runtime_observation_failure(),
-                };
-                if let Err(error) = pulled {
-                    // HostRuntimeError exposes only bounded, stable
-                    // categories, never helper stderr or credentials.
-                    return ExecutionResult::Failed(
-                        Failure::new(format!("runtime image could not be pulled: {error}"))
-                            .helper(runtime_helper_code(&error), None),
-                    );
-                }
-                distribution_success(evidence)
+        let evidence = match download {
+            Some(Ok(value)) => value,
+            Some(Err(ClientError::CredentialRead(_))) => {
+                return temporary_runtime_observation_failure();
             }
-            // A local read/write failure leaves only an observation gap;
-            // range replay must start from the next attempt's durable length.
-            Some(Ok(Err(ClientError::CredentialRead(_)))) => {
+            Some(Err(error)) => return distribution_failure_result(&error),
+            None if *cancellation.borrow() => {
+                return cancelled("controller cancelled during distribution");
+            }
+            None => return temporary_runtime_observation_failure(),
+        };
+        // Docker pulls are content-addressed and idempotent: reissuing the exact
+        // digest reconciles interrupted pulls and reuses already imported layers.
+        let pulled = run_with_authority(
+            self.pull_runtime_image(
+                claim,
+                &evidence.oci_image_digest,
+                &evidence.oci_image_config_digest,
+            ),
+            lease_deadline,
+            cancellation.clone(),
+            Duration::from_secs(3 * 60 * 60),
+        )
+        .await;
+        match pulled {
+            Some(Ok(())) => distribution_success(evidence),
+            Some(Err(error)) if temporary_observation_error(&error) => {
                 temporary_runtime_observation_failure()
             }
-            Some(Ok(Err(error))) => distribution_failure_result(&error),
+            Some(Err(error)) => runtime_failure("runtime image pull was denied", &error),
+            None if *cancellation.borrow() => cancelled("controller cancelled during image pull"),
+            None => temporary_runtime_observation_failure(),
         }
     }
 }
+
+/// Observe the same renewing authority through silent network and helper work.
+/// Losing either receiver ends this attempt; dropping the future retains exact
+/// partial content for the next bounded, fenced attempt.
+pub(super) async fn run_with_authority<T, F>(
+    operation: F,
+    mut lease: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+    mut cancellation: tokio::sync::watch::Receiver<bool>,
+    budget: Duration,
+) -> Option<T>
+where
+    F: Future<Output = T>,
+{
+    let deadline = tokio::time::Instant::now() + budget;
+    tokio::pin!(operation);
+    loop {
+        if *cancellation.borrow() || remaining_lease(*lease.borrow()).is_zero() {
+            return None;
+        }
+        let lease_remaining = remaining_lease(*lease.borrow());
+        tokio::select! {
+            biased;
+            () = wait_for_cancellation(&mut cancellation) => return None,
+            changed = lease.changed() => {
+                if changed.is_err() { return None; }
+            }
+            _ = tokio::time::sleep_until(deadline) => return None,
+            _ = tokio::time::sleep(lease_remaining) => {
+                if remaining_lease(*lease.borrow()).is_zero() { return None; }
+            }
+            result = &mut operation => return Some(result),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

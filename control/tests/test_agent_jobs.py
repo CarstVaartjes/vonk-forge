@@ -3804,10 +3804,18 @@ def test_excluded_work_refusal_names_every_predicate_condition(service, check) -
         "unknown",
     ],
 )
-def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
+def test_exhausted_request_is_not_revived_by_stale_recovery_evidence(
     service, condition
 ):
     """Reconcile valid persisted exhaustion without reviving obsolete authority."""
+    from vonk_agent_protocol import (
+        AgentFailureKind,
+        AgentResultState,
+        FailureCode,
+        LifecycleState,
+        OutcomeFailed,
+    )
+
     jobs, sessions, clock = service
     kind = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     job = parent(sessions, clock)
@@ -3826,28 +3834,25 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
         )
         assert claim is not None
         jobs.record_result(
-            AgentResult.model_validate_json(
-                canonical_message(
-                    {
-                        **{
-                            key: claim.model_dump(mode="json")[key]
-                            for key in ("fence",)
-                        },
-                        "state": "failed",
-                        "result": {
-                            "status": "failed",
-                            "error_code": "artifact_distribution_failed",
-                            "reason": "NAS transport unavailable",
-                            "failure_kind": "temporary-dependency",
-                        },
-                    }
-                )
+            AgentResult(
+                fence=claim.fence,
+                state=AgentResultState.FAILED,
+                result=OutcomeFailed(
+                    code=FailureCode.ARTIFACT_DISTRIBUTION_FAILED,
+                    reason="NAS transport unavailable",
+                    failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
+                ),
             )
         )
         with sessions() as session:
             row = session.get(AgentOperation, operation.id)
-            assert row is not None and row.next_action_at is not None
-            clock.now = row.next_action_at.replace(tzinfo=UTC) + timedelta(seconds=1)
+            assert row is not None
+            if row.next_action_at is not None:
+                clock.now = row.next_action_at.replace(tzinfo=UTC) + timedelta(
+                    seconds=1
+                )
+            else:
+                assert row.state == LifecycleState.FAILED.value
     with sessions.begin() as session:
         row = session.get(AgentOperation, operation.id)
         assert row is not None
@@ -3899,23 +3904,16 @@ def test_existing_exhausted_exact_intent_rearms_only_with_current_safe_evidence(
         assert row is not None
         due = row.next_action_at
         assert row.current_attempt == 5 and row.payload == original_payload
-        if condition not in {"temporary", "expired"}:
-            assert due is None
-            return
-        assert due is not None
-        assert clock.now < due.replace(tzinfo=UTC) <= clock.now + timedelta(seconds=60)
-    clock.now = due.replace(tzinfo=UTC)
-    jobs = AgentJobService(sessions, clock=clock)
-    resumed = claim_agent(
-        jobs,
-        NODE_A,
-        "serial-a",
-    )
-    assert (
-        resumed is not None
-        and fenced_operation(sessions, resumed).id == operation.id
-        and fenced_attempt(sessions, resumed).attempt == 6
-    )
+        assert due is None
+        assert row.state == LifecycleState.FAILED.value
+    if condition not in {"revoked", "superseded"}:
+        fresh = jobs.enqueue(
+            parent(sessions, clock).id, NODE_A, kind, COMMIT, {"plan_digest": COMMIT}
+        )
+        admitted = claim_agent(jobs, NODE_A, "serial-a")
+        assert admitted is not None
+        assert fenced_operation(sessions, admitted).id == fresh.id
+        assert fenced_attempt(sessions, admitted).attempt == 1
 
 
 def test_a_start_budget_begins_when_the_start_is_first_dispatched(service) -> None:

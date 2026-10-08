@@ -90,17 +90,17 @@ pub(super) fn materialize_compiled_models_controlled(
     plan.validate()?;
     let installation = managed_path(data_root, "installations", installation_id)?;
     let destination_root = installation.join("models");
-    fs::create_dir_all(&installation)?;
-    fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))?;
-    fs::create_dir_all(&destination_root)?;
-    fs::set_permissions(&destination_root, fs::Permissions::from_mode(0o700))?;
+    repair_managed_model_directory(&installation)?;
+    repair_managed_model_directory(&destination_root)?;
 
     let model_root = data_root.join("distribution").join("models");
     let model_metadata = fs::symlink_metadata(&model_root)?;
     if model_metadata.file_type().is_symlink() || !model_metadata.is_dir() {
         return Err(OciError::Artifact);
     }
-    let receipt_index = read_installation_metadata(&installation)?
+    let receipt_index = read_installation_metadata(&installation)
+        .ok()
+        .flatten()
         .filter(|receipt| receipt_matches_plan(receipt, plan))
         .map(|receipt| {
             receipt
@@ -147,8 +147,16 @@ pub(super) fn materialize_compiled_models_controlled(
             return Err(OciError::Artifact);
         }
         let parent = destination.parent().ok_or(OciError::Artifact)?;
-        fs::create_dir_all(parent)?;
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        let mut directory = destination_root.clone();
+        for component in parent
+            .strip_prefix(&destination_root)
+            .map_err(|_| OciError::Artifact)?
+            .components()
+        {
+            check_materialization_cancelled(cancelled)?;
+            directory.push(component.as_os_str());
+            repair_managed_model_directory(&directory)?;
+        }
         let source = model_root.join(&artifact.sha256);
         if !source.starts_with(&model_root) {
             return Err(OciError::Artifact);
@@ -156,7 +164,13 @@ pub(super) fn materialize_compiled_models_controlled(
         let shared = shared_store_inode(data_root, &artifact.sha256);
         if let Ok(metadata) = fs::symlink_metadata(&destination) {
             if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(OciError::Artifact);
+                // Retire only the exact managed name, without touching targets
+                // or traversing an unmatched directory. The source is refetched
+                // under the current assignment before materialization.
+                fs::rename(
+                    &destination,
+                    destination.with_extension(format!("{}.damaged", uuid::Uuid::new_v4())),
+                )?;
             }
             let reusable = receipt_index.as_ref().and_then(|index| {
                 index
@@ -167,12 +181,13 @@ pub(super) fn materialize_compiled_models_controlled(
             // the one trusted inode, and nothing is left to place.
             let already_shared = shared == Some((metadata.dev(), metadata.ino()));
             if reusable.is_some() || already_shared {
-                let (_, opened_metadata) =
-                    open_trusted_model_file(&destination, artifact.size_bytes, shared)?;
-                if already_shared
-                    || reusable
-                        .is_some_and(|entry| metadata_matches_receipt(&opened_metadata, entry))
+                if let Ok((_, opened_metadata)) =
+                    open_trusted_model_file(&destination, artifact.size_bytes, shared)
+                    && (already_shared
+                        || reusable
+                            .is_some_and(|entry| metadata_matches_receipt(&opened_metadata, entry)))
                 {
+                    check_materialization_cancelled(cancelled)?;
                     physical_by_path.insert(physical_key, (destination.clone(), physical));
                     materialized.push(destination);
                     done_bytes += artifact.size_bytes;
@@ -212,6 +227,7 @@ pub(super) fn materialize_compiled_models_controlled(
             if linked.dev() != source_metadata.dev() || linked.ino() != source_metadata.ino() {
                 return Err(OciError::Artifact);
             }
+            check_materialization_cancelled(cancelled)?;
             fs::rename(&temporary, &destination)?;
             temporary_guard.retain();
             sync_parent(parent)?;
@@ -270,6 +286,7 @@ pub(super) fn materialize_compiled_models_controlled(
             return Err(OciError::Artifact);
         }
         drop(output);
+        check_materialization_cancelled(cancelled)?;
         fs::rename(&temporary, &destination)?;
         temporary_guard.retain();
         sync_parent(parent)?;
@@ -291,9 +308,35 @@ pub(super) fn materialize_compiled_models_controlled(
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod recovery_tests;
+
 fn check_materialization_cancelled(cancelled: &dyn Fn() -> bool) -> Result<(), OciError> {
     if cancelled() {
         return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
     }
+    Ok(())
+}
+
+/// Reconstruct only a managed projection name; never follow a stored symlink.
+fn repair_managed_model_directory(path: &Path) -> Result<(), OciError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if metadata.is_dir()
+                && !metadata.file_type().is_symlink()
+                && metadata.uid() == rustix::process::geteuid().as_raw() =>
+        {
+            return Ok(());
+        }
+        Ok(_) => fs::rename(
+            path,
+            path.with_extension(format!("{}.damaged", uuid::Uuid::new_v4())),
+        )?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    fs::create_dir_all(path)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    sync_parent(path.parent().ok_or(OciError::Artifact)?)?;
     Ok(())
 }

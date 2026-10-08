@@ -154,8 +154,9 @@ pub(super) fn host_runtime_evidence(
 pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
     use crate::host_runtime::HostRuntimeError;
     match error {
-        HostRuntimeError::Io(error) => error.kind() != std::io::ErrorKind::PermissionDenied,
-        HostRuntimeError::Controller(ClientError::Protocol) => false,
+        HostRuntimeError::Io(_) => true,
+        HostRuntimeError::Controller(ClientError::Identity | ClientError::Pin) => false,
+        HostRuntimeError::Controller(ClientError::Protocol) => true,
         HostRuntimeError::Controller(ClientError::Controller(error))
             if matches!(error.status, 401 | 403) =>
         {
@@ -167,10 +168,25 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
                 code,
                 HelperErrorCode::OperationIo
                     | HelperErrorCode::InstallationReconciliationStorageUnavailable
+                    | HelperErrorCode::InstallationReconciliationBusy
+                    | HelperErrorCode::RuntimeImageLoadFailed
+                    | HelperErrorCode::RuntimeImageInspectFailed
+                    | HelperErrorCode::RuntimeImageReceiptFailed
+                    | HelperErrorCode::ConcurrencyLimit
             )
         }
-        HostRuntimeError::HelperProtocol(_) => false,
-        HostRuntimeError::HelperProtocolBound { .. } => false,
+        HostRuntimeError::HelperProtocol(cause)
+        | HostRuntimeError::HelperProtocolBound { cause, .. } => matches!(
+            cause,
+            crate::host_runtime::HelperProtocolCause::HelperCallJoin
+                | crate::host_runtime::HelperProtocolCause::MessageFraming
+                | crate::host_runtime::HelperProtocolCause::ResponseUnbound
+                | crate::host_runtime::HelperProtocolCause::RejectionMalformed
+                | crate::host_runtime::HelperProtocolCause::OutcomeMalformed
+                | crate::host_runtime::HelperProtocolCause::InspectionOutcome
+                | crate::host_runtime::HelperProtocolCause::RequestStorage
+                | crate::host_runtime::HelperProtocolCause::SystemClock
+        ),
         HostRuntimeError::StopUncertain => false,
     }
 }
@@ -409,9 +425,15 @@ pub(super) fn runtime_failure(
 
 pub(super) fn runtime_preparation_failure(error: &OciError) -> ExecutionResult {
     let (stage, category) = error.safe_start_context();
-    failed_owned(format!(
-        "container runtime could not prepare the workload (stage={stage}; category={category})"
-    ))
+    ExecutionResult::Failed(
+        Failure::new(format!(
+            "container runtime could not prepare the workload (stage={stage}; category={category})"
+        ))
+        .code(FailureCode::RuntimeObservationUnavailable)
+        .kind(AgentFailureKind::TemporaryDependency)
+        .retry_after(Some(5))
+        .stage(stage),
+    )
 }
 
 #[cfg(test)]

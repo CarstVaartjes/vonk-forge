@@ -22,8 +22,7 @@ use crate::{
     agent_upgrade::AgentUpgradeExecutor,
     client::{
         AgentHttpClient, ClientError, ControllerError, DistributionDownloadEvidence,
-        DistributionProgress, ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN,
-        RecipeRunDisposition,
+        ExactRecipeRunObservation, HEARTBEAT_LEASE_MARGIN, RecipeRunDisposition,
     },
     health::{wait_ready, wait_ready_until},
     host_runtime::{

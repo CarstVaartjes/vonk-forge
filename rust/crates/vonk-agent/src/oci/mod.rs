@@ -21,7 +21,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::generated::FailureStage;
@@ -219,19 +218,6 @@ pub struct InstallationAclTransition {
     files: Vec<(PathBuf, File, fs::Metadata)>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RuntimePolicy {
-    runtime_interface: String,
-    architecture: String,
-    required_image_label: RuntimePolicyLabel,
-}
-
-#[derive(Debug, Deserialize)]
-struct RuntimePolicyLabel {
-    name: String,
-    value: String,
-}
-
 pub struct RuntimeStartPlan {
     pub image_digest: String,
     pub registry_index_digest: String,
@@ -259,13 +245,6 @@ pub fn start_arguments_for_paths(
     run_id: &str,
 ) -> Result<Vec<String>, OciError> {
     projected_start_arguments_for_paths(spec, paths, run_id).map_err(|_| OciError::Runtime)
-}
-
-fn runtime_policy() -> Result<RuntimePolicy, OciError> {
-    serde_json::from_str(include_str!(
-        "../../../../../schemas/global/container-runtime-policy-v1.json"
-    ))
-    .map_err(OciError::Json)
 }
 
 use materialization::*;

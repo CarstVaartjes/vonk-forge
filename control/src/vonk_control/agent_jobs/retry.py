@@ -11,8 +11,11 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
+    AgentFailureKind,
     AgentOperation,
+    AgentResultState,
     DistributionAssignmentState,
+    FailureStage,
     validate_result_for_operation,
 )
 from vonk_agent_protocol.contracts import canonical_payload
@@ -82,6 +85,14 @@ def _safe_retry_failure(kind: str, state: str, result: WireModel) -> bool:
     and reconciles the prior effect first.  Invalid contracts, denied
     authority, and integrity refusals are not transient and stay terminal.
     """
+    if kind == AgentOperation.RECIPE_JOB_RUN.value:
+        # Only a positively pre-execution report can reissue an irreversible
+        # job. Uncertain runtime effects still go through observation.
+        return (
+            state == AgentResultState.FAILED.value
+            and result.get("stage") == FailureStage.MODEL_MATERIALIZATION.value
+            and kind_for_agent_error(result) is AgentFailureKind.TEMPORARY_DEPENDENCY
+        )
     if kind not in _RESTART_REISSUE_OPERATIONS:
         return False
     if state == agent_operation_states.WIRE_UNKNOWN:
@@ -258,7 +269,8 @@ def _renew_distribution_grant(
     )
     conditions = [
         ArtifactDistributionAssignment.node_id == operation.node_id,
-        ArtifactDistributionAssignment.plan_digest == operation.authority_revision,
+        ArtifactDistributionAssignment.plan_digest
+        == column_field(operation, "payload", "plan_digest"),
         ArtifactDistributionAssignment.state.in_(states),
         ArtifactDistributionAssignment.expires_at < now + timedelta(minutes=30),
     ]

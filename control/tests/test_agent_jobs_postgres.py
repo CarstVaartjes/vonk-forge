@@ -1058,7 +1058,12 @@ def test_postgres_boolean_cancel_request_is_named(service) -> None:
         assert "parent-cancel-requested" in stored.status_reason
 
 
-def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(service):
+def test_postgres_exhausted_request_ends_and_fresh_request_has_one_claim_winner(
+    service,
+):
+    from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
+    from vonk_agent_protocol import LifecycleState
+
     sessions, clock = service
     first = AgentJobService(sessions, clock=clock)
     operation = first.enqueue(
@@ -1100,20 +1105,23 @@ def test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner(ser
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert list(pool.map(claim_from, services)) == [None, None]
     with sessions() as session:
-        parked = session.get(AgentOperation, operation.id)
-        assert parked is not None and parked.next_action_at is not None
-        assert parked.current_attempt == 5
-        due = parked.next_action_at
-    clock.now = due
+        ended = session.get(AgentOperation, operation.id)
+        assert ended is not None and ended.state == LifecycleState.FAILED.value
+        assert ended.next_action_at is None
+        assert ended.current_attempt == 5
+    fresh = first.enqueue(
+        parent(sessions, clock).id,
+        NODE_A,
+        ProtocolAgentOperation.RECIPE_STOP.value,
+        COMMIT,
+        STOP_PAYLOAD,
+    )
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(claim_from, services))
     resumed = [claim for claim in outcomes if claim is not None]
-    assert len(resumed) == 1 and fenced_attempt(sessions, resumed[0]).attempt == 6
-    assert fenced_operation(sessions, resumed[0]).id == operation.id
+    assert len(resumed) == 1 and fenced_attempt(sessions, resumed[0]).attempt == 1
+    assert fenced_operation(sessions, resumed[0]).id == fresh.id
     with pytest.raises(StaleAgentAttempt):
         first.succeed(original, STOP_RESULT)
     services[0].succeed(resumed[0], STOP_RESULT)
-    assert (
-        state(sessions, fenced_operation(sessions, original).parent_job_id)
-        == "succeeded"
-    )
+    assert state(sessions, fresh.parent_job_id) == LifecycleState.SUCCEEDED.value

@@ -34,6 +34,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn execute_job_run(
         &self,
         claim: &AgentClaim,
+        lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         mut cancellation: tokio::sync::watch::Receiver<bool>,
         request: vonk_agent_protocol::RecipeJobRunRequest,
     ) -> ExecutionResult {
@@ -42,29 +43,57 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let installation_id = request.installation_id.to_string();
         let job_scope = request.job_id.to_string();
         let spec = request.compiled_execution_plan.clone();
-        if *cancellation.borrow() {
-            return cancelled_job(&request, started, "controller cancellation requested");
-        }
-        if self
-            .prepare_installation(
-                claim,
-                &spec,
-                &installation_id,
-                spec.artifacts
-                    .iter()
-                    .map(|artifact| artifact.size_bytes)
-                    .sum(),
-                &cancellation,
-            )
-            .await
-            .is_err()
-        {
-            return temporary_runtime_observation_failure();
-        }
         let invocation = match prepare_job_invocation(&spec, &request) {
             Ok(plan) => plan,
             Err(_) => return failed_job(&request, 1, started, "job invocation is invalid"),
         };
+        let input_manifest = match recipe_job_input_manifest(&request) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return failed_job(&request, 1, started, "job input manifest is invalid");
+            }
+        };
+        let placement = match job_placement(&invocation) {
+            Ok(placement) => placement,
+            Err(_) => {
+                return failed_job(
+                    &request,
+                    1,
+                    started,
+                    "job placement does not match the installed workload",
+                );
+            }
+        };
+        let Some(job_cancel_stop_plan) =
+            exact_stop_plan_from_claim(claim, &request.run_id.to_string(), true)
+        else {
+            return failed_job(
+                &request,
+                1,
+                started,
+                "job cancellation stop plan could not be bound",
+            );
+        };
+        if *cancellation.borrow() {
+            return cancelled_job(&request, started, "controller cancellation requested");
+        }
+        if let Err(result) = self
+            .prepare_installation(
+                claim,
+                &spec,
+                &installation_id,
+                &lease_deadline,
+                &cancellation,
+            )
+            .await
+        {
+            return match result {
+                ExecutionResult::Failed(failure) => {
+                    ExecutionResult::Failed(failure.stage(FailureStage::ModelMaterialization))
+                }
+                result => result,
+            };
+        }
         // Kit peak is an estimate, never an admission veto. The host
         // guard observes actual wedge precursors independently.
         let preload_diagnostics = self.runtime.report_preload_memory(
@@ -119,13 +148,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .iter()
             .map(|input| input.name.clone())
             .collect::<Vec<_>>();
-        let input_manifest = match recipe_job_input_manifest(&request) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                let _ = self.runtime.cleanup_job_scope(&job_scope);
-                return failed_job(&request, 1, started, "job input manifest is invalid");
-            }
-        };
         if self
             .runtime
             .write_job_input_manifest(
@@ -144,17 +166,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 "job input staging is not same-run exact",
             );
         }
-        let placement = match job_placement(&invocation) {
-            Ok(placement) => placement,
-            Err(_) => {
-                return failed_job(
-                    &request,
-                    1,
-                    started,
-                    "job placement does not match the installed workload",
-                );
-            }
-        };
         let plan = match self.runtime.prepare_job_start(
             &spec,
             &installation_id,
@@ -180,17 +191,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             plan.image_reference,
         ];
         arguments.extend(plan.main);
-        let Some(job_cancel_stop_plan) =
-            exact_stop_plan_from_claim(claim, &request.run_id.to_string(), true)
-        else {
-            let _ = self.runtime.cleanup_job_scope(&job_scope);
-            return failed_job(
-                &request,
-                1,
-                started,
-                "job cancellation stop plan could not be bound",
-            );
-        };
         let outcome = run_interruptible_job(
             self.execute_host_runtime_plan_outcome(
                 claim,

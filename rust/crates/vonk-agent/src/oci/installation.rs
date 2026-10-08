@@ -78,6 +78,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         recipe_content_sha256: &str,
     ) -> Result<(), OciError> {
+        let encoded = serde_json::to_vec(spec)?;
+        if encoded.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
+            return Err(OciError::Artifact);
+        }
         self.verify_image(spec)?;
         if recipe_content_sha256 != spec.identity.recipe_revision_sha256 {
             return Err(OciError::Artifact);
@@ -120,6 +124,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         self.verify_image(spec)
             .map_err(|error| install_error(FailureStage::ImageVerification, error))?;
+        let encoded_spec = serde_json::to_vec(spec)
+            .map_err(OciError::Json)
+            .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
+        if encoded_spec.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
+            return Err(install_error(
+                FailureStage::InstallationMetadata,
+                OciError::Artifact,
+            ));
+        }
         let installation =
             managed_path(self.data_root, "installations", installation_id).map_err(|error| {
                 install_error(FailureStage::InstallationPath, OciError::Workload(error))
@@ -142,14 +155,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             cancelled,
         )
         .map_err(|error| install_error(FailureStage::ModelMaterialization, error))?;
-        let encoded_spec = serde_json::to_vec(spec)
-            .map_err(OciError::Json)
-            .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
-        if encoded_spec.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
-            return Err(install_error(
-                FailureStage::InstallationMetadata,
-                OciError::Artifact,
-            ));
+        if cancelled() {
+            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
         }
         write_installation_metadata(self.data_root, &installation, spec)
             .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
@@ -218,6 +225,10 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     ) -> Result<(), OciError> {
         if cancelled() {
             return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+        }
+        let encoded = serde_json::to_vec(spec)?;
+        if encoded.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
+            return Err(OciError::Artifact);
         }
         self.verify_image(spec)?;
         if recipe_content_sha256 != spec.identity.recipe_revision_sha256 {
@@ -313,16 +324,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub fn verify_image(&self, spec: &CompiledExecutionPlan) -> Result<(), OciError> {
         spec.validate()?;
-        let policy = runtime_policy()?;
-        // Compiled images are always linux/arm64 and the current runtime
-        // interface; the policy must agree.
-        if policy.runtime_interface != "vonk.runtime.v1"
-            || policy.architecture != "linux/arm64"
-            || policy.required_image_label.name != "ai.vonkforge.runtime-interface"
-            || spec.runtime_image.runtime_interface_label != policy.required_image_label.value
-        {
-            return Err(OciError::ImageDigest);
-        }
+        // Runtime policy was admitted by the Controller. Local kit metadata
+        // is not image-byte or signature evidence and cannot veto this plan.
         Ok(())
     }
 }

@@ -39,18 +39,30 @@ impl AgentHttpClient {
         if !valid_sha256(plan_digest) {
             return Err(ClientError::Protocol);
         }
-        let response = self
-            .current_client()
-            .await?
-            .get(self.endpoint(&format!("/agent/distribution/manifests/{plan_digest}"))?)
-            .send()
-            .await?;
-        classify_response(&response)?;
-        let body = bounded_body(response).await?;
-        let assignment: DistributionAssignment =
-            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
-        assignment.validate().map_err(|_| ClientError::Protocol)?;
-        Ok(assignment)
+        for attempt in 0..3_u32 {
+            let result = async {
+                let response = self
+                    .current_client()
+                    .await?
+                    .get(self.endpoint(&format!("/agent/distribution/manifests/{plan_digest}"))?)
+                    .send()
+                    .await?;
+                classify_response(&response)?;
+                let body = bounded_body(response).await?;
+                let assignment: DistributionAssignment =
+                    parse_strict(&body).map_err(|_| ClientError::Retryable)?;
+                assignment.validate().map_err(|_| ClientError::Retryable)?;
+                Ok::<_, ClientError>(assignment)
+            }
+            .await;
+            match result {
+                Err(ref error) if error.retryable() && attempt < 2 => {
+                    tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt + 1))).await;
+                }
+                result => return result,
+            }
+        }
+        unreachable!("the final manifest attempt returns")
     }
 
     /// Consume a complete assignment. Every model/configuration object is
@@ -82,8 +94,8 @@ impl AgentHttpClient {
         }
         let assignment = self.distribution_manifest(plan_digest).await?;
         let model_root = destination_root.join("models");
-        tokio::fs::create_dir_all(&model_root).await?;
-        tokio::fs::set_permissions(&model_root, std::fs::Permissions::from_mode(0o700)).await?;
+        ensure_managed_directory(destination_root).await?;
+        ensure_managed_directory(&model_root).await?;
         ensure_private_parent(&model_root, destination_root).await?;
         let tracker = Mutex::new(DistributionProgressTracker {
             object_bytes: vec![0; assignment.objects.len()],
@@ -94,9 +106,6 @@ impl AgentHttpClient {
         });
         let mut pending = Vec::new();
         for (index, object) in assignment.objects.iter().enumerate() {
-            if object.kind != "model" {
-                return Err(ClientError::Protocol);
-            }
             let path = model_root.join(&object.sha256);
             let managed_root = destination_root;
             if !path.starts_with(managed_root) {
@@ -294,7 +303,7 @@ impl AgentHttpClient {
                     }
                 }
                 if offset != end + 1 {
-                    return Err(ClientError::Protocol);
+                    return Err(ClientError::Retryable);
                 }
                 Ok::<(), ClientError>(())
             })
@@ -308,7 +317,19 @@ impl AgentHttpClient {
                     tokio::time::sleep(Duration::from_millis(500 * (1 << retries))).await;
                     retries += 1;
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    // Publish no final object, but persist the accepted prefix
+                    // before ending this range/request budget. A fresh request
+                    // resumes from its durable length rather than replaying it.
+                    let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
+                    tokio::time::timeout_at(deadline, output.flush())
+                        .await
+                        .map_err(|_| ClientError::Retryable)??;
+                    tokio::time::timeout_at(deadline, output.get_ref().sync_data())
+                        .await
+                        .map_err(|_| ClientError::Retryable)??;
+                    return Err(error);
+                }
             }
         }
         progress(offset, ProgressPhase::Copying);
@@ -331,7 +352,8 @@ impl AgentHttpClient {
             || !validate_trusted_metadata(&partial_metadata, expected_bytes)
             || !same_file_metadata(&synced_metadata, &partial_metadata)
         {
-            return Err(ClientError::Protocol);
+            isolate_managed_entry(&partial).await?;
+            return Err(ClientError::Retryable);
         }
         // Bytes came over the assignment-bound mTLS channel from our own
         // Controller, so size and custody are checked here and the content is
@@ -343,7 +365,8 @@ impl AgentHttpClient {
             .await
             .map_err(|_| ClientError::Retryable)?;
         if !same_file_metadata(&synced_metadata, &before_rename) {
-            return Err(ClientError::Protocol);
+            isolate_managed_entry(&partial).await?;
+            return Err(ClientError::Retryable);
         }
         tokio::fs::rename(&partial, destination)
             .await
@@ -351,7 +374,7 @@ impl AgentHttpClient {
         sync_parent(parent).await?;
         let final_file = inspect_trusted_final(destination, expected_bytes)
             .await?
-            .ok_or(ClientError::Protocol)?;
+            .ok_or(ClientError::Retryable)?;
         let final_metadata = final_file
             .metadata()
             .await
@@ -365,7 +388,8 @@ impl AgentHttpClient {
         if !same_file_content_identity(&synced_metadata, &output_after)
             || !same_file_metadata(&output_after, &final_metadata)
         {
-            return Err(ClientError::Protocol);
+            isolate_managed_entry(destination).await?;
+            return Err(ClientError::Retryable);
         }
         // The transfer filled the page cache with an object of up to hundreds
         // of gigabytes. It stays on disk; the resident pages do not need to.

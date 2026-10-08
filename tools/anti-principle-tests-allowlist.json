@@ -225,18 +225,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_agent_operation_lifecycle.py",
-      "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_operation_lifecycle.py",
-      "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_agent_upgrade_lifecycle.py",
       "function": "test_every_stored_shape_adopts_and_no_event_waits_for_an_operator",
       "kind": "operator-wait-assertion",
@@ -1002,18 +990,6 @@
       "path": "control/tests/test_library_listing_budget.py",
       "function": "test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored",
       "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_lifecycle_core.py",
-      "function": "test_an_unknown_effect_waits_for_an_operator_only_with_an_action",
-      "kind": "operator-wait-assertion",
-      "count": 2
-    },
-    {
-      "path": "control/tests/test_lifecycle_core.py",
-      "function": "test_parked_legacy_rows_are_reevaluated_on_their_first_tick",
-      "kind": "operator-wait-assertion",
       "count": 1
     },
     {
@@ -2519,6 +2495,38 @@
       "count": 4,
       "reason": "security-edge",
       "justification": "Withdrawal is bound to the explicit accepted exact Stop and retained root before the simulated publication process dies. The four assertions preserve that authorized withdrawal through grace expiry and same-owner worker dispatch; they do not withdraw a healthy route merely because an observation is missing or grant a new destructive scope."
+    },
+    {
+      "path": "control/tests/test_agent_jobs.py",
+      "function": "test_exhausted_request_is_not_revived_by_stale_recovery_evidence",
+      "kind": "transient-failed-assertion",
+      "count": 2,
+      "reason": "resource-bound",
+      "justification": "The owning request exhausts a persisted retry or observation budget; the test then immediately claims a distinct fresh request. A transient attempt is retried and never treated as exhaustion by itself."
+    },
+    {
+      "path": "control/tests/test_agent_jobs_postgres.py",
+      "function": "test_postgres_exhausted_request_ends_and_fresh_request_has_one_claim_winner",
+      "kind": "transient-failed-assertion",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "The owning request exhausts a persisted retry or observation budget; the test then immediately claims a distinct fresh request. A transient attempt is retried and never treated as exhaustion by itself."
+    },
+    {
+      "path": "control/tests/test_agent_preparation_recovery.py",
+      "function": "test_permanent_dependency_ends_its_request_and_fresh_request_is_claimable",
+      "kind": "transient-failed-assertion",
+      "count": 2,
+      "reason": "resource-bound",
+      "justification": "The owning request exhausts a persisted retry or observation budget; the test then immediately claims a distinct fresh request. A transient attempt is retried and never treated as exhaustion by itself."
+    },
+    {
+      "path": "control/tests/test_agent_preparation_recovery.py",
+      "function": "test_job_preparation_retries_without_replaying_an_uncertain_job",
+      "kind": "transient-failed-assertion",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "The owning request exhausts a persisted retry or observation budget; the test then immediately claims a distinct fresh request. A transient attempt is retried and never treated as exhaustion by itself."
     }
   ],
   "content_identities": {
