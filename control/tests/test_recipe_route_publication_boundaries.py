@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from vonk_agent_protocol import WaitReason
 from vonk_control.models import RoutePublication
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -64,7 +65,8 @@ def _service(
 class _BlockedAcknowledgement:
     """Acknowledge instantly, except one armed wait that a test releases."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, lose_acknowledgement: bool = False) -> None:
+        self.lose_acknowledgement = lose_acknowledgement
         self.entered = threading.Event()
         self.release = threading.Event()
         self._armed = False
@@ -80,6 +82,8 @@ class _BlockedAcknowledgement:
         self.waited.append(marker.generation)
         self.entered.set()
         assert self.release.wait(timeout=60), "the test never released the wait"
+        if self.lose_acknowledgement:
+            raise OSError("superseded acknowledgement connection lost")
 
 
 def _live_aliases(root: Path) -> set[str]:
@@ -88,9 +92,11 @@ def _live_aliases(root: Path) -> set[str]:
     return set(bundle.routes)
 
 
-def _competing_change_is_not_blocked(base, root: Path, first_run: str) -> None:
+def _competing_change_is_not_blocked(
+    base, root: Path, first_run: str, *, lose_acknowledgement: bool
+) -> None:
     clock = MutableClock(NOW)
-    acknowledgement = _BlockedAcknowledgement()
+    acknowledgement = _BlockedAcknowledgement(lose_acknowledgement=lose_acknowledgement)
     service = _service(base, root, clock, acknowledgement)
     service.publish_run(first_run)
     slow_run = add_running_run(
@@ -122,9 +128,11 @@ def _competing_change_is_not_blocked(base, root: Path, first_run: str) -> None:
             slow.result(timeout=60)
 
     assert competing.generation > 0
+    assert _live_aliases(root) == {"qwen", "fast"}
     # Superseded is a wait, never a failed attempt: the worker re-reads.
     assert isinstance(superseded.value, RecipeRouteNotReady)
     assert publication_is_temporary(superseded.value)
+    assert superseded.value.typed_reason == WaitReason.SCOPE_CHANGED
     with base.sessions() as session:
         slow_row = _recipe_run(session, slow_run)
         assert slow_row.route_state == "pending"
@@ -138,20 +146,27 @@ def _competing_change_is_not_blocked(base, root: Path, first_run: str) -> None:
         } == {"published"}
 
 
+@pytest.mark.parametrize("lose_acknowledgement", [False, True])
 def test_a_competing_route_change_is_not_blocked_by_a_slow_acknowledgement(
     tmp_path: Path,
+    lose_acknowledgement: bool,
 ) -> None:
     base, _publisher, _applied, first_run = setup(tmp_path / "database")
-    _competing_change_is_not_blocked(base, tmp_path / "live", first_run)
+    _competing_change_is_not_blocked(
+        base, tmp_path / "live", first_run, lose_acknowledgement=lose_acknowledgement
+    )
 
 
+@pytest.mark.parametrize("lose_acknowledgement", [False, True])
 def test_postgres_competing_route_change_is_not_blocked_by_a_slow_acknowledgement(
-    tmp_path: Path, postgres_engine
+    tmp_path: Path, postgres_engine, lose_acknowledgement: bool
 ) -> None:
     base, _publisher, _applied, first_run = setup(
         tmp_path / "database", engine=postgres_engine
     )
-    _competing_change_is_not_blocked(base, tmp_path / "live", first_run)
+    _competing_change_is_not_blocked(
+        base, tmp_path / "live", first_run, lose_acknowledgement=lose_acknowledgement
+    )
 
 
 def test_postgres_slow_acknowledgement_outlasting_the_idle_timeout_publishes(

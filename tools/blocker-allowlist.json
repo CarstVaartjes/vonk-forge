@@ -1171,7 +1171,7 @@
       "catches": [
         "RecipeRouteNotReady"
       ],
-      "reason": "Three request-led attempts reopen the publication transaction after bounded jitter; supersession and missing evidence leave no admission gate."
+      "reason": "Three request-led attempts reopen transactions for missing evidence after bounded jitter; an accepted publication retains its exact claim, so supersession cannot reclaim ownership or leave an admission gate."
     },
     {
       "path": "control/src/vonk_control/recipe_routes/publisher.py",

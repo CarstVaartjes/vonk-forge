@@ -82,18 +82,21 @@ class RecipeRouteService:
         self._retained: dict[str, str] = {}
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
-        """Observe publication races with fresh transactions and bounded backoff."""
+        """Bounded observation preserves each accepted publication's exact claim."""
         last: RecipeRouteNotReady | None = None
+        publication: _Publication | None = None
         for _attempt in bounded_attempts():
             try:
-                return self._publish_run_once(run_id)
+                if publication is None:
+                    publication = self._claim_run(run_id)
+                return self._execute(publication)
             except RecipeRouteNotReady as error:
                 last = error
         assert last is not None
         raise last
 
-    def _publish_run_once(self, run_id: str) -> LiteLlmGeneration:
-        """Publish one run: claim, then the effect, then record the result.
+    def _claim_run(self, run_id: str) -> _Publication:
+        """Claim one run before effects and conditional completion.
 
         No database transaction is open while the bundle is activated or the
         supervisor acknowledgement is awaited, so a slow LiteLLM reload cannot
@@ -113,7 +116,7 @@ class RecipeRouteService:
         if committed_error is not None:
             raise committed_error
         assert publication is not None
-        return self._execute(publication)
+        return publication
 
     def publication_transaction(self) -> AbstractContextManager[Session]:
         return route_publication_transaction(self.sessions)

@@ -1723,7 +1723,7 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
 def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     tmp_path: Path, postgres_engine, failure_point: str, recovering: bool
 ) -> None:
-    """A lost publication response adopts an activated bundle on restart."""
+    """Unavailable acknowledgement stays pending; restart adopts exact bytes."""
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(
@@ -1736,7 +1736,6 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     def acknowledge(marker):
         acknowledgements.append(marker.generation)
         if fail_ack[0]:
-            fail_ack[0] = False
             raise OSError("supervisor acknowledgement lost")
 
     runtime = AtomicRouteBundlePublisher(root, await_supervisor_ack=acknowledge)
@@ -1801,6 +1800,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
             assert recovery_job.result == {}
 
     clock.now = due_at + timedelta(seconds=1)
+    fail_ack[0] = False
     restarted_runtime = AtomicRouteBundlePublisher(
         root, await_supervisor_ack=acknowledge
     )
@@ -1828,7 +1828,8 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
             assert result["recovery_route_published"] is True
     if marker_after_failure is not None:
         assert final_marker.digest == marker_after_failure.digest
-        assert acknowledgements == [1, 1]
+        assert acknowledgements[:-1]
+        assert set(acknowledgements) == {final_marker.generation}
     else:
         assert final_marker.generation == 1
         assert acknowledgements == [1]

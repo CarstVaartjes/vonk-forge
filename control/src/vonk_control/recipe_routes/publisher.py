@@ -173,9 +173,21 @@ class AtomicRecipeRoutePublisher:
         last: _ActivatedRecipeRouteError | None = None
         for _attempt in bounded_attempts():
             try:
-                return self._activate_once(
-                    route_digest, litellm, endpoints=endpoints, state=state
+                result = self._activate_once(
+                    route_digest,
+                    litellm,
+                    endpoints=endpoints,
+                    state=state,
+                    expected_marker_digest=(
+                        last.generation.activation_marker.digest
+                        if last is not None
+                        and isinstance(last.generation, _AtomicRecipeGeneration)
+                        else None
+                    ),
                 )
+                if result is None:
+                    break
+                return result
             except _ActivatedRecipeRouteError as error:
                 last = error
         assert last is not None
@@ -188,7 +200,8 @@ class AtomicRecipeRoutePublisher:
         *,
         endpoints: dict[str, _RecipeEndpoint],
         state: GatewayRouteState,
-    ) -> LiteLlmGeneration:
+        expected_marker_digest: str | None = None,
+    ) -> LiteLlmGeneration | None:
         self._publisher._identity(self._AUTHORITY_ID, route_digest, route_digest)
         acknowledgement_error: Exception | None = None
         with self._publisher._locked():
@@ -198,6 +211,12 @@ class AtomicRecipeRoutePublisher:
                 # An unreadable or retired marker is replaced by a fresh
                 # generation instead of blocking publication forever.
                 current = None
+            # A retry observes only its exact activation. A newer bundle wins;
+            # the service fences the old claim and reports typed supersession.
+            if expected_marker_digest is not None and (
+                current is None or current.digest != expected_marker_digest
+            ):
+                return None
 
             def route_bytes(generation: int) -> bytes:
                 document = RouteBundleDocument(
