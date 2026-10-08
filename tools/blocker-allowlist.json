@@ -254,7 +254,11 @@
       "control/src/vonk_control/run_switch_operations/service.py",
       "control/src/vonk_control/run_switch_operations/stop_planning.py",
       "control/src/vonk_control/run_switch_progress.py",
-      "control/src/vonk_control/runtime_image_preparation.py",
+      "control/src/vonk_control/runtime_image_preparation/__init__.py",
+      "control/src/vonk_control/runtime_image_preparation/contracts.py",
+      "control/src/vonk_control/runtime_image_preparation/preparation.py",
+      "control/src/vonk_control/runtime_image_preparation/storage.py",
+      "control/src/vonk_control/runtime_image_preparation/transport.py",
       "control/src/vonk_control/source_bundles.py",
       "control/src/vonk_control/topology.py"
     ],
@@ -470,12 +474,16 @@
       "control/src/vonk_control/run_switch_operations/run_planning.py",
       "control/src/vonk_control/run_switch_operations/service.py",
       "control/src/vonk_control/run_switch_operations/stop_planning.py",
-      "control/src/vonk_control/runtime_image_preparation.py"
+      "control/src/vonk_control/runtime_image_preparation/__init__.py",
+      "control/src/vonk_control/runtime_image_preparation/contracts.py",
+      "control/src/vonk_control/runtime_image_preparation/preparation.py",
+      "control/src/vonk_control/runtime_image_preparation/storage.py",
+      "control/src/vonk_control/runtime_image_preparation/transport.py"
     ]
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 124,
+    "total": 107,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -533,14 +541,6 @@
         "AgentUpgradeRetryLater"
       ],
       "reason": "The signed release is fetched again a bounded number of times with pauses that outlast the few steps of a release publication before the requester is told to retry."
-    },
-    {
-      "path": "control/src/vonk_control/api.py",
-      "function": "_close_model_cache",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Shutdown retries model-cache checkpointing on the bounded request pause schedule, then releases the lifespan so durable unfinished transfers resume after Controller restart."
     },
     {
       "path": "control/src/vonk_control/attempt_residues.py",
@@ -1030,30 +1030,6 @@
       "reason": "Unknown removal retains the item, records its next attempt and continues other items; the next timed sweep re-observes the references and retries the retained item after its scan interval."
     },
     {
-      "path": "control/src/vonk_control/worker.py",
-      "function": "Worker._run_housekeeping",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "A housekeeping task whose outcome is unknown is logged and contained; the worker pass runs the same task again on its next pass."
-    },
-    {
-      "path": "control/src/vonk_control/worker.py",
-      "function": "Worker.close",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Shutdown retries each unknown checkpoint on the bounded request pause schedule, continues closing other owned executors, then releases the process so durable claims resume on restart."
-    },
-    {
-      "path": "control/src/vonk_control/worker.py",
-      "function": "Worker.run_once",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "The worker pass contains one source's unknown outcome: the failure is logged, the pass moves on to the other sources and the heartbeat, and the failed source runs again on the next pass; no source state is ended by it."
-    },
-    {
       "path": "control/src/vonk_control/fleet_profiles/cancellation_observation.py",
       "function": "FleetProfileService._stop_children",
       "catches": [
@@ -1198,6 +1174,81 @@
       "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
     },
     {
+      "path": "control/src/vonk_control/api.py",
+      "function": "_close_model_cache",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Shutdown retries model-cache checkpointing on the bounded request pause schedule, then releases the lifespan so durable unfinished transfers resume after Controller restart."
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "function": "Worker._run_housekeeping",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "A housekeeping task whose outcome is unknown is logged and contained; the worker pass runs the same task again on its next pass."
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "function": "Worker.close",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Shutdown retries each unknown checkpoint on the bounded request pause schedule, continues closing other owned executors, then releases the process so durable claims resume on restart."
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "function": "Worker.run_once",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The worker pass contains one source's unknown outcome: the failure is logged, the pass moves on to the other sources and the heartbeat, and the failed source runs again on the next pass; no source state is ended by it."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation/storage.py",
+      "function": "FilesystemRuntimeImageStorage._iter_receipts",
+      "catches": [
+        "RuntimeImagePreparationUnknown",
+        "_ReceiptDocumentRejected"
+      ],
+      "reason": "A scan re-observes metadata on each request and skips only an unavailable candidate. Exact request-led preparation rebuilds absent metadata; unrelated cache misses never wait on it."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation/storage.py",
+      "function": "FilesystemRuntimeImageStorage.find_build",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Exact build reuse observes its receipt once; unavailable metadata returns a miss, so the ordinary bounded build owner prepares this content on the current request."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation/storage.py",
+      "function": "FilesystemRuntimeImageStorage._archive_is_present",
+      "catches": [
+        "RuntimeImagePreparationUnknown"
+      ],
+      "reason": "Unavailable archive observation returns a reuse miss; a fresh request prepares the image through the bounded owning worker."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation/storage.py",
+      "function": "FilesystemRuntimeImageStorage._discard_rejected_receipt",
+      "catches": [
+        "RuntimeImagePreparationError",
+        "_ReceiptDocumentRejected"
+      ],
+      "reason": "A busy publication fence releases all descriptors and skips this candidate; the next request scan observes it again without retaining claims."
+    },
+    {
+      "path": "control/src/vonk_control/runtime_image_preparation/preparation.py",
+      "function": "_prepare_from_build",
+      "catches": [
+        "RuntimeImagePreparationUnknown",
+        "RuntimeImagePreparationInvalid"
+      ],
+      "reason": "Unavailable derived metadata is re-observed from verified archive/build evidence on this same preparation pass, under a nonblocking publication fence. Security refusals propagate."
+    },
+    {
       "path": "control/src/vonk_control/recipe_routes/candidate.py",
       "function": "candidate_in_session",
       "catches": [
@@ -1265,14 +1316,6 @@
   ],
   "route_guards": [
     {
-      "path": "control/src/vonk_control/api.py",
-      "function": "create_app.platform_observation",
-      "catches": [
-        "ObservationCaptureUnavailable"
-      ],
-      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
-    },
-    {
       "path": "control/src/vonk_control/operator_projection_api.py",
       "function": "install_operator_projection_routes.fleet_status",
       "catches": [
@@ -1295,6 +1338,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "Every Controller route runs inside this wrapper (ControllerAPIRoute): an unknown outcome that the route itself did not handle is answered with a typed 503 and Retry-After, never a 500 or a refusal, and the caller (client, agent or worker) asks again."
+    },
+    {
+      "path": "control/src/vonk_control/api.py",
+      "function": "create_app.platform_observation",
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
     }
   ],
   "content_identities": {
@@ -1651,7 +1702,7 @@
       "create_app.job_view": "754d9f4c9f68c4126defc8680f2bdbd2e5c05a5459c4b2efc9c40b039222bbcc",
       "create_app.resume_job": "7f58e9155e4110534855ce1e7074124b65d339c0621845b27eca7d9063063bd5",
       "_close_model_cache": "9eca711a4633a9cd077f803b4fe7d91ab554e4c0baed874694524a381d7fb36f",
-      "production_app": "52fa35532717f44f854f44bcaf0f4b19143b88cefba9eb1dffb96cd98bdce1e8",
+      "production_app": "3d0faca398f19d3523da983f60b4ca5581672169bbdf6a465a8ce626e98e47fd",
       "production_app.clock": "3c87c7fecd6efb5bf9a23b9256ee2cf26c0be1d7b831864e8bc856c1538e0dba",
       "production_app.build_cache": "948c3e7d9b1ac2a7754013491fbc75a505a55c2afc4f73e7e2c4a3ef35628054",
       "production_app.build_artifact_jobs": "4c060fb9071db6525f6b00b04f34bbdf69feb911acdf0127aead9c8c0832cc48",
@@ -2447,20 +2498,25 @@
       "_stored_utc": "122222353094a447206fa308e8ab72dba1ed06aaa7be7e4b0deef4063fd7f72f"
     },
     "control/src/vonk_control/execution_plan_service.py": {
-      "compile_job_invocation": "c52281278b3b2a33d4a1ff50f1d96ce8ca21e312836e92013a64d67b4655741f",
-      "ExecutionPlanCompilationError": "8dda301ee7d2b285dc46bbe0e4655404c461c70205bd9650466c5b9c7c659458",
-      "ControllerExecutionPlanService": "f093e4340b6f707126706e50e736adb28adbfc619f8a93c540f9cc14944952b3",
+      "compile_job_invocation": "76fda2df0e54b8c323b506e90605eb7a3477bc21137acb547180aedd4e012a24",
+      "ExecutionPlanCompilationError": "d65d7dfa62e66c0255e4321fb0ffaf7a89ed0ca6cb73f25ac8387e4a45eb0bc1",
+      "ExecutionPlanCompilationError.__init__": "06de9d125a54edc920d774cafde20df6b67d13ccf283783fde9bbb8c5f5a0c66",
+      "ExecutionPlanReceiptRefused": "a70ec6fdadfde8c0354f9ad1ba7f59824fb6d0daacc889e0fbfa0bac14301178",
+      "ExecutionPlanReceiptRefused.__init__": "00517a618d8b6327c860ffee66a8f19a65566b9d5086a0d3879b2a6d157acc94",
+      "ExecutionPlanEvidenceUnknown": "09425bcd6c9041ad9df62d2d28994ec02848d3383a6eb574d1a02a7fe6357b8d",
+      "ExecutionPlanEvidenceUnknown.__init__": "a6433f0ffdbaf267488b744934f81827b9ffc770ce5e0f5fb896430fd9085cca",
+      "ControllerExecutionPlanService": "21c91191f57f3f872b8306ee00145d6397441fdae8691e89432e812aa513e96c",
       "ControllerExecutionPlanService.__init__": "5e573c9b09ab4b22ab7abf439c2bde9336602e2d6a71dc3939e6797998873e5f",
-      "ControllerExecutionPlanService.compile_installation": "168a60e0dc421ad1d4f00c7b08cfc69549f7fbd0c324e9fe43b0c26663b3852b",
-      "ControllerExecutionPlanService._runtime_image": "963ea6e682d2fb08af70bde252f5c20db84b4cf7ba8c352c45bdfe92ceb7b56b",
-      "_runtime_image_receipt": "eacc611eb2289a2a34aa4993dd6f8eae0bfb2514840218e670ac7826a07713f7",
-      "_build_package": "79f58d82b0cefbf7b3b9bd88f1d214f9e676453014b68c4e2efff3c8faf91c78",
+      "ControllerExecutionPlanService.compile_installation": "679bd3bb10c43147f2623260269319b48e83c4d7eae0f45c4de9d0764817164a",
+      "ControllerExecutionPlanService._runtime_image": "c78d684bf34f62aeeb7e2f38033589181878b25026780994a3e4b265b1e72ac8",
+      "_runtime_image_receipt": "4c810c33f9d37e7fa4f061f4ba998dd938bed0c952dd3e5f1b0bedcb400d8d0a",
+      "_build_package": "dd5d3ea0ecb4320b88da6f1a78ce9023cc9c90eb8dd39d8fbc104c1319984f79",
       "_image_digest": "ba7b17d355421bf5ab0cec0ba6d421404e67a38910f810da8d2702a71bdeccf7",
       "_world_size": "5582448abe2d214f28bd8ffeded8ea9671f1150b951f583b63a22477517dae61",
       "_PlacementTarget": "fc14f411a039c764fcae563c8d158fd7954052545d9984d53689309c6ffcdc45",
       "_placement": "a4a8e8e255108cf25d8f0b6992ff917de706b9441ce59a03835781997f9a42a0",
       "_bind_runtime_artifacts": "04c066288f5687c804ce309075f7c36a2edbc8d35023b138d5d42ca96204f76a",
-      "<module>": "5ee0db568e709c26ce55c57eaaddc91ec5fa2f1cb82ee7be8967ad35df07b2f6"
+      "<module>": "a1a4be0a2024f64644c7716a113d511bc7c90bc949eda09fc471e05af9e85ffa"
     },
     "control/src/vonk_control/failure_evidence.py": {
       "EvidenceModel": "e980258579b21d0b738940b76fcf850ddb6b730592b4bfe4795c338e119437f3",
@@ -5006,16 +5062,16 @@
       "<module>": "9b465599462a2d989fdebfdbbd23c0e85be37e878728d156762c3b4ef5216805"
     },
     "control/src/vonk_control/recipe_routes/publisher.py": {
-      "AtomicRecipeRoutePublisher": "fb0fe5cdafb436669012e71d529209551db694c53bad35ac47a90b114ce734bc",
+      "AtomicRecipeRoutePublisher": "a1361ef5a11c84cf68ec74c14ece06380130ddbab5fa8533396f0c7f5eaed171",
       "AtomicRecipeRoutePublisher.__init__": "3e1fd3de63e442a11e8713af7399f6178aefe6d0441214731ec8f57b7c6edd1b",
       "AtomicRecipeRoutePublisher.publish_recipe": "35560fca7ca53db4e4d27d372a86c64934ed9a4549062123eabac4bef8ff8b80",
       "AtomicRecipeRoutePublisher.publish_empty": "24cff5df9f741879f75e16d9b68d53eb53a17b703b7e1e12820cc05e4136980e",
       "AtomicRecipeRoutePublisher.active_marker_digest": "1a9a903487521620bd5ced80885ce4cef0ba70e883b5a0df4726583297d0d62e",
       "AtomicRecipeRoutePublisher.accepted_run": "49facd253cd27d0ba768102f59a497e7a269f1f474eee060c5666e0d36f8bbde",
       "AtomicRecipeRoutePublisher._next_generation": "b43dd9af51d77dba7686220f65786206b2193cea760d31e0e51b70389a063af4",
-      "AtomicRecipeRoutePublisher._activate": "2595240f8069961f3bd2556dfc206f332d796c871ab4fefa8028a6d8950579af",
+      "AtomicRecipeRoutePublisher._activate": "09f1871bba55fa1f8eab0fd06ee9482b34393e9ef1016e0570d858f00ebb11ce",
       "AtomicRecipeRoutePublisher._activate_once": "514490f069e58b08eef1c87660634bc12155fcb0864e986f5042e9e319a172a8",
-      "<module>": "fb0fe5cdafb436669012e71d529209551db694c53bad35ac47a90b114ce734bc"
+      "<module>": "a1361ef5a11c84cf68ec74c14ece06380130ddbab5fa8533396f0c7f5eaed171"
     },
     "control/src/vonk_control/recipe_routes/service.py": {
       "RecipeRouteService": "4867521bee0933d6de788be5ca239cecaea24400f770181f8e5ed415b87e84e4",
@@ -5643,20 +5699,19 @@
       "_topology_mode": "cf089dc078f0bbdac22233356505167640ec37b8eb30a82c13f83aefd597f472",
       "<module>": "4acb3333aa9dd2a13f32db43c11d629120cb8df0138138912654c92408440238"
     },
-    "control/src/vonk_control/runtime_image_preparation.py": {
+    "control/src/vonk_control/runtime_image_preparation/__init__.py": {},
+    "control/src/vonk_control/runtime_image_preparation/contracts.py": {
       "RuntimeImagePreparationError": "1ee6fc3714198983dad3a498157af9e97d572cd5dcc406fbb2b3f011ad688707",
       "RuntimeImagePreparationError.__init__": "30125364d3c106246e9646b1344c8c4216b3ef019a2f0526b77a0d0a26d52075",
       "RuntimeImagePreparationRefused": "6652d4c5de951a10e19dd7e6cbcd11bb510ed45b359fb7f31ec27abea263a2af",
       "RuntimeImagePreparationRefused.__init__": "673ade916ef30fb92e50d7be9f74595a7982596786efda105060558de4ed6c86",
       "RuntimeImagePreparationInvalid": "9d54d9d2f6747e10eb0086bcd66a7277a55b2c8639685d43b7bb24be8b18bbc8",
       "RuntimeImagePreparationInvalid.__init__": "82a21b8ef2f694611215c69c6a077086d7ac4d1eb5546bd295377d96f0babd32",
-      "RuntimeImagePreparationUnknown": "fb9d3589c3e19ee5375e0f958b1c90276873779e177f37098b2d7325cc17b786",
-      "RuntimeImagePreparationUnknown.__init__": "1de399a418724fb0099b06b25ef68460b9668d2f85eddd73816ef625c9458184",
+      "RuntimeImagePreparationUnknown": "538d3fed882e410e9829b6bc3841eb4d4d159b9cba331c775a602f6c0a39ce4b",
+      "RuntimeImagePreparationUnknown.__init__": "ae98e3461e5a66cac3f104db52df308a18bd5ad92b5bd6ff63ad299ed593b5f6",
       "PulledImageEvidence": "a8a953a74e104e9a49436ddc2738249b5e9d35f4cc152a96340d43ea18a56ed4",
       "OCIImageTransport": "d4dfd45cb9efd5f8f8f2862f8123ad217cbd967b7659688da387ed8e2092675e",
       "OCIImageTransport.inspect_archive": "b6d10b5dd391119d322152a755d696840d0a162d7802ceed24521c748d7062af",
-      "OciLayoutImageTransport": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c",
-      "OciLayoutImageTransport.inspect_archive": "09d010ebf2e8e99ff6178772bfdf333dbee861ccaf2dd88e64e7514f631dd0c2",
       "RuntimeImageReceipt": "ef560dabcf79438643af6fd747d7e35285c8f51d75cf7b1d414f2a99bfa3e741",
       "RuntimeImageReceipt.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
       "RuntimeImageReferenceIntent": "bb11eb339f7c064b86fd5cb6dc494b30ca3477626c7c67a66febf9fd29173698",
@@ -5666,7 +5721,7 @@
       "_ReceiptDocumentRejected": "ec5a764ba955d21be3d2477eb4e6a0dce5627542dbea3e75eeb7c4511c764c08",
       "_ReceiptDocumentRejected.__init__": "0e11e142278fa9c05b0dcea2d1367893003c134307be1657f0312a7933f286fc",
       "_receipt_may_be_newer": "8b1a1d17c06e0a81523dc19cd6152812dfba4e422fecbea81a50af2970e7b476",
-      "_load_receipt_document": "b31b5a60ad814d4d7b924e1b3da7dcfa38bfa32603b30b2f846315616b2b9a57",
+      "_load_receipt_document": "a7ee72f62c0965a5bb65d7234a9a4c5a264fccea2ead01f63a1bdd56a129d557",
       "_log_rejected_receipt": "4bf59bc24d0ab5ef2efdcf3c6f71a68788ee4ffd8d8f8adcf7a54565951bed25",
       "RuntimeImageStorage": "d38a76b72adfd644be5571f4eddd82ba5c5ca6f8a128b974af74c1fd3445992a",
       "RuntimeImageStorage.read_receipt": "02a9b03ffe87bf3b17c47929ae3b49457b597099db453875ca603d808c574607",
@@ -5679,7 +5734,32 @@
       "RuntimeImageStorage.find_build": "c63795aa72cad32ded3b58b5b1941c4a3fe9d4ba76d2b2aca0c7b3f570d1f0e9",
       "_same_image": "4c58c5d9c45636e6aedf88f03391f3dee53e112360b54737ae3dbdee4c4b881c",
       "_with_provenance": "13c6f328fc101d85bfb5f43f203a325573e649ed608fb7b3913857c065a4b18a",
-      "FilesystemRuntimeImageStorage": "5fd55141a697f3b0f0cc50d3fb4cacdcb7f61c4a78f229063220cec4f2e6b478",
+      "_runtime_interface_label": "0c0927c33618775355fd92d2294b55434be479c325215a099cfe707a477af2f7",
+      "_wire_architecture": "f3eda1a380617cc13855f69dfdc009e61652f647ce2c633b1452684d1d414b88",
+      "_atomic_json_replace": "44daa0ae0f73f598076f2b06f95c9a35f4a51f9e7f44daf2a13a1b4014dbb007",
+      "_unlink_quietly": "5b0e3bfdb5c144fbab744dfc3ffa3237c7b2378df0acc2bb787a4eda2ca34ae2",
+      "<module>": "fe27b9d9d10e8f7485431f569d29578cd391f1ed82d22e24d2b4acf916df1ac2"
+    },
+    "control/src/vonk_control/runtime_image_preparation/preparation.py": {
+      "prepare_runtime_image": "7c20094084d6ea074bfddb303f56461420a777dacab2586aeadc003f9efd90ad",
+      "RuntimeImagePreparer": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091",
+      "RuntimeImagePreparer.__call__": "623028fdbb49b6b503f2532e8f2e419319ddc2739bbe76696970715c2b0c37b6",
+      "make_runtime_image_receipt_preparer": "bc1d8554ffcf68ac821bfe4bbd9b56f30f0c80701410ab2819840ca590de01be",
+      "make_runtime_image_receipt_preparer.prepare": "7b191902d061461aac674f0d4aa83c9dc606285e39c38f7ebd86aab96e8768b6",
+      "stored_runtime_image_resolver": "c4f53d9e5a45523576d1d177604c5b27a46fbfa430e7e967883ec378132d4efb",
+      "stored_runtime_image_resolver.resolve": "52066d4797e30226c7bc9e0b2cff3f07903dcc2f1d0f3f3f362ef31ac733797f",
+      "_prepare_from_build": "24a45debdef4c76612d837b224dcecfe1a939310261baf127e17358ee319b6fb",
+      "_canonical_recipe": "eac35d6ea02ac912c3d946431c1fa95f9486ef67906e0fd39d778585e983c53e",
+      "runtime_image_expectations": "db199f316850896cbf30e3f78630f64703d20db85b81d418d677042b5a6513db",
+      "_receipt_runtime_identity": "d75295c3f0786d6e263d43c5bbf0579758df172b6c3b141daf66ba1f9d88360d",
+      "_recipe_digest": "777c7fa0aa1ec9c00093ee6e26c87333b3c303df9b1f2a496415117a00ab0697",
+      "_object_mapping": "0e6a072414e4e091d7e20135e909ea5ba4d95a9f607d57df9763601d92a33518",
+      "_string": "d4a2b392f73c2478f23d739dd10fadc00bd718ec9605871f0b63a146763b0a27",
+      "_timestamp": "76ae5ce281add20e8f0b89d98dc62b77dc824748e3f98bfe4b34863ab8cb6962",
+      "<module>": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091"
+    },
+    "control/src/vonk_control/runtime_image_preparation/storage.py": {
+      "FilesystemRuntimeImageStorage": "60b846358773174f8947729752131ed51e9c73e34c5b783f6a01c6ecb29371e6",
       "FilesystemRuntimeImageStorage.__init__": "456f828685584efe3b21c35ba3937d15f2d5d79ae32e22069a3814b4274a0f68",
       "FilesystemRuntimeImageStorage.publication_lock": "2aa02f46500875e7980e3cad5d73c73ddce749396d291073859a2d63d0a66c26",
       "FilesystemRuntimeImageStorage.commit": "c79777f073ef5dbd7025cc7b910ae085163b7aa8d3ad1b1b4490ec90fe764ad2",
@@ -5689,37 +5769,23 @@
       "FilesystemRuntimeImageStorage.remove_published": "b09865c3ea7c4d2f97b49629be16fb4daad7a7712bb034af5d881eeef40b4e41",
       "FilesystemRuntimeImageStorage.build_archive_available": "54ae5c2933af28f49c6c25ad8f3ae0263e2f29b474a2ce332c83dca24c42da18",
       "FilesystemRuntimeImageStorage.find_verified": "248b496f2b03ddeed0c1d42b55cfc48f8f741d809b489db7feb12c68fd4d7407",
-      "FilesystemRuntimeImageStorage.find_build": "7ae6ec50e72b077e445a15e1de3b2c21dbe6d3acb1ac11e9a6726d564c04f19d",
-      "FilesystemRuntimeImageStorage._iter_receipts": "ce683f3496a6b4c985512683f08eec6e7c766773511a1debb3c91107e2b0433d",
+      "FilesystemRuntimeImageStorage.find_build": "629fb5fa2a4ad612fb1aa1112c260c07bc9ff11f04792f10a39d6cd1fbe84f85",
+      "FilesystemRuntimeImageStorage._iter_receipts": "ba39f6fe0c11ab0e71b9d8c985956f0323d6210ed043e838220091c6fbac1b9b",
       "FilesystemRuntimeImageStorage._discard_rejected_receipt": "fd46b7f59cc47e9fc045d7089f7dcf9cfdcc5f5854a9a96d759a95d5607aac20",
       "FilesystemRuntimeImageStorage._first_report": "71c8c2f14e32b7b2ae4bf5ffa5268a1c3dbf1aab90a4d94859451b638604ee67",
-      "FilesystemRuntimeImageStorage._archive_is_present": "c4905bb63d84c44f653613753c37e4b95133860f5613ab78851b69a3f0fb2d90",
+      "FilesystemRuntimeImageStorage._archive_is_present": "7af8989bf1b08b75e281ccb83deaa2393e36afd4d0fd7abbf211cd557b7a569e",
       "FilesystemRuntimeImageStorage.read_receipt": "50ef46f21e6480f7a1aa21dc5aff61b2fef135b5e1314bb066eb18941c451d67",
-      "prepare_runtime_image": "7c20094084d6ea074bfddb303f56461420a777dacab2586aeadc003f9efd90ad",
-      "RuntimeImagePreparer": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091",
-      "RuntimeImagePreparer.__call__": "623028fdbb49b6b503f2532e8f2e419319ddc2739bbe76696970715c2b0c37b6",
-      "make_runtime_image_receipt_preparer": "bc1d8554ffcf68ac821bfe4bbd9b56f30f0c80701410ab2819840ca590de01be",
-      "make_runtime_image_receipt_preparer.prepare": "7b191902d061461aac674f0d4aa83c9dc606285e39c38f7ebd86aab96e8768b6",
-      "stored_runtime_image_resolver": "c4f53d9e5a45523576d1d177604c5b27a46fbfa430e7e967883ec378132d4efb",
-      "stored_runtime_image_resolver.resolve": "52066d4797e30226c7bc9e0b2cff3f07903dcc2f1d0f3f3f362ef31ac733797f",
-      "_prepare_from_build": "5ab15d6f0687accabd328c65243ba3c82a3c9e2219d8154dd24e030b6826931d",
-      "_canonical_recipe": "eac35d6ea02ac912c3d946431c1fa95f9486ef67906e0fd39d778585e983c53e",
-      "runtime_image_expectations": "db199f316850896cbf30e3f78630f64703d20db85b81d418d677042b5a6513db",
-      "_runtime_interface_label": "0c0927c33618775355fd92d2294b55434be479c325215a099cfe707a477af2f7",
-      "_wire_architecture": "f3eda1a380617cc13855f69dfdc009e61652f647ce2c633b1452684d1d414b88",
-      "_receipt_runtime_identity": "d75295c3f0786d6e263d43c5bbf0579758df172b6c3b141daf66ba1f9d88360d",
-      "_recipe_digest": "777c7fa0aa1ec9c00093ee6e26c87333b3c303df9b1f2a496415117a00ab0697",
+      "<module>": "60b846358773174f8947729752131ed51e9c73e34c5b783f6a01c6ecb29371e6"
+    },
+    "control/src/vonk_control/runtime_image_preparation/transport.py": {
+      "OciLayoutImageTransport": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c",
+      "OciLayoutImageTransport.inspect_archive": "09d010ebf2e8e99ff6178772bfdf333dbee861ccaf2dd88e64e7514f631dd0c2",
       "_validate_evidence": "457b4f87e33c4f8f70e3a6907ee8a3197d981aed8492eb7948aae880c4640288",
       "_run_json_text": "e047d16dbb0f871b9f8ca95678ad4061f07a670ad6125965132bdf7f5c8c76a4",
       "_observed_architecture": "ac93f0957b1ab0670f15638c4bb90c71e8b00fddd0641104f42bc43af934f3de",
       "_observed_runtime_interface": "581e3d2ead65986b26f2d5c96343a5c563495167deda7602d35af4fafbd2de9e",
       "_config_digest": "e3c74f85165381d5b0647d420aabe8dfe02cc54550fd8c531c9d2195ccd4522b",
-      "_object_mapping": "0e6a072414e4e091d7e20135e909ea5ba4d95a9f607d57df9763601d92a33518",
-      "_string": "d4a2b392f73c2478f23d739dd10fadc00bd718ec9605871f0b63a146763b0a27",
-      "_timestamp": "76ae5ce281add20e8f0b89d98dc62b77dc824748e3f98bfe4b34863ab8cb6962",
-      "_atomic_json_replace": "44daa0ae0f73f598076f2b06f95c9a35f4a51f9e7f44daf2a13a1b4014dbb007",
-      "_unlink_quietly": "5b0e3bfdb5c144fbab744dfc3ffa3237c7b2378df0acc2bb787a4eda2ca34ae2",
-      "<module>": "498824d6f4581fce7ce776b4665150a4d41e5058fdba3a308968f424415bf3e4"
+      "<module>": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c"
     },
     "control/src/vonk_control/runtime_init.py": {
       "RuntimeSecretError": "3092c0af89cd8a7ffe3e5b0e621ff63607a8adb0fac5f3955337b4ccd611e682",
@@ -5991,7 +6057,7 @@
       "Worker._run_model_cache": "71b5e55a99203d0981a8ab4b9f9cd931551506c0005e26fe1758be0fb3d3c5f3",
       "Worker._run_generic": "2dd47b9bd5040ae1a719b5aa39aca6b9390d39fcda8273fd5fd0bc7f5dacc12d",
       "assemble_production_worker": "9a2fb6fe2de2f24b9bc18c008a0a937c8942af8b0345fb8c674555a7995cfe47",
-      "<module>": "659d21e524e5354ec616362b56724a85801683d103f4fabb9b3a60b6585f8e9c"
+      "<module>": "42cf5201dff1769a075ccdb2fee521f8af1c4d064df0e5bd2e5c95ce7b58a3c3"
     }
   },
   "operator_waits": [
@@ -6603,25 +6669,6 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ExecutionPlanCompilationError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/distribution_executor.py", "RecipeRuntimeSpecError", "CompositeDistributionPhaseExecutor._prepare_runtime_image", "canonical-model-projection-is-invalid", 1]
-      ]
-    },
-    {
-      "family": "execution_plan_service.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "runtime-image-receipt-does-not-match-the-compiled-runtime-im", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService._runtime_image", "verified-oci-archive-receipt-is-unavailable-for-the-selected", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-build-receipt-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-revision-digest-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "verified-model-artifact-set-receipt-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_build_package", "successful-controller-build-receipt-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_image_digest", "compiled-runtime-image-digest-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_placement", "compiled-runtime-endpoint-is-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_image_receipt", "runtime-image-receipt-is-invalid", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_runtime_image_receipt", "verified-runtime-image-receipt-is-invalid", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "compiled-runtime-job-settings-are-unavailable", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-build-receipt-is-unavailable", 1]
       ]
     },
     {
@@ -7352,17 +7399,10 @@
       "category": "bookkeeping-debt",
       "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.existing_archive", "runtime_image.cache_missing", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.lock_unavailable", 3],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.publication_contended", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.read_receipt", "message", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_load_receipt_document", "runtime_image.receipt_unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3]
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.lock_unavailable", 3],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.publication_contended", 1],
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1]
       ]
     },
     {
@@ -7370,8 +7410,8 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_load_receipt_document", "permission-denied", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.digest_mismatch", 1]
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "RuntimeImagePreparationRefused", "_load_receipt_document", "permission-denied", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.digest_mismatch", 1]
       ]
     },
     {
@@ -7709,14 +7749,14 @@
       "category": "security-edge",
       "reason": "Exact-image verification before publication: a receipt is published only for the stored image it names, at the size it records (never over other bytes), and an image is accepted only with the platform and runtime-interface label the recipe declares. A mismatch refuses instead of publishing or substituting a different image; archive_mismatch is already the typed re-download signal of the failure classification.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "FilesystemRuntimeImageStorage.commit", "runtime_image.archive_mismatch", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "FilesystemRuntimeImageStorage.existing_archive", "runtime_image.archive_mismatch", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "OciLayoutImageTransport.inspect_archive", "runtime_image.architecture_mismatch", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "OciLayoutImageTransport.inspect_archive", "runtime_image.interface_mismatch", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_observed_architecture", "runtime_image.architecture_missing", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_observed_runtime_interface", "runtime_image.interface_missing", 2],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.architecture_mismatch", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.interface_mismatch", 1]
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationRefused", "FilesystemRuntimeImageStorage.commit", "runtime_image.archive_mismatch", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationRefused", "FilesystemRuntimeImageStorage.existing_archive", "runtime_image.archive_mismatch", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationRefused", "OciLayoutImageTransport.inspect_archive", "runtime_image.architecture_mismatch", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationRefused", "OciLayoutImageTransport.inspect_archive", "runtime_image.interface_mismatch", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationRefused", "_observed_architecture", "runtime_image.architecture_missing", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationRefused", "_observed_runtime_interface", "runtime_image.interface_missing", 2],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.architecture_mismatch", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationRefused", "_validate_evidence", "runtime_image.interface_mismatch", 1]
       ]
     },
     {
@@ -7724,19 +7764,19 @@
       "category": "input-validation",
       "reason": "Rejects an argument or document that does not satisfy the function's contract before any effect: an exact SHA-256 or image digest, a recipe document, a runtime projection with architecture and interface, the build receipt a caller passes to prepare an image, the evidence a transport returns. The caller fixes the input; nothing is read from stored state here.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.build_archive_available", "runtime_image.receipt_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.find_build", "runtime_image.digest_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.find_verified", "runtime_image.digest_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.identity_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.published_archive_bytes", "runtime_image.identity_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.remove_published", "runtime_image.identity_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_canonical_recipe", "runtime_image.recipe_invalid", 2],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_object_mapping", "runtime_image.receipt_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_recipe_digest", "runtime_image.recipe_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_string", "runtime_image.identity_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "_validate_evidence", "runtime_image.evidence_invalid", 3],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationInvalid", "runtime_image_expectations", "runtime_image.runtime_invalid", 3]
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.build_archive_available", "runtime_image.receipt_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.find_build", "runtime_image.digest_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.find_verified", "runtime_image.digest_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.identity_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.published_archive_bytes", "runtime_image.identity_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationInvalid", "FilesystemRuntimeImageStorage.remove_published", "runtime_image.identity_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "RuntimeImagePreparationInvalid", "_canonical_recipe", "runtime_image.recipe_invalid", 2],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "RuntimeImagePreparationInvalid", "_object_mapping", "runtime_image.receipt_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "RuntimeImagePreparationInvalid", "_recipe_digest", "runtime_image.recipe_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "RuntimeImagePreparationInvalid", "_string", "runtime_image.identity_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationInvalid", "_validate_evidence", "runtime_image.evidence_invalid", 3],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "RuntimeImagePreparationInvalid", "runtime_image_expectations", "runtime_image.runtime_invalid", 3]
       ]
     },
     {
@@ -8186,11 +8226,11 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-architecture-is-not-supported", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-interface-is-not-supported", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-interface-label-is-not-supported", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "make_runtime_image_receipt_preparer.prepare", "source-build-receipt-is-unavailable", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "InvalidValue", "stored_runtime_image_resolver.resolve", "runtime-image-preparation-is-required-before-compile-install", 1]
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-architecture-is-not-supported", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-interface-is-not-supported", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "InvalidValue", "_receipt_runtime_identity", "runtime-image-interface-label-is-not-supported", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "InvalidValue", "make_runtime_image_receipt_preparer.prepare", "source-build-receipt-is-unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "InvalidValue", "stored_runtime_image_resolver.resolve", "runtime-image-preparation-is-required-before-compile-install", 1]
       ]
     },
     {
@@ -8329,7 +8369,8 @@
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-memory-reservation-is-invalid", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-recipe-differs-from-the-installed-workload", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-role-differs-from-the-accepted-canonical-workload", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-timeout-exceeds-the-installed-workload", 1]
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-timeout-exceeds-the-installed-workload", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-build-receipt-is-unavailable", 1]
       ]
     },
     {
@@ -8985,15 +9026,15 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.commit", "runtime_image.receipt_contract_newer", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.remove_published", "runtime_image.removal_storage_failed", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "OciLayoutImageTransport.inspect_archive", "runtime_image.inspect_invalid", 2],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_atomic_json_replace", "runtime_image.receipt_write_failed", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_config_digest", "runtime_image.config_missing", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.build_incomplete", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.receipt_invalid", 2],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_run_json_text", "runtime_image.inspect_invalid", 1],
-        ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "prepare_runtime_image", "runtime_image.receipt_persistence_failed", 1]
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.commit", "runtime_image.receipt_contract_newer", 1],
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.remove_published", "runtime_image.removal_storage_failed", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationUnknown", "OciLayoutImageTransport.inspect_archive", "runtime_image.inspect_invalid", 2],
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "RuntimeImagePreparationUnknown", "_atomic_json_replace", "runtime_image.receipt_write_failed", 1],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationUnknown", "_config_digest", "runtime_image.config_missing", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.build_incomplete", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.receipt_invalid", 2],
+        ["control/src/vonk_control/runtime_image_preparation/transport.py", "RuntimeImagePreparationUnknown", "_run_json_text", "runtime_image.inspect_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/preparation.py", "RuntimeImagePreparationUnknown", "prepare_runtime_image", "runtime_image.receipt_persistence_failed", 1]
       ]
     },
     {
@@ -9356,6 +9397,73 @@
       "reason": "Malformed JSON cannot be consumed as authenticated activation authority. This syntax/integrity check precedes consumption of bundle authority and does not classify missing files or I/O uncertainty as integrity failures.",
       "sites": [
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-invalid-json", 1]
+      ]
+    },
+    {
+      "family": "execution_plan_service.input-validation-reviewed",
+      "category": "input-validation",
+      "reason": "Pure compiler checks of the supplied canonical revision and compiled runtime digest, endpoint and job interface; validation completes before any dispatch, publication, claim or reservation effect. Missing build/cache receipts remain unknown outcomes, not validation.",
+      "sites": [
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-revision-digest-is-unavailable", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_image_digest", "compiled-runtime-image-digest-is-unavailable", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "_placement", "compiled-runtime-endpoint-is-unavailable", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "compiled-runtime-job-settings-are-unavailable", 1]
+      ]
+    },
+    {
+      "family": "execution_plan_service.security-edge-reviewed",
+      "category": "security-edge",
+      "reason": "Image receipt ingress rejects an invalid portable verification receipt or content digest that differs from the exact compiled image; unverified image evidence must never enter a launch plan.",
+      "sites": [
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanReceiptRefused", "ControllerExecutionPlanService._runtime_image", "runtime-image-receipt-does-not-match-the-compiled-runtime-im", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanReceiptRefused", "_runtime_image_receipt", "runtime-image-receipt-is-invalid", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanReceiptRefused", "_runtime_image_receipt", "verified-runtime-image-receipt-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "execution_plan_service.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanEvidenceUnknown", "ControllerExecutionPlanService._runtime_image", "verified-oci-archive-receipt-is-unavailable-for-the-selected", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanEvidenceUnknown", "ControllerExecutionPlanService.compile_installation", "verified-model-artifact-set-receipt-is-unavailable", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanEvidenceUnknown", "_build_package", "successful-controller-build-receipt-is-unavailable", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanEvidenceUnknown", "compile_job_invocation", "job-build-receipt-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "contracts.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3]
+      ]
+    },
+    {
+      "family": "storage.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.existing_archive", "runtime_image.cache_missing", 1]
+      ]
+    },
+    {
+      "family": "contracts.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
+      "sites": [
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "RuntimeImagePreparationUnknown", "_load_receipt_document", "runtime_image.receipt_unavailable", 1],
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_invalid", 1],
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "RuntimeImagePreparationUnknown", "_parse_runtime_image_receipt", "runtime_image.receipt_unavailable", 1]
+      ]
+    },
+    {
+      "family": "storage.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
+      "sites": [
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.read_receipt", "message", 1]
       ]
     },
     {
