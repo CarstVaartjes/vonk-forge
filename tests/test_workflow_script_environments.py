@@ -9,7 +9,10 @@ script whose module-level imports need a project package must go through ``uv ru
 
 from __future__ import annotations
 
+import ast
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,3 +52,59 @@ def test_workflows_run_project_python_scripts_through_uv() -> None:
                     "run it with `uv run --project control --frozen python ...`"
                 )
     assert problems == []
+
+
+def test_contract_generators_prepare_before_project_imports() -> None:
+    """A bare interpreter must enter preparation before loading dependencies."""
+
+    scripts = sorted(ROOT.joinpath("scripts").glob("generate-*")) + sorted(
+        ROOT.joinpath("scripts").glob("export-*schema*")
+    )
+    checked = []
+    for script in scripts:
+        source = script.read_text()
+        if "python" not in source.splitlines()[0]:
+            continue
+        tree = ast.parse(source)
+        needs_project = (
+            any(
+                isinstance(node, ast.ImportFrom)
+                and (node.module or "").split(".")[0]
+                in {
+                    "pydantic",
+                    "vonk_agent_protocol",
+                    "vonk_control",
+                    "vonk_forge_contracts",
+                }
+                for node in ast.walk(tree)
+            )
+            or "scripts/export-" in source
+        )
+        if not needs_project:
+            continue
+        # No site packages and a preparation sentinel: catches imports before
+        # preparation as well as generators that never prepare at all.
+        probe = """
+import runpy, subprocess, sys, types
+def unprepared(*args, **kwargs):
+    raise AssertionError("generator effects started before preparation")
+subprocess.run = unprepared
+script = sys.argv[1]
+sys.argv = [script]
+helper = types.ModuleType("check_environment")
+def prepare(root):
+    raise SystemExit(73)
+helper.run_in_control = prepare
+sys.modules["check_environment"] = helper
+runpy.run_path(script, run_name="__main__")
+"""
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", probe, str(script)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        assert result.returncode == 73, f"{script.name}: {result.stderr}"
+        checked.append(script.name)
+    assert "generate-agent-wire" in checked

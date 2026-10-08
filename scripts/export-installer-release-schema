@@ -9,10 +9,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+if __name__ == "__main__":
+    from check_environment import run_in_control
+
+    run_in_control(ROOT)
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
 
 from vonk_agent_protocol.installer_release import InstallerReleaseManifest
-
 
 OUTPUT = ROOT / "schemas/install-release-manifest.schema.json"
 
@@ -27,6 +31,7 @@ def rendered() -> str:
 def main() -> None:
     argparse.ArgumentParser(description=__doc__).parse_args()
     OUTPUT.write_text(rendered())
+
 
 if __name__ == "__main__":
     main()

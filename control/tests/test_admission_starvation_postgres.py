@@ -43,28 +43,31 @@ def sessions(postgres_engine):
     return factory
 
 
-def _tick_forever(sessions, stop: threading.Event) -> None:
+def _tick_forever(sessions, stop: threading.Event, started: threading.Event) -> None:
     """A background writer that takes the node key again as soon as it lets go."""
 
-    while not stop.is_set():
+    deadline = time.monotonic() + 8
+    while not stop.is_set() and time.monotonic() < deadline:
         try:
             with sessions.begin() as session:
                 acquire_admission_keys(
                     session, (node_admission_key(NODE),), holder="order-reconcile"
                 )
-                time.sleep(0.02)
+                started.set()
+                stop.wait(0.02)
         except AdmissionLockBusy:
-            time.sleep(0.02)  # backs off a node that is being served
+            stop.wait(0.02)  # backs off a node that is being served
 
 
 def test_a_patient_admission_wins_against_a_constantly_ticking_writer(
     sessions,
 ) -> None:
     stop = threading.Event()
-    ticker = threading.Thread(target=_tick_forever, args=(sessions, stop))
+    started = threading.Event()
+    ticker = threading.Thread(target=_tick_forever, args=(sessions, stop, started))
     ticker.start()
     try:
-        time.sleep(0.1)
+        assert started.wait(timeout=5), "ticker did not acquire admission"
         with patient_admission(3), sessions.begin() as session:
             acquire_admission_keys(
                 session, (node_admission_key(NODE),), holder="run-admission"
@@ -82,6 +85,11 @@ def test_a_patient_admission_wins_against_a_constantly_ticking_writer(
     finally:
         stop.set()
         ticker.join(timeout=5)
+        assert not ticker.is_alive(), "ticker outlived its test"
+    with sessions.begin() as session:
+        acquire_admission_keys(
+            session, (node_admission_key(NODE),), holder="run-admission"
+        )
 
 
 def test_an_impatient_admission_is_refused_and_names_the_holder(sessions) -> None:

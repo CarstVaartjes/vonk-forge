@@ -650,3 +650,37 @@ def test_continuous_valid_observation_progress_cannot_extend_attempt(
     repaired = ControlClient(state["url"], Path(state["token"]))
     assert repaired.request("GET", "/api/fleet") == frozen
     assert len(state["calls"]) == 2
+
+
+def test_sigint_during_executor_shutdown_finishes_cleanup(monkeypatch):
+    """Ctrl-C at coroutine creation must not abandon Runner shutdown."""
+
+    import inspect
+
+    transport, request = _wedged_loop_response(monkeypatch, interrupt=False)
+
+    async def closes(_self):
+        pass
+
+    monkeypatch.setattr(transport.HTTPSResponse, "_close", closes)
+    response = transport.HTTPSResponse(request, 1)
+    loop = response._runner.get_loop()
+    shutdown = loop.shutdown_default_executor
+    coroutines = []
+
+    def interrupt_shutdown(timeout=None):
+        work = shutdown(timeout=timeout)
+        coroutines.append(work)
+        signal.raise_signal(signal.SIGINT)
+        return work
+
+    monkeypatch.setattr(loop, "shutdown_default_executor", interrupt_shutdown)
+    with pytest.raises(KeyboardInterrupt):
+        response.close()
+    assert response.closed and loop.is_closed()
+    assert all(
+        inspect.getcoroutinestate(work) == inspect.CORO_CLOSED for work in coroutines
+    )
+    assert signal.getsignal(signal.SIGINT) == signal.default_int_handler
+    with asyncio.Runner() as runner:
+        assert runner.run(asyncio.sleep(0, result=42)) == 42
