@@ -47,8 +47,10 @@ class CertificateIssuanceBinding(StrictJSONModel):
             raise ValueError("source serial must identify only rotation requests")
         before = datetime.fromisoformat(self.not_before)
         after = datetime.fromisoformat(self.not_after)
-        if (after - before).total_seconds() != 2592000:
-            raise ValueError("certificate lifetime must equal the fixed 30-day policy")
+        if not 90 <= (after - before).total_seconds() <= 2592000:
+            raise ValueError(
+                "certificate lifetime must be between 90 and 2592000 seconds"
+            )
         if self.serial == self.source_serial:
             raise ValueError("rotation must use a new certificate serial")
         return self
