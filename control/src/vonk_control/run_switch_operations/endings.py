@@ -45,6 +45,62 @@ if TYPE_CHECKING:
 
 
 class EndingsMixin:
+    def _expire_distribution_observation(
+        self, operation_id: str, now: datetime
+    ) -> bool:
+        """End expired artifact observation before any mutable re-planning.
+
+        The transfer owner fences its exact attempts; successful or unobserved
+        remote effects are retained without withdrawing routes.
+        """
+        service = typing_cast("RunSwitchOperationService", self)
+        from vonk_agent_protocol.agent_words import ProfileChildPhase
+
+        from ..agent_jobs.retirement import release_owned_reservations_in_session
+
+        with service._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None or job.state not in {
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.OBSERVING,
+            }:
+                return False
+            progress = _read_progress(read_row_column(job, "result"))
+            deadline = progress.recovery_deadline_at
+            plan = _stored_job_plan(job)
+            if (
+                deadline is None
+                or now < _aware(deadline)
+                or plan is None
+                or progress.cancellation is not None
+            ):
+                return False
+            if progress.phase_index >= len(plan.phases) or plan.phases[
+                progress.phase_index
+            ].kind not in {
+                ProfileChildPhase.PREPARE,
+                ProfileChildPhase.TRANSFER,
+                ProfileChildPhase.VERIFY,
+            }:
+                return False
+            expire = getattr(service._phase_executor, "expire", None)
+            if callable(expire):
+                expire(
+                    session,
+                    progress.child_operation_id or progress.recovery_child_operation_id,
+                    now,
+                    plan_digest=plan.plan_digest,
+                )
+            service._mark_failed(
+                job,
+                "distribution observation window exhausted; remote effects remain unobserved",
+                now=now,
+                progress=progress,
+            )
+            release_owned_reservations_in_session(session, "job", job.id, now)
+            return True
+
     def _settle_stop_observation(
         self,
         session: Session,
@@ -122,7 +178,7 @@ class EndingsMixin:
         Everything else (a receipt that does not validate, a verification that
         cannot be observed, a missing child, a wiring gap) is an unknown: the same
         idempotent phase is entered again at the core's bounded backoff, so the
-        failure never ends a load whose bytes and workload are fine.  The caller
+        owner deadline ends an unobserved request without denying a fresh load.  The caller
         no longer chooses; the classifier does (``failure_classification``).
         ``definite`` is only for an owner that typed its own verdict (the image
         preparation's non-retryable errors: an invalid archive or identity).
@@ -138,6 +194,7 @@ class EndingsMixin:
             if job is None or job.state not in {
                 LifecycleState.QUEUED.value,
                 LifecycleState.RUNNING.value,
+                LifecycleState.OBSERVING.value,
             }:
                 return
             progress = _read_progress(read_row_column(job, "result"))
@@ -185,6 +242,7 @@ class EndingsMixin:
                     and progress.phase != "start"
                 )
                 if clear_child:
+                    progress.recovery_child_operation_id = progress.child_operation_id
                     progress.child_operation_id = None
                 service._schedule_checkpoint_retry(job, progress, reason, now)
                 return

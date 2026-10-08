@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 697288b9821d65f1b0067698a94a88c603312ef851369ce5d907a8401efdf163. Do not edit.
+// Generated from canonical OpenAPI SHA256 dbeaa07a8b628c62e74c49663aba4c54be2a7baab52ab07746f20636ec7cfdbb. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -3127,7 +3127,7 @@ export interface components {
         DistributionCode: "distribution.assignment_conflict" | "distribution.expired" | "distribution.model_set_identity_unavailable" | "distribution.model_set_mismatch" | "distribution.object_invalid" | "distribution.object_unavailable" | "distribution.runtime_image_mismatch" | "distribution.unassigned" | "distribution.wrong_node";
         /**
          * DistributionJobPayload
-         * @description One target-copy child: the plan it serves and what each Spark must receive.
+         * @description One target-copy child and its exact per-node content binding.
          */
         DistributionJobPayload: {
             /** Assignments */
@@ -10942,6 +10942,11 @@ export interface components {
              * @constant
              */
             subphase: "target-copy";
+            /**
+             * Uncertain
+             * @default false
+             */
+            uncertain: boolean;
         };
         /**
          * RunSwitchDistributionEndedResult
@@ -10960,6 +10965,11 @@ export interface components {
              * @constant
              */
             subphase: "target-copy";
+            /**
+             * Uncertain
+             * @default true
+             */
+            uncertain: boolean;
         };
         /** RunSwitchFinalVerifyResult */
         RunSwitchFinalVerifyResult: {
@@ -11356,6 +11366,10 @@ export interface components {
             preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
             /** Profile Application Id */
             profile_application_id?: string | null;
+            /** Recovery Child Operation Id */
+            recovery_child_operation_id?: string | null;
+            /** Recovery Deadline At */
+            recovery_deadline_at?: string | null;
             /** Retry Attempt */
             retry_attempt?: (number | ExactNumber) | null;
             /** Retry Reason */

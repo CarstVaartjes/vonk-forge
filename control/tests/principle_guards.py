@@ -427,19 +427,22 @@ def scan_source(
         if alias.name == "_OperationResponseTooLarge"
     }
     # An unrelated local class or assignment cannot borrow the owner's name.
-    resource_errors -= (
-        {
-            node.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
-        }
-        | {
-            node.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
-        }
-        | {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
-    )
+    if resource_errors:
+        resource_errors -= (
+            {
+                node.id
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+            }
+            | {
+                node.name
+                for node in ast.walk(tree)
+                if isinstance(
+                    node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+                )
+            }
+            | {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+        )
 
     class Collector(ast.NodeVisitor):
         def __init__(self):

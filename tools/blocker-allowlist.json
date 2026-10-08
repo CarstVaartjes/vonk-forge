@@ -1278,6 +1278,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "A typed unknown ends this pure validation entry with a diagnostic without effects or claims; remaining recipes are examined and a fresh invocation is immediately eligible."
+    },
+    {
+      "path": "control/src/vonk_control/distribution.py",
+      "function": "CompositeObjectSource.verified_model_objects_for_set",
+      "catches": [
+        "DistributionUnknown"
+      ],
+      "reason": "Three bounded_attempts re-read the current configured model provider. An exhausted request releases all request resources and returns unknown; provider restoration is accepted by the next call. No bytes, grant or SQL hold is produced here."
     }
   ],
   "call_edges": [
@@ -1372,7 +1380,7 @@
     },
     "control/src/vonk_control/agent_jobs/__init__.py": {},
     "control/src/vonk_control/agent_jobs/aggregation.py": {
-      "_aggregate_parent": "52eb20b85cf646953f4f1f6b57beb30d18843645bdb1832507c4f70c891d55cd",
+      "_aggregate_parent": "c9d93ba0b29d708a11f834a6e71625556f8936d3dd783083339c8b777c49e619",
       "_aggregate_parent_state": "225d6354f8be8411a27cf9e30f73bebadae5c971661899d94a101626c645219e",
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
@@ -2308,8 +2316,6 @@
     "control/src/vonk_control/distribution.py": {
       "DistributionError": "75ad18fa0293f0e4930136d8ca0273e4ca5236718f40198bbd310240c33e44f5",
       "DistributionError.__init__": "c58da4fea52607536a83acc163cbfbf81e53311ca94511e38a3290a53170791b",
-      "DistributionInputError": "d7099a520afa1889ee8f7aacae7c18b92e120bb45ff8851e76956ffbd783add5",
-      "DistributionInputError.__init__": "546146a4cd33cdb9e526fd672b7477e8c5850872818efd12c901fb33a75571f1",
       "DistributionUnknown": "c7a6580f575d38fe5ac5f505d59372a5fc7ab08c91846900442a145824ed53f0",
       "DistributionUnknown.__init__": "fce40a5b3a67eb42d9ccf97811bebc9021c11cb217d5a2e1c692d7e9a66726a0",
       "DistributionRefused": "3ac07d2926458ec3486e62d6bbb201fe043b8af34dc254aa36446984ed0722da",
@@ -2322,34 +2328,35 @@
       "ObjectSource.verify_artifact_set": "48ff44937dc1cf8f3d8b8732de39244605d614cdd22516becc3ead7006251ec7",
       "ObjectSource.verify_runtime_image": "3f3478f0f2cc74df927eb05ab360a9e371f13865321c8b414df5a708dce1996d",
       "artifact_set_sha256": "cf7b574970aed5c3795264b50f74b6f9ef1bf6c8af71222fc459e38985bb5f8e",
-      "FilesystemObjectSource": "cbe10e777bc324ecea9af68800b7000206f17c2582f314f4aac13c70a5c9c9e7",
+      "FilesystemObjectSource": "4bcf784625a303348b19aa42708973dbafe40e5ea3957fd21b21184c6d325a0c",
       "FilesystemObjectSource.__init__": "da41958c452818ab10f93ca2025010a0d3cad8899db0080dfd0cb61707aca934",
       "FilesystemObjectSource.verify_runtime_image": "d1e797c0fd24329c4c79b5f9b14ad6d658cb5385a9fb7bb253de1d89393594f8",
       "FilesystemObjectSource.verify_artifact_set": "32daf55b23395efb9d038adceb4fc5c679cff044f0521e4823901f53a67d27a7",
-      "FilesystemObjectSource.open_object": "07b4a4adbb969c102fc4119683c190c677e233d9f7d824264f7a282d0f804726",
-      "RecipeBuildObjectSource": "60ee5da1ba10c434cbd5df2d5ca414ddcf9a467acb83514036ea3a41a451317d",
+      "FilesystemObjectSource.open_object": "a5b04b32cfe6cc7889f505728827618aaf2079bbf6dec1d992b175c4c1b8fe91",
+      "RecipeBuildObjectSource": "8938829f6b0e8d3e78c2e00b16a4b9bf532dcf2037ff3c1a094670d5fc80444d",
       "RecipeBuildObjectSource.__init__": "f2f1a61637ed1efce756d17409cc4b177939ab8712bb9a74f530f1ce49bcc177",
       "RecipeBuildObjectSource.verify_artifact_set": "797e35d909dbf406fdca0821645f47e2122797679fe5aecf9257322a9aae3043",
-      "RecipeBuildObjectSource.verify_runtime_image": "41897aa12f015fbac580e4134662963cb9fe749295b441de34cded576eae95f3",
-      "RecipeBuildObjectSource.open_object": "da0709928a2bdf9820f3a09d3cfeb1c942236a458a03d2e23c69d7b2fb8ceb55",
-      "ModelCacheObjectSource": "4914e5e1660066f80f1f004d6f7b78b0dcc35d9adabe7cd16252368443db50d4",
+      "RecipeBuildObjectSource.verify_runtime_image": "44bf190acbd6ed6efad1d8f2e669d6eaa361d8eb3c4bcb2b3fefdf995f850a87",
+      "RecipeBuildObjectSource.open_object": "9d173ca8e11da71beb1857b2f54f9251b0c4a4487c6a90fb8b19bdfe6c3461eb",
+      "ModelCacheObjectSource": "1ec283232a5fbf3ece59cc38a7471db7755d2d3b9476201524c59b5eb2e541bf",
       "ModelCacheObjectSource.__init__": "68d58bb8dd00bb6e56e1996cc40388685c17a2788a1da7459a07af82be636f3a",
       "ModelCacheObjectSource.open_object": "691db78a193e01710d023297452b20b9de845739096c714c6d667bd6dfe6039e",
       "ModelCacheObjectSource.verify_runtime_image": "660757c621d6f51a2b5703fd7e95582284ac556fddcadc8b9c5ab96aca8383fe",
       "ModelCacheObjectSource.from_service": "31d55ae58c88cc6957e991b4f92c9c5ac133ad686af7045c2d64e58b6659f193",
       "ModelCacheObjectSource._from_cache_service": "7f85755506535e3f6871e536bbe93a7cf84f34cf1a84b67103c3ef8083202f39",
       "ModelCacheObjectSource._load_manifest": "74d1af8db119dff90ee503cff98ad1659841fb60d21c0b769c59328b26dea3ee",
-      "ModelCacheObjectSource._describe": "298bcfdfaa0ad14d5f24bf318a1a2abffc43b49db53dfd393ccb0f884b40cb71",
+      "ModelCacheObjectSource._describe": "4451d43b8bc5e9e48b017dac6ff9ed67fbddbada90a84db076a2123e6f3aa1d5",
       "ModelCacheObjectSource._open_cache_object": "0e5b6ac1e4ffa3e9c7d78b5ce23ff98f4531c8a137fe364ba1cceab6446a818a",
       "ModelCacheObjectSource.verify_artifact_set": "5cb72b9ca70966b894368dd9867f2ffc042c7a05e34539c784019329323dcbf7",
       "ModelCacheObjectSource.objects_for_set": "807396e70f8ae961a0a0563ecbf8cf11c7eb3baf97f7cc6f454252e8c469f7e7",
       "ModelCacheObjectSource.verified_model_objects_for_set": "0a7cc3ba0372d45ebf66307fd622d029ab17e8cf8af1bd81ea6683730a0668b0",
       "verified_model_receipts": "83b1bfbe76f0da8ff8ea4f584aaaa6a6be10e61bc363fa6b0c0510b8be35a709",
-      "CompositeObjectSource": "775a7997a0fb17c014b5f5d38a80cfb72b46f8c5c062f668a3d1f297a59ac518",
+      "CompositeObjectSource": "389f4e9b113c32eab3d76ff360a12c482eacbd01d2aeedc88d553dc74d312054",
       "CompositeObjectSource.__init__": "0a1e6acc9c994ab8477d2b2f5f098a655a2f46dd513139efd34871018af07fca",
       "CompositeObjectSource.verify_artifact_set": "f165c3dbc3eaaf9fe26ca912cee2295c14a7e397761ffdfa98c82fc4cb3d8792",
       "CompositeObjectSource.verify_runtime_image": "763532bbe7c6c0e09054193d4ed136f511c625af0047dd1beb44ab3da1fd1b7d",
-      "CompositeObjectSource.verified_model_objects_for_set": "889169ab58460535e040a47f99989f9c2449d94f4cf2873870417da773b698b1",
+      "CompositeObjectSource.verified_model_objects_for_set": "cfbe80f5fc9aa7ea01cdac3420e3cf7588245f458e5e6b4458806aa100ab19d1",
+      "CompositeObjectSource._verified_model_objects_for_set_once": "52d3be30dc9657e3161391f411fa725be2cbc72faf4525e901c9cee4bdd2c1c2",
       "CompositeObjectSource.open_object": "f6efb227e5241a14f4aefc439886494631673cb1f883edae63d6b9265dde5f51",
       "MemoryObjectSource": "442b048fad4740e7cb07fdefc2f9b83863583c27f2109874c39e81900199733c",
       "MemoryObjectSource.__init__": "df2292de588cd62f1430b9714f0348cf440067621e323c1c8717883e888c9aa8",
@@ -2363,35 +2370,35 @@
       "_may_replace": "95d947960468027caef976809148e74419ebc3b35d71c21f6ddfb558711faf71",
       "_may_replace.grant": "112211900deb895b4a305ee7183eedb33223d74e39205d736e20305d534ab69c",
       "_still_stored": "410dc4a0a2535d4a7f8e9534b847ce6f61ab6a354eb8b5d5bcf27a95aee7c99f",
-      "DistributionService": "2f56f0978ce947185e3a4beb4a23bf98daf490e83625b9d07699fef6585cb708",
+      "DistributionService": "727861c22c68b1cce6465c03c0a5f826504fa0ed83840f9fc3d1e30d6353f77a",
       "DistributionService.__init__": "8896ae50844172f1de6745dddf2108a6855fdd9417eaf4e44c5549a130599dd9",
       "DistributionService.attach_sessions": "ce7416c53ea1b730694d0026a652eca7b8afb551dc9740f1d1ff0dd16af0523b",
       "DistributionService.register": "42781085f4bbce824115e0be82e8d0c94dc2137042e3c7872e6145723e829149",
       "DistributionService._register_row": "cf29bb549deed58623b996d7ab0cf06eded4c65fd16dba18775617660615744e",
       "DistributionService._from_row": "82876d0778eabb9510e565cfe60616bb8ddd39d385056f107105a440e30faa45",
       "DistributionService.revoke": "3f7810ef9d529c98ee8f005ff712e61bd0a210e281c98177e8f4673067a41976",
-      "DistributionService.authorize": "73538bd0b15b782ef8aa005d99b4f13b68b3689b5b4cce819c13b646e4480f43",
-      "DistributionService._authorize_uncached": "a47b6c307cea275c4a6ebbfd28ec912fda60dbc629402ab56eef91eabde1f430",
+      "DistributionService.authorize": "41840b9d0af437a260deac16c33edd55577ba8509a25a709266ac3575ef50c15",
+      "DistributionService._authorize_uncached": "f8da412d9ecc92a7f9534d435a8b366f3bdf0c123c9093a515e98b90f30e3498",
       "DistributionService.locate_object": "b4d473a2a0cb304610529a018010a4e72fde24039541f2ff1f7d2c3bc820e983",
       "DistributionService.open_object": "94b1c84441a23dff917206d55139d4211149850f8794b2c5c1b5e5508444631c",
       "record_distributed_runtime_image": "cd13be509addbbc48fb3a6ae09f0b2681f1e8ef318ae344818ed037d1f443552",
       "build_distribution_service": "90d71fa5561622844c14f716149298ade8a3dd91eb26ce66e64ddd667684da07",
       "build_distribution_service_from_components": "cfe34867778564e9f3aa745892abd7d0cadd3713b5474b0a6617d4d6e4e5f5f7",
-      "<module>": "f2a084030b92bc396ab446c275b3d528dcb87f06b53b14fbcc6e159ef43a4877"
+      "<module>": "f4235b36086ab594d9f3b9cae6f07d3c47759e98c160033f4699e9f4a07479b6"
     },
     "control/src/vonk_control/distribution_executor/preparation.py": {
-      "CompositeDistributionPhaseExecutor": "4d2bbdb3158ae64621d41874bb509c4b538081425decbdf30b3a22668edc3d96",
+      "CompositeDistributionPhaseExecutor": "9995d8f69137b3b0ae5f03657ce3d948d78275726679da584e1ea1c8118c36ea",
       "CompositeDistributionPhaseExecutor.__init__": "0a2ca4ae8caedd100668af236f590a182c815e5ab7bcce1389d8dd8d0d30f2d4",
       "CompositeDistributionPhaseExecutor.memory_footprint": "ac93d09598e40ba98532886d65e00f66c982d13add5a24e557de3975428d325b",
       "CompositeDistributionPhaseExecutor.close": "7fe75185b69aa1ae560c9876c3b10d0a6171e30439f18c8cf78742a9046e1dd0",
-      "CompositeDistributionPhaseExecutor.execute": "ae5b6ca02dfd8ba14cd5016f1b34dad8f8bbb7350d27797c2e56b8acd11123a8",
-      "CompositeDistributionPhaseExecutor._prepare_runtime_image": "6848e9b75ac92e2c4d33fdaf49c2ac97098ffc6790f9f80cc38a5809bb0c0c35",
+      "CompositeDistributionPhaseExecutor.execute": "f75f143b4efb5092744e41ee2bbb415413482895cd2fcdc5291520bfd72ee480",
+      "CompositeDistributionPhaseExecutor._prepare_runtime_image": "83d3fc1b481742b565a18ddac1665dba3e17a058c5dc60bab58faf7938c0d130",
       "CompositeDistributionPhaseExecutor._prepare_runtime_image.before_publish": "c9b00e0448534b05701e876eb8bfd1c9b402628984159db3422fe40ff321d925",
       "CompositeDistributionPhaseExecutor._prepare_runtime_image.persist_reference": "1f214ae4fc81d21fdfa5058399b8f56e34c5a7f8176b932859c01f065751bacc",
       "CompositeDistributionPhaseExecutor.get": "3925260150357e56c329665f7c3f87b73f48abafee316602ef5c7fb7dc5d8735",
-      "CompositeDistributionPhaseExecutor._cache_state": "7a6f0e1d2e8dbc81099ee5bd4b4db87c774d59347212afaae713d6ce315ca667",
+      "CompositeDistributionPhaseExecutor._cache_state": "2fd7fa51c6b33a83a3530fc40d3cdbecdd409f604c82a003f83beffef00fdf4c",
       "CompositeDistributionPhaseExecutor._cache_result": "9d8252f6294b9a1a28e97e2b3368819a96d52cc05fda91699e3e0fd2d876a060",
-      "<module>": "9f5ad4b76ce5d18c110a30270dedbd39a63e796529c0131132dc438e35a53489"
+      "<module>": "41e01e91b87be1f6e4b121a67b88b2c9e3ce0df1bc1b02959f557a352ccfb760"
     },
     "control/src/vonk_control/enrollment.py": {
       "EnrollmentDenied": "e8b094d8abe035c49d1a0bacc78e61a239360fcd5612078362be38475b506ccd",
@@ -5271,11 +5278,11 @@
       "_activity_result": "92c659a8687b7ec2a99b65d53107381f812e066557cea482fef6d8591f1a6d77"
     },
     "control/src/vonk_control/run_switch_operations/advance.py": {
-      "AdvanceMixin": "26802e760d35e4777b58361bece4e5ae0cd50f3ffc22655d8ef6738e0c2cea47",
-      "AdvanceMixin._advance": "29de151d436b1834ab2d42572bebaa9dfafbd15d255f1f05d34110c5bb40adc7",
+      "AdvanceMixin": "3eedc667368ddfcb274adbb8d05ccbd1e55b9d7e0e9bf5f90c0cbb01889715a4",
+      "AdvanceMixin._advance": "36c29f85c9f55ce64aefaa515a460c6b5b32e4ce2105bd0184df088d5e0fe410",
       "AdvanceMixin._advance.checkpoint_job": "4768cbca5c2b679bda8c5f89cbd49af35a3e82f2e5c086474890a514ba8b50ee",
       "AdvanceMixin._advance.fail": "c25baf10f1f6245ecd3d6356a0a01ff92b2bba30530d2c924ab992310c0f57ba",
-      "<module>": "a215aa62c6d37f85a21d723dbfa32c7bd554e913523382eef004a1dfb0a84546"
+      "<module>": "16d2a8e3fc69c2e8456cd3464114f8fbcb1f2790dc4111d9ec1c67de21dad6de"
     },
     "control/src/vonk_control/run_switch_operations/artifact_inspection.py": {
       "DatabaseRunSwitchArtifactInspector": "1d7e5cb890a68d6b5a42b6465cddb032e62188ed5f78d46ee7346452e8d8ed45",
@@ -5322,14 +5329,15 @@
       "<module>": "187d53f90ec1e8391222d2fdd01b82c14b81b5f4a17d7d7473c927cee5fa1cee"
     },
     "control/src/vonk_control/run_switch_operations/endings.py": {
-      "EndingsMixin": "5fa88925371224cf7e73f422755b3c6f77b12900ef76f89e8ea13804d5aecc90",
+      "EndingsMixin": "2c63d20e90de2d163d1124028ab58d2bd29850a2e5637e384625d5ced29c4980",
+      "EndingsMixin._expire_distribution_observation": "503737d3f2e0c70eacd83f7182637ce93d9e8e0d6dcb23d230065ed6f71c7b1a",
       "EndingsMixin._settle_stop_observation": "04dbd9a49d584e31905da65a22f7102a8afe77ba395bb044f96453883ad0a8a9",
       "EndingsMixin._get_child_operation": "c861efc9302bc9b5380925ef9580a3d62991eaff938b315919d0cc5bd6181f0f",
-      "EndingsMixin._fail": "64e4b6014d867effcc7bfd0a9ccfcc7f79ff72aa0eaed1997ba6e28038e7c32c",
+      "EndingsMixin._fail": "8f5e6a7bece527ca4b49dc2d30334b9ba27b2bcdb2cb1586a5da7e58745deb5c",
       "EndingsMixin._settle_invalid_receipt": "f6c609fdc97f5308c258bc28764dc9c200239e079061e8b5d5c6bb50d9857d18",
       "EndingsMixin._schedule_checkpoint_retry": "24b73ca9c25ec6ad3421aeca8b1d607638a04a1d91575408b63bc0bf91cf19c3",
       "EndingsMixin._mark_failed": "7de0f8b9781bc0b44e28ad044b7111ec53da35e1eac4a1d590d8780e9059b1cc",
-      "<module>": "66fb80c07de2bd3e51a74239147c5e91c6d817577463f8888064a4cc3d01dc3c"
+      "<module>": "f25e159264b51c2ec9965e5027f520ccd0988231ec1586e64c203994eedc086d"
     },
     "control/src/vonk_control/run_switch_operations/endings_helpers.py": {
       "_reject_invalid_operation": "5509131ef88abf14a9f748e78aae0e34ca6140923c5a0d7bed6f6e9941a12c0b"
@@ -5429,13 +5437,13 @@
       "<module>": "992204f0bd1233ca0f16a1b39c21e403935c08caa2382c8aa6404b07191e7c37"
     },
     "control/src/vonk_control/run_switch_operations/observation.py": {
-      "ObservationMixin": "a13490fc9e0f66364d0aa7c36cf9d9992382108b580791dfde4377c76c5a88af",
+      "ObservationMixin": "09f02ef05b1e127a40baaabcd6a3cbdda0002c3298e9a58391edcc7280f2da16",
       "ObservationMixin.activity_provider": "7b341dfaf4a9a4022de444983243314d30e3f7065a428dde8284477d1285b722",
       "ObservationMixin.bind_model_cache": "5222b8501e7049199cb30edffccf0916c776a7c964d6e9a8b70ab3597cc25d0e",
-      "ObservationMixin.tick": "bd7a15079d3d99a8a672f0744e2ea5e67314afabf20602de1e17ce91a048b2ba",
+      "ObservationMixin.tick": "218c1f94d069f0cea028141ff675dd4ccdbc8edf1f4b5ab420d464748d8f362a",
       "ObservationMixin._hold_after_advance_failure": "a8f506a4e10a3bef208018b8bc72f543c72bb5f7666efeb8caaecd5ba5bc85dc",
       "ObservationMixin._record_wait": "a1bd7235591e71205fd0d2128cbfc2b588cd5d0967fb78dd8f613187ef1cd72d",
-      "<module>": "1cf3ebe14c4cfd36a8d06ece13c300c57a131b1a1865a81fcd2ac938d06f735a"
+      "<module>": "302b496a13b4e94c22b6cc6e64a7e2b38edda0e0288ab53704914e3de7b6e4be"
     },
     "control/src/vonk_control/run_switch_operations/observation_helpers.py": {
       "_EstablishedEffect": "3871ab52024d2c8c7cca50f67a9b70934216276b4576b5f6ba398a3bc40d4d5f",
@@ -5522,7 +5530,7 @@
       "<module>": "e40b3d0a889543392fdd99246a9637551a2f26b7bc29a8946a638d7d560c008e"
     },
     "control/src/vonk_control/run_switch_operations/publish.py": {
-      "_persist_run_switch_runtime_image_reference": "520e4c4299e165ae62926cf364b03783c387ec2d90acbf814f8af6cedecd3c40"
+      "_persist_run_switch_runtime_image_reference": "ad68205126f8ea1d7696f5997a35d5d4b66720e22f7636a0e7a004bba2ce1f69"
     },
     "control/src/vonk_control/run_switch_operations/reservation.py": {
       "ReservationMixin": "0e73407db13965f12c711921e2efd5e9521ca96ec51259ed2dffb53e2f98f1e1",
@@ -5570,7 +5578,7 @@
       "_persisted_result": "6522df6de4cc7538cef1b094283d9a6e824320141d07f87fee462e23f23e94fd",
       "_phase_result": "15b12fff5eccd352fd6afd9aeacff21a30d8218a94c5d3e9de15f7173276f0d6",
       "_child_result": "63d08457443d746de3630aeaff37bd2f09056bb9af4ed7c0807eb9d449fa21a7",
-      "_child_progress_payload": "9d2f8aac4a64a085a63aa3bb4303efbb3b017adfa74f064b45ac319596814af3",
+      "_child_progress_payload": "0d43edd178f2a1e41f295d3af5375cde73605f9c57003dfff5969fe03de96a2c",
       "_child_failure_code": "1b3d52c22042348dfa80affad5af2731f577e0196ccd15a63bac5b15797678cf",
       "_child_failure_kind": "c66bad7519a38ae2bfdab53db3d790a387363b7f1e50bdee81863bdb2932a0ce",
       "_without_observation_time": "5cc3ed67a5aec4f74cdbc1f6f82c18ff03cb6f0ca2647b5da477342e84bde94b",
@@ -6485,7 +6493,6 @@
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._authorize_uncached", "distribution.wrong_node", 2],
         ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.open_object", "distribution.unassigned", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "DistributionService._authorize_uncached", "distribution.revoked", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "forbidden", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "permission-denied", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "nas-cache-object-access-was-refused", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "permission-denied", 1],
@@ -8725,9 +8732,7 @@
       "category": "input-validation",
       "reason": "Code-reviewed boundary:  Rejects a malformed requested object digest before opening storage. Rejects an invalid requested object length before opening storage. Rejects archive download for a runtime image; this source only supports layered pulls.",
       "sites": [
-        ["control/src/vonk_control/distribution.py", "DistributionError", "FilesystemObjectSource.open_object", "distribution.object_invalid", 2],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "RecipeBuildObjectSource.open_object", "distribution.object_unavailable", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionInputError", "CompositeObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 1]
+        ["control/src/vonk_control/distribution.py", "DistributionError", "FilesystemObjectSource.open_object", "distribution.object_invalid", 2]
       ]
     },
     {
@@ -9340,11 +9345,11 @@
     {
       "family": "distribution.already-retried",
       "category": "already-retried",
-      "reason": "Managed-storage absence or unreadable descriptors are typed DistributionUnknown. Existing registered Run/Switch phase and admission observation loops re-enter the same content identity with durable bounded backoff; the HTTP boundary returns a bounded retry hint to the agent. No grant, claim or artifact availability is fabricated. The retry proof covers every call path.",
+      "reason": "Managed-storage misses expose no unverified bytes. Direct requests return a finite unknown response. Accepted Run/Switch artifact phases re-observe under their persisted recovery deadline; expiry fences owned transfer attempts and releases request holds without asserting a remote stop. The scanner proves call edges, not runtime termination; parent restart/expiry/fresh-admission behavior has a separate regression.",
       "sites": [
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService._register_row", "message", 1],
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.open_object", "distribution.object_unavailable", 2],
-        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "FilesystemObjectSource.open_object", "distribution.object_unavailable", 2],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "FilesystemObjectSource.open_object", "distribution.object_unavailable", 3],
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "MemoryObjectSource.open_object", "distribution.object_unavailable", 2],
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "ModelCacheObjectSource._describe", "distribution.model_set_identity_unavailable", 2],
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "ModelCacheObjectSource._open_cache_object", "distribution.object_unavailable", 3],
@@ -9359,6 +9364,39 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "ModelCacheObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 3]
+      ]
+    },
+    {
+      "family": "distribution.already-retried",
+      "category": "already-retried",
+      "reason": "The request re-observes without publishing bytes or changing a grant. Run/Switch artifact workers persist a recovery deadline, poll the original identity, and end observation at expiry. Direct request exhaustion returns unknown without retaining request resources; a repaired provider or clock is accepted by a fresh call. Static retry registration is supplemental to the behavioral tests.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService._authorize_uncached", "distribution.object_unavailable", 1]
+      ]
+    },
+    {
+      "family": "distribution.security-edge",
+      "category": "security-edge",
+      "reason": "The manifest provider raised an OS PermissionError. No descriptor or bytes are exposed after the actual denied access; renewed authorized access is observed by a fresh call.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._describe", "permission-denied", 1]
+      ]
+    },
+    {
+      "family": "distribution.already-retried",
+      "category": "already-retried",
+      "reason": "The request re-observes without publishing bytes or changing a grant. Run/Switch artifact workers persist a recovery deadline, poll the original identity, and end observation at expiry. Direct request exhaustion returns unknown without retaining request resources; a repaired provider or clock is accepted by a fresh call. Static retry registration is supplemental to the behavioral tests.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "CompositeObjectSource._verified_model_objects_for_set_once", "distribution.model_set_identity_unavailable", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.authorize", "distribution.object_unavailable", 1]
+      ]
+    },
+    {
+      "family": "distribution.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class DistributionUnknown is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "RecipeBuildObjectSource.open_object", "distribution.object_unavailable", 1]
       ]
     }
   ]

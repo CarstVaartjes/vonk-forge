@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, timedelta
 from typing import Any
 
+from pydantic import BaseModel
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionObject,
@@ -20,17 +21,16 @@ from ..agent_jobs import AgentJobService
 from ..content_identity import ImageContent, same_image
 from ..distribution import DistributionService
 from ..distribution_assignment import NodeDistributionAssignment
-from ..models import (
-    RecipeBuild,
-)
 from ..oci_image_store import StoreUnknown
 from ..run_switch_contract import (
+    RunSwitchMemberState,
     RunSwitchOperationResult,
     RunSwitchPlan,
     RunSwitchRuntimeImageResult,
     RunSwitchRuntimePlanResult,
 )
 from ..run_switch_operations import effective_build_receipt
+from ..run_switch_operations.constants import _MEMBER_STATE_ADAPTER
 from ..runtime_image_preparation import (
     RuntimeImageStorage,
 )
@@ -169,37 +169,28 @@ class DistributionIdentity:
         layout_digest: str,
         image_bytes: int,
     ) -> RuntimeImagePull:
-        """The stored archive of a succeeded build, identified by its content.
+        """Resolve verified archive content from its managed-storage authority.
 
-        The bytes were verified at ingress and managed storage holds the image.
-        The plan names the build, and the build's recorded result must equal
-        the archive being copied; which recipe revision asks for it does not
-        matter.
+        A historical build identifier is provenance, not an availability gate.
         """
 
         if not image_digest or not layout_digest or image_bytes < 1:
             raise RuntimeError("verified OCI runtime image identity is unavailable")
-        if build_id is None:
-            raise RuntimeError("verified OCI runtime image build is unavailable")
-        with self._sessions() as session:
-            build = session.get(RecipeBuild, build_id)
-            if (
-                build is None
-                or build.state != LifecycleState.SUCCEEDED.value
-                or build.image_bytes is None
-                or not same_image(
-                    build,
-                    ImageContent(
-                        image_digest=image_digest,
-                        archive_sha256=layout_digest,
-                        image_bytes=image_bytes,
-                    ),
-                )
-            ):
-                raise RuntimeError("OCI build authority changed")
+        storage = self._source_runtime_storage(self._distribution.source)
+        layout = getattr(storage, "layout", None)
+        stored = layout.read(f"sha256:{layout_digest}") if layout is not None else None
+        if (
+            stored is None
+            or isinstance(stored, StoreUnknown)
+            or not same_image(
+                stored,
+                ImageContent(image_digest=image_digest, image_bytes=image_bytes),
+            )
+        ):
+            raise RuntimeError("managed runtime image content is unavailable")
         return RuntimeImagePull(
             image_digest=image_digest,
-            config_digest=self._stored_config_digest(layout_digest),
+            config_digest=stored.config_digest,
             address=layout_digest,
         )
 
@@ -229,26 +220,17 @@ class DistributionIdentity:
         assignment_bytes = bytearray(hashlib.sha256(seed.encode("utf-8")).digest()[:16])
         assignment_bytes[6] = (assignment_bytes[6] & 0x0F) | 0x40
         assignment_bytes[8] = (assignment_bytes[8] & 0x3F) | 0x80
-        return NodeDistributionAssignment.parse(
-            {
-                "assignment_id": str(uuid.UUID(bytes=bytes(assignment_bytes))),
-                "plan_digest": plan.plan_digest,
-                "generation": generation,
-                "node_id": node_id,
-                # The grant lives from this registration; authenticated agent
-                # progress renews it while the copy runs (the
-                # artifact-distribution renewal in AgentJobService.heartbeat).
-                # A plan may be accepted hours before its copy starts, so its
-                # age must not expire the grant.
-                "expires_at": (
-                    self._clock().astimezone(UTC) + timedelta(hours=1)
-                ).isoformat(),
-                "model_artifact_set_sha256": model_set_digest,
-                "objects": [item.to_mapping() for item in model_objects],
-                "oci_image_digest": image.image_digest,
-                "oci_image_config_digest": image.config_digest,
-                "oci_archive_sha256": image.address,
-            }
+        return NodeDistributionAssignment(
+            assignment_id=str(uuid.UUID(bytes=bytes(assignment_bytes))),
+            plan_digest=plan.plan_digest,
+            generation=generation,
+            node_id=node_id,
+            expires_at=self._clock().astimezone(UTC) + timedelta(hours=1),
+            model_artifact_set_sha256=model_set_digest,
+            objects=model_objects,
+            oci_image_digest=image.image_digest,
+            oci_image_config_digest=image.config_digest,
+            oci_archive_sha256=image.address,
         )
 
     @staticmethod
@@ -292,18 +274,22 @@ class DistributionIdentity:
         return model_bytes + image_bytes
 
     @staticmethod
-    def _member_state(value: str) -> str:
-        return {
-            LifecycleState.QUEUED.value: ProfileEffectState.PENDING.value,
-            LifecycleState.RUNNING.value: LifecycleState.RUNNING.value,
-            LifecycleState.SUCCEEDED.value: LifecycleState.SUCCEEDED.value,
-            LifecycleState.FAILED.value: LifecycleState.FAILED.value,
-        }.get(value, ProfileEffectState.UNKNOWN.value)
+    def _member_state(value: str) -> RunSwitchMemberState:
+        return _MEMBER_STATE_ADAPTER.validate_python(
+            {
+                LifecycleState.QUEUED.value: ProfileEffectState.PENDING.value,
+                LifecycleState.RUNNING.value: LifecycleState.RUNNING.value,
+                LifecycleState.SUCCEEDED.value: LifecycleState.SUCCEEDED.value,
+                LifecycleState.FAILED.value: LifecycleState.FAILED.value,
+            }.get(value, ProfileEffectState.UNKNOWN.value)
+        )
 
     @staticmethod
     def _int(value: object) -> int | None:
         return value if type(value) is int and value >= 0 else None
 
     @staticmethod
-    def _digest(value: Mapping[str, object]) -> str:
-        return hashlib.sha256(canonical_message(value)).hexdigest()
+    def _digest(value: BaseModel) -> str:
+        return hashlib.sha256(
+            canonical_message(value.model_dump(mode="json"))
+        ).hexdigest()

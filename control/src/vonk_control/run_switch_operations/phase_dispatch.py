@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     run_switch_code,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
 
 from ..admission_locking import (
     AdmissionLockBusy,
@@ -30,7 +31,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
-from ..failure_classification import error_code, is_redownload
+from ..failure_classification import error_code, is_security_failure
 from ..install_admission import (
     InstallAdmissionBusy,
 )
@@ -284,7 +285,13 @@ class PhaseDispatchMixin:
                 fail(
                     str(error),
                     failure_code=code,
-                    replan=phase.kind != "final_verify",
+                    replan=phase.kind
+                    not in {
+                        ProfileChildPhase.PREPARE.value,
+                        ProfileChildPhase.TRANSFER.value,
+                        ProfileChildPhase.VERIFY.value,
+                        ProfileReportedPhase.FINAL_VERIFY.value,
+                    },
                     definite=error.definite,
                 )
                 return True
@@ -330,7 +337,7 @@ class PhaseDispatchMixin:
                 fail(
                     f"{type(error).__name__}: {error}",
                     failure_code=error.code,
-                    definite=not (error.retryable or is_redownload(error.code)),
+                    definite=is_security_failure(error.code),
                 )
                 return True
             except (
@@ -345,7 +352,13 @@ class PhaseDispatchMixin:
                 fail(
                     detail,
                     failure_code=_failure_code_of(error),
-                    replan=isinstance(error, (RuntimeError, ValueError)),
+                    replan=isinstance(error, (RuntimeError, ValueError))
+                    and phase.kind
+                    not in {
+                        ProfileChildPhase.PREPARE.value,
+                        ProfileChildPhase.TRANSFER.value,
+                        ProfileChildPhase.VERIFY.value,
+                    },
                 )
                 return True
         if (

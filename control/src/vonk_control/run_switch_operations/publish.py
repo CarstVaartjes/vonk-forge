@@ -219,6 +219,10 @@ def _persist_run_switch_runtime_image_reference(
             current_ordinal != ordinal
             or _string_or_none(current.profile_application_id) != profile_application_id
             or current.cancellation is not None
+            or (
+                current.recovery_deadline_at is not None
+                and now >= current.recovery_deadline_at
+            )
             # The operation waits on this very background preparation, so the
             # same phase/item checkpoint also owns publication while waiting.
             or job.state

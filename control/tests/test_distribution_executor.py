@@ -19,6 +19,7 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import (
+    AgentResultState,
     DistributionObject,
     LifecycleState,
     OperationMemberProgress,
@@ -51,7 +52,10 @@ from vonk_control.job_documents import (
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
-from vonk_control.model_cache_contract import ModelCacheCounters
+from vonk_control.model_cache_contract import (
+    ModelCacheCounters,
+    ModelCacheDownloadResult,
+)
 from vonk_control.model_cache_progress import cache_progress, progress_document
 from vonk_control.models import (
     AgentNode,
@@ -73,6 +77,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchPhase,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
+    RunSwitchRuntimePlanResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchTargetTransferResult,
     RunSwitchVerifyResult,
@@ -146,7 +151,7 @@ def test_phase_receipt_rejects_explicit_cross_phase_receipt() -> None:
     }
     phase = _phase(kind="transfer", subphase="target-copy")
     with pytest.raises(RuntimeError, match="phase receipt is invalid"):
-        _phase_receipt(receipt, phase=phase)
+        _phase_receipt(RunSwitchRuntimePlanResult(**receipt), phase=phase)
 
 
 def _target(node: str, *, image: bool = False) -> SimpleNamespace:
@@ -316,6 +321,37 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     )
     assert first.operation_id is not None
     assert isinstance(first.result, RunSwitchTargetTransferResult)
+    # Lose real child bookkeeping after dispatch. Reconstructing the owner's
+    # deterministic identity must retain, rather than duplicate, the issued order.
+    with services.sessions.begin() as session:
+        original_order = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == first.operation_id
+            )
+        )
+        assert original_order is not None
+        order_id = original_order.id
+        session.delete(session.get(Job, first.operation_id))
+    recovered_child = executor.execute(
+        plan,
+        phase,
+        item_index=0,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress=RunSwitchOperationResult(
+            workload_intent_ordinal=7, recovery_child_operation_id=first.operation_id
+        ),
+    )
+    assert recovered_child.operation_id == first.operation_id
+    with services.sessions() as session:
+        orders = list(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == first.operation_id
+                )
+            )
+        )
+        assert [order.id for order in orders] == [order_id]
     pending = executor.get(first.operation_id)
     assert isinstance(pending.result, RunSwitchDistributionChildResult)
     assert pending.result.progress.members[0].completed_bytes == 0
@@ -368,7 +404,15 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
                 },
             )
         )
+    # Worker aggregation progresses and publishes without any reader.
+    with services.sessions.begin() as session:
+        services.operations._aggregate_parent(session, first.operation_id)
+    with services.sessions() as session:
+        before_read = session.get(Job, first.operation_id).result
     view = executor.get(first.operation_id)
+    executor.get(first.operation_id)
+    with services.sessions() as session:
+        assert session.get(Job, first.operation_id).result == before_read
     assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.state == "succeeded"
     assert [member.node_id for member in view.result.members] == [
@@ -440,10 +484,20 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         attempt.result = {**attempt.result, "downloaded_bytes": 14}
     mismatch = executor.get(first.operation_id)
     assert isinstance(mismatch.result, RunSwitchDistributionChildResult)
-    assert mismatch.state == "failed"
-    assert mismatch.result.members[0].error == (
-        "distributed transfer byte evidence mismatch"
-    )
+    assert mismatch.state == LifecycleState.SUCCEEDED
+    assert mismatch.result.members[0].state == LifecycleState.SUCCEEDED
+    assert mismatch.result.members[0].total_bytes is None
+    assert mismatch.result.progress.total_bytes is None
+    with services.sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == stored.id,
+                AgentOperationAttempt.attempt == stored.current_attempt,
+            )
+        )
+        attempt.result = {"downloaded_bytes": 15}
+    repaired = executor.get(first.operation_id)
+    assert repaired.progress is not None and repaired.progress.total_bytes == 30
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
@@ -666,6 +720,8 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
             )
         )
         child_id = child.id
+    with services.sessions.begin() as session:
+        services.operations._aggregate_parent(session, child_id)
     view = executor.get(child_id)
     assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.state == "failed"
@@ -755,19 +811,15 @@ def test_abandon_closes_only_a_parked_distribution_child(
 
 
 @pytest.mark.parametrize(
-    ("failure_kind", "retried"),
-    [("temporary-dependency", True), ("integrity-failure", False)],
+    "failure_kind",
+    ["temporary-dependency", "integrity-failure"],
 )
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_member_failure_kind_and_diagnostic_survive_aggregation(
     agent_system,  # noqa: F811
     failure_kind: str,
-    retried: bool,
 ) -> None:
     """The agent's typed failure decides the parent's retry and stays visible."""
-
-    from vonk_control.recovery_policy import RecoveryDecision, classify
-    from vonk_control.run_switch_operations import _child_failure_kind
 
     _client, services, _tokens, clock = agent_system
     executor = DurableDistributionPhaseExecutor(
@@ -845,15 +897,41 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
             )
         )
         child_id = child.id
+    with services.sessions.begin() as session:
+        services.operations._aggregate_parent(session, child_id)
     view = executor.get(child_id)
     assert isinstance(view.result, RunSwitchDistributionChildResult)
-    member = view.result.members[0]
-    assert member.failure_kind == failure_kind
-    assert member.diagnostic == "http_status=404 error_code=controller.http_404"
-    assert view.result.evidence[0].diagnostic == member.diagnostic
-    assert view.result.failure_kind == failure_kind
-    decision = classify(_child_failure_kind(view))
-    assert (decision is RecoveryDecision.RETRY) is retried
+    assert view.result.members[0].diagnostic
+    with services.sessions() as session:
+        persisted = session.get(Job, child_id).result
+    for _ in range(3):
+        executor.get(child_id)
+    with services.sessions() as session:
+        assert session.get(Job, child_id).result == persisted
+    # Repair the original operation's evidence. Its successful effect is not
+    # demoted by absent totals and reads never rewrite the worker's verdict.
+    with services.sessions.begin() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
+        )
+        operation.state = LifecycleState.SUCCEEDED
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id,
+                AgentOperationAttempt.attempt == 1,
+            )
+        )
+        attempt.state = LifecycleState.SUCCEEDED
+        attempt.result = {"downloaded_bytes": 26}
+        child = session.get(Job, child_id)
+        child.state = LifecycleState.RUNNING
+        services.operations._aggregate_parent(session, child_id)
+    repaired = executor.get(child_id)
+    assert repaired.state == LifecycleState.SUCCEEDED
+    measured = repaired.progress
+    assert measured is not None
+    assert measured.total_bytes == 26
+    assert measured.completed_bytes == 26
 
 
 @pytest.mark.parametrize("image_prepared", [True, False])
@@ -893,10 +971,12 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
                 "expected_bytes": 15,
                 "artifact_count": 2,
                 "new_bytes": 12,
+                "already_cached_bytes": 3,
+                "warnings": [],
                 "blockers": [],
                 "_manifest": SimpleNamespace(
                     digest="d" * 64,
-                    recipe_revision_sha256="b" * 64,
+                    recipe_revision_sha256="9" * 64,
                 ),
             }
 
@@ -977,7 +1057,7 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
     cache_view.state = "running"
     assert executor.get(cache_view.id).state == "running"
     cache_view.state = "cancelled"
-    assert executor.get(cache_view.id).state == "failed"
+    assert executor.get(cache_view.id).state == LifecycleState.CANCELLED
     if image_prepared:
         plan.storage = ArtifactStorageImpact.model_construct(missing_nas_bytes=12)
     else:
@@ -1183,7 +1263,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     artifact_set = str(seeded.artifact_set_sha256)
     archive_payload = b"prebuilt arm64 oci archive"
     archive_digest = hashlib.sha256(archive_payload).hexdigest()
-    image_digest = "sha256:" + "d" * 64
+    image_digest = "sha256:" + archive_digest
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
     model_id = str(uuid.uuid4())
@@ -1369,6 +1449,11 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             node = session.get(AgentNode, node_id)
             assert node is not None
             node.workload_intent_ordinal = 1
+    # Managed image content stays usable when historical build provenance is gone.
+    with services.sessions.begin() as session:
+        historical_build = session.get(RecipeBuild, build_id)
+        assert historical_build is not None
+        session.delete(historical_build)
     copy_child = executor.execute(
         plan,
         copy_phase,
@@ -1450,6 +1535,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             )
             assert payload_response.status_code == 200
             assert payload_response.headers["x-vonk-file"].endswith(item["sha256"])
+    with services.sessions.begin() as session:
+        services.operations._aggregate_parent(session, copy_child.operation_id)
     view = executor.get(copy_child.operation_id)
     assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.state == "succeeded"
@@ -1475,23 +1562,15 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         request_key=parent_request,
         progress=RunSwitchOperationResult(),
     )
-    assert cached_model.operation_id is None
-    assert _receipt_json(cached_model.result) == {
-        "schema_version": 2,
-        "phase": "transfer",
-        "subphase": "model-download",
-        "skipped": True,
-        "coverage": "complete",
-        "artifact_set_sha256": artifact_set,
-        "downloaded_bytes": 0,
-        "total_bytes": 0,
-        "progress": {
-            "phase": "model-download",
-            "completed_bytes": 0,
-            "total_bytes": 0,
-            "total_bytes_known": True,
-        },
-    }
+    cached_id = cached_model.operation_id
+    assert cached_id is not None and cached_id == seeded.id
+    assert cache.run_pending() == 0
+    reused = executor.get(cached_id)
+    assert reused.state == LifecycleState.SUCCEEDED
+    assert (
+        cast(RunSwitchModelDownloadResult, reused.result).artifact_set_sha256
+        == artifact_set
+    )
 
     copy_view = executor.get(copy_child.operation_id)
     assert isinstance(copy_view.result, RunSwitchDistributionChildResult)
@@ -1674,14 +1753,11 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         actor,
         request_key,
         progress,
-        wait_for_busy_owner=False,
     ) -> None:
         assert item_index == 0
         assert actor == "operator"
         assert request_key
         assert progress == RunSwitchOperationResult()
-        # Off the tick thread, publication waits for the owner row.
-        assert wait_for_busy_owner is True
         entered.set()
         assert release.wait(5)
 
@@ -1717,55 +1793,76 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         executor.close()
 
 
-def test_zero_byte_model_download_records_the_already_verified_set() -> None:
-    """All objects cached (maybe by another revision): record the set, no fetch."""
-
-    adopted: list[object] = []
-    manifest = SimpleNamespace(digest="d" * 64, recipe_revision_sha256="b" * 64)
+def test_zero_byte_model_download_uses_the_cache_admission() -> None:
+    """A complete content decision still goes through its owning admission."""
+    calls = []
+    view = SimpleNamespace(
+        id=str(uuid4()),
+        state=LifecycleState.SUCCEEDED,
+        artifact_set_sha256="d" * 64,
+        last_error=None,
+        result=ModelCacheDownloadResult(
+            schema_version=2, artifact_set_sha256="d" * 64, coverage="complete"
+        ),
+        progress=progress_document(
+            cache_progress(
+                ModelCacheCounters(
+                    phase="completed",
+                    completed_artifacts=2,
+                    total_artifacts=2,
+                    downloaded_bytes=0,
+                    expected_bytes=0,
+                ),
+                previous=None,
+                now=datetime.now(UTC),
+            )
+        ),
+    )
 
     class Cache:
-        def download_preview(self, **_kwargs):
+        def download_preview(self, **kwargs):
             return {
                 "artifact_set_sha256": "d" * 64,
                 "plan_digest": "e" * 64,
                 "expected_bytes": 15,
                 "artifact_count": 2,
                 "new_bytes": 0,
+                "already_cached_bytes": 15,
                 "blockers": [],
-                "_manifest": manifest,
+                "warnings": [],
             }
 
-        def start_download(self, **_kwargs):
-            raise AssertionError("nothing is missing, so nothing is downloaded")
-
-        def adopt_verified_set(self, value):
-            adopted.append(value)
+        def start_download(self, **kwargs):
+            calls.append(kwargs)
+            return view
 
     plan = _plan(
         preparation=SimpleNamespace(
             model=SimpleNamespace(
                 artifact_set_sha256="d" * 64,
                 model_content_sha256="a" * 64,
-                recipe_revision_sha256="b" * 64,
                 artifact_count=2,
                 artifact_set_bytes=15,
             )
         ),
         recipe_revision_id=str(uuid4()),
     )
-    result = CompositeDistributionPhaseExecutor(
+    executor = CompositeDistributionPhaseExecutor(
         None, None, None, model_cache=Cache(), clock=lambda: datetime.now(UTC)
-    ).execute(
+    )
+    result = executor.execute(
         plan,
         _phase(kind="transfer", subphase="model-download", index=0),
         item_index=0,
         actor="operator",
-        request_key="00000000-0000-4000-8000-000000000001",
+        request_key=str(uuid4()),
         progress=RunSwitchOperationResult(),
     )
-    assert result.operation_id is None
-    assert result.result is not None and _receipt_json(result.result)["skipped"] is True
-    assert adopted == [manifest]
+    assert result.operation_id == view.id
+    assert len(calls) == 1
+    completed_receipt = cast(RunSwitchModelDownloadResult, result.result)
+    assert completed_receipt.evidence == view.result
+    assert completed_receipt.progress.completed_bytes == 0
 
 
 @pytest.mark.parametrize(
@@ -1812,3 +1909,93 @@ def test_child_persistence_retains_in_place_default_members(
     finally:
         event.remove(sessions, "after_flush", check_written_receipt)
     assert writes, "the selected persistence writer must be exercised"
+
+
+def test_expired_distribution_fence_cannot_revive_or_block_fresh_transfer(agent_system):  # noqa: F811
+    """Issued transfer expiry releases dispatch while retaining late evidence."""
+    from datetime import timedelta
+
+    from vonk_agent_protocol import AgentResult
+    from vonk_agent_protocol.contracts import ArtifactDistributionResult
+
+    from .runtime_identity_support import claim_agent
+    from .test_distribution import _assignment
+
+    _client, services, _tokens, clock = agent_system
+    source = MemoryObjectSource()
+    model = source.put(b"model payload")
+    config = source.put(b"config!")
+    archive = source.put(b"oci archive")
+    assignment = _assignment(NODE_A, model, config, archive).model_copy(
+        update={"expires_at": clock.now + timedelta(hours=1)}
+    )
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(assignment.oci_image_digest, archive)
+    distribution = DistributionService(source, clock=clock, sessions=services.sessions)
+    executor = DurableDistributionPhaseExecutor(
+        services.sessions, services.operations, distribution, clock=clock
+    )
+    with services.sessions.begin() as session:
+        session.get(AgentNode, NODE_A).workload_intent_ordinal = 1
+    plan = _plan(plan_digest=assignment.plan_digest)
+    phase = _phase(index=0, kind="transfer", node_ids=[NODE_A])
+    old = executor._ensure_child(
+        plan,
+        phase,
+        actor="test",
+        request_key=str(uuid4()),
+        cached=(),
+        assignments={NODE_A: assignment},
+        target_order=(NODE_A,),
+        workload_intent_ordinal=1,
+        target_bytes=20,
+    )
+    claim = claim_agent(services.operations, NODE_A, "serial-a")
+    assert claim is not None
+    with services.sessions.begin() as session:
+        executor.expire(session, old, clock.now, plan_digest=plan.plan_digest)
+    with services.sessions() as session:
+        old_order = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == old)
+        )
+        assert old_order.state == LifecycleState.CANCELLED
+        old_state = old_order.state
+    late = AgentResult(
+        fence=claim.fence,
+        state=AgentResultState.SUCCEEDED,
+        result=ArtifactDistributionResult(downloaded_bytes=20),
+    )
+    services.operations.record_late_result(late)
+    with services.sessions() as session:
+        old_order = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == old)
+        )
+        assert old_order.state == old_state
+    fresh = executor._ensure_child(
+        plan,
+        phase,
+        actor="test",
+        request_key=str(uuid4()),
+        cached=(),
+        assignments={NODE_A: assignment},
+        target_order=(NODE_A,),
+        workload_intent_ordinal=1,
+        target_bytes=20,
+    )
+    assert fresh != old
+    next_claim = claim_agent(services.operations, NODE_A, "serial-a")
+    assert next_claim is not None and next_claim.fence != claim.fence
+    services.operations.record_result(
+        AgentResult(
+            fence=next_claim.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=ArtifactDistributionResult(downloaded_bytes=20),
+        )
+    )
+    completed = executor.get(fresh)
+    assert completed.state == LifecycleState.SUCCEEDED
+    measurement = completed.progress
+    assert measurement is not None
+    assert measurement.completed_bytes == 20
