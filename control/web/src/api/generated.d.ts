@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 0cb5c8a8c3bfc730e0b8650ccc9da6bb0baef1b4228f4a1bcd319e43d9210770. Do not edit.
+// Generated from canonical OpenAPI SHA256 fbcff7cf53af2b27c880e6fa059ed6f664a1c502694e1e1517e9a2f533d0ac90. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -14884,7 +14884,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GatewayKeyList"];
+                    "application/json": components["schemas"]["GatewayKeyList"] | components["schemas"]["UnknownError"];
                 };
             };
             /** @description Unauthorized */
@@ -14944,7 +14944,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GatewayKeyCreated"];
+                    "application/json": components["schemas"]["GatewayKeyCreated"] | components["schemas"]["UnknownError"];
+                };
+            };
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnknownError"];
                 };
             };
             /** @description Unauthorized */
@@ -14983,6 +14992,15 @@ export interface operations {
                     "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
@@ -15011,7 +15029,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GatewayKeyRevoked"];
+                    "application/json": components["schemas"]["GatewayKeyRevoked"] | components["schemas"]["UnknownError"];
                 };
             };
             /** @description Unauthorized */
@@ -15032,15 +15050,6 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -15048,6 +15057,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
             /** @description Service Unavailable */
@@ -15078,7 +15096,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GatewayKeyCreated"];
+                    "application/json": components["schemas"]["GatewayKeyCreated"] | components["schemas"]["UnknownError"];
                 };
             };
             /** @description Unauthorized */
@@ -15099,15 +15117,6 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -15115,6 +15124,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
             /** @description Service Unavailable */
