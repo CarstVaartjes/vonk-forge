@@ -20,6 +20,10 @@ The proof has two reviewed parts and one mechanical part:
 * ``call_edges`` declares where a call the code cannot name goes (a ``getattr``
   with a computed name), ``{"path", "function", "calls", "reason"}``; the edge
   keeps the ``try`` context of the dynamic call, so it can be looped.
+* Callback arguments (including forwarded aliases), typed interface dispatch and
+  literal ``getattr`` dispatch are resolved by the graph and retain the catch
+  context of each invocation. Unknown callback consumers remain entry paths;
+  untyped literal dispatch is only fallback evidence and cannot earn credit.
 * The mechanical part walks the call graph of ``blocker_callgraph`` *backwards*
   from the raising function (flow sensitive).  The exception leaves a function
   through the first handler around the call that catches it:

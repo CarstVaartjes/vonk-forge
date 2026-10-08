@@ -50,7 +50,8 @@ def test_the_spark_setup_program_writes_the_ports_the_controller_allocates() -> 
     """
 
     source = (
-        Path(__file__).resolve().parents[2] / "rust/crates/vonk-spark-setup/src/lib.rs"
+        Path(__file__).resolve().parents[2]
+        / "rust/crates/vonk-spark-setup/src/firewall.rs"
     )
     if not source.exists():
         pytest.skip("repository checkout required")
