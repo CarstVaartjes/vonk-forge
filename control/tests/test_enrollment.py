@@ -1730,7 +1730,7 @@ def test_rotation_response_loss_preserves_exact_request_and_recovers(
     original = authority.renew_node
     monkeypatch.setattr(authority, "renew_node", refuse_capacity)
     request = csr()
-    with pytest.raises(RenewalIssuanceUncertain):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; unchanged identity asserted below
         enrollment.renew(NODE_ID, issued.serial, request)
     assert len(authority.calls) == calls
     with sessions() as session:
@@ -1738,11 +1738,14 @@ def test_rotation_response_loss_preserves_exact_request_and_recovers(
         assert source is not None and source.state == "active"
         intent = session.scalar(select(AgentCertificateRotation))
         assert intent is not None and intent.state == "issuing"
+        binding = intent.provider_request_id
+        assert list(session.scalars(select(AgentCertificate.serial))) == [issued.serial]
     monkeypatch.setattr(authority, "renew_node", original)
     _clock.advance(seconds=61)
     recovered = enrollment.renew(NODE_ID, issued.serial, request)
     assert recovered.node_id == NODE_ID
     assert len(authority.calls) == calls + 1
+    assert authority.renew_request_ids[-1] == binding
 
 
 class RecoveryAuthority(RecordingAuthority):

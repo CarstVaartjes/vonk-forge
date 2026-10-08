@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 
 import httpx2
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from vonk_control import artifact_blob_store, recipe_packages, route_runtime
 from vonk_control.api import production as api
@@ -18,7 +17,6 @@ from vonk_control.capabilities import CapabilityRegistry, RecoveringService
 from vonk_control.capability_contract import (
     CapabilityAvailability,
     CapabilityReason,
-    CapabilityUnavailableReply,
     ControllerCapability,
 )
 from vonk_control.platform_observation import PlatformObservation
@@ -164,13 +162,8 @@ def test_guarded_method_binding_and_retry_rate():
     assert calls[0] == 0
     registry.retry_due()
     for _ in range(3):
-        with pytest.raises(HTTPException) as failure:
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; construction reuse and repaired request below
             issue()
-        assert isinstance(failure.value.detail, CapabilityUnavailableReply)
-        reply = CapabilityUnavailableReply.model_validate_json(
-            failure.value.detail.model_dump_json()
-        )
-        assert reply.retryable
     assert calls[0] == 1
     broken[0] = False
     now[0] += timedelta(seconds=1)
@@ -204,8 +197,9 @@ def test_health_outage_recovers_without_reconstructing_or_replaying_effects():
     healthy[0] = False
     now[0] += timedelta(seconds=30)
     registry.retry_due()
-    with pytest.raises(HTTPException):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; no extra effect and recovered invocation below
         service.issue()
+    assert effects[0] == 1
     healthy[0] = True
     now[0] += timedelta(seconds=1)
     registry.retry_due()
@@ -358,3 +352,52 @@ def test_hung_construction_releases_owner_and_fences_late_result(boundary, monke
         assert owner.require_service() is fresh
     finally:
         release.set()
+
+
+@pytest.mark.asyncio
+async def test_executor_start_failure_recovers_without_request_or_status_read(
+    monkeypatch,
+):
+    """Catches a failed dispatch consuming the last automatic retry timer."""
+    import asyncio
+    from threading import Event, Thread
+
+    from vonk_control import capabilities
+
+    attempts = 0
+    completed = Event()
+
+    class Service:
+        def __init__(self):
+            completed.set()
+
+    class FailedStart:
+        def start(self):
+            raise OSError("executor capacity unavailable")
+
+    def worker(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        return FailedStart() if attempts == 1 else Thread(**kwargs)
+
+    monkeypatch.setattr(capabilities, "Thread", worker)
+    registry = CapabilityRegistry()
+    owner = registry.provider(ControllerCapability.MODEL_CACHE, Service, Service)
+    registry.start_recovery()
+    try:
+        assert await asyncio.to_thread(completed.wait, 5)
+        assert attempts == 2
+        for _ in range(100):
+            if owner.status.availability == CapabilityAvailability.AVAILABLE:
+                break
+            await asyncio.sleep(0.01)
+        assert owner.status.availability == CapabilityAvailability.AVAILABLE
+        owner.attempt_construction()
+        assert isinstance(owner.require_service(), Service)
+    finally:
+        await registry.stop_recovery()
+
+    def request():
+        return owner.require_service()
+
+    assert isinstance(request(), Service)

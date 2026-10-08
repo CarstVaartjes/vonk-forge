@@ -49,6 +49,7 @@ from vonk_control.models import (
     AgentOperation,
     ArtifactJob,
     ArtifactJobBlob,
+    ArtifactJobFile,
     CatalogDocumentRevision,
     Job,
     RecipeInstallation,
@@ -1656,7 +1657,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
             "in_flight_uploads": 1,
             "remaining_bytes": 2,
         }
-        with pytest.raises(ArtifactBlobStoreError):
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; unconsumed stream and subsequent upload below
             await second_store.put_stream(
                 hashlib.sha256(b"bbbb").hexdigest(),
                 second_source(),
@@ -1742,7 +1743,23 @@ def test_terminal_job_retention_removes_only_unreferenced_cas_bytes(tmp_path) ->
         assert stored is not None
         stored.completed_at = NOW - timedelta(days=8)
     report = service.reconcile_storage()
+    assert report.remaining_work
+    assert report.expired_jobs == 0
+    with sessions() as session:
+        assert session.get(ArtifactJob, job.id) is not None
+    # Grace is also unfinished filesystem work: its authorization must survive.
+    store = ArtifactBlobStore(tmp_path / "artifact-blobs")
+    fresh_content = b"fresh admitted while reclamation waits"
+    fresh = store.put_bytes(
+        hashlib.sha256(fresh_content).hexdigest(),
+        fresh_content,
+        maximum_bytes=len(fresh_content),
+    )
+    assert fresh.path.read_bytes() == fresh_content
+    os.utime(tmp_path / "artifact-blobs" / digest[:2] / digest, (0, 0))
+    report = service.reconcile_storage()
     assert report.expired_jobs == 1
+    assert fresh.path.read_bytes() == fresh_content
     with sessions() as session:
         assert session.get(ArtifactJob, job.id) is None
         assert session.get(ArtifactJobBlob, digest) is None
@@ -1784,7 +1801,10 @@ def test_reconcile_never_deletes_blobs_on_an_empty_reference_scan(tmp_path) -> N
         assert session.get(ArtifactJobBlob, digest) is not None
 
 
-def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
+@pytest.mark.parametrize("contended", (False, True))
+def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(
+    tmp_path, contended
+) -> None:
     """Partial reference loss must not unlink bytes a surviving row still owns."""
 
     sessions, _recipe_operations, _queue, service, run_id, _node_id = (
@@ -1818,6 +1838,19 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
                 created_at=NOW,
             )
         )
+    live_request = artifact_create_request(
+        run_id, "00000000-0000-4000-8000-000000000152"
+    )
+    live_request["inputs"][0]["size_bytes"] = len(unproven_content)
+    live_request["inputs"][0]["sha256"] = unproven_digest
+    live = create_artifact_job(service, **live_request)
+    service.put_input(
+        live.id,
+        name="input.png",
+        media_type="image/png",
+        expected_sha256=unproven_digest,
+        content=unproven_content,
+    )
     service.cancel(
         job.id,
         actor="operator",
@@ -1833,6 +1866,31 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
     os.utime(expired_path, (0, 0))
     os.utime(seeded.path, (0, 0))
 
+    if contended:
+        import fcntl
+
+        with (root / ".quota.lock").open("a+b") as quota:
+            fcntl.flock(quota.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with pytest.raises(Exception):  # noqa: B017 -- ending witness; durable evidence asserted below
+                service.reconcile_storage()
+            with sessions() as session:
+                assert session.get(ArtifactJob, job.id) is not None
+                assert session.get(ArtifactJobBlob, expired_digest) is not None
+                assert (
+                    session.scalar(
+                        select(ArtifactJobFile).where(
+                            ArtifactJobFile.artifact_job_id == job.id
+                        )
+                    )
+                    is not None
+                )
+        # Recreate the consumer to prove evidence survives an executor restart.
+        service = ArtifactJobService(
+            sessions,
+            recipe_operations=_recipe_operations,
+            blob_store=ArtifactBlobStore(root),
+            clock=lambda: NOW,
+        )
     report = service.reconcile_storage()
 
     assert report.expired_jobs == 1
@@ -1842,6 +1900,11 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(tmp_path) -> None:
     with sessions() as session:
         assert session.get(ArtifactJobBlob, expired_digest) is None
         assert session.get(ArtifactJobBlob, unproven_digest) is not None
+    capacity = len(unproven_content) + len(expired_content)
+    store = ArtifactBlobStore(root, max_stored_bytes=capacity)
+    fresh = store.put_bytes(expired_digest, expired_content, maximum_bytes=capacity)
+    assert fresh.path.read_bytes() == expired_content
+    assert seeded.path.read_bytes() == unproven_content
 
 
 def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(

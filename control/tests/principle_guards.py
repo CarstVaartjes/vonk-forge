@@ -1006,14 +1006,16 @@ def _scan_sites(mode: str) -> list[Site]:
         if mode == "retention":
             modules.append((relative, parsed.tree))
         else:
-            sites.extend(
-                scan_source(parsed.source, path=relative, mode=mode, tree=parsed.tree)
-            )
-        if mode == "tests":
-            # Collector classes close over the current tree. Release their
-            # cycles per file without traversing the older cached inventories.
-            del parsed
-            gc.collect(0)
+            try:
+                sites.extend(
+                    scan_source(
+                        parsed.source, path=relative, mode=mode, tree=parsed.tree
+                    )
+                )
+            finally:
+                if mode == "tests":
+                    del parsed
+                    gc.collect(0)
     return scan_retention(modules) if mode == "retention" else sites
 
 

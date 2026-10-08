@@ -153,7 +153,6 @@ class ArtifactBlobStore:
                 "artifact upload size is outside its bound",
                 reason=InvalidRequestReason.MALFORMED,
             )
-        self._prepare_root()
         unavailable: UnknownOutcomeError | None = None
         async for _attempt in bounded_async_attempts():
             try:
@@ -244,9 +243,7 @@ class ArtifactBlobStore:
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         finally:
-            if temporary != Path() and temporary.exists():
-                temporary.unlink()
-            self._release_reservation(reservation)
+            self._cleanup_upload(temporary, reservation)
 
     def put_bytes(
         self,
@@ -266,7 +263,6 @@ class ArtifactBlobStore:
                 "artifact upload SHA-256 does not match",
                 reason=SecurityRefusalReason.DIGEST_MISMATCH,
             )
-        self._prepare_root()
         reservation, existing = self._reserve(expected_sha256, len(content))
         if existing is not None:
             return existing
@@ -292,9 +288,7 @@ class ArtifactBlobStore:
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         finally:
-            if temporary != Path() and temporary.exists():
-                temporary.unlink()
-            self._release_reservation(reservation)
+            self._cleanup_upload(temporary, reservation)
 
     def resolve(self, storage_key: str, sha256: str, size_bytes: int) -> Path | None:
         """The stored object, or ``None`` when its bytes are absent or damaged.
@@ -303,18 +297,28 @@ class ArtifactBlobStore:
         ``None`` as "not found" and the next identical upload replaces them.
         """
 
-        self._digest(sha256)
-        expected_key = f"{sha256[:2]}/{sha256}"
-        if storage_key != expected_key:
-            raise ArtifactBlobUnsafePath(
-                "artifact storage key is invalid",
-                reason=SecurityRefusalReason.UNSAFE_PATH,
-            )
-        path = self._root / sha256[:2] / sha256
-        if path.is_symlink() or not path.is_file() or path.stat().st_size != size_bytes:
+        try:
+            self._digest(sha256)
+            expected_key = f"{sha256[:2]}/{sha256}"
+            if storage_key != expected_key:
+                retire_as_unknown(
+                    "artifact-blob.storage-key",
+                    sha256,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    "stored key differs from content identity",
+                )
+            # Content identity owns the path. A damaged stored key cannot select
+            # another path or prevent observation of the exact accepted bytes.
+            path = self._root / expected_key
+            if (
+                path.is_symlink()
+                or not path.is_file()
+                or path.stat().st_size != size_bytes
+            ):
+                return None
+            return path
+        except (ArtifactBlobInvalid, OSError):
             return None
-        # Bytes are hashed once, on upload; the file is named by that digest.
-        return path
 
     @staticmethod
     def iter_file(path: Path, *, chunk_bytes: int = 1024**2) -> Iterator[bytes]:
@@ -605,6 +609,7 @@ class ArtifactBlobStore:
         self, sha256: str, size_bytes: int
     ) -> tuple[_BlobReservation | None, StoredArtifactBlob | None]:
         try:
+            self._prepare_root()
             return self._reserve_once(sha256, size_bytes)
         except OSError as error:
             raise ArtifactBlobBusy(
@@ -626,6 +631,7 @@ class ArtifactBlobStore:
                     )
                 # Rebuild from evidence: the incoming bytes are verified against
                 # the digest and replace the damaged stored object.
+            self._reap_abandoned_uploads()
             reservations = self._reservation_entries()
             accounted = (
                 self._stored_bytes()
@@ -659,14 +665,70 @@ class ArtifactBlobStore:
                 raise
             return _BlobReservation(token, path, descriptor, size_bytes), None
 
+    def _cleanup_upload(self, temporary: Path, reservation: _BlobReservation) -> None:
+        try:
+            if temporary != Path():
+                temporary.unlink(missing_ok=True)
+        except OSError as error:
+            retire_as_unknown(
+                "artifact-blob.temporary",
+                reservation.token,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                str(error),
+            )
+        finally:
+            self._release_reservation(reservation)
+
+    def _reap_abandoned_uploads(self) -> None:
+        # Quota ownership serializes new reservation creation. A nonblocking
+        # claim of the reservation proves its uploader no longer owns it.
+        # Keep that exact record until its partial bytes have been removed.
+        for path in (self._root / ".reservations").glob("*.reserve"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            descriptor = os.open(path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                token = path.name.removesuffix(".reserve")
+                for temporary in (self._root / ".tmp").iterdir():
+                    if (
+                        self._temporary_token(temporary) == token
+                        and not temporary.is_symlink()
+                    ):
+                        temporary.unlink(missing_ok=True)
+                path.unlink(missing_ok=True)
+            finally:
+                os.close(descriptor)
+
     def _release_reservation(self, reservation: _BlobReservation) -> None:
         try:
-            # This exact reservation is uniquely owned by its descriptor.
-            # Cleanup must not wait for a quota owner to release it.
-            reservation.path.unlink(missing_ok=True)
+            if not any(
+                self._temporary_token(path) == reservation.token
+                for path in (self._root / ".tmp").iterdir()
+            ):
+                reservation.path.unlink(missing_ok=True)
+        except OSError as error:
+            retire_as_unknown(
+                "artifact-blob.reservation",
+                reservation.token,
+                BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                str(error),
+            )
         finally:
-            fcntl.flock(reservation.descriptor, fcntl.LOCK_UN)
-            os.close(reservation.descriptor)
+            try:
+                fcntl.flock(reservation.descriptor, fcntl.LOCK_UN)
+            except OSError as error:
+                retire_as_unknown(
+                    "artifact-blob.reservation",
+                    reservation.token,
+                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                    str(error),
+                )
+            finally:
+                os.close(reservation.descriptor)
 
     def _reservation_entries(self) -> dict[str, int]:
         values: dict[str, int] = {}
@@ -717,7 +779,13 @@ class ArtifactBlobStore:
 
     def _quota_lock(self):
         lock_path = self._root / ".quota.lock"
-        stream = lock_path.open("a+b")
+        try:
+            stream = lock_path.open("a+b")
+        except OSError as error:
+            raise ArtifactBlobBusy(
+                "artifact quota storage is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
 
         class _Lock:
             def __enter__(self_nonlocal):
@@ -732,8 +800,17 @@ class ArtifactBlobStore:
                 return stream
 
             def __exit__(self_nonlocal, _kind, _value, _traceback):
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-                stream.close()
+                try:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                except OSError as error:
+                    retire_as_unknown(
+                        "artifact-blob.quota",
+                        str(lock_path),
+                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
+                        str(error),
+                    )
+                finally:
+                    stream.close()
 
         return _Lock()
 

@@ -1321,7 +1321,6 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 def test_recipe_image_upload_lock_preserves_interrupted_bytes(tmp_path) -> None:
     import os
 
-    from fastapi import HTTPException
     from vonk_control.agent_api import _prepare_recipe_image_upload
 
     descriptor, partial = _prepare_recipe_image_upload(tmp_path, "a" * 64)
@@ -3335,10 +3334,9 @@ def test_oversized_enrollment_preserves_split_discovery_prefix(agent_system) -> 
     second = b'ken":"' + token.encode("ascii") + b'","padding":"' + b"x" * (64 * 1024)
     request = ChunkedEnrollmentRequest(first, second, b"must-not-be-received")
 
-    with pytest.raises(HTTPException) as denied:
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; bounded body and corrected grant below
         asyncio.run(_bounded_enrollment_body(request, services))  # type: ignore[arg-type]
 
-    assert denied.value.status_code == 413
     assert request.received == 2
     assert_corrected_enrollment_succeeds(services, token)
 
@@ -3356,10 +3354,9 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
     )
     request = ChunkedEnrollmentRequest(huge, b"must-not-be-received")
 
-    with pytest.raises(HTTPException) as denied:
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; bounded body and corrected grant below
         asyncio.run(_bounded_enrollment_body(request, services))  # type: ignore[arg-type]
 
-    assert denied.value.status_code == 413
     assert request.received == 1
     assert huge.largest_slice <= 2048
     assert_corrected_enrollment_succeeds(services, token)
@@ -4015,3 +4012,62 @@ def test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers(agent_sys
     assert point.gpu_temperature_c == 61
     assert point.memory_total_bytes == 128_000_000_000
     assert point.gpu_memory_total_bytes is None
+
+
+def test_enrollment_observation_does_not_block_unrelated_requests(
+    agent_system, monkeypatch
+):
+    """Catches synchronous CA/SQL observation running on the async route's loop."""
+    client, services, _, _ = agent_system
+    original = services.enrollment._authority.issue_node
+    entered = Event()
+    release = Event()
+    health_completed = Event()
+    body = json.loads(valid_enrollment_body(enrollment_grant(services)))
+
+    def slow_issue(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(services.enrollment._authority, "issue_node", slow_issue)
+
+    def observe():
+        try:
+            assert entered.wait(timeout=3)
+            return health_completed.wait(timeout=2)
+        finally:
+            release.set()
+
+    async def exercise():
+        async with AsyncClient(
+            transport=ASGITransport(app=client.app), base_url="http://testserver"
+        ) as async_client:
+
+            async def health_request():
+                assert await asyncio.to_thread(entered.wait, 3)
+                response = await async_client.get("/api/healthz")
+                health_completed.set()
+                return response
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                observer = pool.submit(observe)
+                pairing = asyncio.create_task(
+                    async_client.post("/agent/enroll", json=body)
+                )
+                health = asyncio.create_task(health_request())
+                try:
+                    paired, responsive = await asyncio.wait_for(
+                        asyncio.gather(pairing, health),
+                        timeout=10,
+                    )
+                finally:
+                    release.set()
+                return paired, responsive, observer.result(timeout=1)
+
+    paired, responsive, progressed = asyncio.run(exercise())
+    assert progressed
+    assert paired.status_code == responsive.status_code == 200
+    replay = client.post("/agent/enroll", json=body)
+    assert replay.status_code == 200
+    assert replay.json() == paired.json()

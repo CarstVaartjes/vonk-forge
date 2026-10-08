@@ -1719,15 +1719,15 @@
       "ArtifactBlobBusy": "b2e51e686597ed80cb49ba9d63eec897745a38214ab5701e68d35eb7d6a8c239",
       "StoredArtifactBlob": "c3dd407239760e2c3f822ef5b836837e52a6e00dab5b5725d3c5386a7534353c",
       "_BlobReservation": "c2f7e58ec788df00c75919976d911c2a10e8371b9de1a12a34bad7b1cba47a61",
-      "ArtifactBlobStore": "ee22966551b96ad0294cb1adebe095d23821e004ab9a06899348e6bb6c51ac8a",
+      "ArtifactBlobStore": "63158d8341385a533c0bb3ff5acb2471d94d2c3e4d1721caf64977d91b4ab3ec",
       "ArtifactBlobStore.__init__": "7536a16e56ed2f9b083924540b5f1913c927b56d79c3e636ce31d69e78317f4a",
       "ArtifactBlobStore.max_stored_bytes": "f4d38c663d06c61f1c114849bdb072aea4adc016e48d29217e376a3fde32a8fd",
       "ArtifactBlobStore.usage": "63363af7241f68fe43bd7bfec33a0d79d730e1b5ead7420690e56358b1d1b76b",
       "ArtifactBlobStore.reference_attachment": "8792fdafc8c7ea365effa6b2f6e3c850b635a74ba3d6286983673e6f009cfe95",
       "ArtifactBlobStore.reference_reconciliation": "0857ec0312548542ef8621f61433495f7bc836f58a773a74250fc865b0351c73",
-      "ArtifactBlobStore.put_stream": "217fe82c2bf1ca2d2c8b9d3f8ec418b0705f375b6d842736f9f7c5f153e45143",
-      "ArtifactBlobStore.put_bytes": "cccd4d07db5d7b5217a5eaab06adfad662496255fb1ae69d1748877c72f9ab87",
-      "ArtifactBlobStore.resolve": "dc579191a2bb983f41dc608bc023b3e6cc65bf35e5704af5ea1750901f2505d7",
+      "ArtifactBlobStore.put_stream": "f315cb9b58c680d7d8d3644b73755b1cb83b6bc319a66767f0fc96441839b123",
+      "ArtifactBlobStore.put_bytes": "4ec7beb72762db02217d78a9f25ce0f6645076f4377dec094166c98d6e39c953",
+      "ArtifactBlobStore.resolve": "ef8f3634641c80a1f61b6c8fed5636b87dd13aedee48ad5048d80d19545182f1",
       "ArtifactBlobStore.iter_file": "1b2c8bf3b2774fdaa747b2943189cd85f20f5b9681c64e6dbf4926e4b1f12ddf",
       "ArtifactBlobStore.delete": "488cba8dd2ee3547df76e42216fa54b7b86faaebe51cdf81ff7c9467746d2470",
       "ArtifactBlobStore.reconcile": "30c22f56639c6ab19d2b7ddd139898101902347bee8fcc0effbde70567ccbd12",
@@ -1739,18 +1739,20 @@
       "ArtifactBlobStore._intact": "009849ba9a43c81f31cd856c84392057f6ff3f8fff9d757284d3050ea46087a4",
       "ArtifactBlobStore._prepare_root": "a6a2d47f3f69acedee0c1ca6d2ece3084f0ef2ed031e4265886aec5d73b2c3b6",
       "ArtifactBlobStore._stored_bytes": "5cfcd4328ac4c5ab9d33bc40dde04ff02887b444aefa5da2631372323f4a3452",
-      "ArtifactBlobStore._reserve": "72438cfbd61d6233583a1693ca238975003e8965463ddd67dd4746049ce67393",
-      "ArtifactBlobStore._reserve_once": "1d1939bb29b025e623544f85a2ed2506c9e16ca38457762d75458def9f725b74",
-      "ArtifactBlobStore._release_reservation": "160c3f7dadca5e2f82630411761deb9e7dbe4cd53ef56789f09126ce8974b876",
+      "ArtifactBlobStore._reserve": "28ac555c3204ed4f9b395d6e95c05d6794914d39d86f8145070926c89c477068",
+      "ArtifactBlobStore._reserve_once": "6c4ce231b2ee1d9b19cf43e2b6fe83ae014fbc8fb5def52a401f87a5da5af41b",
+      "ArtifactBlobStore._cleanup_upload": "38e0041fbe4f2b836dc04e5766108e91490efae12370fe5888d31f5d9c95d3dc",
+      "ArtifactBlobStore._reap_abandoned_uploads": "ab6d43213898585f43a6cf2e03d5a418006728ec2e8e9ea685cfe93e34dea458",
+      "ArtifactBlobStore._release_reservation": "3915b492574519d12d1d8bb622795f2ae6542533f505cf4f311c67d58658eabc",
       "ArtifactBlobStore._reservation_entries": "2e439eea630e70e489f66466e73805da8fa387363b0f832bc2f3c0e56183674c",
       "ArtifactBlobStore._unreserved_temporary_bytes": "64f902067be8b9efa7097b1494cdf74334027a9a946a4479a7efa994c0c98b23",
       "ArtifactBlobStore._temporary_token": "c2f81f47a8cb1ea2dfa952c5efe1b89286bf48140252bb7208d0eddf51bfe9db",
-      "ArtifactBlobStore._quota_lock": "83d70d18c9ff449f117b07537986c3d60ff628883c0e7453b15ef7d44bab8e08",
-      "ArtifactBlobStore._quota_lock._Lock": "ce69929ab7b83468dc3a0359b1b826223dc1200d93aebc5c9626a00a62aaedf6",
+      "ArtifactBlobStore._quota_lock": "1b0376419a0fc07044c5d90b0ad6bd1aee37bebe7b1b31daf5f33fd8342e9771",
+      "ArtifactBlobStore._quota_lock._Lock": "9954ed4442293425c2d25a3a35957e8e16d6cdeca37e256f48f76fc0c9a09aa1",
       "ArtifactBlobStore._quota_lock._Lock.__enter__": "c6539586e40185560d2ae5a60e2145c7362823d2ddbf5dd1c46032099fa36998",
-      "ArtifactBlobStore._quota_lock._Lock.__exit__": "85b91c994f69938caefe5ea257ce9ba409bed0f5ddfe3734f2607ca96c466ae2",
+      "ArtifactBlobStore._quota_lock._Lock.__exit__": "684053b41adc87f7e90d27dd137a32ba85463188b6e15bb7ebfa384140aec435",
       "ArtifactBlobStore._digest": "062738892c9ae2fc1e209a0ea87e325d7a14c27abab52a6d187c6c7a52759487",
-      "<module>": "aa321746230a593f99aad11933bc65f6db9592c03da248943a301b3c03602d62"
+      "<module>": "253385f6d49aea275cc3a5865ea9d4f2e1f99e053e35e7c4555c2f3763ab3182"
     },
     "control/src/vonk_control/artifact_jobs/__init__.py": {
       "<module>": "c917b75f126ca987a3f8369c905ae2337fa69c6dfc68b07db671be1027256e41"
@@ -1814,9 +1816,9 @@
       "<module>": "5a299d54997ad8817102f777ffb19176a8b054734d0aa4593d26aa55f2f1b018"
     },
     "control/src/vonk_control/artifact_jobs/service.py": {
-      "ArtifactJobService": "cb8500693677af1baacd5d66273bc30d1d2c9bf796ea3fe28e6fa526a09c45e4",
+      "ArtifactJobService": "daac48052941729f00254a7c9504124ed18fdfaa63f3ad3470b70da3bdcbb32e",
       "ArtifactJobService.reconcile_storage": "4483ad163fa85bff9d0e6fa275e790cb9a410b4d3b6595c002897a25410a2681",
-      "ArtifactJobService._reconcile_storage_fenced": "86f568a4865455a0f394619dcc0f4354764b824416d011aca96f55892d76affa",
+      "ArtifactJobService._reconcile_storage_fenced": "d09a46c862f519afb46721bf175be91387740354842d606bb5c19420d9295f29",
       "ArtifactJobService.create": "7aa3387e1b239e4d5aa72f66a059e5079563a17b1cbdc781b6c44f9411ae3f5d",
       "ArtifactJobService._create_in_session": "71ca1bc78f875e054bb00699bfafb2f4381bc1d35cf5abe67d1b4e9951af754c",
       "ArtifactJobService.capabilities": "95508cb294f804f5b92f8fc6c66aaf00f31a299f99452eb0852a5906fbe612c9",
@@ -1825,7 +1827,7 @@
       "ArtifactJobService.get_by_request_id": "3149eb334ee9355d8908000906840353148a28a311c1a1ada0d421617f6f0a93",
       "ArtifactJobService.list_for_run": "654bfea0a331dad844e517d29be24af45a64ecf90251354867cd7aabf45c6b52",
       "ArtifactJobService.cancel": "a16f336c0e1f00dc9d4988d79a1390524d9999c6ce3f4833d8e768509f5e6b21",
-      "<module>": "cb8500693677af1baacd5d66273bc30d1d2c9bf796ea3fe28e6fa526a09c45e4"
+      "<module>": "daac48052941729f00254a7c9504124ed18fdfaa63f3ad3470b70da3bdcbb32e"
     },
     "control/src/vonk_control/artifact_jobs/storage.py": {
       "ArtifactJobService": "1d73440a9c242cc8a8fb9b6c6bd9282acb81ab9e22b7dcf71804bbb5216741a0",
@@ -2738,11 +2740,11 @@
       "<module>": "f562c1ae0ea11cbf6a0fd9b63dbe6fe8258f41263b4227abed60ff4c13758df9"
     },
     "control/src/vonk_control/fleet_profiles/pending_admission.py": {
-      "FleetProfileService": "7b68bb5e6801467b3118ea1923d88cec80b658898b413aa78ec73d290db5bc99",
-      "FleetProfileService._observe_pending_admissions": "0dc087f1f9a078c3305b3d93929a0f11002b7a5d6db2cb37a39941d4d71ad07b",
-      "FleetProfileService._finish_pending_admission": "dabbb855608800bde431fda07e7161e2f1513bf808762b55197f6c8d9877e066",
+      "FleetProfileService": "c2354bb13fd5e3f3f2f63537f6388c25e01db6bb84e9ab8c75b2e55203c4eab9",
+      "FleetProfileService._observe_pending_admissions": "d34ac9a7dfc671d844ab009b27a457124ab1421b27649b71f29c23b2d3c7df1e",
+      "FleetProfileService._finish_pending_admission": "94ab2d22da07bacdc9be7a83fc225f882a4bec1efbe254540acb7dca562db746",
       "FleetProfileService._heal_legacy_applications": "b5cf7f5e5a3c5e6e19dc72e27be574de7ec89c22a0d9f39b7c9386c756c9080c",
-      "<module>": "2f1f50798fc24c76c8f6e03c61025e966429679dc7f9737f7a3022c4630224c7"
+      "<module>": "64bdd73db46cd611609afd855b51dccc02826cfec895826134b975c9295e2931"
     },
     "control/src/vonk_control/fleet_profiles/pending_application.py": {
       "FleetProfileService": "16e0b48c3b94ef0ea70213657795372b44940726e018e0118d5cf2cd1e87bc28",
@@ -4153,16 +4155,16 @@
       "ManagementAddressPolicy.parse": "7aa5301062a9b14a697493c6cf6ab99770a57fdbe55a8fcc39428a43c72fcaeb",
       "ManagementAddressPolicy.validate": "19bc85949fb00e63d8aa549d06ef32a864c55bfa4dda06720975531cc88bb67d",
       "ManagementAddressObservation": "d3cc97f58061e3323b3fd683c936d5a1ffaed3968518ee2871ab6542d75cbbe6",
-      "AgentPresenceService": "59f1d853a0070dda11cdafcd06ecb0c57ec1fe1aaa743638cc68cb3de59e695e",
+      "AgentPresenceService": "bb529c347c7cb0f8be1ebafa2c76f9e22316849cae63fd7c57a0501b4376a972",
       "AgentPresenceService.__init__": "5e3c580362ae8f70380fcc019ad4add9d690d7745fd14f76592a3dbbbb87fc8f",
-      "AgentPresenceService._lock_active_node": "14948f603bbab90551d652b36ed7f450bf31faee9bab5ca8a372946922da49a9",
-      "AgentPresenceService._lock_active_certificate": "e81198ab007a842e436369b6e5b24a0e3d8d1b8d66c5df0d4af20e43bdd35b28",
+      "AgentPresenceService._lock_active_node": "21a2c10eb5f644be29b6c721450cbed85b4ce937e6277d26a3a6c12b6a509aec",
+      "AgentPresenceService._lock_active_certificate": "6d1a0a23e837df6db8d7df5810ef66ff4a971c49a7bb4a80251ce8c1e37107b0",
       "AgentPresenceService.observe": "fccc3008bb9ba5a2ea2e2f75a6645caf2c0201c769a143202366d84a5c909e09",
       "AgentPresenceService.observe_in_session": "cdaef0e66418430762240cc000eef2a9a8aa83fbffad92feb64838bfdcf85fa2",
       "AgentPresenceService.validate": "756d77a4c7ef584c13f0a835c47a94988edafbe3ff369ce6f5979c7b917df90c",
       "AgentPresenceService.latest": "ca0323fc2b123605634d08b68561277729fbc974df8f78adc44e0dfb81030404",
-      "AgentPresenceService.latest_in_session": "b0661be3d20192772bb40d9de8044c88c66d5b06a376c307d8ae49e15900e399",
-      "<module>": "69bb81fc17856644a31d623d8243d4f34fa503b9d49107bb4c6ca8bb27b44987"
+      "AgentPresenceService.latest_in_session": "b2bdd7f105a37e96f3212ceab539b855cabede53c448f671a1dd7d4d1fe9fc15",
+      "<module>": "fc198159025a9877c4942368f251888d02d3f75338f9835997b11993983f9f35"
     },
     "control/src/vonk_control/profile_capacity.py": {
       "reservation_visible": "6e99d6e9172270916575de0a751ac357d5a40ca067233e26c065e722bc382ba1",
@@ -5872,7 +5874,7 @@
       "StepCAError": "2a5c4a32fe47f95cccbcc460560e59c004f76edd0e8cd3a4dc039dca7a29892c",
       "StepCAError.__init__": "a3f0545b70866687dcf3e7bf68c9c7daf4d6bae0e4d10255e4d72c9184b0304e",
       "StepCAIssuancePending": "7c361bfdd64a083a89ea08b2ae4bbbf3999e14f835e7b2895da28652bfa1a4a9",
-      "StepCertificateAuthority": "5efedcc27273c2615e4bf1f8e480bf4d23f363146618955ebf87d3a1265f4026",
+      "StepCertificateAuthority": "e1ba10b1e785b2e8b0d3078e34dd6405cff0b64e2e856de783e91e2569f0edf3",
       "StepCertificateAuthority.__init__": "9ccafaa60a089600330dd4b027dd5613660a515889d86de9138894ea5f77bf54",
       "StepCertificateAuthority.prepare_request": "41e6b112978621aa5d9ad66ec8887bc7441e0a7ac90b583465e623c3d36c8c5c",
       "StepCertificateAuthority.issue_node": "ceedfb0601a723b607a4733724b6cf0a11b946f0af6b946ce638e76a655d8cf3",
@@ -5882,11 +5884,10 @@
       "StepCertificateAuthority.renew_node": "d42904369682e550d0079136fce15f74f93e1a952cb7b746b158e2236d44419b",
       "StepCertificateAuthority.revoke_node": "06cf01c5c698632f2e7b2b3ccd4777eb6e66962def2fea249d96309ea743303b",
       "StepCertificateAuthority.revocation_bundle": "525a7ed5f10025694ae20280944f1122b6b82d4817e416c9e5bbba2fc553135d",
-      "StepCertificateAuthority._sign": "f3185d9995bfe7f15cc2dd41e0ae439a12e2145053f15306d12a1fe6ddb9372f",
+      "StepCertificateAuthority._sign": "45a9cfbff9ef5e193721c836acb91926ca2a7dbe3be70e3e6f5f2e05b4d73c01",
       "StepCertificateAuthority._validate_leaf": "72ac22e31927e58ebaf6f6e6ec3ec0c2388a3040fd09092e5e1e981bf4eb09b7",
       "StepCertificateAuthority._token": "ab8926f9d3d1327ceb494231514f93a418e8afbbd9edfde4cb9448fcc85ac6cb",
       "StepCertificateAuthority._json_request": "9dc14844c79aa008dfaaf16b6c5951514ae83323ffcc0f3fd8b7e70bc49d7a57",
-      "StepCertificateAuthority._validate_sign_response_capacity": "a2d5414611bc59206bb1f56b9fa2f722ca10b8a910fb5f9a643f53739596a915",
       "StepCertificateAuthority._request": "d174df304ac54e55595b534e1740948ac03100d74158efaa40210ba5653be4f4",
       "_signature_verifying_key": "ab4d2636b62a3dc6b59f6f0923ff9b23e1cd93f6762b4c286b2e971be0c64172",
       "_one_certificate": "5faa26381884724f154c00b066b2993580230a18910fba89190fc5d35118e634",
@@ -5895,7 +5896,7 @@
       "_is_ok": "be409a4b8538033101a130135a6f52fa1eba5f4ba1575d0a3ee5217c9f596525",
       "_jwk_thumbprint": "980236714b705f091bb0749383d1be714be4e2773b638bd89d141341d6555811",
       "_validate_crl_freshness": "323f4d3c0b294161d33c92d56e4170ddeb967606d34b0ed968ada330426c927e",
-      "<module>": "3997cf91d566e9f209fcd3c6f2d34c04b39eedb6bebbb8e7ab7bda0e7214cd01"
+      "<module>": "86f7d0d8142205796f31cb801e075cf3d8a36d0ddc9050f52faa4f0764e28128"
     },
     "control/src/vonk_control/strict_json.py": {
       "_serialized_field_name": "151bb9bbaf2c39c68e75ee889a325d0fdca084f5e1bc21e865d8e49cf08cfe71",
@@ -7666,14 +7667,13 @@
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore._prepare_root", "artifact-storage-metadata-path-is-unsafe", 1],
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore._prepare_root", "artifact-storage-root-is-unsafe", 1],
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore.delete", "artifact-storage-key-is-invalid", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore.delete", "artifact-storage-path-is-unsafe", 1],
-        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore.resolve", "artifact-storage-key-is-invalid", 1]
+        ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobUnsafePath", "ArtifactBlobStore.delete", "artifact-storage-path-is-unsafe", 1]
       ]
     },
     {
       "family": "artifact_blob_store.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ArtifactBlobInvalid is of the input-validation error type; class ArtifactBlobQuotaExhausted is of the input-validation error type; class InvalidValue is of the input-validation error type.",
+      "reason": "Validates supplied digest syntax, declared byte and chunk bounds, and explicit storage/reconciliation configuration before the corresponding effect. Quota shortage is observed by the upload owner and is not caller input validation.",
       "sites": [
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobInvalid", "ArtifactBlobStore._digest", "artifact-digest-is-invalid", 1],
         ["control/src/vonk_control/artifact_blob_store.py", "ArtifactBlobInvalid", "ArtifactBlobStore.put_bytes", "artifact-bytes-exceed-the-limit", 1],

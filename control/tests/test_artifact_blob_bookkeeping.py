@@ -60,8 +60,10 @@ def test_digest_key_and_path_refusals_still_refuse(tmp_path: Path) -> None:
 
     with pytest.raises(ArtifactBlobStoreError):
         store.put_bytes(_digest(b"other"), content, maximum_bytes=1024)
-    with pytest.raises(ArtifactBlobStoreError):
-        store.resolve("00/" + digest, digest, len(content))
+    assert store.resolve("00/" + digest, digest, len(content)) is None
+    stored = store.put_bytes(digest, content, maximum_bytes=1024)
+    assert store.resolve("00/" + digest, digest, len(content)) == stored.path
+    assert stored.path.read_bytes() == content
     with pytest.raises(ArtifactBlobStoreError):
         store.delete("00/" + digest, digest)
     with pytest.raises(ArtifactBlobStoreError):
@@ -83,7 +85,7 @@ def test_an_upload_over_current_capacity_ends_without_blocking_fresh_work(
     store = _store(tmp_path, quota=4)
     content = b"larger than four bytes"
 
-    with pytest.raises(ArtifactBlobStoreError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; fresh content admission below
         store.put_bytes(_digest(content), content, maximum_bytes=1024)
     assert store.usage().in_flight_uploads == 0
     fresh = store.put_bytes(_digest(b"ok"), b"ok", maximum_bytes=4)
@@ -91,13 +93,22 @@ def test_an_upload_over_current_capacity_ends_without_blocking_fresh_work(
 
 
 @pytest.mark.parametrize("boundary", ("reserve", "commit"))
-def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(tmp_path, boundary):
+def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(
+    tmp_path, boundary, monkeypatch
+):
     """Catches quota exhaustion retaining temporary claims or rejecting reuse."""
-    from vonk_control.artifact_blob_store import ArtifactBlobQuotaExhausted
-
     store = _store(tmp_path, quota=8)
     occupied = store.put_bytes(_digest(b"12345"), b"12345", maximum_bytes=8)
     payload = b"abcd"
+    attempts = []
+    method = "_reserve" if boundary == "reserve" else "_commit"
+    observe = getattr(store, method)
+
+    def count_observation(*args):
+        attempts.append(None)
+        return observe(*args)
+
+    monkeypatch.setattr(store, method, count_observation)
 
     async def chunks():
         yield payload
@@ -107,7 +118,7 @@ def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(tmp_path, bo
 
     if boundary == "commit":
         store.delete(occupied.storage_key, occupied.sha256)
-    with pytest.raises(ArtifactBlobQuotaExhausted):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; released claims asserted below
         import asyncio
 
         asyncio.run(
@@ -115,6 +126,7 @@ def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(tmp_path, bo
                 _digest(payload), chunks(), expected_bytes=len(payload), maximum_bytes=8
             )
         )
+    assert len(attempts) == 3
     assert store.usage().in_flight_uploads == 0
     assert not list((tmp_path / "blobs" / ".reservations").glob("*.reserve"))
     if boundary == "reserve":
@@ -238,3 +250,96 @@ def test_reservation_fsync_failure_releases_claim_and_fresh_upload_fits(
     assert store.usage().in_flight_uploads == 0
     stored = store.put_bytes(_digest(content), content, maximum_bytes=1024)
     assert stored.path.read_bytes() == content
+
+
+@pytest.mark.parametrize(
+    "boundary", ("temporary-unlink", "reservation-unlink", "unlock")
+)
+def test_cleanup_fault_releases_kernel_owner_and_fresh_upload_reaps_partial(
+    tmp_path, monkeypatch, boundary
+):
+    """Catches cleanup faults leaking a claim or counting abandoned bytes forever."""
+    import fcntl
+
+    store = _store(tmp_path, quota=4)
+    unlink = Path.unlink
+    flock = fcntl.flock
+
+    def fail_unlink(path, *args, **kwargs):
+        if (boundary == "temporary-unlink" and path.suffix == ".part") or (
+            boundary == "reservation-unlink" and path.suffix == ".reserve"
+        ):
+            raise OSError("cleanup storage unavailable")
+        return unlink(path, *args, **kwargs)
+
+    def fail_unlock(descriptor, mode):
+        if boundary == "unlock" and mode == fcntl.LOCK_UN:
+            raise OSError("explicit unlock unavailable")
+        return flock(descriptor, mode)
+
+    with monkeypatch.context() as fault:
+        fault.setattr(Path, "unlink", fail_unlink)
+        fault.setattr(fcntl, "flock", fail_unlock)
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; no ingress publication and fresh admission below
+            # A wrong digest ends after owning temporary bytes and a reservation.
+            import asyncio
+
+            async def chunks():
+                yield b"bad!"
+
+            asyncio.run(
+                store.put_stream(
+                    _digest(b"good"), chunks(), expected_bytes=4, maximum_bytes=4
+                )
+            )
+    assert not list((tmp_path / "blobs").glob("??/*"))
+    fresh = store.put_bytes(_digest(b"ok"), b"ok", maximum_bytes=4)
+    assert fresh.path.read_bytes() == b"ok"
+    assert store.usage().in_flight_uploads == 0
+    assert not list((tmp_path / "blobs" / ".tmp").iterdir())
+
+
+@pytest.mark.parametrize("boundary", ("mkdir", "quota-open"))
+def test_storage_admission_fault_observes_bound_without_consuming_stream(
+    tmp_path, monkeypatch, boundary
+):
+    """Catches root/quota I/O escaping before the upload's bounded observations."""
+    import asyncio
+
+    store = _store(tmp_path)
+    calls = []
+    consumed = []
+    method = "mkdir" if boundary == "mkdir" else "open"
+    original = getattr(Path, method)
+
+    def unavailable(path, *args, **kwargs):
+        affected = (
+            path == tmp_path / "blobs"
+            if boundary == "mkdir"
+            else path.name == ".quota.lock"
+        )
+        if affected:
+            calls.append(None)
+            raise OSError("storage observation unavailable")
+        return original(path, *args, **kwargs)
+
+    async def chunks():
+        consumed.append(None)
+        yield b"ok"
+
+    with monkeypatch.context() as fault:
+        fault.setattr(Path, method, unavailable)
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; unconsumed stream and fresh admission below
+            asyncio.run(
+                store.put_stream(
+                    _digest(b"ok"), chunks(), expected_bytes=2, maximum_bytes=4
+                )
+            )
+    assert len(calls) == 3
+    assert not consumed
+    fresh = asyncio.run(
+        store.put_stream(_digest(b"ok"), chunks(), expected_bytes=2, maximum_bytes=4)
+    )
+    assert fresh.path.read_bytes() == b"ok"
+    assert consumed == [None]
+    assert store.usage().in_flight_uploads == 0

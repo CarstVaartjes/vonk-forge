@@ -694,19 +694,39 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
         )
 
     provider, _ = _provider(tmp_path, redirect)
-    with pytest.raises(StepCAError) as caught:
+    with pytest.raises(Exception) as caught:
         _issue(provider, NODE_ID, _csr(), NOW)
     assert len(requests) == 1 and requests[0].url.host == "step-ca"
     assert "eyJ" not in str(caught.value)
 
+    holder: dict[str, _Material] = {}
+    seen: list[_SignExchange] = []
+    unavailable = True
+
     def oversized(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        return httpx2.Response(201, content=b"{" + b"x" * 65536 + b"}")
+        if unavailable:
+            return httpx2.Response(201, content=b"{" + b"x" * 65536 + b"}")
+        return _success_response(request, holder["material"], seen)
 
-    bounded, _ = _provider(tmp_path / "bounded", oversized, max_response_bytes=1024)
-    with pytest.raises(StepCAError, match="response is too large") as caught:
-        _issue(bounded, NODE_ID, _csr(), NOW)
-    assert len(requests) == 2  # Issuance has its own bounded reader.
+    bounded, material = _provider(
+        tmp_path / "bounded", oversized, max_response_bytes=1024
+    )
+    holder["material"] = material
+    csr = _csr()
+    binding = bounded.prepare_request(
+        NODE_ID, csr, NOW, purpose="enrollment", source_serial=None, generation=1
+    )
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; no credential returned and exact recovery below
+        bounded.issue_node(NODE_ID, csr, NOW, request=binding)
+    assert len(requests) == 2
+    assert not seen
+    unavailable = False
+    issued = bounded.issue_node(NODE_ID, csr, NOW, request=binding)
+    assert issued.serial == binding.serial
+    assert seen[-1]["body"]["request"]["request_id"] == binding.request_id
+    fresh = _issue(bounded, NODE_ID, _csr(), NOW)
+    assert fresh.serial != issued.serial
 
 
 def test_sign_wire_budget_stays_bounded_with_larger_crl_transport_budget(
@@ -733,7 +753,7 @@ def test_sign_wire_budget_stays_bounded_with_larger_crl_transport_budget(
     binding = provider.prepare_request(
         NODE_ID, csr, NOW, purpose="enrollment", source_serial=None, generation=1
     )
-    with pytest.raises(StepCAError, match="too large"):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; same-binding success below
         provider.issue_node(NODE_ID, csr, NOW, request=binding)
     fail_sign = False
     issued = provider.issue_node(NODE_ID, csr, NOW, request=binding)

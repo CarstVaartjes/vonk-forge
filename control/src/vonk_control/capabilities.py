@@ -92,11 +92,20 @@ class RecoveringService[T]:
             done = Event()
             value = self._value
             initialized = self._initialized
-        Thread(
-            target=self._construct,
-            args=(generation, value, initialized, done),
-            daemon=True,
-        ).start()
+        try:
+            Thread(
+                target=self._construct,
+                args=(generation, value, initialized, done),
+                daemon=True,
+            ).start()
+        except Exception:  # noqa: BLE001 -- dispatch failure releases this attempt
+            with self._lock:
+                if self._generation == generation:
+                    self._construction_deadline = None
+                    self._unavailable(
+                        CapabilityReason.DEPENDENCY_UNAVAILABLE, self._clock()
+                    )
+            return
         if wait and not done.wait(timeout=self._construction_timeout):
             with self._lock:
                 if self._generation == generation:
@@ -271,8 +280,10 @@ class CapabilityRegistry:
     async def _retry_one(self, service: RecoveringService[Any]) -> None:
         # Dispatch performs no blocking constructor I/O. The generation deadline
         # fences late results and the next scheduler tick releases expired ownership.
-        service.attempt_construction(wait=False)
-        self._schedule(service)
+        try:
+            service.attempt_construction(wait=False)
+        finally:
+            self._schedule(service)
 
     async def stop_recovery(self) -> None:
         self._stopping = True

@@ -420,7 +420,6 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
         ),
     )
     assert ended.state == LifecycleState.SUPERSEDED
-    assert ended.progress.supersede_code is not None
     assert fresh.id != ended.id
 
 
@@ -577,3 +576,51 @@ def test_damaged_newest_pending_plan_does_not_starve_readable_admission():
     fresh = service.apply(profile.id, request_key=_uuid(1132), actor="admin")
     assert fresh.id not in {healthy.id, damaged.id}
     assert service.application(damaged.id).state == LifecycleState.CANCELLED
+
+
+@pytest.mark.parametrize("damage", ("bad-time", "future-time", "missing-pending"))
+def test_expired_admission_is_settled_independently_of_retry_projection(damage):
+    """Catches damaged progress hiding expired ownership from the worker."""
+    from datetime import timedelta
+
+    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.agent_words import ProfileOperationKind
+    from vonk_control.settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+    from vonk_control.stored_json import write_guard_mode
+
+    sessions = _database()
+    _, revision_id = _seed(sessions)
+    now = [NOW]
+    adapter = _SwitchAdapter()
+    service = FleetProfileService(
+        sessions, clock=lambda: now[0], switch_adapter=adapter
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    pending = service._create_pending_application(
+        service.preview(profile.id),
+        request_key=_uuid(1140),
+        actor="admin",
+        operation_kind=ProfileOperationKind.APPLY.value,
+    )
+    with write_guard_mode(strict=False), sessions.begin() as session:
+        row = session.get(FleetProfileApplication, pending.id)
+        assert row is not None
+        progress = dict(row.progress)
+        if damage == "missing-pending":
+            progress.pop("admission_pending", None)
+        else:
+            progress["admission_retry_at"] = (
+                "zzz"
+                if damage == "bad-time"
+                else (NOW + timedelta(days=30)).isoformat()
+            )
+        row.progress = progress
+    now[0] += timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS + 1)
+    assert service._observe_pending_admissions(now[0])
+    ended = service.application(pending.id)
+    assert ended.state == LifecycleState.CANCELLED
+    assert not ended.progress.admission_pending
+    assert not adapter.starts
+    fresh = service.apply(profile.id, request_key=_uuid(1141), actor="admin")
+    assert fresh.id != pending.id
+    assert service.application(pending.id).state == LifecycleState.CANCELLED

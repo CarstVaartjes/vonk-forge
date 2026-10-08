@@ -530,25 +530,54 @@ def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecti
         gc.enable() if original else gc.disable()
 
 
+@pytest.mark.parametrize("failure_at", (None, 8))
 def test_inventory_releases_temporary_trees_without_scanning_old_generations(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, failure_at
 ):
-    """Catches retained test trees or a full-heap collection on every file."""
+    """Catches retained parsed trees, including an interrupted inventory."""
     import gc
+    import weakref
 
     from . import principle_guards
 
-    source = tmp_path / "test_fixture.py"
-    source.write_text("def test_fixture():\n    assert True\n")
+    sources = []
+    for index in range(16):
+        source = tmp_path / f"test_fixture_{index}.py"
+        source.write_text("def test_fixture():\n    assert True\n")
+        sources.append(source)
     monkeypatch.setattr(principle_guards, "ROOT", tmp_path)
-    monkeypatch.setattr(principle_guards, "source_files", lambda _mode: [source])
-    generations = []
-    real = gc.collect
+    monkeypatch.setattr(principle_guards, "source_files", lambda _mode: sources)
+    trees = []
+    parse = principle_guards.parse_file
 
-    def collect(generation):
-        generations.append(generation)
-        return real(generation)
+    def observe_parse(path, **kwargs):
+        if failure_at is not None and len(trees) == failure_at:
+            raise OSError("inventory unavailable")
+        parsed = parse(path, **kwargs)
+        trees.append(weakref.ref(parsed.tree))
+        return parsed
 
-    monkeypatch.setattr(gc, "collect", collect)
+    full_collections = []
+    collect = gc.collect
+
+    def observe_collection(generation=2):
+        if generation > 0:
+            full_collections.append(generation)
+        return collect(generation)
+
+    monkeypatch.setattr(principle_guards, "parse_file", observe_parse)
+    monkeypatch.setattr(gc, "collect", observe_collection)
+    if failure_at is None:
+        assert principle_guards.scan_sites("tests") == []
+        assert len(trees) == len(sources)
+    else:
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; retained trees asserted below
+            principle_guards.scan_sites("tests")
+        assert len(trees) == failure_at
+    assert all(tree() is None for tree in trees)
+    assert not full_collections
+    # A new scan is admitted after both success and failure.
+    trees.clear()
+    failure_at = None
     assert principle_guards.scan_sites("tests") == []
-    assert generations == [0]
+    assert all(tree() is None for tree in trees)

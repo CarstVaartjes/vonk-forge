@@ -21,7 +21,6 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 from pydantic import BaseModel, ConfigDict, ValidationError
 from vonk_agent_protocol.enrollment import (
     MAX_ENROLLMENT_RESPONSE_BYTES,
-    IssuedCertificateResponse,
 )
 
 from .ca_issuance_contract import (
@@ -397,7 +396,6 @@ class StepCertificateAuthority(CertificateAuthority):
             or request.policy_sha256 != expected.policy_sha256
         ):
             raise ValueError("CA request no longer matches exact issuer policy or CSR")
-        self._validate_sign_response_capacity(request)
         raw_response = self._json_request(
             "POST",
             "/1.0/vonk/sign",
@@ -646,30 +644,6 @@ class StepCertificateAuthority(CertificateAuthority):
             return json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise StepCAError("step-ca returned malformed JSON") from error
-
-    def _validate_sign_response_capacity(
-        self, request: CertificateIssuanceBinding
-    ) -> None:
-        # Issuance owns a fixed complete-reply contract, independent of the
-        # optional transport reader budget used by CRL and health observation.
-        # The CA's committed reply includes each PEM twice (crt/ca and
-        # certChain). A complete sign reply bounded to 64 KiB therefore spends
-        # at most half that budget on the two PEMs in the agent response.
-        # Charge the actual outgoing metadata independently BEFORE CA effects;
-        # do not assume the CA transport bound covers the agent envelope.
-        # The canonical response model owns metadata bounds. Invalid internal
-        # metadata reaches enrollment's exact-journal uncertainty handling;
-        # it never becomes a second request/refusal classifier here.
-        IssuedCertificateResponse(
-            node_id=request.node_id,
-            certificate_pem="x",
-            chain_pem="x",
-            serial=request.serial,
-            fingerprint="0" * 64,
-            not_before=datetime.fromisoformat(request.not_before).isoformat(),
-            not_after=datetime.fromisoformat(request.not_after).isoformat(),
-            generation=request.generation,
-        )
 
     def _request(
         self,

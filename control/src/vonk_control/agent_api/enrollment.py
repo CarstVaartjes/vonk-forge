@@ -7,6 +7,7 @@ import re
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from vonk_agent_protocol.enrollment import (
     EnrollmentBootstrapResponse,
     EnrollmentSubmitRequest,
@@ -127,8 +128,11 @@ def install_enrollment_routes(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
         try:
-            outcome = _require_enrollment(required).submit(
-                submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
+            outcome = await run_in_threadpool(
+                _require_enrollment(required).submit,
+                submitted.grant_token,
+                csr_bytes,
+                submitted.evidence.model_dump(),
             )
         except EnrollmentIssuanceUncertain as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
