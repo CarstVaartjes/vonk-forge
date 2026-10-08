@@ -393,7 +393,7 @@
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "path": "rust/crates/vonk-agent/src/host_runtime/tests/responses.rs",
       "function": "helper_message_framing_refusal_names_the_message_contract",
       "kind": "rust-wait-without-deadline",
       "count": 1
@@ -567,13 +567,13 @@
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/tests/recipe_builder.rs",
+      "path": "rust/crates/vonk-agent/tests/recipe_builder/main.rs",
       "function": "drop",
       "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/tests/recipe_builder.rs",
+      "path": "rust/crates/vonk-agent/tests/recipe_builder/main.rs",
       "function": "start",
       "kind": "rust-wait-without-deadline",
       "count": 1
@@ -831,19 +831,19 @@
       "count": 1
     },
     {
-      "path": "src/cluster_profiles/control_client.py",
+      "path": "src/cluster_profiles/control_client/transfers.py",
       "function": "ControlClient.download_file",
       "kind": "loop-without-deadline",
       "count": 1
     },
     {
-      "path": "src/cluster_profiles/control_client.py",
+      "path": "src/cluster_profiles/control_client/transfers.py",
       "function": "ControlClient.upload_file",
       "kind": "loop-without-deadline",
       "count": 1
     },
     {
-      "path": "src/cluster_profiles/control_client.py",
+      "path": "src/cluster_profiles/control_client/transport.py",
       "function": "_read_token_file",
       "kind": "loop-without-deadline",
       "count": 1
@@ -861,19 +861,19 @@
       "count": 1
     },
     {
-      "path": "src/cluster_profiles/controller_cli.py",
+      "path": "src/cluster_profiles/controller_cli/profile.py",
       "function": "_profile",
       "kind": "loop-without-deadline",
       "count": 1
     },
     {
-      "path": "src/cluster_profiles/controller_cli.py",
+      "path": "src/cluster_profiles/controller_cli/profile_options.py",
       "function": "_prompt_option",
       "kind": "loop-without-deadline",
       "count": 1
     },
     {
-      "path": "src/cluster_profiles/controller_cli.py",
+      "path": "src/cluster_profiles/controller_cli/selection.py",
       "function": "_recipe_rows",
       "kind": "loop-without-deadline",
       "count": 1
@@ -927,7 +927,7 @@
       "count": 1
     },
     {
-      "path": "src/cluster_profiles/qualification_fixtures.py",
+      "path": "src/cluster_profiles/qualification_fixtures/media.py",
       "function": "_png_metadata",
       "kind": "loop-without-deadline",
       "count": 1
@@ -983,7 +983,7 @@
       "justification": "Pure fragment encoding of an immutable finite UTF-8 JSON token, not polling or an external wait. offset starts at zero and advances by min(available - len(pending), len(raw) - offset); pending is strictly below available on entry, and a full fragment yields then clears pending before the next iteration. Nonpositive available fails closed. allocation derives the actual 2 MiB per-record envelope including ordinal; no total snapshot byte/time cap is implied. The real large FleetSnapshot roundtrip checks every record bound and original full document, and the PostgreSQL slow-ASGI proof checks SQL release and threadpool encoding. Each emitted fragment yields to the transport; this classification does not claim CPU preemption or physical-worker coverage."
     },
     {
-      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "path": "rust/crates/vonk-agent/src/host_runtime/tests/observation.rs",
       "function": "drop",
       "kind": "rust-wait-without-deadline",
       "count": 1,
@@ -991,7 +991,7 @@
       "justification": "Only the inspection-test Gate cleanup joins its exact owned std::thread::JoinHandle after observing that same handle is_finished. The shared absolute cleanup deadline bounds prior completion polling; unfinished workers are not joined and their fixture is retained. Task abortion and semaphore return are separately checked before cleanup may claim completion. This is a completed-thread reap, not an external wait or evidence that an unresolved native effect ended."
     },
     {
-      "path": "rust/crates/vonk-agent/src/host_runtime.rs",
+      "path": "rust/crates/vonk-agent/src/host_runtime/tests/mod.rs",
       "function": "request_root_publication_has_no_permissive_intermediate_state",
       "kind": "rust-wait-without-deadline",
       "count": 1,
@@ -1046,6 +1046,50 @@
       "_contract_component_schemas": "46db43044c42cbe518b4e2a9d32cd7d5861581b04cb747bb05480ce8d31d7633",
       "_stored_component_schemas": "8b8f88b43d25355d188fa7ca3497a15d02c63ec4ede53a978502abd45300ba4f",
       "<module>": "a49e99b27c5a3a186b1ff26afe98c9fb0410d49b3f356bcaa70a4b3581df57de"
+    },
+    "src/cluster_profiles/control_client/transfers.py": {
+      "ControlClient": "e5c5eb3e12060e768fe776c66324ac3b9ce47c9fdf0c974be5d3c8b5386af7ae",
+      "ControlClient.upload_file": "1ee65565cbea21db113d67f77e8fb858b976cdbfe90a1e29f15a72955b67aea1",
+      "ControlClient.download_file": "78644019425daa47c6d2d976f12ee87b7a4033259704c81ebc000f9ee1766549",
+      "<module>": "e5c5eb3e12060e768fe776c66324ac3b9ce47c9fdf0c974be5d3c8b5386af7ae"
+    },
+    "src/cluster_profiles/control_client/transport.py": {
+      "_read_token_file": "95855dc9667f01aa8ed5a2cffb937931654adf2f9ce56fca936fa2a9a14662d9",
+      "_read_control_response": "ee503176979d82144a26ba2c53dc0162931b811f4abd4ff44e63c9d3a2a13e95",
+      "_observation_payload": "b93e86b3aadef2df6fbe67f4d0285e1536ac4d2a4cd5e18c7890281edd0aaa1d",
+      "_OpenerTransport": "083b788aa55ef3989376b2e0bb1983514846cdb44e28698a189660bcdb6e61a9",
+      "_OpenerTransport.__init__": "c5d61e8abde91e4b0b21f96aff65281f2b8f3bde14299a7fb03370dcf1faa6f8",
+      "_OpenerTransport.handle_request": "3da686a33c64ab94bd934e4d80a738e955eb261f6b13c09f605c9939885220b3",
+      "_RecordingTransport": "d0f645e0cc7386ad7490915f6436ec4c891f8c2e4830cabdd9eb2144e1038a75",
+      "_RecordingTransport.__init__": "9c6074f62d69663a802ec11c73059501fc2dfca5c584107596ba27af7d233ea7",
+      "_RecordingTransport.handle_request": "61833404395185ac94e1029a2e69e69c9980103a816bb4f09fbd7cf67ebb81c8",
+      "<module>": "57780ffd8d73e6112683b79de12648d0a3d119267fd19ae675df5a976c3406bd"
+    },
+    "src/cluster_profiles/controller_cli/profile.py": {
+      "_profile": "37cbe2ff20d03efe0754217d296ccb4f525d4f8bc7dc05eba0e562fd55c68a1b"
+    },
+    "src/cluster_profiles/controller_cli/profile_options.py": {
+      "_configure_option_target": "b3759c4531a4dffc82f3991248dfe30b23879ec8ca67fe4f128fb7efd8261fac",
+      "_parse_option_flags": "b8b2f5a6b7ac7b76bf48593676adb6316e9b7fc8eb0fb6655d32711eae977615",
+      "_option_interactive": "465e40859831c77ba555a2a9c5fddf356e4231b5571538a13f2da7e02e778f8f",
+      "_apply_option_choices": "595803148b9374feff4682b6dc5a58c51ace8376907567e2c0159606365c910b",
+      "_prompt_option": "766beb3af67f6663cea83ab8607d53269f46a1be8ac5b73a709596ad3de773af"
+    },
+    "src/cluster_profiles/controller_cli/selection.py": {
+      "_selection_remaining": "abe497c10816fc204cb9aaf5fd24895a36b736cf540f6389628f996922887af0",
+      "_recipe_rows": "1355a63486b8b770bf6a85aeefb9633dd6b3f34c567b9725c5c601dc2d56393c",
+      "_resolve_recipe_selector": "2424624f3db49e916f5506ed066bf807fa8c7d2dd659c7a20ddb59874d7aca6f",
+      "_resolve_spark_selectors": "2b179a2aee58257fbc5af49cca29713106d433c360bf6ef46e60b4f1ea6b916a"
+    },
+    "src/cluster_profiles/qualification_fixtures/media.py": {
+      "_load_content": "d9f12642eda54c0343fa59065f3f5f2c7f30987d3b13091b977b5db8de4ac702",
+      "_validate_magic": "0726d423e6f20125a09c60af9d98399c6f91faa44b47508d6f74368dae7a27cb",
+      "_png_metadata": "ffb071f1bba591eeaa4a48c397c4978de8a80ee03750ef4225d2c93d69137366",
+      "_wav_metadata": "d96b1ea53c5cdbe0ba05ea8daab90d1f590642e012498015f54ff184975d60ee",
+      "_ffprobe_metadata": "b204b1c79b604600a0e2c5f2ac08f7fd6abd4b83fe5e3a3465a4760a1f600ac1",
+      "_verify_media_decode": "d1d0d0b16a5ac20c19015ad9d843432495eea6820c3f876ef61944e5047711b2",
+      "_glb_metadata": "f5d31cf1520939db3edaad2fe951042ac16f1503554d8b696dabbca35bd6713b",
+      "_safe_zip_entries": "d29781c22af92cda1a54fbe573510a8656e904d102d99d1116d98f744fb04f3a"
     }
   }
 }

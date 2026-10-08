@@ -13,8 +13,12 @@ from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import Base
 from vonk_control.strict_json import serialize_json_value
 
-from cluster_profiles import control_client, observation_transfer_reader
-from cluster_profiles.control_client import ControlClient, ControlTransportError
+from cluster_profiles import observation_transfer_reader
+from cluster_profiles.control_client import (
+    ControlClient,
+    ControlTransportError,
+)
+from cluster_profiles.control_client import client as control_client
 from control.tests.observation_transfer_peer import ObservationHTTPPeer
 from control.tests.test_observation_transfer import _peer
 
