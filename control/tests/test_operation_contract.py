@@ -4,7 +4,7 @@ import json
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import OperationCheckpoint, canonical_message
+from vonk_agent_protocol import OperationCheckpoint, ProgressPhase, canonical_message
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.operation_contract import (
     OperationMemberProgress,
@@ -263,3 +263,16 @@ def test_failure_evidence_restored_diagnostics_obey_the_byte_limit() -> None:
     assert stderr["truncated"] is True
     dropped = stderr["dropped_bytes"]
     assert isinstance(dropped, int) and dropped > 0
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_progress_update_retains_in_place_default_members(partial: bool) -> None:
+    """A snapshot or partial update cannot erase an appended default member."""
+    previous = OperationProgress(phase=ProgressPhase.TRANSFER)
+    current = OperationProgress(phase=ProgressPhase.TRANSFER)
+    member = OperationMemberProgress(member_id="target-1", phase=ProgressPhase.TRANSFER)
+    current.members.append(member)
+    assert "members" not in current.model_fields_set
+    merged = validate_progress_update(previous, current, partial=partial)
+    restored = OperationProgress.model_validate_json(merged.model_dump_json())
+    assert restored.members == [member]

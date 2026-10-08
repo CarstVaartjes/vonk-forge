@@ -69,7 +69,7 @@ from .runtime_image_preparation import (
     RuntimeImageReceipt,
     RuntimeImageStorage,
 )
-from .strict_json import read_stored_model
+from .strict_json import read_stored_model, serialize_json_value
 from .worker_memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
@@ -613,7 +613,7 @@ class DurableDistributionPhaseExecutor:
             if state != child.state:
                 JobAdapter.amend_ended(child, payload.get("reason"), self._clock())
             payload = _child_receipt(payload)
-            child.result = payload.model_dump(mode="json", exclude_unset=True)
+            child.result = serialize_json_value(payload)
             child.updated_at = self._clock()
             session.commit()
             return _ChildView(state=state, result=payload)
@@ -805,15 +805,17 @@ class DurableDistributionPhaseExecutor:
                         for node_id, assignment in assignments.items()
                     },
                 },
-                result=_child_receipt(
-                    {
-                        "phase": "transfer",
-                        "subphase": "target-copy",
-                        "progress": progress,
-                        "members": progress["members"],
-                        "evidence": [],
-                    }
-                ).model_dump(mode="json", exclude_unset=True),
+                result=serialize_json_value(
+                    _child_receipt(
+                        {
+                            "phase": "transfer",
+                            "subphase": "target-copy",
+                            "progress": progress,
+                            "members": progress["members"],
+                            "evidence": [],
+                        }
+                    )
+                ),
                 created_at=now,
                 updated_at=now,
             )

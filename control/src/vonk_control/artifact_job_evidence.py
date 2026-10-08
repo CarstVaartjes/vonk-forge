@@ -15,7 +15,7 @@ from pydantic import ConfigDict, Field
 from vonk_agent_protocol import canonical_message
 
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from .strict_json import StrictJSONModel, read_stored_model
+from .strict_json import StrictJSONModel, read_stored_model, serialize_json_value
 
 
 class ArtifactJobResultEvidence(StrictJSONModel):
@@ -80,11 +80,11 @@ def read_result_evidence(value: object) -> ArtifactJobResultEvidence | None:
 def dump_result_evidence(
     evidence: ArtifactJobResultEvidence | None,
 ) -> dict[str, object] | None:
-    """The JSON document stored for ``evidence``: only the facts that were set."""
+    """Store all current facts, including values mutated outside field tracking."""
 
     if evidence is None:
         return None
-    document = evidence.model_dump(mode="json", exclude_unset=True)
+    document = serialize_json_value(evidence)
     return document or None
 
 

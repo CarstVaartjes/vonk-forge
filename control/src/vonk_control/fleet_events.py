@@ -38,6 +38,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .strict_json import serialize_json_value
 
 EVENT_TYPES = frozenset(
     {"node-telemetry", "node-profile", "recipe-state", "operation-state"}
@@ -149,7 +150,7 @@ def _walk_payload(value: object) -> None:
 
 def _stored_payload(
     draft: FleetEventDraft,
-) -> dict[str, str | int | bool | None]:
+) -> object:
     """The JSON document of a draft's typed payload, checked before it is stored."""
 
     if draft.event_type not in EVENT_TYPES:
@@ -167,7 +168,7 @@ def _stored_payload(
         draft.node_id,
         draft.payload,
     )
-    payload = draft.payload.model_dump(mode="json", exclude_unset=True)
+    payload = serialize_json_value(draft.payload)
     _walk_payload(payload)
     try:
         encoded = json.dumps(

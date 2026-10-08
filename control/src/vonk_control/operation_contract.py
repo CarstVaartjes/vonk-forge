@@ -191,15 +191,23 @@ def validate_progress_update(
 ) -> OperationProgress:
     """Validate monotonic bytes/checkpoint updates within one leased attempt.
 
-    ``current`` carries only the fields its producer set (``model_fields_set``):
+    ``current`` carries fields its producer set, including nonempty members
+    appended to the default list:
     a Controller-internal partial update omits durable fields and takes them from
     ``previous``; an agent snapshot is complete (``partial=False``).
     """
 
     if previous is None:
         return current
-    given = current.model_fields_set
-    document = current.model_dump(mode="python", exclude_unset=True)
+    given = set(current.model_fields_set)
+    # A nonempty default list is current state even if append did not update
+    # Pydantic's presence tracking. Explicit empty members still clear the list;
+    # an untouched empty default in a partial update still carries it forward.
+    if current.members:
+        given.add("members")
+    # Presence controls only the top-level partial merge. Nested models carry
+    # their complete values, independent of how their producers mutated them.
+    document = current.model_dump(mode="python")
     if partial:
         for key in _CARRIED_PROGRESS_FIELDS:
             if key == "total_bytes" and (
