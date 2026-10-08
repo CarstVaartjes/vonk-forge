@@ -31,7 +31,6 @@ from vonk_control.recipe_routes import (
 from vonk_control.route_runtime import (
     ActivationMarker,
     AtomicRouteBundlePublisher,
-    verify_active_route_bundle,
 )
 
 from .non_blocking import assert_ended_without_blocking
@@ -86,7 +85,7 @@ def _routes(sessions, root: Path, gate: _Gate) -> RecipeRouteService:
 
 
 def _aliases(root: Path) -> set[str]:
-    bundle = verify_active_route_bundle(root).routes
+    bundle = _verified_bundle(root).routes
     assert bundle is not None
     return set(bundle.routes)
 
@@ -439,3 +438,6 @@ def test_accepted_stop_continues_without_client_and_never_republishes(
     assert ended.state == LifecycleState.SUCCEEDED
     assert fresh.id != continued[0].id
     assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
+
+from .test_route_runtime import _verified_bundle

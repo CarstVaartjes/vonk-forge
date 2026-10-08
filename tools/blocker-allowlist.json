@@ -489,7 +489,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 175,
+    "total": 146,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -549,14 +549,6 @@
       "reason": "The signed release is fetched again a bounded number of times with pauses that outlast the few steps of a release publication before the requester is told to retry."
     },
     {
-      "path": "control/src/vonk_control/api/production.py",
-      "function": "_close_model_cache",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Shutdown retries model-cache checkpointing on the bounded request pause schedule, then releases the lifespan so durable unfinished transfers resume after Controller restart."
-    },
-    {
       "path": "control/src/vonk_control/attempt_residues.py",
       "function": "AttemptResidueReconciler._incomplete_installations",
       "catches": [
@@ -595,14 +587,6 @@
         "CatalogSyncError"
       ],
       "reason": "The automatic library sync is asked again after every failure on a delay that doubles from 30 seconds up to the steady-state interval; a sync that finds another sync running, or cannot finish, leaves the previously imported catalog active and is unknown, never a refusal. The loop only ends when the Controller stops."
-    },
-    {
-      "path": "control/src/vonk_control/distributed_recovery/coordinator.py",
-      "function": "DistributedRecoveryCoordinator.tick",
-      "catches": [
-        "_RecoveryDependencyPending"
-      ],
-      "reason": "The recovery tick schedules a recovery wait for a pending dependency and continues; the next tick reconciles the same run again."
     },
     {
       "path": "control/src/vonk_control/fleet_profiles/pending_admission.py",
@@ -644,14 +628,6 @@
         "_FleetProfileRecoveryBindingConflict"
       ],
       "reason": "The tick preserves the accepted identity, records a typed blocker and schedules a bounded backoff for retryable conflicts; superseded intent ends and releases claims. Child dispatch failures are observed again under the same request identity."
-    },
-    {
-      "path": "control/src/vonk_control/gateway_keys.py",
-      "function": "keep_default_key",
-      "catches": [
-        "GatewayKeyError"
-      ],
-      "reason": "The default client key is asked for again on a delay that doubles from 5 to 300 seconds until LiteLLM answers and the key matches its secrets file; an unreachable or unsettled gateway is unknown, never a refusal, and the loop ends only when the key is ready or the Controller stops."
     },
     {
       "path": "control/src/vonk_control/image_store_collection.py",
@@ -766,30 +742,6 @@
         "ModelCacheError"
       ],
       "reason": "A provider failure ends this bounded metadata observation with check-failed and a typed code, without changing catalog state or holding a claim; subsequent requested or periodic checks observe it again."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds/source.py",
-      "function": "check_source",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds/planning.py",
-      "function": "prepare_plan",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds/source.py",
-      "function": "resolve",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
     },
     {
       "path": "control/src/vonk_control/recipe_image_availability/cancellation.py",
@@ -1044,14 +996,6 @@
       "reason": "The worker tick contains one operation's unknown outcome: the failure is logged, _hold_after_advance_failure keeps the checkpoint and schedules a bounded retry that names its cause, and the rest of the batch advances; the next tick picks the operation up when due."
     },
     {
-      "path": "control/src/vonk_control/unused_storage_collection/pressure.py",
-      "function": "_remove",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Unknown removal retains the item, records its next attempt and continues other items; the next timed sweep re-observes the references and retries the retained item after its scan interval."
-    },
-    {
       "path": "control/src/vonk_control/worker.py",
       "function": "Worker._run_housekeeping",
       "catches": [
@@ -1148,6 +1092,110 @@
       "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
     },
     {
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "function": "BuildMixin.preview_build",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Direct build preview re-observes exact inputs through the bounded admission schedule. Exhaustion returns typed uncertainty without a claim, so the next request can observe again; security refusals escape immediately."
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "keep_default_key",
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "reason": "The default client key is asked for again on a delay that doubles from 5 to 300 seconds until LiteLLM answers and the key matches its secrets file; an unreachable or unsettled gateway is unknown, never a refusal, and the loop ends only when the key is ready or the Controller stops."
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "_observe_gateway",
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "reason": "Public key operations observe gateway uncertainty here. Read-only listing and health retry three times with bounded backoff and per-request timeouts; mutation attempts are never replayed blindly and end with the shared typed UnknownError, without local claims or gates. Default-key maintenance reconciles the persisted secret on its next bounded-rate pass."
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "GatewayKeyService.create",
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "GatewayKeyService.revoke",
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "GatewayKeyService.roll",
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
+    },
+    {
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "function": "GatewayKeyService.ensure_default",
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
+    },
+    {
+      "path": "control/src/vonk_control/api/production.py",
+      "function": "_close_model_cache",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Shutdown retries model-cache checkpointing on the bounded request pause schedule, then releases the lifespan so durable unfinished transfers resume after Controller restart."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery/coordinator.py",
+      "function": "DistributedRecoveryCoordinator.tick",
+      "catches": [
+        "_RecoveryDependencyPending"
+      ],
+      "reason": "The recovery tick schedules a recovery wait for a pending dependency and continues; the next tick reconciles the same run again."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/source.py",
+      "function": "check_source",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/planning.py",
+      "function": "prepare_plan",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/source.py",
+      "function": "resolve",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection/pressure.py",
+      "function": "_remove",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Unknown removal retains the item, records its next attempt and continues other items; the next timed sweep re-observes the references and retries the retained item after its scan interval."
+    },
+    {
       "path": "control/src/vonk_control/prebuilt_images.py",
       "function": "write_library_image_plan",
       "catches": [
@@ -1162,14 +1210,6 @@
         "UnknownOutcomeError"
       ],
       "reason": "A typed unknown ends this pure validation entry with a diagnostic without effects or claims; remaining recipes are examined and a fresh invocation is immediately eligible."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_operations/build.py",
-      "function": "BuildMixin.preview_build",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "Direct build preview re-observes exact inputs through the bounded admission schedule. Exhaustion returns typed uncertainty without a claim, so the next request can observe again; security refusals escape immediately."
     }
   ],
   "call_edges": [
@@ -1198,14 +1238,6 @@
   ],
   "route_guards": [
     {
-      "path": "control/src/vonk_control/api/application.py",
-      "function": "create_app.platform_observation",
-      "catches": [
-        "ObservationCaptureUnavailable"
-      ],
-      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
-    },
-    {
       "path": "control/src/vonk_control/operator_projection_api.py",
       "function": "install_operator_projection_routes.fleet_status",
       "catches": [
@@ -1228,6 +1260,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "Every Controller route runs inside this wrapper (ControllerAPIRoute): an unknown outcome that the route itself did not handle is answered with a typed 503 and Retry-After, never a 500 or a refusal, and the caller (client, agent or worker) asks again."
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.platform_observation",
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
     }
   ],
   "content_identities": {
@@ -2859,7 +2899,8 @@
       "<module>": "9a63c54234d69697f8b6401e5371077f31953907f324d1d79c299a3299d8b87a"
     },
     "control/src/vonk_control/gateway_keys.py": {
-      "GatewayKeyError": "5d4a0204a2e12fd94940eaf84799e88ce927f0aba264c0074a24e1977473f982",
+      "GatewayKeyError": "3ac6e34bd1374f0ef5af9db6b0df2c745c2416e044ad8f91303631e49383361f",
+      "_observe_gateway": "dd4dbe3f6f6cf17dfc264c8655634b45fe50dbc7cda71a9528cedd7e836762ec",
       "GatewayKeyConflict": "6f14cf8f23e0608e72951bae9be1f385fba4464374cbc5202c6c3e2beb842a5e",
       "GatewayKeyCreateRequest": "bbf33ca5199793c277958e2e6f1ed8712cda31024d7d77a3c572b89660cfcda0",
       "GatewayKeyView": "18b22d38e0ebbb703ff0437cccdf006826716cd0b5a688c2224bf091547294c9",
@@ -2888,32 +2929,38 @@
       "_remaining": "eb4d399677046f3c3f01b0a4751cb3576800c90c169ff5ad82e0a0d879928153",
       "_rolling_alias": "6cfbbb4b20d3ed64ce9d0c7c0bdfb80c27cb47fb8933cbbd3e2eabf43e3a5ed1",
       "_view": "b497541e9bae8b616c67f60069bc9d8541634899a60e0fdb447b50285db3af6f",
-      "GatewayKeyService": "dcd1b0a1be004cae41716b980b1aae046919a133a7880f0c4189984e7ce5324b",
+      "GatewayKeyService": "99f80d75d0f5051a66cd79d893d3f242cd9ea53f500110815caf5c9b4f939094",
       "GatewayKeyService.__init__": "2a45607eec979636c36c75a25342c296e9150474df3601ec67d1b8718466dc32",
-      "GatewayKeyService.check_health": "c081031605e3379865afc3b7af0e7edfe6d06779f61b978d556eb570f7910231",
+      "GatewayKeyService.check_health": "e776afd511f6ec4a8a45ae292856a13f7cb53215782724c2e22ec2c07c16beeb",
+      "GatewayKeyService.list_keys": "bb62e6cb39f7bb1346e60394134ede8302583086630028f2c30eed31eb36f534",
+      "GatewayKeyService.create": "5cb2f77388e1d82765381245e4701a023037baeafad38a25f35b9b60680b8e92",
+      "GatewayKeyService.revoke": "b5bcc19f17a76933bcb2bb77ecd90b0a2cf7e7a32cb1720833ac9722b9a92e98",
+      "GatewayKeyService.roll": "0ff8425a75b275aa436b0f3699ca3d636ef39b74bacd6e35099cd8a038292a66",
+      "GatewayKeyService.ensure_default": "ae8abf5a08f7ef811a53a433bd14a5cf9738a1984de5ed0bf223cf63379e626b",
+      "GatewayKeyService._gateway_check_health": "59224477fb04e7ab5d2233762fbc1dd88a2914312df2aa41e43782a003308662",
       "GatewayKeyService.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
-      "GatewayKeyService._request": "89b6f4e4ac83aa8f5951f1cee68644bd4a4b0442dbaa9ff0817369954244bb83",
-      "GatewayKeyService._raw_keys": "28794f37e9f1ca0a2baea1c08b2a44f2a2f3d44f01d4b34ac22c4fbf857496c6",
-      "GatewayKeyService.list_keys": "5a8c28b97d04cddcc792e6ed9c16443321a329bce3198f988628ffaeddd5ba8a",
-      "GatewayKeyService._exists": "d9d46cb1c2880815a01d92dccb74e89d7f3e11be57bfad9c237df18784ae9785",
-      "GatewayKeyService.create": "f0f175e87f46f594c5cc0db4aee1c39b0cf9a85a6b31b9305c28a86e6406b2c1",
-      "GatewayKeyService._create_under": "4f4aa4747463e22c3a8702d6a918f851d757fdc80dc90ce002557cf727298326",
-      "GatewayKeyService._delete_alias": "ab36a2a93869b7263d72ee4a5d1f8642710e64bc6f589816b3e1658a40f41e52",
-      "GatewayKeyService.revoke": "562c4541e8930502bb5336e469c0df84e63ecb64e41e7e4d2ac88f4658f44117",
-      "GatewayKeyService.roll": "5982a9997f9a10e9c50ea1931d57b8fdaf6551700e6c27adbe0b594388d49a04",
-      "GatewayKeyService.ensure_default": "75816f743520ca5ce92c9272caf8ce1659be22e3d1b094ba0629ad140d6fac6f",
-      "keep_default_key": "b7a1f63e54653b6a45646dc5de8d9da51416ec80b8d5dbf355dd4a424f165e96",
+      "GatewayKeyService._gateway_request": "553f2bb33401df305176acb8650144e2b1c9b6579e765b1d5f87e69aabd5ee97",
+      "GatewayKeyService._gateway_raw_keys": "70f5b985ea70a114eaa50e01cf255802569838926c4738a1ef14694e7e46f6df",
+      "GatewayKeyService._gateway_list_keys": "8ceb99b17b2aa3d674479b95e059d6ea9809d9b9d55ef08a84771f0aa02c8b44",
+      "GatewayKeyService._gateway_exists": "1170dc8e7198849333377d2fc9fb5eae7b60a66b69e4cd8e54026236df95a2ea",
+      "GatewayKeyService._gateway_create": "86ba5f8b745f599583600d362c4e86f160f88936b2b995a866c7c8e5ef789556",
+      "GatewayKeyService._gateway_create_under": "7be21949446e6058b19e231041f8f300590a76141bc1514faf1e636f10734c08",
+      "GatewayKeyService._gateway_observe_created": "e8a68375df576265d164dec861017066eadcbac299284c4aa82b70ca4798135e",
+      "GatewayKeyService._gateway_delete_alias": "6da52bd2ce22ea0cada3a52874f6a9d171ca6d44dcb82c9c20f58645cb9509b1",
+      "GatewayKeyService._gateway_revoke": "c1eba269f1aa3829be88fa848dc783c19d0ad77c4233d7c2dfaf1d637f060597",
+      "GatewayKeyService._gateway_roll": "d4b85e3f05312afbd276bafc6e35c5b0fe0f23aaf3f467bd23d959163fa37f38",
+      "GatewayKeyService._gateway_ensure_default": "235e3982b5135d52eb35dd0c0ad9ecf26581290e566a3147bbbe13b2726a0104",
+      "keep_default_key": "83f1661f2df61ff7be135e6ca46ee9507ce6648adecc72175682873593a7afb4",
       "_read_key": "2e898d94ed8980af3930950387d6f16ca00820ee48abe52dec00c827010c55f5",
       "_write_private": "cbab0c3851a129ac57570770a0578355ddec786b26ea99c34c168aaed55680be",
-      "install_gateway_key_routes": "812dfa38cf1221440db426cc3fa648b59524d3b92e6708e78f5dfb23b50dff59",
+      "install_gateway_key_routes": "cf9887f07d5b4d135fb46e9f2bf2cc02a921345c60ef940ce3e3f2d53798874d",
       "install_gateway_key_routes.available": "bf06b6f24aa9ee165f3616ca490346f8f08273dd2b943cc88871745ef1645844",
       "install_gateway_key_routes.authorize": "6ebff86b34855e4007017a85584b418401836eb1db113bdab3fa8bc1637d762c",
-      "install_gateway_key_routes.unavailable": "8fe3546cea98b4cfc71fa5d5d85084b0b08b5878d36509b9c5b3567fcb27c3c8",
-      "install_gateway_key_routes.list_gateway_keys": "171e1534c1005cfc4f6ed49fecac9eab8449900ea52d1d47336d90cad34de441",
-      "install_gateway_key_routes.create_gateway_key": "8cfbacaa542271ccac33308858282793813a5594e415f0bf17e03fe483f535e0",
-      "install_gateway_key_routes.revoke_gateway_key": "6c65afc6d2e3420229ed57c5d5662ec60d29f36b5bf58e68a1f4431177e42302",
-      "install_gateway_key_routes.roll_gateway_key": "00a8a592639396a97c5e63c708b708dbe132a0be2e230622052acdfc365596a5",
-      "<module>": "3239679713cc018191b92d278e6897481f452e95a4a79f346b3051c850e07daf"
+      "install_gateway_key_routes.list_gateway_keys": "e4026c42f024f7a34e430a5a4e9ddf9512c48a6f510fd46f2c7b101e9423ea1d",
+      "install_gateway_key_routes.create_gateway_key": "c329231911525a7314bebefa0eb7ab26d2b00dd169848eda102b47016f2ecb21",
+      "install_gateway_key_routes.revoke_gateway_key": "68d74f8590fcaa1140c6e4d4a16edfdeb6be237cc5148d1b3598c1e11f0183c4",
+      "install_gateway_key_routes.roll_gateway_key": "2e6e54dcee2c087999a8e691a0974f6358f1ab279992a82ad1f303b452fd2554",
+      "<module>": "fdb769f5ffc739be9ff35848eecb115cb1eebde3dcf1769b1b4028ffbe56a34b"
     },
     "control/src/vonk_control/harnesses/canonical.py": {
       "_canonical_json": "146175eb2460e313b8b706ce4b207dff60b4a140ef02b8ed2bee694d79a37ae5",
@@ -3804,10 +3851,10 @@
       "_agent_upgrade_diagnostics": "bc3c9249b6f9b44a0711185c20072f7d951d0fa704685101c5d8f6b99eaeaa75"
     },
     "control/src/vonk_control/operation_api/durable.py": {
-      "_DurableOperationProjection": "cdfe0a3c3bce6d1adab25a1e57ec85e62bb265b5154069c84da984c977bd41a7",
+      "_DurableOperationProjection": "84da4a06ac2c0ca344b1a4db220a32d5f69e6051080769125f117d3784217b10",
       "_DurableOperationProjection.__init__": "979450dd2a4d5d6b2756afa0a491748f8a989b52d36d8390c79eeeb385484d2e",
       "_DurableOperationProjection._publication_snapshot": "0d0bad6ffbf8c411d72abfa4049822ffd88e2a031b2293e140802c5ce13ccccf",
-      "_DurableOperationProjection._verified_routes": "631bcd6d7fee12fc1d7e367cc6df682addfc1739539dd785dbc6c63638e0610e",
+      "_DurableOperationProjection._verified_routes": "38f622bbd9945c84b347d6ebbcb2dcbc02f8995c1e5b45b4e39472258b222f1c",
       "_DurableOperationProjection._endpoint_payload": "3bf74d1f8f0c7d609938b9b5d867cd0e258fa656cb1725b4df57bacc7256e222",
       "_DurableOperationProjection._route_run_id": "c3cf09f88eaf01ee87d724019392e8d2b1d07f9c856663e1c30d8e49507397d1",
       "_DurableOperationProjection.profile_endpoint": "ccf57c33da098a2a5bb8ad53e9cc2a5854a50a2334f95ed869e1308543fb655c",
@@ -3823,7 +3870,7 @@
       "durable_operation_services": "469ca94e471e1f143cc7047935b04fb4c9b4daa561470beb045eac056c83a127",
       "durable_operation_services.resume_job": "3395559588ebc9e31ba19de88ccfa38db4df8d6801eac1be9e971e1d21c5b507",
       "durable_operation_services.retire_job": "7556cdebe075aed48f065bced9ea2ede954b03dd776583a5428a1788469fd749",
-      "<module>": "cdfe0a3c3bce6d1adab25a1e57ec85e62bb265b5154069c84da984c977bd41a7"
+      "<module>": "84da4a06ac2c0ca344b1a4db220a32d5f69e6051080769125f117d3784217b10"
     },
     "control/src/vonk_control/operation_api/openapi.py": {
       "admin_openapi_schema": "9fd2dd68f65f8e139356a668e6c55a762689e243dca2d4092d9bcc154fbb4f49",
@@ -4017,16 +4064,16 @@
       "ManagementAddressPolicy.parse": "7aa5301062a9b14a697493c6cf6ab99770a57fdbe55a8fcc39428a43c72fcaeb",
       "ManagementAddressPolicy.validate": "19bc85949fb00e63d8aa549d06ef32a864c55bfa4dda06720975531cc88bb67d",
       "ManagementAddressObservation": "d3cc97f58061e3323b3fd683c936d5a1ffaed3968518ee2871ab6542d75cbbe6",
-      "AgentPresenceService": "1a438913a28585cb1d31355150a1f6a7a26b98f7d387cb5732a9288cd719ea8d",
+      "AgentPresenceService": "88e5da346e4566aa43d7ee1c05894b2e1d5b71cb49e7032245f1cce5fb82dbc6",
       "AgentPresenceService.__init__": "5e3c580362ae8f70380fcc019ad4add9d690d7745fd14f76592a3dbbbb87fc8f",
       "AgentPresenceService._lock_active_node": "14948f603bbab90551d652b36ed7f450bf31faee9bab5ca8a372946922da49a9",
       "AgentPresenceService._lock_active_certificate": "e81198ab007a842e436369b6e5b24a0e3d8d1b8d66c5df0d4af20e43bdd35b28",
       "AgentPresenceService.observe": "fccc3008bb9ba5a2ea2e2f75a6645caf2c0201c769a143202366d84a5c909e09",
       "AgentPresenceService.observe_in_session": "cdaef0e66418430762240cc000eef2a9a8aa83fbffad92feb64838bfdcf85fa2",
       "AgentPresenceService.validate": "756d77a4c7ef584c13f0a835c47a94988edafbe3ff369ce6f5979c7b917df90c",
-      "AgentPresenceService.latest": "ba03db04939cbe712e67e3832d1e79cb66ed6d1320d34293b73896dbf262c935",
-      "AgentPresenceService.latest_in_session": "2f758a181c9acf083667ef31cbe8bbbdafe1469a9d4c97eb482b7d3efd8a3115",
-      "<module>": "7db051b709313371cf6a89d891941750a2f7446bcfd76768c0f6466998453ead"
+      "AgentPresenceService.latest": "ca0323fc2b123605634d08b68561277729fbc974df8f78adc44e0dfb81030404",
+      "AgentPresenceService.latest_in_session": "9754908ee593dcdcf34632411ae54fba18516ea25e9c69769219e0e3dcc76520",
+      "<module>": "e32c00da74de2e1eb7dbea7427c22e8a9cfb041fe7ca6e672af84fe8b69387f4"
     },
     "control/src/vonk_control/profile_capacity.py": {
       "reservation_visible": "6e99d6e9172270916575de0a751ac357d5a40ca067233e26c065e722bc382ba1",
@@ -4936,14 +4983,14 @@
       "route_publication_owner_lock_statement": "d1e42ca6896837318067b792c5b45d4bc286f8c2b8340754e38ed5f42ac50343",
       "lock_route_publication_owner_in_session": "0fcc9c4e1c2e77f5573bc1fc28cbbda2f25989c529093bb6430292c13841e825",
       "route_publication_transaction": "899797b8a931858d9445663bd0ba68d0fcf868201758ac85d099e785caefd74b",
-      "AtomicRecipeRoutePublisher": "a729e0405657695a25d83a9e06041b5848bfeccc4209e42e8efd4b7c4f056e94",
+      "AtomicRecipeRoutePublisher": "980d3320151d7d4e7c8ee1ab777174b4a6c6adce8673f29d830cceb10c665f54",
       "AtomicRecipeRoutePublisher.__init__": "3e1fd3de63e442a11e8713af7399f6178aefe6d0441214731ec8f57b7c6edd1b",
       "AtomicRecipeRoutePublisher.publish_recipe": "35560fca7ca53db4e4d27d372a86c64934ed9a4549062123eabac4bef8ff8b80",
       "AtomicRecipeRoutePublisher.publish_empty": "24cff5df9f741879f75e16d9b68d53eb53a17b703b7e1e12820cc05e4136980e",
-      "AtomicRecipeRoutePublisher.active_marker_digest": "4b6962848390d14ca7f2eab4d3741c73f0013c67815d2c62fbb237f28266d455",
-      "AtomicRecipeRoutePublisher.accepted_run": "98d7580db0f5c79aa67e8c35fb9b1184c31127a2b1c4401d474f28f3a8275cfa",
+      "AtomicRecipeRoutePublisher.active_marker_digest": "1a9a903487521620bd5ced80885ce4cef0ba70e883b5a0df4726583297d0d62e",
+      "AtomicRecipeRoutePublisher.accepted_run": "49facd253cd27d0ba768102f59a497e7a269f1f474eee060c5666e0d36f8bbde",
       "AtomicRecipeRoutePublisher._next_generation": "b43dd9af51d77dba7686220f65786206b2193cea760d31e0e51b70389a063af4",
-      "AtomicRecipeRoutePublisher._activate": "498a1ea9bddb244447571e545daed313ef82ec536044bbf2d79bfe8604ba4783",
+      "AtomicRecipeRoutePublisher._activate": "f2322748db92eaf718a3c2493bc2f6310069bb8d494e74cd1132b23213d222dc",
       "RecipeRouteService": "202833582388c9b6f7fe45e35566e9f974b1b52b0e5cb044fa64bca2ddd03891",
       "RecipeRouteService.__init__": "369b3e8654ba9f85e967ed045132c00fc2fc0bdeb7f3b97e3c90e235646a1791",
       "RecipeRouteService.publish_run": "faf652032cc54080ea6950e8ee6974b19e94e96ce1cd4fd5b9b8689bae234015",
@@ -4988,7 +5035,7 @@
       "_claim_ordinal": "0f17a3a3361bcb82dbaa42818b38b51bb4f7425e94e88bae29a511ccbac8e569",
       "_aware": "9b2e980f441c7279ca2f128f28ba566eec71f96a641fea813cf292850730fa8c",
       "_endpoint": "36bd917561ff93d97bddd6766a7cdd53a0e73ae6f026025bf8d573b70827b3b6",
-      "<module>": "f75e074aea4dc5f258c73498cc0f6a7a075ef1a5bf16b0edaf3480aaeb7714e0"
+      "<module>": "e29b5cff0742fdd000e3bce7081dd41a325ccb5401196d84684a6e400f7891aa"
     },
     "control/src/vonk_control/recipe_runtime_specs.py": {
       "RecipeRuntimeSpecError": "72a7fa8080a1f8b1a23b8d7e8bade92d2d4b6ef607d174c55e84f6f60550fafe",
@@ -5061,32 +5108,33 @@
     },
     "control/src/vonk_control/route_runtime.py": {
       "RouteRuntimeError": "88943347befbcc323de64878dcd4b2457e43ffbdef84b1bb2fea6afe0b90b2e5",
+      "_unknown": "85103402e55a6b63745022eaea54951d6399248b5cb87ffe8f685ed3ab816a4d",
       "_sha256": "0da03bc981038a7737863967936720daacf1a239fad76678dc3eb5806bf1273c",
       "_aware": "64a458c2b653aa1afb7e0bebc04b1e313ba8a2b1c61fc8caa2dfe738415610f7",
-      "_parse_time": "e0dfd3fe886b4849d698e8f4f71bdbeea1d6e670ba90f6a5db447e3753d817dd",
+      "_parse_time": "63151af23b0908c256ff589dd0cbd299223e86fb106eb8dfb119a65f566af281",
       "VerifiedRouteBundle": "c1a89baa852ec90bf5f483b2f12125541fc4226ddb05fc884bebaae2cbb9728f",
       "recipe_route_run_id": "d56f3b14ea7e28cb45e1adb31c172c9eb7bc88c002cef42703510a56f3505eaa",
-      "FileSupervisorAcknowledger": "3a9b82dcd8627499ac63982b34e20fea50faf5d4942dc10c2d4ba9b727e1c982",
+      "FileSupervisorAcknowledger": "beebd0bd9ba44d691389642dfc001b193a4462beca79e8ed45f71c5ba9d910b8",
       "FileSupervisorAcknowledger.__init__": "116586e5ed87ce56ec7f9dfc82619d090be83b5451cf535b062223b97aab6247",
-      "FileSupervisorAcknowledger.__call__": "efd6cc5bfa03ab27fe16b2e88f425022e3aa01672bc3b2e085f118b03f9fa207",
-      "FileSupervisorAcknowledger._matches": "07cffd6d5388cedfbd63cf056fc850e9ad19295f529f4651c663e65e876cd6ae",
-      "AtomicRouteBundlePublisher": "cd62fa5cb5d34901d9e31740815cca5e1222e960f0e70a08c286476380b4e088",
-      "AtomicRouteBundlePublisher.__init__": "7a3179a5eeb260c4c0876924209e3babf098f2fec8c89a49a25d1c56da2cc6b9",
-      "AtomicRouteBundlePublisher._require_supervisor_ack": "f97edb129c417a78cbbc097c149cdbb227b3804e8ba9d553bd933b07606e675c",
+      "FileSupervisorAcknowledger.__call__": "3001eed2d7a4f1f5ba035ebfc1a6044665fe258bed38630f21cfb057a3bd81c9",
+      "FileSupervisorAcknowledger._matches": "8bac82e5e2f5cc96dd0fbaca9d6d00ff72dd9d15933bf5b057613e0b2762a829",
+      "AtomicRouteBundlePublisher": "66a03bf12d4835c001a6197126ca8b12ec2fe8904b4e16e44dfaa44ee7afe8b0",
+      "AtomicRouteBundlePublisher.__init__": "b1f30abf62a308a03d8d8957144891acb6d49e0b46c6b905760f1e9ce6015e2f",
+      "AtomicRouteBundlePublisher._require_supervisor_ack": "89287afcb62c1d8d9c620e7ecc724cfdf118114662a932fc65f17f731ffecffd",
       "AtomicRouteBundlePublisher._valid_routes": "94e2ba7330921146910f5429cc22669100719604781b170e53e155eb97fcc25f",
       "AtomicRouteBundlePublisher._valid_litellm": "63bc2df4c4c273ba81b84322dd1cce6894c63d852877edefb5e9ad0c8b765dcf",
       "AtomicRouteBundlePublisher._identity": "bdb71cb38fbbc403a4e27250f079a7f417d3119aa7800830c1108137a0f1bf3e",
-      "AtomicRouteBundlePublisher._locked": "d717ad61f83e301706f92750d0bb6d87a3112e69b04688aba392b2fd6d2c55b9",
-      "AtomicRouteBundlePublisher._claim_publication_lock": "e24eb1f46529a729e288da1ba30ec72ae03c449049b76fa1a50274cf4135a0b3",
-      "AtomicRouteBundlePublisher._activate": "f3032298eea42e0c8086620a31f2828177315c5c6a6f00e3ae53e32495b4519c",
+      "AtomicRouteBundlePublisher._locked": "b556995c0ee90452bc054b826c70273fe4eabe0e2ef4ffa2729691338eb81a88",
+      "AtomicRouteBundlePublisher._claim_publication_lock": "d837a8cd10b204e02bf7a5b377cadb7638e425db7333e5a466f75d8b25b031fa",
+      "AtomicRouteBundlePublisher._activate": "d3d5404a5c4d7d5ff6e43df8d870e94c8e88b2f8e126e58742917e2ace25322f",
       "AtomicRouteBundlePublisher._atomic_write": "938e91071c17f1ae00953b41f64c87077dd4629a427803c3b75794236dd5d1ac",
       "AtomicRouteBundlePublisher._stage": "c733e4ed94f557a976fc94beda7f20661c2b4b13eae14fd0d51dbdd011212e64",
-      "AtomicRouteBundlePublisher.inspect": "12732eaf0721f9829eb2dc97db67bac9afc50223e6030a92aaa798216f1ac931",
-      "AtomicRouteBundlePublisher._read_marker": "decadcb98d03c8673820fe9049a8a59c59933e5727c8418afb5152049bb036e5",
+      "AtomicRouteBundlePublisher.inspect": "32f726147cd89786ef03d6a1357594ea79d88b3616075901711b61ceedc4ee50",
+      "AtomicRouteBundlePublisher._read_marker": "e3c2038ff0246a9f94ec03d23f18c46363104624292c44c6da208fde21cc9188",
       "AtomicRouteBundlePublisher._validate_marker": "b77e23d0adbf1ee4167f46391ececfdd86beb1453fc10ad9de88a5ae3c616d6a",
-      "verify_active_route_bundle": "91e33b6d7b61d36769d7fcc90e7a8ea56198098d5f9eada9c393151e0f5f19e2",
-      "_read_active_route_bundle": "d555dec30c0b61403a1061f02630ea42a38fc2a7f2daecb4407a0a666de570ae",
-      "<module>": "84101b86948c6489f0c4e5b17431090436dd26aaf71a809566262f5071c32592"
+      "verify_active_route_bundle": "df40c5fed352dc9b8fe5c8f0eb9a055a8c36127b785434e6b0cda3820df89242",
+      "_read_active_route_bundle": "8e017c8c1a6013d45954d95dcce86af6cda370d1a220fde4727b6569ae647e11",
+      "<module>": "73722f8c480ea86d621e1a8d8ee126f9bea465342f619b81199a803b22069d97"
     },
     "control/src/vonk_control/run_admission.py": {
       "RunPortDemand": "794d4e599d1cd19ea518bdb4d9f7ae9c445031fd1f9a8d0f30e88975aa578f5c",
@@ -5768,12 +5816,12 @@
       "<module>": "da9f651b40821543c97a32b816c13b95e532ef9deaab4fdab1f9188a17733a59"
     },
     "control/src/vonk_control/topology.py": {
-      "TopologyError": "7686ce0b0858a24507e0d7cf769ca3a5e98a5d746d028d4b93d4bb0abc059d64",
-      "TopologyError.__init__": "c71e9b0000c0921c1f9159940785706090523d4fbd82289a7899ccb6ea9dbc26",
+      "TopologyError": "62130096a12099e7c8ec2509fcdfbed6cd9f55d25b1366dde5d446a721239b61",
+      "TopologyError.__init__": "911a08899e511152c5aa4b1dcb8376f11e60d4c701458bc02e6a60ce27dd7fc4",
       "Placement": "455b5a284cd8f0d06b43f6c1baf59644c4e61f4991a9302c83b47ec2c1b105b5",
       "validate_topology": "be0ba79f84786f298d61c7e878648469b23a1bacf8c912d38d795fcbd9af5e8f",
       "_fabric_capability": "ac4b543a38a960dea22a7c4347db68d81690152124c29ee3b3cc37fe6cd54c59",
-      "<module>": "36005af7d759d62897af6508bf066ad1c44a05f0bb529a5ee55c296e6e31b1e3"
+      "<module>": "73865f4a7e7c3e74974c61f2c993668d83860708ed00174b5ae5d7d72a13bfe3"
     },
     "control/src/vonk_control/unused_storage_collection/pressure.py": {
       "_pressures": "f5b57e3b52db9b494e0ab64ca4d2084a8f80f2a52c29e5df7f35abe927a9b12f",
@@ -6550,23 +6598,11 @@
       ]
     },
     {
-      "family": "gateway_keys.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
-      "sites": [
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._create_under", "litellm-refused-to-create-the-key-http", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._raw_keys", "litellm-refused-to-list-keys-http", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._raw_keys", "litellm-returned-a-malformed-key-list", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._request", "litellm-gateway-is-unavailable", 1],
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._request", "litellm-master-key-is-unavailable", 1]
-      ]
-    },
-    {
       "family": "gateway_keys.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class GatewayKeyConflict validates a contract or request.",
       "sites": [
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyConflict", "GatewayKeyService.create", "key", 1]
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyConflict", "GatewayKeyService._gateway_create", "key", 1]
       ]
     },
     {
@@ -6834,15 +6870,15 @@
         ["control/src/vonk_control/operation_api/diagnostics.py", "BoundedJSONError", "_agent_upgrade_diagnostics", "agent-upgrade-job", 2],
         ["control/src/vonk_control/operation_api/responses.py", "BoundedJSONError", "_required_bool", "message", 1],
         ["control/src/vonk_control/operation_api/responses.py", "BoundedJSONError", "_required_text", "message", 1],
-        ["control/src/vonk_control/operation_api/durable.py", "CursorError", "_DurableOperationProjection.job_operations", "operation-cursor-is-invalid", 1],
-        ["control/src/vonk_control/operation_api/durable.py", "CursorError", "_DurableOperationProjection.list_operations", "operation-cursor-is-invalid", 1],
         ["control/src/vonk_control/operation_api/responses.py", "CursorError", "decode_offset", "target-cursor-is-invalid", 2],
         ["control/src/vonk_control/operation_api/providers.py", "CursorError", "merge_operation_providers", "operation-cursor-is-invalid", 1],
         ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "_operation_boundary", "operation-created-at-is-invalid", 2],
         ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "_operation_boundary", "operation-id-is-invalid", 1],
         ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "get_operation_from_providers", "operation-ids-are-not-globally-unique", 1],
         ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "merge_operation_providers", "message", 2],
-        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "merge_operation_providers", "operation-ids-are-not-globally-unique", 1]
+        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "merge_operation_providers", "operation-ids-are-not-globally-unique", 1],
+        ["control/src/vonk_control/operation_api/durable.py", "CursorError", "_DurableOperationProjection.job_operations", "operation-cursor-is-invalid", 1],
+        ["control/src/vonk_control/operation_api/durable.py", "CursorError", "_DurableOperationProjection.list_operations", "operation-cursor-is-invalid", 1]
       ]
     },
     {
@@ -6867,14 +6903,6 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class SourcePolicyError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/prebuilt_images.py", "SourcePolicyError", "_require_source_policy", "message", 1]
-      ]
-    },
-    {
-      "family": "presence.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/presence.py", "PresenceError", "AgentPresenceService.latest_in_session", "management-address-presence-is-unavailable", 1]
       ]
     },
     {
@@ -7051,7 +7079,8 @@
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "RecipeRouteService.candidate_in_session", "recipe-endpoint-owner-is-awaiting-exact-readiness", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "RecipeRouteService.candidate_in_session", "recipe-rank-is-awaiting-current-exact-observation", 1],
         ["control/src/vonk_control/recipe_routes.py", "RecipeRouteSuperseded", "RecipeRouteService._execute", "route-publication-was-superseded", 2],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteSuperseded", "RecipeRouteService._record_completion", "route-publication-was-superseded", 1]
+        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteSuperseded", "RecipeRouteService._record_completion", "route-publication-was-superseded", 1],
+        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "AtomicRecipeRoutePublisher._activate", "message", 2]
       ]
     },
     {
@@ -7147,33 +7176,6 @@
       "sites": [
         ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-stop-generation-is-invalid", 1],
         ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadInvalid", "durable_run_stop_payloads", "recipe-stop-target-set-is-empty-or-duplicated", 1]
-      ]
-    },
-    {
-      "family": "route_runtime.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "litellm-validation-rejected-the-staged-bundle", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "route-bundle-activation-failed-previous-activation-retained", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "route-bundle-apply-failed-previous-activation-retained", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "route-validation-rejected-the-staged-bundle", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._claim_publication_lock", "route-publication-lock-is-held-by-another-publisher", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._locked", "route-publication-lock-is-unavailable", 2],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._require_supervisor_ack", "live-litellm-supervisor-acknowledgement-is-unavailable", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher.inspect", "active-route-marker-does-not-match-expected-publication", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "FileSupervisorAcknowledger.__call__", "live-litellm-supervisor-acknowledgement-timed-out", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_aware", "message", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_parse_time", "activation", 2],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-document-is-invalid", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-file-is-unreadable", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-is-unavailable", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "no-route-bundle-is-active", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-fields-are-invalid", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-not-canonical", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-unreadable", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "verify_active_route_bundle", "route-generation-root-is-unavailable", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "verify_active_route_bundle", "route-runtime-root-is-unavailable", 1]
       ]
     },
     {
@@ -7359,14 +7361,6 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class SourcePolicyError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/source_policy.py", "SourcePolicyError", "enforce_build_source_policy", "message", 1]
-      ]
-    },
-    {
-      "family": "topology.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/topology.py", "TopologyError", "validate_topology", "topology.runtime_capability_missing", 1]
       ]
     },
     {
@@ -8282,7 +8276,12 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._delete_alias", "litellm-refused-to-revoke-the-key-http", 1]
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_create_under", "litellm-refused-to-create-the-key-http", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_delete_alias", "litellm-refused-to-revoke-the-key-http", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_raw_keys", "litellm-refused-to-list-keys-http", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_raw_keys", "litellm-returned-a-malformed-key-list", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_request", "litellm-gateway-is-unavailable", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_request", "litellm-master-key-is-unavailable", 1]
       ]
     },
     {
@@ -9198,6 +9197,58 @@
         ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "runtime_image_reference_findings", "artifact.reference_scan_limited", 1],
         ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "runtime_image_reference_findings.account", "artifact.reference_scan_failed", 1],
         ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "runtime_image_reference_findings.account", "artifact.reference_scan_limited", 1]
+      ]
+    },
+    {
+      "family": "topology.runtime-request-validation",
+      "category": "input-validation",
+      "reason": "validate_topology checks the caller-supplied placements and capability snapshot before any dispatch, allocation or effect. A requested placement without the required runtime is an unsupported request; no stored state or unknown effect is being reconciled.",
+      "sites": [
+        ["control/src/vonk_control/topology.py", "TopologyError", "validate_topology", "topology.runtime_capability_missing", 1]
+      ]
+    },
+    {
+      "family": "route_runtime.pre-effect-validation",
+      "category": "input-validation",
+      "reason": "The submitted route and LiteLLM bytes and caller clock must validate before staging or activation; these checks do not inspect an unknown prior effect.",
+      "sites": [
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "litellm-validation-rejected-the-staged-bundle", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "route-validation-rejected-the-staged-bundle", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_aware", "message", 1]
+      ]
+    },
+    {
+      "family": "route_runtime.ingress-contract",
+      "category": "security-edge",
+      "reason": "Rejects malformed or noncanonical activation contracts before consuming them as verified route authority; parsed acknowledgement timestamps cannot authenticate a live process unless valid. Does not classify absent or unreadable files as integrity failures.",
+      "sites": [
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-document-is-invalid", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-fields-are-invalid", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-not-canonical", 1]
+      ]
+    },
+    {
+      "family": "gateway_keys.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class GatewayKeyError is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_create_under", "gateway-key-creation-effect-is-unconfirmed", 1]
+      ]
+    },
+    {
+      "family": "route_runtime.lock-path-ingress",
+      "category": "security-edge",
+      "reason": "Rejects a symlink lock path before opening the publication claim or staging route bytes; an unsafe path is a real publication security edge, not lock contention.",
+      "sites": [
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._locked", "route-publication-lock-must-not-be-a-symlink", 1]
+      ]
+    },
+    {
+      "family": "route_runtime.marker-json-ingress",
+      "category": "security-edge",
+      "reason": "Malformed JSON cannot be consumed as authenticated activation authority. This syntax/integrity check precedes consumption of bundle authority and does not classify missing files or I/O uncertainty as integrity failures.",
+      "sites": [
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-invalid-json", 1]
       ]
     }
   ]

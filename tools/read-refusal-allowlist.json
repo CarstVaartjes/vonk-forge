@@ -3,90 +3,6 @@
   "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
   "debt": [
     {
-      "path": "control/src/vonk_control/agent_api/artifacts.py",
-      "function": "artifact",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/artifacts.py",
-      "function": "distribution_manifest",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/artifacts.py",
-      "function": "distribution_object",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/enrollment.py",
-      "function": "enrollment_bootstrap",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/artifacts.py",
-      "function": "install_artifacts_routes.distribution_manifest",
-      "kind": "get-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/artifacts.py",
-      "function": "install_artifacts_routes.distribution_object",
-      "kind": "get-refusal",
-      "count": 2
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/enrollment.py",
-      "function": "install_enrollment_routes.enrollment_bootstrap",
-      "kind": "get-refusal",
-      "count": 3
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/observations.py",
-      "function": "install_observations_routes.recipe_run_disposition",
-      "kind": "get-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/observations.py",
-      "function": "recipe_run_disposition",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/observations.py",
-      "function": "source_bundle",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/api/application.py",
-      "function": "create_app.fleet_event_stream",
-      "kind": "get-refusal",
-      "count": 2
-    },
-    {
-      "path": "control/src/vonk_control/api/application.py",
-      "function": "create_app.job_view",
-      "kind": "get-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/api/application.py",
-      "function": "create_app.operation_view",
-      "kind": "get-refusal",
-      "count": 4
-    },
-    {
-      "path": "control/src/vonk_control/api/application.py",
-      "function": "create_app.operations_view",
-      "kind": "get-refusal",
-      "count": 3
-    },
-    {
       "path": "control/src/vonk_control/artifact_job_api.py",
       "function": "agent_input",
       "kind": "get-helper-refusal",
@@ -355,6 +271,90 @@
       "function": "review_remove",
       "kind": "get-helper-refusal",
       "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "artifact",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "distribution_manifest",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "distribution_object",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/enrollment.py",
+      "function": "enrollment_bootstrap",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "install_artifacts_routes.distribution_manifest",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "install_artifacts_routes.distribution_object",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/enrollment.py",
+      "function": "install_enrollment_routes.enrollment_bootstrap",
+      "kind": "get-refusal",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/observations.py",
+      "function": "install_observations_routes.recipe_run_disposition",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/observations.py",
+      "function": "recipe_run_disposition",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/observations.py",
+      "function": "source_bundle",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.fleet_event_stream",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.job_view",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.operation_view",
+      "kind": "get-refusal",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.operations_view",
+      "kind": "get-refusal",
+      "count": 3
     }
   ],
   "exceptions": [
@@ -485,7 +485,8 @@
       "<module>": "e8b9ce2fff85ba7c82d292c51b4964f146bb7e10d0ab329587e3ee171998b681"
     },
     "control/src/vonk_control/gateway_keys.py": {
-      "GatewayKeyError": "5d4a0204a2e12fd94940eaf84799e88ce927f0aba264c0074a24e1977473f982",
+      "GatewayKeyError": "3ac6e34bd1374f0ef5af9db6b0df2c745c2416e044ad8f91303631e49383361f",
+      "_observe_gateway": "dd4dbe3f6f6cf17dfc264c8655634b45fe50dbc7cda71a9528cedd7e836762ec",
       "GatewayKeyConflict": "6f14cf8f23e0608e72951bae9be1f385fba4464374cbc5202c6c3e2beb842a5e",
       "GatewayKeyCreateRequest": "bbf33ca5199793c277958e2e6f1ed8712cda31024d7d77a3c572b89660cfcda0",
       "GatewayKeyView": "18b22d38e0ebbb703ff0437cccdf006826716cd0b5a688c2224bf091547294c9",
@@ -514,32 +515,38 @@
       "_remaining": "eb4d399677046f3c3f01b0a4751cb3576800c90c169ff5ad82e0a0d879928153",
       "_rolling_alias": "6cfbbb4b20d3ed64ce9d0c7c0bdfb80c27cb47fb8933cbbd3e2eabf43e3a5ed1",
       "_view": "b497541e9bae8b616c67f60069bc9d8541634899a60e0fdb447b50285db3af6f",
-      "GatewayKeyService": "dcd1b0a1be004cae41716b980b1aae046919a133a7880f0c4189984e7ce5324b",
+      "GatewayKeyService": "99f80d75d0f5051a66cd79d893d3f242cd9ea53f500110815caf5c9b4f939094",
       "GatewayKeyService.__init__": "2a45607eec979636c36c75a25342c296e9150474df3601ec67d1b8718466dc32",
-      "GatewayKeyService.check_health": "c081031605e3379865afc3b7af0e7edfe6d06779f61b978d556eb570f7910231",
+      "GatewayKeyService.check_health": "e776afd511f6ec4a8a45ae292856a13f7cb53215782724c2e22ec2c07c16beeb",
+      "GatewayKeyService.list_keys": "bb62e6cb39f7bb1346e60394134ede8302583086630028f2c30eed31eb36f534",
+      "GatewayKeyService.create": "5cb2f77388e1d82765381245e4701a023037baeafad38a25f35b9b60680b8e92",
+      "GatewayKeyService.revoke": "b5bcc19f17a76933bcb2bb77ecd90b0a2cf7e7a32cb1720833ac9722b9a92e98",
+      "GatewayKeyService.roll": "0ff8425a75b275aa436b0f3699ca3d636ef39b74bacd6e35099cd8a038292a66",
+      "GatewayKeyService.ensure_default": "ae8abf5a08f7ef811a53a433bd14a5cf9738a1984de5ed0bf223cf63379e626b",
+      "GatewayKeyService._gateway_check_health": "59224477fb04e7ab5d2233762fbc1dd88a2914312df2aa41e43782a003308662",
       "GatewayKeyService.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
-      "GatewayKeyService._request": "89b6f4e4ac83aa8f5951f1cee68644bd4a4b0442dbaa9ff0817369954244bb83",
-      "GatewayKeyService._raw_keys": "28794f37e9f1ca0a2baea1c08b2a44f2a2f3d44f01d4b34ac22c4fbf857496c6",
-      "GatewayKeyService.list_keys": "5a8c28b97d04cddcc792e6ed9c16443321a329bce3198f988628ffaeddd5ba8a",
-      "GatewayKeyService._exists": "d9d46cb1c2880815a01d92dccb74e89d7f3e11be57bfad9c237df18784ae9785",
-      "GatewayKeyService.create": "f0f175e87f46f594c5cc0db4aee1c39b0cf9a85a6b31b9305c28a86e6406b2c1",
-      "GatewayKeyService._create_under": "4f4aa4747463e22c3a8702d6a918f851d757fdc80dc90ce002557cf727298326",
-      "GatewayKeyService._delete_alias": "ab36a2a93869b7263d72ee4a5d1f8642710e64bc6f589816b3e1658a40f41e52",
-      "GatewayKeyService.revoke": "562c4541e8930502bb5336e469c0df84e63ecb64e41e7e4d2ac88f4658f44117",
-      "GatewayKeyService.roll": "5982a9997f9a10e9c50ea1931d57b8fdaf6551700e6c27adbe0b594388d49a04",
-      "GatewayKeyService.ensure_default": "75816f743520ca5ce92c9272caf8ce1659be22e3d1b094ba0629ad140d6fac6f",
-      "keep_default_key": "b7a1f63e54653b6a45646dc5de8d9da51416ec80b8d5dbf355dd4a424f165e96",
+      "GatewayKeyService._gateway_request": "553f2bb33401df305176acb8650144e2b1c9b6579e765b1d5f87e69aabd5ee97",
+      "GatewayKeyService._gateway_raw_keys": "70f5b985ea70a114eaa50e01cf255802569838926c4738a1ef14694e7e46f6df",
+      "GatewayKeyService._gateway_list_keys": "8ceb99b17b2aa3d674479b95e059d6ea9809d9b9d55ef08a84771f0aa02c8b44",
+      "GatewayKeyService._gateway_exists": "1170dc8e7198849333377d2fc9fb5eae7b60a66b69e4cd8e54026236df95a2ea",
+      "GatewayKeyService._gateway_create": "86ba5f8b745f599583600d362c4e86f160f88936b2b995a866c7c8e5ef789556",
+      "GatewayKeyService._gateway_create_under": "7be21949446e6058b19e231041f8f300590a76141bc1514faf1e636f10734c08",
+      "GatewayKeyService._gateway_observe_created": "e8a68375df576265d164dec861017066eadcbac299284c4aa82b70ca4798135e",
+      "GatewayKeyService._gateway_delete_alias": "6da52bd2ce22ea0cada3a52874f6a9d171ca6d44dcb82c9c20f58645cb9509b1",
+      "GatewayKeyService._gateway_revoke": "c1eba269f1aa3829be88fa848dc783c19d0ad77c4233d7c2dfaf1d637f060597",
+      "GatewayKeyService._gateway_roll": "d4b85e3f05312afbd276bafc6e35c5b0fe0f23aaf3f467bd23d959163fa37f38",
+      "GatewayKeyService._gateway_ensure_default": "235e3982b5135d52eb35dd0c0ad9ecf26581290e566a3147bbbe13b2726a0104",
+      "keep_default_key": "83f1661f2df61ff7be135e6ca46ee9507ce6648adecc72175682873593a7afb4",
       "_read_key": "2e898d94ed8980af3930950387d6f16ca00820ee48abe52dec00c827010c55f5",
       "_write_private": "cbab0c3851a129ac57570770a0578355ddec786b26ea99c34c168aaed55680be",
-      "install_gateway_key_routes": "812dfa38cf1221440db426cc3fa648b59524d3b92e6708e78f5dfb23b50dff59",
+      "install_gateway_key_routes": "cf9887f07d5b4d135fb46e9f2bf2cc02a921345c60ef940ce3e3f2d53798874d",
       "install_gateway_key_routes.available": "bf06b6f24aa9ee165f3616ca490346f8f08273dd2b943cc88871745ef1645844",
       "install_gateway_key_routes.authorize": "6ebff86b34855e4007017a85584b418401836eb1db113bdab3fa8bc1637d762c",
-      "install_gateway_key_routes.unavailable": "8fe3546cea98b4cfc71fa5d5d85084b0b08b5878d36509b9c5b3567fcb27c3c8",
-      "install_gateway_key_routes.list_gateway_keys": "171e1534c1005cfc4f6ed49fecac9eab8449900ea52d1d47336d90cad34de441",
-      "install_gateway_key_routes.create_gateway_key": "8cfbacaa542271ccac33308858282793813a5594e415f0bf17e03fe483f535e0",
-      "install_gateway_key_routes.revoke_gateway_key": "6c65afc6d2e3420229ed57c5d5662ec60d29f36b5bf58e68a1f4431177e42302",
-      "install_gateway_key_routes.roll_gateway_key": "00a8a592639396a97c5e63c708b708dbe132a0be2e230622052acdfc365596a5",
-      "<module>": "3239679713cc018191b92d278e6897481f452e95a4a79f346b3051c850e07daf"
+      "install_gateway_key_routes.list_gateway_keys": "e4026c42f024f7a34e430a5a4e9ddf9512c48a6f510fd46f2c7b101e9423ea1d",
+      "install_gateway_key_routes.create_gateway_key": "c329231911525a7314bebefa0eb7ab26d2b00dd169848eda102b47016f2ecb21",
+      "install_gateway_key_routes.revoke_gateway_key": "68d74f8590fcaa1140c6e4d4a16edfdeb6be237cc5148d1b3598c1e11f0183c4",
+      "install_gateway_key_routes.roll_gateway_key": "2e6e54dcee2c087999a8e691a0974f6358f1ab279992a82ad1f303b452fd2554",
+      "<module>": "fdb769f5ffc739be9ff35848eecb115cb1eebde3dcf1769b1b4028ffbe56a34b"
     },
     "control/src/vonk_control/installation_reconciliation_api.py": {
       "install_installation_reconciliation_routes": "32856540fc1a773d0723b86cfc5c75fb1fbfba05f23034ac4d1ff13bcee5f9a7",
