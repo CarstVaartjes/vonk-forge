@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -28,6 +29,7 @@ from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recovery_policy import RecoveryPolicy
 
 from .agent_fences import fenced_attempt, fenced_operation
+from .non_blocking import assert_ended_without_blocking
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
     NOW,
@@ -125,7 +127,7 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
             )
         )
         assert run is not None and reservation is not None
-        assert run.state == "lost"
+        assert run.state == "starting"
         assert reservation.state == "active"
         assert reservation.released_at is None
         old_operation = session.get(
@@ -288,6 +290,28 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
         assert retired is not None
         assert _required(retired.result)["recovery"] == "retry creates a new operation"
         assert "exact cleanup confirmed" in (retired.status_reason or "")
+        installation_id = run.installation_id
+
+    def fresh(_):
+        plan = restarted.preview_run(installation_id, "after-retirement")
+        return restarted.start(
+            plan,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id="after-retirement-start",
+        )
+
+    def assert_reason(receipt):
+        assert _required(receipt.result).get("cancelled") is True
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        started,
+        end=lambda _: retired,
+        fresh=fresh,
+        request_key=lambda receipt: receipt.id,
+        assert_reason=assert_reason,
+    )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -391,7 +415,10 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
     assert projection.retire_job is not None
     projection.retire_job(install.id)
     now[0] += timedelta(seconds=6)
-    assert lifecycle.reconcile_retired_operations()
+    progressed = lifecycle.reconcile_retired_operations()
+    with sessions() as session:
+        reason = _required(session.get(Job, install.id)).status_reason
+    assert progressed, reason
     cleanup = claim_agent(jobs, nodes[0], "serial-0")
     assert cleanup is not None and cleanup.operation == "recipe.uninstall"
     jobs.record_result(

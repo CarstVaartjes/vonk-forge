@@ -554,8 +554,32 @@ def test_nodes_never_polled_are_still_reconciled(agent_service) -> None:
         node.state = "revoked"
         node.revoked_at = clock.now
     clock.advance(seconds=45)
-    assert jobs.reconcile_orders() is True
-    assert _stored(sessions, operation.id).state == aos.BACKOFF
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    def end(_):
+        assert jobs.reconcile_orders()
+        return _stored(sessions, operation.id)
+
+    def fresh(_):
+        with sessions.begin() as session:
+            node = session.get(AgentNode, NODE_A)
+            node.state = "active"
+            node.revoked_at = None
+        successor = jobs.enqueue(
+            parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
+        )
+        assert claim_agent(jobs, NODE_A, "serial-a") is not None
+        return _stored(sessions, successor.id)
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=end,
+        fresh=fresh,
+        request_key=lambda row: row.id,
+    )
 
 
 # ------------------------------------ the stored vocabulary is the core's

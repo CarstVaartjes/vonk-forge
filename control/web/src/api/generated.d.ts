@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 ae0c28f8b048466e928651887f95edd926600344fc565aa100db154de79c8cba. Do not edit.
+// Generated from canonical OpenAPI SHA256 0e44e8cf7084e846fca96b834e45a0ed7d207538eb1b4dd734b2ae24ecf5425d. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5443,6 +5443,11 @@ export interface components {
             workload_intent_ordinal: number;
         };
         /**
+         * JournalRepairPurpose
+         * @enum {string}
+         */
+        JournalRepairPurpose: "measurement" | "cancellation" | "owner_observation";
+        /**
          * LibraryAssessmentCode
          * @description Why a library entry is not assessed runnable on the current fleet.
          * @enum {string}
@@ -6763,6 +6768,28 @@ export interface components {
             /** Notice */
             notice: string;
         };
+        /** NativeProgressWitness */
+        NativeProgressWitness: {
+            /** Attempt Id */
+            attempt_id: string;
+            /** Certificate Serial */
+            certificate_serial: string;
+            /** Fence */
+            fence: string;
+            /** Node Id */
+            node_id: string;
+            /** Operation Id */
+            operation_id: string;
+            /** Payload Digest */
+            payload_digest: string;
+            /** @default null */
+            sample: components["schemas"]["OperationProgress"] | null;
+            /**
+             * Sample Digest
+             * @default null
+             */
+            sample_digest: string | null;
+        };
         /**
          * NetworkInterface
          * @description One NIC as the agent reads it from sysfs.
@@ -6964,6 +6991,20 @@ export interface components {
          * @enum {string}
          */
         ObservedAssignmentState: "not-placed" | "placed" | "installing" | "installed" | "running" | "degraded";
+        /**
+         * OfflineStopIntent
+         * @description Exact Stop orders retained for reconciliation after node contact returns.
+         */
+        OfflineStopIntent: {
+            /**
+             * Code
+             * @default node.offline
+             * @constant
+             */
+            code: "node.offline";
+            /** Node Ids */
+            node_ids: string[];
+        };
         /**
          * OperationBlocker
          * @description One reason an operation is waiting or blocked, with the Sparks it concerns.
@@ -7534,6 +7575,8 @@ export interface components {
              * @constant
              */
             execution_mode: "profile-jobrun-stop";
+            /** @default null */
+            offline_stop_intent: components["schemas"]["OfflineStopIntent"] | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -9701,6 +9744,8 @@ export interface components {
             execution_mode: "one-shot-jobs" | null;
             /** @default null */
             job_run_stop_authorization: components["schemas"]["JobRunStopScope"] | null;
+            /** @default null */
+            offline_stop_intent: components["schemas"]["OfflineStopIntent"] | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -10804,6 +10849,88 @@ export interface components {
              * @default null
              */
             workload_intent_ordinal: number | null;
+        };
+        /**
+         * RunSwitchJournalRepairEndEvidence
+         * @description An ended observation retains the original journal and cancel request.
+         */
+        RunSwitchJournalRepairEndEvidence: {
+            /** @default null */
+            cancellation: components["schemas"]["RunSwitchCancellation"] | null;
+            /**
+             * Code
+             * @constant
+             */
+            code: "run-switch.journal-repair-exhausted";
+            /** Operation Id */
+            operation_id: string;
+            /** Original Digest */
+            original_digest: string;
+            /** Original Document */
+            original_document: string;
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Request Key */
+            request_key: string;
+        };
+        /**
+         * RunSwitchJournalRepairEvidence
+         * @description Historical evidence only: no runnable state, clock, or alternate intent.
+         */
+        RunSwitchJournalRepairEvidence: {
+            /**
+             * Algorithm
+             * @constant
+             */
+            algorithm: "zero-transfer-native-install-v1";
+            /** Corrected Digest */
+            corrected_digest: string;
+            /** Native Samples */
+            native_samples: components["schemas"]["NativeProgressWitness"][];
+            /** Operation Id */
+            operation_id: string;
+            /** Original Digest */
+            original_digest: string;
+            /** Original Document */
+            original_document: string;
+            /** Payload Digest */
+            payload_digest: string;
+            /** Plan Digest */
+            plan_digest: string;
+            purpose: components["schemas"]["JournalRepairPurpose"];
+            /**
+             * Recorded At
+             * Format: date-time
+             */
+            recorded_at: string;
+            /** Request Key */
+            request_key: string;
+        };
+        /**
+         * RunSwitchJournalRepairPendingState
+         * @description Durable observation and cancellation while Job.result remains untouched.
+         */
+        RunSwitchJournalRepairPendingState: {
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number | ExactNumber;
+            /** @default null */
+            cancellation: components["schemas"]["RunSwitchCancellation"] | null;
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /**
+             * Next Attempt At
+             * Format: date-time
+             */
+            next_attempt_at: string;
         };
         /** RunSwitchMemberProgress */
         RunSwitchMemberProgress: {
@@ -11966,7 +12093,7 @@ export interface components {
          *     this enum, so the Controller and the contract cannot disagree.
          * @enum {string}
          */
-        SecurityRefusalReason: "401" | "403" | "agent.certificate.rotation.conflict" | "agent.enrollment.submit.rejected" | "agent.identity_mismatch" | "agent.tombstone_fenced" | "catalog.authentication_required" | "controller.authentication_required" | "controller.fleet.enrollment_denied" | "controller.request_rejected" | "digest_verification_failed" | "distribution.revoked" | "forbidden" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "helper.authorization_invalid" | "helper_grant_invalid" | "helper_grant_node_mismatch" | "helper_grant_unauthorized" | "helper_operation_invalid_artifact" | "helper_peer_identity_invalid" | "helper_request_installation_identity_invalid" | "helper_request_plan_binding_invalid" | "helper_request_replayed" | "helper_runtime_image_identity_invalid" | "host_helper.authority_denied" | "local.identity_expired" | "local.identity_failed" | "model_cache.credentials_denied" | "model_cache.credentials_invalid" | "model_cache.source_access_denied" | "operation_invalid_artifact" | "peer_identity_invalid" | "permission_denied" | "recipe_update.authority_denied" | "request_replayed" | "run-switch.artifact-digest-verification-failed" | "run-switch.cleanup-nas-eviction-forbidden" | "run-switch.cleanup-reclaimed-digest-not-planned" | "run-switch.runtime-image-preparation-digest-mismatch" | "runtime_image.authorization_invalid" | "runtime_image.authorization_revoked" | "runtime_image_identity_invalid" | "stale_fence" | "tuf.metadata_invalid" | "tuf.signature_invalid" | "unauthorized" | "unsafe_path";
+        SecurityRefusalReason: "401" | "403" | "agent.certificate.rotation.conflict" | "agent.enrollment.submit.rejected" | "agent.expired_renewal_refused" | "agent.expired_renewal_grace_exhausted" | "agent.identity_mismatch" | "agent.tombstone_fenced" | "catalog.authentication_required" | "controller.authentication_required" | "controller.fleet.enrollment_denied" | "controller.request_rejected" | "digest_verification_failed" | "distribution.revoked" | "forbidden" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "helper.authorization_invalid" | "helper_grant_invalid" | "helper_grant_node_mismatch" | "helper_grant_unauthorized" | "helper_operation_invalid_artifact" | "helper_peer_identity_invalid" | "helper_request_installation_identity_invalid" | "helper_request_plan_binding_invalid" | "helper_request_replayed" | "helper_runtime_image_identity_invalid" | "host_helper.authority_denied" | "local.identity_expired" | "local.identity_failed" | "model_cache.credentials_denied" | "model_cache.credentials_invalid" | "model_cache.source_access_denied" | "operation_invalid_artifact" | "peer_identity_invalid" | "permission_denied" | "recipe_update.authority_denied" | "request_replayed" | "run-switch.artifact-digest-verification-failed" | "run-switch.cleanup-nas-eviction-forbidden" | "run-switch.cleanup-reclaimed-digest-not-planned" | "run-switch.runtime-image-preparation-digest-mismatch" | "runtime_image.authorization_invalid" | "runtime_image.authorization_revoked" | "runtime_image_identity_invalid" | "stale_fence" | "tuf.metadata_invalid" | "tuf.signature_invalid" | "unauthorized" | "unsafe_path";
         /**
          * ServiceRunStopReview
          * @description The exact service Stop accepted before its route withdrawal claim.

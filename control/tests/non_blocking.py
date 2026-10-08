@@ -13,6 +13,7 @@ from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_control import agent_operation_states
 from vonk_control.models import (
     AgentOperation,
     AgentOperationAttempt,
@@ -109,6 +110,11 @@ def _assert_session(session: Session) -> None:
             )
         )
     ):
+        # Lease-lapsed observations are historical effect evidence, not live
+        # claims. The canonical attempt predicate distinguishes them from an
+        # executor that reported uncertainty while retaining authority.
+        if agent_operation_states.attempt_lapsed(attempt):
+            continue
         agent_operation = session.get(AgentOperation, attempt.operation_id)
         _assert_holds(
             [

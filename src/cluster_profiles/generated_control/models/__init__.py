@@ -343,6 +343,7 @@ from .job_resume_request_disposition import JobResumeRequestDisposition
 from .job_resume_response import JobResumeResponse
 from .job_run_phase_operation import JobRunPhaseOperation
 from .job_run_stop_scope import JobRunStopScope
+from .journal_repair_purpose import JournalRepairPurpose
 from .library_assessment_code import LibraryAssessmentCode
 from .library_facet_values import LibraryFacetValues
 from .library_filter_values import LibraryFilterValues
@@ -433,6 +434,7 @@ from .model_revision_projection import ModelRevisionProjection
 from .model_revision_projection_modalities_item import ModelRevisionProjectionModalitiesItem
 from .model_source import ModelSource
 from .model_territorial_restrictions import ModelTerritorialRestrictions
+from .native_progress_witness import NativeProgressWitness
 from .network_interface import NetworkInterface
 from .network_interface_kind import NetworkInterfaceKind
 from .node_connection import NodeConnection
@@ -450,6 +452,7 @@ from .observation_transfer_error import ObservationTransferError
 from .observation_transfer_start import ObservationTransferStart
 from .observation_transfer_start_resource import ObservationTransferStartResource
 from .observed_assignment_state import ObservedAssignmentState
+from .offline_stop_intent import OfflineStopIntent
 from .operation_blocker import OperationBlocker
 from .operation_blocker_severity import OperationBlockerSeverity
 from .operation_checkpoint import OperationCheckpoint
@@ -730,6 +733,9 @@ from .run_switch_installation_verify_result_subphase_type_0 import RunSwitchInst
 from .run_switch_job_payload import RunSwitchJobPayload
 from .run_switch_job_payload_action import RunSwitchJobPayloadAction
 from .run_switch_job_payload_operation_kind import RunSwitchJobPayloadOperationKind
+from .run_switch_journal_repair_end_evidence import RunSwitchJournalRepairEndEvidence
+from .run_switch_journal_repair_evidence import RunSwitchJournalRepairEvidence
+from .run_switch_journal_repair_pending_state import RunSwitchJournalRepairPendingState
 from .run_switch_member_progress import RunSwitchMemberProgress
 from .run_switch_member_progress_phase_type_0 import RunSwitchMemberProgressPhaseType0
 from .run_switch_member_progress_state import RunSwitchMemberProgressState
@@ -1211,6 +1217,7 @@ __all__ = (
     "JobResumeResponse",
     "JobRunPhaseOperation",
     "JobRunStopScope",
+    "JournalRepairPurpose",
     "LibraryAssessmentCode",
     "LibraryFacetValues",
     "LibraryFilterValues",
@@ -1301,6 +1308,7 @@ __all__ = (
     "ModelRevisionProjectionModalitiesItem",
     "ModelSource",
     "ModelTerritorialRestrictions",
+    "NativeProgressWitness",
     "NetworkInterface",
     "NetworkInterfaceKind",
     "NodeConnection",
@@ -1318,6 +1326,7 @@ __all__ = (
     "ObservationTransferStart",
     "ObservationTransferStartResource",
     "ObservedAssignmentState",
+    "OfflineStopIntent",
     "OperationBlocker",
     "OperationBlockerSeverity",
     "OperationCheckpoint",
@@ -1598,6 +1607,9 @@ __all__ = (
     "RunSwitchJobPayload",
     "RunSwitchJobPayloadAction",
     "RunSwitchJobPayloadOperationKind",
+    "RunSwitchJournalRepairEndEvidence",
+    "RunSwitchJournalRepairEvidence",
+    "RunSwitchJournalRepairPendingState",
     "RunSwitchMemberProgress",
     "RunSwitchMemberProgressPhaseType0",
     "RunSwitchMemberProgressState",

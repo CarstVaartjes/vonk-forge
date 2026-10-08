@@ -28,8 +28,10 @@ _ROW_LOCK_ORDER = (
     "node_artifacts",
     "node_inventory_snapshots",
     "resource_reservations",
+    "fleet_profile_applications",
     "jobs",
     "agent_operations",
+    "agent_operation_attempts",
 )
 _ROW_LOCK_RANK = {table: rank for rank, table in enumerate(_ROW_LOCK_ORDER)}
 

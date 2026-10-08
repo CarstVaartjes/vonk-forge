@@ -814,6 +814,35 @@ def test_the_allowlist_credits_exactly_what_the_proof_proves(
     assert promote_proven(document) == 0
 
 
+def test_profile_cancellation_cannot_borrow_the_journal_repair_retry(
+    retry_proof_graph: object,
+) -> None:
+    """A child cancellation needs its own registered bounded observation path."""
+
+    document = copy.deepcopy(load_allowlist())
+    path = "control/src/vonk_control/run_switch_operations.py"
+    function = "RunSwitchOperationService.cancel"
+    # The all-path classifier does not credit cancellation merely because its
+    # profile observer and journal observer are registered: other entry paths
+    # still have no proven bounded retry.
+    assert not proven(document, path, "RunSwitchRetryLater", function)
+    verdict = classify(
+        RaiseSite(path, "RunSwitchRetryLater", function, "x.y", 1, "message"),
+        document,
+    )
+    assert verdict.category == DEBT
+    loops = document["retry_loops"]
+    assert isinstance(loops, list)
+    document["retry_loops"] = [
+        entry
+        for entry in loops
+        if entry["function"] != "RunSwitchFleetProfileAdapter.request_cancellation"
+    ]
+    # Keeping the journal repair loop and every other observer is insufficient:
+    # the profile cancellation call path must handle and register its own retry.
+    assert not proven(document, path, "RunSwitchRetryLater", function)
+
+
 def test_admission_proof_requires_the_result_retry_on_every_path() -> None:
     """Reject credit when worker admission retries but result admission does not."""
 

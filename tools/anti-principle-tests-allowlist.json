@@ -160,30 +160,6 @@
     },
     {
       "path": "control/tests/test_agent_jobs.py",
-      "function": "test_parent_job_becomes_succeeded_only_after_every_operation_succeeds",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs.py",
-      "function": "test_parent_job_fails_when_all_operations_are_terminal_and_one_failed",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs.py",
-      "function": "test_parent_job_waits_when_all_operations_terminal_without_failures",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs.py",
-      "function": "test_parent_job_waits_when_all_operations_terminal_without_failures",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs.py",
       "function": "test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim",
       "kind": "transient-failed-assertion",
       "count": 3
@@ -1126,18 +1102,6 @@
     },
     {
       "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_fails_the_order_but_retains_uncertain_capacity",
-      "kind": "observation-withdrawal-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_fails_the_order_but_retains_uncertain_capacity",
-      "kind": "transient-failed-assertion",
-      "count": 2
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
       "function": "test_durable_retire_refuses_a_parked_operation_whose_lease_is_live",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1171,18 +1135,6 @@
       "function": "test_durable_retire_retains_uncertain_run_capacity",
       "kind": "ending-without-fresh-request",
       "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_retains_uncertain_run_capacity",
-      "kind": "observation-withdrawal-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_retains_uncertain_run_capacity",
-      "kind": "transient-failed-assertion",
-      "count": 2
     },
     {
       "path": "control/tests/test_operation_api.py",
@@ -2212,12 +2164,6 @@
     },
     {
       "path": "control/tests/test_shared_build_cancellation.py",
-      "function": "test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_shared_build_cancellation.py",
       "function": "test_shared_build_survives_one_detachment_then_stops_after_last_consumer",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -2605,18 +2551,10 @@
     {
       "path": "control/tests/test_route_withdrawal_before_dispatch.py",
       "function": "test_accepted_stop_continues_without_client_and_never_republishes",
-      "kind": "ending-without-fresh-request",
-      "count": 1,
-      "reason": "dependency-unavailable",
-      "justification": "A lost withdrawal acknowledgement leaves the exact accepted Stop pending. With the client gone, the worker resumes the same root and issues its native phases; the run remains stopping, awaiting the actual agent receipt. This publication/dispatch boundary neither finishes physical Stop nor claims free capacity."
-    },
-    {
-      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
-      "function": "test_accepted_stop_continues_without_client_and_never_republishes",
       "kind": "observation-withdrawal-assertion",
-      "count": 5,
+      "count": 4,
       "reason": "security-edge",
-      "justification": "Withdrawal is bound to the explicit accepted exact Stop and retained root before the simulated publication process dies. The five assertions preserve that authorized withdrawal through grace expiry and same-owner worker dispatch; they do not withdraw a healthy route merely because an observation is missing or grant a new destructive scope."
+      "justification": "Withdrawal is bound to the explicit accepted exact Stop and retained root before the simulated publication process dies. The four assertions preserve that authorized withdrawal through grace expiry and same-owner worker dispatch; they do not withdraw a healthy route merely because an observation is missing or grant a new destructive scope."
     }
   ]
 }

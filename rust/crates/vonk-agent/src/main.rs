@@ -68,7 +68,32 @@ enum Command {
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::process::ExitCode {
+    match agent_main().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("vonk-agent: {error}");
+            std::process::ExitCode::from(agent_error_exit_status(error.as_ref()))
+        }
+    }
+}
+
+fn agent_error_exit_status(error: &(dyn std::error::Error + 'static)) -> u8 {
+    if error
+        .downcast_ref::<RotationError>()
+        .is_some_and(RotationError::fatal)
+        || error
+            .downcast_ref::<LoopError>()
+            .is_some_and(loop_error_is_fatal)
+    {
+        // Security refusal requires new authority; systemd must not loop on it.
+        78
+    } else {
+        1
+    }
+}
+
+async fn agent_main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
         Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
@@ -253,7 +278,7 @@ async fn run_control_lane(
                 POLL_MIN_SECONDS,
                 POLL_MAX_SECONDS,
             )
-            .await;
+            .await?;
             let controller_url = config.controller_url.clone();
             // Resolving the NAS host may block on DNS; keep it off the reactor.
             let evidence = tokio::task::spawn_blocking(move || {
@@ -406,21 +431,35 @@ fn inventory_retry_delay(failures: u32, minimum: u64, maximum: u64) -> Duration 
     jittered_backoff(failures, minimum, maximum)
 }
 
+// A private /dev cannot acquire nodes created after namespace construction.
+// Bound every failed inventory attempt, including malformed/failed GPU probes.
+fn prerequisite_restart_due(elapsed: Duration) -> bool {
+    elapsed >= Duration::from_secs(300)
+}
+
 async fn collect_inventory_until_ready<Collect>(
     mut collect: Collect,
     failures: &mut u32,
     minimum: u64,
     maximum: u64,
-) -> Inventory
+) -> Result<Inventory, InventoryError>
 where
     Collect: FnMut() -> Result<Inventory, InventoryError>,
 {
+    let started = tokio::time::Instant::now();
     loop {
         match collect() {
-            Ok(inventory) => return inventory,
+            Ok(inventory) => return Ok(inventory),
             Err(error) => {
+                if prerequisite_restart_due(started.elapsed()) {
+                    eprintln!(
+                        "vonk-agent: host.prerequisite_restart: inventory deadline reached; restarting private device namespace ({error})"
+                    );
+                    return Err(error);
+                }
                 *failures = (*failures).saturating_add(1);
-                let delay = inventory_retry_delay(*failures, minimum, maximum);
+                let delay = inventory_retry_delay(*failures, minimum, maximum)
+                    .min(Duration::from_secs(300).saturating_sub(started.elapsed()));
                 eprintln!(
                     "vonk-agent: degraded: host inventory unavailable ({error}); retrying in {} seconds",
                     delay.as_secs()
@@ -658,6 +697,80 @@ mod tests {
     }
 
     #[test]
+    fn security_refusals_stop_systemd_retries_while_inventory_failure_restarts() {
+        assert_eq!(
+            super::agent_error_exit_status(&RotationError::ExpiredRecoveryGraceExhausted),
+            78
+        );
+        assert_eq!(
+            super::agent_error_exit_status(&RotationError::Client(
+                vonk_agent::client::ClientError::Controller(Box::new(
+                    vonk_agent::client::ControllerError::from_status(403)
+                ))
+            )),
+            78
+        );
+        assert_eq!(
+            super::agent_error_exit_status(&InventoryError::PrerequisiteUnavailable(
+                "NVIDIA GPU discovery"
+            )),
+            1
+        );
+    }
+
+    #[test]
+    fn prerequisite_restart_deadline_has_an_exact_boundary() {
+        assert!(!super::prerequisite_restart_due(Duration::from_secs(299)));
+        assert!(super::prerequisite_restart_due(Duration::from_secs(300)));
+    }
+
+    fn test_inventory() -> Inventory {
+        Inventory {
+            memory_total_bytes: 100,
+            memory_available_bytes: 90,
+            disk_total_bytes: 1000,
+            disk_available_bytes: 900,
+            state_database_reserve_held: true,
+            gpu_count: 1,
+            gpu_memory_total_bytes: 100,
+            gpu_memory_free_bytes: 90,
+            memory_pool: vonk_agent_protocol::MemoryPool::Separate,
+            nvidia_driver_version: "test".to_owned(),
+            container_runtime_version: "test".to_owned(),
+            artifact_store_read_only: false,
+            capabilities: vec![],
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+            network_interfaces: None,
+            nas_route_interface: None,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unavailable_gpu_exits_then_a_fresh_namespace_can_collect() {
+        let mut failures = 0;
+        let result = collect_inventory_until_ready(
+            || {
+                Err(InventoryError::PrerequisiteUnavailable(
+                    "NVIDIA GPU discovery",
+                ))
+            },
+            &mut failures,
+            1,
+            1,
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(InventoryError::PrerequisiteUnavailable(_))
+        ));
+        let recovered = collect_inventory_until_ready(|| Ok(test_inventory()), &mut failures, 1, 1)
+            .await
+            .unwrap();
+        assert_eq!(recovered.gpu_count, 1);
+    }
+
+    #[test]
     fn startup_inventory_retry_backoff_is_bounded_by_agent_poll_limits() {
         for failure in [1, 2, 3, 20, u32::MAX] {
             let delay = inventory_retry_delay(failure, 2, 30);
@@ -677,32 +790,15 @@ mod tests {
                 if attempt <= 7 {
                     Err(InventoryError::PrerequisiteUnavailable("Podman"))
                 } else {
-                    Ok(Inventory {
-                        memory_total_bytes: 100,
-                        memory_available_bytes: 90,
-                        disk_total_bytes: 1000,
-                        disk_available_bytes: 900,
-                        state_database_reserve_held: true,
-                        gpu_count: 1,
-                        gpu_memory_total_bytes: 100,
-                        gpu_memory_free_bytes: 90,
-                        memory_pool: vonk_agent_protocol::MemoryPool::Separate,
-                        nvidia_driver_version: "test".to_owned(),
-                        container_runtime_version: "test".to_owned(),
-                        artifact_store_read_only: false,
-                        capabilities: vec![],
-                        fabric_address: None,
-                        fabric_bandwidth_mbps: None,
-                        network_interfaces: None,
-                        nas_route_interface: None,
-                    })
+                    Ok(test_inventory())
                 }
             },
             &mut failures,
             1,
             1,
         )
-        .await;
+        .await
+        .unwrap();
 
         assert_eq!(attempts.get(), 8);
         assert_eq!(failures, 7);

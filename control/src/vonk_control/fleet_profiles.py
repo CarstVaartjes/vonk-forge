@@ -163,8 +163,12 @@ from .lifecycle.fleet_profile import (
     cancellation_state,
     doc_state,
 )
-from .lifecycle.types import Effect as _LifecycleEffect
-from .lifecycle.types import State as _LifecycleState
+from .lifecycle.types import (
+    Effect as _LifecycleEffect,
+)
+from .lifecycle.types import (
+    State as _LifecycleState,
+)
 from .logging import redact_text
 from .model_cache_contract import CachedResourceEstimate, CacheResolution
 from .models import (
@@ -212,6 +216,10 @@ from .profile_capacity import (
     reserve_profile_ports,
     restore_released_profile_claims,
 )
+from .profile_error_summary import (
+    _error_summary as _error_summary,  # noqa: PLC0414 -- shared helper export
+)
+from .profile_error_summary import _normalized_failure_text
 from .recipe_build_cancellation import (
     BuildConsumerError,
     lock_profile_build_dependencies,
@@ -327,10 +335,6 @@ _PROFILE_RECOVERY_REFUSED_CODES = frozenset(
 #: retrying cannot change a deterministic outcome (a start that crashes the same
 #: way every time), so the Controller stops after ``RECOVERY.max_failures``.
 PROFILE_REPEATED_FAILURE_CODE = ProfileReasonCode.FAILURE_REPEATED
-_VARIABLE_TEXT = re.compile(
-    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    r"|\b[0-9a-f]{12,}\b|\d+"
-)
 # A profile request may race a short heartbeat, telemetry write, or worker
 # transaction while taking the reviewed admission snapshot.  Retry the whole
 # SQL transaction after releasing it; the request key keeps a later successful
@@ -844,12 +848,6 @@ def _newer_profile_intent_overlaps(
     return False
 
 
-def _normalized_failure_text(value: object) -> str:
-    """A failure reason with its changing parts (ids, counts, times) removed."""
-
-    return " ".join(_VARIABLE_TEXT.sub("#", str(value or "")).split())[:240]
-
-
 def _stored_retry_lineage(value: object) -> str | None:
     """Read only the explicit retry lineage one stored receipt declared.
 
@@ -1303,15 +1301,6 @@ def _deferral_code(error: BaseException) -> str:
     return ProfileReasonCode.ADMISSION_BUSY
 
 
-def _error_summary(error: BaseException) -> str:
-    """A short, safe description of an error: its type and the start of its text."""
-
-    code = getattr(error, "code", None)
-    name = code if isinstance(code, str) and code else type(error).__name__
-    text = redact_text(" ".join(str(error).split()))[:160]
-    return f"{name}: {text}" if text else name
-
-
 def _require_recovery_preparations(
     accepted: FleetProfilePreview, current: FleetProfilePreview
 ) -> None:
@@ -1452,6 +1441,12 @@ class RunSwitchFleetProfileAdapter:
                     request_key=request_key,
                     reason="Profile application cancellation",
                 )
+            except UnknownOutcomeError:
+                # Cancellation intent is already durable. The worker retries
+                # these exact children on the next due observation, outside this
+                # reading session; the lifecycle cancellation budget ends an
+                # unconfirmed stop without parking the application.
+                continue
             except (KeyError, RunSwitchOperationConflict):
                 continue
 

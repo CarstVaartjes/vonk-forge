@@ -383,6 +383,20 @@ fn cleanup_abandoned_generations(
     Ok(())
 }
 
+pub fn active_certificate_serial(root: &Path) -> Result<String, IdentityError> {
+    let paths = active_identity_paths(root)?;
+    let directory = paths.certificate.parent().ok_or(IdentityError::Node)?;
+    let metadata: IdentityMetadata =
+        serde_json::from_slice(&read_private(&directory.join("identity.json"))?)?;
+    Ok(metadata.serial)
+}
+
+pub fn expired_recovery_allowed(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
+    let paths = active_identity_paths(root)?;
+    let (_, expiry) = certificate_validity(&paths.certificate)?;
+    Ok(now <= expiry + chrono::Duration::days(30))
+}
+
 pub fn renewal_due(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityError> {
     Ok(now >= renewal_time(root)?)
 }
@@ -595,6 +609,30 @@ mod tests {
             fingerprint: format!("fingerprint-{generation}"),
             generation,
         }
+    }
+
+    #[test]
+    fn expired_certificate_can_recover_only_through_the_thirty_day_grace() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        persist_identity(&root, &certificate_material(1, true)).unwrap();
+        let expiry = Utc.with_ymd_and_hms(2026, 8, 2, 0, 0, 0).unwrap();
+        assert!(identity_expired(&active_identity_paths(&root).unwrap(), expiry).unwrap());
+        assert!(
+            super::expired_recovery_allowed(&root, expiry + chrono::Duration::days(1)).unwrap()
+        );
+        assert!(
+            super::expired_recovery_allowed(&root, expiry + chrono::Duration::days(30)).unwrap()
+        );
+        assert!(
+            !super::expired_recovery_allowed(
+                &root,
+                expiry + chrono::Duration::days(30) + chrono::Duration::seconds(1)
+            )
+            .unwrap()
+        );
+        // Recovery admission does not remove or change the enrolled key.
+        assert_eq!(super::active_certificate_serial(&root).unwrap(), "serial-1");
     }
 
     #[test]

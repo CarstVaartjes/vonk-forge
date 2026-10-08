@@ -415,7 +415,7 @@ def test_typed_success_receipt_retries_bounded_admission_refusal(
 
     monkeypatch.setattr(AgentJobService, "_finish", finish)
     monkeypatch.setattr(
-        "vonk_control.agent_jobs.admission_attempts", lambda: iter(range(3))
+        "vonk_control.agent_jobs.results.admission_attempts", lambda: iter(range(3))
     )
     service = object.__new__(AgentJobService)
     if refusals == 3:

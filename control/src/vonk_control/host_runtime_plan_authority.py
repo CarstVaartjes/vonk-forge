@@ -40,6 +40,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .offline_stops import is_deferred_stop
 from .profile_stop_authority import (
     ProfileJobRunStopJob,
     ProfileStopAuthorityError,
@@ -200,6 +201,7 @@ def derive_runtime_plan_binding(
                 operation=operation,
                 stop_parent=parent,
                 now=now,
+                require_current=not is_deferred_stop(parent, operation),
             )
         except (TypeError, ValueError) as error:
             raise RuntimePlanAuthorityRefused(
@@ -228,6 +230,7 @@ def derive_runtime_plan_binding(
                 targets[0],
                 stop,
                 operation=operation,
+                require_current=not is_deferred_stop(parent, operation),
                 stop_parent=parent,
             )
         except (TypeError, ValueError) as error:

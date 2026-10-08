@@ -34,18 +34,12 @@ from .mapping_parameters import MappingParameters
 from .model_cache_contract import ModelCacheDownloadResult
 from .operation_blockers import OperationBlocker
 from .preparation_contract import RolloutPreparation
+from .run_switch_identity_contract import NodeId, RunSwitchCancellation, UuidId
 from .runtime_image_preparation import RuntimeImageReceipt
 from .strict_json import StrictModel
 
-_UUID_PATTERN = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
-_NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 
-UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
-NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 Digest = Annotated[str, StringConstraints(pattern=_DIGEST_PATTERN)]
 PortNumber = Annotated[int, Field(ge=1, le=65535)]
 Alias = Annotated[
@@ -1152,13 +1146,6 @@ RunSwitchPhaseResult = (
     | RunSwitchCleanupVerifyResult
     | RunSwitchInstallationVerifyResult
 )
-
-
-class RunSwitchCancellation(StrictModel):
-    request_key: UuidId
-    actor: Annotated[str, StringConstraints(min_length=1, max_length=256)]
-    reason: Annotated[str, StringConstraints(min_length=1, max_length=512)]
-    requested_at: datetime
 
 
 class RunSwitchRuntimeImageReferenceIntent(StrictModel):

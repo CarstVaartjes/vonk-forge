@@ -38,6 +38,11 @@ CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
 CORE_PREFIX = "control/src/vonk_control/lifecycle/"
 MODELS_MODULE = "control/src/vonk_control/models.py"
 
+AGENT_JOB_MODULES = tuple(
+    path.relative_to(REPO_ROOT).as_posix()
+    for path in (REPO_ROOT / "control/src/vonk_control/agent_jobs").glob("*.py")
+)
+
 LIFECYCLE_MODELS = frozenset(subject.value for subject in LifecycleSubject)
 ATTRIBUTE = StateWriteKind.ATTRIBUTE.value
 DICT_ITEM = StateWriteKind.DICT_ITEM.value
@@ -49,7 +54,7 @@ KINDS = frozenset(kind.value for kind in StateWriteKind)
 #: document; a ``["state"] =`` store elsewhere is not a lifecycle write.
 DICT_STATE_OWNERS = frozenset(
     {
-        "control/src/vonk_control/agent_jobs.py",
+        *AGENT_JOB_MODULES,
         "control/src/vonk_control/artifact_jobs.py",
         "control/src/vonk_control/fleet_profiles.py",
         "control/src/vonk_control/jobs.py",
@@ -94,11 +99,14 @@ DICT_STATE_OWNERS = frozenset(
 #: Variables the resolver cannot type (they come out of a mapping lookup or a
 #: loop over one) but whose model is fixed by the module's own conventions.
 NAME_HINTS: dict[str, dict[str, str]] = {
-    "control/src/vonk_control/agent_jobs.py": {
-        "operation": "AgentOperation",
-        "child": "AgentOperation",
-        "parent": "Job",
-        "attempt": "AgentOperationAttempt",
+    **{
+        path: {
+            "operation": "AgentOperation",
+            "child": "AgentOperation",
+            "parent": "Job",
+            "attempt": "AgentOperationAttempt",
+        }
+        for path in AGENT_JOB_MODULES
     },
     "control/src/vonk_control/recipe_operations.py": {"job": "Job"},
 }
@@ -107,9 +115,10 @@ NAME_HINTS: dict[str, dict[str, str]] = {
 #: Any other unresolved ``variable.state = ...`` in these modules fails
 #: ``test_no_unresolved_state_write_hides_in_a_lifecycle_module``.
 NON_LIFECYCLE_STATE_VARIABLES: dict[str, frozenset[str]] = {
-    "control/src/vonk_control/agent_jobs.py": frozenset(
-        {"installation", "reservation", "run"}
-    ),
+    **{
+        path: frozenset({"installation", "reservation", "run"})
+        for path in AGENT_JOB_MODULES
+    },
     "control/src/vonk_control/model_cache/artifacts.py": frozenset(
         {"row"}
     ),  # ModelCacheSet

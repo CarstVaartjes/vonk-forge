@@ -566,3 +566,17 @@ def test_an_unknown_constructor_cannot_hide_a_real_operator_wait() -> None:
     assert [(site.kind, site.function) for site in sites] == [
         (RUST_RESULT, "unconfirmed")
     ]
+
+
+def test_reviewed_debt_cannot_return_to_an_unaudited_bucket() -> None:
+    """Moving a reviewed module out of scope must not hide its remaining debt."""
+    document = load_allowlist()
+    assert document["debt_ceiling"]["unaudited"] == 0  # type: ignore[index]
+    audited = audited_paths(document)
+    assert not {
+        site[0]
+        for family in document["fail_closed"]  # type: ignore[attr-defined]
+        if family["category"] == "bookkeeping-debt"
+        for site in family["sites"]
+        if site[0] not in audited
+    }

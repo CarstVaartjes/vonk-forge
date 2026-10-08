@@ -265,8 +265,8 @@ def lock_build_dependency(
 def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, ...]:
     """Derive dependencies from their accepted owners, under the build lock.
 
-    Consumer publication uses lock_build_dependency. Removing demand is safe
-    without that lock: at worst this snapshot conservatively refuses once.
+    Consumer publication and Run/Switch detachment use lock_build_dependency.
+    A recorded cancel retains demand until the fenced parent ending commits.
     A malformed matching owner cannot authorize cancellation of its child.
     """
     candidates = session.scalars(
@@ -442,8 +442,8 @@ def _run_switch_consumer(
     progress = read_stored_model(
         RunSwitchOperationResult, canonical_message(parent.result), from_json=True
     )
-    if progress.cancellation is not None:
-        return False
+    # The cancel intent is committed before detachment can acquire the build
+    # boundary. Live parents retain demand until that fenced ending commits.
     ordinal = parent.payload["workload_intent_ordinal"]
     targets = tuple(node.node_id for node in plan.spark_group.nodes)
     if (

@@ -15,8 +15,10 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState, ProjectionCode, RouteState, RunState
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.models import AgentOperation, AgentPresence, Job, RecipeRun, RunNode
+from vonk_control.offline_stops import deferred_stop_nodes
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
@@ -32,6 +34,7 @@ from vonk_control.route_runtime import (
     verify_active_route_bundle,
 )
 
+from .non_blocking import assert_ended_without_blocking
 from .test_recipe_operations import (
     NOW,
     _required,
@@ -402,8 +405,37 @@ def test_accepted_stop_continues_without_client_and_never_republishes(
     assert _aliases(root) == set()
     with sessions() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
-        assert (stored.state, stored.route_state) == ("stopping", "withdrawn")
-        assert stored.route_error is None
+        assert (stored.state, stored.route_state) == (
+            RunState.STOPPING,
+            RouteState.WITHDRAWN,
+        )
+        assert stored.stopped_at is None
+        assert (
+            stored.route_error
+            == f"{ProjectionCode.NODE_OFFLINE}: exact Stop pending reconnect"
+        )
     continued = _stop_jobs(sessions)
     assert len(continued) == 1 and continued[0].id == accepted[0].id
     assert continued[0].payload.get("phases")
+    assert continued[0].state == LifecycleState.SUCCEEDED
+    assert deferred_stop_nodes(continued[0]) == frozenset(continued[0].targets)
+    # Foreground completion is not a busy gate for a fresh exact Stop request.
+    fresh_plan = service.preview_stop(run.owner_id)
+    with sessions() as session:
+        ended, fresh = assert_ended_without_blocking(
+            session,
+            service.get(continued[0].id),
+            end=lambda original: service.get(original.id),
+            fresh=lambda _world: service.stop(
+                run.owner_id,
+                plan_digest=fresh_plan.plan_digest,
+                actor="admin",
+                request_id="h" * 36,
+            ),
+            request_key=lambda receipt: (
+                _required(session.get(Job, receipt.id)).request_id
+            ),
+        )
+    assert ended.state == LifecycleState.SUCCEEDED
+    assert fresh.id != continued[0].id
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}

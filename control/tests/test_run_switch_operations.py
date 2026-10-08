@@ -4751,13 +4751,15 @@ def test_cancel_queued_start_is_idempotent_and_active_cancel_starts_stop(tmp_pat
     )
     assert cancelled.state == "cancelled"
     assert cancelled.progress.state == "cancelled"
-    with pytest.raises(RunSwitchOperationConflict, match="already used differently"):
-        service.cancel(
-            operation.operation_id,
-            actor="admin",
-            request_key=key,
-            reason="Different intent",
-        )
+    repeated = service.cancel(
+        operation.operation_id,
+        actor="admin",
+        request_key=key,
+        reason="Different intent",
+    )
+    assert repeated.state == "cancelled"
+    assert repeated.result is not None and repeated.result.cancellation is not None
+    assert repeated.result.cancellation.reason == "Keep the current profile"
     request_key = str(uuid.uuid4())
     active = service.apply(
         RunSwitchApplyRequest(

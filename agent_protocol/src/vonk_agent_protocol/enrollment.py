@@ -72,6 +72,23 @@ class RenewRequest(WireModel):
     node_id: NodeId
 
 
+class ExpiredRenewRequest(RenewRequest):
+    """Proof of possession, bound to the exact durable replacement CSR."""
+
+    serial: str = Field(min_length=1, max_length=128)
+    signed_at: int = Field(ge=0)
+    signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+    def proof_bytes(self) -> bytes:
+        import hashlib
+
+        digest = hashlib.sha256(self.csr.encode("ascii")).hexdigest()
+        return (
+            f"vonk-expired-renew-v1\n{self.node_id}\n{self.serial}\n"
+            f"{self.signed_at}\n{digest}"
+        ).encode("ascii")
+
+
 class ActivateRequest(WireModel):
     # AgentCertificate and AgentCertificateRotation own this monotone identity
     # in PostgreSQL INTEGER columns, whose domain is signed 32-bit.
