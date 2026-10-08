@@ -421,8 +421,23 @@ def test_postgres_real_pending_stop_allows_disjoint_load_and_reconnects_after_re
         ),
     )
     lifecycle.reconcile_offline_stops()
-    restarted_coordinator.tick()
-    restarted.advance(app.id)
+    with sessions() as session:
+        assert (
+            set(
+                session.scalars(
+                    select(Job.id).where(
+                        Job.id.in_(exact_parents), Job.state == LifecycleState.SUCCEEDED
+                    )
+                )
+            )
+            == exact_parents
+        )
+    # The wrapper observes the native Stop, verifies the foreground result,
+    # then completes on separate worker turns. None requires agent contact or
+    # advancing the frozen clock; one tick only observes the native receipt.
+    for _ in range(3):
+        restarted_coordinator.tick()
+        restarted.advance(app.id)
     after = _stored(sessions, app.id)
     assert {item.operation_id for item in after.pending_children} == {_uuid(18603)}
     assert any(
