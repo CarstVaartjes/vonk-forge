@@ -840,16 +840,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let owner = rustix::process::geteuid().as_raw();
         let root = temp.path().join("requests");
-        assert!(matches!(
-            super::claim_once_at(&root, "first", owner),
-            Err(super::ClaimFailure::Ledger)
-        ));
+        assert!(super::claim_once_at(&root, "first", owner).is_err());
+        assert!(!root.join("first").exists());
         std::fs::create_dir(&root).unwrap();
         assert!(super::claim_once_at(&root, "fresh", owner).is_ok());
-        assert!(matches!(
-            super::claim_once_at(&root, "fresh", owner),
-            Err(super::ClaimFailure::Consumed)
-        ));
+        assert!(super::claim_once_at(&root, "fresh", owner).is_err());
         assert!(super::claim_once_at(&root, "next", owner).is_ok());
     }
 

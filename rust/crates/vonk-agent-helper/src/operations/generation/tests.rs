@@ -72,6 +72,7 @@ fn start_authority_binds_generation_plan_identity_and_projected_arguments() {
             },
             logical_run_id,
             plan_digest,
+            ..
         } if run_generation == i64::MAX as u64 && runtime_id == start_plan.run_id
             && installation_id == start_plan.installation_id
             && logical_run_id == start_plan.run_id
@@ -342,7 +343,13 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
     // then prove the old named container is still rejected as generation
     // 1 and can only be removed by its own exact Stop.
     assert!(matches!(
-        executor.runtime_start_authorized(&[], current, current.runtime_id, &current_plan_digest,),
+        executor.runtime_start_authorized(
+            &[],
+            current,
+            current.runtime_id,
+            &current_plan_digest,
+            &format!("sha256:{}", "c".repeat(64))
+        ),
         Err(OperationError::InvalidOperation)
     ));
 

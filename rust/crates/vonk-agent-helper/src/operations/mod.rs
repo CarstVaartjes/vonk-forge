@@ -289,6 +289,7 @@ enum AuthorizedRuntimeEffect {
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
         plan_digest: String,
+        image_config_id: String,
     },
     Stop {
         identity: RuntimeEffectIdentity,

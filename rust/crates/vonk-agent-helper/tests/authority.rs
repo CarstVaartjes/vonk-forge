@@ -902,7 +902,7 @@ fn startup_sweeps_only_exact_root_custody_shapes() {
 
 #[test]
 fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
-    for attack in ["symlink", "hardlink", "mode"] {
+    for attack in ["symlink", "hardlink", "mode", "fifo"] {
         let (temp, roots, runner, release) = fixture();
         let package_owner = fs::metadata(&roots.incoming).unwrap().uid();
         let package = b"signed package";
@@ -918,6 +918,16 @@ fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
                 fs::write(&incoming, package).unwrap();
                 fs::set_permissions(&incoming, fs::Permissions::from_mode(0o600)).unwrap();
                 fs::hard_link(&incoming, temp.path().join("linked.deb")).unwrap();
+            }
+            "fifo" => {
+                rustix::fs::mknodat(
+                    rustix::fs::CWD,
+                    &incoming,
+                    rustix::fs::FileType::Fifo,
+                    rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+                    0,
+                )
+                .unwrap();
             }
             "mode" => {
                 fs::write(&incoming, package).unwrap();
@@ -939,6 +949,7 @@ fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
         .unwrap()
         .with_package_owner(package_owner);
 
+        let started = std::time::Instant::now();
         assert!(
             executor
                 .execute_for_node(
@@ -953,6 +964,7 @@ fn package_custody_rejects_symlinks_hardlinks_and_non_private_modes() {
                 .is_err(),
             "accepted {attack} package"
         );
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
         assert!(runner.calls.lock().unwrap().is_empty());
         assert!(
             !roots.package_custody.exists()

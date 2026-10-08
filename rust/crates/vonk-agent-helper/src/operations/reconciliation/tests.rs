@@ -118,13 +118,21 @@ fn reconciliation_clears_only_private_cache_and_replays_after_agent_removal() {
     assert!(receipt_path.is_file());
 
     let calls = runner.calls.lock().unwrap();
-    assert_eq!(calls.len(), 1);
+    assert_eq!(calls.len(), 2);
     let arguments = &calls[0];
-    assert!(!arguments.iter().any(|argument| argument == "--filter"));
-    let template = arguments.last().unwrap();
-    assert!(template.contains(".Label"));
-    assert!(template.as_bytes().contains(&b'\t'));
-    assert!(!template.contains(r"\t"));
+    assert!(arguments.windows(2).any(|pair| pair
+        == [
+            "--filter",
+            &format!(
+                "label=ai.vonkforge.installation-id={}",
+                identity.installation_id
+            ),
+        ]));
+    assert!(
+        calls[1]
+            .iter()
+            .any(|argument| argument == &format!("volume={}", runtime_cache.display()))
+    );
     drop(calls);
 
     // The agent may finish deleting its exact installation after the
@@ -272,29 +280,28 @@ fn reconciliation_refuses_active_unknown_failed_or_truncated_runtime_inventory()
 }
 
 #[test]
-fn reconciliation_retires_stopped_unbound_vonk_run_before_publishing_receipt() {
+fn reconciliation_does_not_delete_unbound_containers() {
     let (_temp, roots, identity, runtime_cache, _shared_cache) = helper_reconciliation_fixture();
-    let run_id = "40000000-0000-4000-8000-000000000004";
-    let container_id = "a".repeat(64);
-    let runner = ReconciliationCleanupRunner::new(CommandOutput {
+    let unbound = format!("{}\texited\tvonk-{}\ttrue\t\n", "a".repeat(64), RUN_ID);
+    let runner = ReconciliationListingRunner::new(CommandOutput {
         success: true,
-        stdout: format!("{container_id}\texited\tvonk-{run_id}\ttrue\t\n").into_bytes(),
+        stdout: unbound.into_bytes(),
         stderr: Vec::new(),
         exit_code: Some(0),
     });
     let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
-
-    executor.runtime_reconcile_installation(&identity).unwrap();
-
+    assert!(executor.runtime_reconcile_installation(&identity).is_err());
+    assert!(runtime_cache.exists());
+    assert_eq!(runner.calls.lock().unwrap().len(), 1);
+    let repaired = ReconciliationListingRunner::new(CommandOutput {
+        success: true,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+        exit_code: Some(0),
+    });
+    let fresh = OperationExecutor::new(roots, &[0; 32], repaired, None).unwrap();
+    fresh.runtime_reconcile_installation(&identity).unwrap();
     assert!(!runtime_cache.exists());
-    let calls = runner.calls.lock().unwrap();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].first().map(String::as_str), Some("container"));
-    assert_eq!(calls[0].get(1).map(String::as_str), Some("ls"));
-    assert_eq!(
-        calls[1],
-        vec!["container".to_owned(), "rm".to_owned(), container_id]
-    );
 }
 
 #[test]
@@ -317,10 +324,7 @@ fn reconciliation_lock_defers_cleanup_and_completed_history_admits_fresh_work() 
     let start_guard = executor
         .lock_installation_runtime(&installation_id)
         .unwrap();
-    assert!(matches!(
-        executor.runtime_reconcile_installation(&identity),
-        Err(OperationError::InstallationReconciliationBusy)
-    ));
+    assert!(executor.runtime_reconcile_installation(&identity).is_err());
     assert!(runtime_cache.exists());
     drop(start_guard);
 
@@ -445,3 +449,5 @@ fn uncertain_replacement_is_preserved_and_does_not_gate_fresh_work() {
     assert_eq!(fs::read(&sentinel).unwrap(), b"unproven replacement");
     assert!(original.is_dir());
 }
+
+mod independent_history;

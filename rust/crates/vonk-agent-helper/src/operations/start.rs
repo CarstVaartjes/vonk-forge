@@ -9,6 +9,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
         plan_digest: &str,
+        image_config_id: &str,
     ) -> Result<(Option<i32>, Option<Box<JobEvidence>>), OperationError> {
         let installation_id = identity.installation_id.to_string();
         let started_at = Instant::now();
@@ -17,8 +18,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
             self.refuse_reconciled_runtime(&installation_id)?;
             self.update_runtime_generation_fence(&identity, RuntimeGenerationFenceUse::Start)?;
             let active_start = self.job_cancellation.begin(identity)?;
-            let launch =
-                self.runtime_start_locked(arguments, identity, logical_run_id, plan_digest)?;
+            let launch = self.runtime_start_locked(
+                arguments,
+                identity,
+                logical_run_id,
+                plan_digest,
+                image_config_id,
+            )?;
             (launch, active_start)
         };
         let outcome = match launch {
@@ -44,6 +50,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         identity: RuntimeEffectIdentity,
         logical_run_id: uuid::Uuid,
         plan_digest: &str,
+        image_config_id: &str,
     ) -> Result<RuntimeStartLaunch, OperationError> {
         let [
             archive_sha256,
@@ -74,14 +81,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         self.bind_native_fabric(&mut validated, Path::new(NATIVE_FABRIC_ROOT))?;
         self.require_authorised_published_endpoint(&validated)?;
-        let (inspected, operational_image) =
-            self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
+        let (inspected, operational_image) = self.inspect_accepted_runtime_image(
+            &validated.local_image_reference,
+            image_config_id,
+            platform_manifest_digest,
+        )?;
+        if inspected.0 != image_config_id && inspected.0 != *platform_manifest_digest {
+            return Err(OperationError::RuntimeImageIdentityInvalid);
+        }
         self.require_image_receipt(
             archive_sha256,
             registry_index_digest,
             platform_manifest_digest,
             &validated.local_image_reference,
-            &inspected.0,
+            image_config_id,
         )?;
         let semantic_digest = hex_sha256(
             &canonical_json(&validated.arguments).map_err(|_| OperationError::InvalidOperation)?,

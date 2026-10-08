@@ -155,7 +155,7 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
     use crate::host_runtime::HostRuntimeError;
     match error {
         HostRuntimeError::Io(error) => error.kind() != std::io::ErrorKind::PermissionDenied,
-        HostRuntimeError::Controller(ClientError::Protocol) => false,
+        HostRuntimeError::Controller(ClientError::Protocol) => true,
         HostRuntimeError::Controller(ClientError::Controller(error))
             if matches!(error.status, 401 | 403) =>
         {
@@ -166,11 +166,12 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
             matches!(
                 code,
                 HelperErrorCode::OperationIo
+                    | HelperErrorCode::RuntimeImageInspectFailed
                     | HelperErrorCode::InstallationReconciliationStorageUnavailable
             )
         }
-        HostRuntimeError::HelperProtocol(_) => false,
-        HostRuntimeError::HelperProtocolBound { .. } => false,
+        HostRuntimeError::HelperProtocol(_) => true,
+        HostRuntimeError::HelperProtocolBound { .. } => true,
         HostRuntimeError::StopUncertain => false,
     }
 }
@@ -404,6 +405,16 @@ pub(super) fn runtime_failure(
         limit,
         observed,
     }));
+    let failure = if temporary_observation_error(error) {
+        // Peer observations do not become permanent admission decisions.
+        // The Controller's durable recovery counter owns the retry-to-end
+        // budget; every attempt re-observes through a fresh accepted grant.
+        failure
+            .kind(AgentFailureKind::TemporaryDependency)
+            .retry_after(Some(2))
+    } else {
+        failure
+    };
     ExecutionResult::Failed(failure)
 }
 

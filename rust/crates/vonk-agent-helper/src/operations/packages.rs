@@ -155,12 +155,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
         let mut source = OpenOptions::new()
             .read(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-            .open(incoming)
-            .map_err(|_| OperationError::InvalidArtifact)?;
-        let source_before = source
-            .metadata()
-            .map_err(|_| OperationError::InvalidArtifact)?;
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
+            .open(incoming)?;
+        let source_before = source.metadata()?;
         require_agent_artifact(&source_before, self.package_owner_uid)?;
         let mut destination = OpenOptions::new()
             .write(true)
@@ -178,9 +177,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             if Instant::now() >= deadline {
                 return Err(OperationError::CommandFailed);
             }
-            let count = source
-                .read(&mut buffer)
-                .map_err(|_| OperationError::InvalidArtifact)?;
+            let count = source.read(&mut buffer)?;
             if count == 0 {
                 break;
             }
@@ -192,9 +189,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             destination.write_all(&buffer[..count])?;
         }
         destination.sync_all()?;
-        let source_after = source
-            .metadata()
-            .map_err(|_| OperationError::InvalidArtifact)?;
+        let source_after = source.metadata()?;
         let destination_metadata = destination.metadata()?;
         let observed_digest = hex::encode(digest.finalize());
         if artifact_identity(&source_before) != artifact_identity(&source_after)

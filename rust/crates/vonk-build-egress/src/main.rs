@@ -14,6 +14,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use wait_timeout::ChildExt;
+
 const LISTEN: &str = "0.0.0.0:18080";
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_CONNECTIONS: usize = 64;
@@ -23,6 +25,7 @@ const MAX_TUNNEL_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 /// tunnel cannot move MAX_TUNNEL_BYTES in each direction.
 const IO_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+static RESOLVER_OWNERS: AtomicUsize = AtomicUsize::new(0);
 
 fn main() -> ExitCode {
     match run(std::env::args().skip(1).collect()) {
@@ -36,15 +39,11 @@ fn main() -> ExitCode {
 
 fn run(arguments: Vec<String>) -> Result<(), String> {
     if arguments == ["--probe"] {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let stream = TcpStream::connect_timeout(
-            &"127.0.0.1:18080"
-                .parse()
-                .map_err(|_| "probe address is invalid")?,
-            deadline.saturating_duration_since(Instant::now()),
+        probe_available(
+            SocketAddr::from(([127, 0, 0, 1], 18080)),
+            Instant::now() + Duration::from_secs(2),
         )
-        .map_err(|_| "proxy is unavailable")?;
-        probe(stream, deadline).map_err(|_| "proxy probe unavailable")?;
+        .map_err(|_| "proxy probe unavailable")?;
         return Ok(());
     }
     // Isolate the system resolver in a killable process. A stalled libc/NSS
@@ -111,7 +110,16 @@ impl Drop for ConnectionGuard {
     }
 }
 
-fn handle(mut client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
+fn handle(client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
+    handle_observed(client, hosts, resolve_public, connect_any)
+}
+
+fn handle_observed(
+    mut client: TcpStream,
+    hosts: &BTreeSet<String>,
+    mut resolve: impl FnMut(&str, u16) -> Result<Vec<SocketAddr>, u16>,
+    mut connect: impl FnMut(&[SocketAddr]) -> Result<TcpStream, ()>,
+) -> io::Result<()> {
     client.set_read_timeout(Some(IO_TIMEOUT))?;
     client.set_write_timeout(Some(IO_TIMEOUT))?;
     let header = read_header(&mut client)?;
@@ -122,14 +130,14 @@ fn handle(mut client: TcpStream, hosts: &BTreeSet<String>) -> io::Result<()> {
             return Ok(());
         }
     };
-    let addresses = match resolve_public(&request.host, request.port) {
+    let addresses = match resolve(&request.host, request.port) {
         Ok(value) => value,
         Err(status) => {
             reject(client, status);
             return Ok(());
         }
     };
-    let mut upstream = match connect_any(&addresses) {
+    let mut upstream = match connect(&addresses) {
         Ok(value) => value,
         Err(()) => {
             reject(client, 502);
@@ -336,22 +344,86 @@ fn blocked_metadata_name(value: &str) -> bool {
 }
 
 fn resolve_public(host: &str, port: u16) -> Result<Vec<SocketAddr>, u16> {
-    let mut command = Command::new(std::env::current_exe().map_err(|_| 502_u16)?);
-    command.args(["--resolve", host, &port.to_string()]);
-    let output =
-        resolver_output(&mut command, Instant::now() + CONNECT_TIMEOUT).map_err(|_| 502_u16)?;
-    let text = std::str::from_utf8(&output).map_err(|_| 502_u16)?;
-    let mut addresses = BTreeSet::new();
-    for line in text.lines() {
-        addresses.insert(line.parse::<SocketAddr>().map_err(|_| 502_u16)?);
-        if addresses.len() > MAX_RESOLVED_ADDRESSES {
-            return Err(502);
+    resolve_observed(port, Instant::now() + CONNECT_TIMEOUT, |deadline| {
+        let mut command = Command::new(std::env::current_exe().map_err(|_| ())?);
+        command.args(["--resolve", host, &port.to_string()]);
+        resolver_output(&mut command, deadline)
+    })
+}
+
+// All observations for a request share one budget. Empty, malformed, failed
+// and oversized replies are unknown; only a proved denied address is 403.
+fn resolve_observed(
+    port: u16,
+    deadline: Instant,
+    mut observe: impl FnMut(Instant) -> Result<Vec<u8>, ()>,
+) -> Result<Vec<SocketAddr>, u16> {
+    for attempt in 0..3 {
+        if Instant::now() >= deadline {
+            break;
+        }
+        let attempt_deadline = deadline.min(Instant::now() + CONNECT_TIMEOUT / 3);
+        if let Ok(output) = observe(attempt_deadline)
+            && let Ok(text) = std::str::from_utf8(&output)
+        {
+            let mut addresses = BTreeSet::new();
+            let mut valid = true;
+            for line in text.lines() {
+                match line.parse::<SocketAddr>() {
+                    Ok(address) if address.port() == port => {
+                        // Do not allow malformed sibling data to hide a proved
+                        // private destination.
+                        if !public_ip(address.ip()) {
+                            return Err(403);
+                        }
+                        addresses.insert(address);
+                    }
+                    _ => valid = false,
+                }
+                if addresses.len() > MAX_RESOLVED_ADDRESSES {
+                    valid = false;
+                    break;
+                }
+            }
+            if valid && !addresses.is_empty() {
+                return validate_resolved(addresses).map_err(|_| 502);
+            }
+        }
+        if attempt < 2 {
+            thread::sleep(
+                Duration::from_millis(50 * (attempt + 1))
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
         }
     }
-    validate_resolved(addresses).map_err(|_| 403)
+    Err(502)
+}
+
+// The owner follows the child, including after the request deadline. Admission
+// remains bounded when an OS cannot terminate a child immediately.
+struct ResolverOwner(&'static AtomicUsize);
+impl ResolverOwner {
+    fn acquire() -> Result<Self, ()> {
+        Self::acquire_at(&RESOLVER_OWNERS)
+    }
+
+    fn acquire_at(counter: &'static AtomicUsize) -> Result<Self, ()> {
+        counter
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < MAX_CONNECTIONS).then_some(count + 1)
+            })
+            .map(|_| Self(counter))
+            .map_err(|_| ())
+    }
+}
+impl Drop for ResolverOwner {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 fn resolver_output(command: &mut Command, deadline: Instant) -> Result<Vec<u8>, ()> {
+    let owner = ResolverOwner::acquire()?;
     let (mut output_stream, child_output) = UnixStream::pair().map_err(|_| ())?;
     let mut child = command
         .stdin(Stdio::null())
@@ -377,18 +449,39 @@ fn resolver_output(command: &mut Command, deadline: Instant) -> Result<Vec<u8>, 
                 );
             }
             _ => {
+                // Transfer the exact child and its resource claim to a reaper.
+                // A failed kill never drops a live child or releases its slot.
                 let _ = child.kill();
-                let reap_deadline = Instant::now() + Duration::from_secs(1);
-                while Instant::now() < reap_deadline {
-                    match child.try_wait() {
-                        Ok(None) => thread::sleep(Duration::from_millis(10)),
-                        _ => break,
-                    }
-                }
+                retain_resolver(child, owner, |child| {
+                    let _ = child.kill();
+                });
                 return Err(());
             }
         }
     }
+}
+
+// The request relinquishes its worker, but the exact child's resource claim
+// stays held until wait confirms reaping. Termination failure is observation
+// uncertainty, never permission to abandon a live child.
+fn retain_resolver(
+    mut child: std::process::Child,
+    owner: ResolverOwner,
+    mut terminate: impl FnMut(&mut std::process::Child) + Send + 'static,
+) {
+    thread::spawn(move || {
+        let _owner = owner;
+        loop {
+            match child.wait_timeout(Duration::from_millis(100)) {
+                Ok(Some(_)) => break,
+                Ok(None) => terminate(&mut child),
+                Err(_) => {
+                    terminate(&mut child);
+                    thread::sleep(Duration::from_millis(100));
+                }
+            }
+        }
+    });
 }
 
 fn read_resolver_output(stream: &mut UnixStream, deadline: Instant) -> Result<Vec<u8>, ()> {
@@ -409,6 +502,30 @@ fn read_resolver_output(stream: &mut UnixStream, deadline: Instant) -> Result<Ve
         }
         output.extend_from_slice(&buffer[..count]);
     }
+}
+
+fn probe_available(address: SocketAddr, deadline: Instant) -> io::Result<()> {
+    for attempt in 0..3 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let attempt_deadline = deadline.min(Instant::now() + Duration::from_millis(500));
+        if let Ok(stream) = TcpStream::connect_timeout(
+            &address,
+            attempt_deadline.saturating_duration_since(Instant::now()),
+        ) && probe(stream, attempt_deadline).is_ok()
+        {
+            return Ok(());
+        }
+        if attempt < 2 {
+            thread::sleep(
+                Duration::from_millis(50 * (attempt + 1))
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+    }
+    Err(io::ErrorKind::TimedOut.into())
 }
 
 fn probe(mut stream: TcpStream, deadline: Instant) -> io::Result<()> {
@@ -613,158 +730,4 @@ fn reject(mut stream: TcpStream, status: u16) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn silent_probe_ends_and_a_fresh_probe_completes() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let client = TcpStream::connect(address).unwrap();
-        let (silent, _) = listener.accept().unwrap();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(250));
-            drop(silent);
-        });
-        let started = Instant::now();
-        assert!(probe(client, started + Duration::from_millis(50)).is_err());
-        assert!(started.elapsed() < Duration::from_millis(200));
-        let client = TcpStream::connect(address).unwrap();
-        let (mut server, _) = listener.accept().unwrap();
-        server.write_all(b"HTTP/1.1 403 Forbidden\r\n").unwrap();
-        probe(client, Instant::now() + Duration::from_secs(1)).unwrap();
-    }
-
-    #[test]
-    fn a_retained_resolver_writer_cannot_extend_the_deadline() {
-        let (mut reader, retained_writer) = UnixStream::pair().unwrap();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(250));
-            drop(retained_writer);
-        });
-        let started = Instant::now();
-        assert!(read_resolver_output(&mut reader, started + Duration::from_millis(50)).is_err());
-        assert!(started.elapsed() < Duration::from_secs(1));
-        let (mut reader, mut writer) = UnixStream::pair().unwrap();
-        writer.write_all(b"1.1.1.1:443\n").unwrap();
-        drop(writer);
-        assert_eq!(
-            read_resolver_output(&mut reader, Instant::now() + Duration::from_secs(1)).unwrap(),
-            b"1.1.1.1:443\n"
-        );
-    }
-
-    #[test]
-    fn stalled_resolver_is_reaped_and_fresh_work_is_admitted() {
-        let started = Instant::now();
-        assert!(
-            resolver_output(
-                Command::new("/bin/sleep").arg("10"),
-                started + Duration::from_millis(50)
-            )
-            .is_err()
-        );
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert_eq!(
-            resolver_output(
-                Command::new("/bin/echo").arg("1.1.1.1:443"),
-                Instant::now() + Duration::from_secs(1)
-            )
-            .unwrap(),
-            b"1.1.1.1:443\n"
-        );
-    }
-
-    #[test]
-    fn rejects_private_reserved_and_metadata_destinations() {
-        for value in [
-            "127.0.0.1",
-            "10.0.0.1",
-            "169.254.169.254",
-            "192.168.1.1",
-            "100.64.0.1",
-            "192.0.2.1",
-            "192.88.99.1",
-            "198.18.0.1",
-            "198.51.100.1",
-            "203.0.113.1",
-            "::1",
-            "64:ff9b::1",
-            "100::1",
-            "fd00::1",
-            "fe80::1",
-            "2001::1",
-            "2001:db8::1",
-            "2002::1",
-            "3fff::1",
-            "5f00::1",
-        ] {
-            assert!(!public_ip(value.parse().unwrap()), "accepted {value}");
-        }
-        assert!(public_ip("1.1.1.1".parse().unwrap()));
-        assert!(public_ip("2606:4700:4700::1111".parse().unwrap()));
-        assert!(blocked_metadata_name("metadata.google.internal"));
-    }
-
-    #[test]
-    fn dns_rebinding_or_mixed_answers_fail_closed() {
-        let addresses = BTreeSet::from([
-            "1.1.1.1:443".parse().unwrap(),
-            "169.254.169.254:443".parse().unwrap(),
-        ]);
-        assert!(validate_resolved(addresses).is_err());
-    }
-
-    #[test]
-    fn exact_allowlist_ports_and_safe_http_methods_are_enforced() {
-        let hosts = BTreeSet::from(["pypi.org".to_owned()]);
-        assert!(
-            parse_request(
-                b"CONNECT pypi.org:443 HTTP/1.1\r\nHost: pypi.org:443\r\n\r\n",
-                &hosts
-            )
-            .is_ok()
-        );
-        assert_eq!(
-            parse_request(
-                b"CONNECT files.pythonhosted.org:443 HTTP/1.1\r\n\r\n",
-                &hosts
-            )
-            .unwrap_err(),
-            403
-        );
-        assert_eq!(
-            parse_request(b"CONNECT pypi.org:22 HTTP/1.1\r\n\r\n", &hosts).unwrap_err(),
-            403
-        );
-        assert_eq!(
-            parse_request(
-                b"POST http://pypi.org/upload HTTP/1.1\r\nHost: pypi.org\r\n\r\n",
-                &hosts
-            )
-            .unwrap_err(),
-            405
-        );
-    }
-
-    #[test]
-    fn strips_hop_headers_and_rejects_proxy_credentials_and_bodies() {
-        let hosts = BTreeSet::from(["pypi.org".to_owned()]);
-        let request = parse_request(b"GET http://pypi.org/simple HTTP/1.1\r\nHost: pypi.org\r\nProxy-Connection: keep-alive\r\nConnection: upgrade, X-Secret\r\nUpgrade: websocket\r\nX-Secret: remove-me\r\nUser-Agent: test\r\n\r\n", &hosts).unwrap();
-        let text = String::from_utf8(request.forward).unwrap();
-        assert!(!text.to_ascii_lowercase().contains("proxy-connection"));
-        assert!(!text.to_ascii_lowercase().contains("upgrade"));
-        assert!(!text.to_ascii_lowercase().contains("x-secret"));
-        assert!(text.contains("User-Agent: test"));
-        assert_eq!(parse_request(b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nProxy-Authorization: Basic abc\r\n\r\n", &hosts).unwrap_err(), 403);
-        assert_eq!(
-            parse_request(
-                b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nContent-Length: 1\r\n\r\n",
-                &hosts
-            )
-            .unwrap_err(),
-            413
-        );
-        assert_eq!(parse_request(b"GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nTransfer-Encoding: chunked\r\n\r\n", &hosts).unwrap_err(), 413);
-    }
-}
+mod tests;

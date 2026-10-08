@@ -112,6 +112,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             platform_manifest_digest,
             image_reference,
             user,
+            image_config_id,
         ] = arguments
         else {
             return Err(OperationError::InvalidOperation);
@@ -121,24 +122,29 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || !lower_hex(archive_sha256, 64)
             || !valid_oci_digest(registry_index_digest)
             || !valid_oci_digest(platform_manifest_digest)
+            || !valid_oci_digest(image_config_id)
             || !numeric_non_root_user(user)
         {
             return Err(OperationError::InvalidOperation);
         }
-        let (inspected, _) = self.inspect_runtime_image_for_reference(image_reference)?;
+        let (inspected, _) = self.inspect_accepted_runtime_image(
+            image_reference,
+            image_config_id,
+            platform_manifest_digest,
+        )?;
         if inspected.1 != "linux"
             || inspected.2 != "arm64"
             || inspected.3 != "v1"
             || inspected.4 != *user
         {
-            return Err(OperationError::RuntimeImageInspectFailed);
+            return Err(OperationError::RuntimeImageIdentityInvalid);
         }
         self.require_image_receipt(
             archive_sha256,
             registry_index_digest,
             platform_manifest_digest,
             image_reference,
-            &inspected.0,
+            image_config_id,
         )
     }
 }
@@ -196,16 +202,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
-    pub(super) fn inspect_runtime_image_for_reference(
-        &self,
-        image_reference: &str,
-    ) -> Result<(RuntimeImageInspection, String), OperationError> {
-        self.inspect_runtime_image_for_reference_if_present(image_reference)?
-            .ok_or(OperationError::RuntimeImageInspectFailed)
-    }
-}
-
-impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn inspect_runtime_image_for_reference_if_present(
         &self,
         image_reference: &str,
@@ -214,17 +210,47 @@ impl<R: CommandRunner> OperationExecutor<R> {
         match self.inspect_runtime_image_if_present(image_reference)? {
             Some(inspected) => Ok(Some((inspected, image_reference.to_owned()))),
             None => {
-                // Classic Docker may discard RepoDigests while loading an OCI
-                // archive. The signed logical reference remains receipt-bound;
-                // use the verified local config ID as the daemon reference so
-                // launch stays pinned to the inspected image object.
+                // Docker may discard the digest-qualified alias. Keep the
+                // daemon's surviving managed name: containerd's manifest ID
+                // is an observation identity, not a supported launch name.
+                // The caller compares its content with the signed identity
+                // before use; labels never authorize substituted content.
                 let Some(inspected) = self.inspect_runtime_image_if_present(&local_image)? else {
                     return Ok(None);
                 };
-                let operational_image = inspected.0.clone();
-                Ok(Some((inspected, operational_image)))
+                Ok(Some((inspected, local_image)))
             }
         }
+    }
+}
+
+impl<R: CommandRunner> OperationExecutor<R> {
+    /// Observe the exact content named by accepted authority even when Docker
+    /// has lost both the logical tag and its disposable receipt.
+    pub(super) fn inspect_accepted_runtime_image(
+        &self,
+        reference: &str,
+        config_digest: &str,
+        manifest_digest: &str,
+    ) -> Result<(RuntimeImageInspection, String), OperationError> {
+        if !valid_oci_digest(config_digest) || !valid_oci_digest(manifest_digest) {
+            return Err(OperationError::InvalidOperation);
+        }
+        parse_local_image_reference(reference)?;
+        if let Ok(Some(found)) = self.inspect_runtime_image_for_reference_if_present(reference)
+            && (found.0.0 == config_digest || found.0.0 == manifest_digest)
+        {
+            return Ok(found);
+        }
+        for identity in [config_digest, manifest_digest] {
+            if let Some(found) = self.inspect_runtime_image_if_present(identity)? {
+                if found.0 != config_digest && found.0 != manifest_digest {
+                    return Err(OperationError::RuntimeImageIdentityInvalid);
+                }
+                return Ok((found, identity.to_owned()));
+            }
+        }
+        Err(OperationError::RuntimeImageInspectFailed)
     }
 }
 
@@ -234,6 +260,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         receipt: RuntimeImageReceipt,
     ) -> Result<(), OperationError> {
         ensure_private_directory(&self.roots.runtime_image_receipts, self.required_owner_uid)?;
+        let _publication = self.lock_image_publication()?;
+        self.collect_image_staging(Instant::now() + Duration::from_millis(100));
         let address = receipt
             .platform_manifest_digest
             .strip_prefix("sha256:")
@@ -255,18 +283,23 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .roots
             .runtime_image_receipts
             .join(format!(".receipt-{}.tmp", uuid::Uuid::new_v4()));
-        {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-                .mode(0o600)
-                .open(&staged)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .mode(0o600)
+            .open(&staged)?;
+        let result = (|| {
             file.write_all(&body)?;
             file.sync_all()?;
+            fs::rename(&staged, &path)?;
+            sync_directory(&self.roots.runtime_image_receipts)
+        })();
+        drop(file);
+        if result.is_err() {
+            let _ = fs::remove_file(&staged);
         }
-        fs::rename(&staged, &path)?;
-        sync_directory(&self.roots.runtime_image_receipts)
+        result
     }
 }
 
@@ -293,30 +326,37 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        if let Ok(receipt) = self.read_image_receipt(archive_sha256)
-            && receipt.schema_version == RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
-            && receipt.platform_manifest_digest == platform_manifest_digest
-            && receipt.local_image_reference == local_image_reference
-            && receipt.image_config_id == image_config_id
+        // A receipt is a cache, never identity authority. The caller supplies
+        // the config digest bound by the signed compiled plan. Classic Docker
+        // names the verified config; containerd names the verified manifest.
+        // Neither arbitrary tag labels nor disposable receipt bytes can bless
+        // another object, and a missing RepoDigest does not veto this content.
+        let (inspected, _) = self.inspect_accepted_runtime_image(
+            local_image_reference,
+            image_config_id,
+            platform_manifest_digest,
+        )?;
+        if inspected.0 != image_config_id && inspected.0 != platform_manifest_digest {
+            return Err(OperationError::RuntimeImageIdentityInvalid);
+        }
+        if self
+            .read_image_receipt(archive_sha256)
+            .ok()
+            .is_some_and(|receipt| {
+                receipt.schema_version == RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
+                    && receipt.platform_manifest_digest == platform_manifest_digest
+                    && receipt.local_image_reference == local_image_reference
+                    && receipt.image_config_id == inspected.0
+            })
         {
             return Ok(());
-        }
-        // A tag and its labels do not prove content identity. Docker resolving
-        // the digest-qualified reference does: its verified store binds that
-        // manifest to the inspected object. Rebuild disposable metadata only
-        // from this observation, never from the tag fallback.
-        let Some(inspected) = self.inspect_runtime_image_if_present(local_image_reference)? else {
-            return Err(OperationError::RuntimeImageInspectFailed);
-        };
-        if inspected.0 != image_config_id {
-            return Err(OperationError::RuntimeImageInspectFailed);
         }
         // Receipt publication is best effort; the verified daemon observation
         // above is enough for this request and later reads can reconstruct it.
         let _ = self.write_image_receipt(RuntimeImageReceipt {
             schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
             platform_manifest_digest: platform_manifest_digest.to_owned(),
-            image_config_id: image_config_id.to_owned(),
+            image_config_id: inspected.0,
             local_image_reference: local_image_reference.to_owned(),
         });
         Ok(())
@@ -362,3 +402,5 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
 #[cfg(test)]
 mod tests;
+
+mod staging;

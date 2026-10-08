@@ -192,6 +192,7 @@ fn damaged_receipts_rebuild_from_digest_qualified_docker_content() {
             format!("sha256:{manifest}"),
             reference,
             "10001:10001".to_owned(),
+            format!("sha256:{config}"),
         ];
         executor.runtime_image_inspect(&arguments).unwrap();
         executor.runtime_image_inspect(&arguments).unwrap();
@@ -234,6 +235,7 @@ fn tag_only_content_is_a_miss_then_exact_signed_pull_repairs_it() {
         format!("sha256:{manifest}"),
         reference,
         "10001:10001".to_owned(),
+        format!("sha256:{config}"),
     ];
     assert!(executor.runtime_image_inspect(&arguments).is_err());
     assert!(!roots.runtime_image_receipts.join(&manifest).exists());
@@ -248,12 +250,17 @@ fn runtime_image_receipt_binds_manifest_config_and_local_reference() {
     let temp = tempfile::tempdir().unwrap();
     let roots = ManagedRoots::under(temp.path());
     fs::create_dir_all(&roots.data).unwrap();
-    let executor =
-        OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
     let address = "a".repeat(64);
     let manifest = format!("sha256:{address}");
     let config = format!("sha256:{}", "c".repeat(64));
     let local_reference = format!("localhost/vonk/compiled-runtime-{address}@{manifest}");
+    let runner = PullRunner::default();
+    runner
+        .images
+        .lock()
+        .unwrap()
+        .insert(local_reference.clone(), config.clone());
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner, None).unwrap();
     executor
         .write_image_receipt(RuntimeImageReceipt {
             schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
@@ -283,4 +290,163 @@ fn runtime_image_receipt_binds_manifest_config_and_local_reference() {
             .require_image_receipt(&"b".repeat(64), &other, &other, &local_reference, &config)
             .is_err()
     );
+}
+
+#[test]
+fn receipt_publication_faults_do_not_accumulate_staging_or_refuse_verified_images() {
+    // Wrong implementation: swallowed rename failures leak a new staging file
+    // on every inspection, even though Docker already holds verified content.
+    let temp = tempfile::tempdir().unwrap();
+    let roots = ManagedRoots::under(temp.path());
+    let manifest = "a".repeat(64);
+    let config = "c".repeat(64);
+    let reference = format!("localhost/vonk/compiled-runtime-{manifest}@sha256:{manifest}");
+    let runner = PullRunner::default();
+    runner
+        .images
+        .lock()
+        .unwrap()
+        .insert(reference.clone(), format!("sha256:{config}"));
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner, None).unwrap();
+    ensure_private_directory(&roots.runtime_image_receipts, None).unwrap();
+    let receipt = roots.runtime_image_receipts.join(&manifest);
+    fs::create_dir(&receipt).unwrap();
+    let arguments = vec![
+        manifest.clone(),
+        format!("sha256:{manifest}"),
+        format!("sha256:{manifest}"),
+        reference,
+        "10001:10001".into(),
+        format!("sha256:{config}"),
+    ];
+    for _ in 0..4 {
+        executor.runtime_image_inspect(&arguments).unwrap();
+        let files = fs::read_dir(&roots.runtime_image_receipts)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path(), receipt);
+    }
+    fs::remove_dir(&receipt).unwrap();
+    executor.runtime_image_inspect(&arguments).unwrap();
+    let repaired: RuntimeImageReceipt = parse_strict(&fs::read(receipt).unwrap()).unwrap();
+    assert_eq!(repaired.image_config_id, format!("sha256:{config}"));
+}
+
+#[test]
+fn lost_docker_names_reuse_accepted_content_without_a_receipt_or_pull() {
+    // Wrong implementation: a missing logical tag or damaged receipt vetoes
+    // content that Docker still holds under its authority-bound digest.
+    let temp = tempfile::tempdir().unwrap();
+    let (manifest, config) = ("a".repeat(64), "c".repeat(64));
+    let manifest_digest = format!("sha256:{manifest}");
+    let config_digest = format!("sha256:{config}");
+    let reference = format!("localhost/vonk/compiled-runtime-{manifest}@{manifest_digest}");
+    let runner = PullRunner::default();
+    runner
+        .images
+        .lock()
+        .unwrap()
+        .insert(config_digest.clone(), config_digest.clone());
+    let roots = ManagedRoots::under(temp.path());
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+    ensure_private_directory(&roots.runtime_image_receipts, None).unwrap();
+    fs::write(roots.runtime_image_receipts.join(&manifest), b"damaged").unwrap();
+    for _ in 0..2 {
+        let (_, operational) = executor
+            .inspect_accepted_runtime_image(&reference, &config_digest, &manifest_digest)
+            .unwrap();
+        assert_eq!(operational, config_digest);
+        executor
+            .require_image_receipt(
+                &manifest,
+                &manifest_digest,
+                &manifest_digest,
+                &reference,
+                &config_digest,
+            )
+            .unwrap();
+    }
+    assert!(
+        !runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|args| args[0] == "pull")
+    );
+    let receipt: RuntimeImageReceipt =
+        parse_strict(&fs::read(roots.runtime_image_receipts.join(&manifest)).unwrap()).unwrap();
+    assert_eq!(receipt.image_config_id, config_digest);
+}
+
+#[test]
+fn leftover_owned_staging_is_collected_after_clearance_without_touching_unsafe_siblings() {
+    // Wrong implementation: a failed staging unlink has no future owner, or
+    // collection races a current publisher / removes ambiguous sibling bytes.
+    let temp = tempfile::tempdir().unwrap();
+    let roots = ManagedRoots::under(temp.path());
+    let executor =
+        OperationExecutor::new(roots.clone(), &[0; 32], PullRunner::default(), None).unwrap();
+    ensure_private_directory(&roots.runtime_image_receipts, None).unwrap();
+    let stage = roots
+        .runtime_image_receipts
+        .join(format!(".receipt-{}.tmp", uuid::Uuid::new_v4()));
+    fs::write(&stage, b"incomplete unpublished receipt").unwrap();
+    fs::set_permissions(&stage, fs::Permissions::from_mode(0o600)).unwrap();
+    let sibling = roots
+        .runtime_image_receipts
+        .join(format!(".receipt-{}.tmp", uuid::Uuid::new_v4()));
+    fs::write(&sibling, b"ambiguous sibling").unwrap();
+    fs::set_permissions(&sibling, fs::Permissions::from_mode(0o644)).unwrap();
+    let guard = executor.lock_image_publication().unwrap();
+    let receipt = RuntimeImageReceipt {
+        schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+        platform_manifest_digest: format!("sha256:{}", "a".repeat(64)),
+        image_config_id: format!("sha256:{}", "c".repeat(64)),
+        local_image_reference: format!(
+            "localhost/vonk/compiled-runtime-{}@sha256:{}",
+            "a".repeat(64),
+            "a".repeat(64)
+        ),
+    };
+    assert!(executor.write_image_receipt(receipt.clone()).is_err());
+    assert!(stage.exists());
+    drop(guard);
+    executor.write_image_receipt(receipt.clone()).unwrap();
+    assert!(!stage.exists());
+    assert_eq!(fs::read(&sibling).unwrap(), b"ambiguous sibling");
+    executor.write_image_receipt(receipt).unwrap();
+    assert_eq!(
+        fs::read_dir(&roots.runtime_image_receipts).unwrap().count(),
+        2
+    );
+}
+
+#[test]
+fn containerd_alias_loss_uses_the_observed_managed_launch_name() {
+    // Wrong implementation: containerd's observed manifest ID is passed to
+    // Docker as a launch name after the digest-qualified alias disappears.
+    let temp = tempfile::tempdir().unwrap();
+    let (manifest, config) = ("a".repeat(64), "c".repeat(64));
+    let local = format!("localhost/vonk/compiled-runtime-{manifest}");
+    let reference = format!("{local}@sha256:{manifest}");
+    let runner = PullRunner::default();
+    runner
+        .images
+        .lock()
+        .unwrap()
+        .insert(local.clone(), format!("sha256:{manifest}"));
+    let executor =
+        OperationExecutor::new(ManagedRoots::under(temp.path()), &[0; 32], runner, None).unwrap();
+    let (observed, launch) = executor
+        .inspect_accepted_runtime_image(
+            &reference,
+            &format!("sha256:{config}"),
+            &format!("sha256:{manifest}"),
+        )
+        .unwrap();
+    assert_eq!(observed.0, format!("sha256:{manifest}"));
+    assert_eq!(launch, local);
 }

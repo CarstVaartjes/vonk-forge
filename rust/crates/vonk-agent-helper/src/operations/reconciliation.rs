@@ -210,7 +210,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !valid_artifact_id(installation_id) {
             return Err(OperationError::InvalidOperation);
         }
-        let root = self.installation_reconciliation_root()?;
+        let root = self.roots.data.join("runtime-ownership");
+        ensure_runtime_directory(&root)?;
+        require_exact_directory(&root, Some(rustix::process::geteuid().as_raw()), 0o700)?;
         let lock_path = root.join(format!("{installation_id}.lock"));
         let lock = OpenOptions::new()
             .read(true)
@@ -247,7 +249,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // Cleanup history is disposable, not standing authority over a later
         // signed START. Generation fencing and current launch validation own
         // stale-effect rejection. Retire the old checkpoint without gating it.
-        let root = self.installation_reconciliation_root()?;
+        let root = self.roots.data.join(INSTALLATION_RECONCILIATION_DIRECTORY);
         let path = root.join(format!("{installation_id}.json"));
         let _ = fs::remove_file(path);
         Ok(())
@@ -259,89 +261,38 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         installation_id: &str,
     ) -> Result<(), OperationError> {
-        let output = self.run_docker(&[
-            "container".to_owned(),
-            "ls".to_owned(),
-            "--all".to_owned(),
-            "--no-trunc".to_owned(),
-            "--format".to_owned(),
-            "{{.ID}}\t{{.State}}\t{{.Names}}\t{{.Label \"ai.vonkforge.managed\"}}\t{{.Label \"ai.vonkforge.installation-id\"}}".to_owned(),
-        ])?;
-        if !output.success || output.stdout.len() as u64 > MAX_COMMAND_OUTPUT_BYTES {
-            return Err(OperationError::InstallationReconciliationStorageUnavailable);
-        }
-        let rows = std::str::from_utf8(&output.stdout)
-            .map_err(|_| OperationError::InstallationReconciliationStorageUnavailable)?;
-        for row in rows.lines().filter(|row| !row.trim().is_empty()) {
-            let fields = row.split('\t').collect::<Vec<_>>();
-            if fields.len() != 5
-                || !lower_hex(fields[0], 64)
-                || !matches!(
-                    fields[1],
-                    "created"
-                        | "running"
-                        | "restarting"
-                        | "paused"
-                        | "exited"
-                        | "dead"
-                        | "removing"
-                )
+        let cache = self
+            .roots
+            .agent_data
+            .join("installations")
+            .join(installation_id)
+            .join("runtime-cache");
+        // Labels identify accepted effects. The bind source independently
+        // catches a container whose labels were damaged: absence of labels
+        // alone never proves this cache unused. Unknown unrelated containers
+        // retain their bytes and do not enter either exact-target observation.
+        for filter in [
+            format!("label=ai.vonkforge.installation-id={installation_id}"),
+            format!("volume={}", cache.display()),
+        ] {
+            let output = self.run_docker(&[
+                "container".to_owned(),
+                "ls".to_owned(),
+                "--all".to_owned(),
+                "--quiet".to_owned(),
+                "--no-trunc".to_owned(),
+                "--filter".to_owned(),
+                filter,
+            ])?;
+            // Only a successful empty exact observation proves absence. A
+            // container ID, malformed bytes, or failed observation preserves
+            // the cache for a subsequent bounded owning-operation attempt.
+            if !output.success
+                || output.exit_code != Some(0)
+                || output.stdout.len() as u64 > MAX_COMMAND_OUTPUT_BYTES
+                || !output.stdout.iter().all(u8::is_ascii_whitespace)
             {
                 return Err(OperationError::InstallationReconciliationStorageUnavailable);
-            }
-            let is_vonk_named = fields[2].split(',').any(|name| name.starts_with("vonk-"));
-            let managed = fields[3] == "true";
-            if !managed && is_vonk_named {
-                // An older or damaged container can retain its Vonk name while
-                // losing the labels that bind it to an installation. Do not
-                // infer that it is unrelated just because the target label is
-                // missing.
-                return Err(OperationError::InstallationReconciliationStorageUnavailable);
-            }
-            if !managed {
-                continue;
-            }
-            let found_installation = uuid::Uuid::parse_str(fields[4])
-                .ok()
-                .map(|value| value.to_string());
-            let Some(found_installation) = found_installation else {
-                // Older agents could leave a stopped managed container without
-                // an installation binding. It cannot be attributed to the
-                // current installation, but its exact Vonk run name and
-                // stopped state prove that it is a retired attempt rather
-                // than a live effect. Retire only that narrow shape; running,
-                // malformed, or ambiguously named containers remain blockers.
-                let run_name = fields[2]
-                    .split(',')
-                    .map(str::trim)
-                    .find(|name| name.strip_prefix("vonk-").is_some());
-                let Some(run_name) = run_name else {
-                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
-                };
-                let Some(run_id) = run_name.strip_prefix("vonk-") else {
-                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
-                };
-                let Ok(parsed_run_id) = uuid::Uuid::parse_str(run_id) else {
-                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
-                };
-                if parsed_run_id.to_string() != run_id || !matches!(fields[1], "exited" | "dead") {
-                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
-                }
-                let removed = self.run_docker(&[
-                    "container".to_owned(),
-                    "rm".to_owned(),
-                    fields[0].to_owned(),
-                ])?;
-                if !removed.success || removed.exit_code != Some(0) {
-                    return Err(OperationError::InstallationReconciliationStorageUnavailable);
-                }
-                continue;
-            };
-            if found_installation != fields[4] {
-                return Err(OperationError::InstallationReconciliationStorageUnavailable);
-            }
-            if found_installation == installation_id {
-                return Err(OperationError::InstallationReconciliationBusy);
             }
         }
         Ok(())

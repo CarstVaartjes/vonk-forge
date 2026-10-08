@@ -72,6 +72,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     identity,
                     logical_run_id,
                     plan_digest,
+                    image_config_id,
                 }) = authorized_effect
                 else {
                     return Err(OperationError::InvalidOperation);
@@ -81,6 +82,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     identity,
                     logical_run_id,
                     &plan_digest,
+                    &image_config_id,
                 )
                 .map(|(exit_code, evidence)| RuntimeRequestOutcome {
                     exit_code,
@@ -211,6 +213,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                         run_generation: generation,
                     },
                     logical_run_id,
+                    image_config_id: compiled.runtime_image.local_image_config_id.clone(),
                     plan_digest: if let Some(plan) = request.start_plan.as_ref() {
                         plan.plan_digest.clone()
                     } else {
