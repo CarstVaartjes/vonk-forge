@@ -6,9 +6,11 @@ from datetime import datetime, timedelta
 
 from vonk_agent_protocol import (
     AgentOperation,
+    AgentResultState,
     OutcomeDone,
     OutcomeFailed,
     OutcomeUnknown,
+    WaitReason,
     outcome_state,
 )
 from vonk_agent_protocol.contracts import AgentResultPayload
@@ -21,6 +23,7 @@ from ..lifecycle import Outcome, Reported
 from ..lifecycle.agent_operation import cancel_requested_at
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
+from .contracts import _GRANT_LIFETIME
 from .retry import _safe_retry_failure
 
 
@@ -46,7 +49,7 @@ def _report_event(
     state = outcome_state(outcome)
     if isinstance(outcome, OutcomeDone):
         return Reported(Outcome.DONE, fence=fence)
-    if state == "cancelled":
+    if state is AgentResultState.CANCELLED:
         return Reported(Outcome.CANCELLED, fence=fence)
     raw_reason = result.get("reason")
     reason = (
@@ -61,6 +64,16 @@ def _report_event(
         and _aware(now) >= _aware(start_deadline)
     ):
         # A spent start budget is final: a retry could only be refused.
+        return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
+    if (
+        isinstance(outcome, OutcomeUnknown)
+        and outcome.wait_reason is WaitReason.CLEANUP_UNCONFIRMED
+        and operation.kind == AgentOperation.RECIPE_UNINSTALL.value
+        and _aware(now) >= _aware(operation.created_at) + _GRANT_LIFETIME
+    ):
+        # Local uninstall evidence gets one authorization lifetime to recover.
+        # Preserve its unknown receipt, end observation without claiming removal,
+        # and release queue ownership so a fresh request can reconcile it.
         return Reported(Outcome.FAILED, fence=fence, retryable=False, reason=reason)
     retry_after = result.get("retry_after_seconds")
     due = (

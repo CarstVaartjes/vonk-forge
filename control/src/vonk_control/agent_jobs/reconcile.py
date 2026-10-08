@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import or_, select
 from vonk_agent_protocol import AgentOperation, WaitReason
 
+from .. import agent_operation_states as aos
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -14,12 +15,14 @@ from ..admission_locking import (
     lock_admission_rows,
 )
 from ..agent_operation_facts import attempt_is_live as _attempt_is_live
+from ..agent_operation_facts import aware as _aware
 from ..lifecycle import Reconciler
 from ..lifecycle.agent_operation import AgentOperationAdapter, lapsed_running_orders
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.types import State as _LifecycleState
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
+from .contracts import _GRANT_LIFETIME
 from .endings import end_unobserved_order
 from .persistence import _OrderStore
 from .retirement import operator_resume_candidates_in_session
@@ -90,19 +93,32 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                     StoredOperation.id,
                     StoredOperation.node_id,
                     StoredOperation.parent_job_id,
+                    StoredOperation.kind,
+                    StoredOperation.created_at,
                 )
-                .where(lapsed_running_orders(now), StoredOperation.current_attempt > 0)
+                .where(
+                    or_(
+                        lapsed_running_orders(now),
+                        (StoredOperation.kind == AgentOperation.RECIPE_UNINSTALL)
+                        & (StoredOperation.created_at <= now - _GRANT_LIFETIME)
+                        & StoredOperation.state.in_(aos.LIVE),
+                    ),
+                    StoredOperation.current_attempt > 0,
+                )
                 .order_by(StoredOperation.created_at, StoredOperation.id)
                 .limit(limit)
             )
         )
     progressed = False
-    for operation_id, node_id, parent_job_id in candidates:
+    for operation_id, node_id, parent_job_id, kind, created_at in candidates:
         # Decide without a lock whether there is anything to do: an order
         # whose attempt is still live (an open launch budget, say) is looked
         # at every pass, and taking the node's rows for each look kept the
         # node busy for the admissions that need it.
-        if not self._sweep_would_act(operation_id, node_id):
+        expired_cleanup = kind == AgentOperation.RECIPE_UNINSTALL and _aware(
+            created_at
+        ) + _GRANT_LIFETIME <= _aware(now)
+        if not expired_cleanup and not self._sweep_would_act(operation_id, node_id):
             continue
         try:
             with self._claim_lock, self._sessions.begin() as session:
@@ -119,7 +135,7 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                     .execution_options(populate_existing=True)
                 )
                 node = session.get(AgentNode, node_id)
-                if operation is None or node is None or operation.state != "running":
+                if operation is None or node is None or operation.state not in aos.LIVE:
                     continue
                 attempt = session.scalar(
                     select(AgentOperationAttempt)
@@ -130,6 +146,23 @@ def _sweep_lapsed_attempts(self: AgentJobService, limit: int) -> bool:
                     .with_for_update(of=AgentOperationAttempt)
                 )
                 now = self._clock()
+                if operation.kind == AgentOperation.RECIPE_UNINSTALL and _aware(
+                    operation.created_at
+                ) + _GRANT_LIFETIME <= _aware(now):
+                    end_unobserved_order(
+                        self,
+                        session,
+                        operation,
+                        attempt,
+                        session.get(Job, parent_job_id),
+                        now,
+                        reason=WaitReason.CLEANUP_UNCONFIRMED,
+                        note="installation cleanup observation budget elapsed",
+                    )
+                    progressed = True
+                    continue
+                if operation.state != aos.RUNNING:
+                    continue
                 if _attempt_is_live(operation, attempt, now) or (
                     operation.workload_intent_ordinal is not None
                     and operation.workload_intent_ordinal

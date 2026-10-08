@@ -428,8 +428,8 @@ fn uninstall_validates_storage_without_requiring_launchable_placement() {
 }
 
 #[test]
-fn uninstall_rejects_its_own_invalid_metadata_identity_and_artifact_paths() {
-    for defect in ["malformed", "identity", "artifact-path"] {
+fn uninstall_preserves_data_outside_its_authorized_content() {
+    for defect in ["identity", "artifact-path"] {
         let root = tempdir().unwrap();
         let mut plan = schema2_single_plan();
         let recipe = plan.identity.recipe_revision_sha256.clone();
@@ -441,9 +441,8 @@ fn uninstall_rejects_its_own_invalid_metadata_identity_and_artifact_paths() {
         persist_plan(root.path(), &plan);
         let installation = root.path().join("installations").join(INSTALLATION);
         fs::write(installation.join("recipe-content.sha256"), &recipe).unwrap();
-        if defect == "malformed" {
-            fs::write(installation.join("spec.json"), b"{}").unwrap();
-        }
+        let outside = root.path().join("outside");
+        fs::write(&outside, b"user data").unwrap();
         let runtime = OciRuntime {
             runner: &NoProcess,
             data_root: root.path(),
@@ -453,7 +452,66 @@ fn uninstall_rejects_its_own_invalid_metadata_identity_and_artifact_paths() {
             "{defect}"
         );
         assert!(installation.exists());
+        assert_eq!(fs::read(outside).unwrap(), b"user data");
+        // A corrected observation permits a fresh exact removal immediately.
+        persist_plan(root.path(), &schema2_single_plan());
+        runtime.uninstall(INSTALLATION, &recipe).unwrap();
+        assert!(!installation.exists());
     }
+}
+
+#[test]
+fn damaged_uninstall_metadata_is_reconciled_without_touching_shared_data() {
+    let root = tempdir().unwrap();
+    let plan = schema2_single_plan();
+    persist_plan(root.path(), &plan);
+    let installation = root.path().join("installations").join(INSTALLATION);
+    fs::set_permissions(
+        &installation,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    fs::write(installation.join("spec.json"), b"{}").unwrap();
+    let shared = root.path().join("shared-model");
+    fs::write(&shared, b"verified model").unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+    };
+    assert!(
+        runtime
+            .uninstall(INSTALLATION, &plan.identity.recipe_revision_sha256)
+            .is_err()
+    );
+    assert!(installation.exists());
+    let authority = vonk_agent_protocol::RecipeReconciliationIdentity {
+        installation_id: INSTALLATION.parse().unwrap(),
+        plan_digest: "c".repeat(64),
+    };
+    runtime.prepare_reconciliation(&authority).unwrap();
+    assert!(
+        runtime
+            .finalize_reconciliation(&authority)
+            .unwrap()
+            .complete
+    );
+    assert!(!installation.exists());
+    assert_eq!(fs::read(shared).unwrap(), b"verified model");
+    // Another authorized operation has an independent identity and no old hold.
+    let fresh = vonk_agent_protocol::RecipeReconciliationIdentity {
+        installation_id: RUN.parse().unwrap(),
+        plan_digest: "d".repeat(64),
+    };
+    let fresh_installation = root.path().join("installations").join(RUN);
+    fs::create_dir(&fresh_installation).unwrap();
+    fs::set_permissions(
+        &fresh_installation,
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    assert!(!runtime.prepare_reconciliation(&fresh).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&fresh).unwrap().complete);
+    assert!(!fresh_installation.exists());
 }
 
 #[test]

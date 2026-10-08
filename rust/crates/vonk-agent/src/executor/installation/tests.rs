@@ -5,6 +5,15 @@ use super::*;
 
 #[tokio::test]
 async fn recipe_uninstall_with_optional_model_cleanup_is_executed() {
+    uninstall_after_observation(false).await;
+}
+
+#[tokio::test]
+async fn damaged_uninstall_observation_preserves_bytes_and_allows_a_fresh_request() {
+    uninstall_after_observation(true).await;
+}
+
+async fn uninstall_after_observation(damage: bool) {
     let data = tempdir().unwrap();
     let runtime_root = tempdir().unwrap();
     let installation_id = "00000000-0000-4000-8000-000000000001";
@@ -72,7 +81,23 @@ async fn recipe_uninstall_with_optional_model_cleanup_is_executed() {
     let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(claim.deadline);
     let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
 
-    let result = executor.execute(&claim, lease_deadline, cancellation).await;
+    if damage {
+        fs::write(installation.join("spec.json"), b"{}").unwrap();
+        let unknown = executor
+            .execute(&claim, lease_deadline.clone(), cancellation.clone())
+            .await;
+        assert_eq!(unknown.state(), AgentResultState::Observing);
+        assert!(installation.exists());
+        assert!(stored_model.iter().all(|object| object.exists()));
+        fs::write(
+            installation.join("spec.json"),
+            serde_json::to_vec(&plan).unwrap(),
+        )
+        .unwrap();
+    }
+    let mut fresh = claim.clone();
+    fresh.fence = Uuid::new_v4();
+    let result = executor.execute(&fresh, lease_deadline, cancellation).await;
 
     assert_eq!(result.state(), AgentResultState::Succeeded);
     assert!(matches!(

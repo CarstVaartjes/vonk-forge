@@ -13,12 +13,10 @@
     "control/src/vonk_control/agent_jobs/claim.py": 5,
     "control/src/vonk_control/agent_jobs/claim_authority.py": 8,
     "control/src/vonk_control/agent_jobs/claim_reconcile.py": 5,
-    "control/src/vonk_control/agent_jobs/completion.py": 1,
     "control/src/vonk_control/agent_jobs/evidence.py": 2,
     "control/src/vonk_control/agent_jobs/heartbeat.py": 1,
     "control/src/vonk_control/agent_jobs/identity.py": 4,
     "control/src/vonk_control/agent_jobs/predicates.py": 1,
-    "control/src/vonk_control/agent_jobs/reconcile.py": 1,
     "control/src/vonk_control/agent_jobs/results.py": 10,
     "control/src/vonk_control/agent_jobs/retirement.py": 6,
     "control/src/vonk_control/agent_jobs/retry.py": 8,
@@ -290,9 +288,6 @@
       "_fail_spent_start_budgets": "12e1c4d9bf385b4353ab76e97040d3f9f18f941c7ca7413d8affa41afe627d71",
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
-    "control/src/vonk_control/agent_jobs/completion.py": {
-      "_report_event": "69e8993ac93f03fc9bd60c2f050f74975e7d8ac2ca99cb0907fa56e1e5c0e124"
-    },
     "control/src/vonk_control/agent_jobs/evidence.py": {
       "_failure_result": "7fcc9b4c56ffe8782a4f22ac950f6cf85185b0965f98766cade49b328e436bca",
       "_lease_expiry_reason": "3fb636feb6b22c419a5e1ad41cc05392ae02fbeedac76f5e1de5632895bfe0a5",
@@ -338,14 +333,6 @@
       "_claim_condition_facts": "6f750dac1d70eddfcf51123749cac7cf25f1ae1ed3b907ee4e16c6093cc46279",
       "_held_claim_conditions": "152cace62fbd18f007cd41254739610176ea3f45e0eeaba61d436a8782254d51",
       "<module>": "00ee06e932384ffcf6e7e93500fcc80cb9fef95c5ff7cf8047db69c8d3d4f55c"
-    },
-    "control/src/vonk_control/agent_jobs/reconcile.py": {
-      "reconcile_orders": "b3a585b6b9b2486f52cc79608ae65b975775228648c4cbe79b55b14d686993bf",
-      "_order_reconciler": "aba04833e274f6b262b8a31591708bbf7da1a093d807d1146a75f495056abc37",
-      "_sweep_lapsed_attempts": "15c780540627185fc57e00fd56ab741d4e091d03be4e54650e4dfbe664948476",
-      "_sweep_would_act": "9604ba3bc3eea4db101a4a7df4ecb3c7f3800a0c776bb45b18e9e5ff0c6c0cdd",
-      "_sweep_gone_targets": "28c1f19ab04ba40829b77bc3b102a4fcc6187c20d1a6335ba5355d7250f4d9f0",
-      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/results.py": {
       "succeed": "595b8dd8467cff5780f0e3eddd18b8cfa01bbfa4b5bfd19ec9aceac649e3bf0f",

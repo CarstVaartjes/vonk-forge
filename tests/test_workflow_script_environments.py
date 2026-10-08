@@ -125,9 +125,8 @@ runpy.run_path(script, run_name="__main__")
     assert "generate-agent-wire" in checked
 
 
-@pytest.mark.parametrize("different_build", [False, True])
 def test_native_renewal_helper_uses_candidate_content_identity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, different_build: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches rebuilding identity from current provenance when a package is reused.
 
@@ -197,7 +196,7 @@ def test_native_renewal_helper_uses_candidate_content_identity(
     environment = {
         **os.environ,
         "RUNNER_TEMP": str(tmp_path),
-        "SOURCE_SHA": release.source_sha,
+        "SOURCE_SHA": "8" * 40,
         "VERSION": release.version,
         "CHANNEL": release.channel,
         "GENERATION": release.generation,
@@ -238,7 +237,7 @@ def test_native_renewal_helper_uses_candidate_content_identity(
     identity = AgentRuntimeIdentity(
         architecture="linux-arm64",
         semantic_version=semantic_version,
-        build_digest="sha256:" + "9" * 64 if different_build else build_digest,
+        build_digest=build_digest,
         binary_digest=package.target_binary_digest,
     )
     run = SparkLifecycle.__new__(SparkLifecycle)
@@ -262,11 +261,38 @@ def test_native_renewal_helper_uses_candidate_content_identity(
         raise FirstEffect
 
     monkeypatch.setattr(run, "_run_command", first_effect)
-    if different_build:
-        with pytest.raises(
-            LifecycleError, match="native renewal helper candidate build changed"
-        ):
-            run._exercise_native_renewal()
-    else:
+    manifest_path = helper_root / "manifest.json"
+    verified_manifest = manifest_path.read_bytes()
+    for defect in (None, "build", "binary", "input", "symlink"):
+        if defect == "build":
+            changed = identity.model_copy(update={"build_digest": "sha256:" + "9" * 64})
+            monkeypatch.setattr(
+                run,
+                "_self_test",
+                lambda changed=changed: changed.model_dump(mode="json"),
+            )
+        elif defect == "binary":
+            helper.write_bytes(b"substituted helper")
+        elif defect == "input":
+            import json
+
+            manifest = json.loads(verified_manifest)
+            name = next(iter(manifest["source_inputs"]))
+            manifest["source_inputs"][name] = "0" * 64
+            manifest_path.write_text(json.dumps(manifest))
+        elif defect == "symlink":
+            target = helper_root / "substituted"
+            target.write_bytes(helper.read_bytes())
+            helper.unlink()
+            helper.symlink_to(target)
+        if defect:
+            with pytest.raises(LifecycleError):
+                run._exercise_native_renewal()
+        # A fresh valid helper is admitted immediately after each refusal.
+        monkeypatch.setattr(run, "_self_test", lambda: identity.model_dump(mode="json"))
+        if helper.is_symlink():
+            helper.unlink()
+        helper.write_bytes(b"hermetic native helper")
+        manifest_path.write_bytes(verified_manifest)
         with pytest.raises(FirstEffect):
             run._exercise_native_renewal()

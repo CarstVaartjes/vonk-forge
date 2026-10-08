@@ -4389,8 +4389,7 @@ class SparkLifecycle:
         if not isinstance(source_inputs, dict):
             raise LifecycleError("native renewal helper inputs are invalid")
         if (
-            manifest.get("source_sha") != self.arguments.source_sha
-            or set(source_inputs) != set(RENEWAL_HELPER_INPUTS)
+            set(source_inputs) != set(RENEWAL_HELPER_INPUTS)
             or helper.is_symlink()
             or not helper.is_file()
             or hashlib.sha256(helper.read_bytes()).hexdigest()

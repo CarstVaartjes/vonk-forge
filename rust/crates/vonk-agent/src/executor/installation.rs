@@ -221,8 +221,20 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 return ExecutionResult::done(RecipeUninstallResult::default());
             }
             Ok(Some(recipe_digest)) if recipe_digest == request.recipe_content_sha256 => {}
-            Ok(Some(_)) | Err(_) => {
-                return failed("installed recipe identity does not match uninstall request");
+            Ok(Some(_)) => {
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation content observation differs from accepted identity",
+                    UnknownEvidence::at(FailureStage::InstallationValidation),
+                );
+            }
+            Err(error) => {
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation identity observation is unavailable",
+                    UnknownEvidence::at(FailureStage::InstallationValidation)
+                        .because(error.safe_category()),
+                );
             }
         }
         let validated = match request.cleanup_model_content_sha256.as_deref() {
@@ -237,10 +249,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 .map(|()| 0),
         };
         if let Err(error) = validated {
-            return failed_stage(
-                "installed recipe could not be safely removed",
-                FailureStage::InstallationValidation,
-                error.safe_category(),
+            return unconfirmed(
+                WaitReason::CleanupUnconfirmed,
+                "installation cleanup observation is unavailable",
+                UnknownEvidence::at(FailureStage::InstallationValidation)
+                    .because(error.safe_category()),
             );
         }
         if *cancellation.borrow() {
@@ -253,6 +266,29 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     .cleanup_installation_cache(claim, installation_uuid)
                     .await
                 {
+                    let authority_denied = match &error {
+                        crate::host_runtime::HostRuntimeError::Controller(
+                            ClientError::Controller(reply),
+                        ) => matches!(reply.status, 401 | 403),
+                        crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
+                            matches!(
+                                code,
+                                HelperErrorCode::GrantInvalid
+                                    | HelperErrorCode::GrantNodeMismatch
+                                    | HelperErrorCode::GrantUnauthorized
+                                    | HelperErrorCode::PeerIdentityInvalid
+                                    | HelperErrorCode::RequestReplayed
+                            )
+                        }
+                        _ => false,
+                    };
+                    if !authority_denied {
+                        return unconfirmed(
+                            WaitReason::CleanupUnconfirmed,
+                            "installation runtime cleanup is unconfirmed",
+                            host_runtime_evidence(FailureStage::RuntimeCacheCleanup, &error),
+                        );
+                    }
                     return failed_stage_owned(
                         "installed recipe could not be safely removed",
                         FailureStage::RuntimeCacheCleanup,
@@ -261,10 +297,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
             }
             Err(error) => {
-                return failed_stage(
-                    "installed recipe could not be safely removed",
-                    FailureStage::RuntimeCacheCleanup,
-                    error.safe_category(),
+                return unconfirmed(
+                    WaitReason::CleanupUnconfirmed,
+                    "installation cache observation is unavailable",
+                    UnknownEvidence::at(FailureStage::RuntimeCacheCleanup)
+                        .because(error.safe_category()),
                 );
             }
         }
@@ -291,10 +328,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .runtime
             .finalize_uninstall(&installation_id, &request.recipe_content_sha256)
         {
-            return failed_stage(
-                "installed recipe could not be safely removed",
-                FailureStage::InstallationRemoval,
-                error.safe_category(),
+            return unconfirmed(
+                WaitReason::CleanupUnconfirmed,
+                "installation removal is unconfirmed",
+                UnknownEvidence::at(FailureStage::InstallationRemoval)
+                    .because(error.safe_category()),
             );
         }
         // Freeing space is best effort and never fails the uninstall.

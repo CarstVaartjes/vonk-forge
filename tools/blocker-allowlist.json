@@ -1388,7 +1388,7 @@
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
     },
     "control/src/vonk_control/agent_jobs/completion.py": {
-      "_report_event": "69e8993ac93f03fc9bd60c2f050f74975e7d8ac2ca99cb0907fa56e1e5c0e124"
+      "_report_event": "4bf011db4163521d158dcf3e975386b2908626e21d9eb92b02ab3420c8ef5235"
     },
     "control/src/vonk_control/agent_jobs/contracts.py": {
       "SupersededAgentEffect": "9e74d6e33e55d56cf72dc29523d1832a16056631b3b9c132c6e1d182caa9a426",
@@ -1475,7 +1475,7 @@
     "control/src/vonk_control/agent_jobs/reconcile.py": {
       "reconcile_orders": "b3a585b6b9b2486f52cc79608ae65b975775228648c4cbe79b55b14d686993bf",
       "_order_reconciler": "aba04833e274f6b262b8a31591708bbf7da1a093d807d1146a75f495056abc37",
-      "_sweep_lapsed_attempts": "15c780540627185fc57e00fd56ab741d4e091d03be4e54650e4dfbe664948476",
+      "_sweep_lapsed_attempts": "fb69258319f1a9e073d387d6e54dbc81884b31a74786b797f3c5cddbeafbf427",
       "_sweep_would_act": "9604ba3bc3eea4db101a4a7df4ecb3c7f3800a0c776bb45b18e9e5ff0c6c0cdd",
       "_sweep_gone_targets": "28c1f19ab04ba40829b77bc3b102a4fcc6187c20d1a6335ba5355d7250f4d9f0",
       "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09"
@@ -4992,7 +4992,7 @@
       "_entry_uri": "34afc8c2c43fd23ee2d6bf03518348b67b4b660595de0042b95207b6b5b3d811",
       "_index_problem": "105949436f48ea07a97c0972e9e3b5cbc216fafa9f5e23425df2f32ef1fb10d3",
       "_incompatible_detail": "a534fb492fbaf93a342ebe971e784f60e649ab71771839d19bb6f1638e86e922",
-      "_bind_release": "201421dcc16c19285eb6e3cbb0e108f0f3c6688f4c24b57dbec17aa4b380edce",
+      "_bind_release": "d2261f04c16378279ca7bbdd4bab0774b90adfb1620ac0155680c8d0d100c3ce",
       "_asset_label": "7c643c948edd86de4faf5285b7d7c2234c4aef2ea1a9d7d325ac2af2cefde723",
       "_persisted_release": "286c9a23d9a17925e3dfeee1ab459705115f992f7d217c9acf3336d9d2fcae6c",
       "load_recipe_package": "3a2b510e079d9d6022aa853d6395d37a8428f70965517e609134ff263ceb6dfc",
@@ -7125,7 +7125,6 @@
         ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageError", "RecipePackageClient._parse_index", "recipe_package.schema_incompatible", 1],
         ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageError", "RecipePackageClient._resolve_release", "recipe_package.response_invalid", 3],
         ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageError", "RecipePackageClient.fetch", "recipe_package.uri_invalid", 1],
-        ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageError", "_bind_release", "recipe_package.response_invalid", 1],
         ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageError", "_library_release", "recipe_package.response_invalid", 2],
         ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageError", "_library_release", "recipe_package.schema_incompatible", 1],
         ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageError", "load_recipe_package", "recipe_package.digest_mismatch", 1]

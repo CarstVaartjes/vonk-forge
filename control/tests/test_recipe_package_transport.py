@@ -389,7 +389,7 @@ def signed_releases(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
 
     The real verifier and the recorded production signature are covered by
     test_recipe_release.py; these cases exercise everything the reader must
-    check after the signature: digests, commit binding, and transport.
+    check after the signature: digests, repository authority, and transport.
     """
     verified: list[bytes] = []
 
@@ -494,24 +494,11 @@ def test_unsigned_bundle_is_refused_even_with_a_previous_generation(
     client.close()
 
 
-@pytest.mark.parametrize(
-    ("tamper", "error"),
-    [
-        ("index", "catalog-index.json does not match SHA256SUMS"),
-        ("source", "not built from the signed release commit"),
-        ("redirect", "redirect leaves the GitHub asset origin"),
-        ("nested", "member <invalid asset name> is not a unique flat file"),
-        ("sums", "lacks a bounded SHA256SUMS"),
-    ],
-)
+@pytest.mark.parametrize("tamper", ["index", "redirect", "nested", "sums"])
 def test_only_the_signed_envelope_rejects_the_whole_bundle(
-    tmp_path: Path, signed_releases: list[bytes], tamper: str, error: str
+    tmp_path: Path, signed_releases: list[bytes], tamper: str
 ) -> None:
     index, _, package = _canonical_package_fixture()
-    if tamper == "source":
-        document = json.loads(index)
-        document["source_commit"] = "b" * 40
-        index = _canonical(document) + b"\n"
     release = _release_for(index, package)
     if tamper == "index":
         release.members["catalog-index.json"] = index.replace(b"tiny", b"tinY", 1)
@@ -522,8 +509,16 @@ def test_only_the_signed_envelope_rejects_the_whole_bundle(
     elif tamper == "sums":
         del release.members["SHA256SUMS"]
     client = _client(release, tmp_path / "packages")
-    with pytest.raises(RecipePackageError, match=error):
+    with pytest.raises(RecipePackageError):
         client.list()
+    assert not tuple((tmp_path / "packages").rglob("*.tar.gz"))
+    # Repair the ingress; the failed attempt must not poison a fresh read.
+    repaired = _release_for(index, package)
+    release.members = repaired.members
+    release.redirect_host = repaired.redirect_host
+    repaired_snapshot = client.list()
+    client.prepare(repaired_snapshot)
+    assert client.fetch(repaired_snapshot.items[0].uri).package_handle is not None
     client.close()
 
 
@@ -822,3 +817,28 @@ def test_unchanged_release_is_noticed_cheaply_and_a_new_one_is_fetched(
     client.list()
     assert len(release.requests) > downloads + 2
     client.close()
+
+
+def test_signed_content_is_prepared_despite_different_source_provenance(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """Catches rejecting verified package bytes only because a commit label moved."""
+    index, _, package = _canonical_package_fixture()
+    document = json.loads(index)
+    document["source_commit"] = "b" * 40
+    index = _canonical(document) + b"\n"
+    release = _release_for(index, package)
+    client = _client(release, tmp_path / "packages")
+    try:
+        snapshot = client.list()
+        assert snapshot.items
+        client.prepare(snapshot)
+        first = client.fetch(snapshot.items[0].uri).package_handle
+        assert first is not None
+        client.prepare(client.list())
+        second = client.fetch(snapshot.items[0].uri).package_handle
+        assert second == first
+        assert first.closure_path.is_dir()
+        assert not snapshot.problems
+    finally:
+        client.close()
