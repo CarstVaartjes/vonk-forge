@@ -164,7 +164,9 @@ class RecoveringService[T]:
         done.set()
 
     def require_service(self) -> T:
-        self.attempt_construction(wait=False)
+        # A cold request owns one bounded construction attempt. Background
+        # retries remain nonblocking; concurrent attempts never hold this lock.
+        self.attempt_construction()
         if (
             self._value is None
             or self.status.availability != CapabilityAvailability.AVAILABLE

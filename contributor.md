@@ -19,3 +19,10 @@ it against `control/uv.lock` before running Controller commands. For direct
 Controller commands, run `scripts/build-control-wheel` once first. See
 [Testing and CI](docs/testing-and-ci.md) for focused commands and the other
 acceptance lanes.
+
+## Added-line guards
+
+`scripts/check-added-lines` uses the merge base with `origin/main`; CI supplies
+the PR base. Only new syntax on added lines fails, with no debt or category
+ledger and no before/after count report. Keep behavior tests and generated
+contract checks. See [principle guards](docs/principle-guards.md).

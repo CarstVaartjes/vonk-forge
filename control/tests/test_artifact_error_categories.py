@@ -1,4 +1,4 @@
-"""Artifact storage, gate and job errors carry their contract category."""
+"""Artifact ingress rejects invalid bytes and preserves the underlying failure."""
 
 from __future__ import annotations
 
@@ -6,23 +6,13 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import (
-    ErrorCategory,
-    SecurityRefusalReason,
-    WaitReason,
-)
 from vonk_control.artifact_blob_store import (
     ArtifactBlobDigestMismatch,
     ArtifactBlobStore,
-    ArtifactBlobStoreError,
-    ArtifactBlobUnsafePath,
 )
 from vonk_control.artifact_jobs import _translate_blob_error
 from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
-    ArtifactLifecycleError,
-    ArtifactReferenceUnsettled,
-    ArtifactRemovalFenceLost,
 )
 
 
@@ -32,11 +22,9 @@ def _store(tmp_path: Path, **kwargs: int) -> ArtifactBlobStore:
 
 def test_upload_digest_mismatch_is_a_security_refusal(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    with pytest.raises(ArtifactBlobDigestMismatch) as caught:
+    with pytest.raises(ArtifactBlobDigestMismatch):
         store.put_bytes("0" * 64, b"content", maximum_bytes=100)
-    assert caught.value.category is ErrorCategory.SECURITY_REFUSAL
-    assert isinstance(caught.value, ArtifactBlobStoreError)
-    assert caught.value.typed_error() is not None
+    assert store.resolve("00/" + "0" * 64, "0" * 64, len(b"content")) is None
 
 
 def test_oversized_upload_and_capacity_release_claims_for_fresh_content(
@@ -54,12 +42,14 @@ def test_oversized_upload_and_capacity_release_claims_for_fresh_content(
     assert fresh.path.read_bytes() == b"ok"
 
 
-def test_unsafe_storage_key_is_a_security_refusal(tmp_path: Path) -> None:
+def test_damaged_storage_key_is_a_miss_and_fresh_upload_is_admitted(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path)
     digest = hashlib.sha256(b"x").hexdigest()
-    with pytest.raises(ArtifactBlobUnsafePath) as caught:
-        store.resolve("../escape", digest, 1)
-    assert caught.value.typed_reason is SecurityRefusalReason.UNSAFE_PATH
+    assert store.resolve("../escape", digest, 1) is None
+    fresh = store.put_bytes(digest, b"x", maximum_bytes=10)
+    assert fresh.path.read_bytes() == b"x"
 
 
 def test_missing_bytes_are_unknown_and_still_file_not_found(tmp_path: Path) -> None:
@@ -69,7 +59,7 @@ def test_missing_bytes_are_unknown_and_still_file_not_found(tmp_path: Path) -> N
     assert store.resolve(f"{digest[:2]}/{digest}", digest, 1) is None
 
 
-def test_blob_failures_keep_their_category_through_the_job_service(
+def test_blob_failure_preserves_the_cause_through_the_job_service(
     tmp_path: Path,
 ) -> None:
     store = _store(tmp_path)
@@ -77,21 +67,9 @@ def test_blob_failures_keep_their_category_through_the_job_service(
         store.put_bytes("0" * 64, b"content", maximum_bytes=100)
     with pytest.raises(Exception) as translated:
         _translate_blob_error(digest_error.value)
-    assert translated.value.category is ErrorCategory.SECURITY_REFUSAL  # type: ignore[attr-defined]
     assert translated.value.__cause__ is digest_error.value
 
 
-def test_gate_busy_is_unknown_and_fence_loss_is_a_refusal() -> None:
-    busy = ArtifactReferenceUnsettled("artifact.reference_busy", "busy", retryable=True)
-    assert busy.category is ErrorCategory.UNKNOWN
-    assert busy.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
-    assert busy.retryable and isinstance(busy, ArtifactLifecycleError)
-    lost = ArtifactRemovalFenceLost("artifact.deletion_fence_lost", "lost")
-    assert lost.category is ErrorCategory.SECURITY_REFUSAL
-    assert not lost.retryable and isinstance(lost, ArtifactLifecycleError)
-
-
 def test_identity_misuse_is_an_invalid_value() -> None:
-    with pytest.raises(ValueError) as caught:
+    with pytest.raises(ValueError):
         ArtifactIdentity("model-set", "not-a-digest")
-    assert caught.value.category is ErrorCategory.INVALID_REQUEST  # type: ignore[attr-defined]

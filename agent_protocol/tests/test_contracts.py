@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     validate_schema_message,
 )
 from vonk_agent_protocol.contracts import RESULT_MODELS, _validate_safe_keys
+from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
 
 
@@ -423,7 +424,7 @@ def test_agent_upgrade_success_uses_the_current_typed_result() -> None:
             "phase": "acknowledged",
             "created_at": 100,
             "updated_at": 130,
-            "outcome": "controller_acknowledged",
+            "outcome": PackageActivationOutcome.CONTROLLER_CONFIRMED_ACTIVATION,
         },
     }
 

@@ -7,7 +7,6 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
 from vonk_agent_protocol import ArtifactLifecycleCode, UnknownOutcomeError
 
 from .. import model_cache_states
@@ -96,11 +95,6 @@ class SchedulerMixin:
         if cache._closed.is_set():
             return 0
 
-        # A caller-supplied Session is intentionally retained for synchronous
-        # fixture/maintenance use only. Background tasks must obtain isolated
-        # sessions from a sessionmaker; SQLAlchemy Session is not thread safe.
-        if isinstance(cache._sessions, Session):
-            return cache.run_pending(limit=1)
         requested = cache._max_parallel_downloads if limit is None else limit
         if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
             raise InvalidValue("cache worker batch limit is invalid")

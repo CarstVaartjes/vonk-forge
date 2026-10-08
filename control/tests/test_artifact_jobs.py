@@ -1905,6 +1905,11 @@ def test_reconcile_reclaims_only_the_expired_jobs_own_blobs(
     fresh = store.put_bytes(expired_digest, expired_content, maximum_bytes=capacity)
     assert fresh.path.read_bytes() == expired_content
     assert seeded.path.read_bytes() == unproven_content
+    fresh_job = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153"),
+    )
+    assert fresh_job.id != job.id
 
 
 def test_gc_cannot_delete_old_dedup_blob_during_database_attachment(

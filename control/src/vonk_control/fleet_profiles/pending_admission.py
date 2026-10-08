@@ -94,8 +94,8 @@ class FleetProfileService:
                     FleetProfileApplication.current_step == 0,
                 )
                 .order_by(
-                    FleetProfileApplication.created_at,
-                    FleetProfileApplication.id,
+                    FleetProfileApplication.created_at.desc(),
+                    FleetProfileApplication.id.desc(),
                 )
                 .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
             )

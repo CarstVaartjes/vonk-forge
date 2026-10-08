@@ -467,6 +467,11 @@ def test_planner_observation_damage_admits_load_and_reobserves(damage):
     for _ in range(12):
         now[0] += timedelta(seconds=61)
         service.tick()
+        if (
+            adapter.starts
+            and service.application(first.id).state == LifecycleState.SUPERSEDED
+        ):
+            break
     assert {item["application_id"] for item in adapter.starts} == {fresh.id}
     assert service.application(first.id).state == LifecycleState.SUPERSEDED
     assert service.application(fresh.id).state in {

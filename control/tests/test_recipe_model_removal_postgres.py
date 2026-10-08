@@ -176,6 +176,9 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     )
     assert accepted["state"] == "queued"
     parent_id = str(accepted["operation_id"])
+    assert recipe_service._observe_recipe_removal(parent_id)
+    accepted = recipe_service.get_operator_request(request_id, actor="operator")
+    accepted = accepted.model_dump(mode="json", exclude_none=True)
 
     with sessions() as session:
         parent_row = session.get(Job, parent_id)

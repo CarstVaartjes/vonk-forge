@@ -354,8 +354,7 @@ def test_hung_construction_releases_owner_and_fences_late_result(boundary, monke
         release.set()
 
 
-@pytest.mark.asyncio
-async def test_executor_start_failure_recovers_without_request_or_status_read(
+def test_executor_start_failure_recovers_without_request_or_status_read(
     monkeypatch,
 ):
     """Catches a failed dispatch consuming the last automatic retry timer."""
@@ -364,40 +363,74 @@ async def test_executor_start_failure_recovers_without_request_or_status_read(
 
     from vonk_control import capabilities
 
-    attempts = 0
-    completed = Event()
+    async def scenario():
+        attempts = 0
+        completed = Event()
+
+        class Service:
+            def __init__(self):
+                completed.set()
+
+        class FailedStart:
+            def start(self):
+                raise OSError("executor capacity unavailable")
+
+        def worker(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            return FailedStart() if attempts == 1 else Thread(**kwargs)
+
+        monkeypatch.setattr(capabilities, "Thread", worker)
+        registry = CapabilityRegistry()
+        owner = registry.provider(ControllerCapability.MODEL_CACHE, Service, Service)
+        registry.start_recovery()
+        try:
+            assert await asyncio.to_thread(completed.wait, 5)
+            assert attempts == 2
+            for _ in range(100):
+                if owner.status.availability == CapabilityAvailability.AVAILABLE:
+                    break
+                await asyncio.sleep(0.01)
+            assert owner.status.availability == CapabilityAvailability.AVAILABLE
+            owner.attempt_construction()
+            assert isinstance(owner.require_service(), Service)
+        finally:
+            await registry.stop_recovery()
+
+        def request():
+            return owner.require_service()
+
+        assert isinstance(request(), Service)
+
+    asyncio.run(scenario())
+
+
+def test_cold_method_invocation_waits_for_its_bounded_constructor(monkeypatch):
+    """Catches a healthy cold facade racing its constructor and refusing wiring."""
+    from threading import Event
+
+    from vonk_control import capabilities
+
+    release = Event()
+
+    class ConstructionDone(Event):
+        def wait(self, timeout=None):
+            release.set()
+            return super().wait(timeout=timeout)
 
     class Service:
-        def __init__(self):
-            completed.set()
+        def issue(self):
+            return 7
 
-    class FailedStart:
-        def start(self):
-            raise OSError("executor capacity unavailable")
+    def factory():
+        assert release.wait(timeout=1)
+        return Service()
 
-    def worker(**kwargs):
-        nonlocal attempts
-        attempts += 1
-        return FailedStart() if attempts == 1 else Thread(**kwargs)
-
-    monkeypatch.setattr(capabilities, "Thread", worker)
+    monkeypatch.setattr(capabilities, "Event", ConstructionDone)
     registry = CapabilityRegistry()
-    owner = registry.provider(ControllerCapability.MODEL_CACHE, Service, Service)
-    registry.start_recovery()
+    service = registry.guard(ControllerCapability.MODEL_CACHE, Service, factory)
     try:
-        assert await asyncio.to_thread(completed.wait, 5)
-        assert attempts == 2
-        for _ in range(100):
-            if owner.status.availability == CapabilityAvailability.AVAILABLE:
-                break
-            await asyncio.sleep(0.01)
-        assert owner.status.availability == CapabilityAvailability.AVAILABLE
-        owner.attempt_construction()
-        assert isinstance(owner.require_service(), Service)
+        assert service.issue() == 7
+        assert service.issue() == 7
     finally:
-        await registry.stop_recovery()
-
-    def request():
-        return owner.require_service()
-
-    assert isinstance(request(), Service)
+        release.set()

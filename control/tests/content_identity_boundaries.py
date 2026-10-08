@@ -1,45 +1,8 @@
-"""Static audit that provenance is never compared as identity in ``control/src``.
-
-``docs/engineering-principles.md`` owns the rule: an image is its content
-(manifest digest, OCI archive sha256, bytes, architecture), a model file is its
-digest, and a build is reusable by ``build_input_sha256`` (executable inputs,
-without the builder binary). *Provenance* says who asked first, never what the
-thing is: the recipe, slug or revision; ``build_id``; ``distribution_*``; the
-runtime adapter of the asker; the builder binary inside a build-input
-comparison. A comparison on provenance refuses an identical image the first
-time a sibling recipe, an editorial successor or an upgraded builder reaches it,
-and every such site found in production was found late because each looked
-different.
-
-This module is the machine check. ``vonk_control.content_identity`` owns every
-"same image / same model / reusable build" decision, so the scan skips that
-file. Anywhere else, a comparison (``==``, ``!=``, ``in``, ``not in``, ``is``,
-an ordering), a query filter (``.where(X == ...)``, ``.in_(...)``,
-``.filter_by(field=...)``) or a call to ``build_input_for_builder`` that touches
-a provenance field is a site, and a site must be named in
-``tools/content-identity-allowlist.json`` with a written reason. Allowed
-reasons are the real security and ownership edges:
-
-* ingress digest verification, build source policy, agent mTLS, the signed
-  Controller-to-agent plans that bind what is installed, the helper's mount and
-  access checks, and the operator-reviewed image of a profile load;
-* selecting rows by id for ownership, cancellation, retention or navigation,
-  where the id is the thing being asked for and not a stand-in for content.
-
-Entries are keyed on path, enclosing function, kind and the normalized
-expression, never on a line number, so an unrelated edit in a large module does
-not break another change. An unlisted site fails, a listed site that no longer
-occurs fails as stale, and an entry without a reason fails to load.
-
-Comparisons whose other side is only a literal (``is None``, ``== ""``) ask
-whether a field exists, not whether two things are the same, and are not sites.
-"""
+"""Fixture-tested syntax detection; no allowances or historical counts."""
 
 from __future__ import annotations
 
 import ast
-import json
-import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,7 +11,6 @@ from .parsed_sources import memoized_scan, parsed_tree
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
-ALLOWLIST_PATH = REPO_ROOT / "tools" / "content-identity-allowlist.json"
 # The one module allowed to decide sameness from provenance-bearing records.
 OWNER_MODULE = "control/src/vonk_control/content_identity.py"
 
@@ -63,6 +25,9 @@ KINDS = frozenset(
 _PROVENANCE_FIELDS = frozenset(
     {
         "build_id",
+        "revision",
+        "revision_id",
+        "assignment_id",
         "recipe_build_id",
         "recipe_revision_id",
         "recipe_id",
@@ -72,7 +37,7 @@ _PROVENANCE_FIELDS = frozenset(
     }
 )
 _PROVENANCE_PREFIXES = ("runtime_adapter",)
-_PROVENANCE_SUFFIXES = ("_build_id",)
+_PROVENANCE_SUFFIXES = ("_build_id", "_revision_id", "_assignment_id")
 # A bare ``slug`` is an engine or catalog selector (``slug == "vllm"``) unless
 # it is compared next to the other parts of a catalog identity.
 _SLUG_COMPANIONS = frozenset({"publisher", "content_sha256"})
@@ -284,82 +249,3 @@ def scan_provenance_sites(root: Path = CONTROL_SOURCE_ROOT) -> list[Site]:
         return sites
 
     return memoized_scan(("identity", root), [root], compute)
-
-
-def _key(identity: dict[str, object]) -> tuple[object, ...]:
-    return (
-        identity["path"],
-        identity["function"],
-        identity["kind"],
-        identity["expression"],
-    )
-
-
-def load_allowlist(path: Path = ALLOWLIST_PATH) -> list[dict[str, object]]:
-    """Read the reviewed allowlist. A malformed entry is a hard failure."""
-
-    document = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(document, dict) or document.get("schema") != 1:
-        raise ValueError(f"{path}: allowlist must be a schema-1 object")
-    entries = document.get("sites")
-    if not isinstance(entries, list):
-        raise TypeError(f"{path}: allowlist needs a sites array")
-    loaded: list[dict[str, object]] = []
-    for index, entry in enumerate(entries):
-        where = f"{path} sites[{index}]"
-        if not isinstance(entry, dict):
-            raise TypeError(f"{where}: entry is not an object")
-        for field in ("path", "function", "kind", "expression"):
-            if not isinstance(entry.get(field), str):
-                raise TypeError(f"{where}: {field} must be a string")
-        if entry["kind"] not in KINDS:
-            raise ValueError(f"{where}: unknown site kind {entry['kind']!r}")
-        reason = entry.get("reason")
-        if not isinstance(reason, str) or len(reason.split()) < 3:
-            raise ValueError(f"{where}: allowlist entry needs a written reason")
-        loaded.append(entry)
-    return loaded
-
-
-def evaluate_identity_gate(
-    sites: Sequence[Site], allowlist: Sequence[dict[str, object]]
-) -> list[str]:
-    """Return one message per unlisted or stale site. An empty list is a pass."""
-
-    messages: list[str] = []
-    listed = {_key(entry) for entry in allowlist}
-    current = {_key(site.identity): site for site in sites}
-    for key, site in sorted(current.items(), key=lambda item: item[1].render()):
-        if key not in listed:
-            messages.append(
-                "provenance compared outside content_identity; use it, or "
-                f"allowlist with a reason: {site.render()}"
-            )
-    for entry in allowlist:
-        if _key(entry) not in current:
-            messages.append(
-                "allowlist entry no longer occurs; delete it: "
-                f"{entry['path']}: {entry['kind']} in {entry['function']}: "
-                f"{entry['expression']}"
-            )
-    return messages
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    sites = scan_provenance_sites()
-    if arguments and arguments[0] == "--list":
-        for site in sites:
-            print(json.dumps(site.identity | {"line": site.line}))
-        return 0
-    messages = evaluate_identity_gate(sites, load_allowlist())
-    if messages:
-        for message in messages:
-            print(message, file=sys.stderr)
-        return 1
-    print(f"provenance comparisons hold at {len(sites)} reviewed sites")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

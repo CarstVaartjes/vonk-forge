@@ -3473,7 +3473,7 @@ def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
             },
         },
     )
-    assert response.status_code == 403
+    assert response.status_code == 422
 
 
 def test_artifact_access_is_owned_content_addressed_and_range_bounded(

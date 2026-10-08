@@ -362,6 +362,8 @@ class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
     review_digest: Digest | None
     removal_fence: str = Field(..., pattern=UUID_PATTERN)
     selected: list[Digest]
+    scope_pending: bool = False
+    scope_from_content: bool = False
     selected_objects: list[Digest]
     delete_objects: list[Digest]
     object_index: int = Field(ge=0)

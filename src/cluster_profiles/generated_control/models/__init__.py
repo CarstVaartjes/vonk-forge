@@ -489,6 +489,7 @@ from .outcome_failed import OutcomeFailed
 from .outcome_kind import OutcomeKind
 from .outcome_unknown import OutcomeUnknown
 from .output_limits import OutputLimits
+from .package_activation_outcome import PackageActivationOutcome
 from .package_activation_phase import PackageActivationPhase
 from .package_activation_receipt import PackageActivationReceipt
 from .package_rollback_authority import PackageRollbackAuthority
@@ -1390,6 +1391,7 @@ __all__ = (
     "OutcomeKind",
     "OutcomeUnknown",
     "OutputLimits",
+    "PackageActivationOutcome",
     "PackageActivationPhase",
     "PackageActivationReceipt",
     "PackageRollbackAuthority",
