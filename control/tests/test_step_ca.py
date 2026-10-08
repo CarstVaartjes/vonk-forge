@@ -405,7 +405,7 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     assert issued.fingerprint == certificate.fingerprint(hashes.SHA256()).hex()
 
 
-@pytest.mark.parametrize("lifetime", (True, 89, 90, 2592001))
+@pytest.mark.parametrize("lifetime", (True, 89, 2592001))
 def test_rejects_invalid_configured_certificate_lifetime(
     tmp_path: Path,
     lifetime: int,
@@ -1254,3 +1254,20 @@ step crypto jwk thumbprint < agent-ca-public.jwk
             timeout=30,
             check=False,
         )
+
+
+@pytest.mark.parametrize("lifetime", (90, 86400, 2592000))
+def test_configured_ca_lifetime_is_trusted_within_bounds(
+    tmp_path: Path,
+    lifetime: int,
+) -> None:
+    """The installed step-ca configuration owns the agent certificate lifetime.
+
+    A Controller whose CA is configured shorter than 30 days still starts and
+    signs with that lifetime; it never refuses to start over it.
+    """
+    _provider(
+        tmp_path,
+        lambda _: httpx2.Response(500),
+        certificate_lifetime_seconds=lifetime,
+    )

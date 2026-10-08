@@ -162,10 +162,14 @@ class StepCertificateAuthority(CertificateAuthority):
         if (
             isinstance(certificate_lifetime_seconds, bool)
             or not isinstance(certificate_lifetime_seconds, int)
-            or certificate_lifetime_seconds != _DEFAULT_CERTIFICATE_LIFETIME_SECONDS
+            or not 90
+            <= certificate_lifetime_seconds
+            <= _DEFAULT_CERTIFICATE_LIFETIME_SECONDS
         ):
+            # The NAS step-ca configuration owns the lifetime (trust the kit);
+            # only an unrepresentable value is refused.
             raise ValueError(
-                "certificate lifetime must equal the fixed 2592000-second policy"
+                "certificate lifetime must be an integer between 90 and 2592000 seconds"
             )
         if not 0 <= clock_skew_seconds <= 60:
             raise ValueError("CA clock skew must be between zero and 60 seconds")
@@ -176,6 +180,7 @@ class StepCertificateAuthority(CertificateAuthority):
         public_jwk_bytes = _read_regular_secret_file(provisioner_public_jwk_path)
         self._root = _one_certificate(root_pem, "root")
         self._intermediate = _one_certificate(intermediate_pem, "intermediate")
+        self._certificate_lifetime_seconds = certificate_lifetime_seconds
         self._certificate_lifetime = timedelta(seconds=certificate_lifetime_seconds)
         _verify_ca_chain(self._root, self._intermediate, self._certificate_lifetime)
         try:
@@ -261,7 +266,7 @@ class StepCertificateAuthority(CertificateAuthority):
         issuer = self._intermediate.fingerprint(hashes.SHA256()).hex()
         policy = json.dumps(
             {
-                "certificate_lifetime_seconds": _DEFAULT_CERTIFICATE_LIFETIME_SECONDS,
+                "certificate_lifetime_seconds": self._certificate_lifetime_seconds,
                 "issuer_fingerprint": issuer,
                 "profile": "vonk-node-client-v1",
                 "provisioner_kid": self._provisioner_kid,
