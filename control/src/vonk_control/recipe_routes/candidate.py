@@ -66,9 +66,7 @@ def _candidate_once(
     exclude_run_ids: frozenset[str],
     lock: bool,
 ) -> _RecipeCandidate:
-    now = self._clock()
-    if now.tzinfo is None or now.utcoffset() is None:
-        raise RecipeRouteError("recipe route clock must be timezone-aware")
+    now = _aware(self._clock())
     aliases: dict[str, str] = {}
     upstream_models: dict[str, str] = {}
     model_policies: dict[str, Mapping[str, int | str]] = {}
@@ -89,7 +87,17 @@ def _candidate_once(
     if lock:
         run_statement = run_statement.with_for_update(of=RecipeRun)
     runs = tuple(session.scalars(run_statement))
-    candidate_runs = tuple(run for run in runs if run.id not in exclude_run_ids)
+    # The newest accepted intent owns an alias. An explicit publication takes
+    # precedence over older persisted projections, including damaged ones.
+    owners: dict[str, RecipeRun] = {}
+    for run in sorted(
+        runs,
+        key=lambda item: (item.id == include_run_id, item.created_at, item.id),
+        reverse=True,
+    ):
+        if run.id not in exclude_run_ids:
+            owners.setdefault(run.alias, run)
+    candidate_runs = tuple(owners.values())
     node_statement = (
         select(RunNode)
         .where(RunNode.run_id.in_([run.id for run in candidate_runs]))
@@ -126,7 +134,7 @@ def _candidate_once(
         try:
             retained: list[str] = []
             if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
-                raise RecipeRouteError(
+                raise RecipeRouteNotReady(
                     "recipe run alias is invalid or duplicated", run_id=run.id
                 )
             upstream_model = _primary_model_alias(session, run)
@@ -279,6 +287,7 @@ def _candidate_once(
             accepted = read_accepted(run.id, self._management_policy)
             if accepted is None:
                 raise
+            retained_aliases: list[str] = []
             for accepted_alias, endpoint in accepted.endpoints.items():
                 agent = session.get(AgentNode, endpoint.node_id)
                 if agent is not None and agent.revoked_at is not None:
@@ -286,9 +295,10 @@ def _candidate_once(
                         "accepted endpoint node is revoked", run_id=run.id
                     )
                 if accepted_alias in aliases:
-                    raise RecipeRouteError(
-                        "accepted recipe aliases overlap", run_id=run.id
-                    )
+                    # A stale accepted projection cannot displace the owner
+                    # already selected from current authorized intent.
+                    continue
+                retained_aliases.append(accepted_alias)
                 model_policies[accepted_alias] = accepted.policy.models[accepted_alias]
                 aliases[accepted_alias] = endpoint.api_base
                 endpoints[accepted_alias] = endpoint
@@ -304,8 +314,9 @@ def _candidate_once(
                         accepted_policy=accepted_policy,
                     )
                 )
-            included.add(run.id)
-            self._note_retained(run.id, [str(error)])
+            if retained_aliases:
+                included.add(run.id)
+                self._note_retained(run.id, [str(error)])
     identity = RouteIdentityDocument(runs=run_identities, aliases=aliases)
     digest = hashlib.sha256(
         json.dumps(

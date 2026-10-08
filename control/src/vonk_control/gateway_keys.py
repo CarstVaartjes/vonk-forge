@@ -11,13 +11,16 @@ working as profiles change.
 from __future__ import annotations
 
 import asyncio
+import fcntl
+import hashlib
 import logging
 import os
 import re
 import secrets
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -72,7 +75,7 @@ class GatewayKeyError(UnknownOutcomeError, RuntimeError):
 def _observe_gateway[T](
     action: Callable[[], T], *, attempts: int = 1
 ) -> T | UnknownError:
-    """Bound observation attempts; mutations end uncertain rather than replaying effects."""
+    """Bound retries; mutation retries reconcile their retained exact secret first."""
     for attempt in range(attempts):
         try:
             return action()
@@ -283,7 +286,9 @@ class GatewayKeyService:
         base_url: str = LITELLM_KEY_ADMIN_URL,
         master_key: Callable[[], str] | None = None,
         transport: httpx2.BaseTransport | None = None,
+        intent_root: Path = DEFAULT_KEY_FILE.parent / "mutations",
     ) -> None:
+        self._intent_root = intent_root
         self._master_key = master_key or (
             lambda: MASTER_KEY_FILE.read_text(encoding="utf-8").strip()
         )
@@ -306,40 +311,63 @@ class GatewayKeyService:
         expires: str | None = None,
         key: str | None = None,
     ) -> GatewayKeyCreated | UnknownError:
-        try:
-            return self._gateway_create(name, models=models, expires=expires, key=key)
-        except GatewayKeyError:
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+        def create_once() -> GatewayKeyCreated | UnknownError:
+            with self._mutation_claim(name) as acquired:
+                if not acquired:
+                    return UnknownError(
+                        category=ErrorCategory.UNKNOWN,
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    )
+                return self._gateway_create(
+                    name, models=models, expires=expires, key=key
+                )
+
+        return _observe_gateway(create_once, attempts=3)
 
     def revoke(self, name: str) -> GatewayKeyRevoked | UnknownError:
-        try:
-            return self._gateway_revoke(name)
-        except GatewayKeyError:
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+        with self._mutation_claim(name) as acquired:
+            if not acquired:
+                return UnknownError(
+                    category=ErrorCategory.UNKNOWN,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            try:
+                result = self._gateway_revoke(name)
+            except GatewayKeyError:
+                return UnknownError(
+                    category=ErrorCategory.UNKNOWN,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            self._forget_intent(name)
+            self._forget_intent(_rolling_alias(name))
+            return result
 
     def roll(self, name: str) -> GatewayKeyCreated | UnknownError:
-        try:
-            return self._gateway_roll(name)
-        except GatewayKeyError:
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+        def roll_once() -> GatewayKeyCreated | UnknownError:
+            with self._mutation_claim(name) as acquired:
+                if not acquired:
+                    return UnknownError(
+                        category=ErrorCategory.UNKNOWN,
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    )
+                return self._gateway_roll(name)
+
+        return _observe_gateway(roll_once, attempts=3)
 
     def ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool | UnknownError:
-        try:
-            return self._gateway_ensure_default(path)
-        except GatewayKeyError:
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
+        with self._mutation_claim(DEFAULT_KEY_NAME) as acquired:
+            if not acquired:
+                return UnknownError(
+                    category=ErrorCategory.UNKNOWN,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            try:
+                return self._gateway_ensure_default(path)
+            except (GatewayKeyError, OSError):
+                return UnknownError(
+                    category=ErrorCategory.UNKNOWN,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
 
     def _gateway_check_health(self) -> bool:
         code, _payload = self._gateway_request("GET", "/health/readiness")
@@ -424,9 +452,26 @@ class GatewayKeyService:
         expires: str | None = None,
         key: str | None = None,
     ) -> GatewayKeyCreated:
-        if self._gateway_exists(name):
+        pending = self._read_intent(name)
+        if (
+            pending is None
+            and not self._intent_path(name).exists()
+            and not self._intent_path(_rolling_alias(name)).exists()
+            and self._gateway_exists(name)
+        ):
             raise GatewayKeyConflict(f"key {name} already exists")
-        return self._gateway_create_under(name, models=models, expires=expires, key=key)
+        created = self._gateway_create_under(
+            name, models=models, expires=expires, key=key
+        )
+        rolling = _rolling_alias(name)
+        if self._intent_path(rolling).exists():
+            # The newer create supersedes the unfinished rotation. Retain its
+            # own receipt until the obsolete remote alias is reconciled.
+            if self._gateway_exists(rolling):
+                self._gateway_delete_alias(rolling)
+            self._forget_intent(rolling)
+        self._forget_intent(name)
+        return created
 
     def _gateway_create_under(
         self,
@@ -436,14 +481,41 @@ class GatewayKeyService:
         expires: str | None = None,
         key: str | None = None,
     ) -> GatewayKeyCreated:
-        body = _KeyGenerateRequest(
-            key_alias=name,
-            models=list(models or []),
-            allowed_routes=list(_KEY_ROUTES),
-            metadata=_KeyMetadata(),
-            duration=expires,
-            key=key if key is not None else "sk-" + secrets.token_urlsafe(32),
+        body = self._read_intent(name)
+        replacement = self._intent_path(name).exists() and (
+            body is None
+            or body.models != list(models or [])
+            or body.duration != expires
+            or (key is not None and key != body.key)
         )
+        if replacement:
+            body = None
+        if body is not None:
+            observed = self._gateway_observe_created(body)
+            if observed is not None:
+                return observed
+        else:
+            body = _KeyGenerateRequest(
+                key_alias=name,
+                models=list(models or []),
+                allowed_routes=list(_KEY_ROUTES),
+                metadata=_KeyMetadata(),
+                duration=expires,
+                key=key if key is not None else "sk-" + secrets.token_urlsafe(32),
+            )
+            try:
+                self._intent_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+                self._intent_root.chmod(0o700)
+                _write_private(self._intent_path(name), body.model_dump_json())
+            except OSError as error:
+                raise GatewayKeyError(
+                    "gateway mutation persistence is unavailable"
+                ) from error
+        # A persisted unresolved create authorizes replacing an alias whose
+        # secret differs from this exact request. Same-key effects returned
+        # above are adopted, never deleted or regenerated.
+        if self._gateway_exists(name):
+            self._gateway_delete_alias(name)
         try:
             code, payload = self._gateway_request("POST", "/key/generate", json=body)
         except GatewayKeyError:
@@ -510,51 +582,105 @@ class GatewayKeyService:
         self._gateway_delete_alias(name)
         return GatewayKeyRevoked(name=name)
 
-    def _gateway_roll(self, name: str) -> GatewayKeyCreated | UnknownError:
-        """Replace one key's secret, keeping its name and model list.
+    @contextmanager
+    def _mutation_claim(self, name: str) -> Iterator[bool]:
+        descriptor: int | None = None
+        acquired = False
+        try:
+            if self._intent_root.is_symlink():
+                yield False
+                return
+            self._intent_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            self._intent_root.chmod(0o700)
+            descriptor = os.open(
+                self._intent_path(name).with_suffix(".lock"),
+                os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+                0o600,
+            )
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except OSError:
+            pass
+        try:
+            yield acquired
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
 
-        LiteLLM cannot rotate a secret in place, so the new key is created
-        first under a temporary alias; only once it exists is the old key
-        deleted and the new one renamed to `name`. A failed create leaves the
-        old key untouched and working. An unexpired key keeps its remaining
-        lifetime.
-        """
-        current = next(
-            (item for item in self._gateway_raw_keys() if item.key_alias == name), None
-        )
-        if current is None:
+    def _intent_path(self, name: str) -> Path:
+        return self._intent_root / (hashlib.sha256(name.encode()).hexdigest() + ".json")
+
+    def _forget_intent(self, name: str) -> None:
+        try:
+            self._intent_path(name).unlink(missing_ok=True)
+        except OSError:
+            # A retained receipt is safe to observe again; cleanup is bookkeeping.
+            pass
+
+    def _read_intent(self, name: str) -> _KeyGenerateRequest | None:
+        try:
+            if self._intent_path(name).is_symlink():
+                return None
+            body = _KeyGenerateRequest.model_validate_json(
+                self._intent_path(name).read_bytes()
+            )
+            if (
+                body.key_alias != name
+                or body.key is None
+                or _KEY_PATTERN.fullmatch(body.key) is None
+                or body.allowed_routes != _KEY_ROUTES
+                or body.metadata != _KeyMetadata()
+            ):
+                return None
+            return body
+        except (OSError, ValueError):
+            return None
+
+    def _gateway_roll(self, name: str) -> GatewayKeyCreated | UnknownError:
+        """Resume the exact replacement secret before observing mutable alias state."""
+        temporary = _rolling_alias(name)
+        pending = self._read_intent(temporary)
+        if pending is not None:
+            renamed = self._gateway_observe_created(
+                pending.model_copy(update={"key_alias": name})
+            )
+            if renamed is not None:
+                self._forget_intent(temporary)
+                return renamed
+        keys = self._gateway_raw_keys()
+        current = next((item for item in keys if item.key_alias == name), None)
+        if pending is None and current is None:
+            # Damaged local recovery metadata is a miss. A surviving temporary
+            # key supplies observable scope for a fresh authorized replacement.
+            current = next((item for item in keys if item.key_alias == temporary), None)
+        if pending is None and current is None:
             return UnknownError(
                 category=ErrorCategory.UNKNOWN, reason=WaitReason.SCOPE_CHANGED
             )
-        view = _view(current)
-        models = view.models if view is not None else []
-        temporary = _rolling_alias(name)
-        if self._gateway_exists(temporary):
-            # An earlier roll stopped between its steps; its leftover is not
-            # in use by anyone, so it is replaced.
-            self._gateway_delete_alias(temporary)
         created = self._gateway_create_under(
             temporary,
-            models=models,
-            expires=_remaining(current.expires),
+            models=pending.models
+            if pending is not None
+            else current.models
+            if current is not None
+            else None,
+            expires=pending.duration
+            if pending is not None
+            else _remaining(current.expires)
+            if current is not None
+            else None,
         )
-        self._gateway_delete_alias(name)
+        self._forget_intent(name)
+        if self._gateway_exists(name):
+            self._gateway_delete_alias(name)
         code, _ = self._gateway_request(
             "POST",
             "/key/update",
             json=_KeyUpdateRequest(key=created.key, key_alias=name),
         )
         if code != 200:
-            # The new key works; it keeps the temporary alias until the next
-            # roll instead of losing the only copy of its secret.
-            _LOGGER.warning(
-                "rolled gateway key %s could not be renamed (HTTP %s); "
-                "it is listed as %s",
-                name,
-                code,
-                temporary,
-            )
-            return created
+            raise GatewayKeyError("gateway rename effect is unconfirmed")
+        self._forget_intent(temporary)
         return created.model_copy(update={"name": name})
 
     def _gateway_ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool:
@@ -642,6 +768,11 @@ def _write_private(path: Path, content: str) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         Path(temporary).unlink(missing_ok=True)
 

@@ -47,9 +47,16 @@ def _publish(
     publisher._identity(authority_id, plan_digest, evidence_set_digest)
     with publisher._locked() as uncertainty:
         assert uncertainty is None
-        current = publisher._read_marker(optional=True, verify_files=True)
-        assert not isinstance(current, UnknownError)
-        generation = (current.generation if current is not None else 0) + 1
+        generation = (
+            max(
+                (
+                    int(path.name.partition("-")[0])
+                    for path in publisher._generations.iterdir()
+                ),
+                default=0,
+            )
+            + 1
+        )
         marker = publisher._activate(
             generation=generation,
             state=state,
@@ -133,29 +140,38 @@ def test_reader_and_supervisor_reject_invalid_or_retired_markers(
     root = tmp_path / "runtime"
     document = marker.model_dump() | mutation
     (root / "activation.json").write_bytes(_encoded(document))
-    with pytest.raises(RouteRuntimeError):
-        verify_active_route_bundle(root)
+    assert isinstance(verify_active_route_bundle(root), UnknownError)
     assert _supervisor(monkeypatch, root)._active_request() is None
+    _publish(_publisher(tmp_path))
+    assert not isinstance(verify_active_route_bundle(root), UnknownError)
 
 
 @pytest.mark.parametrize("filename", ["manifest.json", "routes.json", "litellm.json"])
-def test_corrupt_generation_fails_closed(tmp_path, monkeypatch, filename):
+def test_corrupt_generation_is_not_consumed_and_fresh_publication_repairs(
+    tmp_path, monkeypatch, filename
+):
     marker = _publish(_publisher(tmp_path))
     root = tmp_path / "runtime"
     (root / "generations" / marker.directory / filename).write_bytes(b"{}\n")
-    with pytest.raises(RouteRuntimeError, match="checksum"):
-        verify_active_route_bundle(root)
+    assert isinstance(verify_active_route_bundle(root), UnknownError)
     assert _supervisor(monkeypatch, root)._active_request() is None
+    repaired = _publish(_publisher(tmp_path))
+    assert repaired.generation > marker.generation
+    assert not isinstance(verify_active_route_bundle(root), UnknownError)
 
 
-def test_noncanonical_marker_fails_closed(tmp_path, monkeypatch):
+def test_noncanonical_marker_is_unknown_and_fresh_publication_repairs(
+    tmp_path, monkeypatch
+):
     marker = _publish(_publisher(tmp_path))
     root = tmp_path / "runtime"
     activation = root / "activation.json"
     activation.write_text(json.dumps(marker.model_dump(), indent=2))
-    with pytest.raises(RouteRuntimeError, match="canonical"):
-        verify_active_route_bundle(root)
+    assert isinstance(verify_active_route_bundle(root), UnknownError)
     assert _supervisor(monkeypatch, root)._active_request() is None
+    repaired = _publish(_publisher(tmp_path))
+    assert not isinstance(verify_active_route_bundle(root), UnknownError)
+    assert repaired.generation > marker.generation
 
 
 def test_republication_and_empty_publication_keep_monotonic_generations_and_ack(
@@ -356,3 +372,24 @@ def _inspected(publisher, **kwargs):
     marker = publisher.inspect(**kwargs)
     assert not isinstance(marker, UnknownError)
     return marker
+
+
+def test_partial_staged_file_is_repaired_but_symlink_target_is_not_consumed(tmp_path):
+    """Catches treating incomplete managed bytes as refusal or writing through an unsafe path."""
+    publisher = _publisher(tmp_path)
+    directory = publisher._generations / "partial"
+    directory.mkdir()
+    target = directory / "routes.json"
+    target.write_bytes(b"partial")
+    publisher._stage(directory, "routes.json", b"complete")
+    assert target.read_bytes() == b"complete"
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"unrelated")
+    target.unlink()
+    target.symlink_to(outside)
+    with pytest.raises(RouteRuntimeError):
+        publisher._stage(directory, "routes.json", b"complete")
+    assert outside.read_bytes() == b"unrelated"
+    target.unlink()
+    publisher._stage(directory, "routes.json", b"complete")
+    assert target.read_bytes() == b"complete"

@@ -7,9 +7,21 @@ import httpx2
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from vonk_agent_protocol import ErrorCategory, UnknownError, WaitReason
+from vonk_agent_protocol import ErrorCategory, UnknownError
 from vonk_control.auth import Actor
 from vonk_control.gateway_keys import GatewayKeyService, install_gateway_key_routes
+
+
+@pytest.fixture(autouse=True)
+def private_mutation_records(tmp_path, monkeypatch):
+    original = GatewayKeyService.__init__
+
+    def initialize(self, **kwargs):
+        kwargs.setdefault("intent_root", tmp_path / "mutations")
+        original(self, **kwargs)
+
+    monkeypatch.setattr(GatewayKeyService, "__init__", initialize)
+
 
 MASTER = "sk-master-" + "m" * 32
 
@@ -108,10 +120,12 @@ def test_roll_replaces_the_secret_and_keeps_name_and_models():
     assert body["name"] == "ci" and body["models"] == ["qwen"]
     assert body["key"] != first["key"]
     assert [item["name"] for item in client.get("/api/key").json()["keys"]] == ["ci"]
-    assert (
-        UnknownError.model_validate(client.post("/api/key/missing/roll").json()).reason
-        is WaitReason.SCOPE_CHANGED
+    assert isinstance(
+        UnknownError.model_validate(client.post("/api/key/missing/roll").json()),
+        UnknownError,
     )
+    assert client.post("/api/key", json={"name": "missing"}).status_code == 201
+    assert client.post("/api/key/missing/roll").status_code == 200
 
 
 def test_roll_that_fails_to_create_keeps_the_old_key_working():
@@ -120,13 +134,17 @@ def test_roll_that_fails_to_create_keeps_the_old_key_working():
     first = client.post("/api/key", json={"name": "ci", "models": ["qwen"]}).json()
     litellm.fail_generate_after = litellm.counter
 
-    assert (
-        UnknownError.model_validate(client.post("/api/key/ci/roll").json()).reason
-        is WaitReason.OBSERVATION_UNAVAILABLE
+    assert isinstance(
+        UnknownError.model_validate(client.post("/api/key/ci/roll").json()),
+        UnknownError,
     )
-
     assert list(litellm.keys) == ["ci"]
     assert litellm.keys["ci"]["key"] == first["key"]
+    litellm.fail_generate_after = None
+    recovered = client.post("/api/key/ci/roll")
+    assert recovered.status_code == 200
+    assert recovered.json()["key"] != first["key"]
+    assert list(litellm.keys) == ["ci"]
 
 
 def test_create_list_and_revoke_client_keys():
@@ -158,10 +176,11 @@ def test_create_list_and_revoke_client_keys():
 
     assert client.post("/api/key/ci/revoke").json() == {"name": "ci"}
     assert set(litellm.keys) == {"laptop"}
-    assert (
-        UnknownError.model_validate(client.post("/api/key/ci/revoke").json()).reason
-        is WaitReason.SCOPE_CHANGED
+    assert isinstance(
+        UnknownError.model_validate(client.post("/api/key/ci/revoke").json()),
+        UnknownError,
     )
+    assert client.post("/api/key", json={"name": "ci"}).status_code == 201
 
 
 def test_only_administrators_create_or_revoke_keys():
@@ -272,50 +291,21 @@ def test_lost_create_reply_reconciles_exact_secret_without_replaying_effect(fail
 
 
 def test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted():
-    """Catches returning 503 or keeping a busy alias after a failed create attempt."""
-    from dataclasses import replace
-
-    from vonk_agent_protocol import AgentOperation, LifecycleState
+    """Catches discarding unresolved identity or leaving a gate after exhaustion."""
     from vonk_control.gateway_keys import GatewayKeyCreated
-    from vonk_control.lifecycle.types import Lifecycle
-
-    from .non_blocking import assert_ended_without_blocking
 
     litellm = FakeLiteLlm()
     litellm.fail_generate_after = 0
     service = _service(litellm)
-    observed = []
-
-    def end(operation):
-        result = service.create("first")
-        assert isinstance(result, UnknownError)
-        observed.append(result)
-        litellm.fail_generate_after = None
-        return replace(operation, state=LifecycleState.FAILED)
-
-    def fresh(_world):
-        created = service.create("first")
-        assert isinstance(created, GatewayKeyCreated)
-        assert created.key == litellm.keys["first"]["key"]
-        return Lifecycle(
-            id="fresh", kind=AgentOperation.RECIPE_START, state=LifecycleState.SUCCEEDED
-        )
-
-    def assert_released():
-        assert not isinstance(service.list_keys(), UnknownError)
-
-    def assert_reason(_operation):
-        assert observed[0].reason is WaitReason.OBSERVATION_UNAVAILABLE
-
-    assert_ended_without_blocking(
-        service,
-        Lifecycle(id="first", kind=AgentOperation.RECIPE_START),
-        end=end,
-        fresh=fresh,
-        request_key=lambda operation: operation.id,
-        assert_released=assert_released,
-        assert_reason=assert_reason,
-    )
+    result = service.create("first")
+    assert isinstance(result, UnknownError)
+    assert not litellm.keys
+    retained = json.loads(service._intent_path("first").read_text())
+    litellm.fail_generate_after = None
+    created = service.create("first")
+    assert isinstance(created, GatewayKeyCreated)
+    assert created.key == retained["key"] == litellm.keys["first"]["key"]
+    assert not isinstance(service.list_keys(), UnknownError)
 
 
 def test_gateway_denial_is_not_softened_to_bookkeeping_unknown():
@@ -333,3 +323,193 @@ def test_gateway_denial_is_not_softened_to_bookkeeping_unknown():
     assert client.get("/api/key").status_code == 403
     denied[0] = False
     assert client.get("/api/key").json() == {"keys": []}
+
+
+@pytest.mark.parametrize("mutation", ["create", "rename-before", "rename-after"])
+def test_remote_effect_and_observation_loss_recovers_after_service_restart(
+    tmp_path, mutation
+):
+    """Catches losing the sole secret when both the effect reply and its observation disappear."""
+    from vonk_control.gateway_keys import GatewayKeyCreated
+
+    litellm = FakeLiteLlm()
+    if mutation != "create":
+        assert isinstance(
+            _service(litellm).create("client", models=["qwen"]), GatewayKeyCreated
+        )
+    outage = [False]
+    effects = []
+    root = tmp_path / "retained"
+
+    def transport(request):
+        if outage[0]:
+            raise httpx2.ReadError("observation unavailable", request=request)
+        path = request.url.path
+        target = "/key/generate" if mutation == "create" else "/key/update"
+        if path == target:
+            records = list(root.glob("*.json"))
+            assert len(records) == 1
+            retained = json.loads(records[0].read_text())
+            assert stat.S_IMODE(records[0].stat().st_mode) == 0o600
+            body = json.loads(request.content)
+            assert retained["key"] == body["key"]
+            effects.append(body["key"])
+            if mutation != "rename-before":
+                litellm.handle(request)
+            outage[0] = True
+            raise httpx2.ReadError("effect reply lost", request=request)
+        return litellm.handle(request)
+
+    def service(handler):
+        return GatewayKeyService(
+            master_key=lambda: MASTER,
+            transport=httpx2.MockTransport(handler),
+            intent_root=root,
+        )
+
+    first = service(transport)
+    result = first.create("client") if mutation == "create" else first.roll("client")
+    assert isinstance(result, UnknownError)
+    assert len(effects) == 1
+    recovered = service(litellm.handle)
+    result = (
+        recovered.create("client") if mutation == "create" else recovered.roll("client")
+    )
+    assert isinstance(result, GatewayKeyCreated)
+    assert result.key == effects[0] == litellm.keys["client"]["key"]
+    assert list(litellm.keys) == ["client"]
+    # A completed reconciliation leaves no gate on the next rotation.
+    next_key = recovered.roll("client")
+    assert isinstance(next_key, GatewayKeyCreated)
+    assert next_key.key != result.key
+
+
+@pytest.mark.parametrize("damaged", [True, False])
+def test_new_create_content_supersedes_unresolved_or_damaged_intent(tmp_path, damaged):
+    """Catches replaying stale scope or refusing a fresh request on damaged local metadata."""
+    from vonk_control.gateway_keys import GatewayKeyCreated
+
+    litellm = FakeLiteLlm()
+    litellm.fail_generate_after = 0
+    service = _service(litellm)
+    assert isinstance(service.create("client", models=["old"]), UnknownError)
+    if damaged:
+        service._intent_path("client").write_text("broken")
+    litellm.fail_generate_after = None
+    created = service.create("client", models=["new"])
+    assert isinstance(created, GatewayKeyCreated)
+    assert created.models == litellm.keys["client"]["models"] == ["new"]
+
+
+def test_busy_mutation_ends_without_effect_and_fresh_request_enters():
+    """Catches concurrent mutation writers replacing the only retained secret."""
+    from vonk_control.gateway_keys import GatewayKeyCreated
+
+    litellm = FakeLiteLlm()
+    service = _service(litellm)
+    with service._mutation_claim("client") as acquired:
+        assert acquired
+        result = _service(litellm).create("client")
+        assert isinstance(result, UnknownError)
+        assert not litellm.keys
+    assert isinstance(service.create("client"), GatewayKeyCreated)
+
+
+@pytest.mark.parametrize("replacement", ["roll", "create"])
+def test_damaged_roll_after_original_deletion_does_not_gate_new_mutation(replacement):
+    """Catches an orphan temporary alias requiring manual revocation to escape."""
+    from vonk_control.gateway_keys import GatewayKeyCreated
+
+    litellm = FakeLiteLlm()
+    service = _service(litellm)
+    assert isinstance(service.create("client", models=["old"]), GatewayKeyCreated)
+    original_request = service._gateway_request
+
+    def unavailable_rename(method, path, **kwargs):
+        if path == "/key/update":
+            from vonk_control.gateway_keys import GatewayKeyError
+
+            raise GatewayKeyError("injected rename loss")
+        return original_request(method, path, **kwargs)
+
+    service._gateway_request = unavailable_rename
+    assert isinstance(service.roll("client"), UnknownError)
+    assert list(litellm.keys) == ["client.rolling"]
+    service._intent_path("client.rolling").write_text("broken")
+    service._gateway_request = original_request
+    result = (
+        service.roll("client")
+        if replacement == "roll"
+        else service.create("client", models=["new"])
+    )
+    assert isinstance(result, GatewayKeyCreated)
+    assert list(litellm.keys) == ["client"]
+    assert result.key == litellm.keys["client"]["key"]
+    assert result.models == (["old"] if replacement == "roll" else ["new"])
+
+
+def _create_crash_executor(root, sender):
+    import os
+
+    litellm = FakeLiteLlm()
+
+    def handle(request):
+        if request.url.path == "/key/generate":
+            sender.send_bytes(request.content)
+            os._exit(0)
+        return litellm.handle(request)
+
+    GatewayKeyService(
+        master_key=lambda: MASTER,
+        transport=httpx2.MockTransport(handle),
+        intent_root=root,
+    ).create("client")
+
+
+# A fresh interpreter avoids inheriting HTTP-client threads while exercising death.
+@pytest.mark.slow(15)
+def test_process_death_preserves_create_secret_and_releases_mutation_claim(tmp_path):
+    """Catches a memory-only secret or a claim surviving executor death."""
+    import multiprocessing
+
+    from vonk_control.gateway_keys import GatewayKeyCreated
+
+    root = tmp_path / "process-records"
+    context = multiprocessing.get_context("spawn")
+    receiver, sender = context.Pipe(duplex=False)
+    litellm = FakeLiteLlm()
+
+    process = context.Process(target=_create_crash_executor, args=(root, sender))
+    process.start()
+    sender.close()
+    try:
+        assert receiver.poll(10)
+        body = receiver.recv_bytes()
+        # The external service retains its effect independently of the dead
+        # executor; reconciliation consumes the actual persisted request bytes.
+        litellm.handle(
+            httpx2.Request(
+                "POST",
+                "http://litellm.test/key/generate",
+                headers={"authorization": f"Bearer {MASTER}"},
+                content=body,
+            )
+        )
+        process.join(timeout=3)
+        assert not process.is_alive()
+        assert process.exitcode == 0
+        service = GatewayKeyService(
+            master_key=lambda: MASTER,
+            transport=httpx2.MockTransport(litellm.handle),
+            intent_root=root,
+        )
+        recovered = service.create("client")
+        assert isinstance(recovered, GatewayKeyCreated)
+        assert recovered.key == json.loads(body)["key"]
+        assert litellm.counter == 1
+        assert isinstance(service.roll("client"), GatewayKeyCreated)
+    finally:
+        receiver.close()
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=3)

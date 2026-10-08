@@ -101,7 +101,7 @@ class AtomicRecipeRoutePublisher:
             or routes.generation != bundle.marker.generation
             or bundle.marker.evidence_set_digest != bundle.marker.plan_digest
         ):
-            raise RouteRuntimeError("accepted recipe route identity is invalid")
+            return None
         found = [
             (alias, endpoint)
             for alias, endpoint in routes.routes.items()
@@ -110,26 +110,29 @@ class AtomicRecipeRoutePublisher:
         if not found:
             return None
         if len(found) != 1:
-            raise RouteRuntimeError("accepted recipe run has ambiguous route ownership")
+            return None
         alias, raw = found[0]
         if _ALIAS.fullmatch(alias) is None or raw.scheme != "http" or raw.path != "/v1":
-            raise RouteRuntimeError("accepted recipe endpoint is invalid")
+            return None
         try:
             policy.validate(raw.address)
         except PresenceError as error:
             raise RecipeEndpointAuthorityRefused(
                 "accepted endpoint is outside management policy", run_id=run_id
             ) from error
-        endpoint = _RecipeEndpoint(
-            _NODE_ID.validate_python(raw.node_id),
-            str(ipaddress.ip_address(raw.address)),
-            raw.port,
-            _aware(datetime.fromisoformat(raw.observed_at)),
-            raw.operation_id,
-        )
+        try:
+            endpoint = _RecipeEndpoint(
+                _NODE_ID.validate_python(raw.node_id),
+                str(ipaddress.ip_address(raw.address)),
+                raw.port,
+                _aware(datetime.fromisoformat(raw.observed_at)),
+                raw.operation_id,
+            )
+        except ValueError:
+            return None
         entries = [item for item in runtime.model_list if item.model_name == alias]
         if len(entries) != 1:
-            raise RouteRuntimeError("accepted recipe runtime policy is invalid")
+            return None
         params = entries[0].litellm_params
         model, rpm, tpm = params.model, params.rpm, params.tpm
         if (
@@ -138,7 +141,7 @@ class AtomicRecipeRoutePublisher:
             or params.api_base != endpoint.api_base.rstrip("/")
             or params.api_key != "os.environ/LITELLM_UPSTREAM_KEY"
         ):
-            raise RouteRuntimeError("accepted recipe runtime policy is invalid")
+            return None
         quota = LiteLlmPolicy(
             {
                 alias: {
@@ -150,7 +153,10 @@ class AtomicRecipeRoutePublisher:
         )
         # The renderer owns policy validation, including resource bounds.
         state = RouteState({alias: endpoint.api_base}, bundle.marker.plan_digest)
-        render_config(state, quota)
+        try:
+            render_config(state, quota)
+        except ValueError:
+            return None
         return _RecipeCandidate(state, frozenset({run_id}), quota, {alias: endpoint})
 
     def _next_generation(self) -> int:

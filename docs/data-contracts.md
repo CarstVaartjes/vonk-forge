@@ -304,3 +304,12 @@ Controller capability availability and retryable refusals are owned by
 `control/src/vonk_control/capability_contract.py`.
 
 `operation_api/openapi.py` passes external OpenAPI and JSON Schema documents through `ExternalSchemaDocument`, annotated with `ExternalPassthrough`; application responses remain canonical registered models.
+
+Gateway mutation recovery uses the existing `gateway_keys._KeyGenerateRequest`
+contract. The proposed alias, scope, lifetime, and secret are persisted before
+LiteLLM mutation in `/gateway-secrets/mutations`, the Controller's writable,
+persistent gateway secret bind mount. Records and claim files are private
+(mode 0600, directory mode 0700); normalized administrative secrets remain
+read-only. These records do not grant authority: every API mutation retains
+its role check and every remote request authenticates with the master key.
+Malformed records are misses; current requests replace them before effects.

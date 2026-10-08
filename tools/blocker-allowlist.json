@@ -3042,7 +3042,7 @@
     },
     "control/src/vonk_control/gateway_keys.py": {
       "GatewayKeyError": "3ac6e34bd1374f0ef5af9db6b0df2c745c2416e044ad8f91303631e49383361f",
-      "_observe_gateway": "dd4dbe3f6f6cf17dfc264c8655634b45fe50dbc7cda71a9528cedd7e836762ec",
+      "_observe_gateway": "98556db49d7d6068a777c2387de97176e46c9decfd4b358c3da5bf3ead48c8b8",
       "GatewayKeyConflict": "6f14cf8f23e0608e72951bae9be1f385fba4464374cbc5202c6c3e2beb842a5e",
       "GatewayKeyCreateRequest": "bbf33ca5199793c277958e2e6f1ed8712cda31024d7d77a3c572b89660cfcda0",
       "GatewayKeyView": "18b22d38e0ebbb703ff0437cccdf006826716cd0b5a688c2224bf091547294c9",
@@ -3071,30 +3071,36 @@
       "_remaining": "eb4d399677046f3c3f01b0a4751cb3576800c90c169ff5ad82e0a0d879928153",
       "_rolling_alias": "6cfbbb4b20d3ed64ce9d0c7c0bdfb80c27cb47fb8933cbbd3e2eabf43e3a5ed1",
       "_view": "b497541e9bae8b616c67f60069bc9d8541634899a60e0fdb447b50285db3af6f",
-      "GatewayKeyService": "99f80d75d0f5051a66cd79d893d3f242cd9ea53f500110815caf5c9b4f939094",
-      "GatewayKeyService.__init__": "2a45607eec979636c36c75a25342c296e9150474df3601ec67d1b8718466dc32",
+      "GatewayKeyService": "9a240b47ec4ac153b1efdc74e67fb594c2f98af617e88b8e624011385ebab78c",
+      "GatewayKeyService.__init__": "4d4e97f92817e4474421d46df38f62d70cd973d2def4cebfa8ca720872de79cd",
       "GatewayKeyService.check_health": "e776afd511f6ec4a8a45ae292856a13f7cb53215782724c2e22ec2c07c16beeb",
       "GatewayKeyService.list_keys": "bb62e6cb39f7bb1346e60394134ede8302583086630028f2c30eed31eb36f534",
-      "GatewayKeyService.create": "5cb2f77388e1d82765381245e4701a023037baeafad38a25f35b9b60680b8e92",
-      "GatewayKeyService.revoke": "b5bcc19f17a76933bcb2bb77ecd90b0a2cf7e7a32cb1720833ac9722b9a92e98",
-      "GatewayKeyService.roll": "0ff8425a75b275aa436b0f3699ca3d636ef39b74bacd6e35099cd8a038292a66",
-      "GatewayKeyService.ensure_default": "ae8abf5a08f7ef811a53a433bd14a5cf9738a1984de5ed0bf223cf63379e626b",
+      "GatewayKeyService.create": "dfd86b75952ab240949f7da8eb4673e31829c4118ce77c147292d17e69cb22f7",
+      "GatewayKeyService.create.create_once": "8809bca4b40e50a543d81946cae69207ad56115bf86ed4aeb72ae217330a9ea4",
+      "GatewayKeyService.revoke": "a59edf94df5bc72f92dd62ea648b9b8c3c4365aa7d8aefa3f7c27c786662df40",
+      "GatewayKeyService.roll": "4859d8ac140796ebb77d1a1790b28cb86ea034002379e548eb602ff9e9e387a6",
+      "GatewayKeyService.roll.roll_once": "ae8f8a5b33b1cdf8333c905bc1144bb0bf1294d6b4d5c6214aee5f65210aaa77",
+      "GatewayKeyService.ensure_default": "9be834456b495db3a4c4d8d6a9652b531fd520de0c4d770416b7e48f9cc0e107",
       "GatewayKeyService._gateway_check_health": "59224477fb04e7ab5d2233762fbc1dd88a2914312df2aa41e43782a003308662",
       "GatewayKeyService.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
       "GatewayKeyService._gateway_request": "553f2bb33401df305176acb8650144e2b1c9b6579e765b1d5f87e69aabd5ee97",
       "GatewayKeyService._gateway_raw_keys": "70f5b985ea70a114eaa50e01cf255802569838926c4738a1ef14694e7e46f6df",
       "GatewayKeyService._gateway_list_keys": "8ceb99b17b2aa3d674479b95e059d6ea9809d9b9d55ef08a84771f0aa02c8b44",
       "GatewayKeyService._gateway_exists": "1170dc8e7198849333377d2fc9fb5eae7b60a66b69e4cd8e54026236df95a2ea",
-      "GatewayKeyService._gateway_create": "86ba5f8b745f599583600d362c4e86f160f88936b2b995a866c7c8e5ef789556",
-      "GatewayKeyService._gateway_create_under": "7be21949446e6058b19e231041f8f300590a76141bc1514faf1e636f10734c08",
+      "GatewayKeyService._gateway_create": "492fbc04e6c1214563de9936d2d360f668a26ed6e281cacf0e17eb7191b81c31",
+      "GatewayKeyService._gateway_create_under": "efd6a4cc7d20bbbabf34e6d6b92d008803244e0ccbaf2afa82d65d5751325447",
       "GatewayKeyService._gateway_observe_created": "e8a68375df576265d164dec861017066eadcbac299284c4aa82b70ca4798135e",
       "GatewayKeyService._gateway_delete_alias": "6da52bd2ce22ea0cada3a52874f6a9d171ca6d44dcb82c9c20f58645cb9509b1",
       "GatewayKeyService._gateway_revoke": "c1eba269f1aa3829be88fa848dc783c19d0ad77c4233d7c2dfaf1d637f060597",
-      "GatewayKeyService._gateway_roll": "d4b85e3f05312afbd276bafc6e35c5b0fe0f23aaf3f467bd23d959163fa37f38",
+      "GatewayKeyService._mutation_claim": "0d016bfa246ee020a2eeee5cbc341992ba181b89e42209b37eac7ed6278aecfe",
+      "GatewayKeyService._intent_path": "d420513c616ce1dda61cc0c77eb74878b83c3dbac7e7b5602ce06e341a66b103",
+      "GatewayKeyService._forget_intent": "f308f5ce92716b5947ba98eb1f4bdef5563d675039952964110d717f15f47e0f",
+      "GatewayKeyService._read_intent": "c1373487864d0692e6a76c764a207d6b9dfb44f221f9a941d7c5fa178cb4f810",
+      "GatewayKeyService._gateway_roll": "47894caed180cee0863a3bd2d2e87ffd4712727bae1929b5240e7f3f41989d82",
       "GatewayKeyService._gateway_ensure_default": "235e3982b5135d52eb35dd0c0ad9ecf26581290e566a3147bbbe13b2726a0104",
       "keep_default_key": "83f1661f2df61ff7be135e6ca46ee9507ce6648adecc72175682873593a7afb4",
       "_read_key": "2e898d94ed8980af3930950387d6f16ca00820ee48abe52dec00c827010c55f5",
-      "_write_private": "cbab0c3851a129ac57570770a0578355ddec786b26ea99c34c168aaed55680be",
+      "_write_private": "b51ffcff58562425d19908c2024a254dcd705a20746d39d1c2cac633b7b28574",
       "install_gateway_key_routes": "cf9887f07d5b4d135fb46e9f2bf2cc02a921345c60ef940ce3e3f2d53798874d",
       "install_gateway_key_routes.available": "bf06b6f24aa9ee165f3616ca490346f8f08273dd2b943cc88871745ef1645844",
       "install_gateway_key_routes.authorize": "6ebff86b34855e4007017a85584b418401836eb1db113bdab3fa8bc1637d762c",
@@ -3102,7 +3108,7 @@
       "install_gateway_key_routes.create_gateway_key": "c329231911525a7314bebefa0eb7ab26d2b00dd169848eda102b47016f2ecb21",
       "install_gateway_key_routes.revoke_gateway_key": "68d74f8590fcaa1140c6e4d4a16edfdeb6be237cc5148d1b3598c1e11f0183c4",
       "install_gateway_key_routes.roll_gateway_key": "2e6e54dcee2c087999a8e691a0974f6358f1ab279992a82ad1f303b452fd2554",
-      "<module>": "fdb769f5ffc739be9ff35848eecb115cb1eebde3dcf1769b1b4028ffbe56a34b"
+      "<module>": "e04dd8b53531ddc54a38d75eef71c3f10fabddf8626928e5d1843f1dbe272681"
     },
     "control/src/vonk_control/harnesses/canonical.py": {
       "_canonical_json": "146175eb2460e313b8b706ce4b207dff60b4a140ef02b8ed2bee694d79a37ae5",
@@ -5086,23 +5092,23 @@
       "<module>": "50018b75cd0741dfc221429001e89af382778f0c302abc40a234cb5cec883ab1"
     },
     "control/src/vonk_control/recipe_routes/candidate.py": {
-      "_candidate_once": "a8fd59a347ca0d69d7dcd819fcd5de53d3440e62f5511e356eed9b8d4e0b2f0e",
+      "_candidate_once": "669abce6bced9d59b7db36732e6cebe49c5dfad321c29679e00f34c7a165efda",
       "_primary_model_alias": "a5c52074516836c08edc729414160397cc38084c79ef9892103f3dd854c3a89b",
       "_endpoint": "a614046094efcdec62f0f329285a886debd270f8bda712e402303e5c330a2dbd",
       "candidate_in_session": "6347ad99b0b12a2c075c309a16d9f77d6b01b8a26bb9fbd2ee1cf9d7b652bec7",
       "<module>": "9b465599462a2d989fdebfdbbd23c0e85be37e878728d156762c3b4ef5216805"
     },
     "control/src/vonk_control/recipe_routes/publisher.py": {
-      "AtomicRecipeRoutePublisher": "a1361ef5a11c84cf68ec74c14ece06380130ddbab5fa8533396f0c7f5eaed171",
+      "AtomicRecipeRoutePublisher": "c7e8563e9010d0f035167a787f40a34b7f7d7c374443165428b6657efe126bb5",
       "AtomicRecipeRoutePublisher.__init__": "3e1fd3de63e442a11e8713af7399f6178aefe6d0441214731ec8f57b7c6edd1b",
       "AtomicRecipeRoutePublisher.publish_recipe": "35560fca7ca53db4e4d27d372a86c64934ed9a4549062123eabac4bef8ff8b80",
       "AtomicRecipeRoutePublisher.publish_empty": "24cff5df9f741879f75e16d9b68d53eb53a17b703b7e1e12820cc05e4136980e",
       "AtomicRecipeRoutePublisher.active_marker_digest": "1a9a903487521620bd5ced80885ce4cef0ba70e883b5a0df4726583297d0d62e",
-      "AtomicRecipeRoutePublisher.accepted_run": "49facd253cd27d0ba768102f59a497e7a269f1f474eee060c5666e0d36f8bbde",
+      "AtomicRecipeRoutePublisher.accepted_run": "1f17d8cd58416044d8a4d813ead0c157e3a17837ff9e2fd7e880458e56b7c8b2",
       "AtomicRecipeRoutePublisher._next_generation": "b43dd9af51d77dba7686220f65786206b2193cea760d31e0e51b70389a063af4",
       "AtomicRecipeRoutePublisher._activate": "09f1871bba55fa1f8eab0fd06ee9482b34393e9ef1016e0570d858f00ebb11ce",
       "AtomicRecipeRoutePublisher._activate_once": "514490f069e58b08eef1c87660634bc12155fcb0864e986f5042e9e319a172a8",
-      "<module>": "a1361ef5a11c84cf68ec74c14ece06380130ddbab5fa8533396f0c7f5eaed171"
+      "<module>": "c7e8563e9010d0f035167a787f40a34b7f7d7c374443165428b6657efe126bb5"
     },
     "control/src/vonk_control/recipe_routes/service.py": {
       "RecipeRouteService": "4867521bee0933d6de788be5ca239cecaea24400f770181f8e5ed415b87e84e4",
@@ -5280,7 +5286,7 @@
       "FileSupervisorAcknowledger.__init__": "116586e5ed87ce56ec7f9dfc82619d090be83b5451cf535b062223b97aab6247",
       "FileSupervisorAcknowledger.__call__": "3001eed2d7a4f1f5ba035ebfc1a6044665fe258bed38630f21cfb057a3bd81c9",
       "FileSupervisorAcknowledger._matches": "8bac82e5e2f5cc96dd0fbaca9d6d00ff72dd9d15933bf5b057613e0b2762a829",
-      "AtomicRouteBundlePublisher": "66a03bf12d4835c001a6197126ca8b12ec2fe8904b4e16e44dfaa44ee7afe8b0",
+      "AtomicRouteBundlePublisher": "ce106c38e4ee99424dca242a14b5cad5ec4719015a182b4f98dcd00d8e05e6cf",
       "AtomicRouteBundlePublisher.__init__": "b1f30abf62a308a03d8d8957144891acb6d49e0b46c6b905760f1e9ce6015e2f",
       "AtomicRouteBundlePublisher._require_supervisor_ack": "89287afcb62c1d8d9c620e7ecc724cfdf118114662a932fc65f17f731ffecffd",
       "AtomicRouteBundlePublisher._valid_routes": "94e2ba7330921146910f5429cc22669100719604781b170e53e155eb97fcc25f",
@@ -5290,13 +5296,12 @@
       "AtomicRouteBundlePublisher._claim_publication_lock": "d837a8cd10b204e02bf7a5b377cadb7638e425db7333e5a466f75d8b25b031fa",
       "AtomicRouteBundlePublisher._activate": "d3d5404a5c4d7d5ff6e43df8d870e94c8e88b2f8e126e58742917e2ace25322f",
       "AtomicRouteBundlePublisher._atomic_write": "938e91071c17f1ae00953b41f64c87077dd4629a427803c3b75794236dd5d1ac",
-      "AtomicRouteBundlePublisher._stage": "c733e4ed94f557a976fc94beda7f20661c2b4b13eae14fd0d51dbdd011212e64",
+      "AtomicRouteBundlePublisher._stage": "2d5752a520b9b7c1323812c2e9661975a49314b00e0d508dd62fb22a060f7e48",
       "AtomicRouteBundlePublisher.inspect": "32f726147cd89786ef03d6a1357594ea79d88b3616075901711b61ceedc4ee50",
       "AtomicRouteBundlePublisher._read_marker": "e3c2038ff0246a9f94ec03d23f18c46363104624292c44c6da208fde21cc9188",
-      "AtomicRouteBundlePublisher._validate_marker": "b77e23d0adbf1ee4167f46391ececfdd86beb1453fc10ad9de88a5ae3c616d6a",
       "verify_active_route_bundle": "df40c5fed352dc9b8fe5c8f0eb9a055a8c36127b785434e6b0cda3820df89242",
-      "_read_active_route_bundle": "8e017c8c1a6013d45954d95dcce86af6cda370d1a220fde4727b6569ae647e11",
-      "<module>": "73722f8c480ea86d621e1a8d8ee126f9bea465342f619b81199a803b22069d97"
+      "_read_active_route_bundle": "b88af5bc29a1dcbec8cd581907f264f26dd04fad757c20703ffca11d4b5da29e",
+      "<module>": "1b8e917ef01c5ac5d9f9cd1c706cee0c1b7e54a11b0d27648ca32e441b6204fb"
     },
     "control/src/vonk_control/run_admission.py": {
       "RunPortDemand": "794d4e599d1cd19ea518bdb4d9f7ae9c445031fd1f9a8d0f30e88975aa578f5c",
@@ -7228,15 +7233,6 @@
       ]
     },
     {
-      "family": "recipe_routes.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
-      "sites": [
-        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteError", "_candidate_once", "recipe-route-clock-must-be-timezone-aware", 1],
-        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteError", "_candidate_once", "recipe-run-alias-is-invalid-or-duplicated", 1]
-      ]
-    },
-    {
       "family": "recipe_runtime_specs.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
@@ -7306,11 +7302,7 @@
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._atomic_write", "route-runtime-target-must-not-be-a-symlink", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._locked", "route-publication-lock-is-unsafe", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._stage", "staged-route-generation-conflicts-with-existing-bytes", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._stage", "staged-route-generation-is-unsafe", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._validate_marker", "route-activation-marker-directory-binding-is-invalid", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-checksum-mismatch", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-file-is-unsafe", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-unsafe", 1]
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._stage", "staged-route-generation-is-unsafe", 1]
       ]
     },
     {
@@ -8470,19 +8462,7 @@
         ["control/src/vonk_control/recipe_routes/publisher.py", "RecipeEndpointAuthorityRefused", "AtomicRecipeRoutePublisher.accepted_run", "accepted-endpoint-is-outside-management-policy", 1],
         ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeEndpointAuthorityRefused", "_candidate_once", "accepted-endpoint-node-is-revoked", 1],
         ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeEndpointAuthorityRefused", "_candidate_once", "recipe-rank-node-is-revoked", 1],
-        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeEndpointAuthorityRefused", "_endpoint", "entrypoint-endpoint-is-outside-management-policy", 2],
-        ["control/src/vonk_control/recipe_routes/publisher.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-endpoint-is-invalid", 1],
-        ["control/src/vonk_control/recipe_routes/publisher.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-route-identity-is-invalid", 1],
-        ["control/src/vonk_control/recipe_routes/publisher.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-run-has-ambiguous-route-ownership", 1],
-        ["control/src/vonk_control/recipe_routes/publisher.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-runtime-policy-is-invalid", 2]
-      ]
-    },
-    {
-      "family": "recipe_routes.accepted-alias-uniqueness",
-      "category": "input-validation",
-      "reason": "A new route cannot claim an alias already held by another accepted run. Reject the conflicting candidate before publishing any changed effect.",
-      "sites": [
-        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteError", "_candidate_once", "accepted-recipe-aliases-overlap", 1]
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeEndpointAuthorityRefused", "_endpoint", "entrypoint-endpoint-is-outside-management-policy", 2]
       ]
     },
     {
@@ -9331,16 +9311,6 @@
       ]
     },
     {
-      "family": "route_runtime.ingress-contract",
-      "category": "security-edge",
-      "reason": "Rejects malformed or noncanonical activation contracts before consuming them as verified route authority; parsed acknowledgement timestamps cannot authenticate a live process unless valid. Does not classify absent or unreadable files as integrity failures.",
-      "sites": [
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "active-route-generation-document-is-invalid", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-fields-are-invalid", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-not-canonical", 1]
-      ]
-    },
-    {
       "family": "gateway_keys.already-retried",
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class GatewayKeyError is caught and retried by a registered retry loop.",
@@ -9354,14 +9324,6 @@
       "reason": "Rejects a symlink lock path before opening the publication claim or staging route bytes; an unsafe path is a real publication security edge, not lock contention.",
       "sites": [
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._locked", "route-publication-lock-must-not-be-a-symlink", 1]
-      ]
-    },
-    {
-      "family": "route_runtime.marker-json-ingress",
-      "category": "security-edge",
-      "reason": "Malformed JSON cannot be consumed as authenticated activation authority. This syntax/integrity check precedes consumption of bundle authority and does not classify missing files or I/O uncertainty as integrity failures.",
-      "sites": [
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "_read_active_route_bundle", "route-activation-marker-is-invalid-json", 1]
       ]
     },
     {
@@ -9519,6 +9481,23 @@
         ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._claim_run_publication_once", "recipe-run-is-not-ready-for-publication", 1],
         ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._execute_once", "route-publication-was-superseded", 2],
         ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._record_completion", "route-publication-was-superseded", 1]
+      ]
+    },
+    {
+      "family": "gateway_keys.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class GatewayKeyError is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_create_under", "gateway-mutation-persistence-is-unavailable", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_roll", "gateway-rename-effect-is-unconfirmed", 1]
+      ]
+    },
+    {
+      "family": "candidate.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRouteNotReady is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "recipe-run-alias-is-invalid-or-duplicated", 1]
       ]
     }
   ]

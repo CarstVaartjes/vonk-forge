@@ -2106,11 +2106,16 @@ def test_unverified_active_bundle_cannot_supply_a_fallback_endpoint(
     route_file = root / "generations" / marker["directory"] / "routes.json"
     route_file.write_text(route_file.read_text() + " ")
     with service.sessions.begin() as session:
+        original_plan = _recipe_run(session, first).plan
         _recipe_run(session, first).plan = {"unreadable": True}
-    with pytest.raises(RouteRuntimeError, match="checksum mismatch"):
+    with pytest.raises(RecipeRouteNotReady):
         service.publish_run(second)
     assert json.loads((root / "activation.json").read_text()) == marker
     assert _live_models(root) == ["qwen"]
+    with service.sessions.begin() as session:
+        _recipe_run(session, first).plan = original_plan
+    service.publish_run(second)
+    assert _live_models(root) == ["qwen", "second"]
 
 
 from .test_route_runtime import _inspected
