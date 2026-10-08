@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -23,6 +23,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import LEGACY_SUPERSEDED_PREFIXES
 from ..models import FleetProfileApplication
+from ..settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
 from .assessment_support import (
     _deferral_code,
     _progress_with_blockers,
@@ -57,6 +58,7 @@ class FleetProfileService:
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
         candidate: tuple[str, str, str, FleetProfilePreview] | None = None
+        retirements: list[str] = []
         # A waiting load follows a newer recipe revision at once, not when its
         # own retry backoff falls due.
         with self._sessions() as session:
@@ -114,9 +116,12 @@ class FleetProfileService:
             for row in rows:
                 progress = _persisted_profile_progress(row)
                 plan = _persisted_profile_plan(row)
-                if isinstance(plan, Residue):
-                    continue
                 if not _owns_pending_admission(row, progress):
+                    continue
+                if isinstance(plan, Residue) or _aware(now) >= _aware(
+                    row.created_at
+                ) + timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS):
+                    retirements.append(row.id)
                     continue
                 # The SQL text predicate narrows the bounded batch without a
                 # cast that malformed historical JSON could make fail. The
@@ -127,8 +132,14 @@ class FleetProfileService:
                     continue
                 candidate = (row.id, row.request_key, row.actor, plan)
                 break
+        for application_id in retirements:
+            self._finish_pending_admission(
+                application_id,
+                state=_CANCELLED_OPERATION,
+                reason="Profile admission observation ended without readable evidence",
+            )
         if candidate is None:
-            return False
+            return bool(retirements)
         application_id, request_key, actor, plan = candidate
         if not plan.allowed:
             # The accepted intent was blocked when it was reviewed: plan it

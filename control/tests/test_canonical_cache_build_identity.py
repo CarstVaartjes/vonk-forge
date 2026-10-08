@@ -376,7 +376,6 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     no download and no re-hash.
     """
 
-    from vonk_control import execution_plan_service
     from vonk_control.distribution import ModelCacheObjectSource
     from vonk_control.execution_plan_service import (
         ControllerExecutionPlanService,
@@ -481,7 +480,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
         return result
 
     monkeypatch.setattr(
-        execution_plan_service.ModelCacheObjectSource,
+        ModelCacheObjectSource,
         "verified_model_objects_for_set",
         capture,
     )

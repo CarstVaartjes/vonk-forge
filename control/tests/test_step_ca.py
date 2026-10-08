@@ -1273,7 +1273,8 @@ def test_production_ca_fault_isolated_and_repaired(
         EnrollmentEvidence,
         EnrollmentSubmitRequest,
     )
-    from vonk_control import api, route_runtime
+    from vonk_control import route_runtime
+    from vonk_control.api import production as api
     from vonk_control.auth import Actor, TokenCodec
     from vonk_control.capabilities import CapabilityRegistry
     from vonk_control.capability_contract import (

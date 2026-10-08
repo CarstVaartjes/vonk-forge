@@ -468,8 +468,112 @@ def test_planner_observation_damage_admits_load_and_reobserves(damage):
     for _ in range(12):
         now[0] += timedelta(seconds=61)
         service.tick()
-    assert adapter.starts
+    assert {item["application_id"] for item in adapter.starts} == {fresh.id}
+    assert service.application(first.id).state == LifecycleState.SUPERSEDED
     assert service.application(fresh.id).state in {
         LifecycleState.RUNNING,
         LifecycleState.SUCCEEDED,
     }
+
+
+def test_permanent_planner_unknown_ends_at_acceptance_bound_across_restart():
+    """Catches retry timestamps extending ownership and stale dispatch after expiry."""
+    from datetime import timedelta
+
+    from vonk_control.fleet_profile_contract import FLEET_PROFILE_ENDED_STATES
+    from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+    from vonk_control.settings import PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+
+    from .test_fleet_profiles import _assessment
+
+    sessions = _database()
+    _, revision_id = _seed(sessions)
+    now = [NOW]
+    broken = [True]
+    adapter = _SwitchAdapter()
+
+    def assess(_session, assignment, node_ids, **_kwargs):
+        if broken[0]:
+            return retire_as_unknown(
+                "profile-assessment",
+                assignment.id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "observation unavailable",
+            )
+        return _assessment(_exact_preparation(node_ids))
+
+    def restart():
+        return FleetProfileService(
+            sessions,
+            clock=lambda: now[0],
+            switch_adapter=adapter,
+            assessment_provider=assess,
+        )
+
+    service = restart()
+    profile = service.create(_input(revision_id), actor="admin")
+    old = service.apply(profile.id, request_key=_uuid(1120), actor="admin")
+    now[0] += timedelta(seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS + 1)
+    service = restart()
+    for _ in range(4):
+        service.tick()
+    ended = service.application(old.id)
+    assert ended.state in FLEET_PROFILE_ENDED_STATES
+    assert ended.result is None
+    assert not ended.progress.admission_pending
+    assert ended.progress.admission_retry_at is None
+    assert not adapter.starts
+    broken[0] = False
+    fresh = service.apply(profile.id, request_key=_uuid(1121), actor="admin")
+    for _ in range(12):
+        service.tick()
+    assert {item["application_id"] for item in adapter.starts} == {fresh.id}
+    assert service.application(old.id) == ended
+
+
+def test_damaged_newest_pending_plan_does_not_starve_readable_admission():
+    """Catches a damaged batch head keeping admission pending while healthy work waits."""
+    from datetime import timedelta
+
+    from vonk_agent_protocol import LifecycleState
+    from vonk_agent_protocol.agent_words import ProfileOperationKind
+
+    sessions = _database()
+    _, revision_id = _seed(sessions)
+    now = [NOW]
+    adapter = _SwitchAdapter()
+    service = FleetProfileService(
+        sessions, clock=lambda: now[0], switch_adapter=adapter
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    healthy = service._create_pending_application(
+        preview,
+        request_key=_uuid(1130),
+        actor="admin",
+        operation_kind=ProfileOperationKind.APPLY.value,
+    )
+    now[0] += timedelta(seconds=1)
+    damaged = service._create_pending_application(
+        preview,
+        request_key=_uuid(1131),
+        actor="admin",
+        operation_kind=ProfileOperationKind.APPLY.value,
+    )
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, damaged.id)
+        assert row is not None
+        row.plan = preview.model_copy(update={"profile_digest": "e" * 64}).model_dump(
+            mode="json"
+        )
+    now[0] += timedelta(seconds=61)
+    assert service._observe_pending_admissions(now[0])
+    ended = service.application(damaged.id)
+    assert ended.state == LifecycleState.CANCELLED
+    assert not ended.progress.admission_pending
+    assert ended.progress.admission_retry_at is None
+    assert not service.application(healthy.id).progress.admission_pending
+    assert {item["application_id"] for item in adapter.starts} <= {healthy.id}
+    fresh = service.apply(profile.id, request_key=_uuid(1132), actor="admin")
+    assert fresh.id not in {healthy.id, damaged.id}
+    assert service.application(damaged.id).state == LifecycleState.CANCELLED

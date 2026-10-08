@@ -188,7 +188,7 @@ def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
 def test_shutdown_retries_checkpointing_then_releases_lifespan(refusals, monkeypatch):
     import asyncio
 
-    from vonk_control import api
+    from vonk_control.api import production as api
 
     calls, pauses = [], []
 

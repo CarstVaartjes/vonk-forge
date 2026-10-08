@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
     AssetAvailability,
     ModelCacheCode,
     RecipeImageCode,
@@ -232,4 +233,13 @@ def refusing_removal_blockers(review: CacheRemovalReview) -> list[CacheRemovalBl
 
     if any(item.owner_kind == "fleet-profile" for item in review.references):
         return list(review.blockers)
-    return [item for item in review.blockers if item.code not in IN_USE_REMOVAL_CODES]
+    return [
+        item
+        for item in review.blockers
+        if item.code not in IN_USE_REMOVAL_CODES
+        and item.code
+        not in {
+            ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
+            ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
+        }
+    ]

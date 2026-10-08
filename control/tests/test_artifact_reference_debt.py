@@ -8,23 +8,19 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
-    ErrorCategory,
     InvalidRequestReason,
-    SecurityRefusalReason,
+    UnknownOutcomeError,
 )
 from vonk_control.artifact_lifecycle import ArtifactLifecycleError
 from vonk_control.artifact_reference_scan import _profile_plan, require_model_sets_open
 from vonk_control.categorized_errors import InvalidValue
 
 
-def test_unverified_deletion_plan_is_a_destructive_security_edge() -> None:
-    """Catch treating a destructive scope proof as ordinary admission contention."""
+def test_damaged_stored_plan_is_unknown_without_any_deletion_effect() -> None:
+    """Catch refusing local owner damage or treating it as an empty plan."""
     with pytest.raises(ArtifactLifecycleError) as caught:
         _profile_plan({})
-    assert caught.value.category is ErrorCategory.SECURITY_REFUSAL  # type: ignore[attr-defined]
-    assert caught.value.typed_reason is SecurityRefusalReason.OPERATION_INVALID_ARTIFACT  # type: ignore[attr-defined]
-    assert caught.value.code == ArtifactLifecycleCode.REFERENCE_SCAN_FAILED
+    assert isinstance(caught.value, UnknownOutcomeError)
     assert caught.value.retryable
 
 

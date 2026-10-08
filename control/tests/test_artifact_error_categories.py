@@ -8,14 +8,11 @@ from pathlib import Path
 import pytest
 from vonk_agent_protocol import (
     ErrorCategory,
-    InvalidRequestReason,
     SecurityRefusalReason,
     WaitReason,
 )
 from vonk_control.artifact_blob_store import (
     ArtifactBlobDigestMismatch,
-    ArtifactBlobInvalid,
-    ArtifactBlobQuotaExhausted,
     ArtifactBlobStore,
     ArtifactBlobStoreError,
     ArtifactBlobUnsafePath,
@@ -42,16 +39,19 @@ def test_upload_digest_mismatch_is_a_security_refusal(tmp_path: Path) -> None:
     assert caught.value.typed_error() is not None
 
 
-def test_oversized_upload_is_invalid_and_capacity_ends_unknown(tmp_path: Path) -> None:
-    digest = hashlib.sha256(b"content").hexdigest()
-    with pytest.raises(ArtifactBlobInvalid) as too_big:
-        _store(tmp_path).put_bytes(digest, b"content", maximum_bytes=3)
-    assert too_big.value.typed_reason is InvalidRequestReason.LIMIT_EXCEEDED
-    with pytest.raises(ArtifactBlobQuotaExhausted) as quota:
-        _store(tmp_path / "small", max_stored_bytes=3).put_bytes(
-            digest, b"content", maximum_bytes=100
-        )
-    assert quota.value.category is ErrorCategory.UNKNOWN
+def test_oversized_upload_and_capacity_release_claims_for_fresh_content(
+    tmp_path: Path,
+) -> None:
+    content = b"content"
+    digest = hashlib.sha256(content).hexdigest()
+    store = _store(tmp_path, max_stored_bytes=3)
+    for maximum in (3, 100):
+        with pytest.raises(Exception):  # noqa: B017 -- any ending; effects and fresh admission are asserted below
+            store.put_bytes(digest, content, maximum_bytes=maximum)
+        assert store.resolve(f"{digest[:2]}/{digest}", digest, len(content)) is None
+        assert store.usage().in_flight_uploads == 0
+    fresh = store.put_bytes(hashlib.sha256(b"ok").hexdigest(), b"ok", maximum_bytes=3)
+    assert fresh.path.read_bytes() == b"ok"
 
 
 def test_unsafe_storage_key_is_a_security_refusal(tmp_path: Path) -> None:

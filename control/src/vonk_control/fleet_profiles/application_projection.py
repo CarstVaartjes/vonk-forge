@@ -45,6 +45,7 @@ from ..run_switch_operations import RunSwitchOperationService
 from .assessment_support import (
     _operation_state,
 )
+from .contracts import FleetProfileReviewStale
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -401,7 +402,15 @@ class FleetProfileService:
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 "persisted application plan exceeds its reviewed intent",
             )
-        _validate_remaining_effects(root_plan.effects, plan.effects)
+        try:
+            _validate_remaining_effects(root_plan.effects, plan.effects)
+        except FleetProfileReviewStale:
+            return retire_as_unknown(
+                "profile-intent",
+                str(application.id),
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "persisted application effects exceed its reviewed intent",
+            )
         return intended
 
     @staticmethod

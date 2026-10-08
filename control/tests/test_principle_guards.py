@@ -474,3 +474,81 @@ def test_history_relocations_conserve_debt(count, keep_original, rejected, tmp_p
     moved = {**entry, "path": "old/scan.py", "count": count}
     current = {"debt": [moved, *([entry] if keep_original else [])], "exceptions": []}
     assert bool(history_gate(current, previous, moves)) is rejected
+
+
+def test_nested_package_get_helper_refusal_follows_concrete_import(
+    tmp_path, monkeypatch
+):
+    """Moving a GET's rejecting helper cannot erase its existing refusal finding."""
+    from . import principle_guards as guards
+
+    root = tmp_path / "control/src/vonk_control"
+    root.mkdir(parents=True)
+    (root / "__init__.py").write_text("")
+    package = root / "api"
+    package.mkdir()
+    (package / "common.py").write_text(
+        "def required():\n    raise HTTPException(status_code=503)\n"
+    )
+    route = "from .common import required\n@router.get('/x')\ndef observe():\n    return required()\n"
+    path = "control/src/vonk_control/api/application.py"
+    (tmp_path / path).write_text(route)
+    monkeypatch.setattr(guards, "ROOT", tmp_path)
+    assert [
+        site.kind for site in guards.scan_source(route, path=path, mode="reads")
+    ] == ["get-helper-refusal"]
+    (package / "common.py").write_text("def required():\n    return 1\n")
+    assert not guards.scan_source(route, path=path, mode="reads")
+
+
+@pytest.mark.parametrize("fault", (False, True))
+@pytest.mark.parametrize("collecting", (False, True))
+def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecting):
+    """Catches scanner failure leaking a disabled collector into later work."""
+    import gc
+
+    from . import principle_guards
+
+    original = gc.isenabled()
+    try:
+        gc.enable() if collecting else gc.disable()
+
+        def scan(_mode):
+            assert not gc.isenabled()
+            if fault:
+                raise OSError("inventory unavailable")
+            return []
+
+        monkeypatch.setattr(principle_guards, "_scan_sites", scan)
+        if fault:
+            with pytest.raises(Exception):  # noqa: B017 -- ending witness; GC ownership is asserted below
+                principle_guards.scan_sites("tests")
+        else:
+            assert principle_guards.scan_sites("tests") == []
+        assert gc.isenabled() == collecting
+    finally:
+        gc.enable() if original else gc.disable()
+
+
+def test_inventory_releases_temporary_trees_without_scanning_old_generations(
+    tmp_path, monkeypatch
+):
+    """Catches retained test trees or a full-heap collection on every file."""
+    import gc
+
+    from . import principle_guards
+
+    source = tmp_path / "test_fixture.py"
+    source.write_text("def test_fixture():\n    assert True\n")
+    monkeypatch.setattr(principle_guards, "ROOT", tmp_path)
+    monkeypatch.setattr(principle_guards, "source_files", lambda _mode: [source])
+    generations = []
+    real = gc.collect
+
+    def collect(generation):
+        generations.append(generation)
+        return real(generation)
+
+    monkeypatch.setattr(gc, "collect", collect)
+    assert principle_guards.scan_sites("tests") == []
+    assert generations == [0]

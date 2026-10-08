@@ -11,7 +11,8 @@ import httpx2
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from vonk_control import api, artifact_blob_store, recipe_packages, route_runtime
+from vonk_control import artifact_blob_store, recipe_packages, route_runtime
+from vonk_control.api import production as api
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.capabilities import CapabilityRegistry, RecoveringService
 from vonk_control.capability_contract import (

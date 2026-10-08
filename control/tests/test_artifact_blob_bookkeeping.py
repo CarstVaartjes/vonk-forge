@@ -124,3 +124,117 @@ def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(tmp_path, bo
     healed = store.put_bytes(_digest(payload), payload, maximum_bytes=8)
     assert healed.path.read_bytes() == payload
     assert store.put_bytes(_digest(payload), payload, maximum_bytes=8) == healed
+
+
+def test_busy_quota_ends_stream_without_consuming_it_and_fresh_stream_fits(tmp_path):
+    """Catches blocking flock and replaying a consumed upload on admission retry."""
+    import asyncio
+    import fcntl
+    import time
+
+    store = _store(tmp_path)
+    store.usage()
+    content = b"verified stream"
+    consumed = []
+
+    async def chunks():
+        consumed.append(True)
+        yield content
+
+    with (tmp_path / "blobs" / ".quota.lock").open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        started = time.monotonic()
+        with pytest.raises(Exception):  # noqa: B017 -- any ending; effects and fresh admission are asserted below
+            asyncio.run(
+                store.put_stream(
+                    _digest(content),
+                    chunks(),
+                    expected_bytes=len(content),
+                    maximum_bytes=1024,
+                )
+            )
+        assert time.monotonic() - started < 2
+        assert not consumed
+        assert not list((tmp_path / "blobs" / ".reservations").iterdir())
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    stored = asyncio.run(
+        store.put_stream(
+            _digest(content),
+            chunks(),
+            expected_bytes=len(content),
+            maximum_bytes=1024,
+        )
+    )
+    assert consumed == [True]
+    assert stored.path.read_bytes() == content
+    assert store.usage().in_flight_uploads == 0
+
+
+@pytest.mark.parametrize("boundary", ("reserve", "commit"))
+def test_stream_retries_same_content_without_replaying_iterator(
+    tmp_path, monkeypatch, boundary
+):
+    """Catches streaming callers bypassing retries or destroying verified temporary bytes."""
+    import asyncio
+
+    from vonk_agent_protocol import WaitReason
+    from vonk_control.artifact_blob_store import ArtifactBlobBusy
+
+    store = _store(tmp_path)
+    content = b"exact streamed bytes"
+    consumed = []
+    attempts = []
+    actual = getattr(store, "_" + boundary)
+
+    def once(*args):
+        attempts.append(args)
+        if len(attempts) == 1:
+            raise ArtifactBlobBusy(
+                "storage temporarily unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        return actual(*args)
+
+    monkeypatch.setattr(store, "_" + boundary, once)
+
+    async def chunks():
+        consumed.append(True)
+        yield content
+
+    stored = asyncio.run(
+        store.put_stream(
+            _digest(content),
+            chunks(),
+            expected_bytes=len(content),
+            maximum_bytes=1024,
+        )
+    )
+    assert len(attempts) == 2
+    assert attempts[0] == attempts[1]
+    assert consumed == [True]
+    assert stored.path.read_bytes() == content
+    assert store.usage().in_flight_uploads == 0
+    fresh = store.put_bytes(_digest(content), content, maximum_bytes=1024)
+    assert fresh.path == stored.path
+
+
+def test_reservation_fsync_failure_releases_claim_and_fresh_upload_fits(
+    tmp_path, monkeypatch
+):
+    """Catches an OS failure escaping the storage owner with a retained reservation."""
+    import os
+
+    store = _store(tmp_path)
+    real = os.fsync
+
+    def unavailable(_descriptor):
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr(os, "fsync", unavailable)
+    content = b"reservation repair"
+    with pytest.raises(Exception):  # noqa: B017 -- any ending; effects and fresh admission are asserted below
+        store.put_bytes(_digest(content), content, maximum_bytes=1024)
+    monkeypatch.setattr(os, "fsync", real)
+    assert store.usage().in_flight_uploads == 0
+    stored = store.put_bytes(_digest(content), content, maximum_bytes=1024)
+    assert stored.path.read_bytes() == content

@@ -1405,7 +1405,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
         assert release.wait(timeout=60)
         real_fsync(descriptor)
 
-    monkeypatch.setattr("vonk_control.agent_api.os.fsync", slow_fsync)
+    monkeypatch.setattr("vonk_control.agent_api.common.os.fsync", slow_fsync)
     headers = agent_headers(NODE_A, "serial-a") | {
         "content-type": "application/x-tar",
         "x-vonk-image-digest": "sha256:" + "d" * 64,
@@ -1471,6 +1471,32 @@ def assert_grant_consumed(services: AgentApiServices, token: str) -> None:
     assert enrollment is not None
     with pytest.raises(EnrollmentDenied, match="consumed"):
         enrollment.submit(token, b"", {})
+
+
+def assert_grant_unconsumed(services: AgentApiServices, token: str) -> None:
+    from vonk_control.enrollment import _decode_token, _digest
+    from vonk_control.models import AgentEnrollmentGrant
+
+    with services.sessions() as session:
+        grant = session.scalar(
+            select(AgentEnrollmentGrant).where(
+                AgentEnrollmentGrant.token_digest == _digest(_decode_token(token))
+            )
+        )
+        assert grant is not None
+        assert grant.consumed_at is None
+
+
+def assert_corrected_enrollment_succeeds(
+    services: AgentApiServices, token: str
+) -> None:
+    submitted = json.loads(valid_enrollment_body(token))
+    assert services.enrollment is not None
+    issued = services.enrollment.submit(
+        token, submitted["csr"].encode("ascii"), submitted["evidence"]
+    )
+    assert issued.node_id == NODE_C
+    assert issued.certificate_pem
 
 
 def valid_enrollment_body(token: str) -> bytes:
@@ -3269,7 +3295,7 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
     assert reads == 0
 
 
-def test_duplicate_enrollment_grants_consume_unicode_escaped_token_values(
+def test_duplicate_enrollment_grants_preserve_unicode_escaped_token_values(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
@@ -3283,8 +3309,8 @@ def test_duplicate_enrollment_grants_consume_unicode_escaped_token_values(
     status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
 
     assert status_code == 422
-    assert_grant_consumed(services, first)
-    assert_grant_consumed(services, second)
+    assert_grant_unconsumed(services, first)
+    assert_grant_unconsumed(services, second)
 
 
 def test_normal_enrollment_object_still_succeeds(agent_system) -> None:
@@ -3314,7 +3340,7 @@ def test_oversized_enrollment_preserves_split_discovery_prefix(agent_system) -> 
 
     assert denied.value.status_code == 413
     assert request.received == 2
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
 def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
@@ -3336,7 +3362,7 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
     assert denied.value.status_code == 413
     assert request.received == 1
     assert huge.largest_slice <= 2048
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
 @pytest.mark.parametrize(
@@ -3355,7 +3381,9 @@ def test_enrollment_rejects_non_object_json_without_server_error(
     assert status_code == 422
 
 
-def test_non_object_enrollment_consumes_identifiable_nested_grant(agent_system) -> None:
+def test_non_object_enrollment_preserves_identifiable_nested_grant(
+    agent_system,
+) -> None:
     client, services, _, _ = agent_system
     token = enrollment_grant(services)
     raw = f'[{{"grant_token":"{token}"}}]'.encode("ascii")
@@ -3363,10 +3391,10 @@ def test_non_object_enrollment_consumes_identifiable_nested_grant(agent_system) 
     status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
 
     assert status_code == 422
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
-def test_service_denied_enrollment_consumes_every_discovered_grant(
+def test_invalid_evidence_preserves_every_discovered_grant(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
@@ -3381,9 +3409,9 @@ def test_service_denied_enrollment_consumes_every_discovered_grant(
         json.dumps(body).encode("utf-8"),
     )
 
-    assert status_code == 403
-    assert_grant_consumed(services, effective)
-    assert_grant_consumed(services, nested)
+    assert status_code == 422
+    assert_grant_unconsumed(services, effective)
+    assert_grant_unconsumed(services, nested)
 
 
 @pytest.mark.parametrize(
@@ -3395,7 +3423,7 @@ def test_service_denied_enrollment_consumes_every_discovered_grant(
     ),
     ids=("malformed-json", "invalid-utf8", "deep-nesting"),
 )
-def test_invalid_enrollment_json_consumes_identifiable_grant(
+def test_invalid_enrollment_json_preserves_identifiable_grant(
     agent_system,
     prefix: bytes,
     suffix: bytes,
@@ -3410,10 +3438,10 @@ def test_invalid_enrollment_json_consumes_identifiable_grant(
     )
 
     assert status_code == 422
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
-def test_wrong_enrollment_content_type_consumes_identifiable_grant(
+def test_wrong_enrollment_content_type_preserves_identifiable_grant(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
@@ -3427,7 +3455,7 @@ def test_wrong_enrollment_content_type_consumes_identifiable_grant(
     )
 
     assert status_code == 415
-    assert_grant_consumed(services, token)
+    assert_corrected_enrollment_succeeds(services, token)
 
 
 def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:

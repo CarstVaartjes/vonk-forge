@@ -867,7 +867,7 @@ def test_a_callback_through_an_injected_service_has_its_caller(
     graph = build_graph_for(load_allowlist())
     callback = graph.by_key[
         (
-            "control/src/vonk_control/distribution_executor.py",
+            "control/src/vonk_control/distribution_executor/preparation.py",
             "CompositeDistributionPhaseExecutor._prepare_runtime_image.before_publish",
         )
     ]
@@ -1085,10 +1085,13 @@ def test_recipe_build_unknown_outcomes_have_no_unhandled_or_swallowed_path(
     from .blocker_boundaries import scan_raises
 
     document = load_allowlist()
-    path = "control/src/vonk_control/recipe_builds.py"
+    path = "control/src/vonk_control/recipe_builds/persistence.py"
     for site in scan_raises():
-        if site.path == path and site.exception_class in unknown_classes():
-            assert proven(document, path, site.exception_class, site.function), (
+        if (
+            site.path.startswith("control/src/vonk_control/recipe_builds/")
+            and site.exception_class in unknown_classes()
+        ):
+            assert proven(document, site.path, site.exception_class, site.function), (
                 site.render()
             )
 
@@ -1105,7 +1108,7 @@ def test_recipe_build_unknown_outcomes_have_no_unhandled_or_swallowed_path(
         damaged,
         path,
         "RecipeBuildUnknown",
-        "RecipeBuildService.persist_plan_in_session",
+        "persist_plan_in_session",
     )
 
 
@@ -1275,3 +1278,23 @@ def test_callback_binding_converges_beyond_a_fixed_pass_limit(escape: bool) -> N
     proof = _prove(source, "work", loops={"tick": ("Busy",)})
     assert proof.reached_by_a_loop
     assert proof.proven is not escape
+
+
+def test_extracted_method_descriptor_dispatch_preserves_the_retry_catch():
+    """A bound implementation is reached through its class, not a new uncaught entry."""
+    graph = CallGraph(
+        {
+            "pkg/__init__.py": ast.parse(""),
+            "pkg/source.py": ast.parse(
+                "from .service import Service\ndef once(self: Service):\n    raise Busy()\n"
+            ),
+            "pkg/service.py": ast.parse(
+                "from .source import once\nclass Service:\n    once = once\n    def observe(self):\n        try:\n            self.once()\n        except Busy:\n            pass\n"
+            ),
+            "pkg/worker.py": ast.parse(
+                "from .service import Service\ndef tick(service: Service):\n    service.observe()\n"
+            ),
+        }
+    )
+    prover = Prover(graph, {("pkg/service.py", "Service.observe"): frozenset({"Busy"})})
+    assert prover.prove("pkg/source.py", "Busy", "once").proven

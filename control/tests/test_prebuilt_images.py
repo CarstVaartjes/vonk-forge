@@ -249,7 +249,7 @@ def _start(builds, operations, revision_id: str):
 def test_a_recipe_the_controller_refuses_gets_no_image_and_says_why(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control import recipe_builds
+    from vonk_control.recipe_builds import common as recipe_builds
     from vonk_control.source_policy import (
         SourcePolicyFinding,
         SourcePolicyReport,
