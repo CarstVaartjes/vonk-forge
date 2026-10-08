@@ -7,9 +7,12 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control import recipe_operations as operations_module
 from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
+from vonk_control.recipe_build_cancellation import current_build_consumers
 from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
@@ -148,28 +151,81 @@ def test_last_consumer_retains_issued_capacity_until_exact_cleanup_receipt(
     assert not _active_claims(sessions, selected.build_id)
 
 
+@pytest.mark.parametrize("issued", [False, True])
 def test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes(
-    tmp_path, postgres_engine
+    tmp_path, postgres_engine, issued
 ):
     sessions, planner, parent, _request, selected = _direct_parent(
         tmp_path, postgres_engine
     )
     assert planner._advance(parent.operation_id)
+    with sessions() as session:
+        child_id = session.scalar(select(Job.id).where(Job.kind == "recipe.build.v1"))
+        assert child_id is not None
+    if issued:
+        _issue(sessions, child_id)
+    claims = _active_claims(sessions, selected.build_id)
     before = _snapshot(sessions, parent.operation_id)
+    child_before = _snapshot(sessions, child_id)
+    assert isinstance(before[2], dict)
     key = str(uuid4())
     with sessions.begin() as blocker:
-        blocker.get(RecipeBuild, selected.build_id, with_for_update=True)
+        locked_build = blocker.get(RecipeBuild, selected.build_id, with_for_update=True)
+        assert locked_build is not None
         with pytest.raises(RunSwitchOperationConflict, match="build.consumer_busy"):
             planner.cancel(
                 parent.operation_id, actor="admin", request_key=key, reason="Detach"
             )
-    assert _snapshot(sessions, parent.operation_id) == before
-    assert (
-        planner.cancel(
-            parent.operation_id, actor="admin", request_key=key, reason="Detach"
-        ).state
-        == "cancelled"
+        after = _snapshot(sessions, parent.operation_id)
+        # Accepting intent is the sole write; busy detachment cannot end the
+        # parent, alter its child, release claims or change accepted identities.
+        with sessions() as session:
+            job = session.get(Job, parent.operation_id)
+            assert job is not None
+            cancellation = planner.get(parent.operation_id).result
+            assert cancellation is not None and cancellation.cancellation is not None
+            assert cancellation.cancellation.request_key == key
+            assert job.result is not None
+            expected_result = {**before[2], "cancellation": job.result["cancellation"]}
+        assert after == (before[0], before[1], expected_result, before[3])
+        assert _active_claims(sessions, selected.build_id) == claims
+        assert not planner._advance(parent.operation_id)
+        assert _snapshot(sessions, parent.operation_id) == after
+        # A second request cannot replace the first accepted intent.
+        with pytest.raises(RunSwitchOperationConflict, match="build.consumer_busy"):
+            planner.cancel(
+                parent.operation_id,
+                actor="admin",
+                request_key=str(uuid4()),
+                reason="Repeated cancel",
+            )
+        assert _snapshot(sessions, parent.operation_id) == after
+        assert _snapshot(sessions, child_id) == child_before
+        assert _active_claims(sessions, selected.build_id) == claims
+        assert parent.operation_id in current_build_consumers(blocker, locked_build)
+    # The ordinary worker completes detachment once the boundary is free.
+    # A fresh Run/Switch request reuses the still-live shared producer through
+    # its dependency claim; an independent build would replace that intent.
+    assert planner._advance(parent.operation_id)
+    assert planner.get(parent.operation_id).state == "cancelled"
+    assert _active_claims(sessions, selected.build_id) == claims
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    fresh = planner.apply(
+        RunSwitchApplyRequest(
+            **_request.model_dump(exclude={"request_key"}), request_key=str(uuid4())
+        ),
+        actor="admin",
     )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+    assert fresh.operation_id != parent.operation_id
+    assert planner._advance(fresh.operation_id)
+    with sessions() as session:
+        build = session.get(RecipeBuild, selected.build_id)
+        assert build is not None
+        consumers = current_build_consumers(session, build)
+        assert parent.operation_id not in consumers
+        assert fresh.operation_id in consumers
 
 
 @pytest.mark.parametrize("issued", [False, True])

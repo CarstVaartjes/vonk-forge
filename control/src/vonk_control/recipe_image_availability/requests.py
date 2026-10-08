@@ -138,8 +138,8 @@ def cancel_profile_preparation(
     """Cancel the pending preparation a profile load asked for, if any.
 
     Only the chain of deterministic requests ``ensure_preparation`` makes
-    is touched. The build layer still refuses to cancel an image another
-    accepted consumer needs.
+    is touched under accepted cancellation authority. Current author grants
+    do not gate cleanup; images needed by another consumer stay protected.
     """
 
     namespace = uuid.NAMESPACE_URL
@@ -176,8 +176,6 @@ def cancel_profile_preparation(
                         )
                     ),
                     reason=reason,
-                    # Cleanup belongs to the accepted profile cancellation,
-                    # not the current permissions of its original author.
                     authorize=False,
                 )
                 cancelled.append(job.id)

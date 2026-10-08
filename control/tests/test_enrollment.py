@@ -175,8 +175,10 @@ class CompletedRenewalAuthority(RecordingAuthority):
             raise SystemExit("simulated crash during issued-certificate revocation")
 
 
-def csr(node_id: str = NODE_ID) -> bytes:
-    key = ed25519.Ed25519PrivateKey.generate()
+def csr(
+    node_id: str = NODE_ID, *, key: ed25519.Ed25519PrivateKey | None = None
+) -> bytes:
+    key = key or ed25519.Ed25519PrivateKey.generate()
     return (
         x509.CertificateSigningRequestBuilder()
         .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, node_id)]))
@@ -1736,3 +1738,162 @@ def test_known_rotation_capacity_refusal_preserves_active_certificate(
         assert source is not None and source.state == "active"
         intent = session.scalar(select(AgentCertificateRotation))
         assert intent is not None and intent.state == "issuing"
+
+
+class RecoveryAuthority(RecordingAuthority):
+    """A real signed leaf is required to verify enrolled-key possession."""
+
+    def issue_node(self, node_id, public_key_pem, now, *, request):
+        self._begin(request)
+        self.calls.append((node_id, public_key_pem, now))
+        self._serial += 1
+        csr_request = x509.load_pem_x509_csr(public_key_pem)
+        issuer_key = ed25519.Ed25519PrivateKey.generate()
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(csr_request.subject)
+            .issuer_name(
+                x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Test issuer")])
+            )
+            .public_key(csr_request.public_key())
+            .serial_number(int(request.serial))
+            .not_valid_before(datetime.fromisoformat(request.not_before))
+            .not_valid_after(datetime.fromisoformat(request.not_after))
+            .add_extension(
+                csr_request.extensions.get_extension_for_class(
+                    x509.SubjectAlternativeName
+                ).value,
+                critical=False,
+            )
+            .sign(issuer_key, algorithm=None)
+        )
+        pem = certificate.public_bytes(serialization.Encoding.PEM)
+        return self._finish(
+            request,
+            IssuedCertificate(
+                node_id=node_id,
+                certificate_pem=pem,
+                chain_pem=pem,
+                serial=request.serial,
+                fingerprint=certificate.fingerprint(hashes.SHA256()).hex(),
+                not_before=certificate.not_valid_before_utc,
+                not_after=certificate.not_valid_after_utc,
+                generation=request.generation,
+            ),
+        )
+
+
+@pytest.fixture
+def recovery_service(service):
+    _enrollment, sessions, clock, _authority = service
+    authority = RecoveryAuthority()
+    return (
+        EnrollmentService(sessions, authority, clock=clock),
+        sessions,
+        clock,
+        authority,
+    )
+
+
+def expired_proof(key, node_id, serial, replacement, now):
+    from vonk_agent_protocol.enrollment import ExpiredRenewRequest
+
+    proof = ExpiredRenewRequest(
+        node_id=node_id,
+        serial=serial,
+        csr=replacement.decode("ascii"),
+        signed_at=int(now.timestamp()),
+        signature="0" * 128,
+    )
+    return proof.model_copy(update={"signature": key.sign(proof.proof_bytes()).hex()})
+
+
+def test_expired_renewal_replays_then_activates_and_allows_fresh_rotation(
+    recovery_service,
+):
+    enrollment, sessions, clock, authority = recovery_service
+    key = ed25519.Ed25519PrivateKey.generate()
+    issued = enroll(enrollment, request=csr(key=key))
+    clock.now = issued.not_after + timedelta(days=1)
+    replacement_key = ed25519.Ed25519PrivateKey.generate()
+    proof = expired_proof(
+        key, NODE_ID, issued.serial, csr(key=replacement_key), clock.now
+    )
+    renewed = enrollment.renew_expired(proof)
+    assert enrollment.renew_expired(proof) == renewed
+    assert len(authority.calls) == 2
+    enrollment.activate(NODE_ID, renewed.serial, renewed.generation)
+    fresh = enrollment.renew(NODE_ID, renewed.serial, csr())
+    assert fresh.generation == renewed.generation + 1
+    with sessions() as session:
+        assert session.get(AgentCertificate, issued.serial).state == "revoked"
+
+
+@pytest.mark.parametrize(
+    "failure", ["grace", "revoked", "removed", "wrong-key", "changed-csr", "stale"]
+)
+def test_expired_renewal_refusals_do_not_issue_or_poison_fresh_enrollment(
+    recovery_service, failure
+):
+    enrollment, sessions, clock, authority = recovery_service
+    key = ed25519.Ed25519PrivateKey.generate()
+    issued = enroll(enrollment, request=csr(key=key))
+    clock.now = issued.not_after + timedelta(days=1)
+    proof = expired_proof(key, NODE_ID, issued.serial, csr(), clock.now)
+    if failure == "grace":
+        clock.now = issued.not_after + timedelta(days=30, seconds=1)
+        proof = expired_proof(key, NODE_ID, issued.serial, csr(), clock.now)
+    elif failure in {"revoked", "removed"}:
+        with sessions.begin() as session:
+            if failure == "removed":
+                session.execute(
+                    delete(AgentCertificate).where(AgentCertificate.node_id == NODE_ID)
+                )
+                session.execute(delete(AgentNode).where(AgentNode.node_id == NODE_ID))
+            else:
+                session.get(AgentNode, NODE_ID).revoked_at = clock.now
+    elif failure == "wrong-key":
+        proof = expired_proof(
+            ed25519.Ed25519PrivateKey.generate(),
+            NODE_ID,
+            issued.serial,
+            csr(),
+            clock.now,
+        )
+    elif failure == "changed-csr":
+        proof = proof.model_copy(update={"csr": csr().decode("ascii")})
+    else:
+        clock.now += timedelta(seconds=301)
+    with pytest.raises(EnrollmentDenied):
+        enrollment.renew_expired(proof)
+    assert len(authority.calls) == 1
+    if failure in {"wrong-key", "changed-csr", "stale"}:
+        fresh = expired_proof(key, NODE_ID, issued.serial, csr(), clock.now)
+        assert enrollment.renew_expired(fresh).generation == issued.generation + 1
+    # Refusing one security identity must not leave a rotation gate for others.
+    assert enroll(enrollment, node_id=OTHER_NODE_ID).node_id == OTHER_NODE_ID
+
+
+def test_expired_renewal_consumes_the_same_signed_fixture_as_the_rust_agent(
+    recovery_service,
+):
+    from vonk_agent_protocol.enrollment import ExpiredRenewRequest
+
+    enrollment, _sessions, clock, authority = recovery_service
+    proof = ExpiredRenewRequest.model_validate_json(
+        (
+            Path(__file__).resolve().parents[2]
+            / "agent_protocol/fixtures/expired-renewal-request.json"
+        ).read_bytes()
+    )
+    clock.now = datetime.fromtimestamp(proof.signed_at, UTC) - timedelta(days=31)
+    authority._serial = int(proof.serial) - 1
+    key = ed25519.Ed25519PrivateKey.from_private_bytes(bytes([42]) * 32)
+    issued = enroll(
+        enrollment, node_id=proof.node_id, request=csr(proof.node_id, key=key)
+    )
+    assert issued.serial == proof.serial
+    clock.now = datetime.fromtimestamp(proof.signed_at, UTC)
+    renewed = enrollment.renew_expired(proof)
+    assert renewed.generation == issued.generation + 1
+    assert enrollment.renew_expired(proof) == renewed

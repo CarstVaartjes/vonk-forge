@@ -287,6 +287,10 @@ issued effects before ownership passes to the replacement.
    before acquisition; if new information requires an earlier lock, roll back
    and replan. Include implicit foreign-key, unique-index, and upsert locks in
    the audit; ordering explicit `FOR UPDATE` calls alone is insufficient.
+   The shared row order places Fleet profile applications before Jobs (matching
+   acceptance ownership), and native Agent operation attempts after their Agent
+   operations. A declared multi-Job set orders parent and child together by
+   immutable primary key, rather than acquiring a parent first by convention.
 4. **Bound every database wait.** Use `SKIP LOCKED` for eligible work claims
    and `NOWAIT` for contested coordination rows. Configure finite lock,
    statement, and transaction budgets centrally, including implicit lock waits.

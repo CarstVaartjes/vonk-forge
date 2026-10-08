@@ -6,9 +6,10 @@ use crate::{
     client::{AgentHttpClient, ClientError},
     config::AgentConfig,
     identity::{
-        IdentityError, IdentityMaterial, active_identity_paths, clear_pending, generate_pending,
-        identity_expired, load_pending, persist_pending, publish_staged, renewal_due,
-        retire_expired_staged, stage_identity, staged_identity_paths,
+        IdentityError, IdentityMaterial, active_identity_paths, clear_pending,
+        expired_recovery_allowed, generate_pending, identity_expired, load_pending,
+        persist_pending, publish_staged, renewal_due, retire_expired_staged, stage_identity,
+        staged_identity_paths,
     },
     pair::{PairingError, validate_issued},
     vocabulary,
@@ -18,6 +19,8 @@ use crate::{
 pub enum RotationError {
     #[error("active agent certificate has expired")]
     ActiveIdentityExpired,
+    #[error("agent.expired_renewal_grace_exhausted: re-enrollment required")]
+    ExpiredRecoveryGraceExhausted,
     #[error("credential operation failed: {0}")]
     Client(#[from] ClientError),
     #[error("credential storage failed: {0}")]
@@ -33,6 +36,9 @@ impl RotationError {
 
     pub fn code(&self) -> String {
         match self {
+            Self::ExpiredRecoveryGraceExhausted => {
+                SecurityRefusalReason::AgentExpiredRenewalGraceExhausted.to_string()
+            }
             Self::ActiveIdentityExpired => SecurityRefusalReason::LocalIdentityExpired.to_string(),
             Self::Client(error) => error
                 .code()
@@ -52,7 +58,7 @@ impl RotationError {
         match self {
             Self::ActiveIdentityExpired => false,
             Self::Client(error) => error.fatal(),
-            Self::Identity(_) | Self::Issued(_) => true,
+            Self::Identity(_) | Self::Issued(_) | Self::ExpiredRecoveryGraceExhausted => true,
         }
     }
 
@@ -104,6 +110,10 @@ pub async fn rotate_if_due_at(
     if !renewal_due(&root, scheduling_now)? {
         return Ok(false);
     }
+    let expired = !active_identity_is_valid(config)?;
+    if expired && !expired_recovery_allowed(&root, now)? {
+        return Err(RotationError::ExpiredRecoveryGraceExhausted);
+    }
     let pending = match load_pending(&root)? {
         Some(value) => value,
         None => {
@@ -113,7 +123,12 @@ pub async fn rotate_if_due_at(
         }
     };
     let active_client = AgentHttpClient::from_config(config)?;
-    let issued = match active_client.renew(&pending.csr_pem).await {
+    let renewal = if expired {
+        active_client.renew_expired(config, &pending.csr_pem).await
+    } else {
+        active_client.renew(&pending.csr_pem).await
+    };
+    let issued = match renewal {
         Ok(issued) => issued,
         // A controller-side staged CSR conflict is a typed denial.  The
         // recovery endpoint is authenticated with the same still-active
@@ -165,6 +180,25 @@ pub async fn rotate_if_due_at(
 #[cfg(test)]
 mod tests {
     use super::{ClientError, RotationError};
+
+    #[test]
+    fn expired_renewal_refused_for_revocation_never_retries_or_activates() {
+        let error = RotationError::Client(ClientError::Controller(Box::new(
+            crate::client::ControllerError::from_status(403),
+        )));
+        assert!(error.fatal());
+        assert!(!error.retryable());
+        assert_eq!(error.decision(), "exit");
+    }
+
+    #[test]
+    fn expired_renewal_after_grace_requires_new_enrollment_authority() {
+        let error = RotationError::ExpiredRecoveryGraceExhausted;
+        assert!(error.fatal());
+        assert!(!error.retryable());
+        assert_eq!(error.decision(), "exit");
+        assert_eq!(error.code(), "agent.expired_renewal_grace_exhausted");
+    }
 
     #[test]
     fn rotation_preserves_controller_status_code_and_decision() {

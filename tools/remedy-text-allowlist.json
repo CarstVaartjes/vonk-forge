@@ -3,12 +3,6 @@
   "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
   "debt": [
     {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "operator_resume_candidates_in_session",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/agent_upgrade_status.py",
       "function": "agent_upgrade_next_action",
       "kind": "imperative-remedy",

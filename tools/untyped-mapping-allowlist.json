@@ -293,10 +293,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "count": 4
-    },
-    {
       "path": "control/src/vonk_control/agent_upgrade_status.py",
       "count": 1
     },
@@ -374,7 +370,11 @@
     },
     {
       "path": "control/src/vonk_control/enrollment.py",
-      "count": 3
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/enrollment_validation.py",
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/execution_plan_service.py",
@@ -510,11 +510,15 @@
     },
     {
       "path": "control/src/vonk_control/recipe_operations.py",
-      "count": 18
+      "count": 15
     },
     {
       "path": "control/src/vonk_control/recipe_packages.py",
       "count": 5
+    },
+    {
+      "path": "control/src/vonk_control/recipe_progress.py",
+      "count": 3
     },
     {
       "path": "control/src/vonk_control/recipe_release.py",

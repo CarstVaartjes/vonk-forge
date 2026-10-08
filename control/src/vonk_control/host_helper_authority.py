@@ -56,6 +56,7 @@ from .models import (
     Job,
 )
 from .models import AgentOperation as StoredAgentOperation
+from .offline_stops import is_deferred_stop
 from .package_activation import matches_receipt
 from .strict_json import read_stored_model
 
@@ -517,7 +518,10 @@ class HostRuntimeAuthorityService:
                 or parent is None
                 or node is None
                 or certificate is None
-                or parent.state not in {"queued", "running"}
+                or (
+                    parent.state not in {"queued", "running"}
+                    and not is_deferred_stop(parent, operation)
+                )
                 or node_id not in parent.targets
                 or node.state != "active"
                 or node.revoked_at is not None

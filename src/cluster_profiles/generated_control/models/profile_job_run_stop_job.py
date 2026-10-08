@@ -8,10 +8,12 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
 
 if TYPE_CHECKING:
+  from ..models.offline_stop_intent import OfflineStopIntent
   from ..models.profile_job_run_stop_authorization import ProfileJobRunStopAuthorization
   from ..models.profile_job_run_stop_phase_item import ProfileJobRunStopPhaseItem
 
@@ -39,6 +41,7 @@ class ProfileJobRunStopJob:
                 JobRun scope.
             schema_version (Literal[1]):
             workload_intent_ordinal (int):
+            offline_stop_intent (None | OfflineStopIntent | Unset):
      """
 
     execution_mode: Literal['profile-jobrun-stop']
@@ -51,6 +54,7 @@ class ProfileJobRunStopJob:
     profile_stop_authorization: ProfileJobRunStopAuthorization
     schema_version: Literal[1]
     workload_intent_ordinal: int
+    offline_stop_intent: None | OfflineStopIntent | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
@@ -58,6 +62,7 @@ class ProfileJobRunStopJob:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.offline_stop_intent import OfflineStopIntent # noqa: PLC0415
         from ..models.profile_job_run_stop_authorization import ProfileJobRunStopAuthorization # noqa: PLC0415
         from ..models.profile_job_run_stop_phase_item import ProfileJobRunStopPhaseItem # noqa: PLC0415
         execution_mode = self.execution_mode
@@ -90,6 +95,14 @@ class ProfileJobRunStopJob:
 
         workload_intent_ordinal = self.workload_intent_ordinal
 
+        offline_stop_intent: dict[str, Any] | None | Unset
+        if isinstance(self.offline_stop_intent, Unset):
+            offline_stop_intent = UNSET
+        elif isinstance(self.offline_stop_intent, OfflineStopIntent):
+            offline_stop_intent = self.offline_stop_intent.to_dict()
+        else:
+            offline_stop_intent = self.offline_stop_intent
+
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -105,6 +118,8 @@ class ProfileJobRunStopJob:
             "schema_version": schema_version,
             "workload_intent_ordinal": workload_intent_ordinal,
         })
+        if offline_stop_intent is not UNSET:
+            field_dict["offline_stop_intent"] = offline_stop_intent
 
         return field_dict
 
@@ -112,6 +127,7 @@ class ProfileJobRunStopJob:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.offline_stop_intent import OfflineStopIntent # noqa: PLC0415
         from ..models.profile_job_run_stop_authorization import ProfileJobRunStopAuthorization # noqa: PLC0415
         from ..models.profile_job_run_stop_phase_item import ProfileJobRunStopPhaseItem # noqa: PLC0415
         d = dict(src_dict)
@@ -157,6 +173,26 @@ class ProfileJobRunStopJob:
 
         workload_intent_ordinal = d.pop("workload_intent_ordinal")
 
+        def _parse_offline_stop_intent(data: object) -> None | OfflineStopIntent | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                offline_stop_intent_type_0 = OfflineStopIntent.from_dict(data)
+
+
+
+                return offline_stop_intent_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | OfflineStopIntent | Unset, data)
+
+        offline_stop_intent = _parse_offline_stop_intent(d.pop("offline_stop_intent", UNSET))
+
+
         profile_job_run_stop_job = cls(
             execution_mode=execution_mode,
             owner_id=owner_id,
@@ -168,6 +204,7 @@ class ProfileJobRunStopJob:
             profile_stop_authorization=profile_stop_authorization,
             schema_version=schema_version,
             workload_intent_ordinal=workload_intent_ordinal,
+            offline_stop_intent=offline_stop_intent,
         )
 
 

@@ -1,10 +1,10 @@
 [Unit]
 Description=Vonk Forge outbound agent
-Wants=network-online.target
-After=network-online.target vonk-forge-package-helper.socket
-# Host GPU devices and CDI entries can arrive after network-online. Keep the
-# agent retryable and let its restart delay give systemd time to rebuild the
-# private device namespace after the host runtime becomes ready.
+Wants=network-online.target nvidia-persistenced.service
+After=network-online.target vonk-forge-package-helper.socket nvidia-persistenced.service
+# Order after driver startup. The agent restarts itself if GPU devices are
+# missing from its private namespace, recreating that namespace on restart.
+# RestartSec bounds the rate without a start-limit latch preventing recovery.
 StartLimitIntervalSec=0
 
 [Service]
@@ -20,6 +20,7 @@ Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent
 Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp
 Environment=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf
 Restart=on-failure
+RestartPreventExitStatus=78
 RestartSec=30s
 TimeoutStartSec=0
 WatchdogSec=15min

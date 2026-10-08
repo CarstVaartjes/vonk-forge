@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import json
 import logging
@@ -14,13 +13,12 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.x509.oid import NameOID
-from pydantic import JsonValue, ValidationError
+from pydantic import JsonValue
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,11 +26,37 @@ from vonk_agent_protocol import (
     CertificateCode,
     EnrollmentGrantState,
     InvalidRequestError,
+    SecurityRefusalReason,
 )
-from vonk_agent_protocol.enrollment import MAX_CSR_BYTES, EnrollmentEvidence
+from vonk_agent_protocol.enrollment import (
+    MAX_CSR_BYTES,
+    ExpiredRenewRequest,
+)
 
 from .ca_issuance_contract import CertificateIssuanceBinding
 from .enrollment_contract import ENROLLMENT_ID_PATTERN, EnrollmentGrantStatus
+from .enrollment_validation import (
+    _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
+)
+from .enrollment_validation import (
+    _digest as _digest,  # noqa: PLC0414 -- shared helper export
+)
+from .enrollment_validation import (
+    _load_csr as _load_csr,  # noqa: PLC0414 -- shared helper export
+)
+from .enrollment_validation import (
+    _stored_utc as _stored_utc,  # noqa: PLC0414 -- shared helper export
+)
+from .enrollment_validation import _utc as _utc  # noqa: PLC0414 -- shared helper export
+from .enrollment_validation import (
+    _validate_actor as _validate_actor,  # noqa: PLC0414 -- shared helper export
+)
+from .enrollment_validation import (
+    _validate_evidence as _validate_evidence,  # noqa: PLC0414 -- shared helper export
+)
+from .enrollment_validation import (
+    _validate_node_id as _validate_node_id,  # noqa: PLC0414 -- shared helper export
+)
 from .models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -58,6 +82,12 @@ _ROTATION_ISSUANCE_TIMEOUT = timedelta(minutes=5)
 
 class EnrollmentDenied(RuntimeError):
     """Enrollment input or state does not authorize the requested operation."""
+
+
+class ExpiredRenewalGraceExhausted(EnrollmentDenied):
+    """The enrolled key no longer authorizes unattended certificate recovery."""
+
+    reason_code = SecurityRefusalReason.AGENT_EXPIRED_RENEWAL_GRACE_EXHAUSTED
 
 
 class EnrollmentIssuanceUncertain(EnrollmentDenied):
@@ -570,7 +600,52 @@ class EnrollmentService:
             )
         return self._issue_enrollment_claim(claim, now)
 
-    def renew(self, node_id: str, serial: str, csr: bytes) -> IssuedCertificate:
+    def renew_expired(self, proof: ExpiredRenewRequest) -> IssuedCertificate:
+        """Authenticate the stored active key; never relax work/activation mTLS.
+
+        Fresh proofs bind a durable CSR, so replay uses the existing journal
+        and cannot choose another key or issue another generation.
+        """
+        now = _utc(self._clock())
+        with self._transaction() as session:
+            node = session.get(AgentNode, proof.node_id)
+            certificate = session.get(AgentCertificate, proof.serial)
+            if (
+                node is None
+                or node.state != "active"
+                or node.revoked_at is not None
+                or certificate is None
+                or certificate.node_id != proof.node_id
+                or certificate.state != "active"
+                or certificate.revoked_at is not None
+                or certificate.certificate_pem is None
+            ):
+                raise EnrollmentDenied("expired renewal identity is removed or revoked")
+            expiry = _stored_utc(certificate.not_after)
+            if now < expiry or now > expiry + timedelta(days=30):
+                raise ExpiredRenewalGraceExhausted(
+                    "expired renewal grace exhausted; re-enrollment required"
+                )
+            if abs(int(now.timestamp()) - proof.signed_at) > 300:
+                raise EnrollmentDenied("expired renewal proof is stale")
+            public_key = x509.load_pem_x509_certificate(
+                certificate.certificate_pem.encode("ascii")
+            ).public_key()
+            if not isinstance(public_key, ed25519.Ed25519PublicKey):
+                raise EnrollmentDenied("expired renewal key is not Ed25519")
+            try:
+                public_key.verify(bytes.fromhex(proof.signature), proof.proof_bytes())
+            except (InvalidSignature, ValueError, UnicodeEncodeError):
+                raise EnrollmentDenied("expired renewal proof is invalid") from None
+        # Admission rechecks removal/revocation and grace under the existing
+        # node/certificate locks. No transaction spans provider I/O.
+        return self.recover_rotation(
+            proof.node_id, proof.serial, proof.csr.encode("ascii"), expired=True
+        )
+
+    def renew(
+        self, node_id: str, serial: str, csr: bytes, *, expired: bool = False
+    ) -> IssuedCertificate:
         _validate_node_id(node_id)
         if not serial.strip():
             raise ValueError("certificate serial is required")
@@ -583,6 +658,7 @@ class EnrollmentService:
                 normalized_csr,
                 csr_fingerprint,
                 now,
+                expired=expired,
             )
         except IntegrityError:
             # SQLite does not implement SELECT FOR UPDATE. A node-unique row
@@ -593,6 +669,7 @@ class EnrollmentService:
                 normalized_csr,
                 csr_fingerprint,
                 now,
+                expired=expired,
             )
         if isinstance(claim, IssuedCertificate):
             return claim
@@ -605,7 +682,7 @@ class EnrollmentService:
         return self._issue_rotation_claim(claim, now)
 
     def recover_rotation(
-        self, node_id: str, serial: str, csr: bytes
+        self, node_id: str, serial: str, csr: bytes, *, expired: bool = False
     ) -> IssuedCertificate:
         """Recover an unactivated staged certificate for the durable pending CSR.
 
@@ -626,9 +703,10 @@ class EnrollmentService:
             normalized_csr,
             csr_fingerprint,
             now,
+            expired=expired,
         )
         if recovery is None:
-            return self.renew(node_id, serial, normalized_csr)
+            return self.renew(node_id, serial, normalized_csr, expired=expired)
         try:
             self._authority.revoke_node(recovery.retiring_serial, now)
         except RuntimeError as error:
@@ -642,7 +720,7 @@ class EnrollmentService:
             now,
         )
         if not owns_issuance:
-            return self.renew(node_id, serial, normalized_csr)
+            return self.renew(node_id, serial, normalized_csr, expired=expired)
         return self._issue_rotation_claim(recovery.claim, now)
 
     def _prepare_rotation_recovery(
@@ -652,6 +730,8 @@ class EnrollmentService:
         normalized_csr: bytes,
         csr_fingerprint: str,
         now: datetime,
+        *,
+        expired: bool = False,
     ) -> _RotationRecoveryClaim | None:
         with self._transaction() as session:
             node = session.scalar(
@@ -681,7 +761,7 @@ class EnrollmentService:
                 or source.revoked_at is not None
                 or source.state != "active"
                 or _stored_utc(source.not_before) > now
-                or _stored_utc(source.not_after) <= now
+                or not _rotation_source_valid(source, now, expired=expired)
             ):
                 raise EnrollmentDenied("node identity is retired or revoked")
 
@@ -862,6 +942,8 @@ class EnrollmentService:
         normalized_csr: bytes,
         csr_fingerprint: str,
         now: datetime,
+        *,
+        expired: bool = False,
     ) -> _RotationClaim | IssuedCertificate:
         with self._transaction() as session:
             node = session.scalar(
@@ -893,9 +975,8 @@ class EnrollmentService:
                 raise EnrollmentDenied("node identity is retired or revoked")
             if certificate.state != "active":
                 raise EnrollmentDenied("certificate is not active")
-            if (
-                _stored_utc(certificate.not_before) > now
-                or _stored_utc(certificate.not_after) <= now
+            if _stored_utc(certificate.not_before) > now or not _rotation_source_valid(
+                certificate, now, expired=expired
             ):
                 raise EnrollmentDenied("certificate is not currently valid")
             staged = next(
@@ -1628,116 +1709,6 @@ def _rotation_claim(
     )
 
 
-def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:
-    try:
-        request = x509.load_pem_x509_csr(csr)
-    except (TypeError, ValueError) as error:
-        raise EnrollmentDenied("CSR must be valid PEM") from error
-    if not request.is_signature_valid:
-        raise EnrollmentDenied("CSR signature is invalid")
-    common_names = request.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-    if len(common_names) != 1:
-        raise EnrollmentDenied("CSR subject must contain a canonical node ID")
-    common_name = common_names[0].value
-    if not isinstance(common_name, str) or _NODE_ID.fullmatch(common_name) is None:
-        raise EnrollmentDenied("CSR subject must contain a canonical node ID")
-    csr_node_id = common_name
-    if node_id is not None and csr_node_id != node_id:
-        raise EnrollmentDenied("CSR subject does not match enrollment node")
-    if len(request.extensions) != 1:
-        raise EnrollmentDenied("CSR must contain only the node URI SAN extension")
-    try:
-        sans = request.extensions.get_extension_for_class(
-            x509.SubjectAlternativeName
-        ).value
-    except x509.ExtensionNotFound as error:
-        raise EnrollmentDenied("CSR node URI SAN is required") from error
-    expected_sans = x509.SubjectAlternativeName(
-        [
-            x509.UniformResourceIdentifier(
-                f"spiffe://vonk-forge.local/node/{csr_node_id}"
-            )
-        ]
-    )
-    if sans != expected_sans:
-        raise EnrollmentDenied("CSR node URI SAN does not match enrollment node")
-    public_key = request.public_key()
-    if not isinstance(public_key, ed25519.Ed25519PublicKey):
-        raise EnrollmentDenied("CSR public key must be Ed25519")
-    public_key_pem = public_key.public_bytes(
-        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    public_key_der = public_key.public_bytes(
-        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    return (
-        request.public_bytes(serialization.Encoding.PEM),
-        public_key_pem,
-        _digest(public_key_der),
-        csr_node_id,
-    )
-
-
-def _validate_evidence(
-    evidence: Mapping[str, object],
-    grant_node_id: str | None,
-    csr_node_id: str,
-    public_key_fingerprint: str,
-) -> tuple[dict[str, str], str | None]:
-    try:
-        values = EnrollmentEvidence.model_validate(evidence).model_dump()
-    except ValidationError:
-        return {}, "evidence fields are invalid"
-    if values["node_id"] != csr_node_id:
-        return values, "evidence node ID does not match CSR"
-    if grant_node_id is not None and values["node_id"] != grant_node_id:
-        return values, "evidence node ID does not match enrollment grant"
-    if values["csr_public_key_fingerprint"] != public_key_fingerprint:
-        return values, "evidence CSR public-key fingerprint does not match CSR"
-    return values, None
-
-
-def _decode_token(token: str) -> bytes:
-    if not isinstance(token, str) or _TOKEN.fullmatch(token) is None:
-        raise EnrollmentDenied("invalid enrollment grant")
-    try:
-        value = base64.b64decode(
-            (token + "=").encode("ascii"), altchars=b"-_", validate=True
-        )
-    except (ValueError, binascii.Error) as error:
-        raise EnrollmentDenied("invalid enrollment grant") from error
-    if len(value) != 32:
-        raise EnrollmentDenied("invalid enrollment grant")
-    return value
-
-
-def _digest(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _validate_node_id(node_id: str) -> None:
-    if _NODE_ID.fullmatch(node_id) is None:
-        raise ValueError(
-            "node ID must be a canonical spk_<32 lowercase hex characters> value"
-        )
-
-
-def _validate_actor(actor: str) -> None:
-    if not actor.strip():
-        raise ValueError("administrator actor is required")
-
-
-def _utc(value: datetime) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError("timestamp must be timezone-aware")
-    return value.astimezone(UTC)
-
-
-def _stored_utc(value: datetime) -> datetime:
-    """Normalize database timestamps; SQLite does not round-trip tzinfo."""
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
 def _issuance_binding(
     value: JsonValue | None,
 ) -> CertificateIssuanceBinding | None:
@@ -1769,3 +1740,10 @@ def _require_issuance_binding(
     """The same exact accepted binding fences admission and result adoption."""
     if _issuance_binding(stored) != expected:
         raise EnrollmentDenied("enrollment issuance binding changed")
+
+
+def _rotation_source_valid(
+    certificate: AgentCertificate, now: datetime, *, expired: bool
+) -> bool:
+    expiry = _stored_utc(certificate.not_after)
+    return expiry <= now <= expiry + timedelta(days=30) if expired else now < expiry

@@ -32,7 +32,7 @@ import httpx2
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     AgentFailureResult,
@@ -142,10 +142,13 @@ from .lifecycle.run_switch import (
 )
 from .lifecycle.run_switch import (
     RunSwitchAdapter,
-    set_member_state,
 )
-from .lifecycle.types import Effect as _LifecycleEffect
-from .lifecycle.types import State as _LifecycleState
+from .lifecycle.types import (
+    Effect as _LifecycleEffect,
+)
+from .lifecycle.types import (
+    State as _LifecycleState,
+)
 from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .logging import log_event, redact_text
 from .memory_reservations import (
@@ -173,6 +176,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .offline_stops import pending_run_stop_nodes
 from .operation_api import (
     OperationListPage,
     OperationQuery,
@@ -184,7 +188,7 @@ from .operation_blockers import (
     bound_blockers,
     make_blocker,
 )
-from .operation_progress import project_progress, sample_progress
+from .operation_progress import sample_progress
 from .prebuilt_images import policy_prebuilt_reference
 from .preparation_contract import (
     ControllerAssetState,
@@ -205,6 +209,7 @@ from .profile_capacity import (
 from .recipe_build_cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
+    needs_container_build,
 )
 from .recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from .recipe_execution_contract import (
@@ -284,7 +289,6 @@ from .run_switch_contract import (
     RunSwitchCoverage,
     RunSwitchDistributionChildResult,
     RunSwitchFinalVerifyResult,
-    RunSwitchMemberProgress,
     RunSwitchMemberReceipt,
     RunSwitchMemberState,
     RunSwitchOperation,
@@ -297,7 +301,6 @@ from .run_switch_contract import (
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchProfileStopScope,
-    RunSwitchProgress,
     RunSwitchProgressState,
     RunSwitchReason,
     RunSwitchReasonScope,
@@ -327,6 +330,22 @@ from .run_switch_observation_contract import (
     RunSwitchObservedImageIdentity,
     RunSwitchStoredIdentity,
 )
+from .run_switch_progress import (
+    _complete_operation_progress as _complete_operation_progress,  # noqa: PLC0414 -- shared helper export
+)
+from .run_switch_progress import (
+    _complete_phase_progress as _complete_phase_progress,  # noqa: PLC0414 -- shared helper export
+)
+
+# Persisted progress and catalog documents arrive as decoded JSON, so the
+# contract's closed value sets are read back through the declared alias instead
+# of a hand-written membership test that could drift from it.
+from .run_switch_progress import (
+    _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
+)
+from .run_switch_progress import (
+    _progress_view as _progress_view,  # noqa: PLC0414 -- shared helper export
+)
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImagePreparationRefused,
@@ -344,9 +363,6 @@ from .strict_json import (
 )
 from .unused_storage_collection import spark_eviction_capacity
 
-# Persisted progress and catalog documents arrive as decoded JSON, so the
-# contract's closed value sets are read back through the declared alias instead
-# of a hand-written membership test that could drift from it.
 _KNOBS_ADAPTER: TypeAdapter[dict[str, Scalar]] = TypeAdapter(dict[str, Scalar])
 _CHANGE_EFFECTS_ADAPTER = TypeAdapter(dict[str, RunSwitchChangeEffect])
 _CONTAINER_BUILD_STATE_ADAPTER = TypeAdapter(RunSwitchContainerBuildState)
@@ -1328,11 +1344,38 @@ class RecipeLifecyclePhaseExecutor:
                         RunSwitchCode.STOPPED_RUN_MEMBERSHIP_CHANGED,
                         reason=WaitReason.SCOPE_CHANGED,
                     )
-                if run.state != RunState.STOPPED or run.stopped_at is None:
+                pending_offline = pending_run_stop_nodes(session, run.id)
+                ranks = tuple(
+                    session.scalars(select(RunNode).where(RunNode.run_id == run.id))
+                )
+                reachable_complete = (
+                    run.state == RunState.STOPPING
+                    and bool(pending_offline)
+                    and not (members & expected_pools.keys() & pending_offline)
+                    and all(
+                        rank.state == RunState.STOPPED
+                        or rank.node_id in pending_offline
+                        for rank in ranks
+                    )
+                )
+                if not reachable_complete and (
+                    run.state != RunState.STOPPED or run.stopped_at is None
+                ):
                     raise RunSwitchPostStopEvidencePending(
                         f"Stop receipt for {stop.run_id} is not complete"
                     )
-                stopped_at = _aware(run.stopped_at)
+                if not (members & expected_pools.keys()):
+                    continue
+                assert run.stopped_at is not None or reachable_complete
+                stopped_at = (
+                    max(
+                        _aware(rank.updated_at)
+                        for rank in ranks
+                        if rank.state == RunState.STOPPED
+                    )
+                    if reachable_complete
+                    else _aware(run.stopped_at or now)
+                )
                 for node_id in sorted(members & expected_pools.keys()):
                     try:
                         snapshot = inventory.latest(
@@ -2195,10 +2238,19 @@ class RecipeLifecyclePhaseExecutor:
                                 for rank in missing_ranks
                             )
                         )
+                with self._sessions() as session:
+                    pending_offline = pending_run_stop_nodes(session, run_id)
                 verified = (
-                    status.state == RunState.STOPPED
+                    (
+                        status.state == RunState.STOPPED
+                        or (status.state == RunState.STOPPING and bool(pending_offline))
+                    )
                     and status.route_state == RouteState.WITHDRAWN
-                    and all(rank.state == RunState.STOPPED for rank in status.ranks)
+                    and all(
+                        rank.state == RunState.STOPPED
+                        or rank.node_id in pending_offline
+                        for rank in status.ranks
+                    )
                 )
                 waiting = (
                     status.state in STOPPABLE_RUN_STATES
@@ -3606,6 +3658,12 @@ class RunSwitchOperationService:
         self, operation_id: str, *, actor: str, request_key: str, reason: str
     ) -> RunSwitchOperation:
         """Stop at the next safe phase boundary, keeping shared immutable work."""
+        from .run_switch_journal_repair import (
+            is_zero_transfer_journal_fault,
+            record_repair_cancellation,
+            try_repair_zero_transfer_journal,
+        )
+
         stop_run_id: str | None = None
         profile_application_id: str | None = None
         cancellation = RunSwitchCancellation(
@@ -3614,43 +3672,91 @@ class RunSwitchOperationService:
             reason=" ".join(reason.split()),
             requested_at=_now(self._clock),
         )
+        with self._sessions() as session:
+            snapshot = session.get(Job, operation_id)
+            if (
+                snapshot is not None
+                and snapshot.kind in _OPERATION_KINDS
+                and snapshot.state not in _LIVE_STATES
+            ):
+                return self._operation_view(snapshot)
+            damaged = snapshot is not None and is_zero_transfer_journal_fault(snapshot)
+        if damaged:
+            record_repair_cancellation(self._sessions, operation_id, cancellation)
+            try_repair_zero_transfer_journal(
+                self._sessions, operation_id, _now(self._clock)
+            )
+            return self.get(operation_id)
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
                 raise MissingRecord(operation_id)
             progress = _read_progress(job.result)
-            previous = progress.cancellation
-            if previous:
-                if (previous.request_key, previous.actor, previous.reason) != (
-                    cancellation.request_key,
-                    cancellation.actor,
-                    cancellation.reason,
-                ):
-                    raise RunSwitchRequestInvalid(
-                        "run-switch cancellation request was already used differently",
-                        reason=InvalidRequestReason.CONFLICT,
-                    )
-                return self._operation_view(job)
             if job.state not in _LIVE_STATES:
-                raise RunSwitchRequestInvalid("run-switch operation is not cancellable")
-            # A cancel always completes: a plan that cannot be read is unknown,
+                return self._operation_view(job)
+            if progress.cancellation is None:
+                progress.cancellation = cancellation
+                job.result = _persisted_result(progress)
+                job.updated_at = cancellation.requested_at
+        # The intent above is committed before a build lock, child observation
+        # or Stop admission can fail. Repeated cancels retain that first intent.
+        with self._sessions.begin() as session:
+            # Read identities first, then acquire the build before its parent.
+            # Detachment and last-consumer cleanup must share this NOWAIT fence.
+            snapshot = session.get(Job, operation_id)
+            if snapshot is None:
+                return self.get(operation_id)
+            snapshot_plan = _stored_job_plan(snapshot)
+            snapshot_index = _read_progress(snapshot.result).phase_index
+            if snapshot_plan is not None:
+                try:
+                    lock_run_switch_build_dependency(
+                        session,
+                        snapshot_plan,
+                        phase_index=snapshot_index,
+                        allow_cancelling=True,
+                    )
+                except BuildConsumerError as error:
+                    raise RunSwitchRetryLater(
+                        f"{error.code}: {error}",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
+            try:
+                job = session.scalar(
+                    select(Job)
+                    .where(Job.id == operation_id)
+                    .with_for_update(nowait=True)
+                    .execution_options(populate_existing=True)
+                )
+            except DBAPIError as error:
+                if getattr(error.orig, "sqlstate", None) != "55P03":
+                    raise
+                raise RunSwitchRetryLater(
+                    "run-switch cancellation owner is busy",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
+            if job is None:
+                return self.get(operation_id)
+            if job.state not in _LIVE_STATES:
+                return self._operation_view(job)
+            progress = _read_progress(job.result)
+            if (
+                _stored_job_plan(job) != snapshot_plan
+                or progress.phase_index != snapshot_index
+            ):
+                # Replan in a fresh transaction; never append an earlier lock.
+                raise RunSwitchRetryLater(
+                    "run-switch cancellation boundary changed",
+                    reason=WaitReason.SCOPE_CHANGED,
+                )
+            cancellation = progress.cancellation or cancellation
+            # A recorded cancel is retried: an unreadable plan is unknown,
             # so the cancel treats the operation as possibly started and Stops
             # through the child's run, without the plan's build-dependency lock.
             plan = _stored_job_plan(job)
             profile_application_id = _string_or_none(progress.profile_application_id)
             phase = None
             if plan is not None:
-                try:
-                    lock_run_switch_build_dependency(
-                        session,
-                        plan,
-                        phase_index=require_integer(
-                            progress.phase_index, "phase index"
-                        ),
-                        allow_cancelling=True,
-                    )
-                except BuildConsumerError as error:
-                    raise RunSwitchRequestInvalid(f"{error.code}: {error}") from error
                 phase = plan.phases[
                     min(
                         require_integer(progress.phase_index, "phase index"),
@@ -3922,6 +4028,11 @@ class RunSwitchOperationService:
         due_at = func.replace(
             Job.result["observation_due_at"].as_string(), "Z", "+00:00"
         )
+        deadline_at = func.replace(
+            Job.result["observation_deadline_at"].as_string(), "Z", "+00:00"
+        )
+        from .models import RunSwitchJournalRepairPending
+
         with self._sessions() as session:
             active = (
                 select(Job.id)
@@ -3940,8 +4051,10 @@ class RunSwitchOperationService:
                         Job.state.in_(job_states.words(LifecycleState.NEEDS_OPERATOR)),
                     ),
                     or_(
+                        Job.id.in_(select(RunSwitchJournalRepairPending.job_id)),
                         due_at.is_(None),
                         due_at <= _now(self._clock).isoformat(),
+                        deadline_at <= _now(self._clock).isoformat(),
                         # A cancel in flight is looked at on every tick: it ends as
                         # soon as its child does (its stop attempts are spaced by
                         # the core, not by this clock).
@@ -4013,6 +4126,10 @@ class RunSwitchOperationService:
                     LifecycleState.OBSERVING,
                 ):
                     return
+                if _progress_damaged(job.result):
+                    # An unexpected observer error cannot replace evidence of
+                    # an issued child with the empty projection fallback.
+                    return
                 progress = _read_progress(job.result)
                 code = error_code(error) or RunSwitchCode.ADVANCE_FAILED
                 attempt = (
@@ -4046,6 +4163,14 @@ class RunSwitchOperationService:
         replaced at each check and empty once the operation runs on or settles.
         """
 
+        from .run_switch_journal_repair import is_zero_transfer_journal_fault
+
+        with self._sessions() as session:
+            snapshot = session.get(Job, operation_id)
+            if snapshot is not None and is_zero_transfer_journal_fault(snapshot):
+                # The bounded repair already owns this unknown observation. Do
+                # not turn its NOWAIT refusal into an unbounded wait here.
+                return
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
@@ -7261,6 +7386,47 @@ class RunSwitchOperationService:
 
     def _advance(self, operation_id: str) -> bool:
         now = _now(self._clock)
+        from .run_switch_journal_contract import JournalRepairDisposition
+        from .run_switch_journal_repair import try_repair_zero_transfer_journal
+
+        repair = try_repair_zero_transfer_journal(self._sessions, operation_id, now)
+        if repair != JournalRepairDisposition.NOT_APPLICABLE:
+            # Repair dispatches nothing. The next ordinary turn observes the
+            # same child; ambiguous evidence retains its raw journal and scope.
+            return repair in {
+                JournalRepairDisposition.REPAIRED,
+                JournalRepairDisposition.ENDED,
+            }
+        # A deferred build detachment re-enters the same fenced cancel path,
+        # before child observation can end the parent through the lifecycle core.
+        # A busy boundary leaves only the durable intent and releases all locks;
+        # the worker's bounded polling retries it without a Stop of shared work.
+        with self._sessions() as session:
+            snapshot = session.get(Job, operation_id)
+            plan = _stored_job_plan(snapshot) if snapshot is not None else None
+            progress = _read_progress(snapshot.result) if snapshot is not None else None
+            cancellation = progress.cancellation if progress is not None else None
+            detach_build = (
+                snapshot is not None
+                and snapshot.state in _LIVE_STATES
+                and plan is not None
+                and progress is not None
+                and needs_container_build(plan, progress.phase_index)
+            )
+        if detach_build and cancellation is not None:
+            for _attempt in admission_attempts():
+                try:
+                    self.cancel(
+                        operation_id,
+                        actor=cancellation.actor,
+                        request_key=cancellation.request_key,
+                        reason=cancellation.reason,
+                    )
+                except RunSwitchRetryLater:
+                    # The failed transaction has closed before bounded backoff.
+                    continue
+                return True
+            return False
         if self._refresh_blocked_plan(operation_id, now):
             return True
         with self._sessions() as session:
@@ -8978,6 +9144,55 @@ class RunSwitchOperationService:
             )
             else []
         )
+        repair_due: datetime | None = None
+        from .run_switch_journal_repair import (
+            REPAIR_WAIT,
+            is_zero_transfer_journal_fault,
+        )
+
+        if (
+            persisted_result is None
+            and job.state
+            in {
+                LifecycleState.QUEUED.value,
+                LifecycleState.RUNNING.value,
+                LifecycleState.OBSERVING.value,
+            }
+            and is_zero_transfer_journal_fault(job)
+        ):
+            from .models import RunSwitchJournalRepairPending
+            from .run_switch_journal_contract import RunSwitchJournalRepairPendingState
+
+            view_session = object_session(job)
+            pending = (
+                view_session.get(RunSwitchJournalRepairPending, job.id)
+                if view_session is not None
+                else None
+            )
+            retained = (
+                read_row_column(pending, "progress") if pending is not None else None
+            )
+            if isinstance(retained, RunSwitchJournalRepairPendingState):
+                repair_due = retained.next_attempt_at
+            projected_state = "unknown"
+            blockers = [
+                make_blocker(
+                    REPAIR_WAIT,
+                    job.status_reason
+                    or f"{REPAIR_WAIT}: waiting for exact accepted child evidence",
+                    node_ids=list(job.targets),
+                )
+            ]
+        from .run_switch_journal_contract import JournalRepairCode
+
+        if (job.status_reason or "").startswith(JournalRepairCode.EXHAUSTED):
+            blockers = [
+                make_blocker(
+                    JournalRepairCode.EXHAUSTED,
+                    job.status_reason or JournalRepairCode.EXHAUSTED,
+                    node_ids=list(job.targets),
+                )
+            ]
         return RunSwitchOperation(
             operation_id=job.id,
             kind=_OPERATION_KIND_ADAPTER.validate_python(job.kind, strict=True),
@@ -9003,7 +9218,8 @@ class RunSwitchOperationService:
             "recorded identity.",
             result=persisted_result,
             blockers=blockers,
-            next_attempt_at=(
+            next_attempt_at=repair_due
+            or (
                 persisted_result.observation_due_at
                 if blockers and persisted_result is not None
                 else None
@@ -9078,7 +9294,7 @@ class RunSwitchOperationProvider:
                     .limit(limit)
                 )
             )
-        items = tuple(self._item(job) for job in jobs[:limit])
+            items = tuple(self._item(job) for job in jobs[:limit])
         return OperationListPage(items, None, total)
 
     def get_operation(self, operation_id: str) -> Mapping[str, object]:
@@ -9172,10 +9388,13 @@ class RunSwitchOperationProvider:
                 and operation.result.retryable
                 else ["cancel"]
                 if operation.state
-                in job_states.words(
-                    LifecycleState.QUEUED,
-                    LifecycleState.RUNNING,
-                    LifecycleState.OBSERVING,
+                in (
+                    *job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.OBSERVING,
+                    ),
+                    "unknown",
                 )
                 and not (operation.result and operation.result.cancellation)
                 and (
@@ -10085,300 +10304,8 @@ def _checkpoint_matches(
     )
 
 
-def _merge_progress_evidence(
-    progress: RunSwitchOperationResult,
-    plan: RunSwitchPlan,
-    phase: RunSwitchPhase,
-    evidence: object,
-    now: datetime | None = None,
-) -> None:
-    """Merge typed measured observations while retaining exact phase ownership."""
-    if isinstance(evidence, RunSwitchObservedEvidence):
-        payload = evidence
-    else:
-        try:
-            raw = (
-                evidence.model_dump(mode="json")
-                if isinstance(evidence, BaseModel)
-                else evidence
-            )
-            payload = RunSwitchObservedEvidence.model_validate_json(
-                canonical_message(raw), strict=True
-            )
-        except (TypeError, ValueError):
-            return
-    if payload.progress is not None:
-        _merge_progress_evidence(progress, plan, phase, payload.progress, now)
-    if payload.operation is not None:
-        progress.operation = payload.operation
-        progress.operation_phase_index = phase.index
-    reported_completed = next(
-        (
-            value
-            for value in (
-                payload.completed_bytes,
-                payload.copied_bytes,
-                payload.downloaded_bytes,
-            )
-            if value is not None
-        ),
-        None,
-    )
-    # Native install/build measurements belong to their phase's OperationProgress.
-    # Only transfer evidence can advance the accepted distribution byte budget.
-    if reported_completed is not None:
-        if phase.kind == "transfer":
-            model_download, _, _ = _planned_transfer_parts(plan)
-            offset = (
-                model_download
-                if phase.subphase == "target-copy" and model_download is not None
-                else 0
-            )
-            progress.completed_bytes = max(
-                progress.completed_bytes, offset + reported_completed
-            )
-        if now is not None and payload.progress is None and payload.operation is None:
-            prior = progress.operation
-            completed = (
-                max(prior.completed_bytes, reported_completed)
-                if prior is not None and prior.phase == phase.kind
-                else reported_completed
-            )
-            current = OperationProgress(
-                phase=phase.kind,
-                completed_bytes=completed,
-                total_bytes=payload.total_bytes,
-                total_bytes_known=payload.total_bytes is not None,
-            )
-            progress.operation = _observe_progress(prior, current, now)
-            progress.operation_phase_index = phase.index
-    if (
-        phase.kind == "transfer"
-        and payload.total_bytes is not None
-        and progress.total_bytes is None
-    ):
-        model_download, _, _ = _planned_transfer_parts(plan)
-        if phase.subphase == "target-copy" and model_download is not None:
-            progress.total_bytes = model_download + payload.total_bytes
-            progress.total_bytes_known = True
-    known_nodes = set(_plan_target_node_ids(plan))
-    existing = {
-        item.node_id: item for item in progress.members if item.node_id in known_nodes
-    }
-    for item in payload.members:
-        if item.node_id not in known_nodes:
-            continue
-        prior = existing.get(item.node_id)
-        target = item.model_copy(deep=True)
-        if prior is not None:
-            target.completed_bytes = max(prior.completed_bytes, item.completed_bytes)
-            if target.total_bytes is None:
-                target.total_bytes = prior.total_bytes
-            if target.phase is None:
-                target.phase = prior.phase
-        if target.error is not None:
-            target.error = target.error[:256]
-        existing[item.node_id] = target
-    progress.members = list(existing.values())
-
-
-def _complete_phase_progress(
-    progress: RunSwitchOperationResult, plan: RunSwitchPlan, phase: RunSwitchPhase
-) -> None:
-    progress.retry_attempt = None
-    if phase.kind != "transfer":
-        return
-    model_download, target_copy, aggregate = _planned_transfer_parts(plan)
-    if phase.subphase == "model-download":
-        if model_download is not None:
-            progress.completed_bytes = max(progress.completed_bytes, model_download)
-        return
-    if phase.subphase != "target-copy":
-        return
-    _, member_totals = _planned_transfer_bytes(plan)
-    if aggregate is not None:
-        progress.completed_bytes = aggregate
-        progress.total_bytes = aggregate
-        progress.total_bytes_known = True
-    elif target_copy is not None:
-        progress.completed_bytes = max(
-            progress.completed_bytes, target_copy + (model_download or 0)
-        )
-    entries = {item.node_id: item for item in progress.members}
-    for node_id, total in member_totals.items():
-        item = entries.setdefault(
-            node_id, RunSwitchMemberReceipt(node_id=node_id, state="pending")
-        )
-        if total is not None:
-            item.total_bytes = total
-            item.completed_bytes = total
-        item.phase = phase.kind
-        set_member_state(item, "succeeded")
-        item.error = None
-    progress.members = list(entries.values())
-
-
-def _complete_operation_progress(
-    plan: RunSwitchPlan, progress: RunSwitchOperationResult
-) -> RunSwitchOperationResult:
-    total, member_totals = _planned_transfer_bytes(plan)
-    if total is not None:
-        progress.completed_bytes = total
-        progress.total_bytes = total
-        progress.total_bytes_known = True
-    entries = {item.node_id: item for item in progress.members}
-    for node_id, member_total in member_totals.items():
-        item = entries.setdefault(
-            node_id, RunSwitchMemberReceipt(node_id=node_id, state="pending")
-        )
-        if member_total is not None:
-            item.total_bytes = member_total
-            item.completed_bytes = member_total
-        item.phase = "final_verify"
-        set_member_state(item, "succeeded")
-        item.error = None
-    progress.members = list(entries.values())
-    progress.phase = "final_verify"
-    progress.subphase = None
-    progress.retryable = False
-    progress.failed_phase = None
-    progress.failure_code = None
-    progress.child_operation_id = None
-    return progress
-
-
 #: The one placeholder member of a damaged operation that records no targets.
 _UNKNOWN_MEMBER_NODE_ID = "spk_" + "0" * 32
-
-
-def _progress_view(
-    plan: RunSwitchPlan | None,
-    raw: RunSwitchOperationResult,
-    operation_state: str,
-    status_reason: str | None,
-    node_ids: Sequence[str] | None = None,
-) -> RunSwitchProgress:
-    """Project durable typed progress without advancing the operation."""
-    node_ids = (
-        list(_plan_target_node_ids(plan))
-        if plan is not None
-        else list(node_ids or [item.node_id for item in raw.members])
-    )
-    phase_count = max(1, len(plan.phases)) if plan is not None else 1
-    phase_index = min(raw.phase_index, 31) if plan is not None else 0
-    phase = raw.phase
-    subphase = raw.subphase
-    if plan is not None and phase_index < len(plan.phases):
-        phase = phase or plan.phases[phase_index].kind
-        subphase = subphase or plan.phases[phase_index].subphase
-    total, member_totals = (
-        _planned_transfer_bytes(plan) if plan is not None else (None, {})
-    )
-    total = total if total is not None else raw.total_bytes
-    state = _progress_operation_state(operation_state)
-    if state == "succeeded":
-        phase, subphase = "final_verify", None
-        phase_index = min(max(phase_index, phase_count - 1), 31)
-    completed = raw.completed_bytes
-    if state == "succeeded" and total is not None:
-        completed = total
-    elif plan is not None and total is not None:
-        completed = min(completed, total)
-    raw_members = {
-        item.node_id: item for item in raw.members if item.node_id in node_ids
-    }
-    current_nodes = (
-        set(plan.phases[phase_index].node_ids)
-        if plan is not None and phase_index < len(plan.phases)
-        else set()
-    )
-    members = []
-    for node_id in node_ids:
-        item = raw_members.get(node_id)
-        member_total = (
-            item.total_bytes
-            if item is not None and item.total_bytes is not None
-            else member_totals.get(node_id)
-        )
-        member_completed = item.completed_bytes if item is not None else 0
-        if member_total is not None:
-            member_completed = min(member_completed, member_total)
-        member_state = item.state if item is not None else None
-        if member_state is None:
-            member_state = (
-                "succeeded"
-                if state == "succeeded"
-                else "failed"
-                if state == "failed" and node_id in current_nodes
-                else "running"
-                if state == "running" and node_id in current_nodes
-                else "pending"
-                if state == "queued" or state == "running" and raw.completed_phases
-                else "unknown"
-            )
-        error = item.error if item is not None else None
-        if state == "failed" and node_id in current_nodes and error is None:
-            error = status_reason[:256] if status_reason is not None else None
-        members.append(
-            RunSwitchMemberProgress(
-                node_id=node_id,
-                phase=item.phase
-                if item is not None and item.phase is not None
-                else phase,
-                state=member_state,
-                completed_bytes=member_completed,
-                total_bytes=member_total,
-                error=error,
-            )
-        )
-    if not members:
-        retire_as_unknown(
-            "run-switch.progress",
-            "no-target-members",
-            BookkeepingReason.ROW_INCOMPLETE,
-            "operation has no recorded target members",
-        )
-        members.append(
-            RunSwitchMemberProgress(
-                node_id=_UNKNOWN_MEMBER_NODE_ID,
-                phase=phase,
-                state="unknown",
-                error="no target members are recorded for this operation",
-            )
-        )
-    measurement = raw.operation
-    if measurement is not None:
-        measuring_preflight = (
-            raw.preflight is not None and raw.preflight.pending_job_id is not None
-        )
-        if (
-            raw.operation_phase_index != phase_index and not measuring_preflight
-        ) or state not in {"queued", "running"}:
-            measurement = measurement.model_copy(
-                update={
-                    "phase": phase or "unknown",
-                    "bytes_per_second": None,
-                    "smoothed_bytes_per_second": None,
-                    "eta_seconds": None,
-                    "activity": None,
-                }
-            )
-        else:
-            measurement = project_progress(measurement)
-    return RunSwitchProgress(
-        operation=measurement,
-        startup_budget_seconds=raw.startup_budget_seconds,
-        start_deadline=raw.start_deadline,
-        phase_index=phase_index,
-        phase_count=phase_count,
-        phase=phase,
-        state=state,
-        completed_bytes=completed,
-        total_bytes=total,
-        total_bytes_known=total is not None,
-        subphase=subphase,
-        members=members,
-    )
 
 
 def _validate_artifact_execution(

@@ -1,3 +1,8 @@
+mod renewal;
+
+#[cfg(test)]
+use renewal::expired_renewal_request;
+
 use std::{
     fmt, fs,
     os::unix::fs::{MetadataExt, PermissionsExt},
@@ -1610,64 +1615,6 @@ impl AgentHttpClient {
         }
     }
 
-    pub async fn renew(&self, csr: &[u8]) -> Result<IssuedCertificateResponse, ClientError> {
-        let csr = std::str::from_utf8(csr).map_err(|_| ClientError::Protocol)?;
-        if csr.is_empty() || csr.len() > 16 * 1024 {
-            return Err(ClientError::Protocol);
-        }
-        let request = RenewRequest {
-            csr: csr.to_owned(),
-            node_id: self.node_id.clone(),
-        };
-        let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
-        let response = self
-            .current_client()
-            .await
-            .post(self.endpoint("/agent/renew")?)
-            .timeout(ROTATION_REQUEST_TIMEOUT)
-            .header("content-type", "application/json")
-            .body(body)
-            .send()
-            .await?;
-        if !response.status().is_success() {
-            // Renewal can identify one narrowly defined recovery case from
-            // its bounded, safe error body. Keep the status, path, request ID,
-            // and canonical code in the contextual Controller error for all
-            // outcomes; generic 401/403 responses remain rejections.
-            let status = response.status();
-            let endpoint = response.url().path().to_owned();
-            let operation = format!("controller.request {endpoint}");
-            let request_id = response
-                .headers()
-                .get("x-request-id")
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| valid_error_token(value))
-                .map(str::to_owned);
-            let header_code = response
-                .headers()
-                .get("x-vonk-error-code")
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| valid_error_code(value))
-                .map(str::to_owned);
-            let body = bounded_body(response).await?;
-            let code = if status == StatusCode::FORBIDDEN && is_rotation_conflict(&body) {
-                Some(SecurityRefusalReason::AgentCertificateRotationConflict.to_string())
-            } else {
-                header_code
-            };
-            return Err(ClientError::Controller(Box::new(controller_error(
-                status, &endpoint, &operation, request_id, code,
-            ))));
-        }
-        let body = bounded_body(response).await?;
-        let issued: IssuedCertificateResponse =
-            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
-        if issued.node_id != self.node_id || issued.generation == 0 {
-            return Err(ClientError::Protocol);
-        }
-        Ok(issued)
-    }
-
     /// Request recovery of an unactivated staged certificate whose CSR does
     /// not match the durable pending CSR.  The endpoint is authenticated with
     /// this client's active identity and is intentionally separate from the
@@ -2650,6 +2597,25 @@ mod tests {
         let before = request.clone();
         assert!(clamp_inventory_request(&mut request).is_empty());
         assert_eq!(request, before);
+    }
+
+    #[test]
+    fn expired_renewal_proof_matches_the_controller_signed_wire_fixture() {
+        let expected: vonk_agent_protocol::generated::ExpiredRenewRequest =
+            vonk_agent_protocol::parse_strict(include_bytes!(
+                "../../../../agent_protocol/fixtures/expired-renewal-request.json"
+            ))
+            .unwrap();
+        let signer = ring::signature::Ed25519KeyPair::from_seed_unchecked(&[42; 32]).unwrap();
+        let actual = super::expired_renewal_request(
+            &expected.node_id,
+            expected.serial.clone(),
+            expected.csr.as_bytes(),
+            1_800_000_000,
+            &signer,
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]

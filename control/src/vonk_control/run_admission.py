@@ -47,12 +47,14 @@ from .models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
+    Job,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
 )
+from .offline_stops import deferred_stop_nodes
 from .platform_ports import RENDEZVOUS_PORT, service_host_port_candidates
 from .profile_capacity import (
     inherited_profile_memory,
@@ -553,23 +555,44 @@ class RunAdmissionService:
                     .order_by(ClusterMappingNode.rank)
                 )
             )
-            unreconciled_lost_ranks: dict[str, list[tuple[str, str]]] = {}
-            for node_id, run_id, run_alias in session.execute(
-                select(RunNode.node_id, RecipeRun.id, RecipeRun.alias)
+            # A planned Stop never discounts an offline rank's unreconciled
+            # effects, even after foreground completion released its other ranks.
+            deferred_ranks = {
+                (job.payload.get("owner_id"), node_id)
+                for job in session.scalars(
+                    select(Job).where(
+                        Job.kind == "recipe.stop",
+                        Job.payload["owner_id"]
+                        .as_string()
+                        .in_(
+                            select(RecipeRun.id).where(
+                                RecipeRun.state.in_([RunState.LOST, RunState.STOPPING])
+                            )
+                        ),
+                    )
+                )
+                for node_id in deferred_stop_nodes(job)
+            }
+            unreconciled_ranks: dict[str, list[tuple[str, str, RunState]]] = {}
+            for node_id, run_id, run_alias, run_state in session.execute(
+                select(RunNode.node_id, RecipeRun.id, RecipeRun.alias, RecipeRun.state)
                 .join(RecipeRun, RecipeRun.id == RunNode.run_id)
                 .where(
                     RunNode.node_id.in_(
                         [mapping_node.node_id for mapping_node in mapping_nodes]
                     ),
                     RunNode.state != RunState.STOPPED,
-                    RecipeRun.state == RunState.LOST,
-                    # A reviewed plan that stops the lost run reconciles it.
-                    RecipeRun.id.not_in(tuple(released_run_ids)),
+                    RecipeRun.state.in_([RunState.LOST, RunState.STOPPING]),
                 )
                 .order_by(RunNode.node_id, RecipeRun.id)
             ):
-                unreconciled_lost_ranks.setdefault(node_id, []).append(
-                    (run_id, run_alias)
+                deferred = (run_id, node_id) in deferred_ranks
+                if run_state == RunState.STOPPING and not deferred:
+                    continue
+                if run_id in released_run_ids and not deferred:
+                    continue
+                unreconciled_ranks.setdefault(node_id, []).append(
+                    (run_id, run_alias, RunState(run_state))
                 )
             installed_nodes = {
                 (row.node_id, row.rank, row.role)
@@ -623,12 +646,16 @@ class RunAdmissionService:
         for placement in ordered:
             blockers = [] if topology_reason is None else [topology_reason]
             warnings: list[AdmissionReason] = []
-            for run_id, run_alias in unreconciled_lost_ranks.get(placement.node_id, ()):
+            for run_id, run_alias, run_state in unreconciled_ranks.get(
+                placement.node_id, ()
+            ):
                 blockers.append(
                     AdmissionReason(
-                        RunAdmissionCode.UNRECONCILED_LOST_RANK,
-                        f"Spark {placement.node_id} still has rank state for lost "
-                        f"model {run_alias} ({run_id}); reconcile it before placing work.",
+                        ResourceBlockerCode.RESIDENT_USAGE_UNKNOWN
+                        if run_state == RunState.STOPPING
+                        else RunAdmissionCode.UNRECONCILED_LOST_RANK,
+                        f"Spark {placement.node_id} has unreconciled rank effects for "
+                        f"model {run_alias} ({run_id}); exact Stop confirmation pending.",
                     )
                 )
             if legal_admission.warning is not None:

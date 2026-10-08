@@ -13196,6 +13196,15 @@
         "title": "JobRunStopScope",
         "type": "object"
       },
+      "JournalRepairPurpose": {
+        "enum": [
+          "measurement",
+          "cancellation",
+          "owner_observation"
+        ],
+        "title": "JournalRepairPurpose",
+        "type": "string"
+      },
       "LibraryAssessmentCode": {
         "description": "Why a library entry is not assessed runnable on the current fleet.",
         "enum": [
@@ -17279,6 +17288,76 @@
         "title": "ModelTerritorialRestrictions",
         "type": "object"
       },
+      "NativeProgressWitness": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "certificate_serial": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Certificate Serial",
+            "type": "string"
+          },
+          "fence": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Fence",
+            "type": "string"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Payload Digest",
+            "type": "string"
+          },
+          "sample": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sample_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sample Digest"
+          }
+        },
+        "required": [
+          "operation_id",
+          "attempt_id",
+          "node_id",
+          "certificate_serial",
+          "fence",
+          "payload_digest"
+        ],
+        "title": "NativeProgressWitness",
+        "type": "object"
+      },
       "NetworkInterface": {
         "additionalProperties": false,
         "description": "One NIC as the agent reads it from sysfs.",
@@ -17801,6 +17880,32 @@
         ],
         "title": "ObservedAssignmentState",
         "type": "string"
+      },
+      "OfflineStopIntent": {
+        "description": "Exact Stop orders retained for reconciliation after node contact returns.",
+        "properties": {
+          "code": {
+            "const": "node.offline",
+            "default": "node.offline",
+            "title": "Code",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_ids"
+        ],
+        "title": "OfflineStopIntent",
+        "type": "object"
       },
       "OperationBlocker": {
         "description": "One reason an operation is waiting or blocked, with the Sparks it concerns.",
@@ -19613,6 +19718,17 @@
             "const": "profile-jobrun-stop",
             "title": "Execution Mode",
             "type": "string"
+          },
+          "offline_stop_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfflineStopIntent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "owner_id": {
             "maxLength": 36,
@@ -26418,6 +26534,17 @@
             ],
             "default": null
           },
+          "offline_stop_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfflineStopIntent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
           "owner_id": {
             "maxLength": 128,
             "minLength": 1,
@@ -29709,6 +29836,177 @@
           "progress"
         ],
         "title": "RunSwitchJobPayload",
+        "type": "object"
+      },
+      "RunSwitchJournalRepairEndEvidence": {
+        "additionalProperties": false,
+        "description": "An ended observation retains the original journal and cancel request.",
+        "properties": {
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "code": {
+            "const": "run-switch.journal-repair-exhausted",
+            "title": "Code",
+            "type": "string"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "original_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Original Digest",
+            "type": "string"
+          },
+          "original_document": {
+            "title": "Original Document",
+            "type": "string"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "operation_id",
+          "request_key",
+          "original_digest",
+          "original_document",
+          "recorded_at"
+        ],
+        "title": "RunSwitchJournalRepairEndEvidence",
+        "type": "object"
+      },
+      "RunSwitchJournalRepairEvidence": {
+        "additionalProperties": false,
+        "description": "Historical evidence only: no runnable state, clock, or alternate intent.",
+        "properties": {
+          "algorithm": {
+            "const": "zero-transfer-native-install-v1",
+            "title": "Algorithm",
+            "type": "string"
+          },
+          "corrected_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Corrected Digest",
+            "type": "string"
+          },
+          "native_samples": {
+            "items": {
+              "$ref": "#/components/schemas/NativeProgressWitness"
+            },
+            "minItems": 1,
+            "title": "Native Samples",
+            "type": "array"
+          },
+          "operation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "original_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Original Digest",
+            "type": "string"
+          },
+          "original_document": {
+            "title": "Original Document",
+            "type": "string"
+          },
+          "payload_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Payload Digest",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/JournalRepairPurpose"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "title": "Recorded At",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "algorithm",
+          "purpose",
+          "operation_id",
+          "request_key",
+          "payload_digest",
+          "plan_digest",
+          "original_digest",
+          "corrected_digest",
+          "original_document",
+          "native_samples",
+          "recorded_at"
+        ],
+        "title": "RunSwitchJournalRepairEvidence",
+        "type": "object"
+      },
+      "RunSwitchJournalRepairPendingState": {
+        "additionalProperties": false,
+        "description": "Durable observation and cancellation while Job.result remains untouched.",
+        "properties": {
+          "attempts": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSwitchCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "deadline_at": {
+            "format": "date-time",
+            "title": "Deadline At",
+            "type": "string"
+          },
+          "next_attempt_at": {
+            "format": "date-time",
+            "title": "Next Attempt At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deadline_at",
+          "next_attempt_at"
+        ],
+        "title": "RunSwitchJournalRepairPendingState",
         "type": "object"
       },
       "RunSwitchMemberProgress": {
@@ -33396,6 +33694,8 @@
           "403",
           "agent.certificate.rotation.conflict",
           "agent.enrollment.submit.rejected",
+          "agent.expired_renewal_refused",
+          "agent.expired_renewal_grace_exhausted",
           "agent.identity_mismatch",
           "agent.tombstone_fenced",
           "catalog.authentication_required",
@@ -42887,6 +43187,13 @@
     ],
     "run_nodes.observation_failure_diagnostics": [
       "FailureDiagnostics"
+    ],
+    "run_switch_journal_repair_pending.progress": [
+      "RunSwitchJournalRepairPendingState"
+    ],
+    "run_switch_journal_repairs.evidence": [
+      "RunSwitchJournalRepairEndEvidence",
+      "RunSwitchJournalRepairEvidence"
     ]
   }
 }

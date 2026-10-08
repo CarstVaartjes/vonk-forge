@@ -160,3 +160,140 @@ def test_the_strict_write_guard_refuses_a_document_no_contract_describes() -> No
         session.add(row)
         with pytest.raises(ValueError, match=r"jobs\.targets"):
             session.flush()
+
+
+def _journal_documents():
+    import hashlib
+    from datetime import UTC, datetime
+
+    from vonk_control.run_switch_journal_contract import (
+        JournalRepairPurpose,
+        NativeProgressWitness,
+        RunSwitchJournalRepairEndEvidence,
+        RunSwitchJournalRepairEvidence,
+        RunSwitchJournalRepairPendingState,
+    )
+
+    now = datetime(2026, 10, 7, tzinfo=UTC)
+    identity = "00000000-0000-4000-8000-000000000001"
+    digest = hashlib.sha256(b"{}").hexdigest()
+    return (
+        RunSwitchJournalRepairPendingState(deadline_at=now, next_attempt_at=now),
+        RunSwitchJournalRepairEndEvidence(
+            code="run-switch.journal-repair-exhausted",
+            operation_id=identity,
+            request_key=identity,
+            original_digest=digest,
+            original_document="{}",
+            recorded_at=now,
+        ),
+        RunSwitchJournalRepairEvidence(
+            algorithm="zero-transfer-native-install-v1",
+            purpose=JournalRepairPurpose.OWNER_OBSERVATION,
+            operation_id=identity,
+            request_key=identity,
+            payload_digest="0" * 64,
+            plan_digest="0" * 64,
+            original_digest=digest,
+            corrected_digest=digest,
+            original_document="{}",
+            native_samples=[
+                NativeProgressWitness(
+                    operation_id=identity,
+                    attempt_id=identity,
+                    node_id="spk_" + "0" * 32,
+                    certificate_serial="serial",
+                    fence=identity,
+                    payload_digest="0" * 64,
+                )
+            ],
+            recorded_at=now,
+        ),
+    )
+
+
+@pytest.mark.parametrize("document", _journal_documents())
+def test_journal_columns_return_models_and_keep_damaged_reads_non_blocking(document):
+    """Catch raw-dict ORM reads, skipped decorated columns and refused damaged reads."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import text
+    from sqlalchemy.exc import StatementError
+    from vonk_control.models import (
+        Job,
+        RunSwitchJournalRepair,
+        RunSwitchJournalRepairPending,
+    )
+    from vonk_control.run_switch_journal_contract import (
+        RunSwitchJournalRepairEndEvidence,
+        RunSwitchJournalRepairPendingState,
+    )
+    from vonk_control.stored_json import binding_for, read_row_column
+
+    now = datetime(2026, 10, 7, tzinfo=UTC)
+    identity = "00000000-0000-4000-8000-000000000001"
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    model = (
+        RunSwitchJournalRepairPending
+        if isinstance(document, RunSwitchJournalRepairPendingState)
+        else RunSwitchJournalRepair
+    )
+    column = "progress" if model is RunSwitchJournalRepairPending else "evidence"
+    table = Base.metadata.tables[model.__tablename__]
+    # Decorated JSON must remain visible to the coverage and structural guards.
+    assert (table.name, column) in json_columns(Base)
+    assert column_violations(binding_for(table.name, column)) == []
+    with Session(engine) as session, write_guard_mode(strict=True):
+        session.add(
+            Job(
+                id=identity,
+                request_id=identity,
+                kind="probe",
+                state="queued",
+                actor="a",
+                authority_revision="r",
+                targets=[],
+                payload_digest="0" * 64,
+                payload={},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.flush()
+        if isinstance(document, RunSwitchJournalRepairPendingState):
+            row = RunSwitchJournalRepairPending(job_id=identity, progress=document)
+        else:
+            row = RunSwitchJournalRepair(
+                id=identity,
+                job_id=identity,
+                original_digest=document.original_digest,
+                record_kind="end"
+                if isinstance(document, RunSwitchJournalRepairEndEvidence)
+                else "repair",
+                evidence=document,
+                created_at=now,
+            )
+        session.add(row)
+        session.commit()
+        session.expire_all()
+        assert getattr(row, column) == document
+        assert isinstance(getattr(row, column), type(document))
+        assert read_row_column(row, column) == document
+    # Core writes have no ORM event guard: the type itself must validate them.
+    with (
+        engine.begin() as connection,
+        write_guard_mode(strict=True),
+        pytest.raises(StatementError),
+    ):
+        connection.execute(table.update().values({column: {"wrong": True}}))
+    # Fault injection bypasses the serializer, as a damaged database row would.
+    with engine.begin() as connection:
+        connection.execute(text(f"UPDATE {table.name} SET {column} = '{{}}'"))
+    with Session(engine) as session:
+        damaged = session.get(model, identity)
+        assert damaged is not None
+        outcome = getattr(damaged, column)
+        assert isinstance(outcome, Residue)
+        assert read_row_column(damaged, column) == outcome
+    engine.dispose()

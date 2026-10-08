@@ -36,6 +36,10 @@ from vonk_control.distribution_executor import (
     RuntimeImagePull,
     _phase_receipt,
 )
+from vonk_control.job_documents import (
+    DistributionJobPayload,
+    DistributionTransferProgress,
+)
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_api import model_cache_operation_provider
 from vonk_control.model_cache_contract import ModelCacheCounters
@@ -598,11 +602,22 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
             authority_revision="f" * 64,
             targets=[NODE_A],
             payload_digest="0" * 64,
-            payload={
-                "workload_intent_ordinal": 1,
-                "cached_nodes": [],
-                "target_totals": {NODE_A: 26},
-            },
+            payload=DistributionJobPayload(
+                plan_digest="f" * 64,
+                workload_intent_ordinal=1,
+                phase="transfer",
+                progress=DistributionTransferProgress(
+                    phase="transfer",
+                    completed_bytes=0,
+                    total_bytes=26,
+                    total_bytes_known=True,
+                    members=[],
+                ),
+                cached_nodes=[],
+                target_order=[NODE_A],
+                target_totals={NODE_A: 26},
+                assignments={},
+            ).model_dump(mode="json", exclude_none=True),
             result=None,
             created_at=clock.now,
             updated_at=clock.now,
@@ -674,11 +689,22 @@ def test_abandon_closes_only_a_parked_distribution_child(
             authority_revision="f" * 64,
             targets=[NODE_A],
             payload_digest="0" * 64,
-            payload={
-                "workload_intent_ordinal": 1,
-                "cached_nodes": [],
-                "target_totals": {NODE_A: 26},
-            },
+            payload=DistributionJobPayload(
+                plan_digest="f" * 64,
+                workload_intent_ordinal=1,
+                phase="transfer",
+                progress=DistributionTransferProgress(
+                    phase="transfer",
+                    completed_bytes=0,
+                    total_bytes=26,
+                    total_bytes_known=True,
+                    members=[],
+                ),
+                cached_nodes=[],
+                target_order=[NODE_A],
+                target_totals={NODE_A: 26},
+                assignments={},
+            ).model_dump(mode="json", exclude_none=True),
             result=None,
             created_at=clock.now,
             updated_at=clock.now,
@@ -755,11 +781,22 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
             authority_revision="f" * 64,
             targets=[NODE_A],
             payload_digest="0" * 64,
-            payload={
-                "workload_intent_ordinal": 1,
-                "cached_nodes": [],
-                "target_totals": {NODE_A: 26},
-            },
+            payload=DistributionJobPayload(
+                plan_digest="f" * 64,
+                workload_intent_ordinal=1,
+                phase="transfer",
+                progress=DistributionTransferProgress(
+                    phase="transfer",
+                    completed_bytes=0,
+                    total_bytes=26,
+                    total_bytes_known=True,
+                    members=[],
+                ),
+                cached_nodes=[],
+                target_order=[NODE_A],
+                target_totals={NODE_A: 26},
+                assignments={},
+            ).model_dump(mode="json", exclude_none=True),
             result=None,
             created_at=clock.now,
             updated_at=clock.now,

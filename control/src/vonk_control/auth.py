@@ -266,7 +266,8 @@ class TrustedProxyAgentIdentityMiddleware:
         if (
             isinstance(path, str)
             and path.startswith("/agent/")
-            and path not in {"/agent/bootstrap", "/agent/enroll"}
+            and path
+            not in {"/agent/bootstrap", "/agent/enroll", "/agent/renew/expired"}
             and (
                 scoped_identity is None
                 or validator is None

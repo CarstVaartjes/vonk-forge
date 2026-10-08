@@ -86,6 +86,7 @@ from ..agent_operation_facts import (
 from ..categorized_errors import InvalidValue
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
+from ..offline_stops import is_deferred_stop
 from ..operation_progress import progress_document
 from .adapter import Dispatch
 from .core import OBSERVE_BUDGET, transition
@@ -321,6 +322,7 @@ class AgentOperationAdapter:
             requested_at is None
             and parent is not None
             and parent.state in ENDED_PARENT_STATES
+            and not is_deferred_stop(parent, operation)
         ):
             # Its job ended without it: nothing can claim, resume or retire it, so
             # it is cancelled like any other order whose owner no longer wants it.
@@ -771,6 +773,18 @@ class AgentOperationAdapter:
         operation.retry_disposition = None
         operation.retry_disposition_attempt = None
         operation.retry_due_at = None
+
+    @staticmethod
+    def end_unobserved_attempt(attempt: AgentOperationAttempt, now: datetime) -> None:
+        """Fence an abandoned idempotent attempt without fabricating a receipt.
+
+        Its retained result and progress remain historical evidence. Failed
+        means this attempt ended, not that remote files were removed.
+        """
+        if attempt.state == State.RUNNING.value or aos.attempt_is_observing(attempt):
+            attempt.state = State.FAILED.value
+            attempt.observation_cause = None
+            attempt.lease_deadline = aware(now)
 
     @staticmethod
     def expire_attempt(attempt: AgentOperationAttempt) -> None:
