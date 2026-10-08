@@ -16,16 +16,23 @@ import os
 import re
 import secrets
 import tempfile
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
 import httpx2
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi import Path as PathParameter
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
-from vonk_agent_protocol import UnknownOutcomeError
+from vonk_agent_protocol import (
+    ErrorCategory,
+    SecurityRefusalReason,
+    UnknownError,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
 from .auth import MUTATION_ROLES, Actor
 from .operation_api import bounded_error_responses
@@ -56,11 +63,25 @@ _ROLL_PATH = "/api/key/{name}/roll"
 class GatewayKeyError(UnknownOutcomeError, RuntimeError):
     """LiteLLM could not complete a key request; the detail is secret-free.
 
-    An unknown outcome, never a refusal of the caller: the gateway may simply not
-    be up yet.  ``keep_default_key`` retries the startup path on a doubling
-    delay, and an operator request that meets it is answered 503 to be asked
-    again.
+    Read boundaries retry with bounded backoff; mutation boundaries return the
+    shared typed uncertainty result. Default maintenance observes its durable
+    secret again on the next bounded-rate pass.
     """
+
+
+def _observe_gateway[T](
+    action: Callable[[], T], *, attempts: int = 1
+) -> T | UnknownError:
+    """Bound observation attempts; mutations end uncertain rather than replaying effects."""
+    for attempt in range(attempts):
+        try:
+            return action()
+        except GatewayKeyError:
+            if attempt + 1 < attempts:
+                time.sleep(0.05 * (2**attempt))
+    return UnknownError(
+        category=ErrorCategory.UNKNOWN, reason=WaitReason.OBSERVATION_UNAVAILABLE
+    )
 
 
 class GatewayKeyConflict(ValueError):
@@ -271,13 +292,63 @@ class GatewayKeyService:
         )
 
     def check_health(self) -> bool:
-        code, _payload = self._request("GET", "/health/readiness")
+        observed = _observe_gateway(self._gateway_check_health, attempts=3)
+        return observed if isinstance(observed, bool) else False
+
+    def list_keys(self) -> GatewayKeyList | UnknownError:
+        return _observe_gateway(self._gateway_list_keys, attempts=3)
+
+    def create(
+        self,
+        name: str,
+        *,
+        models: list[str] | None = None,
+        expires: str | None = None,
+        key: str | None = None,
+    ) -> GatewayKeyCreated | UnknownError:
+        try:
+            return self._gateway_create(name, models=models, expires=expires, key=key)
+        except GatewayKeyError:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+
+    def revoke(self, name: str) -> GatewayKeyRevoked | UnknownError:
+        try:
+            return self._gateway_revoke(name)
+        except GatewayKeyError:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+
+    def roll(self, name: str) -> GatewayKeyCreated | UnknownError:
+        try:
+            return self._gateway_roll(name)
+        except GatewayKeyError:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+
+    def ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool | UnknownError:
+        try:
+            return self._gateway_ensure_default(path)
+        except GatewayKeyError:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+
+    def _gateway_check_health(self) -> bool:
+        code, _payload = self._gateway_request("GET", "/health/readiness")
         return code == 200
 
     def close(self) -> None:
         self._client.close()
 
-    def _request(
+    def _gateway_request(
         self,
         method: str,
         path: str,
@@ -301,16 +372,25 @@ class GatewayKeyService:
             )
         except httpx2.HTTPError as error:
             raise GatewayKeyError("LiteLLM gateway is unavailable") from error
+        if response.status_code in (401, 403):
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=(
+                    SecurityRefusalReason.HTTP_401
+                    if response.status_code == 401
+                    else SecurityRefusalReason.HTTP_403
+                ),
+            )
         try:
             payload: object = response.json() if response.content else {}
         except ValueError:
             payload = {}
         return response.status_code, payload if isinstance(payload, dict) else {}
 
-    def _raw_keys(self) -> list[_LiteLlmKey]:
+    def _gateway_raw_keys(self) -> list[_LiteLlmKey]:
         keys: list[_LiteLlmKey] = []
         for page in range(1, _MAX_PAGES + 1):
-            code, payload = self._request(
+            code, payload = self._gateway_request(
                 "GET",
                 "/key/list",
                 params=_KeyListParams(page=page, size=_PAGE_SIZE),
@@ -325,18 +405,18 @@ class GatewayKeyService:
                 break
         return keys
 
-    def list_keys(self) -> GatewayKeyList:
-        views = (_view(item) for item in self._raw_keys())
+    def _gateway_list_keys(self) -> GatewayKeyList:
+        views = (_view(item) for item in self._gateway_raw_keys())
         return GatewayKeyList(
             keys=sorted(
                 (view for view in views if view is not None), key=lambda v: v.name
             )
         )
 
-    def _exists(self, name: str) -> bool:
-        return any(item.key_alias == name for item in self._raw_keys())
+    def _gateway_exists(self, name: str) -> bool:
+        return any(item.key_alias == name for item in self._gateway_raw_keys())
 
-    def create(
+    def _gateway_create(
         self,
         name: str,
         *,
@@ -344,13 +424,11 @@ class GatewayKeyService:
         expires: str | None = None,
         key: str | None = None,
     ) -> GatewayKeyCreated:
-        if self._exists(name):
-            raise GatewayKeyConflict(
-                f"key {name} already exists; revoke it first or choose another name"
-            )
-        return self._create_under(name, models=models, expires=expires, key=key)
+        if self._gateway_exists(name):
+            raise GatewayKeyConflict(f"key {name} already exists")
+        return self._gateway_create_under(name, models=models, expires=expires, key=key)
 
-    def _create_under(
+    def _gateway_create_under(
         self,
         name: str,
         *,
@@ -364,12 +442,27 @@ class GatewayKeyService:
             allowed_routes=list(_KEY_ROUTES),
             metadata=_KeyMetadata(),
             duration=expires,
-            key=key,
+            key=key if key is not None else "sk-" + secrets.token_urlsafe(32),
         )
-        code, payload = self._request("POST", "/key/generate", json=body)
+        try:
+            code, payload = self._gateway_request("POST", "/key/generate", json=body)
+        except GatewayKeyError:
+            observed = self._gateway_observe_created(body)
+            if observed is not None:
+                return observed
+            raise GatewayKeyError(
+                "gateway key creation effect is unconfirmed"
+            ) from None
         reply = _KeyGenerateReply.model_validate(payload)
         secret = reply.key
+        if secret is not None and secret != body.key:
+            raise HTTPException(
+                status_code=502, detail=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH
+            )
         if code not in (200, 201) or secret is None:
+            observed = self._gateway_observe_created(body)
+            if observed is not None:
+                return observed
             raise GatewayKeyError(f"LiteLLM refused to create the key (HTTP {code})")
         # The request's own facts fill what LiteLLM's answer leaves out.
         described = _LiteLlmKey(
@@ -383,20 +476,41 @@ class GatewayKeyService:
         view = _view(described) or GatewayKeyView(name=name, models=[])
         return GatewayKeyCreated(**view.model_dump(), key=secret)
 
-    def _delete_alias(self, name: str) -> None:
-        code, _ = self._request(
-            "POST", "/key/delete", json=_KeyDeleteRequest(key_aliases=[name])
+    def _gateway_observe_created(
+        self, body: _KeyGenerateRequest
+    ) -> GatewayKeyCreated | None:
+        assert body.key is not None
+        code, payload = self._gateway_request(
+            "GET", "/key/info", params=_KeyInfoParams(key=body.key)
         )
-        if code != 200:
+        info = _KeyInfoReply.model_validate(payload).info
+        if code != 200 or info is None or info.key_alias != body.key_alias:
+            return None
+        view = _view(info)
+        assert view is not None
+        return GatewayKeyCreated(**view.model_dump(), key=body.key)
+
+    def _gateway_delete_alias(self, name: str) -> None:
+        try:
+            code, _ = self._gateway_request(
+                "POST", "/key/delete", json=_KeyDeleteRequest(key_aliases=[name])
+            )
+        except GatewayKeyError:
+            if not self._gateway_exists(name):
+                return
+            raise
+        if code != 200 and self._gateway_exists(name):
             raise GatewayKeyError(f"LiteLLM refused to revoke the key (HTTP {code})")
 
-    def revoke(self, name: str) -> GatewayKeyRevoked:
-        if not self._exists(name):
-            raise KeyError(name)
-        self._delete_alias(name)
+    def _gateway_revoke(self, name: str) -> GatewayKeyRevoked | UnknownError:
+        if not self._gateway_exists(name):
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN, reason=WaitReason.SCOPE_CHANGED
+            )
+        self._gateway_delete_alias(name)
         return GatewayKeyRevoked(name=name)
 
-    def roll(self, name: str) -> GatewayKeyCreated:
+    def _gateway_roll(self, name: str) -> GatewayKeyCreated | UnknownError:
         """Replace one key's secret, keeping its name and model list.
 
         LiteLLM cannot rotate a secret in place, so the new key is created
@@ -406,24 +520,26 @@ class GatewayKeyService:
         lifetime.
         """
         current = next(
-            (item for item in self._raw_keys() if item.key_alias == name), None
+            (item for item in self._gateway_raw_keys() if item.key_alias == name), None
         )
         if current is None:
-            raise KeyError(name)
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN, reason=WaitReason.SCOPE_CHANGED
+            )
         view = _view(current)
         models = view.models if view is not None else []
         temporary = _rolling_alias(name)
-        if self._exists(temporary):
+        if self._gateway_exists(temporary):
             # An earlier roll stopped between its steps; its leftover is not
             # in use by anyone, so it is replaced.
-            self._delete_alias(temporary)
-        created = self._create_under(
+            self._gateway_delete_alias(temporary)
+        created = self._gateway_create_under(
             temporary,
             models=models,
             expires=_remaining(current.expires),
         )
-        self._delete_alias(name)
-        code, _ = self._request(
+        self._gateway_delete_alias(name)
+        code, _ = self._gateway_request(
             "POST",
             "/key/update",
             json=_KeyUpdateRequest(key=created.key, key_alias=name),
@@ -441,7 +557,7 @@ class GatewayKeyService:
             return created
         return created.model_copy(update={"name": name})
 
-    def ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool:
+    def _gateway_ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool:
         """Keep a working `default` key whose secret is in `path`.
 
         The file is written first, so an interrupted attempt registers the same
@@ -452,15 +568,15 @@ class GatewayKeyService:
         if key is None:
             key = "sk-" + secrets.token_urlsafe(32)
             _write_private(path, key + "\n")
-        code, payload = self._request(
+        code, payload = self._gateway_request(
             "GET", "/key/info", params=_KeyInfoParams(key=key)
         )
         info = _KeyInfoReply.model_validate(payload).info
         if code == 200 and info is not None and info.key_alias == DEFAULT_KEY_NAME:
             return False
-        if self._exists(DEFAULT_KEY_NAME):
-            self.revoke(DEFAULT_KEY_NAME)
-        self.create(DEFAULT_KEY_NAME, key=key)
+        if self._gateway_exists(DEFAULT_KEY_NAME):
+            self._gateway_revoke(DEFAULT_KEY_NAME)
+        self._gateway_create(DEFAULT_KEY_NAME, key=key)
         return True
 
 
@@ -483,10 +599,20 @@ async def keep_default_key(
     delay = first_delay
     while not stop.is_set():
         try:
-            if await asyncio.to_thread(lambda: service.ensure_default(path)):
-                _LOGGER.info("default gateway client key is ready")
+            observed = await asyncio.to_thread(lambda: service.ensure_default(path))
+            if not isinstance(observed, UnknownError):
+                if observed:
+                    _LOGGER.info("default gateway client key is ready")
+                return
+            _LOGGER.warning(
+                "default gateway client key observation: %s", observed.reason
+            )
+        except HTTPException as error:
+            _LOGGER.error(
+                "gateway key security boundary refused (HTTP %s)", error.status_code
+            )
             return
-        except (GatewayKeyError, OSError, HTTPException) as error:
+        except (GatewayKeyError, OSError) as error:
             _LOGGER.warning(
                 "default gateway client key not ready: %s; retrying in %s seconds",
                 error,
@@ -542,77 +668,65 @@ def install_gateway_key_routes(
         if actor.role not in MUTATION_ROLES[("POST", path)]:
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def unavailable(error: GatewayKeyError) -> HTTPException:
-        return HTTPException(status_code=503, detail=str(error))
-
     @app.get(
         _KEY_PATH,
-        response_model=GatewayKeyList,
+        response_model=GatewayKeyList | UnknownError,
         responses=bounded_error_responses(401, 403, 503),
         operation_id="listGatewayKeys",
     )
-    def list_gateway_keys(actor: Actor = actor_dependency) -> GatewayKeyList:
-        try:
-            return available().list_keys()
-        except GatewayKeyError as error:
-            raise unavailable(error) from None
+    def list_gateway_keys(
+        actor: Actor = actor_dependency,
+    ) -> GatewayKeyList | UnknownError:
+        return available().list_keys()
 
     @app.post(
         _KEY_PATH,
-        response_model=GatewayKeyCreated,
-        responses=bounded_error_responses(401, 403, 409, 422, 503),
+        response_model=GatewayKeyCreated | UnknownError,
+        responses={
+            202: {"model": UnknownError},
+            **bounded_error_responses(401, 403, 409, 422, 502, 503),
+        },
         status_code=status.HTTP_201_CREATED,
         operation_id="createGatewayKey",
     )
     def create_gateway_key(
-        body: GatewayKeyCreateRequest, actor: Actor = actor_dependency
-    ) -> GatewayKeyCreated:
+        body: GatewayKeyCreateRequest,
+        response: Response,
+        actor: Actor = actor_dependency,
+    ) -> GatewayKeyCreated | UnknownError:
         authorize(actor, _KEY_PATH)
         try:
-            return available().create(
+            result = available().create(
                 body.name, models=body.models, expires=body.expires
             )
+            if isinstance(result, UnknownError):
+                response.status_code = status.HTTP_202_ACCEPTED
+            return result
         except GatewayKeyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
-        except GatewayKeyError as error:
-            raise unavailable(error) from None
 
     @app.post(
         _REVOKE_PATH,
-        response_model=GatewayKeyRevoked,
-        responses=bounded_error_responses(401, 403, 404, 503),
+        response_model=GatewayKeyRevoked | UnknownError,
+        responses=bounded_error_responses(401, 403, 502, 503),
         operation_id="revokeGatewayKey",
     )
     def revoke_gateway_key(
         name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
         actor: Actor = actor_dependency,
-    ) -> GatewayKeyRevoked:
+    ) -> GatewayKeyRevoked | UnknownError:
         authorize(actor, _REVOKE_PATH)
-        try:
-            return available().revoke(name)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail=f"no gateway key named {name}"
-            ) from None
-        except GatewayKeyError as error:
-            raise unavailable(error) from None
+        return available().revoke(name)
 
     @app.post(
         _ROLL_PATH,
-        response_model=GatewayKeyCreated,
-        responses=bounded_error_responses(401, 403, 404, 503),
+        response_model=GatewayKeyCreated | UnknownError,
+        responses=bounded_error_responses(401, 403, 502, 503),
         operation_id="rollGatewayKey",
     )
     def roll_gateway_key(
         name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
         actor: Actor = actor_dependency,
-    ) -> GatewayKeyCreated:
+    ) -> GatewayKeyCreated | UnknownError:
         authorize(actor, _ROLL_PATH)
-        try:
-            return available().roll(name)
-        except KeyError:
-            raise HTTPException(
-                status_code=404, detail=f"no gateway key named {name}"
-            ) from None
-        except GatewayKeyError as error:
-            raise unavailable(error) from None
+        return available().roll(name)

@@ -19,9 +19,10 @@ import time
 from pathlib import Path
 
 import pytest
+from vonk_agent_protocol import WaitReason
 from vonk_control import artifact_blob_store, route_runtime, runtime_image_preparation
 from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStoreError
-from vonk_control.route_runtime import AtomicRouteBundlePublisher, RouteRuntimeError
+from vonk_control.route_runtime import AtomicRouteBundlePublisher
 
 pytestmark = pytest.mark.lane
 
@@ -94,17 +95,18 @@ def test_publication_lock_claim_is_bounded_when_another_publisher_holds_it(
     monkeypatch.setattr(route_runtime, "_PUBLICATION_LOCK_RETRY_SECONDS", 0.01)
     holder = _hold(root / ".publication.lock")
     try:
-        with (
-            pytest.raises(RouteRuntimeError, match="held by another publisher"),
-            publisher._locked(),
-        ):
-            pass
+        started = time.monotonic()
+        with publisher._locked() as uncertainty:
+            # Contention is a typed unknown the caller reconciles, never a block.
+            assert uncertainty is not None
+            assert uncertainty.reason == WaitReason.LEASE_LAPSED
+        assert time.monotonic() - started < 5
     finally:
         holder.terminate()
         holder.wait(timeout=10)
 
-    with publisher._locked():
-        pass
+    with publisher._locked() as uncertainty:
+        assert uncertainty is None
 
 
 def test_runtime_image_publication_lock_is_bounded_and_released_on_process_death(

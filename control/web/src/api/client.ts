@@ -138,6 +138,17 @@ function formatApiDetail(detail: unknown): string {
   return "request failed";
 }
 
+function gatewayData<T extends GatewayKeyList | GatewayKeyCreated | GatewayKeyRevoked>(result: {
+  data?: T | components["schemas"]["UnknownError"];
+  error?: unknown;
+  response: Response;
+}): T {
+  const data = resultData(result);
+  if ("category" in data)
+    throw new ApiError(result.response.status, data.reason, requestIdOf(result.response));
+  return data;
+}
+
 function resultData<T>(result: { data?: T; error?: unknown; response: Response }): T {
   if (result.data === undefined) {
     const detail =
@@ -518,7 +529,7 @@ export class ApiClient implements ControlApi {
   }
 
   async gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList> {
-    return resultData(await this.generated.GET("/api/key", { signal }));
+    return gatewayData(await this.generated.GET("/api/key", { signal }));
   }
 
   async createGatewayKey(
@@ -526,19 +537,19 @@ export class ApiClient implements ControlApi {
     models: string[],
     expires?: string,
   ): Promise<GatewayKeyCreated> {
-    return resultData(
+    return gatewayData(
       await this.generated.POST("/api/key", { body: { name, models, expires: expires || null } }),
     );
   }
 
   async rollGatewayKey(name: string): Promise<GatewayKeyCreated> {
-    return resultData(
+    return gatewayData(
       await this.generated.POST("/api/key/{name}/roll", { params: { path: { name } } }),
     );
   }
 
   async revokeGatewayKey(name: string): Promise<GatewayKeyRevoked> {
-    return resultData(
+    return gatewayData(
       await this.generated.POST("/api/key/{name}/revoke", { params: { path: { name } } }),
     );
   }

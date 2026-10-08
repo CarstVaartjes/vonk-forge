@@ -12,7 +12,12 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import DesiredAssignmentState, EndpointState, LifecycleState
+from vonk_agent_protocol import (
+    DesiredAssignmentState,
+    EndpointState,
+    LifecycleState,
+    UnknownError,
+)
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -793,7 +798,7 @@ def test_invalid_candidate_retains_previous_generation(tmp_path: Path) -> None:
     )
     with pytest.raises(RouteRuntimeError, match="LiteLLM validation"):
         rejecting.withdraw_run(run_id)
-    assert publisher.inspect().generation == accepted.generation
+    assert _inspected(publisher).generation == accepted.generation
 
 
 def test_withdraw_publishes_empty_generation_before_workload_stop(
@@ -806,7 +811,7 @@ def test_withdraw_publishes_empty_generation_before_workload_stop(
     assert empty is not None
     assert empty.generation == 2
     assert json.loads(applied[-1])["model_list"] == []
-    assert publisher.inspect().generation == empty.generation
+    assert _inspected(publisher).generation == empty.generation
 
 
 def test_disjoint_sqlite_withdrawals_serialize_one_global_candidate(
@@ -1444,6 +1449,7 @@ def test_worker_republishes_when_the_live_marker_is_unreadable(tmp_path: Path) -
 
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
     marker = AtomicRouteBundlePublisher(root).inspect()
+    assert not isinstance(marker, UnknownError)
     assert marker.generation == first.generation + 1
     with service.sessions() as session:
         assert _publication_owner(session).owner_generation == marker.generation
@@ -1653,6 +1659,7 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
     service = atomic_service(base, root, clock)
     first = service.publish_run(run_id)
     bundle = verify_active_route_bundle(root)
+    assert not isinstance(bundle, UnknownError)
     request = _supervisor(monkeypatch, root)._active_request()
     assert request is not None and request.activation_sha256 == bundle.marker.digest
     with service.sessions() as session:
@@ -1669,6 +1676,7 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
         session.delete(session.get(RoutePublicationOwner, 1))
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
     renewed = verify_active_route_bundle(root)
+    assert not isinstance(renewed, UnknownError)
     assert renewed.marker.generation > first.generation
     with service.sessions() as session:
         owner = _publication_owner(session)
@@ -1676,6 +1684,7 @@ def test_postgres_current_publication_withdrawal_and_owner_recovery(
 
     service.withdraw_run(run_id)
     withdrawn = verify_active_route_bundle(root)
+    assert not isinstance(withdrawn, UnknownError)
     assert withdrawn.marker.state == "maintenance"
     assert withdrawn.marker.generation > renewed.marker.generation
     assert withdrawn.routes is not None
@@ -1706,6 +1715,7 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
         owner = _publication_owner(session)
         publication = _publication(session, owner.authority_id)
         marker = AtomicRouteBundlePublisher(root).inspect()
+        assert not isinstance(marker, UnknownError)
         assert owner.owner_generation == marker.generation == publication.generation
         assert publication.activation_marker_digest == marker.digest
         assert marker.generation == max(result.generation for result in results)
@@ -1789,6 +1799,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
         if failure_point == "after-activation"
         else None
     )
+    assert not isinstance(marker_after_failure, UnknownError)
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.state == "running"
@@ -1816,6 +1827,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
         is True
     )
     final_marker = AtomicRouteBundlePublisher(root).inspect()
+    assert not isinstance(final_marker, UnknownError)
     with base.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.route_state == "published"
@@ -1941,6 +1953,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     service = atomic_service(base, root, clock)
     service.publish_run(first)
     accepted = verify_active_route_bundle(root)
+    assert not isinstance(accepted, UnknownError)
     assert accepted.routes is not None
     assert accepted.litellm is not None
     original_endpoint = deepcopy(accepted.routes.routes["qwen"])
@@ -1967,6 +1980,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
             node.endpoint = {"url": "not an endpoint"}
     service.publish_run(second)
     added = verify_active_route_bundle(root)
+    assert not isinstance(added, UnknownError)
     assert added.routes is not None
     assert added.litellm is not None
     assert added.routes.routes["qwen"] == original_endpoint
@@ -2010,6 +2024,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     assert view.assignments[0].endpoint.backend_api_base == "http://10.0.0.2:8000/v1"
     service.withdraw_run(second)
     removed = verify_active_route_bundle(root)
+    assert not isinstance(removed, UnknownError)
     assert _live_models(root) == ["qwen"]
     assert removed.routes is not None
     assert removed.routes.routes["qwen"] == original_endpoint
@@ -2028,6 +2043,7 @@ def test_corrupt_serving_run_does_not_block_other_route_changes_and_recovers(
     clock.now = NOW + timedelta(seconds=1)
     assert service.maintain() is True
     recovered = verify_active_route_bundle(root)
+    assert not isinstance(recovered, UnknownError)
     assert recovered.marker.generation > removed.marker.generation
     assert _live_models(root) == ["qwen"]
     assert recovered.routes is not None
@@ -2095,3 +2111,6 @@ def test_unverified_active_bundle_cannot_supply_a_fallback_endpoint(
         service.publish_run(second)
     assert json.loads((root / "activation.json").read_text()) == marker
     assert _live_models(root) == ["qwen"]
+
+
+from .test_route_runtime import _inspected

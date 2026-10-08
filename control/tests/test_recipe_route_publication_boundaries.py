@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from vonk_agent_protocol import WaitReason
+from vonk_agent_protocol import UnknownError, WaitReason
 from vonk_control.models import RoutePublication
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
@@ -31,7 +31,6 @@ from vonk_control.recipe_routes import (
 from vonk_control.route_runtime import (
     ActivationMarker,
     AtomicRouteBundlePublisher,
-    verify_active_route_bundle,
 )
 
 from .test_recipe_routes import (
@@ -43,6 +42,7 @@ from .test_recipe_routes import (
     add_running_run,
     setup,
 )
+from .test_route_runtime import _verified_bundle
 
 
 def _service(
@@ -87,7 +87,7 @@ class _BlockedAcknowledgement:
 
 
 def _live_aliases(root: Path) -> set[str]:
-    bundle = verify_active_route_bundle(root).routes
+    bundle = _verified_bundle(root).routes
     assert bundle is not None
     return set(bundle.routes)
 
@@ -199,7 +199,7 @@ def test_postgres_slow_acknowledgement_outlasting_the_idle_timeout_publishes(
         service = _service(base, root, clock, slow_acknowledgement)
         generation = service.publish_run(run_id)
 
-        marker = verify_active_route_bundle(root).marker
+        marker = _verified_bundle(root).marker
         with base.sessions() as session:
             run = _recipe_run(session, run_id)
             assert run.route_state == "published"
@@ -239,6 +239,7 @@ def _crash_between_effect_and_completion_is_recovered(
         service.publish_run(run_id)
 
     live = AtomicRouteBundlePublisher(root).inspect()
+    assert not isinstance(live, UnknownError)
     with base.sessions() as session:
         assert _recipe_run(session, run_id).route_state == "pending"
 
