@@ -418,12 +418,6 @@
     },
     {
       "path": "rust/crates/vonk-agent/src/main.rs",
-      "function": "run_agent",
-      "kind": "rust-loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/main.rs",
       "function": "run_control_lane",
       "kind": "rust-loop-without-deadline",
       "count": 1

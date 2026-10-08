@@ -40,6 +40,7 @@ fn claim() -> AgentClaim {
         target_runtime_id: run_id,
     };
     AgentClaim {
+        observation_budget_seconds: 3600,
         deadline: DateTime::<FixedOffset>::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         operation: AgentOperation::RecipeStop,
@@ -262,15 +263,21 @@ fn mismatched_durable_result_is_rejected_before_submission_and_replay() {
     drop(connection);
 
     let state = StateStore::open(&path, NODE_ID).unwrap();
-    assert!(matches!(
-        state.pending_results(),
-        Err(StateError::Protocol(_))
-    ));
+    assert!(state.pending_results().unwrap().is_empty());
     let mut state = state;
+    let BeginDecision::Replay(result) = state.begin(&claim, Utc::now()).unwrap() else {
+        panic!("damaged custody authorized a replayed effect");
+    };
     assert!(matches!(
-        state.begin(&claim, Utc::now()),
-        Err(StateError::Protocol(_))
+        result.result,
+        AgentResultResult::OutcomeUnknown(_)
     ));
+    let mut fresh = claim.clone();
+    fresh.fence = Uuid::new_v4();
+    assert_eq!(
+        state.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
 }
 
 #[test]
@@ -335,13 +342,14 @@ fn damaged_bookkeeping_is_quarantined_without_blocking_new_claims() {
             recovered.begin(&claim(), Utc::now()).unwrap(),
             BeginDecision::Execute
         );
-        assert!(std::fs::read_dir(directory.path()).unwrap().any(|entry| {
+        let quarantined = std::fs::read_dir(directory.path()).unwrap().any(|entry| {
             entry
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
                 .starts_with("state.sqlite.corrupt-")
-        }));
+        });
+        assert_eq!(quarantined, matches!(damage, "sqlite" | "identity"));
     }
 }
 

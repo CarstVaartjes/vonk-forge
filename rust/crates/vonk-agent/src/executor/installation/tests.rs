@@ -47,6 +47,7 @@ async fn recipe_uninstall_with_optional_model_cleanup_is_executed() {
     fs::write(&another_model, b"another model").unwrap();
 
     let claim = AgentClaim {
+        observation_budget_seconds: 3600,
         deadline: (Utc::now() + ChronoDuration::seconds(20))
             .with_timezone(&FixedOffset::east_opt(0).unwrap()),
         fence: Uuid::new_v4(),

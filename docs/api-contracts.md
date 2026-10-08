@@ -240,6 +240,15 @@ to renew its lease. A terminal heartbeat
 failure, panic, or task cancellation stops the executing process even when its
 executor is blocked in synchronous process polling.
 
+Every agent claim carries `observation_budget_seconds`, an immutable elapsed
+budget for that attempt's observation and effects. Lease renewal cannot reset
+it. A start also retains its accepted start deadline and uses the earlier bound.
+An unusable renewal response is re-observed within that budget; it never
+fabricates lease authority. At expiry the agent signals cancellation, gives the
+executor a bounded settlement interval, and reports unconfirmed surviving
+effects for Controller reconciliation. Durable verified transfer bytes remain
+available to a fresh authorized attempt.
+
 Removing a recipe cache requests cancellation of any source build. A build
 that never started releases its reservation immediately. A claimed build keeps
 its reservation until the Controller receives a typed `recipe.build.cleanup.v1`

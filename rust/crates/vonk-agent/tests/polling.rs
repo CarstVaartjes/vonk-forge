@@ -42,6 +42,7 @@ fn claim(attempt: u128, deadline: &str) -> AgentClaim {
         target_runtime_id: run_id,
     };
     AgentClaim {
+        observation_budget_seconds: 3600,
         deadline: DateTime::<FixedOffset>::parse_from_rfc3339(deadline).unwrap(),
         // One fence per attempt.
         fence: Uuid::from_u128(0x44d4e914_34df_4962_a802_d1f7dcd92800 + attempt),
@@ -85,7 +86,13 @@ fn claims_fail_closed_on_deadline_and_replay_by_fence() {
 
     let live = claim(2, "2099-01-01T00:00:00+00:00");
     assert_eq!(state.begin(&live, now).unwrap(), BeginDecision::Execute);
-    assert!(matches!(state.begin(&live, now), Err(StateError::Busy)));
+    let BeginDecision::Replay(retained) = state.begin(&live, now).unwrap() else {
+        panic!("uncertain running custody replayed an effect");
+    };
+    assert!(matches!(
+        retained.result,
+        vonk_agent_protocol::generated::AgentResultResult::OutcomeUnknown(_)
+    ));
     let result = state
         .finish(&live, ExecutionResult::done(RecipeStopResult::default()))
         .unwrap();

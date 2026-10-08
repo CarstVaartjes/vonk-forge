@@ -32,7 +32,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await
             .is_err()
         {
-            return failed("accepted container image is unavailable to the host runtime");
+            return temporary_runtime_observation_failure();
         }
         if *cancellation.borrow() {
             return cancelled("controller cancelled before model installation began");
@@ -50,11 +50,17 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             &spec.identity.recipe_revision_sha256,
             request.expected_bytes,
             &mut |done, total| progress_client.set_progress_bytes(fence, done, total),
+            &|| *cancellation.borrow(),
         );
         match installed {
             Ok(()) => {}
             Err(OciError::Capacity) => {
                 return failed("local disk capacity changed after install admission");
+            }
+            Err(error) if error.is_cancelled() => {
+                return cancelled(
+                    "controller cancelled model materialization; verified source bytes retained",
+                );
             }
             Err(error) => {
                 let (stage, category) = error.safe_install_context();

@@ -204,6 +204,26 @@ pub enum InventoryError {
     Parse,
 }
 
+// One producer retains the slot through blocking work even if its async
+// observer times out. A later round cannot accumulate another stuck worker.
+static INVENTORY_PRODUCER: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+
+pub async fn collect_owned(
+    collect: impl FnOnce() -> Result<Inventory, InventoryError> + Send + 'static,
+) -> Result<Inventory, InventoryError> {
+    let permit = INVENTORY_PRODUCER
+        .try_acquire()
+        .map_err(|_| InventoryError::PrerequisiteUnavailable("inventory producer observation"))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        collect()
+    })
+    .await
+    .unwrap_or(Err(InventoryError::PrerequisiteUnavailable(
+        "inventory worker",
+    )))
+}
+
 pub struct InventoryCollector<'a, R> {
     pub runner: &'a R,
     pub meminfo_path: &'a Path,

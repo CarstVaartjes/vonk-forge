@@ -219,6 +219,7 @@ impl LoopClient for SupersededCancellationClient {
 pub(in crate::executor) struct TerminalHeartbeatClient {
     pub(in crate::executor) inner: RecordingClient,
     pub(in crate::executor) panic: bool,
+    pub(in crate::executor) recovered: Arc<AtomicBool>,
 }
 
 #[async_trait]
@@ -234,7 +235,10 @@ impl LoopClient for TerminalHeartbeatClient {
             .await
     }
 
-    async fn heartbeat(&self, _progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+    async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        if self.recovered.load(Ordering::SeqCst) {
+            return self.inner.heartbeat(progress).await;
+        }
         assert!(!self.panic, "heartbeat task failed unexpectedly");
         Err(ClientError::Identity)
     }
@@ -481,6 +485,7 @@ pub(in crate::executor) fn claim() -> AgentClaim {
         "compiled_execution_plan": plan,
     });
     let claim = AgentClaim {
+        observation_budget_seconds: 3600,
         deadline: (Utc::now() + ChronoDuration::seconds(20))
             .with_timezone(&FixedOffset::east_opt(0).unwrap()),
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),

@@ -215,6 +215,7 @@ pub(super) mod recipe_start_tests {
     ) -> Result<AgentClaim, ProtocolError> {
         let payload: generated::AgentClaimPayload = serde_json::from_value(payload)?;
         Ok(AgentClaim {
+            observation_budget_seconds: 3600,
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::parse_str("00000000-0000-4000-8000-000000000005").unwrap(),
             operation: operation.parse().unwrap(),
@@ -555,6 +556,7 @@ mod recipe_install_tests {
         });
         let payload: generated::AgentClaimPayload = serde_json::from_value(payload).unwrap();
         let claim = AgentClaim {
+            observation_budget_seconds: 3600,
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::new_v4(),
             operation: generated::AgentOperation::RecipeInstall,
@@ -580,6 +582,7 @@ mod recipe_reconcile_tests {
             "plan_digest": "b".repeat(64),
         });
         let claim = AgentClaim {
+            observation_budget_seconds: 3600,
             deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
             fence: Uuid::new_v4(),
             operation: generated::AgentOperation::RecipeReconcile,

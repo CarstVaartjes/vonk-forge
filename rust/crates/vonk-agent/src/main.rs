@@ -197,30 +197,15 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
             "STATUS=Degraded: state database disk reserve is unavailable; attempting recovery",
         );
     }
-    let mut rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
-    let mut failures = 0_u32;
-    let state = loop {
-        let opened =
-            StateStore::open_recovered(&config.data_dir.join("state.sqlite"), &config.node_id);
-        match opened {
-            Ok(state) => break state,
-            Err(error) => {
-                failures = failures.saturating_add(1);
-                let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
-                eprintln!(
-                    "vonk-agent: degraded: local state database unavailable ({error}); retrying in {} seconds",
-                    delay.as_secs()
-                );
-                systemd_notify::progress("Degraded: local state database unavailable; retrying");
-                tokio::select! {
-                    _ = tokio::time::sleep(delay) => {},
-                    result = &mut rotation => return match result {
-                        Ok(Ok(())) => Ok(()),
-                        Ok(Err(error)) => Err(error.into()),
-                        Err(error) => Err(error.into()),
-                    },
-                }
-            }
+    let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
+    let state_path = config.data_dir.join("state.sqlite");
+    let state = match StateStore::open_recovered(&state_path, &config.node_id) {
+        Ok(state) => state,
+        Err(error) => {
+            eprintln!("vonk-agent: durable custody unavailable: {error}");
+            // No effects are possible through this handle. Claims can still
+            // receive a bounded unknown and storage is re-observed next pass.
+            StateStore::observation_only(&state_path, &config.node_id)?
         }
     };
     systemd_notify::notify(
@@ -263,6 +248,7 @@ async fn run_control_lane(
     let mut failures = 0_u32;
     let mut readiness_published = false;
     loop {
+        state.restore_custody();
         if !active_identity_is_valid(config)? {
             // The rotation lane is renewing it; never present an expired
             // certificate to the Controller for work in the meantime.
@@ -359,15 +345,11 @@ async fn run_control_lane(
             Err(error) => {
                 failures = failures.saturating_add(1);
                 if matches!(error, LoopError::State(_)) {
-                    // Reopen through the recovery envelope after runtime damage.
-                    // A live handle must not repeatedly read the poisoned row.
-                    match StateStore::open_recovered(
-                        &config.data_dir.join("state.sqlite"),
-                        &config.node_id,
-                    ) {
-                        Ok(recovered) => state = recovered,
-                        Err(error) => eprintln!("vonk-agent: journal recovery deferred: {error}"),
-                    }
+                    // The loop has settled its heartbeat connection. Close the
+                    // remaining connection before systemd's bounded restart
+                    // opens/repairs the journal and reconstructs PrivateDevices.
+                    drop(state);
+                    return Err(error.into());
                 }
                 let delay = jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS);
                 eprintln!(
@@ -395,7 +377,7 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                     || {
                         let config = config.clone();
                         async move {
-                            tokio::task::spawn_blocking(move || {
+                            vonk_agent::inventory::collect_owned(move || {
                                 InventoryCollector {
                                     runner: &SystemProcessRunner,
                                     meminfo_path: Path::new("/proc/meminfo"),
@@ -409,9 +391,6 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient) {
                                 .collect()
                             })
                             .await
-                            .unwrap_or(Err(
-                                InventoryError::PrerequisiteUnavailable("inventory worker"),
-                            ))
                         }
                     },
                     &mut failures,
@@ -1152,5 +1131,46 @@ mod tests {
             outcome,
             LaneExitWithRotation::Control("control finished")
         ));
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn timed_out_blocking_inventory_cannot_accumulate_workers_and_recovers() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let started = Arc::new(AtomicUsize::new(0));
+        let (release, blocked) = std::sync::mpsc::channel();
+        let count = started.clone();
+        let first = vonk_agent::inventory::collect_owned(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+            blocked.recv_timeout(Duration::from_secs(2)).unwrap();
+            Ok(test_inventory())
+        });
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), first)
+                .await
+                .is_err()
+        );
+        for _ in 0..10 {
+            let count = started.clone();
+            let next = vonk_agent::inventory::collect_owned(move || {
+                count.fetch_add(1, Ordering::SeqCst);
+                Ok(test_inventory())
+            })
+            .await;
+            assert!(next.is_err());
+        }
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+        release.send(()).unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        let recovered = loop {
+            let result = vonk_agent::inventory::collect_owned(|| Ok(test_inventory())).await;
+            if let Ok(value) = result {
+                break value;
+            }
+            assert!(tokio::time::Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        };
+        assert_eq!(recovered, test_inventory());
     }
 }

@@ -7,7 +7,9 @@ use super::*;
 /// evidence is a fixture response; permits/socket/request cleanup are real.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work_ready() {
-    use super::super::{BACKGROUND_RUN_INSPECTION_CONCURRENCY, HostRuntimeBoundary};
+    use super::super::{
+        BACKGROUND_RUN_INSPECTION_CONCURRENCY, HostRuntimeBoundary, RUN_INSPECTION_REQUEST_TIMEOUT,
+    };
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Condvar, Mutex};
     struct Gate {
@@ -17,6 +19,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
         tasks: Arc<Mutex<Vec<tokio::task::AbortHandle>>>,
         deadline: std::time::Instant,
         fixture: Option<tempfile::TempDir>,
+        socket: std::path::PathBuf,
     }
     impl Drop for Gate {
         fn drop(&mut self) {
@@ -52,7 +55,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
             cleanup_complete &= tasks.iter().all(|task| task.is_finished());
             // An aborted async task can leave real spawn_blocking work
             // alive. Returning all permits fences its request cleanup.
-            let slots = super::super::background_inspection_slots();
+            let slots = super::super::background_inspection_slots(&self.socket);
             loop {
                 if let Ok(permits) = slots
                     .clone()
@@ -93,6 +96,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
     let stop = Arc::new(AtomicBool::new(false));
     let tasks = Arc::new(Mutex::new(Vec::new()));
     let mut gate = Gate {
+        socket: socket.clone(),
         release: release.clone(),
         stop: stop.clone(),
         server: None,
@@ -230,7 +234,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
     let mut first: Vec<_> = (0..BACKGROUND_RUN_INSPECTION_CONCURRENCY)
         .map(|_| spawn(true))
         .collect();
-    tokio::time::timeout(Duration::from_secs(3), async {
+    tokio::time::timeout(RUN_INSPECTION_REQUEST_TIMEOUT, async {
         while active.load(Ordering::SeqCst) != BACKGROUND_RUN_INSPECTION_CONCURRENCY {
             for task in &mut first {
                 if task.is_finished() {
@@ -292,13 +296,19 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
     );
     *gate.release.0.lock().unwrap() = true;
     gate.release.1.notify_all();
-    assert!(
-        tokio::time::timeout(Duration::from_secs(2), spawn(true))
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap()
-    );
+    // Releasing the peer is not proof that the blocking owner has returned
+    // its permit. Re-observe through the same producer until a fresh native
+    // inspection succeeds; leaked ownership would exhaust this budget.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if matches!(spawn(true).await.unwrap(), Ok(true)) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
     tokio::time::timeout(Duration::from_secs(2), async {
         while active.load(Ordering::SeqCst) != 0 {
             assert!(
@@ -314,7 +324,7 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
     // in the blocking closures, rather than just in the fixture server.
     let permits = tokio::time::timeout(
         Duration::from_secs(2),
-        super::super::background_inspection_slots()
+        super::super::background_inspection_slots(&socket)
             .acquire_many_owned(BACKGROUND_RUN_INSPECTION_CONCURRENCY as u32),
     )
     .await

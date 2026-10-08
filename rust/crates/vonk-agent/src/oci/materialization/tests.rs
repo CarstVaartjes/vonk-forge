@@ -103,6 +103,7 @@ fn model_materialization_reports_bytes_while_a_large_file_is_copied() {
         "cb555393-764b-4eb6-8f15-b416d289428f",
         false,
         &mut |done, of| reports.push((done, of)),
+        &|| false,
     )
     .unwrap();
 
@@ -339,7 +340,8 @@ fn model_materialization_copies_when_a_link_cannot_be_made() {
         serde_json::from_value(compiled_plan()).unwrap();
     let store = stock_store(data.path(), &plan);
 
-    materialize_compiled_models_with(data.path(), &plan, FIRST, false, &mut |_, _| {}).unwrap();
+    materialize_compiled_models_with(data.path(), &plan, FIRST, false, &mut |_, _| {}, &|| false)
+        .unwrap();
 
     let copy = fs::metadata(
         data.path()
@@ -385,6 +387,7 @@ fn real_cross_device_link_failure_logs_cause_copies_and_recovers() {
                 FIRST,
                 &plan.identity.recipe_revision_sha256,
                 &mut |done, total| reports.push((done, total)),
+                &|| false,
             )
             .unwrap();
         instance.verify_installation(FIRST).unwrap();
@@ -503,4 +506,50 @@ fn linkable_bytes_count_only_complete_store_objects() {
     assert_eq!(super::linkable_model_bytes(data.path(), &plan), 7 + 9);
     fs::write(&store[1], b"short").unwrap();
     assert_eq!(super::linkable_model_bytes(data.path(), &plan), 7);
+}
+
+#[test]
+fn in_flight_model_copy_cancels_at_checkpoint_and_fresh_copy_reuses_verified_sources() {
+    use std::cell::Cell;
+    const LARGE: u64 = MATERIALIZE_PROGRESS_STEP * 2;
+    let mut value = compiled_plan();
+    value["artifacts"][0]["size_bytes"] = json!(LARGE);
+    let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    let data = tempdir().unwrap();
+    let root = data.path().join("distribution/models");
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join(&plan.artifacts[0].sha256);
+    fs::File::create(&source).unwrap().set_len(LARGE).unwrap();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+    let small = root.join(&plan.artifacts[1].sha256);
+    fs::write(&small, b"secondary").unwrap();
+    fs::set_permissions(&small, fs::Permissions::from_mode(0o600)).unwrap();
+    let inode = fs::metadata(&source).unwrap().ino();
+    let cancellation = Cell::new(false);
+    let copied = Cell::new(0);
+    let result = materialize_compiled_models_with(
+        data.path(),
+        &plan,
+        FIRST,
+        false,
+        &mut |done, _| {
+            copied.set(done);
+            if done >= MATERIALIZE_PROGRESS_STEP {
+                cancellation.set(true);
+            }
+        },
+        &|| cancellation.get(),
+    );
+    assert!(result.unwrap_err().is_cancelled());
+    assert!(copied.get() < LARGE);
+    assert_eq!(fs::metadata(&source).unwrap().ino(), inode);
+    cancellation.set(false);
+    let placed =
+        materialize_compiled_models_with(data.path(), &plan, FIRST, false, &mut |_, _| {}, &|| {
+            cancellation.get()
+        })
+        .unwrap();
+    assert_eq!(placed.len(), plan.artifacts.len());
+    assert_eq!(fs::metadata(&placed[0]).unwrap().len(), LARGE);
+    assert_eq!(fs::read(&placed[1]).unwrap(), b"secondary");
 }
