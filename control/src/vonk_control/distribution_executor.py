@@ -805,17 +805,15 @@ class DurableDistributionPhaseExecutor:
                         for node_id, assignment in assignments.items()
                     },
                 },
-                result=serialize_json_value(
-                    _child_receipt(
-                        {
-                            "phase": "transfer",
-                            "subphase": "target-copy",
-                            "progress": progress,
-                            "members": progress["members"],
-                            "evidence": [],
-                        }
-                    )
-                ),
+                result=_child_receipt(
+                    {
+                        "phase": "transfer",
+                        "subphase": "target-copy",
+                        "progress": progress,
+                        "members": progress["members"],
+                        "evidence": [],
+                    }
+                ).model_dump(mode="json"),
                 created_at=now,
                 updated_at=now,
             )
