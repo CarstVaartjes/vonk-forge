@@ -17,7 +17,6 @@
     "control/src/vonk_control/models.py": 2319,
     "control/src/vonk_control/operation_api.py": 2486,
     "control/src/vonk_control/recipe_builds.py": 1976,
-    "control/src/vonk_control/recipe_image_availability.py": 6078,
     "control/src/vonk_control/recipe_operations.py": 10245,
     "control/src/vonk_control/recipe_packages.py": 1542,
     "control/src/vonk_control/recipe_routes.py": 1895,
