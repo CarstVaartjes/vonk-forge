@@ -9,9 +9,11 @@ import httpx2
 from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
+    RouteState,
     RunState,
     RunSwitchCode,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from .. import job_states
 from ..failure_classification import error_code, is_security_failure
@@ -56,6 +58,32 @@ def _established_start_effect(
     except (KeyError, RuntimeError, TypeError, ValueError):
         return None
     return child.owner_id if status.healthy else None
+
+
+def _established_stop_effect(
+    lifecycle: RecipeOperationService | None,
+    phase: RunSwitchPhase,
+    child: object,
+) -> str | None:
+    """An exact observed stop settles a child whose acknowledgement was lost."""
+    if (
+        lifecycle is None
+        or phase.kind != ProfileChildPhase.STOP
+        or not isinstance(child, RecipeOperationView)
+        or child.state not in job_states.words(LifecycleState.NEEDS_OPERATOR)
+    ):
+        return None
+    try:
+        status = lifecycle.run_status(child.owner_id)
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return None
+    return (
+        child.owner_id
+        if status.state == RunState.STOPPED
+        and status.route_state == RouteState.WITHDRAWN
+        and all(rank.state == RunState.STOPPED for rank in status.ranks)
+        else None
+    )
 
 
 def _start_still_progressing(
