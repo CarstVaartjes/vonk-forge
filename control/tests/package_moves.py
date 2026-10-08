@@ -122,20 +122,36 @@ class PackageMoves:
     ) -> str:
         old = self.root / path
         package = old.with_suffix("")
-        if old.exists() or old.suffix not in {".py", ".rs"} or not package.is_dir():
-            return path
         if old.suffix == ".rs":
+            if old.exists():
+                source = old.read_text()
+                if re.search(r"\bfn\s+" + re.escape(function) + r"\b", source):
+                    return path
+                module_root = old.parent if old.name == "lib.rs" else package
+                candidates = [
+                    module_root / (name + ".rs")
+                    for name in re.findall(r"(?m)^(?:pub\s+)?mod\s+(\w+)\s*;", source)
+                ]
+            elif package.is_dir():
+                candidates = sorted(package.rglob("*.rs"))
+            else:
+                return path
             # Rust inventories predate body snapshots. Carry only a uniquely
             # named function with the same scanner finding, never a pooled
             # allowance or an ambiguous method shared by operation families.
             matches = [
                 file.relative_to(self.root).as_posix()
-                for file in sorted(package.rglob("*.rs"))
-                if re.search(r"\bfn\s+" + re.escape(function) + r"\b", file.read_text())
+                for file in candidates
+                if file.is_file()
+                and re.search(
+                    r"\bfn\s+" + re.escape(function) + r"\b", file.read_text()
+                )
                 and matches_site is not None
                 and matches_site(file.read_text(), function)
             ]
             return matches[0] if len(matches) == 1 else path
+        if old.exists() or old.suffix != ".py" or not package.is_dir():
+            return path
         previous = self.recorded.get(path, {})
         digest = previous.get(function)
         matches = []
