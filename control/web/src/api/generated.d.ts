@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 4ae6b747469e2ed7129c913df23284a2627f5ab5db426450332e6296ded6b914. Do not edit.
+// Generated from canonical OpenAPI SHA256 a97ce0818c6793e04dbfb40a57ed4600d6d4bc0b837048ebf495d7f1abe5d0a1. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -3065,7 +3065,7 @@ export interface components {
          * @description Generic Controller request and fleet-operation problem codes.
          * @enum {string}
          */
-        ControllerErrorCode: "controller.conflict" | "controller.fleet.revocation_uncertain" | "controller.fleet.upgrade_conflict" | "controller.http_" | "controller.internal_error" | "controller.invalid_request" | "controller.not_found" | "controller.rate_limited" | "controller.request_too_large" | "controller.timeout" | "controller.unavailable";
+        ControllerErrorCode: "controller.conflict" | "controller.fleet.revocation_uncertain" | "controller.fleet.upgrade_conflict" | "controller.http_" | "controller.internal_error" | "controller.invalid_request" | "controller.not_found" | "controller.rate_limited" | "controller.request_too_large" | "superseded_operation_cancelled" | "controller.timeout" | "controller.unavailable";
         /**
          * DesiredAssignmentState
          * @description What a fleet-profile assignment is asked to become on its Sparks.
@@ -5064,6 +5064,12 @@ export interface components {
          * @enum {string}
          */
         HelperErrorCode: "call_join_failed" | "concurrency_limit" | "grant_invalid" | "grant_node_mismatch" | "grant_unauthorized" | "inspection_outcome_invalid" | "installation_reconciliation_busy" | "installation_reconciliation_storage_unavailable" | "message_framing_invalid" | "operation_command_failed" | "operation_failed" | "operation_invalid" | "operation_invalid_artifact" | "operation_io" | "operation_stop_uncertain" | "operation_unsafe_path" | "outcome_malformed" | "package_custody_failed" | "package_install_failed" | "package_metadata_failed" | "package_preflight_failed" | "package_verification_failed" | "peer_identity_invalid" | "rejection_malformed" | "request_arguments_presence_invalid" | "request_argument_nul_byte" | "request_attempt_invalid" | "request_bytes_invalid" | "request_document_invalid" | "request_encoding_invalid" | "request_installation_identity_invalid" | "request_invalid" | "request_ledger_failed" | "request_plan_binding_invalid" | "request_plan_bytes_invalid" | "request_replayed" | "request_schema_version_invalid" | "request_storage_invalid" | "response_unbound" | "runtime_authority_unavailable" | "runtime_endpoint_firewall_rejected" | "runtime_fabric_firewall_rejected" | "runtime_fabric_unavailable" | "runtime_helper_call_join_failed" | "runtime_helper_inspection_outcome_invalid" | "runtime_helper_message_framing_invalid" | "runtime_helper_outcome_malformed" | "runtime_helper_protocol_invalid" | "runtime_helper_rejection_malformed" | "runtime_helper_request_arguments_presence_invalid" | "runtime_helper_request_argument_nul_byte" | "runtime_helper_request_attempt_invalid" | "runtime_helper_request_bytes_invalid" | "runtime_helper_request_document_invalid" | "runtime_helper_request_encoding_invalid" | "runtime_helper_request_installation_identity_invalid" | "runtime_helper_request_plan_binding_invalid" | "runtime_helper_request_plan_bytes_invalid" | "runtime_helper_request_schema_version_invalid" | "runtime_helper_request_storage_invalid" | "runtime_helper_response_unbound" | "runtime_helper_stop_uncertain" | "runtime_helper_system_clock_invalid" | "runtime_helper_unavailable" | "runtime_image_identity_invalid" | "runtime_image_inspect_failed" | "runtime_image_load_failed" | "runtime_image_receipt_failed" | "runtime_process_exited" | "runtime_run_missing" | "system_clock_invalid";
+        /**
+         * HelperOperationCode
+         * @description Stable diagnostic codes returned by the privileged operation executor.
+         * @enum {string}
+         */
+        HelperOperationCode: "helper.artifact_invalid" | "helper.command_failed" | "helper.installation_reconciliation_busy" | "helper.installation_reconciliation_storage_unavailable" | "helper.io_failed" | "helper.operation_invalid" | "helper.package_install_failed" | "helper.package_metadata_invalid" | "helper.package_preflight_failed" | "helper.runtime_endpoint_firewall_rejected" | "helper.runtime_fabric_firewall_rejected" | "helper.runtime_fabric_unavailable" | "helper.runtime_image_identity_invalid" | "helper.runtime_image_inspect_failed" | "helper.runtime_image_load_failed" | "helper.runtime_image_receipt_failed" | "helper.runtime_invocation_limit_exceeded" | "helper.runtime_invocation_limits_unavailable" | "helper.runtime_invocation_string_limit_exceeded" | "helper.runtime_process_exited" | "helper.runtime_run_missing" | "helper.stop_uncertain" | "helper.unsafe_path";
         /**
          * HostHelperResponseStatus
          * @description The verdict a privileged-helper reply carries.
@@ -7865,6 +7871,7 @@ export interface components {
             controller_error_code: components["schemas"]["ControllerErrorCode"];
             distribution_code: components["schemas"]["DistributionCode"];
             helper_error_code: components["schemas"]["HelperErrorCode"];
+            helper_operation_code: components["schemas"]["HelperOperationCode"];
             image_store_code: components["schemas"]["ImageStoreCode"];
             install_admission_code: components["schemas"]["InstallAdmissionCode"];
             install_degraded_reason: components["schemas"]["InstallDegradedReason"];

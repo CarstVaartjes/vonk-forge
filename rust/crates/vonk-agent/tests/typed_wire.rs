@@ -63,6 +63,14 @@ fn rust_files(directory: &Path, found: &mut Vec<PathBuf>) {
 /// Source with comments, string literals and `#[cfg(test)]` items removed.
 fn production_code(source: &str) -> String {
     let stripped = strip_comments_and_strings(source);
+    if stripped
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        == Some("#![cfg(test)]")
+    {
+        return String::new();
+    }
     strip_test_items(&stripped)
 }
 

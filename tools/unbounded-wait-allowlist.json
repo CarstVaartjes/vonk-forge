@@ -207,43 +207,37 @@
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "path": "rust/crates/vonk-agent-helper/src/operations/generation/tests.rs",
       "function": "exact_cancel_stop_waits_for_active_start_then_blocks_late_start",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "path": "rust/crates/vonk-agent-helper/src/operations/generation/tests.rs",
       "function": "exact_cancel_stop_waits_for_active_start_then_blocks_late_start",
       "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "path": "rust/crates/vonk-agent-helper/src/operations/storage.rs",
       "function": "remove_directory_contents",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "path": "rust/crates/vonk-agent-helper/src/operations/model_paths.rs",
       "function": "require_safe_model_path",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
-      "function": "run_with_timeout",
-      "kind": "rust-wait-without-deadline",
-      "count": 2
-    },
-    {
-      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "path": "rust/crates/vonk-agent-helper/src/operations/access/tests.rs",
       "function": "runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer",
       "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent-helper/src/operations.rs",
+      "path": "rust/crates/vonk-agent-helper/src/operations/packages.rs",
       "function": "take_package_custody",
       "kind": "rust-loop-without-deadline",
       "count": 1
@@ -441,61 +435,55 @@
       "count": 2
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/agent_loop/tests_0.rs",
       "function": "a_conflicting_result_response_is_not_an_acknowledgement",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/agent_loop/tests_0.rs",
       "function": "a_conflicting_result_response_is_not_an_acknowledgement",
       "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/agent_loop/tests_0.rs",
       "function": "a_validation_rejected_result_response_is_typed_for_local_custody",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/agent_loop/tests_0.rs",
       "function": "a_validation_rejected_result_response_is_typed_for_local_custody",
       "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/jobs.rs",
       "function": "collect_job_outputs",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/test_support/fixtures_0.rs",
       "function": "execute",
       "kind": "rust-loop-without-deadline",
-      "count": 4
+      "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/test_support/fixtures_0.rs",
       "function": "finish",
       "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/stop.rs",
       "function": "settle_acl_transition",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "wait_for_cancellation",
-      "kind": "rust-loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
+      "path": "rust/crates/vonk-agent/src/executor/test_support/fixtures_0.rs",
       "function": "with_disposition",
       "kind": "rust-loop-without-deadline",
       "count": 2
@@ -1181,6 +1169,30 @@
       "count": 2,
       "reason": "resource-bound",
       "justification": "Two process-lifetime guard threads, each a fixed-cadence sampler rather than an external wait: every iteration performs one bounded step (a /proc read, or a docker inventory/stop through the helper's timeout-bounded CommandRunner), receives with recv_timeout of one sample interval, and sleeps SAMPLE_INTERVAL (250 ms) so there is no hot retry. Pending stops are a BTreeMap bounded by the managed-container inventory and are dropped when a successful enumeration shows the container gone. The loops end only with the helper process, by design: a guard that exits would silently disable host protection."
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor/build.rs",
+      "function": "execute_build",
+      "kind": "rust-loop-without-deadline",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "Progress observation is owned by the byte-bounded image upload with its one-hour HTTP deadline; sender closure drains the snapshot and a heartbeat-sized join timeout aborts the reporter."
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor/distribution.rs",
+      "function": "execute_distribution",
+      "kind": "rust-loop-without-deadline",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "Progress observation is owned by the bounded object transfer and three-attempt retry; sender closure drains the snapshot and a heartbeat-sized join timeout aborts the reporter."
+    },
+    {
+      "path": "rust/crates/vonk-agent/src/executor/start.rs",
+      "function": "execute_start",
+      "kind": "rust-loop-without-deadline",
+      "count": 1,
+      "reason": "resource-bound",
+      "justification": "The runtime inspection future is selected against wait_ready_until and cancellation; the readiness owner enforces the immutable start deadline or current lease deadline and drops the observer at completion."
     }
   ]
 }

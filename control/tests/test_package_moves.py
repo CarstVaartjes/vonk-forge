@@ -362,3 +362,41 @@ def test_undigested_retry_registration_keeps_its_exception_identity(tmp_path):
     assert relocated["call_edges"][0]["calls"][0]["path"] == NEW
     (tmp_path / NEW).write_text(source.replace("SampleError", "OtherError"))
     assert blockers.relocate_document(document, moves)["retry_loops"][0]["path"] == OLD
+
+
+def test_rust_split_carries_only_unique_matching_findings(tmp_path: Path) -> None:
+    from .principle_guards import scan_rust
+
+    old = "rust/operations.rs"
+    package = tmp_path / "rust/operations"
+    package.mkdir(parents=True)
+    target = package / "storage.rs"
+    target.write_text("fn collect() { loop { read(); } }")
+    document = {
+        "schema": 1,
+        "debt": [
+            {
+                "path": old,
+                "function": "collect",
+                "kind": "rust-loop-without-deadline",
+                "count": 1,
+            }
+        ],
+        "exceptions": [],
+    }
+    moves = PackageMoves(tmp_path)
+    current = {
+        **document,
+        "debt": [{**document["debt"][0], "path": "rust/operations/storage.rs"}],
+    }
+    assert (
+        principles.evaluate_gate(
+            scan_rust(target.read_text(), path="rust/operations/storage.rs"),
+            principles.relocate(document, moves),
+        )
+        == []
+    )
+    assert principles.history_gate(current, document, moves) == []
+    # Two methods with the same name cannot share the old allowance.
+    (package / "other.rs").write_text(target.read_text())
+    assert principles.history_gate(current, document, PackageMoves(tmp_path))

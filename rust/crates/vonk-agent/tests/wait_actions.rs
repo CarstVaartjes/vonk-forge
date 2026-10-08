@@ -74,6 +74,10 @@ fn root() -> PathBuf {
 
 /// The module's code without its test module and comments.
 fn production_code(source: &str) -> String {
+    // A file-level cfg applies to every item, including out-of-line fixtures.
+    if source.lines().map(str::trim).find(|line| !line.is_empty()) == Some("#![cfg(test)]") {
+        return String::new();
+    }
     source
         .split("\n#[cfg(test)]\nmod ")
         .next()
@@ -238,7 +242,7 @@ fn a_wait_reports_its_evidence_on_the_wire() {
 fn the_guard_finds_what_it_forbids() {
     let seeded = vec![
         (
-            "executor.rs".to_owned(),
+            "executor/mod.rs".to_owned(),
             production_code(
                 r#"
 fn wait() -> ExecutionResult {
@@ -261,7 +265,7 @@ mod tests {
 
     assert_eq!(
         unadvertised(&seeded),
-        ["executor.rs: WaitReason::ScopeChanged"]
+        ["executor/mod.rs: WaitReason::ScopeChanged"]
     );
-    assert_eq!(hand_built_waiting_states(&seeded), ["executor.rs"]);
+    assert_eq!(hand_built_waiting_states(&seeded), ["executor/mod.rs"]);
 }

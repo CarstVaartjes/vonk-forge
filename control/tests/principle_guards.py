@@ -989,8 +989,16 @@ def relocate(document: dict, moves=None) -> dict:
                         lambda source, name, entry=entry: any(
                             site.function == name and site.kind == entry["kind"]
                             for mode in ALLOWLISTS
-                            for site in scan_source(
-                                source, path=entry["path"], mode=mode
+                            for site in (
+                                (
+                                    scan_rust(source, path=entry["path"])
+                                    if mode == "waits"
+                                    else scan_rust_remedies(source, path=entry["path"])
+                                    if mode == "remedies"
+                                    else []
+                                )
+                                if entry["path"].endswith(".rs")
+                                else scan_source(source, path=entry["path"], mode=mode)
                             )
                         ),
                     ),

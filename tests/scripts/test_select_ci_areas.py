@@ -203,7 +203,7 @@ def test_product_code_and_other_workflows_do_not_need_a_lane_proof() -> None:
     "path",
     [
         "tools/blocker-allowlist.json",
-        "rust/crates/vonk-agent/src/executor.rs",
+        "rust/crates/vonk-agent/src/executor/mod.rs",
     ],
 )
 def test_blocker_guard_inputs_select_the_controller_suite(path: str) -> None:
