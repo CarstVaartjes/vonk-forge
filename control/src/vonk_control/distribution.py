@@ -28,9 +28,13 @@ from vonk_agent_protocol import (
     DistributionAssignmentState,
     DistributionCode,
     DistributionObject,
+    InvalidRequestError,
+    InvalidRequestReason,
     ModelFileState,
     SecurityRefusalError,
     SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
     canonical_message,
 )
 
@@ -63,6 +67,23 @@ class DistributionError(ValueError):
         self.detail = detail
 
 
+class DistributionInputError(InvalidRequestError, DistributionError):
+    """Invalid source configuration detected before object or grant effects."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        DistributionError.__init__(self, code, detail)
+        self.typed_reason = InvalidRequestReason.UNSUPPORTED
+        self.typed_field = None
+
+
+class DistributionUnknown(UnknownOutcomeError, DistributionError):
+    """Unavailable managed storage; the owner observes the same identity again."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        DistributionError.__init__(self, code, detail)
+        self.typed_reason = WaitReason.OBSERVATION_UNAVAILABLE
+
+
 class DistributionRefused(SecurityRefusalError, DistributionError):
     """Denied source access or exact distribution authority; never a cache miss."""
 
@@ -71,6 +92,13 @@ class DistributionRefused(SecurityRefusalError, DistributionError):
     ) -> None:
         DistributionError.__init__(self, code, detail)
         self.typed_reason = reason
+
+
+class DistributionIntegrityError(DistributionRefused):
+    """Content or immutable grant mismatch before publishing or serving bytes."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(code, detail, reason=SecurityRefusalReason.FORBIDDEN)
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,7 +212,7 @@ class FilesystemObjectSource:
                 or before.st_size != expected_bytes
             ):
                 os.close(fd)
-                raise DistributionError(
+                raise DistributionUnknown(
                     DistributionCode.OBJECT_UNAVAILABLE, "stored object length changed"
                 )
             # The name is the digest and the object entered the store through an
@@ -200,7 +228,7 @@ class FilesystemObjectSource:
                 reason=SecurityRefusalReason.PERMISSION_DENIED,
             ) from error
         except OSError as error:
-            raise DistributionError(
+            raise DistributionUnknown(
                 DistributionCode.OBJECT_UNAVAILABLE, "stored object is unavailable"
             ) from error
 
@@ -281,6 +309,8 @@ class ModelCacheObjectSource:
         self._receipts: dict[str, tuple[VerifiedModelObject, ...]] = {}
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
+        if hasattr(self, "_service"):
+            return self._open_cache_object(digest, expected_bytes)
         return self._open_object(digest, expected_bytes)
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
@@ -299,7 +329,6 @@ class ModelCacheObjectSource:
         adapter._manifests = {}
         adapter._receipts = {}
         adapter._paths = {}
-        adapter._open_object = adapter._open_cache_object
         return adapter
 
     def _load_manifest(self, digest: str) -> tuple[DistributionObject, ...]:
@@ -345,9 +374,12 @@ class ModelCacheObjectSource:
                 if requested is None
                 else descriptor_provider(digest, manifest=requested)
             )
+        except SecurityRefusalError:
+            raise
         except Exception as error:
-            raise DistributionError(
-                DistributionCode.MODEL_SET_MISMATCH, "NAS cache manifest is unavailable"
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+                "NAS cache manifest is unavailable",
             ) from error
         objects = []
         receipts = []
@@ -384,8 +416,8 @@ class ModelCacheObjectSource:
                         )
                     )
             except (KeyError, TypeError, ValueError) as error:
-                raise DistributionError(
-                    DistributionCode.MODEL_SET_MISMATCH,
+                raise DistributionUnknown(
+                    DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                     "NAS cache manifest is malformed",
                 ) from error
         return tuple(objects), tuple(receipts), paths
@@ -394,7 +426,7 @@ class ModelCacheObjectSource:
         with self._metadata_guard:
             entry = self._paths.get(digest)
         if entry is None:
-            raise DistributionError(
+            raise DistributionUnknown(
                 DistributionCode.OBJECT_UNAVAILABLE,
                 "NAS cache object was not authorized",
             )
@@ -407,7 +439,7 @@ class ModelCacheObjectSource:
                 set_digest, digest, path
             )
             if size != expected_bytes or verified_digest != digest:
-                raise DistributionError(
+                raise DistributionUnknown(
                     DistributionCode.OBJECT_UNAVAILABLE,
                     "NAS cache object identity changed",
                 )
@@ -431,7 +463,7 @@ class ModelCacheObjectSource:
                 reason=SecurityRefusalReason.PERMISSION_DENIED,
             ) from error
         except Exception as error:
-            raise DistributionError(
+            raise DistributionUnknown(
                 DistributionCode.OBJECT_UNAVAILABLE, "NAS cache object is unavailable"
             ) from error
 
@@ -464,7 +496,7 @@ class ModelCacheObjectSource:
         if manifest is not None and hasattr(self, "_service"):
             objects, receipts, paths = self._describe(digest, manifest)
             if len(receipts) != len(objects):
-                raise DistributionError(
+                raise DistributionUnknown(
                     DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                     "NAS cache manifest lacks canonical model-file identity",
                 )
@@ -475,26 +507,34 @@ class ModelCacheObjectSource:
             cached_receipts = self._receipts.get(digest)
         if cached_receipts is None:
             if hasattr(self, "_service"):
-                try:
-                    self._load_manifest(digest)
-                except Exception as error:
-                    raise DistributionError(
-                        DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
-                        "NAS cache manifest lacks canonical model-file identity",
-                    ) from error
+                objects, receipts, paths = self._describe(digest)
+                if len(receipts) == len(objects):
+                    with self._metadata_guard:
+                        self._paths.update(paths)
+                        self._manifests[digest] = objects
+                        self._receipts[digest] = receipts
             else:
-                raise DistributionError(
+                raise DistributionUnknown(
                     DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                     "NAS cache manifest lacks canonical model-file identity",
                 )
         with self._metadata_guard:
             receipts = self._receipts.get(digest)
         if receipts is None:
-            raise DistributionError(
+            raise DistributionUnknown(
                 DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "NAS cache manifest lacks canonical model-file identity",
             )
         return receipts
+
+
+def verified_model_receipts(
+    service: object, artifact_set_sha256: str, manifest: object
+) -> tuple[VerifiedModelObject, ...]:
+    """Resolve canonical file receipts through the typed NAS adapter boundary."""
+
+    source: ModelCacheObjectSource = ModelCacheObjectSource.from_service(service)
+    return source.verified_model_objects_for_set(artifact_set_sha256, manifest)
 
 
 class CompositeObjectSource:
@@ -521,7 +561,7 @@ class CompositeObjectSource:
     ) -> tuple[VerifiedModelObject, ...]:
         resolver = getattr(self.model_source, "verified_model_objects_for_set", None)
         if resolver is None:
-            raise DistributionError(
+            raise DistributionInputError(
                 DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "NAS cache source lacks canonical model-file identity",
             )
@@ -591,12 +631,15 @@ class MemoryObjectSource:
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         payload = self.objects.get(digest)
+        if payload is None:
+            raise DistributionUnknown(
+                DistributionCode.OBJECT_UNAVAILABLE, "stored object is unavailable"
+            )
         if (
-            payload is None
-            or len(payload) != expected_bytes
+            len(payload) != expected_bytes
             or hashlib.sha256(payload).hexdigest() != digest
         ):
-            raise DistributionError(
+            raise DistributionUnknown(
                 DistributionCode.OBJECT_UNAVAILABLE, "verified object digest mismatch"
             )
         return OpenedObject(BytesIO(payload), len(payload), digest, self.root / digest)
@@ -626,15 +669,16 @@ def _may_replace(
 ) -> bool:
     """Whether a registration may take over a stored (plan, node) grant.
 
-    The same grant (equal bytes and identities; only its expiry differs) is
-    renewed by whichever switch now transfers it. A grant that is no longer
-    live -- revoked, expired, or past its expiry -- belongs to no transfer and
-    is reclaimed. A live grant for different bytes stays refused.
+    Equal authorized content can be renewed across request IDs and generations.
+    A grant that is no longer live -- revoked, expired, or past its expiry --
+    belongs to no transfer and can be reclaimed for different content. A live
+    grant for different bound content stays refused.
     """
 
     def grant(value: NodeDistributionAssignment) -> dict[str, object]:
         mapping = value.to_mapping()
-        mapping.pop("expires_at", None)
+        for field in ("expires_at", "assignment_id", "generation"):
+            mapping.pop(field, None)
         return mapping
 
     return grant(existing) == grant(requested) or not (
@@ -700,8 +744,8 @@ class DistributionService:
         if verifier is None or not verifier(
             assignment.model_artifact_set_sha256, assignment.objects
         ):
-            raise DistributionError(
-                DistributionCode.MODEL_SET_MISMATCH,
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "assignment model objects do not match a verified cache manifest",
             )
         image_verifier = getattr(self.source, "verify_runtime_image", None)
@@ -709,7 +753,7 @@ class DistributionService:
             assignment.oci_image_digest, assignment.oci_archive_sha256
         )
         if not image_verified:
-            raise DistributionError(
+            raise DistributionUnknown(
                 DistributionCode.RUNTIME_IMAGE_MISMATCH,
                 "assignment runtime image does not match the verified image identity",
             )
@@ -722,7 +766,7 @@ class DistributionService:
                 if existing is not None and not _may_replace(
                     existing, assignment, active=True, now=self.clock()
                 ):
-                    raise DistributionError(
+                    raise DistributionIntegrityError(
                         DistributionCode.ASSIGNMENT_CONFLICT,
                         "node assignment is already bound",
                     )
@@ -756,7 +800,7 @@ class DistributionService:
                 if not _may_replace(
                     existing, assignment, active=row.state == "active", now=now
                 ):
-                    raise DistributionError(
+                    raise DistributionIntegrityError(
                         DistributionCode.ASSIGNMENT_CONFLICT,
                         "node assignment is already bound",
                     )
@@ -772,11 +816,11 @@ class DistributionService:
                     now=now,
                 )
             except ArtifactLifecycleError as error:
-                raise DistributionError(error.code, error.detail) from error
+                raise DistributionUnknown(error.code, error.detail) from error
             if row is not None and row.id != assignment.assignment_id:
-                # Reclaim creates a new grant identity. Delete the expired or
-                # revoked grant under the plan/node lock, then insert its
-                # successor in this transaction; primary keys never change.
+                # Renewal or reclaim creates a new grant identity. Replace the
+                # matching-content or inactive grant under the plan/node lock;
+                # primary keys never change in place.
                 session.delete(row)
                 session.flush()
                 row = None
@@ -1003,21 +1047,23 @@ class DistributionService:
         if object_spec.kind == "model" and not self.source.verify_artifact_set(
             assignment.model_artifact_set_sha256, assignment.objects
         ):
-            raise DistributionError(
-                DistributionCode.MODEL_SET_MISMATCH,
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "assignment model objects do not match the cache manifest",
             )
         try:
             opened = self.source.open_object(digest, object_spec.bytes)
         except DistributionError:
             raise
+        except SecurityRefusalError:
+            raise
         except Exception as error:
-            raise DistributionError(
+            raise DistributionUnknown(
                 DistributionCode.OBJECT_UNAVAILABLE, "stored object is unavailable"
             ) from error
         if opened.size != object_spec.bytes or opened.sha256 != digest:
             opened.stream.close()
-            raise DistributionError(
+            raise DistributionUnknown(
                 DistributionCode.OBJECT_UNAVAILABLE, "source returned an invalid object"
             )
         return assignment, object_spec, opened
