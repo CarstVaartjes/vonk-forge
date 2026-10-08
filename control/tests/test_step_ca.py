@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.api import build_agent_services
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
@@ -404,7 +405,7 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     assert issued.fingerprint == certificate.fingerprint(hashes.SHA256()).hex()
 
 
-@pytest.mark.parametrize("lifetime", (True, 89, 2592001))
+@pytest.mark.parametrize("lifetime", (True, 0, -1))
 def test_rejects_invalid_configured_certificate_lifetime(
     tmp_path: Path,
     lifetime: int,
@@ -1324,7 +1325,7 @@ def test_production_ca_fault_isolated_and_repaired(
     monkeypatch.setattr(StepCertificateAuthority, "check_health", health)
     credential = settings.agent_ca_credential_path.read_bytes()
     if fault == "configuration":
-        settings.agent_ca_certificate_lifetime_seconds = 89
+        settings.agent_ca_certificate_lifetime_seconds = 0
     if fault == "credential-file":
         settings.agent_ca_credential_path.unlink()
     from typing import cast
@@ -1408,8 +1409,8 @@ def _assert_unavailable_enrollment(client, request) -> None:
     )
 
 
-@pytest.mark.parametrize("lifetime", (90, 86400, 2592000))
-def test_configured_ca_lifetime_is_trusted_within_bounds(
+@pytest.mark.parametrize("lifetime", (1, 89, 90, 86400, 2592000, 2592001, 120 * 86400))
+def test_configured_ca_lifetime_is_trusted(
     tmp_path: Path,
     lifetime: int,
 ) -> None:
@@ -1418,8 +1419,45 @@ def test_configured_ca_lifetime_is_trusted_within_bounds(
     A Controller whose CA is configured shorter than 30 days still starts and
     signs with that lifetime; it never refuses to start over it.
     """
-    _provider(
+    provider, _material = _provider(
         tmp_path,
         lambda _: httpx2.Response(500),
         certificate_lifetime_seconds=lifetime,
     )
+    binding = provider.prepare_request(
+        NODE_ID,
+        _csr(),
+        NOW,
+        purpose=CertificateIssuancePurpose.ENROLLMENT,
+        source_serial=None,
+        generation=1,
+    )
+    assert (
+        datetime.fromisoformat(binding.not_after)
+        - datetime.fromisoformat(binding.not_before)
+    ).total_seconds() == lifetime
+
+
+@pytest.mark.parametrize("fault", ("transport", "health", "json", "server"))
+def test_provider_unavailability_is_typed_unknown_and_recovers(tmp_path, fault):
+    """Catches transport damage being denied or poisoning later observation."""
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    damaged = True
+
+    def handler(request):
+        if not damaged:
+            return httpx2.Response(200, json={"status": "ok"})
+        if fault == "transport":
+            raise httpx2.ConnectError("unavailable", request=request)
+        if fault == "json":
+            return httpx2.Response(200, content=b"broken")
+        if fault == "server":
+            return httpx2.Response(503)
+        return httpx2.Response(200, json={"status": "unavailable"})
+
+    provider, _ = _provider(tmp_path, handler)
+    with pytest.raises(UnknownOutcomeError):
+        provider.check_health()
+    damaged = False
+    provider.check_health()

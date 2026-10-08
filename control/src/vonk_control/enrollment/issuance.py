@@ -64,7 +64,7 @@ from ..models import (
     AgentNode,
 )
 from ..pki import CertificateAuthority, IssuedCertificate
-from ..step_ca import StepCAError, StepCAIssuancePending
+from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 
@@ -301,12 +301,8 @@ class EnrollmentCore:
                     failure = "enrollment grant is consumed"
                 elif not _replay_matches(enrollment, csr, evidence):
                     failure = "enrollment replay does not match original request"
-                elif enrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
-                    outcome = _issued(enrollment)
-                elif enrollment.state == EnrollmentRecordState.ISSUING:
-                    wait_for_enrollment_id = enrollment.id
                 else:
-                    failure = "enrollment state is invalid"
+                    wait_for_enrollment_id = enrollment.id
             elif _stored_utc(grant.expires_at) <= now:
                 failure = "enrollment grant is expired"
             else:
@@ -436,9 +432,9 @@ class EnrollmentCore:
         if claim.provider_request is None:
             with self._transaction() as session:
                 accepted = _locked_enrollment(session, claim.enrollment_id)
-                if accepted.provider_request is None:
+                if _issuance_binding(accepted.provider_request) is None:
                     session.delete(accepted)
-            raise EnrollmentDenied(
+            raise EnrollmentIssuanceUncertain(
                 "historical certificate issuance has no exact journal binding"
             )
         with self._transaction() as session:
@@ -453,7 +449,10 @@ class EnrollmentCore:
             ):
                 raise EnrollmentDenied("node identity is retired or revoked")
             if accepted.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
-                return _issued(accepted)
+                try:
+                    return _issued(accepted)
+                except RuntimeError:
+                    accepted.state = EnrollmentRecordState.ISSUING
         try:
             try:
                 issued = self._authority.observe_node(
@@ -478,6 +477,12 @@ class EnrollmentCore:
                 raise CertificateResponseCapacityRefused(
                     "certificate response exceeds the supported wire budget"
                 ) from error
+            if isinstance(error, StepCAError) and not isinstance(
+                error, StepCAUnavailable
+            ):
+                raise EnrollmentDenied(
+                    "certificate authority verification failed"
+                ) from error
             # The client only learns that issuance is uncertain.  Operators
             # still need the provider cause and traceback to reconcile a
             # stuck node, keyed by the node identity that owns the claim.
@@ -500,8 +505,23 @@ class EnrollmentCore:
                 )
                 if enrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
                     return _issued(enrollment)
-                if enrollment.state != EnrollmentRecordState.ISSUING:
-                    raise EnrollmentDenied("certificate issuance identity changed")
+                enrollment.state = EnrollmentRecordState.ISSUING
+                existing = session.get(AgentCertificate, issued.serial)
+                if (
+                    existing is not None
+                    and existing.node_id == claim.node_id
+                    and existing.revoked_at is None
+                ):
+                    # The verified exact CA response repairs its local projection.
+                    enrollment.state = EnrollmentRecordState.CERTIFICATE_ISSUED
+                    enrollment.certificate_pem = issued.certificate_pem.decode("ascii")
+                    enrollment.chain_pem = issued.chain_pem.decode("ascii")
+                    enrollment.certificate_serial = issued.serial
+                    enrollment.certificate_fingerprint = issued.fingerprint
+                    enrollment.certificate_generation = issued.generation
+                    enrollment.certificate_not_before = issued.not_before
+                    enrollment.certificate_not_after = issued.not_after
+                    return issued
                 if (
                     claim.purpose == EnrollmentPurpose.NEW_NODE
                     and session.get(AgentNode, enrollment.node_id) is not None
@@ -515,7 +535,9 @@ class EnrollmentCore:
                     now=now,
                 )
                 if enrollment.certificate_generation is None:
-                    raise EnrollmentDenied("certificate generation was not persisted")
+                    raise EnrollmentIssuanceUncertain(
+                        "certificate generation was not persisted"
+                    )
                 issued = replace(issued, generation=enrollment.certificate_generation)
         except SQLAlchemyError as error:
             # The durable issuing state was committed before the provider
@@ -534,9 +556,11 @@ class EnrollmentCore:
             if grant is None or grant.revoked_at is not None:
                 raise EnrollmentDenied("enrollment grant is revoked or missing")
             if enrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
-                return _issued(enrollment)
-            if enrollment.state != EnrollmentRecordState.ISSUING:
-                raise EnrollmentDenied("enrollment state is invalid")
+                try:
+                    return _issued(enrollment)
+                except RuntimeError:
+                    pass
+            enrollment.state = EnrollmentRecordState.ISSUING
             claim = _IssuanceClaim(
                 enrollment_id=enrollment.id,
                 node_id=enrollment.node_id,
@@ -644,7 +668,7 @@ class EnrollmentCore:
         if competing is not None:
             try:
                 self._wait_for_issuance(competing)
-            except EnrollmentDenied:
+            except (EnrollmentDenied, EnrollmentIssuanceUncertain):
                 # Only a locally ended historical gate may be passed. Revocation,
                 # identity mismatch and changed binding still refuse ingress.
                 with self._sessions() as session:

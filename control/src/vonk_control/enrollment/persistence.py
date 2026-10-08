@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 
-from pydantic import JsonValue
+from pydantic import JsonValue, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
@@ -54,7 +54,7 @@ from ..models import (
     AgentNodeProfile,
 )
 from ..pki import IssuedCertificate
-from .types import EnrollmentDenied, _RotationClaim
+from .types import EnrollmentDenied, EnrollmentIssuanceUncertain, _RotationClaim
 
 
 def _persist_issued_enrollment(
@@ -277,9 +277,14 @@ def _issuance_binding(
 ) -> CertificateIssuanceBinding | None:
     if value is None:
         return None
-    return CertificateIssuanceBinding.model_validate_json(
-        json.dumps(value, allow_nan=False)
-    )
+    try:
+        return CertificateIssuanceBinding.model_validate_json(
+            json.dumps(value, allow_nan=False)
+        )
+    except (ValidationError, ValueError, TypeError):
+        # Stored bookkeeping is a miss. A request must establish a fresh exact
+        # binding; no damaged record may authorize certificate adoption.
+        return None
 
 
 def _validate_issued_binding(
@@ -302,7 +307,7 @@ def _require_issuance_binding(
 ) -> None:
     """The same exact accepted binding fences admission and result adoption."""
     if _issuance_binding(stored) != expected:
-        raise EnrollmentDenied("enrollment issuance binding changed")
+        raise EnrollmentIssuanceUncertain("enrollment issuance binding changed")
 
 
 def _rotation_source_valid(

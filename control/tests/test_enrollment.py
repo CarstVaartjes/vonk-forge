@@ -622,9 +622,11 @@ def test_renewal_stages_once_then_activation_atomically_retires_older_identity(
             and staged.state == "staged"
         )
         assert staged.generation == 2
-    with pytest.raises(EnrollmentDenied, match="staged|rotation"):
-        enrollment.renew(NODE_ID, issued.serial, csr())
-    with pytest.raises(EnrollmentDenied, match="active"):
+    replacement = enrollment.renew(NODE_ID, issued.serial, csr())
+    assert isinstance(replacement, IssuedCertificate)
+    assert renewed.serial in authority.revocations
+    renewed = replacement
+    with pytest.raises(EnrollmentDenied):
         enrollment.renew(NODE_ID, renewed.serial, csr())
 
     enrollment.activate(NODE_ID, renewed.serial, renewed.generation)
@@ -951,7 +953,7 @@ def test_recovery_conflict_revocation_is_durable_across_response_loss(
     assert len(authority.renew_request_ids) == 2
 
 
-def test_recovery_denies_unbound_issuance_and_releases_its_gate(service) -> None:
+def test_recovery_replaces_unbound_issuance_and_releases_its_gate(service) -> None:
     enrollment, sessions, clock, authority = service
     source = enroll(enrollment)
     obsolete_csr = csr()
@@ -971,9 +973,13 @@ def test_recovery_denies_unbound_issuance_and_releases_its_gate(service) -> None
             )
         )
 
-    with pytest.raises(EnrollmentDenied, match="no exact journal binding"):
-        enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
-    assert authority.renew_request_ids == []
+    recovered = enrollment.recover_rotation(NODE_ID, source.serial, pending_csr)
+    assert isinstance(recovered, IssuedCertificate)
+    assert len(authority.renew_request_ids) == 1
+    enrollment.activate(NODE_ID, recovered.serial, recovered.generation)
+    assert isinstance(
+        enrollment.renew(NODE_ID, recovered.serial, csr()), IssuedCertificate
+    )
     with sessions() as session:
         intent = session.get(AgentCertificateRotation, NODE_ID)
         assert intent is None
@@ -1587,7 +1593,7 @@ def test_historical_provider_failure_does_not_invent_journal_authority(
         stored = session.scalar(select(AgentEnrollment))
         assert stored is not None
         stored.provider_request = None
-    with pytest.raises(EnrollmentDenied, match="historical"):
+    with pytest.raises(EnrollmentIssuanceUncertain):
         enrollment.submit(grant.token, request, evidence(request))
 
     assert len(authority.calls) == 1

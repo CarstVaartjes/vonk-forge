@@ -50,7 +50,7 @@ from ..models import (
     AgentNode,
 )
 from ..pki import IssuedCertificate
-from ..step_ca import StepCAError, StepCAIssuancePending
+from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 from .issuance import EnrollmentCore
 from .persistence import (
     _certificate_issued,
@@ -81,6 +81,28 @@ class RotationService(EnrollmentCore):
             raise ValueError("certificate serial is required")
         normalized_csr, _, csr_fingerprint, _ = _load_csr(node_id, csr)
         now = _utc(self._clock())
+        with self._sessions() as session:
+            intent = session.get(AgentCertificateRotation, node_id)
+            staged = session.scalar(
+                select(AgentCertificate).where(
+                    AgentCertificate.node_id == node_id,
+                    AgentCertificate.state == CertificateRecordState.STAGED,
+                    AgentCertificate.revoked_at.is_(None),
+                )
+            )
+            competing = (
+                intent is not None
+                and (
+                    intent.csr_public_key_fingerprint != csr_fingerprint
+                    or intent.source_serial != serial
+                    or intent.state == CertificateRotationState.REVOCATION_PENDING
+                )
+            ) or (
+                staged is not None
+                and staged.csr_public_key_fingerprint != csr_fingerprint
+            )
+        if competing:
+            return self._recover_rotation_once(node_id, serial, csr, expired=expired)
         try:
             claim = self._claim_rotation(
                 node_id,
@@ -122,6 +144,23 @@ class RotationService(EnrollmentCore):
         normalized_csr, _, csr_fingerprint, _ = _load_csr(node_id, csr)
         now = _utc(self._clock())
         with self._sessions() as session:
+            # Authenticate the source before observing or issuing an older
+            # effect on behalf of this recovery request. Admission rechecks it
+            # under the owning locks before adopting any replacement.
+            node = session.get(AgentNode, node_id)
+            source = session.get(AgentCertificate, serial)
+            if (
+                node is None
+                or node.state != NodeIdentityState.ACTIVE
+                or node.revoked_at is not None
+                or source is None
+                or source.node_id != node_id
+                or source.state != CertificateRecordState.ACTIVE
+                or source.revoked_at is not None
+                or _stored_utc(source.not_before) > now
+                or not _rotation_source_valid(source, now, expired=expired)
+            ):
+                raise EnrollmentDenied("rotation source authority is invalid")
             intent = session.get(AgentCertificateRotation, node_id)
             competing = (
                 _rotation_claim(intent, owner=False)
@@ -233,7 +272,7 @@ class RotationService(EnrollmentCore):
                         intent.state != CertificateRotationState.REVOCATION_PENDING
                         or intent.source_serial != serial
                     ):
-                        raise EnrollmentDenied("certificate rotation state is invalid")
+                        raise RenewalInProgress("certificate rotation state is invalid")
                 if intent.state == CertificateRotationState.REVOCATION_PENDING:
                     retiring = next(
                         (
@@ -261,7 +300,8 @@ class RotationService(EnrollmentCore):
                     CertificateRotationState.MANUAL_RECOVERY,
                 }:
                     return None
-                raise EnrollmentDenied("certificate rotation state is invalid")
+                intent.state = CertificateRotationState.ISSUING
+                return None
 
             staged = next(
                 (
@@ -362,11 +402,11 @@ class RotationService(EnrollmentCore):
                     )
                     if (
                         intent is not None
-                        and intent.provider_request is None
+                        and _issuance_binding(intent.provider_request) is None
                         and intent.provider_request_id == claim.provider_request_id
                     ):
                         session.delete(intent)
-                raise EnrollmentDenied(
+                raise RenewalInProgress(
                     "historical certificate rotation has no exact journal binding"
                 )
             try:
@@ -389,7 +429,7 @@ class RotationService(EnrollmentCore):
             raise RenewalInProgress(
                 "certificate rotation issuance is in progress"
             ) from error
-        except EnrollmentDenied:
+        except (EnrollmentDenied, RenewalInProgress):
             raise
         except Exception as error:
             if (
@@ -399,15 +439,30 @@ class RotationService(EnrollmentCore):
                 raise CertificateResponseCapacityRefused(
                     "certificate response exceeds the supported wire budget"
                 ) from error
+            if isinstance(error, StepCAError) and not isinstance(
+                error, StepCAUnavailable
+            ):
+                raise EnrollmentDenied(
+                    "certificate authority verification failed"
+                ) from error
             self._mark_rotation_uncertain(claim, now)
             raise RenewalIssuanceUncertain(
                 "certificate rotation observation is unavailable"
             ) from error
         if disposition == CertificateRotationState.REVOCATION_PENDING:
             self._revoke_denied_rotation(issued.serial, claim, now)
-            raise EnrollmentDenied(
-                "node identity retired during certificate rotation; issued certificate revoked"
-            )
+            with self._sessions() as session:
+                node = session.get(AgentNode, claim.node_id)
+                denied = (
+                    node is None
+                    or node.revoked_at is not None
+                    or node.state != NodeIdentityState.ACTIVE
+                )
+            if denied:
+                raise EnrollmentDenied(
+                    "node identity retired during certificate rotation; issued certificate revoked"
+                )
+            raise RenewalInProgress("superseded rotation effect reconciled")
         return replace(issued, generation=claim.generation)
 
     def _claim_rotation(
@@ -470,7 +525,7 @@ class RotationService(EnrollmentCore):
                     session.flush()
                 else:
                     if staged.csr_public_key_fingerprint != csr_fingerprint:
-                        raise EnrollmentDenied(
+                        raise RenewalInProgress(
                             "a different certificate rotation is already staged"
                         )
                     return _certificate_issued(staged)
@@ -485,7 +540,7 @@ class RotationService(EnrollmentCore):
                     or intent.csr_public_key_fingerprint != csr_fingerprint
                     or intent.csr_pem != normalized_csr.decode("ascii")
                 ):
-                    raise EnrollmentDenied(
+                    raise RenewalInProgress(
                         "a different certificate rotation is already in progress"
                     )
                 if (
@@ -501,11 +556,9 @@ class RotationService(EnrollmentCore):
                     and intent.state == CertificateRotationState.MANUAL_RECOVERY
                 ):
                     intent.state = CertificateRotationState.ISSUING
-                if intent.state not in {
-                    CertificateRotationState.ISSUING,
-                    CertificateRotationState.MANUAL_RECOVERY,
-                }:
-                    raise EnrollmentDenied("certificate rotation state is invalid")
+                # The exact binding, rather than a damaged phase projection,
+                # owns observation and adoption.
+                intent.state = CertificateRotationState.ISSUING
                 return _rotation_claim(intent, owner=False)
             generation = (
                 max(
@@ -619,7 +672,9 @@ class RotationService(EnrollmentCore):
                 or intent.state != CertificateRotationState.ISSUING
                 or _issuance_binding(intent.provider_request) != claim.provider_request
             ):
-                raise EnrollmentDenied("certificate rotation issuance identity changed")
+                raise RenewalInProgress(
+                    "certificate rotation issuance identity changed"
+                )
             source = next(
                 (
                     certificate
@@ -684,9 +739,15 @@ class RotationService(EnrollmentCore):
                 or evidence.fingerprint != issued.fingerprint
                 or evidence.generation != claim.generation
             ):
-                raise EnrollmentDenied(
-                    "issued-certificate revocation evidence conflicts"
-                )
+                # The exact verified provider result owns this serial. Repair
+                # damaged local revocation bookkeeping from that result.
+                evidence.node_id = claim.node_id
+                evidence.provider_request_id = claim.provider_request_id
+                evidence.fingerprint = issued.fingerprint
+                evidence.generation = claim.generation
+                evidence.ca_revoked_at = None
+                evidence.state = CertificateRotationState.REVOCATION_PENDING
+                evidence.updated_at = now
             return
         session.add(
             AgentIssuedCertificateRevocation(

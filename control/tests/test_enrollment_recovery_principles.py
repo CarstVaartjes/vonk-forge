@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
     LifecycleState,
     SecurityRefusalReason,
@@ -57,7 +57,7 @@ def test_lost_renewal_response_is_observed_in_the_original_request(service):
 
 def test_verification_failure_is_never_converted_into_unknown(service, monkeypatch):
     """Catches the broad provider handler swallowing a verified identity refusal."""
-    enrollment, _sessions, _clock, authority = service
+    enrollment, sessions, _clock, authority = service
     source = enroll(enrollment)
     original = authority.renew_node
     calls = []
@@ -68,9 +68,12 @@ def test_verification_failure_is_never_converted_into_unknown(service, monkeypat
         return replace(issued, node_id=OTHER_NODE_ID)
 
     monkeypatch.setattr(authority, "renew_node", wrong_identity)
-    with pytest.raises(EnrollmentDenied, match="accepted issuance binding"):
+    with pytest.raises(EnrollmentDenied):
         enrollment.renew(NODE_ID, source.serial, csr())
     assert len(calls) == 1
+    with sessions() as session:
+        assert session.get(AgentCertificate, calls[0]) is None
+        assert session.get(AgentNode, OTHER_NODE_ID) is None
 
 
 def test_exhausted_revocation_keeps_local_denial_and_admits_fresh_operation(service):
@@ -142,51 +145,28 @@ def test_unknown_submit_has_bounded_attempts_and_reuses_exact_binding(
     assert len(authority.calls) == 1
 
 
-def test_unbound_rotation_ends_fail_closed_and_admits_fresh_same_node(service):
-    """Catches an unverified historical issuance gate permanently poisoning renewal."""
+def test_unbound_rotation_repairs_and_admits_fresh_same_node(service):
+    """Catches missing local binding being refused instead of replaced."""
     enrollment, sessions, clock, authority = service
     source = enroll(enrollment)
     request = csr()
     from .test_enrollment import public_key_fingerprint
 
-    claim = enrollment._claim_rotation(
+    enrollment._claim_rotation(
         NODE_ID, source.serial, request, public_key_fingerprint(request), clock.now
     )
-    assert not isinstance(claim, IssuedCertificate)
     with sessions.begin() as session:
         intent = session.get(AgentCertificateRotation, NODE_ID)
         assert intent is not None
         intent.provider_request = None
-    original = Receipt(
-        request_key=claim.provider_request_id, state=LifecycleState.RUNNING
-    )
-
-    def end(_receipt):
-        with pytest.raises(
-            EnrollmentDenied, match="no exact journal binding"
-        ) as refused:
-            enrollment.renew(NODE_ID, source.serial, request)
-        assert authority.renew_request_ids == []
-        return Receipt(
-            request_key=original.request_key,
-            state=LifecycleState.FAILED,
-            reason_code=refused.value.typed_reason,
-        )
-
-    def released():
-        with sessions() as session:
-            assert session.get(AgentCertificateRotation, NODE_ID) is None
-
-    def fresh(_world):
-        issued = enrollment.renew(NODE_ID, source.serial, csr())
-        assert isinstance(issued, IssuedCertificate)
-        return Receipt(
-            request_key=authority.renew_request_ids[-1], state=LifecycleState.SUCCEEDED
-        )
-
-    assert_ended_without_blocking(
-        sessions, original, end=end, fresh=fresh, assert_released=released
-    )
+    issued = enrollment.renew(NODE_ID, source.serial, request)
+    assert isinstance(issued, IssuedCertificate)
+    assert len(authority.renew_request_ids) == 1
+    enrollment.activate(NODE_ID, issued.serial, issued.generation)
+    fresh = enrollment.renew(NODE_ID, issued.serial, csr())
+    assert isinstance(fresh, IssuedCertificate)
+    with sessions() as session:
+        assert session.get(AgentCertificateRotation, NODE_ID) is None
 
 
 def test_new_csr_reconciles_competing_exact_rotation_before_replacement(service):
@@ -234,9 +214,7 @@ def test_unbound_enrollment_releases_old_gate_for_fresh_same_node(service, monke
     original = Receipt(request_key=grant.id, state=LifecycleState.RUNNING)
 
     def end(_receipt):
-        with pytest.raises(
-            EnrollmentDenied, match="no exact journal binding"
-        ) as refused:
+        with pytest.raises(EnrollmentIssuanceUncertain) as refused:
             enrollment.submit(grant.token, request, evidence(request))
         assert authority.calls == []
         return Receipt(
@@ -326,3 +304,97 @@ def test_missing_retirement_target_releases_gate_for_fresh_rotation(service):
     assert_ended_without_blocking(
         sessions, original, end=end, fresh=fresh, assert_released=released
     )
+
+
+@pytest.mark.parametrize("damage", (None, {"broken": True}))
+def test_damaged_rotation_binding_is_a_miss_and_new_csr_is_admitted(service, damage):
+    """Catches malformed bookkeeping poisoning the node-wide issuance gate."""
+    from .test_enrollment import public_key_fingerprint
+
+    enrollment, sessions, clock, authority = service
+    source = enroll(enrollment)
+    old = csr()
+    enrollment._claim_rotation(
+        NODE_ID, source.serial, old, public_key_fingerprint(old), clock.now
+    )
+    with sessions.begin() as session:
+        intent = session.get(AgentCertificateRotation, NODE_ID)
+        assert intent is not None
+        session.execute(
+            update(AgentCertificateRotation)
+            .where(AgentCertificateRotation.node_id == NODE_ID)
+            .values(provider_request=damage)
+        )
+    requested = csr()
+    issued = enrollment.renew(NODE_ID, source.serial, requested)
+    assert isinstance(issued, IssuedCertificate)
+    assert len(authority.renew_request_ids) == 1
+    with sessions() as session:
+        stored = session.get(AgentCertificate, issued.serial)
+        assert stored is not None
+        assert stored.csr_public_key_fingerprint == public_key_fingerprint(requested)
+        assert session.get(AgentCertificateRotation, NODE_ID) is None
+
+
+def test_missing_issued_projection_is_repaired_from_exact_ca_observation(service):
+    """Catches a damaged receipt refusing reuse of an already verified CA effect."""
+    enrollment, sessions, _clock, authority = service
+    grant = enrollment.create(NODE_ID, "admin", 600)
+    request = csr()
+    original = enrollment.submit(grant.token, request, evidence(request))
+    with sessions.begin() as session:
+        accepted = session.scalar(select(AgentEnrollment))
+        assert accepted is not None
+        accepted.certificate_generation = None
+    repaired = enrollment.submit(grant.token, request, evidence(request))
+    assert repaired == original
+    assert len(authority.calls) == 1
+    fresh = enrollment.renew(NODE_ID, original.serial, csr())
+    assert isinstance(fresh, IssuedCertificate)
+
+
+@pytest.mark.parametrize("rotation", (False, True))
+def test_provider_verification_refusal_has_no_unverified_persisted_effect(
+    service, monkeypatch, rotation
+):
+    """Catches certificate/signature refusal being swallowed as network uncertainty."""
+    from vonk_control.step_ca import StepCAError
+
+    enrollment, sessions, _clock, authority = service
+    source = enroll(enrollment) if rotation else None
+
+    def unverified(*args, **kwargs):
+        raise StepCAError("unverified certificate bytes")
+
+    monkeypatch.setattr(
+        authority, "renew_node" if rotation else "issue_node", unverified
+    )
+    with pytest.raises(EnrollmentDenied):
+        if source is not None:
+            enrollment.renew(NODE_ID, source.serial, csr())
+        else:
+            grant = enrollment.create(NODE_ID, "admin", 600)
+            request = csr()
+            enrollment.submit(grant.token, request, evidence(request))
+    with sessions() as session:
+        certificates = list(session.scalars(select(AgentCertificate)))
+        assert [certificate.serial for certificate in certificates] == (
+            [source.serial] if source else []
+        )
+
+
+def test_superseding_request_verifies_source_before_observing_old_effect(service):
+    """Catches a forged source serial causing old provider issuance."""
+    from .test_enrollment import public_key_fingerprint
+
+    enrollment, _sessions, clock, authority = service
+    source = enroll(enrollment)
+    old = csr()
+    enrollment._claim_rotation(
+        NODE_ID, source.serial, old, public_key_fingerprint(old), clock.now
+    )
+    with pytest.raises(EnrollmentDenied):
+        enrollment.renew(NODE_ID, "forged-serial", csr())
+    assert authority.renew_request_ids == []
+    replacement = enrollment.renew(NODE_ID, source.serial, csr())
+    assert isinstance(replacement, IssuedCertificate)

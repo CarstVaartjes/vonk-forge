@@ -19,7 +19,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed448, ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, ExtensionOID, NameOID
 from pydantic import BaseModel, ConfigDict, ValidationError
-from vonk_agent_protocol import CertificateCode, InvalidRequestError, canonical_message
+from vonk_agent_protocol import (
+    CertificateCode,
+    InvalidRequestError,
+    UnknownOutcomeError,
+    WaitReason,
+    canonical_message,
+)
 from vonk_agent_protocol.enrollment import (
     MAX_ENROLLMENT_RESPONSE_BYTES,
     IssuedCertificateResponse,
@@ -115,7 +121,14 @@ class StepCAResponseCapacityRefused(InvalidRequestError, StepCAError):
         self.reason_code = CertificateCode.RESPONSE_UNREPRESENTABLE
 
 
-class StepCAIssuancePending(StepCAError):
+class StepCAUnavailable(UnknownOutcomeError, StepCAError):
+    """Transport or provider health is unknown, never authentication denial."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, reason=WaitReason.OBSERVATION_UNAVAILABLE)
+
+
+class StepCAIssuancePending(StepCAUnavailable):
     """The exact CA journal request is still owned by an issuer epoch."""
 
 
@@ -162,15 +175,11 @@ class StepCertificateAuthority(CertificateAuthority):
         if (
             isinstance(certificate_lifetime_seconds, bool)
             or not isinstance(certificate_lifetime_seconds, int)
-            or not 90
-            <= certificate_lifetime_seconds
-            <= _DEFAULT_CERTIFICATE_LIFETIME_SECONDS
+            or certificate_lifetime_seconds <= 0
         ):
             # The NAS step-ca configuration owns the lifetime (trust the kit);
             # only an unrepresentable value is refused.
-            raise ValueError(
-                "certificate lifetime must be an integer between 90 and 2592000 seconds"
-            )
+            raise ValueError("certificate lifetime must be a positive integer")
         if not 0 <= clock_skew_seconds <= 60:
             raise ValueError("CA clock skew must be between zero and 60 seconds")
 
@@ -324,7 +333,7 @@ class StepCertificateAuthority(CertificateAuthority):
 
     def check_health(self) -> None:
         if not _is_ok(self._json_request("GET", "/health", None)):
-            raise StepCAError("step-ca health response is invalid")
+            raise StepCAUnavailable("step-ca health response is invalid")
 
     def renew_node(
         self,
@@ -348,7 +357,7 @@ class StepCertificateAuthority(CertificateAuthority):
         )
         response = self._json_request("POST", "/1.0/revoke", body)
         if not _is_ok(response):
-            raise StepCAError("step-ca returned an invalid revocation response")
+            raise StepCAUnavailable("step-ca returned an invalid revocation response")
 
     def revocation_bundle(self, now: datetime) -> bytes:
         timestamp = _utc_timestamp(now)
@@ -654,7 +663,7 @@ class StepCertificateAuthority(CertificateAuthority):
         try:
             return json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise StepCAError("step-ca returned malformed JSON") from error
+            raise StepCAUnavailable("step-ca returned malformed JSON") from error
 
     def _validate_sign_response_capacity(
         self, request: CertificateIssuanceBinding
@@ -725,6 +734,10 @@ class StepCertificateAuthority(CertificateAuthority):
                         raise StepCAError("step-ca response is too large")
                     output.extend(chunk)
                 if not response.is_success:
+                    if response.status_code in {401, 403}:
+                        raise StepCAError("CA authorization denied")
+                    if response.status_code >= 500:
+                        raise StepCAUnavailable("step-ca provider is unavailable")
                     if path == "/1.0/vonk/sign" and response.status_code != 404:
                         try:
                             refusal = CertificateRefusalReply.model_validate_json(
@@ -738,14 +751,14 @@ class StepCertificateAuthority(CertificateAuthority):
                             f"CA refused exact certificate request: {refusal.detail}",
                             reason_code=refusal.reason_code,
                         )
-                    raise StepCAError(
+                    raise StepCAUnavailable(
                         f"step-ca request failed with status {response.status_code}"
                     )
                 return bytes(output)
         except StepCAError:
             raise
         except (httpx2.HTTPError, OSError) as error:
-            raise StepCAError("step-ca request failed") from error
+            raise StepCAUnavailable("step-ca request failed") from error
 
 
 def _signature_verifying_key(
