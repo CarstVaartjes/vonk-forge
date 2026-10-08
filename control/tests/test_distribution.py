@@ -4,11 +4,16 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_agent_protocol import (
+    DistributionAssignment,
+    DistributionCode,
+    DistributionObject,
+)
 from vonk_control.distribution import (
     CompositeObjectSource,
     DistributionError,
     DistributionService,
+    DistributionUnknown,
     FilesystemObjectSource,
     MemoryObjectSource,
     ModelCacheObjectSource,
@@ -179,8 +184,13 @@ def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(
     unavailable = client.get(
         path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_A, "serial-a")
     )
-    assert unavailable.status_code == 403
-    assert unavailable.headers["x-vonk-error-code"] == "distribution.object_unavailable"
+    assert unavailable.status_code != 403
+    assert "retry-after" in unavailable.headers
+    assert source.put(b"model payload") == model_digest
+    recovered = client.get(
+        path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_A, "serial-a")
+    )
+    assert recovered.status_code == 200
 
 
 def test_distribution_assignment_survives_controller_service_restart(
@@ -299,9 +309,20 @@ def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> N
     source.register_runtime_image(
         assignment.oci_image_digest, assignment.oci_archive_sha256
     )
+    service = DistributionService(source, clock=clock)
     with pytest.raises(DistributionError) as caught:
-        DistributionService(source, clock=clock).register(assignment)
-    assert caught.value.code == "distribution.model_set_mismatch"
+        service.register(assignment)
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    assert isinstance(caught.value, UnknownOutcomeError)
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    service.register(assignment)
+    assert (
+        service.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
+        == assignment
+    )
 
 
 def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> None:
@@ -348,7 +369,7 @@ def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> Non
 def test_stored_object_is_served_by_name_and_size_without_hashing(tmp_path) -> None:
     # The name is the digest; the bytes were verified where they entered. A
     # same-size file under that name is served as stored, which only holds if
-    # nothing re-hashes it. A wrong size is still refused.
+    # nothing re-hashes it. A wrong size is a recoverable miss.
     digest = "c" * 64
     (tmp_path / digest).write_bytes(b"12345678")
     tmp_path.chmod(0o700)
@@ -359,7 +380,9 @@ def test_stored_object_is_served_by_name_and_size_without_hashing(tmp_path) -> N
         assert stream.read() == b"12345678"
     with pytest.raises(DistributionError) as caught:
         source.open_object(digest, 9)
-    assert caught.value.code == "distribution.object_unavailable"
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    assert isinstance(caught.value, UnknownOutcomeError)
 
 
 def test_model_cache_manifest_publication_is_atomic_across_readers(tmp_path):
@@ -453,8 +476,8 @@ def test_object_location_is_resolved_once_per_window_and_follows_the_file(
         def open_object(self, digest, expected_bytes):
             self.opened += 1
             if not (self.root / digest).exists():
-                raise DistributionError(
-                    "distribution.object_unavailable", "stored object is unavailable"
+                raise DistributionUnknown(
+                    DistributionCode.OBJECT_UNAVAILABLE, "stored object is unavailable"
                 )
             return super().open_object(digest, expected_bytes)
 
@@ -477,11 +500,13 @@ def test_object_location_is_resolved_once_per_window_and_follows_the_file(
     assert source.opened == 1
     assert spec.sha256 == model and location.path == source.root / model
 
-    # A file that disappeared is looked up again, and refused, at once.
+    # A file that disappeared is looked up again as a recoverable miss.
     (source.root / model).unlink()
     with pytest.raises(DistributionError) as caught:
         service.locate_object(**ask)
-    assert caught.value.code == "distribution.object_unavailable"
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    assert isinstance(caught.value, UnknownOutcomeError)
 
     # A revoked assignment is refused no matter what was remembered.
     (source.root / model).write_bytes(b"model payload")

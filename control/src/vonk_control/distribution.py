@@ -212,7 +212,7 @@ class FilesystemObjectSource:
                 or before.st_size != expected_bytes
             ):
                 os.close(fd)
-                raise DistributionIntegrityError(
+                raise DistributionUnknown(
                     DistributionCode.OBJECT_UNAVAILABLE, "stored object length changed"
                 )
             # The name is the digest and the object entered the store through an
@@ -439,7 +439,7 @@ class ModelCacheObjectSource:
                 set_digest, digest, path
             )
             if size != expected_bytes or verified_digest != digest:
-                raise DistributionIntegrityError(
+                raise DistributionUnknown(
                     DistributionCode.OBJECT_UNAVAILABLE,
                     "NAS cache object identity changed",
                 )
@@ -507,7 +507,12 @@ class ModelCacheObjectSource:
             cached_receipts = self._receipts.get(digest)
         if cached_receipts is None:
             if hasattr(self, "_service"):
-                self._load_manifest(digest)
+                objects, receipts, paths = self._describe(digest)
+                if len(receipts) == len(objects):
+                    with self._metadata_guard:
+                        self._paths.update(paths)
+                        self._manifests[digest] = objects
+                        self._receipts[digest] = receipts
             else:
                 raise DistributionUnknown(
                     DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
@@ -634,7 +639,7 @@ class MemoryObjectSource:
             len(payload) != expected_bytes
             or hashlib.sha256(payload).hexdigest() != digest
         ):
-            raise DistributionIntegrityError(
+            raise DistributionUnknown(
                 DistributionCode.OBJECT_UNAVAILABLE, "verified object digest mismatch"
             )
         return OpenedObject(BytesIO(payload), len(payload), digest, self.root / digest)
@@ -739,8 +744,8 @@ class DistributionService:
         if verifier is None or not verifier(
             assignment.model_artifact_set_sha256, assignment.objects
         ):
-            raise DistributionIntegrityError(
-                DistributionCode.MODEL_SET_MISMATCH,
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "assignment model objects do not match a verified cache manifest",
             )
         image_verifier = getattr(self.source, "verify_runtime_image", None)
@@ -748,7 +753,7 @@ class DistributionService:
             assignment.oci_image_digest, assignment.oci_archive_sha256
         )
         if not image_verified:
-            raise DistributionIntegrityError(
+            raise DistributionUnknown(
                 DistributionCode.RUNTIME_IMAGE_MISMATCH,
                 "assignment runtime image does not match the verified image identity",
             )
@@ -1042,8 +1047,8 @@ class DistributionService:
         if object_spec.kind == "model" and not self.source.verify_artifact_set(
             assignment.model_artifact_set_sha256, assignment.objects
         ):
-            raise DistributionIntegrityError(
-                DistributionCode.MODEL_SET_MISMATCH,
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "assignment model objects do not match the cache manifest",
             )
         try:
@@ -1058,7 +1063,7 @@ class DistributionService:
             ) from error
         if opened.size != object_spec.bytes or opened.sha256 != digest:
             opened.stream.close()
-            raise DistributionIntegrityError(
+            raise DistributionUnknown(
                 DistributionCode.OBJECT_UNAVAILABLE, "source returned an invalid object"
             )
         return assignment, object_spec, opened

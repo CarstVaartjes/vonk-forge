@@ -1,17 +1,21 @@
 """The cache adapter exports validated receipt models, including nested identity."""
 
+# ruff: noqa: F811 - pytest fixture is imported by name
+
 from types import SimpleNamespace
 
 import pytest
-from vonk_agent_protocol import DistributionCode
+from vonk_agent_protocol import UnknownOutcomeError
 from vonk_control.compiled_execution_plan import (
     DistributionObjectReceipt,
     VerifiedModelObject,
     VerifiedRuntimeImage,
 )
-from vonk_control.distribution import DistributionUnknown, ModelCacheObjectSource
+from vonk_control.distribution import ModelCacheObjectSource
 from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.runtime_image_preparation import RuntimeImageReceipt
+
+from .test_nas_cache_acceptance import controller  # noqa: F401 - shared cache fixture
 
 
 def _source(tmp_path, **changes):
@@ -44,13 +48,18 @@ def test_cache_exports_typed_receipts_with_exact_nested_identity(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "changes", [{"roles": []}, {"file_id": ""}, {"model_content_sha256": "bad"}]
+    "changes",
+    [
+        {"roles": []},
+        {"file_id": ""},
+        {"model_content_sha256": "bad"},
+        {"file_id": None},
+    ],
 )
 def test_invalid_cache_identity_never_becomes_a_verified_receipt(tmp_path, changes):
     source, manifest = _source(tmp_path, **changes)
-    with pytest.raises(DistributionUnknown) as caught:
+    with pytest.raises(UnknownOutcomeError):
         source.verified_model_objects_for_set(manifest.digest)
-    assert caught.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
     assert source._receipts == {}
     assert source._paths == {}
     assert source._manifests == {}
@@ -73,9 +82,8 @@ def test_unavailable_local_manifest_allows_fresh_verification(
             damaged.setattr(source._service, "manifest_for_artifact_set", None)
         else:
             damaged.setattr(manifest, "digest", "bad")
-        with pytest.raises(DistributionUnknown) as caught:
+        with pytest.raises(UnknownOutcomeError):
             source.verified_model_objects_for_set(digest)
-        assert caught.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
         assert source._receipts == source._paths == source._manifests == {}
     (receipt,) = source.verified_model_objects_for_set(digest)
     assert receipt.file_id == "model"
@@ -108,3 +116,111 @@ def test_runtime_receipt_projection_keeps_exact_launch_identity():
     assert launch.build_id == stored.build_id
     assert launch.image_bytes == stored.image_bytes
     assert VerifiedRuntimeImage.model_validate_json(launch.model_dump_json()) == launch
+
+
+@pytest.mark.parametrize("damage", ["missing", "malformed", "different", "unreadable"])
+def test_local_receipt_miss_triggers_preparation_and_reuses_repaired_content(
+    controller, tmp_path, damage, monkeypatch
+):
+    """Catches refusing local metadata, publishing it, or waiting for an operator."""
+    from vonk_control.distribution import verified_model_receipts
+
+    from .test_nas_cache_acceptance import _artifact, _download
+
+    _database, _engine, sessions, cache = controller
+    artifact = _artifact(
+        tmp_path,
+        "weights",
+        "weights.bin",
+        b"requested content",
+        model_content_sha256="a" * 64,
+        token="unused",
+    )
+    digest = _download(
+        cache,
+        [artifact],
+        model_content_sha256="a" * 64,
+        recipe_revision_sha256="b" * 64,
+        request_key="00000000-0000-4000-8000-000000000111",
+    )
+    manifest = cache.manifest_for_artifact_set(digest)
+    object_digest = manifest.artifacts[0].sha256
+    receipt_path = cache._receipt_path(object_digest)
+    if damage == "missing":
+        receipt_path.unlink()
+    elif damage == "malformed":
+        receipt_path.write_text("{damaged")
+    elif damage == "different":
+        receipt_path.write_text(
+            receipt_path.read_text().replace(object_digest, "f" * 64)
+        )
+    else:
+        original = type(receipt_path).read_text
+
+        def unreadable(path, *args, **kwargs):
+            if path == receipt_path:
+                raise OSError("unreadable local receipt")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(type(receipt_path), "read_text", unreadable)
+    with pytest.raises(UnknownOutcomeError):
+        verified_model_receipts(cache, digest, manifest)
+    from sqlalchemy import select
+    from vonk_agent_protocol import LifecycleState
+    from vonk_control.models import ModelCacheOperation
+
+    with sessions() as session:
+        repairs = list(
+            session.scalars(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.artifact_set_sha256 == digest,
+                    ModelCacheOperation.state == LifecycleState.QUEUED,
+                )
+            )
+        )
+    assert len(repairs) == 1
+    monkeypatch.undo()
+    cache.run_pending()
+    (receipt,) = verified_model_receipts(cache, digest, manifest)
+    assert receipt.sha256 == object_digest
+    assert cache._object_path(object_digest).read_bytes() == b"requested content"
+    assert verified_model_receipts(cache, digest, manifest) == (receipt,)
+
+
+def test_bad_ingress_digest_refuses_and_fresh_valid_ingress_is_admitted(
+    controller, tmp_path
+):
+    """Local misses must not weaken verification when new bytes enter storage."""
+    from vonk_agent_protocol import SecurityRefusalError
+
+    from .test_nas_cache_acceptance import _artifact, _download
+
+    _database, _engine, _sessions, cache = controller
+    artifact = _artifact(
+        tmp_path,
+        "weights",
+        "weights.bin",
+        b"expected",
+        model_content_sha256="a" * 64,
+        token="unused",
+    )
+    digest = _download(
+        cache,
+        [artifact],
+        model_content_sha256="a" * 64,
+        recipe_revision_sha256="b" * 64,
+        request_key="00000000-0000-4000-8000-000000000112",
+    )
+    spec = cache.manifest_for_artifact_set(digest).artifacts[0]
+    ingress = tmp_path / "ingress.part"
+    ingress.write_bytes(b"tampered")
+    with pytest.raises(SecurityRefusalError):
+        cache._publish_object(spec, ingress)
+    assert not ingress.exists()
+    assert cache._object_path(spec.sha256).read_bytes() == b"expected"
+    ingress.write_bytes(b"expected")
+    cache._publish_object(spec, ingress)
+    assert (
+        cache.cached_artifact_file(digest, spec.sha256, spec.path)[0].read_bytes()
+        == b"expected"
+    )

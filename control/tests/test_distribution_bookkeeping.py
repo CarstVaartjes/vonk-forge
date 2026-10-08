@@ -213,13 +213,16 @@ def test_new_request_reuses_matching_content_under_an_existing_grant():
     )
 
 
-def test_corrupt_object_is_a_security_edge():
-    """Digest failures must not be disguised as unavailable bookkeeping."""
+def test_corrupt_local_object_is_a_miss_then_recovered():
+    """Damaged local bytes cannot refuse a fresh content-addressed request."""
     source = MemoryObjectSource()
     digest = source.put(b"payload")
     source.objects[digest] = b"changed"
-    with pytest.raises(SecurityRefusalError):
+    with pytest.raises(UnknownOutcomeError):
         source.open_object(digest, 7)
+    assert source.put(b"payload") == digest
+    with source.open_object(digest, 7).stream as stream:
+        assert stream.read() == b"payload"
 
 
 def test_missing_canonical_file_receipt_is_unknown_then_recovers():
@@ -249,3 +252,58 @@ def test_missing_canonical_file_receipt_is_unknown_then_recovers():
     )
     source._receipts["b" * 64] = (receipt,)
     assert source.verified_model_objects_for_set("b" * 64) == (receipt,)
+
+
+@pytest.mark.parametrize(
+    "damage", ["model-manifest", "runtime-image", "opened-identity"]
+)
+def test_local_distribution_identity_miss_does_not_poison_a_new_request(damage):
+    """Local mismatches cannot become security refusals or leave a busy grant."""
+    from dataclasses import replace
+
+    class Source(MemoryObjectSource):
+        damaged = False
+
+        def open_object(self, digest, expected_bytes):
+            opened = super().open_object(digest, expected_bytes)
+            return replace(opened, sha256="f" * 64) if self.damaged else opened
+
+    source = Source()
+    digest = source.put(b"model payload")
+    archive = source.put(b"oci archive")
+    assignment = _assignment("spk_" + "a" * 32, digest, source.put(b"config!"), archive)
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(assignment.oci_image_digest, archive)
+    service = DistributionService(source)
+    service.register(assignment)
+    if damage == "model-manifest":
+        source.artifact_manifests.clear()
+    elif damage == "runtime-image":
+        source.runtime_images.clear()
+    else:
+        source.damaged = True
+    with pytest.raises(UnknownOutcomeError):
+        if damage == "opened-identity":
+            service.open_object(
+                node_id=assignment.node_id,
+                plan_digest=assignment.plan_digest,
+                digest=digest,
+            )
+        else:
+            service.register(assignment)
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    source.register_runtime_image(assignment.oci_image_digest, archive)
+    source.damaged = False
+    fresh = assignment.model_copy(
+        update={"assignment_id": str(uuid4()), "generation": 2}
+    )
+    service.register(fresh)
+    _grant, _spec, opened = service.open_object(
+        node_id=fresh.node_id, plan_digest=fresh.plan_digest, digest=digest
+    )
+    with opened.stream as stream:
+        assert stream.read() == b"model payload"
