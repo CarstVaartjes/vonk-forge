@@ -50,6 +50,11 @@ RUN_SWITCH_MODULES = tuple(
     )
 )
 
+RECIPE_OPERATION_MODULES = tuple(
+    path.relative_to(REPO_ROOT).as_posix()
+    for path in (REPO_ROOT / "control/src/vonk_control/recipe_operations").glob("*.py")
+)
+
 LIFECYCLE_MODELS = frozenset(subject.value for subject in LifecycleSubject)
 ATTRIBUTE = StateWriteKind.ATTRIBUTE.value
 DICT_ITEM = StateWriteKind.DICT_ITEM.value
@@ -99,7 +104,7 @@ DICT_STATE_OWNERS = frozenset(
         "control/src/vonk_control/model_cache/transfer.py",
         "control/src/vonk_control/model_cache/updates.py",
         "control/src/vonk_control/model_cache/views.py",
-        "control/src/vonk_control/recipe_operations.py",
+        *RECIPE_OPERATION_MODULES,
         *RUN_SWITCH_MODULES,
     }
 )
@@ -115,7 +120,7 @@ NAME_HINTS: dict[str, dict[str, str]] = {
         }
         for path in AGENT_JOB_MODULES
     },
-    "control/src/vonk_control/recipe_operations.py": {"job": "Job"},
+    **{path: {"job": "Job"} for path in RECIPE_OPERATION_MODULES},
 }
 #: ``.state`` writes in a lifecycle-owning module on a variable that is
 #: provably not a lifecycle row (a run, a node, an installation, a cache set).
@@ -224,17 +229,20 @@ NON_LIFECYCLE_STATE_VARIABLES: dict[str, frozenset[str]] = {
     "control/src/vonk_control/model_cache/views.py": frozenset(
         {"row"}
     ),  # ModelCacheSet
-    "control/src/vonk_control/recipe_operations.py": frozenset(
-        {
-            "build",
-            "claim",
-            "installation",
-            "node",
-            "reservation",
-            "run",
-            "started_node",
-        }
-    ),
+    **{
+        path: frozenset(
+            {
+                "build",
+                "claim",
+                "installation",
+                "node",
+                "reservation",
+                "run",
+                "started_node",
+            }
+        )
+        for path in RECIPE_OPERATION_MODULES
+    },
     **{path: frozenset({"self"}) for path in RUN_SWITCH_MODULES},
 }
 _STATE_HELPERS = frozenset({"_set_application_state"})
@@ -289,7 +297,7 @@ def _import_aliases(tree: ast.Module) -> dict[str, str]:
             isinstance(node, ast.ImportFrom)
             and node.module is not None
             and (node.module == "models" or node.module.endswith(".models"))
-            and node.level in (0, 1)
+            and node.level >= 0
         ):
             for imported in node.names:
                 if imported.name in LIFECYCLE_MODELS:
@@ -309,7 +317,7 @@ class _Resolver:
             if isinstance(node, ast.ImportFrom)
             and node.module is not None
             and (node.module == "models" or node.module.endswith(".models"))
-            and node.level in (0, 1)
+            and node.level >= 0
             for imported in node.names
             if imported.name not in LIFECYCLE_MODELS
         }

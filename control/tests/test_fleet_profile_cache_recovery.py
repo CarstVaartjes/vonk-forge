@@ -11,6 +11,7 @@ from typing import cast
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
@@ -20,6 +21,7 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
 )
+from vonk_control.job_documents import RunSwitchJobPayload
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
     AgentNode,
@@ -42,6 +44,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
 )
+from vonk_control.stored_json import read_row_column
 
 from .runtime_image_fixtures import remove_test_image
 from .test_fleet_profile_recovery_current import _failed_profile
@@ -154,10 +157,11 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(
         )
         assert len(retried_children) == 2
         retry_child = next(child for child in retried_children if child.id != child_id)
-        retry_plan = require_mapping(retry_child.payload["plan"], "retry plan")
+        retry_parent = read_row_column(retry_child, "payload")
+        assert isinstance(retry_parent, RunSwitchJobPayload)
         assert all(
-            require_mapping(phase, "retry phase")["subphase"] != "model-download"
-            for phase in require_sequence(retry_plan["phases"], "retry phases")
+            phase.subphase != ProfileChildPhase.MODEL_DOWNLOAD
+            for phase in retry_parent.plan.phases
         )
 
 

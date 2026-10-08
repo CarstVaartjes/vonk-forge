@@ -25,11 +25,13 @@ from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentInstallResult,
     AgentResult,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     LifecycleState,
     RecipeInstallPayload,
+    RecipeOperationCode,
     RecipeStartPayload,
     RecipeStopPayload,
     canonical_message,
@@ -88,6 +90,11 @@ from vonk_control.models import (
 )
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
+from vonk_control.recipe_lifecycle_contract import (
+    LifecycleCodeFailureResult,
+    RecipeOperationProgressResult,
+    RecipeOperationResult,
+)
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
@@ -1514,14 +1521,14 @@ def test_install_is_digest_bound_idempotent_and_gang_complete(tmp_path: Path) ->
     )
     completed = service.get(operation.id)
     assert completed.state == "succeeded"
-    assert completed.result == {
-        "successful_nodes": sorted(nodes),
-        "failed_nodes": [],
-        "node_evidence": {
-            nodes[0]: {"installed_bytes": 120},
-            nodes[1]: {"installed_bytes": 120},
-        },
-    }
+    result = completed.lifecycle_result
+    assert isinstance(result, RecipeOperationResult)
+    assert result.successful_nodes == sorted(nodes)
+    assert result.failed_nodes == []
+    for node_id in nodes:
+        evidence = result.node_evidence[node_id]
+        assert isinstance(evidence, AgentInstallResult)
+        assert evidence.installed_bytes == 120
     with sessions() as session:
         assert (
             _required(session.get(RecipeInstallation, operation.owner_id)).state
@@ -2190,12 +2197,12 @@ def test_distributed_start_with_missing_run_generation_records_the_rank_unproven
         succeeded=True,
         evidence=start_evidence(payload),
     )
-    recorded = _required(view.result)
-    marker = require_mapping(
-        require_mapping(recorded["node_evidence"], "node evidence")[launch.node_id],
-        "evidence",
-    )
-    assert marker["code"] == "recipe.evidence_unproven"
+    recorded = view.lifecycle_result
+    assert isinstance(recorded, RecipeOperationProgressResult)
+    assert recorded.node_evidence is not None
+    marker = recorded.node_evidence[launch.node_id]
+    assert isinstance(marker, LifecycleCodeFailureResult)
+    assert marker.code == RecipeOperationCode.EVIDENCE_UNPROVEN
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -2233,13 +2240,13 @@ def test_tensor_parallel_start_with_missing_run_generation_records_the_rank_unpr
         succeeded=True,
         evidence=start_evidence(payload),
     )
-    recorded = _required(view.result)
-    evidence = require_mapping(
-        recorded.get("launch_evidence") or recorded["node_evidence"], "evidence"
-    )
-    assert require_mapping(evidence[child.node_id], "node evidence")["code"] == (
-        "recipe.evidence_unproven"
-    )
+    recorded = view.lifecycle_result
+    assert isinstance(recorded, RecipeOperationProgressResult)
+    assert recorded.node_evidence is not None
+    evidence = recorded.launch_evidence or recorded.node_evidence
+    marker = evidence[child.node_id]
+    assert isinstance(marker, LifecycleCodeFailureResult)
+    assert marker.code == RecipeOperationCode.EVIDENCE_UNPROVEN
 
 
 def test_worker_death_while_owner_is_healthy_never_publishes_route(
@@ -3571,7 +3578,9 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
     )
 
     assert service.get(first.id).state == "failed"
-    assert _required(service.get(first.id).result)["successful_nodes"] == [nodes[0]]
+    first_result = service.get(first.id).lifecycle_result
+    assert isinstance(first_result, RecipeOperationResult)
+    assert first_result.successful_nodes == [nodes[0]]
     retry = service.retry(first.id, actor="admin", request_id="3" * 36)
     assert retry.id != first.id
     assert retry.owner_id == first.owner_id

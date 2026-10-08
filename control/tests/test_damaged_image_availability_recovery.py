@@ -9,14 +9,17 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 import uuid
 from datetime import timedelta
+from functools import partial
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_control import runtime_image_preparation
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.image_store_collection import GRACE, ImageStoreCollector
@@ -26,7 +29,7 @@ from vonk_control.inventory_repository import (
     InventorySnapshotInput,
 )
 from vonk_control.models import AgentCertificate, Job, ResourceReservation, User
-from vonk_control.oci_image_store import StoredImage
+from vonk_control.oci_image_store import OciImageStore, StoredImage
 from vonk_control.recipe_availability_intent import RecipeBuildDependency
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operations import RecipeOperationService
@@ -45,7 +48,15 @@ pytestmark = pytest.mark.needs_skopeo
 
 def test_damaged_receipted_manifest_recovers_through_new_availability_request(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    skopeo = shutil.which("skopeo")
+    assert skopeo is not None
+    monkeypatch.setattr(
+        runtime_image_preparation,
+        "OciImageStore",
+        partial(OciImageStore, skopeo=skopeo),
+    )
     sessions, bundles, initial, node_id, revision = build_setup(
         tmp_path, recipe_slug="damaged-image-recovery"
     )

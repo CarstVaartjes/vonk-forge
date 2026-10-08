@@ -7,6 +7,7 @@ from datetime import timedelta
 
 import pytest
 from sqlalchemy import Engine, Table, select, update
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -211,7 +212,9 @@ def test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt(tmp
         with sessions() as session:
             effects = tuple(
                 session.scalars(
-                    select(AgentOperation).where(AgentOperation.kind == "recipe.stop")
+                    select(AgentOperation).where(
+                        AgentOperation.kind == WireAgentOperation.RECIPE_STOP.value
+                    )
                 )
             )
         for effect in effects:
