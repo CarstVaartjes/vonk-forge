@@ -9858,10 +9858,10 @@ def _wait_blockers(
 
 def _persisted_result(value: RunSwitchOperationResult) -> dict[str, object]:
     """The single canonical result serializer at the ORM boundary."""
-    # In-place mutations of default collections do not enter model_fields_set.
-    # Persist values, including nested checkpoints, rather than constructor
-    # history; the canonical serializer omits only optional None fields.
-    return serialize_json_value(value)
+    # In-place mutations of default collections do not enter model_fields_set,
+    # so persist every field's value (explicit None included): readers index
+    # keys such as ``observation_due_at`` directly.
+    return value.model_dump(mode="json")
 
 
 _PHASE_RESULT_ADAPTER = TypeAdapter(RunSwitchPhaseResult)
