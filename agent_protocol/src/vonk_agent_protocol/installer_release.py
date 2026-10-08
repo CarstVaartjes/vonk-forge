@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, RootModel
+from pydantic import ConfigDict, Field, RootModel
 
 from .wire_model import WireModel
 
@@ -111,3 +111,32 @@ class InstallerReleaseManifest(
     RootModel[InstallerCandidateRelease | InstallerAcceptanceBaselineRelease]
 ):
     """Candidate and acceptance-only baseline are the two current graph roles."""
+
+
+class CliWheelProjection(InstallerReleaseObject):
+    """Validate wheel identity and bounds while allowing signed descriptor metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class CliReleaseArtifacts(WireModel):
+    """Only the artifact consumed by the self-updater; other artifacts may grow."""
+
+    model_config = ConfigDict(extra="ignore")
+    cli_wheel: CliWheelProjection = Field(alias="cli-wheel")
+
+
+class CliReleaseProjection(WireModel):
+    """Signed updater ingress, independent of the complete installer graph.
+
+    Future installer schemas remain updateable through this stable projection.
+    Ignored fields stay covered by the original bytes' signature and digest.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    schema_version: int = Field(ge=2)
+    channel: Literal["dev", "stable"]
+    generation: InstallerDigest
+    version: InstallerVersion
+    source_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    artifacts: CliReleaseArtifacts

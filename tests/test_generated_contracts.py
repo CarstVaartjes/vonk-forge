@@ -47,6 +47,11 @@ def test_installer_release_schema_is_current() -> None:
     )
 
 
+def test_cli_release_projection_schema_is_current() -> None:
+    module = _script("export-installer-release-schema")
+    assert not _stale(module.CLI_OUTPUT, module.rendered_cli_projection())
+
+
 def test_qualification_campaign_schemas_are_current() -> None:
     stale = [
         str(path.relative_to(ROOT))

@@ -23,6 +23,7 @@ that no longer occurs fails as stale.
 | Compiled launch plan | `compiled_execution_plan.py` in `agent_protocol` | `generated.rs` | none | Controller, tests |
 | Files the Spark agent and helper persist (identity pointers, readiness receipt, reconciliation checkpoints and receipts, installation metadata, run lifecycle, runtime image receipts, generation fence, package rollback transaction) | `agent_protocol/.../agent_state.py` | `generated.rs` (`AgentGenerationPointer`, `AgentReadinessReceipt`, `RunLifecycleRecord`, `HostRuntimeImageReceipt`, ...) | none | none yet; the models document the files |
 | Installer documents (NAS install template, Spark site ports, Spark setup apply frame) | `agent_protocol/.../installer_setup.py` | `generated.rs` (`NasInstallTemplate`, `SitePorts`, `SparkApplyEnvelope`, ...) | none | `scripts/build-nas-compose-bundle` validates its payload with the model; the Controller reads `site-ports.json` through `SitePorts` |
+| CLI release projection | `installer_release.py` | `src/cluster_profiles/schemas/cli-release-projection.schema.json` | none | CLI self-updater |
 | Installer release manifest | `installer_release.py` | `generated.rs`; `schemas/install-release-manifest.schema.json` | none | publisher scripts |
 | Controller API requests and responses | `control/src/vonk_control/*_contract.py` and the registered API modules below | none (the agent does not call these) | `control/web/src/api/generated.d.ts` from `control/openapi.json` | `src/cluster_profiles/generated_control` (CLI client) |
 | Lifecycle and reason-code vocabulary | `lifecycle_vocabulary.py`, `reason_codes.py`, `state_machines.py` | `generated.rs` | `control/web/src/api/vocabulary.generated.ts` | the CLI words in `src/cluster_profiles/cli_states_generated.py` |
@@ -157,7 +158,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/failure_evidence.py` | agent-protocol | 3 | Current bounded failure diagnostics shared by agent and Controller. |
 | `agent_protocol/src/vonk_agent_protocol/helper_response.py` | agent-protocol | 2 | Current framed Unix-socket response from the privileged host helper. |
 | `agent_protocol/src/vonk_agent_protocol/host_helper.py` | agent-protocol | 10 | Canonical authorization protocol for the narrow root host helper. |
-| `agent_protocol/src/vonk_agent_protocol/installer_release.py` | agent-protocol | 11 | Complete current installer publication graphs, shared by publisher and setup. |
+| `agent_protocol/src/vonk_agent_protocol/installer_release.py` | agent-protocol | 14 | Complete installer publication graphs and the forward-compatible signed CLI updater projection. |
 | `agent_protocol/src/vonk_agent_protocol/installer_setup.py` | agent-protocol | 22 | Documents the NAS and Spark setup programs read and exchange. |
 | `agent_protocol/src/vonk_agent_protocol/inventory.py` | agent-protocol | 2 | Authenticated schema-1 inventory evidence reported by an agent. |
 | `agent_protocol/src/vonk_agent_protocol/job_inputs.py` | agent-protocol | 1 | The exact input manifest shared by job staging and container adapters. |

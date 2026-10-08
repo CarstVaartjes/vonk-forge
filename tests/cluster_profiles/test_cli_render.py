@@ -890,3 +890,63 @@ def test_unreadable_operation_membership_is_rendered_as_unknown(action, capsys):
     assert "membership is unknown" in output
     assert "0 of 0" not in output
     assert "No activity" not in output
+
+
+def test_every_controller_command_has_a_registered_presentation() -> None:
+    import argparse
+
+    from cluster_profiles.cli_presentations import PRESENTATIONS
+    from cluster_profiles.controller_cli import add_controller_commands
+
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command")
+    add_controller_commands(commands)
+    expected = set()
+    for noun, command in commands.choices.items():
+        expected.add((noun, None))
+        for action in command._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                expected.update((noun, name) for name in action.choices)
+    assert expected == set(PRESENTATIONS)
+    assert all(callable(presenter) for presenter in PRESENTATIONS.values())
+
+
+@pytest.mark.parametrize("workers_available", [True, False])
+def test_platform_presents_current_response_contract(workers_available, capsys):
+    from typing import get_args
+
+    from cluster_profiles.generated_control.models.platform_observation import (
+        PlatformObservation,
+    )
+    from cluster_profiles.generated_control.models.platform_observation_worker_issue_type_0 import (
+        PlatformObservationWorkerIssueType0,
+    )
+
+    payload = {
+        "observed_at": "2026-10-08T12:00:00Z",
+        "api": {"source_sha": "a" * 40, "control_contract_sha256": "b" * 64},
+        "workers": [
+            {
+                "process_instance_id": "c" * 64,
+                "source_sha": "d" * 40,
+                "worker_contract_sha256": "e" * 64,
+                "loop_sequence": 3,
+                "completed_at": "2026-10-08T11:59:59Z",
+            }
+        ]
+        if workers_available
+        else None,
+        "worker_issue": None
+        if workers_available
+        else get_args(PlatformObservationWorkerIssueType0)[0],
+    }
+    contract = PlatformObservation.from_dict(payload)
+    render_payload(contract.to_dict(), "platform")
+    output = capsys.readouterr().out
+    assert contract.api.source_sha in output
+    assert contract.api.control_contract_sha256 in output
+    if workers_available:
+        assert "d" * 40 in output and "e" * 64 in output
+    else:
+        assert "Workers: unavailable" in output
+        assert contract.worker_issue in output
