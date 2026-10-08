@@ -31,6 +31,7 @@ from ..admission_locking import (
 from ..install_admission import (
     InstallAdmissionBusy,
 )
+from ..job_documents import controller_recipe_document
 from ..models import (
     InstallationNode,
     RecipeInstallation,
@@ -144,7 +145,9 @@ class UninstallMixin:
                     now=now,
                     workload_intent_ordinal=workload_intent_ordinal,
                     job_context={
-                        "reconciliation_authority": serialize_json_value(authority),
+                        "reconciliation_authority": controller_recipe_document(
+                            authority
+                        ),
                     },
                 )
         except AdmissionLockBusy as error:

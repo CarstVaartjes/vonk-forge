@@ -23,8 +23,10 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
+from ..bounded_json import require_mapping
 from ..job_documents import (
     RecipeStopParent,
+    controller_recipe_document,
 )
 from ..logging import redact_text
 from ..models import (
@@ -45,7 +47,6 @@ from ..recipe_routes import (
     route_publication_transaction,
 )
 from ..stored_json import read_row_column
-from ..strict_json import serialize_json_value
 from .constants import _STOP_WITHDRAWAL_ATTEMPTS
 from .errors import (
     RecipeArtifactJobCancellationPending,
@@ -306,7 +307,9 @@ class StopMixin:
     def _write_stop_parent(
         job: Job, document: RecipeStopParent | ProfileJobRunStopJob, *, now: datetime
     ) -> None:
-        job.payload = serialize_json_value(document)
+        job.payload = dict(
+            require_mapping(controller_recipe_document(document), "recipe Stop parent")
+        )
         job.payload_digest = hashlib.sha256(
             canonical_message(read_row_column(job, "payload"))
         ).hexdigest()

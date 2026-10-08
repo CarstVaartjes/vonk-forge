@@ -24,6 +24,7 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
+from ..job_documents import controller_recipe_document
 from ..lifecycle import Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.evidence import (
@@ -357,7 +358,7 @@ class BuildCancellationMixin:
                 authority_digest=build.build_input_sha256,
                 now=now,
                 job_context={
-                    "build_cancellation": cancellation.model_dump(mode="json")
+                    "build_cancellation": controller_recipe_document(cancellation)
                 },
             )
         service._agent_jobs.notify_available()

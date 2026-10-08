@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from ..bounded_json import require_mapping
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
     DistributedRecoveryInvalid,
@@ -37,6 +38,7 @@ from ..job_documents import (
     DistributedRecoveryMarker,
     ProfilePartialStop,
     RecipeStopParent,
+    controller_recipe_document,
 )
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -255,7 +257,7 @@ class StopDispatchMixin:
             authority_revision=admitted.authority_digest.removeprefix("sha256:"),
             targets=sorted(node.node_id for node in nodes),
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-            payload=serialize_json_value(payload),
+            payload=controller_recipe_document(payload),
             result=serialize_json_value(
                 _validated_result(
                     WireAgentOperation.RECIPE_STOP.value, {RunState.STOPPED.value: True}
@@ -270,8 +272,11 @@ class StopDispatchMixin:
             accepted_parent.result = serialize_json_value(
                 _validated_result(job.kind, read_row_column(job, "result"))
             )
-            accepted_parent.payload = serialize_json_value(
-                service._service_stop_document(job)
+            accepted_parent.payload = dict(
+                require_mapping(
+                    controller_recipe_document(service._service_stop_document(job)),
+                    "recipe Stop parent",
+                )
             )
             accepted_parent.payload_digest = job.payload_digest
             accepted_parent.updated_at = now
@@ -430,7 +435,7 @@ class StopDispatchMixin:
                 request_id=request_id,
                 workload_intent_ordinal=workload_intent_ordinal,
                 now=now,
-                job_context={"recovery": serialize_json_value(recovery_context)},
+                job_context={"recovery": controller_recipe_document(recovery_context)},
                 stop_run_generation=accepted_start.run_generation - 1,
             )
         except RecipeOperationConflict as error:

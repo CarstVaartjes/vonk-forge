@@ -27,6 +27,7 @@ from ..agent_jobs import (
     AgentJobService,
 )
 from ..artifact_job_evidence import ArtifactJobResultEvidence
+from ..job_documents import RecipeStopParent, controller_recipe_document
 from ..lifecycle import Effect
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
@@ -312,7 +313,11 @@ class JobRunStopMixin:
                             payload_digest=hashlib.sha256(
                                 canonical_message(payload)
                             ).hexdigest(),
-                            payload=payload,
+                            payload=controller_recipe_document(
+                                RecipeStopParent.model_validate_json(
+                                    canonical_message(payload)
+                                )
+                            ),
                             result=None,
                             created_at=now,
                             updated_at=now,
@@ -345,7 +350,9 @@ class JobRunStopMixin:
                 authority_revision=authority_revision,
                 targets=list(targets),
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-                payload=payload,
+                payload=controller_recipe_document(
+                    RecipeStopParent.model_validate_json(canonical_message(payload))
+                ),
                 result=serialize_json_value(
                     _validated_result(
                         WireAgentOperation.RECIPE_STOP.value,
@@ -401,8 +408,6 @@ class JobRunStopMixin:
         adapter = ArtifactJobAdapter(session)
         frozen: JobRunStopScope | None = None
         if pending_job is not None:
-            from ..job_documents import RecipeStopParent
-
             frozen = RecipeStopParent.model_validate_json(
                 canonical_message(read_row_column(pending_job, "payload")), strict=True
             ).job_run_stop_authorization
@@ -521,7 +526,7 @@ class JobRunStopMixin:
                     "plan_digest": stop_plan_digest,
                     "execution_mode": "one-shot-jobs",
                     "workload_intent_ordinal": workload_intent_ordinal,
-                    "job_run_stop_authorization": json.loads(canonical_message(scope)),
+                    "job_run_stop_authorization": controller_recipe_document(scope),
                 }
                 session.add(
                     new_recipe_job(
@@ -535,7 +540,11 @@ class JobRunStopMixin:
                         payload_digest=hashlib.sha256(
                             canonical_message(payload)
                         ).hexdigest(),
-                        payload=payload,
+                        payload=controller_recipe_document(
+                            RecipeStopParent.model_validate_json(
+                                canonical_message(payload)
+                            )
+                        ),
                         created_at=now,
                         updated_at=now,
                     )
@@ -565,7 +574,7 @@ class JobRunStopMixin:
             workload_intent_ordinal=workload_intent_ordinal,
             job_context={
                 "execution_mode": "one-shot-jobs",
-                "job_run_stop_authorization": json.loads(canonical_message(scope)),
+                "job_run_stop_authorization": controller_recipe_document(scope),
             },
             adopt_stop_parent=pending_job,
         )

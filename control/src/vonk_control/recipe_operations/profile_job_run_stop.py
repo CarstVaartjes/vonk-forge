@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -31,6 +30,7 @@ from ..categorized_errors import (
 )
 from ..job_documents import (
     RunSwitchJobPayload,
+    controller_recipe_document,
 )
 from ..lifecycle import CancelRequested, Effect, Outcome, Reported
 from ..lifecycle.artifact_job import ArtifactJobAdapter
@@ -372,9 +372,7 @@ class ProfileJobRunStopMixin:
                 "execution_mode": "profile-jobrun-stop",
                 "profile_application_id": application.id,
                 "profile_operation_id": profile_operation.id,
-                "profile_stop_authorization": json.loads(
-                    canonical_message(authorization)
-                ),
+                "profile_stop_authorization": controller_recipe_document(authorization),
             },
         )
         try:

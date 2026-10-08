@@ -37,6 +37,7 @@ from ..agent_jobs import (
 )
 from ..job_documents import (
     RecipeBuildParent,
+    controller_recipe_document,
 )
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -256,10 +257,11 @@ class BuildMixin:
                         authority_revision=succeeded.authority_revision,
                         targets=list(succeeded.targets),
                         payload_digest=succeeded.payload_digest,
-                        payload=RecipeBuildParent.model_validate_json(
-                            canonical_message(read_row_column(succeeded, "payload"))
-                        ).model_dump(mode="json")
-                        | {"build_intent": intent.model_dump(mode="json")},
+                        payload=controller_recipe_document(
+                            RecipeBuildParent.model_validate_json(
+                                canonical_message(read_row_column(succeeded, "payload"))
+                            ).model_copy(update={"build_intent": intent})
+                        ),
                         result=receipt,
                         created_at=now,
                         updated_at=now,
@@ -488,7 +490,7 @@ class BuildMixin:
             authority_digest=plan.build_input_sha256,
             now=now,
             job_context={
-                "build_intent": intent.model_dump(mode="json"),
+                "build_intent": controller_recipe_document(intent),
                 **({"force_rebuild": True} if force else {}),
             },
         )
@@ -552,7 +554,7 @@ class BuildMixin:
             # is created, so no agent ever claims this job.
             targets=[build.builder_node_id],
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-            payload=serialize_json_value(payload),
+            payload=controller_recipe_document(payload),
             created_at=now,
             updated_at=now,
         )

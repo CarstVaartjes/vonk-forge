@@ -27,6 +27,7 @@ from ..admission_locking import (
 from ..agent_jobs import (
     AgentJobService,
 )
+from ..job_documents import RecipeJobActivateParent, controller_recipe_document
 from ..models import (
     AgentNode,
     RecipeInstallation,
@@ -206,7 +207,11 @@ class JobActivationMixin:
                 authority_revision=revision.content_digest or "",
                 targets=targets,
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-                payload=payload,
+                payload=controller_recipe_document(
+                    RecipeJobActivateParent.model_validate_json(
+                        canonical_message(payload)
+                    )
+                ),
                 result=serialize_json_value(
                     _validated_result("recipe.job.activate.v1", {"activated": True})
                 ),

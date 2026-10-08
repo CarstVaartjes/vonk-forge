@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
+    RecipeStartPayload,
     canonical_message,
 )
 from vonk_control.agent_api import AgentApiServices
@@ -33,6 +34,7 @@ from vonk_control.host_helper_authority import (
     HostRuntimeAuthorityService,
 )
 from vonk_control.install_admission import InstallAdmissionService
+from vonk_control.job_documents import RecipeStartParent, RecipeStopParent
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -626,7 +628,7 @@ def test_singleton_absence_reboots_through_new_controller_processes(
                 select(Job).where(
                     Job.kind == "recipe.stop",
                     Job.payload["owner_id"].as_string() == run_id,
-                    Job.payload["recovery"].is_not(None),
+                    Job.payload["recovery"].as_string().is_not(None),
                 )
             )
         )
@@ -667,14 +669,20 @@ def test_singleton_absence_reboots_through_new_controller_processes(
         assert completed_stop.request_id == expected_stop_request_id
         assert (
             completed_stop.payload_digest
-            == hashlib.sha256(canonical_message(completed_stop.payload)).hexdigest()
+            == hashlib.sha256(
+                canonical_message(
+                    RecipeStopParent.model_validate_json(
+                        canonical_message(completed_stop.payload)
+                    )
+                )
+            ).hexdigest()
         )
         recovery_starts = tuple(
             session.scalars(
                 select(Job).where(
                     Job.kind == "recipe.start",
                     Job.payload["owner_id"].as_string() == run_id,
-                    Job.payload["recovery"].is_not(None),
+                    Job.payload["recovery"].as_string().is_not(None),
                 )
             )
         )
@@ -777,7 +785,7 @@ def test_singleton_absence_reboots_through_new_controller_processes(
                 select(Job).where(
                     Job.kind == "recipe.stop",
                     Job.payload["owner_id"].as_string() == run_id,
-                    Job.payload["recovery"].is_not(None),
+                    Job.payload["recovery"].as_string().is_not(None),
                 )
             )
         )
@@ -841,7 +849,7 @@ def test_singleton_recovery_stop_grant_survives_start_deadline(
             select(Job).where(
                 Job.kind == "recipe.stop",
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
         assert stop is not None
@@ -939,7 +947,7 @@ def test_newer_workload_intent_wins_over_singleton_reboot_recovery(
             select(Job.id).where(
                 Job.kind == "recipe.stop",
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
 
@@ -987,7 +995,7 @@ def test_uncertain_singleton_recovery_stop_retains_run_claims(
             select(Job).where(
                 Job.kind == "recipe.stop",
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
         assert stop is not None
@@ -1074,7 +1082,7 @@ def test_singleton_recovery_enters_cooldown_then_resumes_automatically(
             select(Job.id).where(
                 Job.kind == "recipe.start",
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
 
@@ -1153,7 +1161,7 @@ def test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered(
             select(Job).where(
                 Job.kind == "recipe.stop",
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
         assert stop is not None and stop.state == "running"
@@ -1214,7 +1222,7 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
             select(Job.id).where(
                 Job.kind == "recipe.stop",
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
 
@@ -1232,7 +1240,7 @@ def test_stale_presence_waits_then_recovery_resumes_without_new_run(
             select(Job).where(
                 Job.kind == "recipe.stop",
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
         assert run is not None and run.state == "stopping"
@@ -1332,7 +1340,7 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
             select(Job).where(
                 Job.kind == "recipe.stop",
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
         assert stale is not None
@@ -1405,11 +1413,23 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
             assert child is not None
             start.payload = payload
             start.payload_digest = hashlib.sha256(
-                canonical_message(payload)
+                canonical_message(
+                    RecipeStartParent.model_validate_json(canonical_message(payload))
+                )
             ).hexdigest()
-            child.payload = start_payload
+            child.payload = json.loads(
+                canonical_message(
+                    RecipeStartPayload.model_validate_json(
+                        canonical_message(start_payload)
+                    )
+                )
+            )
             child.payload_digest = hashlib.sha256(
-                canonical_message(start_payload)
+                canonical_message(
+                    RecipeStartPayload.model_validate_json(
+                        canonical_message(start_payload)
+                    )
+                )
             ).hexdigest()
     now[0] = NOW + timedelta(seconds=4)
     recovery = DistributedRecoveryCoordinator(
@@ -1442,7 +1462,7 @@ def test_singleton_recovery_checks_compiled_lifecycle_authority(
             select(Job.id).where(
                 Job.kind.in_({"recipe.stop", "recipe.start"}),
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
 
@@ -1487,10 +1507,20 @@ def test_singleton_recovery_refuses_per_node_start_for_another_plan(
         child = session.get(AgentOperation, item["operation_id"])
         assert child is not None
         start.payload = payload
-        start.payload_digest = hashlib.sha256(canonical_message(payload)).hexdigest()
-        child.payload = start_payload
+        start.payload_digest = hashlib.sha256(
+            canonical_message(
+                RecipeStartParent.model_validate_json(canonical_message(payload))
+            )
+        ).hexdigest()
+        child.payload = json.loads(
+            canonical_message(
+                RecipeStartPayload.model_validate_json(canonical_message(start_payload))
+            )
+        )
         child.payload_digest = hashlib.sha256(
-            canonical_message(start_payload)
+            canonical_message(
+                RecipeStartPayload.model_validate_json(canonical_message(start_payload))
+            )
         ).hexdigest()
     now[0] = NOW + timedelta(seconds=4)
     recovery = DistributedRecoveryCoordinator(
@@ -1512,7 +1542,7 @@ def test_singleton_recovery_refuses_per_node_start_for_another_plan(
             select(Job.id).where(
                 Job.kind.in_({"recipe.stop", "recipe.start"}),
                 Job.payload["owner_id"].as_string() == run_id,
-                Job.payload["recovery"].is_not(None),
+                Job.payload["recovery"].as_string().is_not(None),
             )
         )
 

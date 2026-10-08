@@ -25,6 +25,7 @@ from ..job_documents import (
     RecipeStopParent,
     RunSwitchJobPayload,
     ServiceRunStopReview,
+    controller_recipe_document,
 )
 from ..logging import redact_text
 from ..models import (
@@ -45,7 +46,6 @@ from ..recipe_routes import (
     route_publication_transaction,
 )
 from ..stored_json import read_row_column
-from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeStopAuthorityRefused
 from .interfaces import new_recipe_job
 
@@ -343,7 +343,7 @@ class StopAcceptanceMixin:
                 actor=actor,
                 authority_revision=admitted.authority_digest,
                 targets=list(admitted.target_node_ids),
-                payload=serialize_json_value(document),
+                payload=controller_recipe_document(document),
                 payload_digest=hashlib.sha256(canonical_message(document)).hexdigest(),
                 status_reason="accepted exact Stop; route withdrawal pending",
                 created_at=now,

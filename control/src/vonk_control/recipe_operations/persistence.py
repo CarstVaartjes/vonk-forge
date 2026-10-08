@@ -39,6 +39,7 @@ from ..agent_jobs import (
     AgentJobService,
     release_owned_reservations_in_session,
 )
+from ..bounded_json import require_mapping
 from ..compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
     CompiledExecutionPlanError,
@@ -47,6 +48,7 @@ from ..compiled_execution_plan import (
 from ..install_admission import (
     InstallAdmissionBusy,
 )
+from ..job_documents import controller_recipe_document
 from ..lifecycle.agent_operation import retry_scheduled
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -443,10 +445,20 @@ class PersistenceMixin:
             context = RecipeOperationContext.model_validate_json(
                 canonical_message(job_context)
             )
-            job_document.update(context.model_dump(mode="json", exclude_none=True))
+            job_document.update(
+                (
+                    (name, value)
+                    for name, value in require_mapping(
+                        controller_recipe_document(context), "recipe context"
+                    ).items()
+                    if value is not None
+                )
+            )
         parent_model = _RECIPE_PARENT_READERS[kind]
         parent = parent_model.validate_json(canonical_message(job_document))
-        job_document = json.loads(canonical_message(parent))
+        job_document = dict(
+            require_mapping(controller_recipe_document(parent), "recipe parent")
+        )
         # A formatted timestamp binds its spelling as well as its instant.
         if job_context is not None and context.start_deadline is not None:
             job_document["start_deadline"] = context.start_deadline
@@ -480,7 +492,7 @@ class PersistenceMixin:
             actor=actor,
             authority_revision=authority_digest.removeprefix("sha256:"),
             targets=targets,
-            payload_digest=hashlib.sha256(canonical_message(job_document)).hexdigest(),
+            payload_digest=hashlib.sha256(canonical_message(parent)).hexdigest(),
             payload=job_document,
             created_at=now,
             updated_at=now,

@@ -31,6 +31,7 @@ from ..distributed_recovery import (
 from ..job_documents import (
     ProfilePartialStop,
     RecipeStopParent,
+    controller_recipe_document,
 )
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -507,7 +508,7 @@ class TerminalProjectionMixin:
                     now=now,
                     workload_intent_ordinal=recovery_intent,
                     job_context={
-                        "recovery": serialize_json_value(marker),
+                        "recovery": controller_recipe_document(marker),
                         "start_deadline": marker.deadline,
                     },
                 )
