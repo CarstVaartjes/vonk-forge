@@ -59,7 +59,7 @@ fn reconciliation_removing_checkpoint_recovers_after_partial_or_complete_quarant
 }
 
 #[test]
-fn reconciliation_missing_installation_without_checkpoint_is_not_cleanup_success() {
+fn reconciliation_absence_is_idempotent_and_history_never_blocks_preparation() {
     let directory = tempdir().unwrap();
     let data_root = directory.path().join("data");
     fs::create_dir_all(data_root.join("installations")).unwrap();
@@ -69,5 +69,46 @@ fn reconciliation_missing_installation_without_checkpoint_is_not_cleanup_success
         runner: &NoProcess,
         data_root: &data_root,
     };
-    assert!(runtime.prepare_reconciliation(&identity).is_err());
+    assert!(runtime.prepare_reconciliation(&identity).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+    runtime
+        .supersede_reconciliation_checkpoint(&missing_id.to_string())
+        .unwrap();
+    assert!(
+        !reconciliation_checkpoint_path(
+            &data_root.join(INSTALLATION_RECONCILIATION_ROOT),
+            &missing_id.to_string(),
+        )
+        .unwrap()
+        .exists()
+    );
+    let (_, current) = reconciliation_installation(&data_root, missing_id);
+    assert!(!runtime.prepare_reconciliation(&current).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&current).unwrap().complete);
+}
+
+#[test]
+fn damaged_checkpoint_is_rebuilt_from_current_observation() {
+    let data = tempdir().unwrap();
+    let id = Uuid::new_v4();
+    let (installation, identity) = reconciliation_installation(data.path(), id);
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: data.path(),
+    };
+    runtime.prepare_reconciliation(&identity).unwrap();
+    let path = reconciliation_checkpoint_path(
+        &data.path().join(INSTALLATION_RECONCILIATION_ROOT),
+        &id.to_string(),
+    )
+    .unwrap();
+    fs::write(&path, b"damaged checkpoint").unwrap();
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+    assert!(!installation.exists());
+    runtime
+        .supersede_reconciliation_checkpoint(&id.to_string())
+        .unwrap();
+    let (_, current) = reconciliation_installation(data.path(), id);
+    assert!(!runtime.prepare_reconciliation(&current).unwrap().complete);
 }

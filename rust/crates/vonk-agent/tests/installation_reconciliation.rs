@@ -145,18 +145,25 @@ fn opaque_install_is_removed_while_shared_model_cache_survives_and_receipt_repla
         "../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
     .unwrap();
-    assert!(matches!(
-        runtime.install(
+    let store = data.path().join("distribution/models");
+    fs::create_dir_all(&store).unwrap();
+    for artifact in &plan.artifacts {
+        write_private_file(
+            &store.join(&artifact.sha256),
+            &vec![0; artifact.size_bytes as usize],
+        );
+    }
+    runtime
+        .install(
             &plan,
             &identity.installation_id.to_string(),
-            &opaque_legacy_spec().1
-        ),
-        Err(OciError::Artifact)
-    ));
-    assert!(
-        !installation_path(data.path(), identity.installation_id).exists(),
-        "a completed cleanup receipt prevents an old install attempt from recreating the installation"
-    );
+            &plan.identity.recipe_revision_sha256,
+        )
+        .unwrap();
+    runtime
+        .verify_installation(&identity.installation_id.to_string())
+        .unwrap();
+    assert!(installation_path(data.path(), identity.installation_id).exists());
 }
 
 #[test]
@@ -233,7 +240,7 @@ fn prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process() {
 }
 
 #[test]
-fn changed_source_identity_cannot_resume_an_existing_checkpoint() {
+fn current_request_supersedes_stored_checkpoint_identity() {
     let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
@@ -244,15 +251,25 @@ fn changed_source_identity_cannot_resume_an_existing_checkpoint() {
 
     let mut changed_identity = identity.clone();
     changed_identity.plan_digest = "f".repeat(64);
-    assert!(runtime.prepare_reconciliation(&changed_identity).is_err());
-    assert!(runtime.finalize_reconciliation(&changed_identity).is_err());
-    assert!(installation_path(data.path(), identity.installation_id).exists());
-
-    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+    assert!(
+        !runtime
+            .prepare_reconciliation(&changed_identity)
+            .unwrap()
+            .complete
+    );
+    assert!(
+        runtime
+            .finalize_reconciliation(&changed_identity)
+            .unwrap()
+            .complete
+    );
+    assert!(!installation_path(data.path(), identity.installation_id).exists());
+    seed_installation(data.path(), &identity, &spec_bytes);
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
 }
 
 #[test]
-fn replaced_installation_directory_is_refused_even_when_its_files_match() {
+fn replaced_directory_is_preserved_until_current_request_reobserves_it() {
     let _serial = serial();
     let data = tempdir().unwrap();
     let runner = NoProcess;
@@ -275,6 +292,12 @@ fn replaced_installation_directory_is_refused_even_when_its_files_match() {
         displaced_original.exists(),
         "the original inode remains available for comparison"
     );
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
+    assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);
+    assert!(!original.exists());
+    assert!(displaced_original.exists());
+    seed_installation(data.path(), &identity, &spec_bytes);
+    assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
 }
 
 #[test]
@@ -285,7 +308,7 @@ fn missing_installation_without_a_checkpoint_does_not_poison_a_later_prepare() {
     let (identity, spec_bytes) = identity_and_spec(Uuid::new_v4());
     let runtime = runtime(data.path(), &runner);
 
-    assert!(runtime.prepare_reconciliation(&identity).is_err());
+    assert!(runtime.prepare_reconciliation(&identity).unwrap().complete);
     seed_installation(data.path(), &identity, &spec_bytes);
     assert!(!runtime.prepare_reconciliation(&identity).unwrap().complete);
     assert!(runtime.finalize_reconciliation(&identity).unwrap().complete);

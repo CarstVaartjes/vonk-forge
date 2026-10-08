@@ -41,33 +41,26 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let started = Instant::now();
         let installation_id = request.installation_id.to_string();
         let job_scope = request.job_id.to_string();
-        if self.runtime.recipe_digest(&installation_id).ok().as_deref()
-            != Some(
-                &request
-                    .compiled_execution_plan
-                    .identity
-                    .recipe_revision_sha256,
-            )
-            || self.runtime.verify_installation(&installation_id).is_err()
-        {
-            return failed_job(
-                &request,
-                1,
-                started,
-                "installed recipe identity or artifact manifest does not match",
-            );
+        let spec = request.compiled_execution_plan.clone();
+        if *cancellation.borrow() {
+            return cancelled_job(&request, started, "controller cancellation requested");
         }
-        let spec = match self.runtime.load_spec(&installation_id) {
-            Ok(spec) => spec,
-            Err(_) => {
-                return failed_job(
-                    &request,
-                    1,
-                    started,
-                    "installed recipe specification is corrupt",
-                );
-            }
-        };
+        if self
+            .prepare_installation(
+                claim,
+                &spec,
+                &installation_id,
+                spec.artifacts
+                    .iter()
+                    .map(|artifact| artifact.size_bytes)
+                    .sum(),
+                &cancellation,
+            )
+            .await
+            .is_err()
+        {
+            return temporary_runtime_observation_failure();
+        }
         let invocation = match prepare_job_invocation(&spec, &request) {
             Ok(plan) => plan,
             Err(_) => return failed_job(&request, 1, started, "job invocation is invalid"),

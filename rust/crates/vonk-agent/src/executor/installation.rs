@@ -3,6 +3,54 @@
 use super::*;
 
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
+    pub(super) async fn prepare_installation(
+        &self,
+        claim: &AgentClaim,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        expected_bytes: u64,
+        cancellation: &tokio::sync::watch::Receiver<bool>,
+    ) -> Result<(), OciError> {
+        let data_root = self.runtime.data_root.to_path_buf();
+        let copy_cancellation = cancellation.clone();
+        let progress_client = self.client.clone();
+        let fence = claim.fence;
+        let spec = spec.clone();
+        let installation_id = installation_id.to_owned();
+        // Bound storage work by authorized bytes at a 1 MiB/s floor plus
+        // setup time. A renewable lease cannot extend this work deadline.
+        let materialized_bytes = {
+            let mut paths = std::collections::BTreeSet::new();
+            spec.artifacts
+                .iter()
+                .filter(|artifact| paths.insert((&artifact.selection_id, &artifact.path)))
+                .map(|artifact| artifact.size_bytes)
+                .sum::<u64>()
+        };
+        let deadline =
+            Instant::now() + Duration::from_secs(75 + materialized_bytes.div_ceil(1024 * 1024));
+        tokio::task::spawn_blocking(move || {
+            let runtime = OciRuntime {
+                runner: &crate::process::SystemProcessRunner,
+                data_root: &data_root,
+            };
+            runtime.install_with_space_check_controlled(
+                &spec,
+                &installation_id,
+                &spec.identity.recipe_revision_sha256,
+                expected_bytes,
+                &mut |done, total| progress_client.set_progress_bytes(fence, done, total),
+                &|| *copy_cancellation.borrow() || Instant::now() >= deadline,
+            )
+        })
+        .await
+        .map_err(|_| {
+            OciError::Io(std::io::Error::other(
+                "installation worker ended without observation",
+            ))
+        })?
+    }
+
     pub(super) async fn execute_install(
         &self,
         claim: &AgentClaim,
@@ -42,26 +90,24 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         // into this installation, measured in bytes. Say so instead
         // of showing a stale phase with no progress for minutes.
         self.report_phase(claim, ProgressPhase::Copying).await;
-        let progress_client = self.client.clone();
-        let fence = claim.fence;
-        let installed = self.runtime.install_with_space_check_observed(
-            &spec,
-            &request.installation_id.to_string(),
-            &spec.identity.recipe_revision_sha256,
-            request.expected_bytes,
-            &mut |done, total| progress_client.set_progress_bytes(fence, done, total),
-        );
+        let installed = self
+            .prepare_installation(
+                claim,
+                &spec,
+                &request.installation_id.to_string(),
+                request.expected_bytes,
+                &cancellation,
+            )
+            .await;
+        if *cancellation.borrow() {
+            return cancelled("controller cancelled during model preparation");
+        }
         match installed {
             Ok(()) => {}
             Err(OciError::Capacity) => {
                 return failed("local disk capacity changed after install admission");
             }
-            Err(error) => {
-                let (stage, category) = error.safe_install_context();
-                return failed_owned(format!(
-                    "recipe artifacts or container image could not be installed (stage={stage}; category={category})"
-                ));
-            }
+            Err(_) => return temporary_runtime_observation_failure(),
         }
         // A failed measurement is not evidence that the admitted
         // payload is present.  Substituting ``expected_bytes`` (the
@@ -117,9 +163,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 );
             }
             Err(error) => {
-                return failed_stage(
-                    "managed installation does not match the reconciliation authority",
+                return temporary_reconciliation_failure(
                     FailureStage::InstallationValidation,
+                    FailureCode::RecipeReconciliationDependencyUnavailable,
                     error.safe_category(),
                 );
             }
@@ -182,9 +228,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 );
             }
             Err(error) => {
-                return failed_stage(
-                    "reconciled installation cleanup could not be completed",
+                return temporary_reconciliation_failure(
                     FailureStage::InstallationRemoval,
+                    FailureCode::RecipeReconciliationDependencyUnavailable,
                     error.safe_category(),
                 );
             }

@@ -16,6 +16,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             return failed("artifact distribution plan identity is invalid");
         }
         self.report_phase(claim, ProgressPhase::Preparing).await;
+        let deadline = tokio::time::Instant::now() + remaining_lease(claim.deadline);
+        let (cancel_sender, mut cancellation) = tokio::sync::watch::channel(false);
         let destination = self.runtime.data_root.join("distribution");
         let (progress_sender, mut progress_receiver) =
             tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
@@ -52,43 +54,53 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         ..phase_progress(item.phase)
                     }),
                 };
-                let _ = progress_client.heartbeat(&progress).await;
-            }
-        });
-        let download = {
-            let mut result = None;
-            for attempt in 0..3_u32 {
-                let progress_sender = progress_sender.clone();
-                let current = self
-                    .client
-                    .download_distribution_with_progress(
-                        &request.plan_digest,
-                        &destination,
-                        move |item| {
-                            progress_sender.send_replace(Some(item));
-                        },
-                    )
-                    .await;
-                match current {
-                    Ok(value) => {
-                        result = Some(Ok(value));
-                        break;
-                    }
-                    Err(error)
-                        if error.retryable()
-                            && error.retry_after_seconds().is_none()
-                            && attempt < 2 =>
-                    {
-                        tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64)).await;
-                    }
-                    Err(error) => {
-                        result = Some(Err(error));
-                        break;
-                    }
+                if let Ok(directive) = progress_client.heartbeat(&progress).await
+                    && directive.cancel_requested
+                {
+                    cancel_sender.send_replace(true);
+                    break;
                 }
             }
-            result.expect("bounded distribution retry always records a result")
-        };
+        });
+        let download = run_until_cancelled(
+            tokio::time::timeout_at(deadline, async {
+                let mut result = None;
+                for attempt in 0..3_u32 {
+                    let progress_sender = progress_sender.clone();
+                    let current = self
+                        .client
+                        .download_distribution_with_progress(
+                            &request.plan_digest,
+                            &destination,
+                            move |item| {
+                                progress_sender.send_replace(Some(item));
+                            },
+                        )
+                        .await;
+                    match current {
+                        Ok(value) => {
+                            result = Some(Ok(value));
+                            break;
+                        }
+                        Err(error)
+                            if error.retryable()
+                                && error.retry_after_seconds().is_none()
+                                && attempt < 2 =>
+                        {
+                            tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64))
+                                .await;
+                        }
+                        Err(error) => {
+                            result = Some(Err(error));
+                            break;
+                        }
+                    }
+                }
+                result.expect("bounded distribution retry always records a result")
+            }),
+            &mut cancellation,
+        )
+        .await;
         // The reporter exits only when every sender is dropped. Keep it
         // alive through retries, then close it before waiting; otherwise
         // a finished transfer can wait forever before pulling its image.
@@ -103,17 +115,25 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             progress_task.abort();
         }
         match download {
-            Ok(evidence) => {
+            None => cancelled("controller cancelled during distribution"),
+            Some(Err(_)) => temporary_runtime_observation_failure(),
+            Some(Ok(Ok(evidence))) => {
                 // Models are in place; the runtime image comes from the
                 // Controller's layered store, pulling only missing layers.
-                if let Err(error) = self
-                    .pull_runtime_image(
+                let pulled = tokio::time::timeout_at(
+                    deadline,
+                    self.pull_runtime_image(
                         claim,
                         &evidence.oci_image_digest,
                         &evidence.oci_image_config_digest,
-                    )
-                    .await
-                {
+                    ),
+                )
+                .await;
+                let pulled = match pulled {
+                    Ok(value) => value,
+                    Err(_) => return temporary_runtime_observation_failure(),
+                };
+                if let Err(error) = pulled {
                     // HostRuntimeError exposes only bounded, stable
                     // categories, never helper stderr or credentials.
                     return ExecutionResult::Failed(
@@ -123,7 +143,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
                 distribution_success(evidence)
             }
-            Err(error) => distribution_failure_result(&error),
+            // A local read/write failure leaves only an observation gap;
+            // range replay must start from the next attempt's durable length.
+            Some(Ok(Err(ClientError::CredentialRead(_)))) => {
+                temporary_runtime_observation_failure()
+            }
+            Some(Ok(Err(error))) => distribution_failure_result(&error),
         }
     }
 }

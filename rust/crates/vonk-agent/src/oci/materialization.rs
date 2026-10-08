@@ -66,6 +66,24 @@ pub(super) fn materialize_compiled_models_with(
     link: bool,
     progress: &mut dyn FnMut(u64, u64),
 ) -> Result<Vec<PathBuf>, OciError> {
+    materialize_compiled_models_controlled(
+        data_root,
+        plan,
+        installation_id,
+        link,
+        progress,
+        &|| false,
+    )
+}
+
+pub(super) fn materialize_compiled_models_controlled(
+    data_root: &Path,
+    plan: &CompiledExecutionPlan,
+    installation_id: &str,
+    link: bool,
+    progress: &mut dyn FnMut(u64, u64),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<PathBuf>, OciError> {
     if !data_root.is_absolute() {
         return Err(OciError::Artifact);
     }
@@ -100,6 +118,7 @@ pub(super) fn materialize_compiled_models_with(
     let mut done_bytes = 0_u64;
     progress(0, total_bytes);
     for artifact in &plan.artifacts {
+        check_materialization_cancelled(cancelled)?;
         let physical_key = (artifact.selection_id.clone(), artifact.path.clone());
         let destination = destination_root
             .join(&artifact.selection_id)
@@ -220,6 +239,7 @@ pub(super) fn materialize_compiled_models_with(
         let mut buffer = [0_u8; 64 * 1024];
         let mut remaining_bytes = artifact.size_bytes;
         while remaining_bytes > 0 {
+            check_materialization_cancelled(cancelled)?;
             let wave_bytes = remaining_bytes.min(buffer.len() as u64) as usize;
             let read = source_file.read(&mut buffer[..wave_bytes])?;
             if read == 0 {
@@ -236,6 +256,7 @@ pub(super) fn materialize_compiled_models_with(
                 progress(done_bytes + copied, total_bytes);
             }
         }
+        check_materialization_cancelled(cancelled)?;
         output.sync_all()?;
         let source_after = source_file.metadata()?;
         let output_metadata = output.metadata()?;
@@ -269,3 +290,10 @@ pub(super) fn materialize_compiled_models_with(
 
 #[cfg(test)]
 mod tests;
+
+fn check_materialization_cancelled(cancelled: &dyn Fn() -> bool) -> Result<(), OciError> {
+    if cancelled() {
+        return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+    }
+    Ok(())
+}

@@ -78,8 +78,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         recipe_content_sha256: &str,
     ) -> Result<(), OciError> {
+        self.verify_image(spec)?;
+        if recipe_content_sha256 != spec.identity.recipe_revision_sha256 {
+            return Err(OciError::Artifact);
+        }
         let _lock = self.lock_installation_reconciliation(installation_id)?;
-        self.refuse_reconciled_installation(installation_id)?;
+        self.supersede_reconciliation_checkpoint(installation_id)?;
         self.install_unlocked(spec, installation_id, recipe_content_sha256, &mut |_, _| {})
     }
 
@@ -89,6 +93,23 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         recipe_content_sha256: &str,
         progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<(), OciError> {
+        self.install_unlocked_controlled(
+            spec,
+            installation_id,
+            recipe_content_sha256,
+            progress,
+            &|| false,
+        )
+    }
+
+    fn install_unlocked_controlled(
+        &self,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        recipe_content_sha256: &str,
+        progress: &mut dyn FnMut(u64, u64),
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<(), OciError> {
         if recipe_content_sha256.len() != 64
             || !recipe_content_sha256
@@ -111,8 +132,16 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .map_err(|error| install_error(FailureStage::InstallationDirectory, error))?;
         self.ensure_runtime_cache(installation_id)
             .map_err(|error| install_error(FailureStage::RuntimeCache, error))?;
-        materialize_compiled_models_observed(self.data_root, spec, installation_id, progress)
-            .map_err(|error| install_error(FailureStage::ModelMaterialization, error))?;
+        repair_installation_projections(&installation)?;
+        super::materialization::materialize_compiled_models_controlled(
+            self.data_root,
+            spec,
+            installation_id,
+            true,
+            progress,
+            cancelled,
+        )
+        .map_err(|error| install_error(FailureStage::ModelMaterialization, error))?;
         let encoded_spec = serde_json::to_vec(spec)
             .map_err(OciError::Json)
             .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
@@ -168,17 +197,53 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         expected_bytes: u64,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<(), OciError> {
+        self.install_with_space_check_controlled(
+            spec,
+            installation_id,
+            recipe_content_sha256,
+            expected_bytes,
+            progress,
+            &|| false,
+        )
+    }
+
+    pub fn install_with_space_check_controlled(
+        &self,
+        spec: &CompiledExecutionPlan,
+        installation_id: &str,
+        recipe_content_sha256: &str,
+        _expected_bytes: u64,
+        progress: &mut dyn FnMut(u64, u64),
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<(), OciError> {
+        if cancelled() {
+            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+        }
+        self.verify_image(spec)?;
+        if recipe_content_sha256 != spec.identity.recipe_revision_sha256 {
+            return Err(OciError::Artifact);
+        }
         let _lock = self.lock_installation_reconciliation(installation_id)?;
-        self.refuse_reconciled_installation(installation_id)?;
+        self.supersede_reconciliation_checkpoint(installation_id)?;
         if self.reuse_completed_install(spec, installation_id, recipe_content_sha256)? {
             return Ok(());
         }
         // Model files already in the shared store are linked, not written, so
         // they need no free space; only what the install must still write does.
         self.ensure_disk_available(
-            expected_bytes.saturating_sub(linkable_model_bytes(self.data_root, spec)),
+            unique_plan_artifacts(spec)
+                .iter()
+                .map(|artifact| artifact.size_bytes)
+                .sum::<u64>()
+                .saturating_sub(linkable_model_bytes(self.data_root, spec)),
         )?;
-        self.install_unlocked(spec, installation_id, recipe_content_sha256, progress)
+        self.install_unlocked_controlled(
+            spec,
+            installation_id,
+            recipe_content_sha256,
+            progress,
+            cancelled,
+        )
     }
 
     pub(super) fn reuse_completed_install(
@@ -199,42 +264,38 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             || metadata.uid() != rustix::process::geteuid().as_raw()
             || metadata.mode() & 0o777 != 0o700
         {
-            return Err(OciError::Artifact);
-        }
-        let mut incomplete = false;
-        for name in [
-            "spec.json",
-            "recipe-content.sha256",
-            INSTALLATION_METADATA_FILE,
-        ] {
-            match fs::symlink_metadata(installation.join(name)) {
-                Ok(metadata) if trusted_receipt_metadata(&metadata) => match name {
-                    "spec.json" if self.load_spec(installation_id)? == *spec => {}
-                    "recipe-content.sha256"
-                        if self.recipe_digest(installation_id)? == recipe_content_sha256 => {}
-                    INSTALLATION_METADATA_FILE
-                        if read_installation_metadata(&installation)?
-                            .is_some_and(|receipt| receipt_matches_plan(&receipt, spec)) => {}
-                    _ => return Err(OciError::Artifact),
-                },
-                Ok(_) => return Err(OciError::Artifact),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => incomplete = true,
-                Err(error) => return Err(error.into()),
-            }
-        }
-        if incomplete {
+            // Preserve the unproven entry without following it. Preparation
+            // creates a new private directory from the accepted content.
+            fs::rename(
+                &installation,
+                installation.with_extension(format!("{}.damaged", uuid::Uuid::new_v4())),
+            )?;
             return Ok(false);
         }
-        let cache = installation.join("runtime-cache");
-        let cache_metadata = fs::symlink_metadata(&cache)?;
-        if !cache_metadata.file_type().is_dir()
-            || cache_metadata.file_type().is_symlink()
-            || cache_metadata.uid() != rustix::process::geteuid().as_raw()
-            || cache_metadata.mode() & 0o777 != 0o700
+        // Saved projections are disposable; the current accepted plan owns
+        // execution authority. Reuse is decided by content receipts alone.
+        let Some(receipt) = read_installation_metadata(&installation)? else {
+            return Ok(false);
+        };
+        if !receipt_matches_plan(&receipt, spec)
+            || self
+                .verify_plan_materialization(installation_id, spec)
+                .is_err()
         {
+            return Ok(false);
+        }
+        let encoded_spec = serde_json::to_vec(spec)?;
+        if encoded_spec.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
             return Err(OciError::Artifact);
         }
-        self.verify_installation(installation_id)?;
+        self.ensure_runtime_cache(installation_id)?;
+        repair_installation_projections(&installation)?;
+        atomic_write(&installation, "spec.json", &encoded_spec)?;
+        atomic_write(
+            &installation,
+            "recipe-content.sha256",
+            recipe_content_sha256.as_bytes(),
+        )?;
         Ok(true)
     }
 
@@ -264,6 +325,25 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         Ok(())
     }
+}
+
+fn repair_installation_projections(installation: &Path) -> Result<(), OciError> {
+    for name in [
+        "spec.json",
+        "recipe-content.sha256",
+        INSTALLATION_METADATA_FILE,
+    ] {
+        let path = installation.join(name);
+        if let Ok(metadata) = fs::symlink_metadata(&path)
+            && !metadata.file_type().is_file()
+        {
+            fs::rename(
+                path,
+                installation.join(format!("{}.damaged", uuid::Uuid::new_v4())),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

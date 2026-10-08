@@ -504,3 +504,56 @@ fn linkable_bytes_count_only_complete_store_objects() {
     fs::write(&store[1], b"short").unwrap();
     assert_eq!(super::linkable_model_bytes(data.path(), &plan), 7);
 }
+
+#[test]
+fn cancelled_copy_yields_without_publishing_and_fresh_preparation_converges() {
+    let data = tempdir().unwrap();
+    let plan: crate::workloads::CompiledExecutionPlan =
+        serde_json::from_value(compiled_plan()).unwrap();
+    let store = stock_store(data.path(), &plan);
+    let checks = std::cell::Cell::new(0);
+    let cancelled = || {
+        let count = checks.get() + 1;
+        checks.set(count);
+        count > 2
+    };
+    assert!(
+        materialize_compiled_models_controlled(
+            data.path(),
+            &plan,
+            FIRST,
+            false,
+            &mut |_, _| {},
+            &cancelled,
+        )
+        .is_err()
+    );
+    assert!(
+        !data
+            .path()
+            .join("installations")
+            .join(FIRST)
+            .join("models/primary/config.json")
+            .exists()
+    );
+    assert!(store.iter().all(|path| path.exists()));
+    materialize_compiled_models_controlled(
+        data.path(),
+        &plan,
+        FIRST,
+        false,
+        &mut |_, _| {},
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(
+            data.path()
+                .join("installations")
+                .join(FIRST)
+                .join("models/primary/config.json")
+        )
+        .unwrap(),
+        b"primary"
+    );
+}

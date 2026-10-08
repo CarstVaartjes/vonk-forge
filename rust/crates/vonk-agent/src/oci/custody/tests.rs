@@ -80,15 +80,77 @@ fn completed_install_retry_reuses_exact_receipt_without_another_space_reservatio
         b"invalid receipt",
     )
     .unwrap();
-    assert!(matches!(
-        runtime.install_with_space_check(
+    runtime
+        .install_with_space_check(
             &plan,
             &installation_id,
             &recipe_digest,
             unavailable_full_copy_bytes,
-        ),
-        Err(OciError::Artifact)
-    ));
+        )
+        .unwrap();
+    runtime.verify_installation(&installation_id).unwrap();
+    assert_eq!(fs::metadata(&model).unwrap().ino(), before.ino());
+    fs::write(installation.join("spec.json"), b"broken projection").unwrap();
+    fs::remove_file(installation.join("recipe-content.sha256")).unwrap();
+    fs::remove_dir(installation.join("runtime-cache")).unwrap();
+    runtime
+        .install_with_space_check(
+            &plan,
+            &installation_id,
+            &recipe_digest,
+            unavailable_full_copy_bytes,
+        )
+        .unwrap();
+    assert_eq!(runtime.load_spec(&installation_id).unwrap(), plan);
+    assert!(installation.join("runtime-cache").is_dir());
+    assert_eq!(fs::metadata(&model).unwrap().ino(), before.ino());
+    fs::remove_dir(installation.join("runtime-cache")).unwrap();
+    let foreign_cache = data.path().join("foreign-cache");
+    fs::create_dir(&foreign_cache).unwrap();
+    fs::write(foreign_cache.join("preserved"), b"foreign bytes").unwrap();
+    symlink(&foreign_cache, installation.join("runtime-cache")).unwrap();
+    runtime
+        .install_with_space_check(
+            &plan,
+            &installation_id,
+            &recipe_digest,
+            unavailable_full_copy_bytes,
+        )
+        .unwrap();
+    assert!(
+        !fs::symlink_metadata(installation.join("runtime-cache"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        fs::read(foreign_cache.join("preserved")).unwrap(),
+        b"foreign bytes"
+    );
+    fs::remove_file(installation.join("spec.json")).unwrap();
+    fs::create_dir(installation.join("spec.json")).unwrap();
+    runtime
+        .install_with_space_check(
+            &plan,
+            &installation_id,
+            &recipe_digest,
+            unavailable_full_copy_bytes,
+        )
+        .unwrap();
+    assert_eq!(runtime.load_spec(&installation_id).unwrap(), plan);
+    assert_eq!(fs::metadata(&model).unwrap().ino(), before.ino());
+    let mut placed = plan.clone();
+    placed.runtime.placement.reserved_memory_bytes += 1;
+    runtime
+        .install_with_space_check(
+            &placed,
+            &installation_id,
+            &recipe_digest,
+            unavailable_full_copy_bytes,
+        )
+        .unwrap();
+    assert_eq!(runtime.load_spec(&installation_id).unwrap(), placed);
+    assert_eq!(fs::metadata(&model).unwrap().ino(), before.ino());
 }
 
 #[test]

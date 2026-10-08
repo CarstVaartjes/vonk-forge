@@ -19,20 +19,32 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             let quarantine = reconciliation_quarantine_path(&root, &installation_id)?;
             let installation = managed_path(self.data_root, "installations", &installation_id)?;
 
-            if let Some(checkpoint) = read_reconciliation_checkpoint(&checkpoint_path)? {
-                if checkpoint.schema_version != INSTALLATION_RECONCILIATION_SCHEMA_VERSION
-                    || checkpoint.identity != *identity
-                {
-                    return Err(OciError::Artifact);
-                }
+            let installed = read_reconciliation_directory_identity(&installation)?;
+            let quarantined = read_reconciliation_directory_identity(&quarantine)?;
+            if let Some(checkpoint) = read_reconciliation_checkpoint(&checkpoint_path)?
+                && checkpoint.schema_version == INSTALLATION_RECONCILIATION_SCHEMA_VERSION
+                && checkpoint.identity == *identity
+                && !(installed.is_some() && quarantined.is_some())
+                && (checkpoint.state != InstallationReconciliationState::Complete
+                    || (installed.is_none() && quarantined.is_none()))
+                && (installed.or(quarantined).is_none_or(|found| {
+                    found
+                        == (
+                            checkpoint.installation_device,
+                            checkpoint.installation_inode,
+                        )
+                }))
+            {
                 match checkpoint.state {
                     InstallationReconciliationState::Complete => {
                         if path_exists_without_following(&installation)?
                             || path_exists_without_following(&quarantine)?
                         {
-                            return Err(OciError::Artifact);
+                            // A replacement is observed below under the
+                            // current request rather than historical history.
+                        } else {
+                            return Ok(InstallationReconciliationProgress { complete: true });
                         }
-                        return Ok(InstallationReconciliationProgress { complete: true });
                     }
                     InstallationReconciliationState::Prepared => {
                         let location = match (
@@ -40,6 +52,16 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                             read_reconciliation_directory_identity(&quarantine)?,
                         ) {
                             (Some(identity), None) | (None, Some(identity)) => identity,
+                            (None, None) => {
+                                let mut completed = checkpoint;
+                                completed.state = InstallationReconciliationState::Complete;
+                                write_reconciliation_checkpoint(
+                                    &root,
+                                    &checkpoint_path,
+                                    &completed,
+                                )?;
+                                return Ok(InstallationReconciliationProgress { complete: true });
+                            }
                             _ => return Err(OciError::Artifact),
                         };
                         if location
@@ -71,10 +93,34 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 }
             }
 
-            if path_exists_without_following(&quarantine)? {
-                return Err(OciError::Artifact);
+            if installed.is_some() && quarantined.is_some() {
+                // Preserve the unmatched directory. It is not evidence that
+                // the replacement installation is authorized for deletion.
+                // This request records its freshly observed inode below;
+                // helper reconciliation must run again before finalization.
+                fs::rename(
+                    &quarantine,
+                    root.join(format!("{}.retained", uuid::Uuid::new_v4())),
+                )?;
+                File::open(&root)?.sync_all()?;
             }
-            let directory_metadata = fs::symlink_metadata(&installation)?;
+            if installed.is_none() && quarantined.is_none() {
+                let checkpoint = InstallationReconciliationCheckpoint {
+                    schema_version: INSTALLATION_RECONCILIATION_SCHEMA_VERSION,
+                    state: InstallationReconciliationState::Complete,
+                    identity: identity.clone(),
+                    installation_device: 0,
+                    installation_inode: 0,
+                };
+                write_reconciliation_checkpoint(&root, &checkpoint_path, &checkpoint)?;
+                return Ok(InstallationReconciliationProgress { complete: true });
+            }
+            let observed_path = if installed.is_some() {
+                &installation
+            } else {
+                &quarantine
+            };
+            let directory_metadata = fs::symlink_metadata(observed_path)?;
             if !trusted_installation_directory(&directory_metadata) {
                 return Err(OciError::Artifact);
             }
@@ -251,14 +297,17 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
     }
 
-    pub(super) fn refuse_reconciled_installation(
+    pub(super) fn supersede_reconciliation_checkpoint(
         &self,
         installation_id: &str,
     ) -> Result<(), OciError> {
         let root = self.ensure_installation_reconciliation_root()?;
         let path = reconciliation_checkpoint_path(&root, installation_id)?;
-        match fs::symlink_metadata(path) {
-            Ok(_) => Err(OciError::Artifact),
+        // The per-installation lock fences an active cleanup. Historical
+        // checkpoints do not hold authority over a new preparation request.
+        let retired = root.join(format!("{}.retired", uuid::Uuid::new_v4()));
+        match fs::rename(path, retired) {
+            Ok(()) => File::open(root)?.sync_all().map_err(OciError::Io),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
         }
@@ -320,6 +369,14 @@ pub(super) fn read_reconciliation_directory_identity(
 pub(super) fn read_reconciliation_checkpoint(
     path: &Path,
 ) -> Result<Option<InstallationReconciliationCheckpoint>, OciError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if trusted_receipt_metadata(&metadata)
+                && metadata.len() <= MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES => {}
+        Ok(_) => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
     let file = match OpenOptions::new()
         .read(true)
         .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
@@ -333,15 +390,15 @@ pub(super) fn read_reconciliation_checkpoint(
     if !trusted_receipt_metadata(&metadata)
         || metadata.len() > MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES
     {
-        return Err(OciError::Artifact);
+        return Ok(None);
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     file.take(MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_INSTALLATION_RECONCILIATION_RECEIPT_BYTES {
-        return Err(OciError::Artifact);
+        return Ok(None);
     }
-    Ok(Some(serde_json::from_slice(&bytes)?))
+    Ok(serde_json::from_slice(&bytes).ok())
 }
 
 pub(super) fn write_reconciliation_checkpoint(
@@ -362,6 +419,16 @@ pub(super) fn write_reconciliation_checkpoint(
         .open(&temporary)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
+    if let Ok(metadata) = fs::symlink_metadata(destination)
+        && !metadata.file_type().is_file()
+    {
+        // A malformed local record may be a directory or symlink. Preserve
+        // it without following it and publish the freshly observed record.
+        fs::rename(
+            destination,
+            root.join(format!("{}.retired", uuid::Uuid::new_v4())),
+        )?;
+    }
     fs::rename(&temporary, destination)?;
     File::open(root)?.sync_all()?;
     Ok(())
