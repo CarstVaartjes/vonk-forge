@@ -23,7 +23,9 @@ pub use vonk_agent_protocol::host_memory_guard_policy::{
     COMMAND_TIMEOUT, EXHAUSTED_BYTES, FULL_PSI_PERCENT, JOURNAL_RETRY, PRELOAD_MARGIN_BYTES,
     SAMPLE_INTERVAL, SUSTAINED_PRESSURE,
 };
-const FAILURE_REASON: &str = "workload.host_memory_exhausted";
+fn failure_reason() -> &'static str {
+    vonk_agent_protocol::generated::FailureCode::WorkloadHostMemoryExhausted.as_str()
+}
 const EXIT_CAUSE: &str = "host_memory_exhausted";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -154,7 +156,7 @@ fn evidence(sample: Sample, trigger: &str, duration: Duration) -> FailureDiagnos
         storage: vec![],
         collector_errors: vec![],
         preflight: vec![
-            property("reason", FAILURE_REASON),
+            property("reason", failure_reason()),
             property("exit_cause", EXIT_CAUSE),
             property("trigger", trigger),
             property(
@@ -205,7 +207,7 @@ fn publish(root: &Path, id: &str, value: &FailureDiagnostics) -> std::io::Result
     let path = evidence_path(root, id)
         .ok_or_else(|| std::io::Error::other("invalid container identity"))?;
     fs::create_dir_all(path.parent().expect("evidence parent"))?;
-    let temporary = path.with_extension("pending");
+    let temporary = path.with_extension("tmp");
     let mut file = File::create(&temporary)?;
     let bytes =
         vonk_agent_protocol::canonical_generated_json(value).map_err(std::io::Error::other)?;
