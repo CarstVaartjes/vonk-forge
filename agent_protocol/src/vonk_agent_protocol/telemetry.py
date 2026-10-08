@@ -63,7 +63,8 @@ class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
         EvidenceGroup(
-            AgentEvidenceCode.TELEMETRY_READING_DROPPED, (("gpu_temperature_c",),)
+            AgentEvidenceCode.TELEMETRY_READING_DROPPED,
+            (("gpu_temperature_c",), ("gpu_unavailable_reason",)),
         ),
         EvidenceGroup(
             AgentEvidenceCode.TELEMETRY_READING_DROPPED,
