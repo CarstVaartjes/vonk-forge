@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Best-effort checkout target reclamation, called under the VM cargo lock.
+
+The caller bounds the entire scan/removal with timeout. Unmarked, malformed,
+symlinked, or inaccessible entries are retained rather than guessed unused.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import shutil
+import sys
+from pathlib import Path
+
+MARKER = ".checkout-path"
+
+
+def target_key(checkout: Path) -> str:
+    return hashlib.sha256(os.fsencode(checkout)).hexdigest()[:16]
+
+
+def prepare(checkout: Path, cache: Path) -> None:
+    cache.mkdir(parents=True, exist_ok=True)
+    with os.scandir(cache) as entries:
+        for entry in entries:
+            try:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                target = Path(entry.path)
+                marker = target / MARKER
+                if marker.is_symlink():
+                    continue
+                with marker.open("rb") as stream:
+                    recorded = stream.read(4097)
+                if not recorded or len(recorded) > 4096:
+                    continue
+                owner = Path(os.fsdecode(recorded))
+                if not owner.is_absolute() or target_key(owner) != entry.name:
+                    continue
+                try:
+                    owner.stat()
+                except FileNotFoundError:
+                    shutil.rmtree(target)
+            except (OSError, ValueError):
+                # Bookkeeping cannot prevent a new cargo invocation.
+                continue
+    target = cache / target_key(checkout)
+    target.mkdir(exist_ok=True)
+    marker = target / MARKER
+    if not target.is_symlink() and not marker.is_symlink():
+        marker.write_bytes(os.fsencode(checkout))
+
+
+if __name__ == "__main__":
+    try:
+        prepare(Path(sys.argv[1]), Path(sys.argv[2]))
+    except (OSError, ValueError):
+        pass
