@@ -275,7 +275,7 @@ def _child_result(
     | None
 ):
     """Read the receipt retained by the owning canonical child DTO."""
-    from ..distribution_executor import _ChildView
+    from ..distribution_executor.receipts import _ChildView
 
     if isinstance(child, RecipeOperationView):
         return child.lifecycle_result
@@ -286,7 +286,7 @@ def _child_result(
 
 def _child_progress_payload(child: object) -> RunSwitchObservedEvidence:
     """Consume explicit executor DTOs at their typed observation boundary."""
-    from ..distribution_executor import _ChildView
+    from ..distribution_executor.receipts import _ChildView
 
     if isinstance(child, RecipeOperationView):
         result, state, reason = _child_result(child), child.state, child.status_reason
