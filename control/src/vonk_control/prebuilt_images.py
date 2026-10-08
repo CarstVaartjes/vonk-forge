@@ -39,6 +39,7 @@ from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
     PrebuiltImageCode,
+    UnknownOutcomeError,
     canonical_message,
 )
 from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
@@ -300,6 +301,10 @@ def write_library_image_plan(library_root: Path, output: Path) -> dict[str, obje
                 ],
             )
             key = executable_build_key(intent)
+        except UnknownOutcomeError as error:
+            # End only this plan entry; a later invocation observes it anew.
+            skipped.append({"slug": slug, "reason": _reason(error)})
+            continue
         except Exception as error:  # noqa: BLE001 - one recipe never blocks the others
             skipped.append({"slug": slug, "reason": _reason(error)})
             continue
@@ -436,6 +441,9 @@ def library_source_policy_failures(library_root: Path) -> dict[str, str]:
         try:
             item, bundle = _library_recipe(library_root, index, entry)
             _require_source_policy(item.document, bundle, item.source_bundle_sha256)
+        except UnknownOutcomeError as error:
+            # No build was accepted and no resource is retained by this report.
+            failures[slug] = _reason(error)
         except Exception as error:  # noqa: BLE001 - report every recipe, not the first
             failures[slug] = _reason(error)
     return failures

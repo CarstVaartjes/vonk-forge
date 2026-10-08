@@ -452,7 +452,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 214,
+    "total": 197,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -1111,6 +1111,30 @@
         "UnknownOutcomeError"
       ],
       "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
+    },
+    {
+      "path": "control/src/vonk_control/availability_production.py",
+      "function": "build_recipe_image_availability.builder",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Canonical unknown planning outcomes roll back any partial persistence and return BuildUnsettled to the identity-lock runner; it releases locks and persists bounded lifecycle backoff before the next exact preparation attempt. Security refusals propagate."
+    },
+    {
+      "path": "control/src/vonk_control/prebuilt_images.py",
+      "function": "write_library_image_plan",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "A typed unknown ends only this recipe plan entry with a diagnostic; no build, lock or claim is accepted and the next invocation re-observes the recipe independently."
+    },
+    {
+      "path": "control/src/vonk_control/prebuilt_images.py",
+      "function": "library_source_policy_failures",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "A typed unknown ends this pure validation entry with a diagnostic without effects or claims; remaining recipes are examined and a fresh invocation is immediately eligible."
     }
   ],
   "call_edges": [
@@ -1688,10 +1712,10 @@
       "RecipeImageAvailabilityScheduler.memory_footprint": "ecea438fab3580ff8d8135c1507b530244b3e9da76ab308d128ab1ee0d24bbd1",
       "RecipeImageAvailabilityScheduler.close": "8cb2dd356f12f2d672315021d6f84f6a83da2ee6e7c6e0692faee6ae3ae180bd",
       "RecipeImageAvailabilityProduction.close": "152fd19dec9a507fa196c3ce7d4eb8e88dddd071dc49e1a1fab7c55703db924c",
-      "build_recipe_image_availability": "7e085c5357ffa1ffcfc129a0a7a03002c3edcafd1572bd803812bae666b8852d",
+      "build_recipe_image_availability": "d688cc25b6deecedadd7f9c7a4178e5644bcd1d2d091a2c566534f30bb6ea3df",
       "build_recipe_image_availability.authority": "5452ae29a468da5cf16518b864ed57a83509ec7eb8b9cf7e14da767116787930",
       "build_recipe_image_availability.recover_build": "2b0483fe84c2bd14d8da2a77ec007832cca578ca9852088a933b7dda89a37809",
-      "build_recipe_image_availability.builder": "aa08c1bccec7d68b443bde088ce4930e33140944896e99662b0c96e5f1e4aca4",
+      "build_recipe_image_availability.builder": "1405ae79d4d1c34517918938a0866260e2bbd2b4934709514d611b78fce4efd6",
       "build_recipe_image_availability.builder.admission_guard": "6fd40226769640f8d50311ce7e2bcd0fe2256f2e357bdff74433ec9c617e0351",
       "run_availability_scheduler": "35f5e4428408ccc49623139359ca0bf9783fc52afb729708e28047eea81e1ad8",
       "_build_dependency": "1c9d5a5e4ee1298e6f85f8c9a9f42cc0870cffdc956f4d763224c7707c17962d",
@@ -1699,7 +1723,7 @@
       "_dependency_unsettled": "8d43e6dc128eaa0af449ef472f4e08ed16eb6c65652c3c265a87b11f9b308b05",
       "_prebuilt_blocker": "b21cad1de95823890c35527dfeeeb386e4b3769630a94a095f0b83d2a8391f5f",
       "_capacity_wait": "9f5386fec7cc1d7418ede6571055513b0854c2e760e18ddef4f4bdac9ccb1bb4",
-      "_planning_failure": "fc2c6ff6ac2113e99cda877c0ef04a8a7897e84ff7fda61f7a7809f056293882",
+      "_planning_failure": "a539f837ac9ca118abdea1836eadf183e7deea960bf4bd38c5f98e9f83035455",
       "_recorded_decision": "368f5aba159d41e689f8ae8e292709af57fb616c94206cde245ba7cb42022414",
       "_prebuilt_choice": "59674c3a71a3dcd62dbe1c2b45871556056e67694f00a52fbb501b92ebdc91b6",
       "_observe_build": "5aafbbd3d5022f7eb18237c8066f83f8d462821ca84664e4212d2b42ee7b3dea",
@@ -3461,11 +3485,11 @@
       "package_build_intent": "0499ec1649ea492f1498aadd402b1d1bc8f85c7c08017f1814ec5ff59fc5005f",
       "_scalar": "22e88adbd8d8219918071462442c5074bf1db952a4a4fd8923c983e76c29ca0c",
       "podman_build_arguments": "b7cb5cef8d57cf68cf001a65a5abce2bea15e99ab0cae8083170ce9c8baf5423",
-      "write_library_image_plan": "b5211ee00ce58ec41eeeb2dc77fd13222e5e9b3bee4557a26fefe0b13449cab1",
+      "write_library_image_plan": "3cfd8391e3ab49affea16d0fb9cbf2b21fa0d83b6bcacf7b5f3c96fb4055bb61",
       "_library_recipe": "4bc95571723440c32e6c405d7d723ec592bddbaaaf11871283675610ea062927",
       "_require_source_policy": "1fdf965d865d2706e98e28acea289aa4dcf607551fe58ed90da90ac68c725dcf",
       "_reason": "8df9a7dc5b43bb303288f34b0728f349b46f646813df45a17058c78dff853c80",
-      "library_source_policy_failures": "a194b88c88d64521f7c451debae89c420502eeea74c7211b08e8afa373d09153",
+      "library_source_policy_failures": "d182f053d2ac321f083a9ea3f4b823ae5bded54bfd382b4a78fd4e1a0d3f4e36",
       "_bundle_relative": "201650b23267d0d5dc7f0f2c8f775e882627d7e54e3a3a570a6ad6b2b4a8e745",
       "prebuilt_reference": "0e6c3e0f3ecabb00245a0c17c9662c8570c017d724fcd1dafd2447e41d27566f",
       "policy_prebuilt_reference": "d80a3ff32340a7163db4c9fe34a60ac981e9ae50e4ab771cf0196f639497c878",
@@ -3583,7 +3607,7 @@
       "RecipeBuildAdmissionBusy.__init__": "90bd65f856fb7024ef68dfa245139c15fb0a63999c0844d7ac7e2569765ebb63",
       "_read_recipe_projection": "5cb0a98d09e66f56835a8ee5ce30d18dfc6a89e51449dfbebac30eeb0fc6c67f",
       "RecipeBuildResolution.cached": "f842f76c6f6223e59507167e1279a416eb244f9996988b63c606ace0ec2dff55",
-      "RecipeBuildResolution.build_input_for_builder": "c6f0d9db1baa213dcd7b124b58bece74ca3ef3dabd17fa075f47ad6402f4b3c3",
+      "RecipeBuildResolution.build_input_for_builder": "131cf7af1d9e5af74ed760ccb21d62cc400a66675e3717705cf60d98cca5a6ed",
       "SourceBundleRederiver.__call__": "d59b4c65acb0925b66894f7cdf8cccc6c7b55b2e47398a9bdab825358fb475db",
       "rederive_source_bundle_from_closure": "cda69a2cff296f0ea098bd73a23c41e9841e752380fd7a33d935cb9ee995e1ec",
       "RecipeBuildService.__init__": "7e3be94c4565501ac4c82a926d2e13ae03159f2a7f9ce38ed623fca10728fbd1",
@@ -3616,7 +3640,7 @@
       "_has_build_receipt": "a24bd7e531123889316c0bdeb20bf3c89c6ab944b4bb7e9f40185be889dc44bd",
       "_reopen_build_attempt": "40a27eacecc9e3837ff642c0c46659092456f974f8fc2e8f285ce608336d3c4d",
       "_digest": "6073c487755ee8fff97be9c815bfb4b393de66792aa9e00a7c279356ccc2cee4",
-      "<module>": "6d2dddab285bff67083ea4a7dd159de2733aa2c0d9f69815acc2be06ab70c310"
+      "<module>": "5e83eba8f17a6335aa5d1e997200002b4795a8536f0625367c3fea945a7a0767"
     },
     "control/src/vonk_control/recipe_execution_contract.py": {
       "RecipeExecutionContractError.__init__": "da4f86129107958663ce2754468e9afd0fd49464d36dff1ed2db4998ed04d23a",
@@ -5472,7 +5496,6 @@
       "sites": [
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_artifact_missing", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_reference_missing", 1],
-        ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService.resolve_reference", "catalog.reference_missing", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService.revise", "catalog.revision_missing", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "_head", "catalog.head_missing", 1]
       ]
@@ -5582,15 +5605,6 @@
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "candidate_placements", "mapping.node_count", 1],
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "effective_option_choices", "mapping.option_invalid", 1],
         ["control/src/vonk_control/cluster_mappings.py", "ClusterMappingError", "validate_mapping_parameters", "mapping.parameters_invalid", 1]
-      ]
-    },
-    {
-      "family": "compiled_execution_plan.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "_verified_model_object", "verified-model-object-receipt-is-invalid", 1],
-        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-execution-plan-receipts-are-inconsistent", 1]
       ]
     },
     {
@@ -5837,9 +5851,9 @@
       ]
     },
     {
-      "family": "canonical.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
+      "family": "canonical.image-handle-request",
+      "category": "input-validation",
+      "reason": "The pure runtime compiler validates its caller-supplied package/build handle in _image before returning a launch projection: missing image digest or a reference inconsistent with that digest is invalid input. This is not a storage lookup or unknown observation; no dispatch, write or reservation occurs.",
       "sites": [
         ["control/src/vonk_control/harnesses/canonical.py", "HarnessCompileError", "_image", "built-image-receipt-reference-does-not-match-its-digest", 1],
         ["control/src/vonk_control/harnesses/canonical.py", "HarnessCompileError", "_image", "source-build-recipe-requires-an-exact-built-image-receipt", 1]
@@ -5878,14 +5892,6 @@
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check.",
       "sites": [
         ["control/src/vonk_control/harnesses/canonical.py", "HarnessCompileError", "_validate_argv_size", "compiled-harness-argv-token-exceeds-its-bound", 1]
-      ]
-    },
-    {
-      "family": "common.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/harnesses/common.py", "HarnessCompileError", "validate_projection", "built-in-harness-telemetry-is-missing", 1]
       ]
     },
     {
@@ -6210,21 +6216,6 @@
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.cancellation_pending", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_busy", 1],
         ["control/src/vonk_control/recipe_build_cancellation.py", "BuildConsumerError", "lock_build_dependency", "build.consumer_invalid", 2]
-      ]
-    },
-    {
-      "family": "recipe_builds.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.persist_plan_in_session", "message", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildResolution.build_input_for_builder", "build.plan_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.node_unknown", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.plan_invalid", 4],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.runtime_changed", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_canonical_recipe_document", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_validate_builder", "build.node_incompatible", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "canonical_build", "build.contract_invalid", 1]
       ]
     },
     {
@@ -8116,6 +8107,7 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.persist_plan_in_session", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.reserve_in_session", "message", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.capability_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_disk", 1],
@@ -8137,8 +8129,14 @@
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._resolve_once", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.node_unknown", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.plan_invalid", 4],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.runtime_changed", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_canonical_recipe_document", "build.contract_invalid", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_source_bundle_handle", "build.source_unavailable", 1]
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_source_bundle_handle", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_validate_builder", "build.node_incompatible", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "canonical_build", "build.contract_invalid", 1]
       ]
     },
     {
@@ -8447,6 +8445,31 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRetryLater", "RetryMixin._retry_install_in_session", "stored-compiled-execution-plan-is-unreadable-for-install-ret", 1]
+      ]
+    },
+    {
+      "family": "catalog_entities.exact-reference-request",
+      "category": "input-validation",
+      "reason": "The caller supplies an exact active document reference to resolve_reference; the read-only lookup rejects an absent target before any mutation. Missing stored heads, revisions and artifact projections remain debt.",
+      "sites": [
+        ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService.resolve_reference", "catalog.reference_missing", 1]
+      ]
+    },
+    {
+      "family": "compiled_execution_plan.receipt-request",
+      "category": "input-validation",
+      "reason": "The pure compiler validates caller-supplied verified receipt values and their consistency before returning any dispatch payload; it performs no storage, dispatch or reservation effect.",
+      "sites": [
+        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "_verified_model_object", "verified-model-object-receipt-is-invalid", 1],
+        ["control/src/vonk_control/compiled_execution_plan.py", "CompiledExecutionPlanError", "compile_verified_execution_plan", "verified-execution-plan-receipts-are-inconsistent", 1]
+      ]
+    },
+    {
+      "family": "common.projection-request",
+      "category": "input-validation",
+      "reason": "validate_projection rejects missing required telemetry on its supplied standalone built-in projection before any effect. The production canonical compiler passes canonical_argv=True, which disables this branch; its internally missing telemetry is separately retained as recipe_runtime_specs debt.",
+      "sites": [
+        ["control/src/vonk_control/harnesses/common.py", "HarnessCompileError", "validate_projection", "built-in-harness-telemetry-is-missing", 1]
       ]
     }
   ]

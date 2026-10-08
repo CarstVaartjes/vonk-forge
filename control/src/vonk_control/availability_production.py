@@ -774,7 +774,7 @@ def build_recipe_image_availability(
                     now=clock(),
                     resolution=resolution,
                 )
-            except Exception as error:  # noqa: BLE001 - a planner failure is an unknown outcome, returned
+            except UnknownOutcomeError as error:
                 code = str(getattr(error, "code", ""))
                 if code in _BUILDER_ADMISSION_CODES:
                     skipped[candidate_id] = (code, str(error)[:200])
@@ -792,11 +792,7 @@ def build_recipe_image_availability(
                         None,
                     )
                     continue
-                return BuildUnsettled(
-                    code or RecipeImageCode.BUILD_UNAVAILABLE,
-                    str(error)[:512],
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
+                return _planning_failure(error)
             # Admission can still refuse the plan when it is persisted; the
             # wait then names why this was a Spark build at all.
             planned_decision = _recorded_decision(prepared.policy_report)
@@ -896,7 +892,7 @@ def build_recipe_image_availability(
                     selected_plan = recipe_builds.persist_plan_in_session(
                         session, prepared, now=clock()
                     )
-                except Exception as error:  # noqa: BLE001 - a planner failure is an unknown outcome, returned
+                except UnknownOutcomeError as error:
                     code = str(getattr(error, "code", ""))
                     if code in _BUILDER_ADMISSION_CODES:
                         skipped[candidate_id] = (code, str(error)[:200])
@@ -913,11 +909,7 @@ def build_recipe_image_availability(
                         continue
                     # The failed write is undone, not committed half done.
                     session.rollback()
-                    return BuildUnsettled(
-                        code or RecipeImageCode.BUILD_UNAVAILABLE,
-                        str(error)[:512],
-                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                    )
+                    return _planning_failure(error)
                 builder_node_id = candidate_id
                 if selected_plan is None:
                     session.rollback()
@@ -958,7 +950,7 @@ def build_recipe_image_availability(
                 prepared = recipe_builds.prepare_plan(
                     revision_id, builder_node_id, now=clock(), resolution=resolution
                 )
-            except Exception as error:  # noqa: BLE001 - a planner failure is an unknown outcome, returned
+            except UnknownOutcomeError as error:
                 return _planning_failure(error)
             with sessions.begin() as session:
                 service._require_claim(session, claim)
@@ -966,7 +958,7 @@ def build_recipe_image_availability(
                     selected_plan = recipe_builds.persist_plan_in_session(
                         session, prepared, now=clock()
                     )
-                except Exception as error:  # noqa: BLE001 - a planner failure is an unknown outcome, returned
+                except UnknownOutcomeError as error:
                     session.rollback()
                     return _planning_failure(error)
         if selected_plan is None:
@@ -1245,7 +1237,7 @@ def _capacity_wait(
     )
 
 
-def _planning_failure(error: Exception) -> BuildUnsettled:
+def _planning_failure(error: UnknownOutcomeError) -> BuildUnsettled:
     """The Recipe build plan could not be prepared or stored: a capacity wait
     when the builder is full or has no fresh inventory, else unavailable."""
 
@@ -1265,7 +1257,7 @@ def _planning_failure(error: Exception) -> BuildUnsettled:
         return BuildUnsettled(
             RecipeImageCode.BUILD_CAPACITY_WAIT,
             detail[:512],
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            reason=error.typed_reason or WaitReason.OBSERVATION_UNAVAILABLE,
             retryable=True,
             recovery_actions=("resume", "retry"),
             blockers=tuple(blockers),
@@ -1273,7 +1265,8 @@ def _planning_failure(error: Exception) -> BuildUnsettled:
     return BuildUnsettled(
         code or RecipeImageCode.BUILD_UNAVAILABLE,
         str(error)[:512],
-        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        reason=error.typed_reason or WaitReason.OBSERVATION_UNAVAILABLE,
+        retryable=True,
     )
 
 

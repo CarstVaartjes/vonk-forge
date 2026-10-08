@@ -2057,3 +2057,20 @@ def test_build_progress_reads_current_attempt_upload_from_persisted_json() -> No
         session.flush()
         with pytest.raises(ValueError):
             availability_production._build_progress(session, "build-job", "builder")
+
+
+def test_unknown_build_planning_preserves_typed_reason_and_retry_policy() -> None:
+    """A stale plan must re-enter observation rather than become terminal debt."""
+    from vonk_agent_protocol import RecipeBuildCode, WaitReason
+    from vonk_control.recipe_builds import RecipeBuildUnknown
+
+    failure = availability_production._planning_failure(
+        RecipeBuildUnknown(
+            RecipeBuildCode.PLAN_INVALID,
+            "stored plan is unavailable",
+            reason=WaitReason.STALE_PLAN,
+        )
+    )
+    assert failure.code == RecipeBuildCode.PLAN_INVALID
+    assert failure.reason is WaitReason.STALE_PLAN
+    assert failure.retryable is True
