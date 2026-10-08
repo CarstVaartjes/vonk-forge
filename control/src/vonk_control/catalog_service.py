@@ -31,8 +31,8 @@ from .catalog_entities import (
     CatalogConflict,
     CatalogDocumentRevision,
     CatalogEntityService,
-    CatalogError,
     CatalogValidationError,
+    _head,
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
@@ -150,7 +150,7 @@ class CatalogService:
     ) -> SourceBundleView:
         del actor
         if self._source_bundles is None:
-            raise CatalogError(
+            raise SourceBundleUnknown(
                 SourceBundleCode.STORAGE_UNAVAILABLE,
                 "source bundle storage is unavailable",
             )
@@ -461,24 +461,29 @@ class CatalogService:
         retained digest must also become current when the imported catalog pins
         it again; its immutable revision and exact dependency bindings survive.
         """
+        recipe = read_catalog_document(revision)
+        if not isinstance(recipe, RecipeDefinition):
+            raise CatalogValidationError(
+                CatalogCode.RECIPE_INVALID, "catalog revision is not a recipe"
+            )
         root = session.get(CatalogDocument, revision.document_id, with_for_update=True)
         if root is None:
-            raise CatalogValidationError(
-                CatalogCode.DOCUMENT_MISSING, "catalog document is missing"
+            # This authorized import names the retained immutable revision.
+            # Rebuild only its lookup root; no user, grant or selected profile
+            # is reconstructed from artifact discovery.
+            root = CatalogDocument(
+                id=revision.document_id,
+                kind=revision.kind,
+                publisher=revision.publisher,
+                slug=revision.slug,
+                title=recipe.metadata.title,
+                created_by=revision.created_by,
+                created_at=revision.created_at,
+                updated_at=self._clock(),
             )
-        head = session.scalar(
-            select(CatalogDocumentHead)
-            .where(
-                CatalogDocumentHead.kind == root.kind,
-                CatalogDocumentHead.publisher == root.publisher,
-                CatalogDocumentHead.slug == root.slug,
-            )
-            .with_for_update()
-        )
-        if head is None:
-            raise CatalogValidationError(
-                CatalogCode.HEAD_MISSING, "catalog document head is missing"
-            )
+            session.add(root)
+            session.flush()
+        head = _head(session, root)
         if head.active_revision_id == revision.id:
             return
         if head.candidate_revision_id is not None:
@@ -488,11 +493,6 @@ class CatalogService:
             )
         head.active_revision_id = revision.id
         head.generation += 1
-        recipe = read_catalog_document(revision)
-        if not isinstance(recipe, RecipeDefinition):
-            raise CatalogValidationError(
-                CatalogCode.RECIPE_INVALID, "catalog revision is not a recipe"
-            )
         root.title = recipe.metadata.title
         root.updated_at = self._clock()
 

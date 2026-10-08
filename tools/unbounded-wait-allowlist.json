@@ -159,7 +159,7 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/recipe_packages.py",
+      "path": "control/src/vonk_control/recipe_packages/__init__.py",
       "function": "RecipePackageClient._store_package",
       "kind": "loop-without-deadline",
       "count": 1

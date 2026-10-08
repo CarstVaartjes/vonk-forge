@@ -13,7 +13,7 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import CatalogCode
+from vonk_agent_protocol import CatalogCode, InvalidRequestError, InvalidRequestReason
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
@@ -54,6 +54,15 @@ class CatalogConflict(CatalogError):
 
 class CatalogValidationError(CatalogError):
     pass
+
+
+class CatalogReferenceInvalid(InvalidRequestError, CatalogValidationError):
+    """The requested candidate names a Model that is not an active input."""
+
+    def __init__(self, code: CatalogCode, detail: str) -> None:
+        CatalogValidationError.__init__(self, code, detail)
+        self.typed_reason = InvalidRequestReason.NOT_FOUND
+        self.typed_field = "models"
 
 
 class CatalogEntityService:
@@ -289,20 +298,15 @@ class CatalogEntityService:
                 .order_by(CatalogDocumentRevision.revision_number.desc())
                 .limit(1)
             )
-            if latest is None:
-                raise CatalogValidationError(
-                    CatalogCode.REVISION_MISSING, "document has no revision"
-                )
-            if (
-                expected_revision is not None
-                and latest.revision_number != expected_revision
-            ):
+            # An empty root has no accepted revision to protect. The new
+            # request supplies the canonical document instead of waiting for
+            # bookkeeping that cannot repair itself.
+            latest_number = latest.revision_number if latest is not None else 0
+            if expected_revision is not None and latest_number != expected_revision:
                 raise CatalogConflict(
                     CatalogCode.STALE_REVISION, "document revision changed"
                 )
-            revision = _revision(
-                root, parsed, clean, latest.revision_number + 1, actor, now
-            )
+            revision = _revision(root, parsed, clean, latest_number + 1, actor, now)
             session.add(revision)
             session.flush()
             head.candidate_revision_id, root.title, root.updated_at = (
@@ -342,6 +346,15 @@ class CatalogEntityService:
             if revision is None:
                 raise KeyError(entity_or_revision_id)
             if revision.state == "active":
+                if (
+                    head.active_revision_id is None
+                    and head.candidate_revision_id is None
+                ):
+                    # The caller named this exact activation; history did not
+                    # select it. Existing selections and candidates still win.
+                    head.active_revision_id = revision.id
+                    head.generation += 1
+                    session.flush()
                 return revision
             if revision.id != head.candidate_revision_id:
                 raise CatalogConflict(
@@ -463,7 +476,7 @@ class CatalogEntityService:
                 .limit(1)
             )
             if model_revision is None:
-                raise CatalogValidationError(
+                raise CatalogReferenceInvalid(
                     CatalogCode.MODEL_REFERENCE_MISSING,
                     f"model reference is missing: {ref.publisher}/{ref.slug}",
                 )
@@ -475,10 +488,20 @@ class CatalogEntityService:
                 )
             models[model_revision.content_digest] = model
             if model_revision.artifact_key is None:
-                raise CatalogValidationError(
-                    CatalogCode.MODEL_ARTIFACT_MISSING,
-                    f"model artifact projection is missing: {ref.publisher}/{ref.slug}",
+                # The immutable Model owns the files; this key is disposable
+                # derived bookkeeping, reconstructed from the exact document.
+                artifact_key = _digest(
+                    {
+                        "files": _model_artifact_files(model),
+                        "format": model.format.model_dump(mode="json"),
+                    }
                 )
+                session.execute(
+                    update(CatalogDocumentRevision)
+                    .where(CatalogDocumentRevision.id == model_revision.id)
+                    .values(artifact_key=artifact_key)
+                )
+                session.expire(model_revision, ["artifact_key"])
             artifact_inputs.append(
                 {
                     "selection_id": selection.id,
@@ -778,9 +801,17 @@ def _head(session: Session, root: CatalogDocument) -> CatalogDocumentHead:
         .with_for_update()
     )
     if head is None:
-        raise CatalogValidationError(
-            CatalogCode.HEAD_MISSING, "catalog document head is missing"
+        # Every caller holds this document root's write lock. Recreate only its
+        # empty selection record: history cannot choose an accepted head. The
+        # current authorized request binds the candidate or imported revision.
+        head = CatalogDocumentHead(
+            kind=root.kind,
+            publisher=root.publisher,
+            slug=root.slug,
+            generation=0,
         )
+        session.add(head)
+        session.flush()
     return head
 
 

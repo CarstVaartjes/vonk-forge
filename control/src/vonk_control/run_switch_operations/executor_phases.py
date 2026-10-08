@@ -32,7 +32,6 @@ from ..models import (
 )
 from ..offline_stops import pending_run_stop_nodes
 from ..profile_capacity import (
-    ProfileHandoffInconsistent,
     prepared_profile_installation,
 )
 from ..recipe_execution_contract import (
@@ -264,19 +263,13 @@ class ExecutorPhasesMixin:
             profile_application_id = _string_or_none(progress.profile_application_id)
             if profile_application_id is not None:
                 with service._sessions() as session:
-                    try:
-                        handed_off = prepared_profile_installation(
-                            session,
-                            profile_application_id,
-                            _required_string(plan.recipe_revision_id),
-                            tuple(node.node_id for node in plan.spark_group.nodes),
-                            workload_intent_ordinal=_bound_workload_intent(progress),
-                        )
-                    except ProfileHandoffInconsistent as error:
-                        raise RunSwitchRetryLater(
-                            f"{RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT}: {error}",
-                            reason=WaitReason.SCOPE_CHANGED,
-                        ) from error
+                    handed_off = prepared_profile_installation(
+                        session,
+                        profile_application_id,
+                        _required_string(plan.recipe_revision_id),
+                        tuple(node.node_id for node in plan.spark_group.nodes),
+                        workload_intent_ordinal=_bound_workload_intent(progress),
+                    )
                     if handed_off is not None:
                         installation_id, install_plan_digest = handed_off
                         installation, _ = service._bound_installation(

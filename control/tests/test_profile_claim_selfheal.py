@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import RunSwitchCode
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import (
     FleetProfileApplication,
@@ -196,17 +197,38 @@ def test_active_claims_with_different_owners_are_named_not_adopted(
         job = session.get(Job, _the_switch(load).id)
         assert job is not None and isinstance(job.result, dict)
         job.result = {**job.result, "phase_index": 0, "item_index": 0}
+    with load.sessions() as session:
+        owners = {
+            row.id: (row.owner_kind, row.owner_id)
+            for row in session.scalars(
+                select(ResourceReservation).where(ResourceReservation.kind == "disk")
+            )
+        }
     for _ in range(20):
         _loop(load, lambda: False, rounds=1)
         _follow_due(load)
-        if "run-switch.installation-handoff-inconsistent" in (
+        if RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT in (
             _the_switch(load).status_reason or ""
         ):
             break
-    assert "run-switch.installation-handoff-inconsistent" in (
+    assert RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT in (
         _the_switch(load).status_reason or ""
     )
     assert _application(load).state == "running"
+    with load.sessions.begin() as session:
+        claims = list(
+            session.scalars(
+                select(ResourceReservation).where(ResourceReservation.kind == "disk")
+            )
+        )
+        assert {row.id: (row.owner_kind, row.owner_id) for row in claims} == owners
+        installation_owner = next(
+            row.owner_id for row in claims if row.owner_kind == "installation"
+        )
+        for row in claims:
+            row.owner_kind = "installation"
+            row.owner_id = installation_owner
+    assert _settle(load), _application(load).status_reason
 
 
 def test_without_room_a_lost_claim_waits_visibly_and_resumes(tmp_path: Path) -> None:
