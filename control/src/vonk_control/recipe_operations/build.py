@@ -78,6 +78,21 @@ class BuildMixin:
         self, recipe_revision_id: str, builder_node_id: str
     ) -> RecipeBuildPlan:
         service = typing_cast("RecipeOperationService", self)
+        refused: UnknownOutcomeError | None = None
+        for _attempt in admission_attempts():
+            try:
+                return service._preview_build_once(recipe_revision_id, builder_node_id)
+            except UnknownOutcomeError as error:
+                refused = error
+                if admission_wait_exhausted(error):
+                    break
+        assert refused is not None
+        raise refused
+
+    def _preview_build_once(
+        self, recipe_revision_id: str, builder_node_id: str
+    ) -> RecipeBuildPlan:
+        service = typing_cast("RecipeOperationService", self)
         if service._builds is None:
             raise RecipeRetryLater("recipe build service is unavailable")
         return service._builds.plan(
@@ -426,7 +441,7 @@ class BuildMixin:
         admission_guard: Callable[[Session], None] | None = None,
     ) -> RecipeOperationView:
         service = typing_cast("RecipeOperationService", self)
-        refused: RecipeBuildAdmissionBusy | None = None
+        refused: UnknownOutcomeError | None = None
         for _attempt in admission_attempts():
             try:
                 return service._build_once(
@@ -437,7 +452,7 @@ class BuildMixin:
                     force=force,
                     admission_guard=admission_guard,
                 )
-            except RecipeBuildAdmissionBusy as error:
+            except UnknownOutcomeError as error:
                 refused = error
                 if admission_wait_exhausted(error):
                     break

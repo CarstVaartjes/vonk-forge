@@ -452,7 +452,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 214,
+    "total": 211,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -863,9 +863,9 @@
       "path": "control/src/vonk_control/recipe_operations/build.py",
       "function": "BuildMixin.build",
       "catches": [
-        "RecipeBuildAdmissionBusy"
+        "UnknownOutcomeError"
       ],
-      "reason": "The build request retries its whole admission transaction a bounded number of times with short jittered pauses; the request identity makes a repeat idempotent."
+      "reason": "Direct build admission retries typed uncertainty, including unavailable build-service wiring, after each failed transaction releases its locks. The finite admission budget preserves exact inputs and leaves a fresh request eligible; security refusals escape immediately."
     },
     {
       "path": "control/src/vonk_control/recipe_operations/install.py",
@@ -1111,6 +1111,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "function": "BuildMixin.preview_build",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Direct build preview re-observes exact inputs through the bounded admission schedule. Exhaustion returns typed uncertainty without a claim, so the next request can observe again; security refusals escape immediately."
     }
   ],
   "call_edges": [
@@ -3953,16 +3961,17 @@
       "<module>": "90f6a0854f3743fab7c8253e4a3c1ac4ffcfa855b3d3b0585416cbf604fdc7f2"
     },
     "control/src/vonk_control/recipe_operations/build.py": {
-      "BuildMixin.preview_build": "23a5f7ffad8245ef62e81d49362e4e79bf3164e78393ff08fdad6cb9816ba8c1",
+      "BuildMixin.preview_build": "5b4a2c3f4247d7c38df54cd8a2d1636130e36b6f3de9ed4194989b5e07f02a3f",
+      "BuildMixin._preview_build_once": "61fa7b2c4512b9cbcdeb87c26bc21c8a196e125e18c425154b6190b1f01f776f",
       "BuildMixin.reusable_build_id": "71ebc653362e20d3f15bc0ca9762c310000a79ec114fc1ebd78c68b5958a83c6",
       "BuildMixin.check_build_source": "d48c220f1c5a3c1f14b3059b174b83f2d61c0599b7b8a07edbf3629848dad135",
       "BuildMixin._check_build_source_once": "4875a4ad3eec7c932357e8cb427d680151bebf87a985fe25a219a98a4f483a92",
-      "BuildMixin._build_once": "43b17d4096ba63e5f7af395fb6ca8485a29f544a5a2234251c4036688a994f2f",
-      "BuildMixin.build": "2c00bf41b56a4a0dbf9ef974a32b4fd2fcb366768d8013e3caf258db0e2b7167",
-      "BuildMixin._start_build_in_session": "cd9c855d65ea8d28fdee5976c0c2eae78759d7d36de113d1956dde5f201db9e5",
-      "BuildMixin._queue_prebuilt_build_in_session": "45c0a74f1eb35cb6acd987cdc4127bbf9dc67aadd7ed36b3b9a15aa4eeb09511",
+      "BuildMixin._build_once": "a16105d85dbd7ea18e2bdfcfa7a12b92410437154724d14c0ec9b14ba8112858",
+      "BuildMixin.build": "04e6c634f71548e5261ce1df8f1dba14d79d0cbb61dff9a6ab3f5a0be7b24d19",
+      "BuildMixin._start_build_in_session": "a371c881e7665049292f105c2f347e820671fa3389699e733e7e20fb6d0c5706",
+      "BuildMixin._queue_prebuilt_build_in_session": "640e900fa2e345f55ada31150e2fb130901614baae322ef28628204ef76d2f45",
       "BuildMixin._successful_build_job_in_session": "d4ef5d2ee29b7d59223e44a61895f930d9fe62a14303028ceb327c5507f7ccea",
-      "<module>": "7ffccbb43ac4ac57020a04acefce21a5b55815717c7bb8b3e27e056c96abedd0"
+      "<module>": "2d2fe2505d61a7b5c5cd0c6924b0cd678a3a9348c45730c0606ebb11b5f5d056"
     },
     "control/src/vonk_control/recipe_operations/build_cancellation.py": {
       "BuildCancellationMixin._cancel_build": "8c9e239fc059b252b0995807e3265771280a3b16ee3f2baf10e3e3c3ec9b51a7",
@@ -6458,9 +6467,6 @@
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "route-bundle-apply-failed-previous-activation-retained", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._activate", "route-validation-rejected-the-staged-bundle", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._claim_publication_lock", "route-publication-lock-is-held-by-another-publisher", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._identity", "publication-digest-identity-is-invalid", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._identity", "reconciliation-id-is-invalid", 1],
-        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._identity", "reconciliation-id-is-not-canonical", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._locked", "route-publication-lock-is-unavailable", 2],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._require_supervisor_ack", "live-litellm-supervisor-acknowledgement-is-unavailable", 1],
         ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher.inspect", "active-route-marker-does-not-match-expected-publication", 1],
@@ -7966,7 +7972,7 @@
         ["control/src/vonk_control/recipe_operations/start.py", "RecipeRetryLater", "StartMixin._start_once", "recipe-installation-is-not-runnable", 1],
         ["control/src/vonk_control/recipe_operations/start.py", "RecipeRetryLater", "StartMixin._start_once", "recipe-node-endpoint-evidence-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRetryLater", "JobRunStopMixin._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
-        ["control/src/vonk_control/recipe_operations/build.py", "RecipeRetryLater", "BuildMixin.preview_build", "recipe-build-service-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/build.py", "RecipeRetryLater", "BuildMixin._preview_build_once", "recipe-build-service-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRetryLater", "InstallationPreparationMixin.start_installation", "prior-installation-intent-requires-exact-observation-before", 1],
         ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRetryLater", "InstallationPreparationMixin.start_installation", "recipe-installation-is-being-reconciled", 1],
         ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRetryLater", "InstallationPreparationMixin.start_installation", "stored-installation-plan-is-unreadable-it-is-recorded-and-t", 1],
@@ -8447,6 +8453,16 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRetryLater", "RetryMixin._retry_install_in_session", "stored-compiled-execution-plan-is-unreadable-for-install-ret", 1]
+      ]
+    },
+    {
+      "family": "route_runtime.publication-input-shape",
+      "category": "input-validation",
+      "reason": "Reviewed submission-shape checks only: _identity validates canonical UUID spelling and hexadecimal digest syntax supplied by the caller, before a publication lock, staging or activation. It neither reads stored bookkeeping nor compares unobserved effects or provenance. Invalid input ends this invocation without claims; a subsequent canonical input remains eligible. Actual bundle-byte checks, unsafe paths and destructive Stop target fences remain separate security edges.",
+      "sites": [
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._identity", "publication-digest-identity-is-invalid", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._identity", "reconciliation-id-is-invalid", 1],
+        ["control/src/vonk_control/route_runtime.py", "RouteRuntimeError", "AtomicRouteBundlePublisher._identity", "reconciliation-id-is-not-canonical", 1]
       ]
     }
   ]
