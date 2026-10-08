@@ -7,12 +7,12 @@ Do not add a whole-tree scan to SCOPED: select its file or node in GUARDS.
 """
 
 GUARDS: tuple[str, ...] = (
+    "control/tests/test_added_line_guards.py",
     "tests/test_ci_apt_install.py",
     "tests/cluster_profiles/test_cli_render.py::test_every_controller_command_has_a_registered_presentation",
     "tests/test_controller_startup_guard.py",
     "tests/test_gpu_telemetry_unit.py",
     "tests/test_data_contract_guards.py",
-    "tests/test_file_size_ratchet.py",
     "tests/test_git_hermeticity.py",
     "tests/test_orm_mapping_guard.py",
     "tests/test_run_switch_patch_targets.py",
@@ -234,10 +234,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "lifecycle canary: fixed entrypoint/fixture behavior.",
     ),
     (
-        "tests/scripts/test_lifecycle_counts.py",
-        "lifecycle counts: fixed entrypoint/fixture behavior.",
-    ),
-    (
         "tests/scripts/test_managed_ca_release_contract.py",
         "managed ca release contract: fixed entrypoint/fixture behavior.",
     ),
@@ -376,10 +372,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/test_generated_contracts.py",
         "generated contracts: fixed entrypoint/fixture behavior.",
-    ),
-    (
-        "tests/test_lifecycle_counts_workflow.py",
-        "lifecycle counts workflow: fixed entrypoint/fixture behavior.",
     ),
     (
         "tests/test_lifecycle_vocabulary_generation.py",
