@@ -52,6 +52,7 @@ from vonk_agent_protocol import (
     RunAdmissionCode,
     RunState,
     RunSwitchCode,
+    RuntimePreflightCode,
     SecurityRefusalError,
     SecurityRefusalReason,
     UninstallPlanCode,
@@ -8061,9 +8062,10 @@ class RunSwitchOperationService:
                     plan, phase, actor=actor, request_key=request_key, progress=progress
                 )
             except (RuntimeError, ValueError, KeyError) as error:
+                code = error_code(error) or RuntimePreflightCode.RECEIPT_INVALID
                 fail(
-                    str(error),
-                    failure_code=error_code(error),
+                    f"{code}: {type(error).__name__}: {error}",
+                    failure_code=code,
                     replan=True,
                     definite=getattr(error, "definite", False),
                 )
@@ -8109,6 +8111,11 @@ class RunSwitchOperationService:
                             now,
                         )
                     job.result = _persisted_result(current)
+                    job.status_reason = (
+                        f"{checkpoint.last_failure_code}: {checkpoint.last_failure_detail}"
+                        if checkpoint.last_failure_code
+                        else None
+                    )
                     job.updated_at = now
                 if checkpoint.pending_job_id or checkpoint.next_check_at is not None:
                     return True
@@ -9851,7 +9858,10 @@ def _wait_blockers(
 
 def _persisted_result(value: RunSwitchOperationResult) -> dict[str, object]:
     """The single canonical result serializer at the ORM boundary."""
-    return value.model_dump(mode="json", exclude_unset=True)
+    # In-place mutations of default collections do not enter model_fields_set.
+    # Persist values, including nested checkpoints, rather than constructor
+    # history; the canonical serializer omits only optional None fields.
+    return serialize_json_value(value)
 
 
 _PHASE_RESULT_ADAPTER = TypeAdapter(RunSwitchPhaseResult)

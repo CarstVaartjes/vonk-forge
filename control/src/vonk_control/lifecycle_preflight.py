@@ -243,6 +243,9 @@ class LifecyclePreflight:
                             node_id, RuntimePreflightCode.RECEIPT_INVALID
                         )
                     checkpoint.receipts[node_id] = result
+                    # A completed child is evidence of an attempt even when an
+                    # older checkpoint serializer lost the default attempt map.
+                    checkpoint.attempts[node_id] = checkpoint.attempts.get(node_id, 1)
                     checkpoint.pending_job_id = None
                     checkpoint.pending_node_id = None
                     checkpoint.next_check_at = None
