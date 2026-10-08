@@ -200,7 +200,12 @@
       "control/src/vonk_control/recipe_operations/uninstall.py",
       "control/src/vonk_control/recipe_packages.py",
       "control/src/vonk_control/recipe_progress.py",
-      "control/src/vonk_control/recipe_routes.py",
+      "control/src/vonk_control/recipe_routes/__init__.py",
+      "control/src/vonk_control/recipe_routes/candidate.py",
+      "control/src/vonk_control/recipe_routes/publisher.py",
+      "control/src/vonk_control/recipe_routes/service.py",
+      "control/src/vonk_control/recipe_routes/shared.py",
+      "control/src/vonk_control/recipe_routes/withdrawal.py",
       "control/src/vonk_control/recipe_runtime_specs.py",
       "control/src/vonk_control/recipe_stop_payloads.py",
       "control/src/vonk_control/recipe_update_batches.py",
@@ -470,7 +475,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 194,
+    "total": 172,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -1151,6 +1156,46 @@
         "UnknownOutcomeError"
       ],
       "reason": "Direct build preview re-observes exact inputs through the bounded admission schedule. Exhaustion returns typed uncertainty without a claim, so the next request can observe again; security refusals escape immediately."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes/candidate.py",
+      "function": "candidate_in_session",
+      "catches": [
+        "RecipeRouteNotReady"
+      ],
+      "reason": "Three non-sleeping candidate observations precede the typed unknown end; no claim is acquired. The worker reopens the transaction on its persisted bounded route backoff."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes/service.py",
+      "function": "RecipeRouteService.publish_run",
+      "catches": [
+        "RecipeRouteNotReady"
+      ],
+      "reason": "Three request-led attempts reopen the publication transaction after bounded jitter; supersession and missing evidence leave no admission gate."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes/publisher.py",
+      "function": "AtomicRecipeRoutePublisher._activate",
+      "catches": [
+        "_ActivatedRecipeRouteError"
+      ],
+      "reason": "Three bounded acknowledgement attempts reconcile and adopt only the identical checksum-verified active bytes, with neither SQL transaction nor artifact lock held during backoff."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes/service.py",
+      "function": "RecipeRouteService._execute",
+      "catches": [
+        "RecipeRouteSuperseded"
+      ],
+      "reason": "Bounded exact claim observation ends with typed scope-changed; a superseded claim is replaced by each fresh publication, and no transaction is held during external completion observation."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes/service.py",
+      "function": "RecipeRouteService._claim_run_publication",
+      "catches": [
+        "RecipeRouteSuperseded"
+      ],
+      "reason": "Bounded exact claim observation ends with typed scope-changed; a superseded claim is replaced by each fresh publication, and no transaction is held during external completion observation."
     }
   ],
   "call_edges": [
@@ -2835,7 +2880,7 @@
       "ProjectionReason": "0c56d27757e0dbf420b5733df7103b32b9e90fc352a7289f674d2571dd038724",
       "NodeConnection": "29401865e60041ed281304afba8fcceeaa76ea7e89fc0c2eee4d8370055650cf",
       "InventoryState": "fa64876910f478af374b9b231bd666c472ea99c45d5439687397732df607faa0",
-      "TelemetryPoint": "b865de24512b9122a6eb508e6048783919b38f93f2ac5da78aaab616eb33b3a3",
+      "TelemetryPoint": "acee7addc760457fc68ba1eca09787d338bfd1fa751225b656126c89bc34a6ec",
       "TelemetryState": "ce3115262c3a185ac87b4412c32c4118eaf465d6b8b7f47fe878f941467c4290",
       "RecipePresence": "59d6483378b2cf716b401d3054feeab0ff191e1fadf6efe54e3360b1151378a9",
       "RunPresence": "9aef5921e7a1e8042a685d0c741815e9f0ff1a22dc0afe62c07f7b7feb7fafcf",
@@ -2846,7 +2891,7 @@
       "FleetNode": "522f23a2d251621f34ea470911e0aa9fe413b03803a2fccb753d3b8f398ee483",
       "FleetSnapshot": "4eac10cc4e71437e25f777516fda60e6344d7898ca905043963ca65968799555",
       "FleetNodeIdentity": "c467730362718b7dbbf7231bd49ef0cfb636497f960b57b36004972ccdedeccf",
-      "telemetry_point": "7c6158ff4548c238a8e057b15bab8d99ebdc97fc014074c64c08087c68028e5c",
+      "telemetry_point": "7af58d76b2c806d9fda5ba40a8bf4f8e451a0d249a875a1ee176916236dfd1de",
       "_utc": "fbbb50d3ca5be4177c7567f574443e15265e47aedff64b175d1293e410db713a",
       "FleetProjection": "ec31fa110529602224545bd0a44cad03b465d8b438f092de2c4b5a7a381c13be",
       "FleetProjection.__init__": "0f477d467fb4347121fe44148bac6675c81bd0a189c3ac3e0172a19270c3998a",
@@ -2871,7 +2916,7 @@
       "FleetProjection._certificate_state": "53a4657b142dfa70ce4830168bccba394e6412c703c36051d6ba476a9f42a567",
       "FleetProjection._inventory": "412f79069fd29a9acf8917a0213a0a9a1c23a4e4a9601197023d65900c1babb4",
       "FleetProjection._telemetry_state": "2d81212aed79d5a533b7d5be3928b6a3cff3fbc1dbd300dafb3867c18a4b93aa",
-      "<module>": "be41d5991b843cf797b2426494d3608bcf78bf4f0606d0c663ae9cca9d89232b"
+      "<module>": "5a7cb72ff6bb6f572b89fa604c9b8e3f3419e302e3d1f17b8bafcc3f09915cc8"
     },
     "control/src/vonk_control/gateway_keys.py": {
       "GatewayKeyError": "5d4a0204a2e12fd94940eaf84799e88ce927f0aba264c0074a24e1977473f982",
@@ -4518,12 +4563,12 @@
       "_FleetProfileCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
       "_RunSwitchCoordinator": "02961d2c009383e9a3f87e48593ebb5638a0be212332ce43cba90184e95ac7db",
       "_RunSwitchCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
-      "RecipeOperationWorker": "51aa15d824bfc4db887bad7cb9584dfc3bd4e248396a4ba2d7bcc249f742b375",
+      "RecipeOperationWorker": "09f864ac373dd4051b45b0e86b6c0a7e3ca4b7c374f298d308de672097649cd0",
       "RecipeOperationWorker.__init__": "259dd62f553359422b5f00134f0c89143093c22fdb6e8e1941436249a46dcd5a",
-      "RecipeOperationWorker.tick": "a3d4c27cf2ec57b7c5101b95bbd4055d546c02630b61dc0c83b7033d51a6a131",
+      "RecipeOperationWorker.tick": "b636f66b36184bb1503364f4fb5304a288dbbd8e3ae875c7ebe48daf5073d6ed",
       "RecipeOperationWorker._defer_publication": "a5e234c9e1d113fc7f968e539e26ed734a388c8d44f34358e4ddd6c429ef63ee",
       "RecipeOperationWorker._expire_initial_observation_deadline": "8d96ac49577ad0b206b31bc7c331136569180e52045d5433b65bcedfff25c21d",
-      "<module>": "fefa03272e684b1e3b6ca3bc4cc482de0abc65cd7049a07fc9e3a3d3c9d42a30"
+      "<module>": "4098616598c130ff5ac35d38b8e28e223bd969de2575b8e22bad96a3b6ca422a"
     },
     "control/src/vonk_control/recipe_operations/__init__.py": {
       "<module>": "0561f1130bcc9b4ca48a51746ec5cd702f8f07bd764916a90bba28eb9aec801a"
@@ -4900,18 +4945,89 @@
       "_project_recipe_operation_progress": "6d17d411506edfb83c97378d4cc7a3ffe22191e3ea002927b88b371f7182c53c",
       "<module>": "8c96870492a7de809a750c948375827b2b4648465de1073e2c85739e1753720e"
     },
-    "control/src/vonk_control/recipe_routes.py": {
+    "control/src/vonk_control/recipe_routes/__init__.py": {
+      "<module>": "50018b75cd0741dfc221429001e89af382778f0c302abc40a234cb5cec883ab1"
+    },
+    "control/src/vonk_control/recipe_routes/candidate.py": {
+      "_candidate_once": "a8fd59a347ca0d69d7dcd819fcd5de53d3440e62f5511e356eed9b8d4e0b2f0e",
+      "_primary_model_alias": "a5c52074516836c08edc729414160397cc38084c79ef9892103f3dd854c3a89b",
+      "_endpoint": "a614046094efcdec62f0f329285a886debd270f8bda712e402303e5c330a2dbd",
+      "candidate_in_session": "6347ad99b0b12a2c075c309a16d9f77d6b01b8a26bb9fbd2ee1cf9d7b652bec7",
+      "<module>": "9b465599462a2d989fdebfdbbd23c0e85be37e878728d156762c3b4ef5216805"
+    },
+    "control/src/vonk_control/recipe_routes/publisher.py": {
+      "AtomicRecipeRoutePublisher": "aa11bbfe31d5bba22f08b8dbcfd43d43a9bb401945b444c8ceb0f832b783071a",
+      "AtomicRecipeRoutePublisher.__init__": "3e1fd3de63e442a11e8713af7399f6178aefe6d0441214731ec8f57b7c6edd1b",
+      "AtomicRecipeRoutePublisher.publish_recipe": "35560fca7ca53db4e4d27d372a86c64934ed9a4549062123eabac4bef8ff8b80",
+      "AtomicRecipeRoutePublisher.publish_empty": "24cff5df9f741879f75e16d9b68d53eb53a17b703b7e1e12820cc05e4136980e",
+      "AtomicRecipeRoutePublisher.active_marker_digest": "4b6962848390d14ca7f2eab4d3741c73f0013c67815d2c62fbb237f28266d455",
+      "AtomicRecipeRoutePublisher.accepted_run": "98d7580db0f5c79aa67e8c35fb9b1184c31127a2b1c4401d474f28f3a8275cfa",
+      "AtomicRecipeRoutePublisher._next_generation": "b43dd9af51d77dba7686220f65786206b2193cea760d31e0e51b70389a063af4",
+      "AtomicRecipeRoutePublisher._activate": "7aa6e8121f684b0e7134bee2266a063dc7bf3756bcffef689d3e2c200b029dca",
+      "AtomicRecipeRoutePublisher._activate_once": "becec6c8d48138533ddb045ac9b5d9efbdc07c37fbef7fd71a64ea486012bd9f",
+      "<module>": "aa11bbfe31d5bba22f08b8dbcfd43d43a9bb401945b444c8ceb0f832b783071a"
+    },
+    "control/src/vonk_control/recipe_routes/service.py": {
+      "RecipeRouteService": "b0cbbb13914ccbfc9e7ad82f506aa7b41af4d6c4c6959413c110965440a8304a",
+      "RecipeRouteService.__init__": "369b3e8654ba9f85e967ed045132c00fc2fc0bdeb7f3b97e3c90e235646a1791",
+      "RecipeRouteService.publish_run": "59684ec8e898a2495c62d62817960b1135487dfabd13e10b5688553374e846a2",
+      "RecipeRouteService._publish_run_once": "f701256a911f67060df1886e1881326d6d35b85bca3af99d530b6ad56fbe9383",
+      "RecipeRouteService.publication_transaction": "cc297c3cb5277e9beeda567d989fe9ca8ea7c69e2149ea1a25d68c5a23efe7d9",
+      "RecipeRouteService._claim_in_session": "facc8a45df94ed2022cfaf1040830daf045df1cbb479fa2cccd5465cc8489ee9",
+      "RecipeRouteService._claim_current": "91960b561004626735f5ff4594afb656e322618ba438b9580b544e1652221bc3",
+      "RecipeRouteService._claim_is_current": "2af678e2b8163adfc67f53c0b450a3e939fe86d44df0c1668f397c672bf4f053",
+      "RecipeRouteService._execute": "1ca4e7541c82f7e1ef775457b7b6e13f89931e1fb6e0f68d8959eb997929754f",
+      "RecipeRouteService._execute_once": "3c9401711d1ebf3080b2633f84646a83248506f177908441897bd434dc1eac08",
+      "RecipeRouteService._record_failure": "cd201d5dbb0f4ab3096417fed54b8451417ad2207aa936e33386895674769244",
+      "RecipeRouteService._settle_failed_run_withdrawal": "e580cee991c2411af5cdfa248a1b0613a790310a3692ebd0001fc6a8d3171750",
+      "RecipeRouteService._record_completion": "a2be382447daace03698136fa5da613e2fc8732167513fe33550cca2f605b6f6",
+      "RecipeRouteService._claim_run_publication": "18e2c13958e0aeb929c28a8c5e2cb0f1c776a201134c897334bec57f53ecf0cb",
+      "RecipeRouteService._claim_run_publication_once": "79b2f3eee4bd370b5bf97c2cb4930c8da0fc5742a28b0090a1a0151caa05c8c3",
+      "RecipeRouteService._claim_run_publication_once.complete": "d9dfe56a75de1fee6c335ed5ae6f05285c326dec2f5dfb34c767b4d6aef78fe2",
+      "RecipeRouteService._claim_run_publication_once.fail": "fa78e613ed8b04621cb5ace4f96415b59dfa385bb50f7c49ce094aeb0cbbf870",
+      "RecipeRouteService._complete_run_publication": "bf5a984b3d612e759e2747149b22000ef9dfd9b035ad1dbff8602f30c73c75ff",
+      "RecipeRouteService._fail_run_publication": "d4bfb94794098d49a893135bbe277aa365d76746fa2d2732415e0065a3afa527",
+      "RecipeRouteService._fail_recovery_publication_in_session": "1a64d0cf3c1261dede3d2f7811d56204fba6a423fb71110667eae685a3b57006",
+      "RecipeRouteService._recovery_job": "9255cb69f628070735f2fac7d6c32ce7c145bab91d4fb023d3baca76e22b6dc7",
+      "RecipeRouteService._recovery_publication": "f39d2b2ab8c8f6dc0ee9c0deb91592d1a66def70f7b0b15edd70437485643b7c",
+      "RecipeRouteService._recovery_context": "8a62b92e238930abf8b88d87c17ae3c697e86927be5db087c10dec756ee8c32f",
+      "RecipeRouteService._enforce_recovery_publication_deadline": "cce5562a4a7ba507ca1cba2caf164b2f5a58f20453e86607ffbfc304ad81d8f9",
+      "RecipeRouteService.withdraw_run": "70ddc98a5af77837570320ccf38f7e51e30f654b198354fd601196c627e7aecb",
+      "RecipeRouteService.withdraw_runs": "6092b3d1a4ba0f6d0d18c4d44acaec300c8776b57db5c458c4d4dd81b3d87f04",
+      "RecipeRouteService._withdrawn_after_backoff": "e632cf93cbeb33737f091c60b45de8950f125704307e424b01218789465b4878",
+      "RecipeRouteService._withdraw_runs_once": "12acdc361e597a483f80752d1d185cbaf39e0612f43a188e9c5dde01b75b89e0",
+      "RecipeRouteService.withdrawal_complete_in_session": "dc9f17977ff5a542205a237f7218d0909a3fff06ab820b5df60a5d14dde36191",
+      "RecipeRouteService.prepare_withdrawal_in_session": "c75c3d65228e9a5dba76afbc3922cb8fd1766463eefb0392e24fba36667d05a0",
+      "RecipeRouteService._withdrawal_effect": "58152196292a2d620ba22816e863cd3d5d9ec5f6b1554b5c0897d7b13826c779",
+      "RecipeRouteService._withdrawal_publication": "5ffe85bade044ce9676c8b6de9c6f20dfbeff2c2bc4909d91f4fe500cb3395d1",
+      "RecipeRouteService._record_withdrawal_in_session": "18f8911a1eba443a40987c7ea1e25ed840879fc8ae1ab112ff0fe3c8c7a51ddf",
+      "RecipeRouteService.maintain": "211fa039c5ed9936483f7ad8af458e110274af3103a72da03ee13be1303d595a",
+      "RecipeRouteService._restore_abandoned_stop_withdrawals": "9d6cd061aa4904360b718b4137076422c175025cf8ec93330aae4daefe12453b",
+      "RecipeRouteService._maintenance_step_in_session": "81ee857c85781217cf0700f3362d5cd7a5f3e0b6eaf23882b787c8aab7219dfb",
+      "RecipeRouteService._maintain_empty_routes": "6510b0fa42136b6d61b27caeb9230bfe58c234c5e7be389782e69634a54e8953",
+      "RecipeRouteService._publish": "61b9b8fae983fd297f626114b03caf69b19d69fc803c450d488cf8743470aa9a",
+      "RecipeRouteService._publish_empty": "14dffd18b0f03a0c0cdfa1f8263c7423af1aa7c8a884a4ff58f10dd9f7fa3016",
+      "RecipeRouteService.projection_in_session": "715bd7a79e20c058fbbcd0bc898c030f35b81c8ea5aae9a2a6fab56718ae5bfc",
+      "RecipeRouteService._note_retained": "e664cf99c0cedb2843d912d8aa9f646e6b71fd60a4b0196ec57ff5c1407ffa66",
+      "RecipeRouteService.candidate_in_session": "f4b57dd0b0061f2d6099d47b508a6e06fdc12641796662e681d50f4491193755",
+      "<module>": "b0cbbb13914ccbfc9e7ad82f506aa7b41af4d6c4c6959413c110965440a8304a"
+    },
+    "control/src/vonk_control/recipe_routes/shared.py": {
       "route_health_recovery_pending": "4d6fe9d3fa885b3eec9db2734b6dad0cb5842a1268b8b380ca2c8fea8c43bd00",
       "RecipeRouteError": "35fa9eea54aa5450a1939254671141b7db072520110933d7d31a4279124b75b4",
       "RecipeRouteError.__init__": "252f2c1872ccd19a359e486541e83c4a6b8b2187fb1d8f6d29cc44ed02d73ae1",
       "RecipeRankStopped": "3f4410aafa402c16c7b23fcb977e65353be996924941294447c934010a8a9ec8",
-      "RecipeEndpointAuthorityRefused": "89ef60c31ccaaa30975fa3840771b234c54d5956ea28fe5e5aab67e4e053a091",
-      "RecipeRouteNotReady": "71976391eec3f5673d56cd5b3378ec0b1a25c55d2c2b94c53a8f82aa8e1e60a9",
-      "RecipeRouteSuperseded": "e5b3a740ee0644fdb9e3e5886116baa3880f1b33ace3265db45be2d01388fcb3",
-      "RecipeRecoveryDeadlineError": "ff06279ad6e658dd6c7eecc66d5c7283aad37cb7dd5c9e4d5100d4826460277d",
+      "RecipeEndpointAuthorityRefused": "7e6b7eaccb2bf2e0dc5c877aa16f57675fcea56866869a6d234eb472c1b0dc02",
+      "RecipeEndpointAuthorityRefused.__init__": "bb83b95d8a4dd5d3b06be5d4782ec0d141f8965fa84d57af6b53b56b86faee51",
+      "RecipeRouteNotReady": "87da78016bef986e2c8e2e981b6510a65fb9d0acd49092417ead562011b90f32",
+      "RecipeRouteNotReady.__init__": "a5e826ca22b234e594dcd439806d1a9ba707ade16724d3f4656ab881eb06934a",
+      "RecipeRouteSuperseded": "6068042c745a42a06244f4c64669a7160e68c95481288c9b8ed146b60884d5b4",
+      "RecipeRouteSuperseded.__init__": "fbeb60a9fad1c8802e6e8e684ffef2d8450077518bd7cbbc870332ceaf0302c3",
+      "RecipeRecoveryDeadlineError": "e9093f32606f04c2531cdd7b8cbbc600be0969a3a5c0818596316dd9fd669531",
+      "RecipeRecoveryDeadlineError.__init__": "fbeb60a9fad1c8802e6e8e684ffef2d8450077518bd7cbbc870332ceaf0302c3",
       "RecipeRecoveryPublicationError": "eea9825a9304004ba5e66b8ee9cde584f7c227e428577fdd1ea867dad3ce0ebb",
-      "_ActivatedRecipeRouteError": "7f4cc09b14bf5374372f68b2f0d59bfc2da93f18c98c9bc9bc7756a3009165c0",
-      "_ActivatedRecipeRouteError.__init__": "2eac628640adcba09dee80ded627d14cd9d84534b990b168bc261c71d9625a80",
+      "_ActivatedRecipeRouteError": "57d3933951293a536b988b9fafcfb32be2e0355bd930726070eca244b2e13ea1",
+      "_ActivatedRecipeRouteError.__init__": "3e68f47ccece9310fda3792f112654eee26c8023b4557e60e0c66a5199b32166",
       "publication_is_temporary": "8424e154011fd166c5e3323a1f4d8090541f876cde0cecbc71eaf283e2f8b475",
       "_RecipeEndpoint": "0ef6a6cd599664a64f73ac0e6b0f708d5c468710e5f6a8db4ff4dbe465149448",
       "_RecipeEndpoint.api_base": "311839e171d88994c70f9fdba235c4e81be4b022db48fbe0509be828715fc27a",
@@ -4925,59 +5041,26 @@
       "route_publication_owner_lock_statement": "d1e42ca6896837318067b792c5b45d4bc286f8c2b8340754e38ed5f42ac50343",
       "lock_route_publication_owner_in_session": "0fcc9c4e1c2e77f5573bc1fc28cbbda2f25989c529093bb6430292c13841e825",
       "route_publication_transaction": "899797b8a931858d9445663bd0ba68d0fcf868201758ac85d099e785caefd74b",
-      "AtomicRecipeRoutePublisher": "a729e0405657695a25d83a9e06041b5848bfeccc4209e42e8efd4b7c4f056e94",
-      "AtomicRecipeRoutePublisher.__init__": "3e1fd3de63e442a11e8713af7399f6178aefe6d0441214731ec8f57b7c6edd1b",
-      "AtomicRecipeRoutePublisher.publish_recipe": "35560fca7ca53db4e4d27d372a86c64934ed9a4549062123eabac4bef8ff8b80",
-      "AtomicRecipeRoutePublisher.publish_empty": "24cff5df9f741879f75e16d9b68d53eb53a17b703b7e1e12820cc05e4136980e",
-      "AtomicRecipeRoutePublisher.active_marker_digest": "4b6962848390d14ca7f2eab4d3741c73f0013c67815d2c62fbb237f28266d455",
-      "AtomicRecipeRoutePublisher.accepted_run": "98d7580db0f5c79aa67e8c35fb9b1184c31127a2b1c4401d474f28f3a8275cfa",
-      "AtomicRecipeRoutePublisher._next_generation": "b43dd9af51d77dba7686220f65786206b2193cea760d31e0e51b70389a063af4",
-      "AtomicRecipeRoutePublisher._activate": "498a1ea9bddb244447571e545daed313ef82ec536044bbf2d79bfe8604ba4783",
-      "RecipeRouteService": "202833582388c9b6f7fe45e35566e9f974b1b52b0e5cb044fa64bca2ddd03891",
-      "RecipeRouteService.__init__": "369b3e8654ba9f85e967ed045132c00fc2fc0bdeb7f3b97e3c90e235646a1791",
-      "RecipeRouteService.publish_run": "faf652032cc54080ea6950e8ee6974b19e94e96ce1cd4fd5b9b8689bae234015",
-      "RecipeRouteService.publication_transaction": "cc297c3cb5277e9beeda567d989fe9ca8ea7c69e2149ea1a25d68c5a23efe7d9",
-      "RecipeRouteService._claim_in_session": "facc8a45df94ed2022cfaf1040830daf045df1cbb479fa2cccd5465cc8489ee9",
-      "RecipeRouteService._claim_current": "91960b561004626735f5ff4594afb656e322618ba438b9580b544e1652221bc3",
-      "RecipeRouteService._claim_is_current": "2af678e2b8163adfc67f53c0b450a3e939fe86d44df0c1668f397c672bf4f053",
-      "RecipeRouteService._execute": "ac50f36bd5267bbd1a47102c7eb2199cf39bd89f0738956800edfb571b61195d",
-      "RecipeRouteService._record_failure": "cd201d5dbb0f4ab3096417fed54b8451417ad2207aa936e33386895674769244",
-      "RecipeRouteService._settle_failed_run_withdrawal": "e580cee991c2411af5cdfa248a1b0613a790310a3692ebd0001fc6a8d3171750",
-      "RecipeRouteService._record_completion": "a2be382447daace03698136fa5da613e2fc8732167513fe33550cca2f605b6f6",
-      "RecipeRouteService._claim_run_publication": "6f38874b244df00a9d76df93ebc32e25d75a7d078365bb15a35b9aede6209315",
-      "RecipeRouteService._claim_run_publication.complete": "d9dfe56a75de1fee6c335ed5ae6f05285c326dec2f5dfb34c767b4d6aef78fe2",
-      "RecipeRouteService._claim_run_publication.fail": "fa78e613ed8b04621cb5ace4f96415b59dfa385bb50f7c49ce094aeb0cbbf870",
-      "RecipeRouteService._complete_run_publication": "3b1dd72dfcd5e3f006e2ba65d080df6102ba74f2d5d523414b34c45afeccba11",
-      "RecipeRouteService._fail_run_publication": "ce52bf18021a6ad4cd8716a3b25250af12bda19a6a3403cbb4e487d73d6e9292",
-      "RecipeRouteService._fail_recovery_publication_in_session": "7d98d99a92abd6f19446f723202029d5162e1d34311a1c121ac0642f08828212",
-      "RecipeRouteService._recovery_job": "9255cb69f628070735f2fac7d6c32ce7c145bab91d4fb023d3baca76e22b6dc7",
-      "RecipeRouteService._recovery_publication": "f39d2b2ab8c8f6dc0ee9c0deb91592d1a66def70f7b0b15edd70437485643b7c",
-      "RecipeRouteService._recovery_context": "8a62b92e238930abf8b88d87c17ae3c697e86927be5db087c10dec756ee8c32f",
-      "RecipeRouteService._enforce_recovery_publication_deadline": "8fd2d5365547ae35597f4a9a24a02e7b69c38a3631698d7eabe3e3e34ab30b4d",
-      "RecipeRouteService.withdraw_run": "2e733d5889c288e451e0b3005e3dab2c07345a06d3f2c0809330d5ff32ccdbf1",
-      "RecipeRouteService.withdraw_runs": "18057fed6948ab952fc4bea0c31dc628c5927e70eda83e781bfe4191bfd96908",
-      "RecipeRouteService._withdrawn_after_backoff": "e78cb50611c7b12ce8310348ba3e62668883f60454d0f5e05e4cbe2532731ded",
-      "RecipeRouteService._withdraw_runs_once": "f352a09ef3efdf95d8e186369722f525f554dc5c30a17584e8940fceb32b1d1c",
-      "RecipeRouteService.withdrawal_complete_in_session": "0e0ae060b1e8a173d087473cf77086c1f91d21f2cefa04f73e1b65188ba26df0",
-      "RecipeRouteService.prepare_withdrawal_in_session": "c15f2c0b7c5858ce474572e575c3c1ea7ebe7167d7bbf43529aeb46aaefb2c68",
-      "RecipeRouteService._withdrawal_effect": "0dce704e288df0abc34becd1765ab1770a07eadc3e18b2011b9298599925ff85",
-      "RecipeRouteService._withdrawal_publication": "3b13ca34a1b4ef2983f4b36682e4dc3b52d27a12d090bb5f03118fb5572f5eac",
-      "RecipeRouteService._withdrawal_publication.complete": "44d2e9e74553b5102125b160665a78b2f307f94d171fea0abb00be7a5754b9cc",
-      "RecipeRouteService._record_withdrawal_in_session": "71786d3ed61d44486a8c8543af18665430be0b9cd1c670acea9b81300df4bea4",
-      "RecipeRouteService.maintain": "c757e2e785295e4fb246a5d829fb0cb8fae5ad6cc9a676504325060896a6d072",
-      "RecipeRouteService._restore_abandoned_stop_withdrawals": "42dda3f93f81eb5575aa10bfeee877374dc60bf6f44af08b613cde9cbdb77e5a",
-      "RecipeRouteService._maintenance_step_in_session": "431a6fb4ecc071bda5912b3a00c35db663b29f04158cd3d7e4b64b6a6d146365",
-      "RecipeRouteService._maintain_empty_routes": "004f05c7729bbf20faf6763d2f8886e3d0b10dec6880cf8182d8a02302d9bb0f",
-      "RecipeRouteService._publish": "61b9b8fae983fd297f626114b03caf69b19d69fc803c450d488cf8743470aa9a",
-      "RecipeRouteService._publish_empty": "14dffd18b0f03a0c0cdfa1f8263c7423af1aa7c8a884a4ff58f10dd9f7fa3016",
-      "RecipeRouteService.projection_in_session": "715bd7a79e20c058fbbcd0bc898c030f35b81c8ea5aae9a2a6fab56718ae5bfc",
-      "RecipeRouteService._note_retained": "e664cf99c0cedb2843d912d8aa9f646e6b71fd60a4b0196ec57ff5c1407ffa66",
-      "RecipeRouteService.candidate_in_session": "82f8a5c0de7731d001232142f8da2cf66863255f1672d1a76620ad1e83cae12d",
-      "_primary_model_alias": "39bfdf447aa7b1019ffc95addff9568bab49543c40442f7fc42faf5e133bf4e7",
       "_claim_ordinal": "0f17a3a3361bcb82dbaa42818b38b51bb4f7425e94e88bae29a511ccbac8e569",
       "_aware": "9b2e980f441c7279ca2f128f28ba566eec71f96a641fea813cf292850730fa8c",
-      "_endpoint": "36bd917561ff93d97bddd6766a7cdd53a0e73ae6f026025bf8d573b70827b3b6",
-      "<module>": "f75e074aea4dc5f258c73498cc0f6a7a075ef1a5bf16b0edaf3480aaeb7714e0"
+      "<module>": "07a2f9767f2aefaa2762570a6dc4af26e1f7e3ebc5a5ab744044e5e80b94b0a4"
+    },
+    "control/src/vonk_control/recipe_routes/withdrawal.py": {
+      "withdraw_run": "b6e79f31c19798d8d3e3a7c398cec8c185bdab4769ec06f160178753252345cd",
+      "withdraw_runs": "65247dd9b155110e6a296b6c43ecae17dd9659f23cfb9454da081a8109735692",
+      "_withdrawn_after_backoff": "e22846ed0f0d495c0d123ac88aa7960b9c1701deccea4a7879de0858a154c000",
+      "_withdraw_runs_once": "ae3d24011fe1082cbbfb39362c4dac31c52fec9cfb3d8b57aabf59bd1dab997f",
+      "withdrawal_complete_in_session": "696fce9fe3e7d08197bf7c2c59c00f1db2c00bbb40a3fe7a1a7d58d01f7d02ce",
+      "prepare_withdrawal_in_session": "64f7030638d5c1e668ed3eccc8913289f5973d4a61c99f8bd9621454fcab8968",
+      "_withdrawal_effect": "b942ce59c76ae23554eb8bae0419c387ce49f3dd3974ed89cb7ed3d9e88075ae",
+      "_withdrawal_publication": "4a9c69060c795fe7b7f9f0885c6323cca2099cacc0592b20ff71dd3f190e6a3c",
+      "_withdrawal_publication.complete": "44d2e9e74553b5102125b160665a78b2f307f94d171fea0abb00be7a5754b9cc",
+      "_record_withdrawal_in_session": "2b3d710d02eba4789189c889f0d1d0bd6ac697054b96ae453667a9eba3a42c05",
+      "maintain": "e39c6c3d051c9bc1223a66e6009d05af37e92d0a7892d77823247f9e97b0434a",
+      "_restore_abandoned_stop_withdrawals": "58d1a3983bb7ad3b57af97ad54c0dd85ba7e0b120021ebc5fe012fd31bb3f89c",
+      "_maintenance_step_in_session": "b6a6ed37fd70b764c76627f897cdc45ef256a21021061ae06c5699a56c7504ed",
+      "_maintain_empty_routes": "5cc138983b36dc4605d44572e3b22b692c6c2ebb2a5d7f6c486cbc8fe7f42bf3",
+      "<module>": "9b465599462a2d989fdebfdbbd23c0e85be37e878728d156762c3b4ef5216805"
     },
     "control/src/vonk_control/recipe_runtime_specs.py": {
       "RecipeRuntimeSpecError": "72a7fa8080a1f8b1a23b8d7e8bade92d2d4b6ef607d174c55e84f6f60550fafe",
@@ -7095,38 +7178,10 @@
       "category": "already-retried",
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRouteNotReady is a busy/pending/superseded handoff; class RecipeRouteSuperseded is a busy/pending/superseded handoff.",
       "sites": [
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRankStopped", "RecipeRouteService.candidate_in_session", "recipe-rank-reports-a-stopped-or-failed-workload", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "RecipeRouteService.candidate_in_session", "every-recipe-rank-must-be-running", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "RecipeRouteService.candidate_in_session", "recipe-endpoint-owner-is-awaiting-exact-readiness", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteNotReady", "RecipeRouteService.candidate_in_session", "recipe-rank-is-awaiting-current-exact-observation", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteSuperseded", "RecipeRouteService._execute", "route-publication-was-superseded", 2],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteSuperseded", "RecipeRouteService._record_completion", "route-publication-was-superseded", 1]
-      ]
-    },
-    {
-      "family": "recipe_routes.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRecoveryDeadlineError", "RecipeRouteService._enforce_recovery_publication_deadline", "message", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService._claim_run_publication", "recipe-run-is-absent-from-route-candidate", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService._claim_run_publication", "recipe-run-is-not-ready-for-publication", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService._complete_run_publication", "recipe-run-changed-during-publication", 2],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService._record_withdrawal_in_session", "recipe-run-changed-during-withdrawal", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "distributed-recipe-route-requires-exact-rank-observations", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "headless-recipe-rank-exposed-endpoint-readiness", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-rank-readiness-evidence-is-stale", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-rank-set-does-not-match-accepted-plan", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-rank-set-is-not-exact", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-run-must-have-exactly-one-mapped-endpoint-owner-entry", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "stored-recipe-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "_endpoint", "entrypoint-endpoint-evidence-is-missing", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "_endpoint", "entrypoint-endpoint-is-invalid", 2],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "_primary_model_alias", "recipe-run-does-not-declare-a-litellm-interface", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "_primary_model_alias", "recipe-runtime-interface-authority-is-invalid", 2],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "_primary_model_alias", "recipe-runtime-interface-authority-is-stale", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "_primary_model_alias", "recipe-runtime-model-authority-is-invalid", 1],
-        ["control/src/vonk_control/recipe_routes.py", "_ActivatedRecipeRouteError", "AtomicRecipeRoutePublisher._activate", "recipe-route-activation-acknowledgement-failed", 1]
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRankStopped", "_candidate_once", "recipe-rank-reports-a-stopped-or-failed-workload", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "every-recipe-rank-must-be-running", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "recipe-endpoint-owner-is-awaiting-exact-readiness", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "recipe-rank-is-awaiting-current-exact-observation", 1]
       ]
     },
     {
@@ -7134,8 +7189,8 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
       "sites": [
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-route-clock-must-be-timezone-aware", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "recipe-run-alias-is-invalid-or-duplicated", 1]
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteError", "_candidate_once", "recipe-route-clock-must-be-timezone-aware", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteError", "_candidate_once", "recipe-run-alias-is-invalid-or-duplicated", 1]
       ]
     },
     {
@@ -8415,14 +8470,14 @@
       "category": "security-edge",
       "reason": "Verified bundle identity, exact run ownership, canonical endpoint contract, node revocation and enforced management-network authority are required before reusing or publishing an accepted endpoint. Corruption never authorizes a substitute endpoint or model.",
       "sites": [
-        ["control/src/vonk_control/recipe_routes.py", "RecipeEndpointAuthorityRefused", "AtomicRecipeRoutePublisher.accepted_run", "accepted-endpoint-is-outside-management-policy", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeEndpointAuthorityRefused", "RecipeRouteService.candidate_in_session", "accepted-endpoint-node-is-revoked", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeEndpointAuthorityRefused", "RecipeRouteService.candidate_in_session", "recipe-rank-node-is-revoked", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RecipeEndpointAuthorityRefused", "_endpoint", "entrypoint-endpoint-is-outside-management-policy", 2],
-        ["control/src/vonk_control/recipe_routes.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-endpoint-is-invalid", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-route-identity-is-invalid", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-run-has-ambiguous-route-ownership", 1],
-        ["control/src/vonk_control/recipe_routes.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-runtime-policy-is-invalid", 2]
+        ["control/src/vonk_control/recipe_routes/publisher.py", "RecipeEndpointAuthorityRefused", "AtomicRecipeRoutePublisher.accepted_run", "accepted-endpoint-is-outside-management-policy", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeEndpointAuthorityRefused", "_candidate_once", "accepted-endpoint-node-is-revoked", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeEndpointAuthorityRefused", "_candidate_once", "recipe-rank-node-is-revoked", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeEndpointAuthorityRefused", "_endpoint", "entrypoint-endpoint-is-outside-management-policy", 2],
+        ["control/src/vonk_control/recipe_routes/publisher.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-endpoint-is-invalid", 1],
+        ["control/src/vonk_control/recipe_routes/publisher.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-route-identity-is-invalid", 1],
+        ["control/src/vonk_control/recipe_routes/publisher.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-run-has-ambiguous-route-ownership", 1],
+        ["control/src/vonk_control/recipe_routes/publisher.py", "RouteRuntimeError", "AtomicRecipeRoutePublisher.accepted_run", "accepted-recipe-runtime-policy-is-invalid", 2]
       ]
     },
     {
@@ -8430,7 +8485,7 @@
       "category": "input-validation",
       "reason": "A new route cannot claim an alias already held by another accepted run. Reject the conflicting candidate before publishing any changed effect.",
       "sites": [
-        ["control/src/vonk_control/recipe_routes.py", "RecipeRouteError", "RecipeRouteService.candidate_in_session", "accepted-recipe-aliases-overlap", 1]
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteError", "_candidate_once", "accepted-recipe-aliases-overlap", 1]
       ]
     },
     {
@@ -9240,6 +9295,46 @@
       "reason": "validate_projection rejects missing required telemetry on its supplied standalone built-in projection before any effect. The production canonical compiler passes canonical_argv=True, which disables this branch; its internally missing telemetry is separately retained as recipe_runtime_specs debt.",
       "sites": [
         ["control/src/vonk_control/harnesses/common.py", "HarnessCompileError", "validate_projection", "built-in-harness-telemetry-is-missing", 1]
+      ]
+    },
+    {
+      "family": "candidate.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "distributed-recipe-route-requires-exact-rank-observations", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "headless-recipe-rank-exposed-endpoint-readiness", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "recipe-rank-readiness-evidence-is-stale", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "recipe-rank-set-does-not-match-accepted-plan", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "recipe-rank-set-is-not-exact", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "recipe-run-must-have-exactly-one-mapped-endpoint-owner-entry", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "stored-recipe-run-plan-is-invalid", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_endpoint", "entrypoint-endpoint-evidence-is-missing", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_endpoint", "entrypoint-endpoint-is-invalid", 2],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_primary_model_alias", "recipe-run-does-not-declare-a-litellm-interface", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_primary_model_alias", "recipe-runtime-interface-authority-is-invalid", 2],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_primary_model_alias", "recipe-runtime-interface-authority-is-stale", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_primary_model_alias", "recipe-runtime-model-authority-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "publisher.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_routes/publisher.py", "_ActivatedRecipeRouteError", "AtomicRecipeRoutePublisher._activate_once", "recipe-route-activation-acknowledgement-failed", 1]
+      ]
+    },
+    {
+      "family": "service.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._claim_run_publication_once", "recipe-run-is-absent-from-route-candidate", 1],
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._claim_run_publication_once", "recipe-run-is-no-longer-present", 1],
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._claim_run_publication_once", "recipe-run-is-not-ready-for-publication", 1],
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._execute_once", "route-publication-was-superseded", 2],
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._record_completion", "route-publication-was-superseded", 1]
       ]
     }
   ]

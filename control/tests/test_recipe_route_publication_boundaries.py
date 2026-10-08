@@ -257,3 +257,205 @@ def test_postgres_a_crash_between_effect_and_completion_is_recovered(
     tmp_path: Path, postgres_engine
 ) -> None:
     _crash_between_effect_and_completion_is_recovered(tmp_path, postgres_engine)
+
+
+def test_damaged_plan_is_retryable_and_a_fresh_publication_is_admitted(tmp_path):
+    """A damaged projection must not turn a recoverable publication into refusal."""
+    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_control.models import RecipeRun
+
+    base, _publisher, _applied, run_id = setup(tmp_path)
+    with base.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        plan = run.plan
+        run.plan = {}
+    with pytest.raises(RecipeRouteNotReady) as caught:
+        base.publish_run(run_id)
+    assert isinstance(caught.value, UnknownOutcomeError)
+    assert caught.value.typed_error() is not None
+    assert publication_is_temporary(caught.value)
+    with base.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.plan = plan
+    assert base.publish_run(run_id).generation > 0
+
+
+def test_disappeared_withdrawal_target_does_not_poison_completion(tmp_path):
+    """Missing bookkeeping after activation cannot roll back its completion."""
+    from vonk_control.models import RunNode
+
+    base, _publisher, _applied, run_id = setup(tmp_path)
+    base.publish_run(run_id)
+    fresh_id = add_running_run(
+        base, run_id, alias="fresh", route_state="pending", identity=8
+    )
+    with base.publication_transaction() as session:
+        withdrawal = base.prepare_withdrawal_in_session(session, frozenset({run_id}))
+        publication = base._withdrawal_publication(session, withdrawal)
+    with base.sessions.begin() as session:
+        for node in session.query(RunNode).filter_by(run_id=run_id):
+            session.delete(node)
+        session.delete(_recipe_run(session, run_id))
+    generation = base._execute(publication)
+    assert generation.generation > 0
+    assert base.publish_run(fresh_id).generation > generation.generation
+
+
+def test_lost_acknowledgement_reconciles_the_same_generation(tmp_path):
+    """A lost ack must not require another request or activate another bundle."""
+    base, _publisher, _applied, run_id = setup(tmp_path / "database")
+    observed = []
+
+    def acknowledge(marker):
+        observed.append(marker.generation)
+        if len(observed) == 1:
+            raise OSError("acknowledgement connection lost")
+
+    service = _service(base, tmp_path / "live", lambda: NOW, acknowledge)
+    generation = service.publish_run(run_id)
+    assert observed == [generation.generation, generation.generation]
+    assert _live_aliases(tmp_path / "live") == {"qwen"}
+
+
+def test_ended_run_has_a_typed_end_and_a_fresh_operation_is_admitted(tmp_path):
+    """Ended targets cannot leave publication claims blocking a new run."""
+    from vonk_agent_protocol import RunState, WaitReason
+
+    from .non_blocking import assert_ended_without_blocking
+
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    with service.sessions.begin() as session:
+        original = _recipe_run(session, run_id)
+        original.state = RunState.FAILED
+
+    reasons: list[WaitReason] = []
+
+    def end(run):
+        with pytest.raises(RecipeRouteSuperseded) as caught:
+            service.publish_run(run.id)
+        assert caught.value.typed_reason == WaitReason.SCOPE_CHANGED
+        reasons.append(caught.value.typed_reason)
+        return run
+
+    def fresh(world):
+        fresh_id = add_running_run(
+            world, run_id, alias="fresh", route_state="pending", identity=9
+        )
+        world.publish_run(fresh_id)
+        with world.sessions() as session:
+            return _recipe_run(session, fresh_id)
+
+    def assert_reason(_run):
+        assert reasons == [WaitReason.SCOPE_CHANGED]
+
+    assert_ended_without_blocking(
+        service,
+        original,
+        end=end,
+        fresh=fresh,
+        request_key=lambda run: run.id,
+        assert_reason=assert_reason,
+    )
+
+
+def test_unknown_evidence_has_durable_backoff_and_recovers_without_a_new_request(
+    tmp_path,
+):
+    """Unknown evidence must not spin on every tick or need manual publication."""
+    from datetime import UTC, timedelta
+
+    from vonk_agent_protocol import RouteState
+
+    clock = MutableClock(NOW)
+    service, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        plan = run.plan
+        run.plan = {}
+        run.route_state = RouteState.PENDING
+    worker = RecipeOperationWorker(service.sessions, service, clock=clock)
+    worker.tick()
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        due = run.route_next_attempt_at
+        assert due is not None
+        assert run.route_attempts == 1
+    assert worker.tick() is False
+    with service.sessions.begin() as session:
+        _recipe_run(session, run_id).plan = plan
+    clock.now = due.replace(tzinfo=UTC) + timedelta(seconds=1)
+    assert worker.tick() is True
+    with service.sessions() as session:
+        run = _recipe_run(session, run_id)
+        assert run.route_state == RouteState.PUBLISHED
+        assert run.route_next_attempt_at is None
+
+
+@pytest.mark.parametrize(
+    "fault", ["rank-gap", "mapping", "catalog", "endpoint", "stale"]
+)
+def test_bookkeeping_evidence_is_typed_temporary_and_repaired_in_place(tmp_path, fault):
+    """Bookkeeping damage cannot become a permanent publication refusal."""
+    from datetime import timedelta
+
+    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_control.models import (
+        ClusterMapping,
+        RecipeInstallation,
+        RunNode,
+    )
+
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        node = session.query(RunNode).filter_by(run_id=run_id, rank=0).one()
+        if fault == "rank-gap":
+            row, field, old = node, "rank", node.rank
+            node.rank = 10
+        elif fault == "mapping":
+            row = session.get(ClusterMapping, run.mapping_id)
+            assert row is not None
+            field, old = "endpoint_owner_node_id", row.endpoint_owner_node_id
+            row.endpoint_owner_node_id = (
+                session.query(RunNode).filter_by(run_id=run_id, rank=1).one().node_id
+            )
+        elif fault == "catalog":
+            row = session.get(RecipeInstallation, run.installation_id)
+            assert row is not None
+            field, old = "recipe_revision_id", row.recipe_revision_id
+            row.recipe_revision_id = "00000000-0000-0000-0000-000000000000"
+        elif fault == "endpoint":
+            row, field, old = node, "endpoint", node.endpoint
+            node.endpoint = None
+        else:
+            row, field, old = node, "updated_at", node.updated_at
+            node.updated_at = NOW - timedelta(hours=1)
+        model, key = type(row), session.identity_key(instance=row)[1]
+    with pytest.raises(RecipeRouteNotReady) as caught:
+        service.publish_run(run_id)
+    assert isinstance(caught.value, UnknownOutcomeError)
+    assert caught.value.typed_error() is not None
+    assert publication_is_temporary(caught.value)
+    with service.sessions.begin() as session:
+        healed = session.get(model, key)
+        assert healed is not None
+        setattr(healed, field, old)
+    assert service.publish_run(run_id).generation > 0
+
+
+def test_damaged_endpoint_projection_keeps_the_verified_serving_route(tmp_path):
+    """Corrupt SQL evidence cannot revoke a checksum-verified working route."""
+    from vonk_agent_protocol import RouteState
+    from vonk_control.models import RunNode
+
+    base, _publisher, _applied, run_id = setup(tmp_path / "database")
+    service = _service(base, tmp_path / "live", lambda: NOW)
+    service.publish_run(run_id)
+    with service.sessions.begin() as session:
+        node = session.query(RunNode).filter_by(run_id=run_id, rank=0).one()
+        node.endpoint = {}
+    service.maintain()
+    assert _live_aliases(tmp_path / "live") == {"qwen"}
+    with service.sessions() as session:
+        assert _recipe_run(session, run_id).route_state == RouteState.PUBLISHED

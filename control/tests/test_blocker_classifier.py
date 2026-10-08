@@ -14,7 +14,6 @@ from .blocker_boundaries import (
 from .blocker_classifier import (
     DEBT,
     INPUT,
-    RETRIED,
     SECURITY,
     classify,
     propose_families,
@@ -62,7 +61,7 @@ def _site(
         # An unknown-outcome class is a handoff only where a registered loop is
         # proven to retry it (test_blocker_retries); by type alone it is debt.
         (_site("InstallAdmissionBusy", "install.capacity_busy"), DEBT),
-        (_site("RecipeRouteSuperseded", "route publication was superseded"), RETRIED),
+        (_site("RecipeRouteSuperseded", "route publication was superseded"), DEBT),
         (_site("CursorError", "operation cursor is invalid"), INPUT),
         (_site("HarnessCompileError", "harness mounts overlap"), INPUT),
         (_site("RecipeOperationConflict", "request key was already used"), INPUT),

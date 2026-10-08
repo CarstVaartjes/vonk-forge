@@ -131,10 +131,11 @@ class RecipeOperationWorker:
         for run_id in run_ids:
             try:
                 self._routes.publish_run(run_id)
-            except RecipeRouteNotReady:
-                # Fail-closed: the candidate is waiting on current rank
-                # evidence, which the next tick re-reads.  This is not a
-                # failed attempt.
+            except RecipeRouteNotReady as error:
+                # Observation is retryable, but it still consumes an attempt.
+                # Persist the same bounded schedule used for other unknown
+                # publications, so restart cannot turn it into a hot loop.
+                self._defer_publication(run_id, error)
                 continue
             except (OSError, RuntimeError, TypeError, ValueError) as error:
                 self._defer_publication(run_id, error)

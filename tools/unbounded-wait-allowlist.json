@@ -165,12 +165,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/recipe_routes.py",
-      "function": "RecipeRouteService.prepare_withdrawal_in_session",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/runtime_init.py",
       "function": "_read_runtime_file",
       "kind": "loop-without-deadline",
