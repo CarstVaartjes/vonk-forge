@@ -17,15 +17,17 @@ from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
     UnknownOutcomeError,
+    canonical_message,
 )
 
 from .. import job_states
 from ..agent_jobs import AgentJobService
-from ..bounded_json import require_integer
+from ..bounded_json import require_integer, require_mapping
 from ..failure_classification import error_code, is_security_failure
 from ..job_documents import (
     RunSwitchCleanupIntent,
     RunSwitchIntent,
+    RunSwitchJobPayload,
     RunSwitchProfileStopIntent,
     RunSwitchRunIntent,
     RunSwitchStopIntent,
@@ -181,6 +183,12 @@ class ReservationMixin:
                 )
             payload["workload_intent_ordinal"] = workload_intent_ordinal
             payload["progress"]["workload_intent_ordinal"] = workload_intent_ordinal
+            payload = require_mapping(
+                serialize_json_value(
+                    RunSwitchJobPayload.model_validate_json(canonical_message(payload))
+                ),
+                "run-switch parent",
+            )
             job = _ADAPTER.new_operation(
                 allowed=plan.allowed,
                 id=str(uuid.uuid4()),

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy.exc import OperationalError
-from vonk_control import recipe_operations as recipe_operations_module
 from vonk_control.admission_locking import AdmissionLockBusy, admission_wait_exhausted
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
 from vonk_control.install_admission import InstallAdmissionBusy
@@ -18,6 +17,14 @@ from vonk_control.lifecycle.evidence import (
 from vonk_control.recipe_operations import (
     RecipeBuildOwnershipBusy,
     RecipeOperationService,
+    build,
+    build_cancellation,
+    install,
+    job_activation,
+    result_consumption,
+    start,
+    stop,
+    uninstall,
 )
 from vonk_control.run_admission import RunAdmissionBusy
 
@@ -81,11 +88,19 @@ class _Flaky:
 
 @pytest.fixture
 def no_pauses(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        recipe_operations_module,
-        "admission_attempts",
-        lambda: iter(range(3)),
-    )
+    for module in (
+        install,
+        start,
+        build,
+        job_activation,
+        stop,
+        uninstall,
+        result_consumption,
+        build_cancellation,
+    ):
+        monkeypatch.setattr(
+            module, "admission_attempts", lambda: iter(range(3)), raising=False
+        )
 
 
 def _service() -> RecipeOperationService:

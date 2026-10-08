@@ -225,3 +225,18 @@ def test_no_unresolved_state_write_hides_in_a_lifecycle_module() -> None:
             if variable not in known:
                 unexplained.append(f"{relative}:{line}: {variable}.state in {function}")
     assert unexplained == []
+
+
+@pytest.mark.parametrize("level", [".", "..", "..."])
+def test_package_relative_model_imports_keep_lifecycle_and_workload_rows_distinct(
+    level,
+):
+    source = f"""
+    from {level}models import Job, RecipeBuild
+    def project(session):
+        job = session.get(Job, "job")
+        build = session.get(RecipeBuild, "build")
+        job.state = "failed"
+        build.state = "failed"
+    """
+    assert _scanned(source) == [("Job", ATTRIBUTE, "project")]

@@ -151,7 +151,40 @@
       "control/src/vonk_control/recipe_image_availability/scheduling.py",
       "control/src/vonk_control/recipe_image_availability/service.py",
       "control/src/vonk_control/recipe_operation_phases.py",
-      "control/src/vonk_control/recipe_operations.py",
+      "control/src/vonk_control/recipe_operations/__init__.py",
+      "control/src/vonk_control/recipe_operations/action_plans.py",
+      "control/src/vonk_control/recipe_operations/build.py",
+      "control/src/vonk_control/recipe_operations/build_cancellation.py",
+      "control/src/vonk_control/recipe_operations/cancellation.py",
+      "control/src/vonk_control/recipe_operations/constants.py",
+      "control/src/vonk_control/recipe_operations/errors.py",
+      "control/src/vonk_control/recipe_operations/install.py",
+      "control/src/vonk_control/recipe_operations/installation_preparation.py",
+      "control/src/vonk_control/recipe_operations/intent.py",
+      "control/src/vonk_control/recipe_operations/interfaces.py",
+      "control/src/vonk_control/recipe_operations/job_activation.py",
+      "control/src/vonk_control/recipe_operations/job_run_completion.py",
+      "control/src/vonk_control/recipe_operations/job_run_stop.py",
+      "control/src/vonk_control/recipe_operations/observation_helpers.py",
+      "control/src/vonk_control/recipe_operations/offline_stop.py",
+      "control/src/vonk_control/recipe_operations/persistence.py",
+      "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+      "control/src/vonk_control/recipe_operations/projection.py",
+      "control/src/vonk_control/recipe_operations/rank_authority.py",
+      "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+      "control/src/vonk_control/recipe_operations/result_consumption.py",
+      "control/src/vonk_control/recipe_operations/results.py",
+      "control/src/vonk_control/recipe_operations/retirement.py",
+      "control/src/vonk_control/recipe_operations/retry.py",
+      "control/src/vonk_control/recipe_operations/run_observation.py",
+      "control/src/vonk_control/recipe_operations/service.py",
+      "control/src/vonk_control/recipe_operations/start.py",
+      "control/src/vonk_control/recipe_operations/stop.py",
+      "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+      "control/src/vonk_control/recipe_operations/stop_dispatch.py",
+      "control/src/vonk_control/recipe_operations/supersession.py",
+      "control/src/vonk_control/recipe_operations/terminal_projection.py",
+      "control/src/vonk_control/recipe_operations/uninstall.py",
       "control/src/vonk_control/recipe_packages.py",
       "control/src/vonk_control/recipe_progress.py",
       "control/src/vonk_control/recipe_routes.py",
@@ -179,7 +212,6 @@
       "control/src/vonk_control/run_switch_operations/executor_preflight.py",
       "control/src/vonk_control/run_switch_operations/executor_verification.py",
       "control/src/vonk_control/run_switch_operations/identity_helpers.py",
-      "control/src/vonk_control/run_switch_operations/publish.py",
       "control/src/vonk_control/run_switch_operations/image_receipts.py",
       "control/src/vonk_control/run_switch_operations/interfaces.py",
       "control/src/vonk_control/run_switch_operations/observation.py",
@@ -192,6 +224,7 @@
       "control/src/vonk_control/run_switch_operations/preparation.py",
       "control/src/vonk_control/run_switch_operations/projection.py",
       "control/src/vonk_control/run_switch_operations/provider.py",
+      "control/src/vonk_control/run_switch_operations/publish.py",
       "control/src/vonk_control/run_switch_operations/reservation.py",
       "control/src/vonk_control/run_switch_operations/resolution.py",
       "control/src/vonk_control/run_switch_operations/resource_admission.py",
@@ -333,7 +366,40 @@
       "control/src/vonk_control/recipe_image_availability/service.py",
       "control/src/vonk_control/recipe_operation_phases.py",
       "control/src/vonk_control/recipe_operation_worker.py",
-      "control/src/vonk_control/recipe_operations.py",
+      "control/src/vonk_control/recipe_operations/__init__.py",
+      "control/src/vonk_control/recipe_operations/action_plans.py",
+      "control/src/vonk_control/recipe_operations/build.py",
+      "control/src/vonk_control/recipe_operations/build_cancellation.py",
+      "control/src/vonk_control/recipe_operations/cancellation.py",
+      "control/src/vonk_control/recipe_operations/constants.py",
+      "control/src/vonk_control/recipe_operations/errors.py",
+      "control/src/vonk_control/recipe_operations/install.py",
+      "control/src/vonk_control/recipe_operations/installation_preparation.py",
+      "control/src/vonk_control/recipe_operations/intent.py",
+      "control/src/vonk_control/recipe_operations/interfaces.py",
+      "control/src/vonk_control/recipe_operations/job_activation.py",
+      "control/src/vonk_control/recipe_operations/job_run_completion.py",
+      "control/src/vonk_control/recipe_operations/job_run_stop.py",
+      "control/src/vonk_control/recipe_operations/observation_helpers.py",
+      "control/src/vonk_control/recipe_operations/offline_stop.py",
+      "control/src/vonk_control/recipe_operations/persistence.py",
+      "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+      "control/src/vonk_control/recipe_operations/projection.py",
+      "control/src/vonk_control/recipe_operations/rank_authority.py",
+      "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+      "control/src/vonk_control/recipe_operations/result_consumption.py",
+      "control/src/vonk_control/recipe_operations/results.py",
+      "control/src/vonk_control/recipe_operations/retirement.py",
+      "control/src/vonk_control/recipe_operations/retry.py",
+      "control/src/vonk_control/recipe_operations/run_observation.py",
+      "control/src/vonk_control/recipe_operations/service.py",
+      "control/src/vonk_control/recipe_operations/start.py",
+      "control/src/vonk_control/recipe_operations/stop.py",
+      "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+      "control/src/vonk_control/recipe_operations/stop_dispatch.py",
+      "control/src/vonk_control/recipe_operations/supersession.py",
+      "control/src/vonk_control/recipe_operations/terminal_projection.py",
+      "control/src/vonk_control/recipe_operations/uninstall.py",
       "control/src/vonk_control/recipe_start_payloads.py",
       "control/src/vonk_control/recipe_stop_payloads.py",
       "control/src/vonk_control/recipe_update_batches.py",
@@ -358,7 +424,6 @@
       "control/src/vonk_control/run_switch_operations/executor_preflight.py",
       "control/src/vonk_control/run_switch_operations/executor_verification.py",
       "control/src/vonk_control/run_switch_operations/identity_helpers.py",
-      "control/src/vonk_control/run_switch_operations/publish.py",
       "control/src/vonk_control/run_switch_operations/image_receipts.py",
       "control/src/vonk_control/run_switch_operations/interfaces.py",
       "control/src/vonk_control/run_switch_operations/observation.py",
@@ -371,6 +436,7 @@
       "control/src/vonk_control/run_switch_operations/preparation.py",
       "control/src/vonk_control/run_switch_operations/projection.py",
       "control/src/vonk_control/run_switch_operations/provider.py",
+      "control/src/vonk_control/run_switch_operations/publish.py",
       "control/src/vonk_control/run_switch_operations/reservation.py",
       "control/src/vonk_control/run_switch_operations/resolution.py",
       "control/src/vonk_control/run_switch_operations/resource_admission.py",
@@ -386,7 +452,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 218,
+    "total": 214,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -769,16 +835,16 @@
       "reason": "Admission reconciles the same request on bounded exponential backoff for at most 250 milliseconds; exhaustion returns a typed failed observation with no accepted effect, locks or claims. A new request is always eligible."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._cancel_build",
+      "path": "control/src/vonk_control/recipe_operations/build_cancellation.py",
+      "function": "BuildCancellationMixin._cancel_build",
       "catches": [
         "RecipeBuildOwnershipBusy"
       ],
       "reason": "A build cancellation that meets a lock another writer holds repeats its transaction a bounded number of times with short jittered pauses; the cancellation request key makes a repeat idempotent."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService._stop_service_run_once",
+      "path": "control/src/vonk_control/recipe_operations/stop.py",
+      "function": "StopMixin._stop_service_run_once",
       "catches": [
         "_RouteNotWithdrawn",
         "UnknownOutcomeError"
@@ -786,56 +852,56 @@
       "reason": "Competing publication is re-withdrawn and exact native dispatch retried a bounded number of times. After acceptance, a canonical unknown outcome is handed to _defer_accepted_service_stop, which preserves the same root and reviewed effects and persists updated_at; reconcile_pending_service_stops resumes that exact root after its five-second due interval without retaining a transaction across publication."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.activate_job_run",
+      "path": "control/src/vonk_control/recipe_operations/job_activation.py",
+      "function": "JobActivationMixin.activate_job_run",
       "catches": [
         "UnknownOutcomeError"
       ],
       "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.build",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "function": "BuildMixin.build",
       "catches": [
         "RecipeBuildAdmissionBusy"
       ],
       "reason": "The build request retries its whole admission transaction a bounded number of times with short jittered pauses; the request identity makes a repeat idempotent."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.install",
+      "path": "control/src/vonk_control/recipe_operations/install.py",
+      "function": "InstallMixin.install",
       "catches": [
         "UnknownOutcomeError"
       ],
       "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.reconcile_cancelled_builds",
+      "path": "control/src/vonk_control/recipe_operations/cancellation.py",
+      "function": "CancellationMixin.reconcile_cancelled_builds",
       "catches": [
         "BuildConsumerError"
       ],
       "reason": "Contention or unknown ownership of one build is logged as deferred and does not block the other eligible builds; the same scheduler pass reads every decision again in its own short transaction, so the build is neither released nor forgotten."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.reconcile_installation",
+      "path": "control/src/vonk_control/recipe_operations/uninstall.py",
+      "function": "UninstallMixin.reconcile_installation",
       "catches": [
         "InstallAdmissionBusy"
       ],
       "reason": "The reconciliation request retries its whole admission transaction a bounded number of times with short jittered pauses; the request identity makes a repeat idempotent."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.reconcile_pending_service_stops",
+      "path": "control/src/vonk_control/recipe_operations/offline_stop.py",
+      "function": "OfflineStopMixin.reconcile_pending_service_stops",
       "catches": [
         "UnknownOutcomeError"
       ],
       "reason": "One oldest due accepted Stop per worker pass retries its exact durable request. A deferred row retains original bytes, claims and meaningful cause and advances its next-attempt clock, releasing transactions before publication and allowing other due rows to advance."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.reconcile_retired_operations",
+      "path": "control/src/vonk_control/recipe_operations/retirement.py",
+      "function": "RetirementMixin.reconcile_retired_operations",
       "catches": [
         "RecipeOperationConflict",
         "RecipeRouteError"
@@ -843,24 +909,24 @@
       "reason": "A retired operation whose owner is unavailable or in conflict is kept: the handler records the blocked cleanup and the next reconciliation time on the operation, and the worker tick reconciles it again on the next pass."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.record_node_result",
+      "path": "control/src/vonk_control/recipe_operations/result_consumption.py",
+      "function": "ResultConsumptionMixin.record_node_result",
       "catches": [
         "UnknownOutcomeError"
       ],
       "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.start",
+      "path": "control/src/vonk_control/recipe_operations/start.py",
+      "function": "StartMixin.start",
       "catches": [
         "UnknownOutcomeError"
       ],
       "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
     },
     {
-      "path": "control/src/vonk_control/recipe_operations.py",
-      "function": "RecipeOperationService.stop",
+      "path": "control/src/vonk_control/recipe_operations/stop.py",
+      "function": "StopMixin.stop",
       "catches": [
         "UnknownOutcomeError"
       ],
@@ -1021,6 +1087,30 @@
         "UnknownOutcomeError"
       ],
       "reason": "Uncertain zero-transfer witnesses defer the same journal repair to the existing persisted two-minute REPAIR_BUDGET. _bounded_repair_turn ends the damaged parent at expiry without advancing unmatched effects."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "function": "BuildMixin.check_build_source",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations/retry.py",
+      "function": "RetryMixin.retry",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+      "function": "ReconciliationAuthorityMixin.preview_uninstall",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
     }
   ],
   "call_edges": [
@@ -1952,7 +2042,7 @@
       "DurableDistributionPhaseExecutor.get": "4f8cfecf3a31683b4360c474004339cd9dbcccbe59851a809997cc348c37c90e",
       "DurableDistributionPhaseExecutor._verification_result": "dca78d6d984770bb2c64c0d2ea92543fcc14ac0baaeb417ad26e1538e90967b0",
       "DurableDistributionPhaseExecutor._adopt_child": "d59f1401354fb44060610ea2997c112feae4aac5967ec2e89bcaa9ad9b703a4d",
-      "DurableDistributionPhaseExecutor._ensure_child": "4a98efeb378373723597451f4fbae5290eeb3e1e44b4a8b80b67a74d25baab60",
+      "DurableDistributionPhaseExecutor._ensure_child": "797cb018a4ed9f3a22e767083ae9b43758e7db524bc22782fc4281ccf7a2bddf",
       "DurableDistributionPhaseExecutor._model_objects": "7f329ff1f097dcc1e51d893ff704ab8cb6d93faf7b3fb2e88cb71db89eaf5fbe",
       "DurableDistributionPhaseExecutor._runtime_identity": "3018371712332cf081ef6faa841f36eb9b9e361c2ce66882eac04f0651ba5f4f",
       "DurableDistributionPhaseExecutor._source_runtime_storage": "7a1856b4a9c400c18c454bfcc2db753ae08bfe4b64a58be49b142fa2cb938ac0",
@@ -1975,7 +2065,7 @@
       "CompositeDistributionPhaseExecutor.get": "3925260150357e56c329665f7c3f87b73f48abafee316602ef5c7fb7dc5d8735",
       "CompositeDistributionPhaseExecutor._cache_state": "67285a481816574b36d780a9f44023c2ac18d9a350abb0b8ffadf8f9c98b5087",
       "CompositeDistributionPhaseExecutor._cache_result": "ddcdf2d1318a6d0e245b8f7533388a7848c2e71103af773022de376cf6d00f86",
-      "<module>": "e1ef72714c39d92e67630b985df5b660e7744827a7c91c24754bb032e66a6bfe"
+      "<module>": "e47108b63ec263ee2c85f3d612ed57e171d836d211d057723b7b10e529025c01"
     },
     "control/src/vonk_control/enrollment.py": {
       "EnrollmentService.__init__": "c6bcb1f864eabb97725b48534d7ce9efa55c936ec7ea0a2df541b6861c75800a",
@@ -3853,163 +3943,266 @@
       "RecipeOperationWorker._expire_initial_observation_deadline": "8d96ac49577ad0b206b31bc7c331136569180e52045d5433b65bcedfff25c21d",
       "<module>": "fefa03272e684b1e3b6ca3bc4cc482de0abc65cd7049a07fc9e3a3d3c9d42a30"
     },
-    "control/src/vonk_control/recipe_operations.py": {
+    "control/src/vonk_control/recipe_operations/__init__.py": {
+      "<module>": "0561f1130bcc9b4ca48a51746ec5cd702f8f07bd764916a90bba28eb9aec801a"
+    },
+    "control/src/vonk_control/recipe_operations/action_plans.py": {
+      "ActionPlansMixin._stop_plan_in_session": "020a48e4b23f61b2f10b50f98fe7204d3053bdfa94270444438579f13a4fd7bf",
+      "ActionPlansMixin._uninstall_plan_in_session": "ee11f19c24c1ec37190707ffead4a0c792dc1ce0e7c74a1264a1d2e41b047c4c",
+      "ActionPlansMixin._model_dependents_on_nodes": "c1b7d59467380aea2cb02bf8e49a60d5a7e8118fa35934925179ef5d7cd20c63",
+      "<module>": "90f6a0854f3743fab7c8253e4a3c1ac4ffcfa855b3d3b0585416cbf604fdc7f2"
+    },
+    "control/src/vonk_control/recipe_operations/build.py": {
+      "BuildMixin.preview_build": "23a5f7ffad8245ef62e81d49362e4e79bf3164e78393ff08fdad6cb9816ba8c1",
+      "BuildMixin.reusable_build_id": "71ebc653362e20d3f15bc0ca9762c310000a79ec114fc1ebd78c68b5958a83c6",
+      "BuildMixin.check_build_source": "d48c220f1c5a3c1f14b3059b174b83f2d61c0599b7b8a07edbf3629848dad135",
+      "BuildMixin._check_build_source_once": "4875a4ad3eec7c932357e8cb427d680151bebf87a985fe25a219a98a4f483a92",
+      "BuildMixin._build_once": "43b17d4096ba63e5f7af395fb6ca8485a29f544a5a2234251c4036688a994f2f",
+      "BuildMixin.build": "2c00bf41b56a4a0dbf9ef974a32b4fd2fcb366768d8013e3caf258db0e2b7167",
+      "BuildMixin._start_build_in_session": "cd9c855d65ea8d28fdee5976c0c2eae78759d7d36de113d1956dde5f201db9e5",
+      "BuildMixin._queue_prebuilt_build_in_session": "45c0a74f1eb35cb6acd987cdc4127bbf9dc67aadd7ed36b3b9a15aa4eeb09511",
+      "BuildMixin._successful_build_job_in_session": "d4ef5d2ee29b7d59223e44a61895f930d9fe62a14303028ceb327c5507f7ccea",
+      "<module>": "7ffccbb43ac4ac57020a04acefce21a5b55815717c7bb8b3e27e056c96abedd0"
+    },
+    "control/src/vonk_control/recipe_operations/build_cancellation.py": {
+      "BuildCancellationMixin._cancel_build": "8c9e239fc059b252b0995807e3265771280a3b16ee3f2baf10e3e3c3ec9b51a7",
+      "BuildCancellationMixin._cancel_current_build": "df692fa2dc53e49c0c0f98c63f900093c4a96c7483718b7e4443a32e712aadaa",
+      "BuildCancellationMixin._cancel_prebuilt_build": "9b9fbb79077de6dc89dc12dce361fe06d0582783f50791c2b945c4aa4e7625b1",
+      "BuildCancellationMixin._cancel_current_build_locked": "ee3d7667f085b03b89c08419261292a3c723f088b3b831d3747f5b398a04232e",
+      "BuildCancellationMixin._release_cancelled_build": "be79bbe9f0bbf39a37b98faeb52dbbbf6f9d9a5278c3cdc231ba46fc638e7c1a",
+      "<module>": "d41616851254fe9c89988e5647b347b0235a0260a7ee71c1b3f9119cdaec9d59"
+    },
+    "control/src/vonk_control/recipe_operations/cancellation.py": {
+      "CancellationMixin.get": "13d74d4d23353a9e5f7684b75160ae43b6642af648d1e8354f60e5b3c566d861",
+      "CancellationMixin.cancel": "505bb73df4d265c3eccec515202db00a20b9906dd37646bb1641d4d5a74f4785",
+      "CancellationMixin._heal_cancelling_build": "8d00f6234b9543a98045b5ba4ffb26939214e56c78799894801631a9d85a1219",
+      "CancellationMixin.reconcile_cancelled_builds": "21f320a6e596fbf5f02531cc4fc35877dc188e3aa76bf95c85de182648603991",
+      "<module>": "4072aabc23d9fc6988d9a8f8046b36a6865406ab0857fc17c320342036ccd76c"
+    },
+    "control/src/vonk_control/recipe_operations/constants.py": {
       "_bounded_blocker_reason": "b4e055d8ded0f89607c51115da2f0f4fd66f298a5b288e28af6f5962c531d239",
-      "_active_recipe_revision": "a78d2083c357252b899d32c25712790ad6d1bab66b74a7e01d602fcc6145ef99",
-      "AgentJobQueue.enqueue_in_session": "f598b46531e57e6a96bea18696a74e0c7baf87e3bdc7b3d092f5bc8557899311",
-      "AgentJobQueue.notify_available": "cd9ff09c539b579bf45a04971aaf38ad7f19b267e2305547648b1f23d7b9829a",
+      "<module>": "4472a054883b2973e5374f5baf81a8bf7762fadb4e2a393fcf6cf9aac295a537"
+    },
+    "control/src/vonk_control/recipe_operations/errors.py": {
+      "RecipeRetryLater.__init__": "2d94a1c7dce73e63fcafb7bf79e07d11d2e5048eda9139f20bf860bac0031f88",
       "_ServiceStopReplay.__init__": "e40e3a1961708cd8fe962a34708dce24c3d9bae1f24a7f466ef6a565e0a619ca",
       "RecipeReconciliationBlocked.__init__": "5b51804dd0880a9be15e724a53b42c21ad6a89e8cef3c218644e699c7a84a13e",
       "RecipeArtifactJobCancellationPending.__init__": "2aa938b4e4a50dd136a4f9b2e63cde2a0a05506f3ddd63460b0edba9b53cefc8",
-      "_validated_result": "bb6a50725238651d550d7d08a6c904889e3caba9dff5396468e0d207791d9f4c",
-      "_recorded_result": "2b47f21d278f95f596a07e2f8e3df93d3b00a5d13fee395efc22a49a81a754d9",
-      "_recorded_result.read": "167c6145dced1f27808a738e823a2102b8687a730602963c9bd1ab669f72aa53",
-      "_recorded_result_document": "22ab585ecbcca0a9e5fe51b824213e0f880e65dc49ab502f566b3f9384c6bfc9",
-      "_node_result": "48d215c946fcf53924c8c91d2a8b2279f542ebcc45b8c2772100a9754defd1b6",
-      "_unproven_evidence": "165a9ac73d8d62fb948c9329adb76ef12c939eda2490ee9062600c2b7d59becf",
-      "_evidence_is_acceptable": "79dce436335fc611d87d49ef698fa2f3435a3d2cfe3b8d41028047d939576d8c",
-      "_ranks_from_mapping": "f4b7319fa9525b35f6f693e826c9051a9603e7fc58fa3165afa9e48d6a1aef9d",
-      "_plan_ranks": "af8181aed145e2c4d1b654d14199fd4ae83e1c5a00b8053f0bc150d5a7a8d0ee",
-      "_run_accepted_ranks": "69b2d3ddda692cddb393a73f1c951790858d6c3b3123a8c227aa90238f0d356f",
-      "_run_accepted_ranks.read": "486f1b0176b5962152b72d7a6378b6e64448cf9ec1ef705cec0b44caa599e7a8",
-      "_uninstall_recipe": "50501d9070ba515a05db5b55aeab8a15249399844694ce0cde0b53fb052ffe7e",
-      "_installation_accepted_ranks": "e99ba27d8dafc11b437bb7a764d676e6c9dc847ef212c75d1a06b10d305963ae",
-      "_installation_accepted_ranks.read": "4db875331b99eece11fe12079badb79a8504f50c0fd00f4a51150b8e84c84612",
-      "_profile_jobrun_parent": "e9d7301796644a49968b3003605ad755a27910c0552b5c4b4c696c93a3ff269e",
-      "_run_is_one_shot": "61c54473f41400ebdb9328331a555d7c6b7677d3b325f134ea24efdf0822a015",
-      "_run_is_one_shot.read": "e567e3289955a575ada9b966779c27e0c8f6aaa9cb54f169b72b9f4b3eb7ab02",
-      "_run_is_one_shot.rebuild": "6a0ecab379bc5a2af47d4dfbf3531445c14951714f78732fe488876e886fc54f",
-      "_run_observes_per_generation": "f4f15c17446f866dbda377666afa74d8c79c66afd38ae203cd0c4ea02b7d12a6",
-      "_run_observes_per_generation.read": "585434651dd40c6869c8d6d276a4f22e8578d467db9aed3fbee82ad61e5be196",
-      "RecipeOperationView.result": "df3e5d06b8b1a73dc671ba2bb0c0c54fe463dc78e0553dd0877a268f0dbbf5bc",
+      "<module>": "1e1e653f5299bde7d6e59af02b96c12a2514f463cd48d3c6871b2dc76714565b"
+    },
+    "control/src/vonk_control/recipe_operations/install.py": {
+      "InstallMixin._install_once": "9e0f1066c8db11ebf5967c904cd3ad6256feae3eb26064ad99785a47e322c508",
+      "InstallMixin.install": "1a2ff6b2c0b943146d9c793e61de8f4bc88157cdf1371603fde7026ec60cb218",
+      "<module>": "8a1800dac261a46bf2a924ba29bd6cb03952f1670e1a72129a989a532359f1a3"
+    },
+    "control/src/vonk_control/recipe_operations/installation_preparation.py": {
+      "InstallationPreparationMixin.preview_install": "652d043361ce118c6ccdd9935c387ff5bce5a5ad5f6f2043888b83c0e55db57f",
+      "InstallationPreparationMixin.prepare_installation": "61658d8126ce9a6ad40b9538b0fee145400eb82977b214fdd08ce8a5d2c3d6a9",
+      "InstallationPreparationMixin._prepared_installation_id": "100cf53622955f33575cbb274ac99560e27e9a8fe2cfb9c0be940b68dedf25fe",
+      "InstallationPreparationMixin._stored_compiled_plans": "fd85cc812beb306cd7883f844131168db5b2bd7c8dea19f6feffd1cfa4f0cd4e",
+      "InstallationPreparationMixin._stored_compiled_plans.read": "9d8ec339031edfcac1dcdd48bc7906d823c682274ae4fc299a9dfdc29d807661",
+      "InstallationPreparationMixin._stored_compiled_plans.rebuild": "cb3f648ab85bf2ae9c19b832a2dd237ae59f3b49720e2497e9c717e207bd228f",
+      "InstallationPreparationMixin.start_installation": "d605f6f56942b6bf5f31a00f487f78d32a3cfce0bda99dc9f89c0e77c438151a",
+      "<module>": "008c7e361776359fe7d7cefe407e52c8e7a54dbecdfe03fb5193fd9c70244b67"
+    },
+    "control/src/vonk_control/recipe_operations/intent.py": {
       "_bound_workload_intent": "0356f70a62abf451ada30959612e09e68be7ec680ac2d7d3a8376581bb95737c",
       "_job_workload_intent": "dea656c7e8038509d16615adf5227c3bef97e699c43af66e01646b5d4a54ff97",
       "_job_workload_intent.read": "1235c935a8ff01fc9489c122c19960d7197d964576a31980f677a23349a91225",
       "_job_workload_intent.rebuild": "38560257fa006461893d2d113d9354d80dd18a7b24134ae6f833f63093285ec4",
-      "_run_start_intent": "7b64bdd843278966740b06e1eb7d6e114fc49c9dda6c56619b7fefa971b34ffd",
+      "_run_start_intent": "f3e99d174fca8d25394b1a596ced86395d6feed9ddd342997ef1eea7f5750115",
       "_intent_is_current": "eecc7afabaeae20d903bd54fad3274842b01bc3ad304070822ef72ee803eef8c",
       "_shared_workload_intent": "5d61016cd43b53f2ed87d0b1a0d006ca1a4e6bebd3a7d95b959e33c14d4ac4bb",
-      "_workload_owner_scope": "e402cd1db0ec28a3eb58999803eb19a28ec315478f1c0c4bc0c811b9a7e268db",
+      "_workload_owner_scope": "c29ccb4bf2372443eb44fcd6606d36267146e753cf9a34b2095fa0275b627d54",
       "_profile_effect_scope": "70b7cdc82fac696f1f9c28adae51d3c543ceb84dd42e727bcfd34a686c7705d1",
-      "_active_owned_workload_jobs": "165a439a77bad338f9053a8d975314c8788e82d26e0195442e20e2c739a5c69f",
-      "_unissued_workload_children": "513bf760d7b7eabea663898ea8e297bbacdd9d1f1e401d2dd7eb197b3fbd4e7d",
-      "_cancel_reason": "764b5bf7cac080d3e4b9a2a8bacff14f84ca233f51c33c89302dcf4d91535a02",
+      "_active_owned_workload_jobs": "cbe3a8ebb4e0bd2ed034e7f33ee2f0df64e57ca05da3a1a6297f3bd814bbcb0f",
+      "_unissued_workload_children": "ed21a8ee2f39b27e23b965c377d5edd1550f9fa95f6f42bace776ea112a567e1",
+      "_cancel_reason": "764b5bf7cac080d3e4b9a2a8bacff14f84ca233f51c33c89302dcf4d91535a02"
+    },
+    "control/src/vonk_control/recipe_operations/interfaces.py": {
+      "AgentJobQueue.enqueue_in_session": "c59849071f08f394bbdee4f2a317a961f3c3d038568c41823da4dba07cade552",
+      "AgentJobQueue.notify_available": "cd9ff09c539b579bf45a04971aaf38ad7f19b267e2305547648b1f23d7b9829a",
+      "RecipeOperationView.result": "f90b0cc84832f72f1e58c73a185db6ff1a8c07057d0364ae5ad8f2c80f14092f",
+      "<module>": "94227a68a7c59603d5c490ac8f52b66b9193753eec7d8d45520d53c55df474f0"
+    },
+    "control/src/vonk_control/recipe_operations/job_activation.py": {
+      "JobActivationMixin._activate_job_run_once": "fb7228596ba0917386a40fef70418480162009371c1ac6ceaa031a51028cddb1",
+      "JobActivationMixin.activate_job_run": "1d89dabd0bd31a51b859c49e6101e45b56b39f3359d58b8bd8dd80c6e4c39989",
+      "<module>": "5759fb3adf49ec8b2b3cbfbf393875d739273c965488d6bd4f5aafc213392718"
+    },
+    "control/src/vonk_control/recipe_operations/job_run_completion.py": {
+      "JobRunCompletionMixin._validate_profile_jobrun_stop_child": "38f13012ed6ceb9c0bc82fd075fcc50b1d4d3834aeb6e4985cd4ac47b5b2d60b",
+      "JobRunCompletionMixin._validate_profile_jobrun_stop_child.unproven": "a92305fc5ba4ee116c535a63d45410467a4b8d08d37dced11bf1d09a8942bcda",
+      "JobRunCompletionMixin._complete_jobrun_stop_in_session": "9f22692ab7aa612d922cbdec66d08187228151902f54b0644b619a757076a9ce",
+      "JobRunCompletionMixin._complete_jobrun_stop_in_session.unproven": "8cc9d8dbe3d1224e680ee80ffdd6ddc0baa4e48c13fea7086e9112fd4007c79f",
+      "<module>": "353e2236d0577f0a555e0a5fa83f93b43adf0041555d837aee367d94e120fd42"
+    },
+    "control/src/vonk_control/recipe_operations/job_run_stop.py": {
+      "JobRunStopMixin._stop_logical_job_run": "9d6853385f3454c4117bedcc6c61e76b3599b39391effc6cc5866775be345806",
+      "JobRunStopMixin._one_shot_stop_is_pending": "14a817a3f53994d042efc0c69b4b33a695d7380dd5027aab2a4ddee220404057",
+      "JobRunStopMixin._run_jobrun_stop_in_session": "ccc696bfcfd456e3841c1185ea30eb6dedd896840ec22c8a032a3a4ba0c806af",
+      "JobRunStopMixin._profile_jobrun_stop_is_pending": "078c3ba84730faedfe2f1e8c40da321f9be386014b536e28ad91ab76f096df82",
+      "<module>": "948fef44aea04e16411d0c6d3c6f4e1c8d939af78f17ad35c2fb42c77be7ffc0"
+    },
+    "control/src/vonk_control/recipe_operations/observation_helpers.py": {
+      "_active_recipe_revision": "a78d2083c357252b899d32c25712790ad6d1bab66b74a7e01d602fcc6145ef99",
+      "record_build_evidence": "d3a4b83f2b0cd1eb9d53db6ca923b32d5cb2a457735aa96a0c5aa2bb69054f3a",
+      "_start_endpoint": "f5be02c884b1c88a39ea201f3df5d14a9b9c9e8e031245cb79465e0801173d5d",
+      "_aware": "9b2e980f441c7279ca2f128f28ba566eec71f96a641fea813cf292850730fa8c",
+      "prepare_exact_recipe_run_observation_nodes": "8d7985c0aa1332e2a8558368c6d6d445f2c94a03ee7e6d267e9fd8c20e31c917",
+      "<module>": "cea69fb6fb1b6a721e633e8932a16cd8b444a00591bc701e301c89696c99cdfd"
+    },
+    "control/src/vonk_control/recipe_operations/offline_stop.py": {
+      "OfflineStopMixin.reconcile_pending_service_stops": "86c272004fa668c179a18690d7cabcbe295043a76148dac66fa2a95c057b4d2e",
+      "OfflineStopMixin.reconcile_offline_stops": "4893424141875f2f89f030b213b238e67e587d790c1218ad63b3980b9b9ae68b",
+      "OfflineStopMixin._finish_offline_stop": "2f5b1315c33992340f02d7a04c9696109195db92d322a62f1970a5639dc1fa41",
+      "<module>": "bc9abad4931361a402158f4ee15a31533bd45566ce7bb78d5ac201f76696c5d5"
+    },
+    "control/src/vonk_control/recipe_operations/persistence.py": {
+      "PersistenceMixin._idempotent": "848f648b50e1c559f591eafe91d30edf19db8cfad35e09371e22dfce76fc9700",
+      "PersistenceMixin._idempotent_in_session": "7801e2a29a0970574161f9f6353027d9e491eb41994b7c5dbd6581d4ab7cf039",
+      "PersistenceMixin._idempotent_job_in_session": "f5d6552eee21eb6a3b2d21a74be6ea5c4dcafd89c8b534bf7b5ad18ae430786b",
+      "PersistenceMixin._admit_workload_intent": "3539833e10286017dcaa19c75c868c0732970fea71a3d8922200cd6c9688b52d",
+      "PersistenceMixin._queue_in_session": "ee32bc4313f07889f5228352a0f69c968429896504bd59302f31d90a39455d74",
+      "PersistenceMixin._view": "402ecb9394438cfde47a100e110ce9519190135a0eab635c974e68ee5b333e99",
+      "PersistenceMixin._release": "569856a3e5badd481ed7557f7502310e24f32def99409a81ea397830c2cc0732",
+      "PersistenceMixin._release_node_reservations": "2f0fd3e775eaecdbcb377e6604fe80689416e5bea9d9635f1ccddb6fae98afd4",
+      "<module>": "0ed4639c8a814531e841a0fd46832b0b168ce486f9c0fd0a39cbdf12c57c4444"
+    },
+    "control/src/vonk_control/recipe_operations/profile_job_run_stop.py": {
+      "ProfileJobRunStopMixin._profile_jobrun_stop_in_session": "bc6d7c90ff0669069bf53599ee18e64be4237b7bd40a33df3d94eaf9c269a7eb",
+      "ProfileJobRunStopMixin._one_shot_stop_prerequisite": "95f70296fb193c304fd126263657137c11dd7b7c9b777694dfe724fb19af7ca8",
+      "ProfileJobRunStopMixin._artifact_job_targets": "32953ea18b9591114768ffbad05b3584e09f4497d44b3c5a0f1e23436612a2e6",
+      "<module>": "22f205e2de02de5a36577e8a132c793e88b886e1413bd5f067228da3a46c9c8a"
+    },
+    "control/src/vonk_control/recipe_operations/projection.py": {
+      "ProjectionMixin._project_node_result": "5275f7bc34686b99b0ff70508e04708b78e050eb5739d485d43779fd69261d8d",
+      "<module>": "7d35fdc0049957fa6008f3ecceea167896e693a99640da5c5fa3d63c91ce6a63"
+    },
+    "control/src/vonk_control/recipe_operations/rank_authority.py": {
+      "_ranks_from_mapping": "f4b7319fa9525b35f6f693e826c9051a9603e7fc58fa3165afa9e48d6a1aef9d",
+      "_plan_ranks": "af8181aed145e2c4d1b654d14199fd4ae83e1c5a00b8053f0bc150d5a7a8d0ee",
+      "_run_accepted_ranks": "abfea013784a37751ad14922695ed3d021857ef0b0dbbb4f5508f1de33732894",
+      "_run_accepted_ranks.read": "2cdfd4323262700f103c3f2092a966e884c6a27e5a5e0c56f1224f2c9e92a6ab",
+      "_uninstall_recipe": "038da52444540570644a294aed7f3a8abee75b83882c482fd8fa2d53fd2c0b96",
+      "_installation_accepted_ranks": "e3d818be34e79abb75ff465e5243d278fd5db815d3c52f951a091cca954e0f06",
+      "_installation_accepted_ranks.read": "dd323ebcfb464c124b13d41f1283e4d21fe2cfba492b8e68ed651e2a38adc69e",
+      "_profile_jobrun_parent": "4f86b60047ead3e4326229b7a378b517ed4b274a9519d7a1445ff6849e352123",
+      "_run_is_one_shot": "6b061e502daeba7d5a0d4cba356b3a9da51a818e66ea97bd852d453d5d16424a",
+      "_run_is_one_shot.read": "09861036405afb29acf1531ce5eedaed83c03716e6af190528a9fe211461c3b9",
+      "_run_is_one_shot.rebuild": "6a0ecab379bc5a2af47d4dfbf3531445c14951714f78732fe488876e886fc54f",
+      "_run_observes_per_generation": "de4450b76fb98a1d86c3d3ad0b8f484abcc5f679aee0505de165e95cd8b620b7",
+      "_run_observes_per_generation.read": "763fabbbec4147e6f45d28f318c748d1e99b2b99e28fc5af320c5ee64e4dee93",
+      "<module>": "f736364753605ac4f040ee38f7fa12393af72dda3e9e6ab5466ef23445b3a44b"
+    },
+    "control/src/vonk_control/recipe_operations/reconciliation_authority.py": {
+      "ReconciliationAuthorityMixin.preview_uninstall": "3e111aa677d31b98e4125c685a33b81c183cdf7478f31f4bc048fa511531e0c0",
+      "ReconciliationAuthorityMixin._preview_uninstall_once": "cdcda1e66ff4fce8b758a906293f099c514f7a93111f7fbd538a40de4a7677ce",
+      "ReconciliationAuthorityMixin.preview_reconciliation_authority": "dbdf45351772d18d46181ef6685a75d8ee760c867dcb36ffc6dc6257fbe8fd76",
+      "ReconciliationAuthorityMixin.reconciliation_complete": "8d4c7e596995b9321732ae4668758728cbda70fe365e93035611a89d013f8a45",
+      "ReconciliationAuthorityMixin._lock_reconciliation_rows_in_session": "f3ae00b721d31cb5a19083d04d86735b0201fd1cf17ed5b17c3e5afad551788b",
+      "ReconciliationAuthorityMixin._reconciliation_authority_in_session": "cc13918585e3eac61e7a5638aeda0bd82a9404b1aaf656621e54e88eb30c706b",
+      "ReconciliationAuthorityMixin._reconciliation_authority_in_session.blocked": "af0794fb5ec6d41c320568c14baac72779c09e303083bd8a0178367a8cb7a9c7",
+      "<module>": "a705de7498a8ca17d85df7b77fe3abe063d52c3c5f94c4d4c5daef9ececa6589"
+    },
+    "control/src/vonk_control/recipe_operations/result_consumption.py": {
+      "ResultConsumptionMixin.record_node_result": "0fef451a4e193d62720a1dda2a1e088bd29bfbe4cf52c50f3cc557efb82bf0db",
+      "ResultConsumptionMixin._record_node_result_once": "cf78daaed5edc3d13a080b6da32dc91a02e45c5c1081d8cf198dc30b28a4c720",
+      "ResultConsumptionMixin.consume_agent_result": "4bcd2645bbecc3e61918aa59a0c27843e6665785c0f130ad349769bcba06e700",
+      "ResultConsumptionMixin._reconciliation_job_complete": "34f4b7a962e2563468d998e5aa17d8de14f69404bd25f14f1752a27048b11fe9",
+      "ResultConsumptionMixin._apply_build_cleanup": "d29cae57a6e75278537b48215e11cb648511e8720b80594ed835dbcc8e94f13e",
+      "<module>": "3ed53d36850525755ca1b687ae7f58e6be693c15ca52515fb5e5bca71e581e49"
+    },
+    "control/src/vonk_control/recipe_operations/results.py": {
+      "_validated_result": "775d180c672340cbe7a7c5b94caf99f27bdc5c5f1f1d4e9459b2c08207a7f65a",
+      "_recorded_result": "2b47f21d278f95f596a07e2f8e3df93d3b00a5d13fee395efc22a49a81a754d9",
+      "_recorded_result.read": "167c6145dced1f27808a738e823a2102b8687a730602963c9bd1ab669f72aa53",
+      "_recorded_result_document": "49b1b39d3a288d15bed794cc26e110391505e7d19bb461934d355d14f1e7ab92",
+      "_node_result": "48d215c946fcf53924c8c91d2a8b2279f542ebcc45b8c2772100a9754defd1b6",
+      "_unproven_evidence": "165a9ac73d8d62fb948c9329adb76ef12c939eda2490ee9062600c2b7d59becf",
+      "_evidence_is_acceptable": "79dce436335fc611d87d49ef698fa2f3435a3d2cfe3b8d41028047d939576d8c",
+      "<module>": "a9eef11f4aa7c950fa4ac1689ee9cb3a9316d6229304c963be8eda9b46c9112b"
+    },
+    "control/src/vonk_control/recipe_operations/retirement.py": {
+      "RetirementMixin.reconcile_retired_operations": "97106484fa54eb25fc6718149f57709e2c0816bb42053c262de8b3e088f49c18",
+      "RetirementMixin._retirement_cleanup": "1941b2c00b289b33516fabc84061bc46aee53efb082fd7763e2bd50952d17091",
+      "<module>": "2408df8c01b99c6d685472b7d36ae2cdb7d1d9606c688533ec7725a5cdbb250c"
+    },
+    "control/src/vonk_control/recipe_operations/retry.py": {
+      "RetryMixin.retry": "9f979bb95843772f5bf266f0d1dc355b87719e43c2d2276cfac6c2ac7737e887",
+      "RetryMixin._retry_once": "86b62a016238932cbcbe59b55a2f4fab5a8133501be620d70c8dedac48eb2af3",
+      "RetryMixin._retry_install_in_session": "a59c0a6bb6d6617481b8a61fe18ca6697eb1f8cb59981b92bc7d08400e9b35e9",
+      "RetryMixin._retry_build_in_session": "2fef50065d4aa1417ff02bdf9c972b5d605ad3b6c3056b7c574df40248b13474",
+      "RetryMixin._retry_build_in_session.plan_from": "81e7d2278bf19b9e1dc1d4f696232c52cc18a49af2508037e5fbdcbab679c098",
+      "RetryMixin._retry_build_in_session.rebuild": "644c094afa10b29ca1e57ae698163a4e80217b5da2369c3f201859d7fe5fd14c",
+      "<module>": "4c36bc975eafd5299e84de88feb4b3c631b9f8d91fa358790cdc4293de6dc992"
+    },
+    "control/src/vonk_control/recipe_operations/run_observation.py": {
+      "RunObservationMixin.preview_run": "b336b332864296964835d6a71a8158cb9f66b0b8dc4fc4463f8008d374f14712",
+      "RunObservationMixin._adopt_start_in_session": "19c4bcb306dfb14a4af44ace4b6bca39734bccaa8e74c6f64733923ac4374783",
+      "RunObservationMixin.replay_start": "929169c7039b2fda240f9258d6989cf19a327ea0aa1f077171fe3ce13d6e7e9e",
+      "RunObservationMixin.adopt_start": "00f0ffa92891772878c8c81993dee01b91425e3b4fb60ad512a49c85990cd022",
+      "RunObservationMixin.adopt_owned_operation": "68ebae5fca366e5ffcec29fda0e5025c92dd0891d30b5d83027949c69ef63a2e",
+      "RunObservationMixin.run_status": "6996272fb5e503a3b717137de4eee15507f664938979e9c5e2303f277f2173ce",
+      "<module>": "a04786fb3a49ee5c856d319ed9555dd7e30b153c549e089d24bb816d2c716cb4"
+    },
+    "control/src/vonk_control/recipe_operations/service.py": {
       "RecipeOperationService.__init__": "c081c353479c33a16f0d9287a0a03e15d930c473a682474dc01c72dd7cd447c1",
       "RecipeOperationService.bind_storage_demands": "15474b4e6ac146a7a1eb01ec331c44367d9237c876a56c638e9adb405ad96ba4",
       "RecipeOperationService._request_install_storage": "c98adece75093fcf52a6b8e87fc4d2c434683ad31dae95bf2f243b702aa1c4c6",
       "RecipeOperationService.preview_mapping": "ecc954a7cdb4e2f7d7c737599dab4f89f7b3a55861d5ac850b2b46b048edc4ec",
       "RecipeOperationService.create_mapping": "9c59bf2d92d45617263e4886c892ce544dcea16ec7eb97379ff4de64b2343c2d",
-      "RecipeOperationService.preview_build": "c4a199aea765195a8e9f94ab58d45aea1cceaa9f18010221874f26c9fb22f3cf",
-      "RecipeOperationService.reusable_build_id": "ff6aa0cba30e52abd1acc4f7303f89d93bcb3077dc12c6b5c489921e656740ad",
-      "RecipeOperationService.check_build_source": "18505fc90433595c317f74d8265cf0fbbbe0092f8309e327694f06841957c989",
-      "RecipeOperationService._build_once": "5132d4502a16bab20dd3ad71878a696acc235529d1c7d5dddb91a4f72017bae8",
-      "RecipeOperationService.build": "30207699c221e997c87dedbd8cb7c939124958110119a8bbcacf1ceaa1ae0a20",
-      "RecipeOperationService._start_build_in_session": "288933cabfe90a654c487b9e2597dfe6e122806ce228a0f817f9d13efaa535ba",
-      "RecipeOperationService._queue_prebuilt_build_in_session": "271e6e046daaed9ccc811ce4e8b58a8e250eb885d6703af5aee3132c72d0dcb9",
-      "RecipeOperationService._successful_build_job_in_session": "8bcb9fc548951cce3eac3d8f841ee67ef369a3589a36dc4075f1ee13396faaa8",
-      "RecipeOperationService.preview_install": "bd5cacc49864f9fb3b5fdb9d698d250454444283b6708f5ef0c343552b20c20d",
-      "RecipeOperationService.prepare_installation": "beee13f87d8c5dd304edee80111095b340da576111d32e241d071a6aceb6453c",
-      "RecipeOperationService._prepared_installation_id": "e3ae0b6a26b5fc7754c70de5effcf19af071ae878872c4d8f034975a115d7197",
-      "RecipeOperationService._stored_compiled_plans": "c741acd35e30abc11a7bc7e5639f106060c19924749132a345d13b674ec35a72",
-      "RecipeOperationService._stored_compiled_plans.read": "3ca1e9b44bd507d4500b78e8be89300d8755b09fd25fd787dc98bb3b5afe131c",
-      "RecipeOperationService._stored_compiled_plans.rebuild": "a7a5e3e0ae4da8e68193e7cfe044fadde06637eaf464f8d68da3d482432c4c41",
-      "RecipeOperationService.start_installation": "52d5cf0acb57e71e6fce10a9088ce448ff670d53b72b4c7b1f1c347a77c992c3",
-      "RecipeOperationService.preview_run": "ff2e2cc57ded792d4ce685e32c8b2db7ba37c65c5be04b850c7868d736c65c85",
-      "RecipeOperationService._adopt_start_in_session": "d1654414ca9924ee99f01430db3bf8d011728369a0c9560f2927a1ede38e1dd3",
-      "RecipeOperationService.replay_start": "c0ac29647847d5148bc8207c7591b8e44a25f8dade65124cb4757c9fd8d146d3",
-      "RecipeOperationService.adopt_start": "48418fcbfaf27dbf6d81806b676e393caa945c39eba093e5445e2d0148c70a02",
-      "RecipeOperationService.adopt_owned_operation": "f5a91d3dd65a59b0a0841a49a4711754f31321d617b03a1ed72ed4f112513b76",
-      "RecipeOperationService.run_status": "e641899eb7e1a709754dd0785de89fe96cfd4306eb6a6ecfbd41146a7749f354",
-      "RecipeOperationService._install_once": "6c52d8d9516ee97293107370a26d8f2a5a05f540d3a3f614a1e7a02c94913ba5",
-      "RecipeOperationService.install": "d1d062baeff71e55fee13aea821520b83a27421cd58827299ae0ed89aa574e82",
-      "RecipeOperationService._start_once": "0186b8c97fa3a87e04e2ad73412a4e679c7d27664f603fb69416734522abcd50",
-      "RecipeOperationService.start": "4c1c2ef3d7b32a5c87e05bf6b80b97ae0fbdc0d4843f29f8045833edf9c9aa14",
-      "RecipeOperationService.enqueue_one_shot_job_in_session": "50853ea7e8237e26120769cc94943ed0e1d0b2dfd03adf0887a2b573250adae5",
-      "RecipeOperationService.notify_agents": "676b524301c7a17188e5b167f83ff9966728df79a1a626776706bf843b287e54",
-      "RecipeOperationService._activate_job_run_once": "58d96259e98a0d4c89bad4429a83b3e7f868f07ee698c3d3e483385c7b231a73",
-      "RecipeOperationService.activate_job_run": "14bdcd3f8760cd36628ceae847f00801fc7e95c2beb990b6aad581adfa098397",
-      "RecipeOperationService.assess_superseded_unissued": "ada2f4c45aa733555de096b82151619afdf88e5dfaf16b8ca4dc3e999e27075e",
-      "RecipeOperationService.assess_superseded_issued": "da5fbf2610ea005d7520d0eeb1e79753231e1cd7fb5ecc8eae8390f83b2b1105",
-      "RecipeOperationService.reconcile_superseded_unissued": "308121d083a9f84628b41169c9333c87c8bb8177afc12b4a14b0dc1da27cd71c",
-      "RecipeOperationService.preview_stop": "9e1b0538945f93b9557f8bc4b1d503d21e0242cb71acdaf62a12e2b424127a8a",
-      "RecipeOperationService.stop": "a31d53010083e9c75e59e5beb507f1346cc90f2690dfac52e978b6e395eb4819",
-      "RecipeOperationService._stop_service_run_once": "8086b6ae5e0bc49acc472129db6b66f49836625807c2555891cb576dbc57c5a8",
-      "RecipeOperationService._stop_service_run_once.claim_withdrawal": "5295aa3e82302038abd64c921422919412d2e6355be3f2dfe909fe5df9911c75",
-      "RecipeOperationService._defer_accepted_service_stop": "9094ab217bfe78d066a382c053d33930bb4f11a85974b6f275c37d2f525af0d8",
-      "RecipeOperationService._service_stop_document": "c568c178760fe39f0e66456a8dee97846441d6325e1c7c2b907adbf67cd04c03",
-      "RecipeOperationService._write_stop_parent": "31c0d8ffbcf3df9fa2395450a224b7ba9c249e12258760a073e26652a1e99693",
-      "RecipeOperationService._service_stop_pending": "ffda4a8c63ab8d5adbbc84b0a8a080370d186f9cd6b37f1aaf3120d886605e1d",
-      "RecipeOperationService._check_service_stop": "5479d4febc34b7c174b20579813f92193a391ec134a0f02a7d9f6bd504720388",
-      "RecipeOperationService._service_profile_stop_owner": "1c51d9f03d707f7c86eac71b1e7f19b904230813b2c5885607572afd0e3afedc",
-      "RecipeOperationService._accept_service_stop": "a89d65e0d74879b920b16eea034d2a497c9c597e4eae6d51bdc805da60e6b511",
-      "RecipeOperationService.reconcile_pending_service_stops": "73097758a0772f833e3dbc0d1e1366dde80d206db0e893aace07b97bbbe35d90",
-      "RecipeOperationService.reconcile_offline_stops": "99c070c171a7a3fb69fedd8d7e5a01f99e884449366faa2d3e548f0d42476f4d",
-      "RecipeOperationService._finish_offline_stop": "55e19cf4b157696f2f3f82727c5f4b7d049bd248479482efb458355512579868",
-      "RecipeOperationService._dispatch_stop_after_withdrawal": "58c9d91f94543d5af89c87350ef7672fd2f46182049bedd44b612feb9297356e",
-      "RecipeOperationService._absent_stop_nodes": "8fa69c1f7e49e98848fca85ef5bcd5d73923606503190340f1b3d463593ede00",
-      "RecipeOperationService._complete_absent_stop_in_session": "9fd42e26e36eeb8dd031ca15a0a71a14156f36f36a7394dc3ab7439b93e976f8",
-      "RecipeOperationService.queue_recovery_stop_in_session": "0dc7e6011a54611c2356dae90348ea8da9c601787fe791f88d1c7b800907295c",
-      "RecipeOperationService._exact_stop_authority": "aeff41a491aec7a9a28ce02aeae60fecab554a3435432f2cb8c99ae5911d53e1",
-      "RecipeOperationService._queue_stop_in_session": "fd53183d06d930f966ff3b628ec1e5eebe31263a13c92981ad3657b5ddd38976",
-      "RecipeOperationService.preview_uninstall": "241df90bb833ec8ffacc9e46a8e05d81cef3783df15cbecc3e6104ba488897cd",
-      "RecipeOperationService.preview_reconciliation_authority": "c302d219c4e50f95e4aba12c19f8d8201e0c17903573a00f6a4c7f2855c966ed",
-      "RecipeOperationService.reconciliation_complete": "c26068c741e42a2caae4f4e4ca0c8e0ec03d41fff1b2d02ce2e88483fbd27204",
-      "RecipeOperationService._lock_reconciliation_rows_in_session": "cfba0bc0a65fa1e863ae569bf379498d3f87d90b217097b99b18a9308bbae629",
-      "RecipeOperationService._reconciliation_authority_in_session": "42892a6501e3858b494e95b84d3f32dd8e21582651e0abe17a316f235eec6ae2",
-      "RecipeOperationService._reconciliation_authority_in_session.blocked": "af0794fb5ec6d41c320568c14baac72779c09e303083bd8a0178367a8cb7a9c7",
-      "RecipeOperationService._reconcile_installation_once": "f6a7439acfe48f1360d23cf524c6c8f373ace071da7d0252fbed0e144ae6f79f",
-      "RecipeOperationService.reconcile_installation": "b05d22bb1fdce6a00fdd472a4f3482dc207b4bae9d96f6a8b2665fc51b85ff57",
-      "RecipeOperationService.uninstall": "58a85ac51be6a545189224ee2bc2d20069b390337ac551a6adb20109461669a7",
-      "RecipeOperationService.abandon_never_installed": "ab69541c955edeb7a11737e8d6c6f7eba9a6178cb99f6513cf47d239445cff00",
-      "RecipeOperationService.retry": "62ac0ef1efc71a246798601ea9d2456e1a906dcd4e5134e5ae41b8009b6ca0bb",
-      "RecipeOperationService._retry_install_in_session": "85fbb8cb03f883de1999349016a7b8ed6bf4ef674b670d74d31ac1fadc3bda1d",
-      "RecipeOperationService._retry_build_in_session": "328267ddec01f9566b6f1579cab0d7a0077307e7c719ee63e3e9b352b9c33ad5",
-      "RecipeOperationService._retry_build_in_session.plan_from": "81e7d2278bf19b9e1dc1d4f696232c52cc18a49af2508037e5fbdcbab679c098",
-      "RecipeOperationService._retry_build_in_session.rebuild": "21ee438dc07e4c833911f2334842efcd0717a7912ce6506dcd768055edd84673",
-      "RecipeOperationService.record_node_result": "a57d05a2ef50d77b04822561361bfcb63b400cca9bf12ad861d589be88a47981",
-      "RecipeOperationService._record_node_result_once": "85d83822fb0993079160b8e9dfd4d3fcadea64418a95cc385bc4e3c766f6180c",
-      "RecipeOperationService.consume_agent_result": "3c87adb8417062b5dbaab619737488fb56c8867e3a63a5c96b56af1463b950e9",
-      "RecipeOperationService._reconciliation_job_complete": "2eeb8c7d03d479c9f071b066c4c96c2fbbba6b50f212ae6aaf1a765f08086952",
-      "RecipeOperationService._apply_build_cleanup": "1a0f8c8e3d40ee638eb478bb4440b970a30a4b241fb846ed02c9272ae4aa04dd",
-      "RecipeOperationService._project_node_result": "33f46822944f59cedd73b2f613820dda2c4875829bbddd2cde0425015e5e986f",
-      "RecipeOperationService.get": "b15b000d3365cf9403783995712f1d51a9690f07d90cb8137fa94f8b0ff04c06",
-      "RecipeOperationService.cancel": "773cebc59cc891826e2dec4f3dee57c8c90a90f7e3676140e6d423d74e898548",
-      "RecipeOperationService._heal_cancelling_build": "291905f5dc71c672759c971aed9bece0f182d761143843f6b7b2dd4f3862dec3",
-      "RecipeOperationService.reconcile_cancelled_builds": "b831c0bea5827b1ccb05d0576473831cff9a8734ee41b01db8eeda22181c5efb",
-      "RecipeOperationService.reconcile_retired_operations": "d2ac903276b1f0e5de04692f4e3c15b4b72946aaa3c69482bcb74b6832f664e0",
-      "RecipeOperationService._retirement_cleanup": "4558ad2bf0d97f02b952c37c98f449634502386191a5eb9a4215c72db72266a0",
-      "RecipeOperationService._cancel_build": "56b288565ec33d701a5cc02c0fe836b3e3383e6d13bf4b61808d109e896f34a4",
-      "RecipeOperationService._cancel_current_build": "63e81d860c4c60fcf06f46eac463d48a0a117b679a2c99ecd1b36bea11358657",
-      "RecipeOperationService._cancel_prebuilt_build": "7601444225c86fb26ccd000a6167804b852e57edb3a4d9dd2376cc4c202f253d",
-      "RecipeOperationService._cancel_current_build_locked": "83efb70f9235e68b88306be4ed93e9d2f80adc44354907935046933cfd13b129",
-      "RecipeOperationService._release_cancelled_build": "718116e70a02c99508d03eff7238e415461302b4f6c29820438afb64a1b9ada5",
-      "RecipeOperationService._stop_logical_job_run": "e3729897610cfb20db94a8267acbda73f07c6b8389bbdb216464d976598566d2",
-      "RecipeOperationService._one_shot_stop_is_pending": "32c47fee466dbc543b819c8aa64e57a7f855a64e245521c8d8dd468a804530e1",
-      "RecipeOperationService._run_jobrun_stop_in_session": "5ea9217ca521610cb33de5c8fc04d8142829d723bb9a0e32904a966697610aa1",
-      "RecipeOperationService._profile_jobrun_stop_is_pending": "130576de8cd79f8eea3e38d60d184cd094822bf222dea569e321b2642ca01563",
-      "RecipeOperationService._validate_profile_jobrun_stop_child": "17825dc96be41efae80beb7c5ff0b71e8494d900add100c0497af74aa2bfab3b",
-      "RecipeOperationService._validate_profile_jobrun_stop_child.unproven": "a92305fc5ba4ee116c535a63d45410467a4b8d08d37dced11bf1d09a8942bcda",
-      "RecipeOperationService._complete_jobrun_stop_in_session": "153468e5c6837856d298d9f3bab5d3f76706aaaf588269f3f132918598a95f62",
-      "RecipeOperationService._complete_jobrun_stop_in_session.unproven": "8cc9d8dbe3d1224e680ee80ffdd6ddc0baa4e48c13fea7086e9112fd4007c79f",
-      "RecipeOperationService._profile_jobrun_stop_in_session": "04b98318cc5d639164e0dcd16b6fa95775ad1b21072eeee38fa36d3b7c40a25a",
-      "RecipeOperationService._one_shot_stop_prerequisite": "ffde4e07a2a19e6bcec6cd260bd1fc0eb15a01295a036804d566a8ebc3e5328e",
-      "RecipeOperationService._artifact_job_targets": "32953ea18b9591114768ffbad05b3584e09f4497d44b3c5a0f1e23436612a2e6",
-      "RecipeOperationService._stop_plan_in_session": "020a48e4b23f61b2f10b50f98fe7204d3053bdfa94270444438579f13a4fd7bf",
-      "RecipeOperationService._uninstall_plan_in_session": "6335e69384fefe9ba65ee915c8b30599a4653d258a78b4705924f623ef77b707",
-      "RecipeOperationService._model_dependents_on_nodes": "c1b7d59467380aea2cb02bf8e49a60d5a7e8118fa35934925179ef5d7cd20c63",
-      "RecipeOperationService._idempotent": "b2aa35378fc29b6136d7f03c3ffabb90fcede346872d8f76e897d987f8aa4d5b",
-      "RecipeOperationService._idempotent_in_session": "dece7ec767fab4f4b02bd2245cc21859f14e2a2fd0c50865720648c22d79e933",
-      "RecipeOperationService._idempotent_job_in_session": "f98eaee01f6f71b90ab3342f8791197d9e3d9268ab4209cfc01ca14b59548cec",
-      "RecipeOperationService._admit_workload_intent": "2240b7325b9c5dd2dc78496a4d54649125433e5ad5790f69386b5b4928b55449",
-      "RecipeOperationService._queue_in_session": "453b56cb3f46fe7822baf126eef6c991b7565f856f8a78bc9712e6de6daefd2f",
-      "RecipeOperationService._view": "aa1aa8f0b282719bd8ab5e53da9fa4eba8d36ea3ef6770f9ce397977ee6b5763",
-      "RecipeOperationService._release": "569856a3e5badd481ed7557f7502310e24f32def99409a81ea397830c2cc0732",
-      "RecipeOperationService._release_node_reservations": "2f0fd3e775eaecdbcb377e6604fe80689416e5bea9d9635f1ccddb6fae98afd4",
-      "record_build_evidence": "0a2d8afda8f990a5d2c2dd9daa7fbdd475b031babff36bdbad701e7eb45f747f",
-      "_start_endpoint": "a2ce121bb5f2d99b429461b74abcc8ad482bd6b39f0fd71216b67d59256dc6ec",
-      "_aware": "9b2e980f441c7279ca2f128f28ba566eec71f96a641fea813cf292850730fa8c",
-      "prepare_exact_recipe_run_observation_nodes": "8d7985c0aa1332e2a8558368c6d6d445f2c94a03ee7e6d267e9fd8c20e31c917",
-      "<module>": "2778c55839adfae6d83f4c0c2a941ff26f4982ac7ea35cbd13f2bad62fbc1542"
+      "<module>": "9574a714d504268a42ba316dda95954a3685f94ef6a5a97890bf8bbb2b1e85e8"
+    },
+    "control/src/vonk_control/recipe_operations/start.py": {
+      "StartMixin._start_once": "62d0f6d9db4f1e8258a86d00ac53e788e6b2c2b25631b283f95bfb88b6073fc7",
+      "StartMixin.start": "599ce51528db2fe1fe09c7e330d37edbc822d7391bd9338ccba094dbb38a9dcb",
+      "StartMixin.enqueue_one_shot_job_in_session": "d23a5c4a96b4f601d571c94068afef403cab15e59978816bf3d100d3b6573222",
+      "StartMixin.notify_agents": "9365f914e84d2e0b3fb31aff7a6dee17957556420aa90f45870069c1571ed57e",
+      "<module>": "a957d419fdc18319e332eb6857b915e3033f8e07cf577a20a4b39f12e0085d3e"
+    },
+    "control/src/vonk_control/recipe_operations/stop.py": {
+      "StopMixin.preview_stop": "74811e5e19fe1ca33accbad7c4d42936926c75779e01771ef69e41646232a2ae",
+      "StopMixin.stop": "34e4d8dca97c0c180b0f2d461e7a72baa4416e9eaabcf2155976424f29f32dac",
+      "StopMixin._stop_service_run_once": "c9645b98e598d3ac1599a627b975cf01a76a719412440bd909c82a3c61bad063",
+      "StopMixin._stop_service_run_once.claim_withdrawal": "eb62d8893169ad35fe876f841b14d51577b72ba867655a1da2ccab0a8c78c2a3",
+      "StopMixin._defer_accepted_service_stop": "82d90421f05ec57b2dfc8ac6583c9e3fd69a77bec72e2b5839a68d715cf9f25f",
+      "StopMixin._service_stop_document": "ef97426247f9a3450ee7c8c7d9f86d0223c808dd8a482cbac07bcbbed52338da",
+      "StopMixin._write_stop_parent": "acc2428b801497fb281cb4f4cd549d7f90503e5e3a50466b29469fa818b28178",
+      "StopMixin._service_stop_pending": "854afed7eec6de633b48397fde94b3742abc28943bf67000cd4f80ccd1460f8b",
+      "StopMixin._check_service_stop": "029b9ea913ab34a7e2ee469391211ccf5880fba21f4c7f7866516faea8628e9c",
+      "<module>": "a3669cdde8ab17988bc605efdfa9d11ada2267ee08f6149518c4404a827a1ff5"
+    },
+    "control/src/vonk_control/recipe_operations/stop_acceptance.py": {
+      "StopAcceptanceMixin._service_profile_stop_owner": "b6325a64d9d3a16e2b6ea023d646008b1f792b557ba3cb5f5f05a2fbb92c8cc6",
+      "StopAcceptanceMixin._accept_service_stop": "e2211e26003bf951238f8522d8c4a581cc04d108b7c76c2e4a773fcabecc0f90",
+      "<module>": "0d83d0ee372913165083bf257faaa156ece104abe77264b461980bf583432652"
+    },
+    "control/src/vonk_control/recipe_operations/stop_dispatch.py": {
+      "StopDispatchMixin._dispatch_stop_after_withdrawal": "9b43fba7ff4ca1668d71e11ea328a9a80fe1f77ff9fb13eb7b250393654b27fd",
+      "StopDispatchMixin._absent_stop_nodes": "8fa69c1f7e49e98848fca85ef5bcd5d73923606503190340f1b3d463593ede00",
+      "StopDispatchMixin._complete_absent_stop_in_session": "875631cad3b0edf35aed3a35a24e83c4a758afa808f79b9f08e7311351c4d584",
+      "StopDispatchMixin.queue_recovery_stop_in_session": "992991a06316054b9d1f0aa2ca874ca6ab4b9f94609bd5a7072238658a7afe4a",
+      "StopDispatchMixin._exact_stop_authority": "aeff41a491aec7a9a28ce02aeae60fecab554a3435432f2cb8c99ae5911d53e1",
+      "StopDispatchMixin._queue_stop_in_session": "5e73a61ed026392f9716877de0e63fe74666c41182d9e34f3f2352e8c5569601",
+      "<module>": "b62c412e3300052c02d84d9c52f2c1ba20e31803386e862e89fa7ffd5848f71d"
+    },
+    "control/src/vonk_control/recipe_operations/supersession.py": {
+      "SupersessionMixin.assess_superseded_unissued": "3c3d2320d7d47d975eef576bebfef543477462e66ad5c288b45e63b8cd48fd7d",
+      "SupersessionMixin.assess_superseded_issued": "3f3aa0531f4377fb390f8266e231d1b65a2396e828f9900a4258d4703f46e00e",
+      "SupersessionMixin.reconcile_superseded_unissued": "6505a8ed271a88c3e2ca0c48600f39ce057c6b62c2fba09c4d33aed70385e956",
+      "<module>": "9e0189c6105b079d7018a85663a606e0aa9d098cdd5d590400403e77c54729ed"
+    },
+    "control/src/vonk_control/recipe_operations/terminal_projection.py": {
+      "TerminalProjectionMixin._project_terminal_result": "80955ef835750e3070c06e93e33c03b0cb40d83ad2b6f3d2fc28f19377db41e4",
+      "<module>": "1404644553cfce8b82ecb422ce254db7d83b388312ecbc32e5026e3ed775b1cf"
+    },
+    "control/src/vonk_control/recipe_operations/uninstall.py": {
+      "UninstallMixin._reconcile_installation_once": "cffdc74f672d7e15082cc07ea86cff50797296210f652097bba7dcf6263f0dda",
+      "UninstallMixin.reconcile_installation": "a5ac48a24138370e15e8b22263f45069cf12728affe9495068d458d8e7578ce1",
+      "UninstallMixin.uninstall": "308d55cfa0724fad66dc9aafaff848df1375b46a73d2680b295e615a2c6da8bd",
+      "UninstallMixin.abandon_never_installed": "9b4ecfa026e536d7f6b32e67c72a75c3eb56875934a767893c14c6593c34df3d",
+      "<module>": "9dc97ba2fd254dc87ccbbf796515f870a61f360a87f275296536377b86a6808a"
     },
     "control/src/vonk_control/recipe_packages.py": {
       "_select_release": "b005492cd677be9ca46434128b6b01c29accbefe49e764597cf214fb4c8ce5f6",
@@ -4382,9 +4575,6 @@
       "_mapping_node": "f452b679c52a063bfa1c5ec53538e4d60992d629511fe19afa1cb44774da8777",
       "<module>": "51d7cdd047461060b0142e6278793e403870148204d58db45d202694703c9c47"
     },
-    "control/src/vonk_control/run_switch_operations/publish.py": {
-      "_persist_run_switch_runtime_image_reference": "520e4c4299e165ae62926cf364b03783c387ec2d90acbf814f8af6cedecd3c40"
-    },
     "control/src/vonk_control/run_switch_operations/image_receipts.py": {
       "_planned_transfer_bytes": "09cf4aa75f6cfed1cb0268b1833d096d65e0548518d0f128fb9f5cb954ce64b3",
       "_plan_target_node_ids": "1f7b6079e00286679d8f2b451f5a10737139cae316ff6f8cebb59a2e2179eadf",
@@ -4433,8 +4623,8 @@
       "<module>": "7ac04cdda77ef8bfec8afcf1476e5638bf4410caf237f7a18719476c1727d9da"
     },
     "control/src/vonk_control/run_switch_operations/phase_dispatch.py": {
-      "PhaseDispatchMixin._execute_checkpoint": "b901d8c95b57f3f20e174fe02065541fececeb679e4b552629992c46ee30e073",
-      "<module>": "46c56f59c35cf6b7df08b9c9064760e7d0eab460437f7b5b8aaa079364a398d4"
+      "PhaseDispatchMixin._execute_checkpoint": "047062866c821a5f09cca1e1118ec2409ff5a42a5d9563f36c900bf3f553b29c",
+      "<module>": "b72253438f4bc75d617db94037da0bb28be4deeb467c0a5c0a428c91909ff81b"
     },
     "control/src/vonk_control/run_switch_operations/phase_planning.py": {
       "PhasePlanningMixin._inspect_artifacts": "cfbd974a49fb2f15cef44317726a04dce180632e2873ae6553779886c6e26ba1",
@@ -4489,6 +4679,9 @@
       "RunSwitchOperationProvider.get_operation": "f32b7250c4b78382a09447ebc9a1e8b76737ece5b83cf3bb87f180d97175e414",
       "RunSwitchOperationProvider._item": "608f4ed49dc56f6a26bd9d7c1ae475fc6d70ed4a5eea26e4012356f014dbf82c",
       "<module>": "e40b3d0a889543392fdd99246a9637551a2f26b7bc29a8946a638d7d560c008e"
+    },
+    "control/src/vonk_control/run_switch_operations/publish.py": {
+      "_persist_run_switch_runtime_image_reference": "520e4c4299e165ae62926cf364b03783c387ec2d90acbf814f8af6cedecd3c40"
     },
     "control/src/vonk_control/run_switch_operations/reservation.py": {
       "ReservationMixin._apply_plan": "e9acf3fcc138493d61fe09b8a3eb2521d8620390f0544efecf6a6affee429b02",
@@ -5126,14 +5319,6 @@
         ["control/src/vonk_control/model_cache/resolution.py", "ModelCacheConflictInvalid", "ResolutionMixin.resolve_artifact_set", "model_cache.pin_mismatch", 1],
         ["control/src/vonk_control/model_cache/resolution.py", "ModelCacheConflictInvalid", "ResolutionMixin.resolve_latest_cached", "model_cache.pin_mismatch", 1],
         ["control/src/vonk_control/model_cache/retry.py", "ModelCacheConflictInvalid", "RetryMixin.check_access_and_resume", "model_cache.access_recheck_unavailable", 1]
-      ]
-    },
-    {
-      "family": "recipe.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping uncertainty (missing receipt, stale stored plan, persisted state, changed scope) that rule 5 of the lifecycle core turns into unknown-then-reconcile. Debt: the ceiling only falls. Audit notes: Evidence/owner/scope bookkeeping on result projection, Stop authority, JobRun Stop, build cleanup. Installation/plan/reconciliation bookkeeping that blocks Install/Start (e.g. complete without a receipt).",
-      "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._uninstall_plan_in_session", "recipe-revision-authority-is-unavailable", 1]
       ]
     },
     {
@@ -6563,66 +6748,65 @@
       "category": "input-validation",
       "reason": "Refused at submit time, before anything is persisted, and the caller can change the request: the entity or argument the request names does not exist or is in a state it cannot act on, the reviewed plan or workload intent is stale or superseded, or a document this very call composes violates its contract. Raised only from the request path; damaged stored state is rebuilt from evidence or retired as unknown (lifecycle.evidence), never raised as this class.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "artifact-job-recipes-currently-require-a-single-node-topolog", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "artifact-workload-target-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "recipe-is-not-an-artifact-job-recipe", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "stored-run-plan-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._admit_workload_intent", "workload-intent-target-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._admit_workload_intent", "workload-intent-was-superseded", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "compiled-execution-plan-is-missing-for-one-or-more-mapped-no", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "message", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "compiled-execution-plan-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "operation-context-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "operation-group-has-no-target-nodes", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "operation-phases-are-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "operation-phases-do-not-match-target-nodes", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "recipe-operation-job-payload-is-too-large", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "workload-intent-ordinal-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "reconciliation-has-no-pending-targets-but-is-not-complete", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._retry_build_in_session", "cancelled-recipe-build-intent-is-not-retryable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._retry_build_in_session", "recipe-build-is-not-retryable", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._retry_install_in_session", "recipe-installation-is-not-retryable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._retry_install_in_session", "recipe-operation-is-not-retryable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "operation-topology-order-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-direct-fabric-rendezvous-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-run-has-no-endpoint-owner", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "recipe-topology-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once.start_payload", "recipe-start-payload-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "artifact-workload-target-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "partial-one-shot-stop-requires-current-profile-ownership", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "profile-jobrun-stop-request-identity-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "recipe-installation-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "stop-plan-is-stale-or-blocked", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "workload-intent-was-superseded", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_plan_in_session", "recipe-installation-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_plan_in_session", "recipe-run-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._uninstall_plan_in_session", "recipe-installation-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.abandon_never_installed", "recipe-installation-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.assess_superseded_issued", "workload-intent-ordinal-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.assess_superseded_issued", "workload-intent-was-superseded", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.create_mapping", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.enqueue_one_shot_job_in_session", "recipe-job-target-is-not-running", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.prepare_installation", "compiled-execution-plan-was-not-persisted", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.prepare_installation", "message", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.reconcile_superseded_unissued", "workload-intent-ordinal-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.reconcile_superseded_unissued", "workload-intent-was-superseded", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.retry", "recipe-operation-is-not-retryable", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.retry", "request-key-was-already-used", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.start_installation", "recipe-installation-is-not-launchable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.start_installation", "recipe-installation-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.start_installation", "recipe-revision-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.uninstall", "installation-was-never-installed-abandon-it-instead-of-unin", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.uninstall", "recipe-installation-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "artifact-job-recipes-currently-require-a-single-node-topolog", 1],
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "artifact-workload-target-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "message", 1],
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "recipe-is-not-an-artifact-job-recipe", 1],
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "stored-run-plan-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._admit_workload_intent", "workload-intent-target-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._admit_workload_intent", "workload-intent-was-superseded", 1],
+        ["control/src/vonk_control/recipe_operations/install.py", "RecipeRequestInvalid", "InstallMixin._install_once", "compiled-execution-plan-is-missing-for-one-or-more-mapped-no", 1],
+        ["control/src/vonk_control/recipe_operations/install.py", "RecipeRequestInvalid", "InstallMixin._install_once", "message", 2],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "compiled-execution-plan-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "operation-group-has-no-target-nodes", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "operation-phases-are-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "operation-phases-do-not-match-target-nodes", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "recipe-operation-job-payload-is-too-large", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "workload-intent-ordinal-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin._reconcile_installation_once", "reconciliation-has-no-pending-targets-but-is-not-complete", 1],
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_build_in_session", "cancelled-recipe-build-intent-is-not-retryable", 1],
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_build_in_session", "recipe-build-is-not-retryable", 2],
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_install_in_session", "recipe-installation-is-not-retryable", 1],
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_install_in_session", "recipe-operation-is-not-retryable", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "message", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "operation-topology-order-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "recipe-direct-fabric-rendezvous-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "recipe-run-has-no-endpoint-owner", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "recipe-topology-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once.start_payload", "recipe-start-payload-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "artifact-workload-target-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "partial-one-shot-stop-requires-current-profile-ownership", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "profile-jobrun-stop-request-identity-changed", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "recipe-installation-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "stop-plan-is-stale-or-blocked", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "workload-intent-was-superseded", 2],
+        ["control/src/vonk_control/recipe_operations/action_plans.py", "RecipeRequestInvalid", "ActionPlansMixin._stop_plan_in_session", "recipe-installation-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/action_plans.py", "RecipeRequestInvalid", "ActionPlansMixin._stop_plan_in_session", "recipe-run-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/action_plans.py", "RecipeRequestInvalid", "ActionPlansMixin._uninstall_plan_in_session", "recipe-installation-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin.abandon_never_installed", "recipe-installation-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/supersession.py", "RecipeRequestInvalid", "SupersessionMixin.assess_superseded_issued", "workload-intent-ordinal-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/supersession.py", "RecipeRequestInvalid", "SupersessionMixin.assess_superseded_issued", "workload-intent-was-superseded", 1],
+        ["control/src/vonk_control/recipe_operations/service.py", "RecipeRequestInvalid", "RecipeOperationService.create_mapping", "message", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin.enqueue_one_shot_job_in_session", "recipe-job-target-is-not-running", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.prepare_installation", "compiled-execution-plan-was-not-persisted", 2],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.prepare_installation", "message", 2],
+        ["control/src/vonk_control/recipe_operations/supersession.py", "RecipeRequestInvalid", "SupersessionMixin.reconcile_superseded_unissued", "workload-intent-ordinal-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/supersession.py", "RecipeRequestInvalid", "SupersessionMixin.reconcile_superseded_unissued", "workload-intent-was-superseded", 1],
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_once", "recipe-operation-is-not-retryable", 2],
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_once", "request-key-was-already-used", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.start_installation", "recipe-installation-is-not-launchable", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.start_installation", "recipe-installation-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.start_installation", "recipe-revision-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin.uninstall", "installation-was-never-installed-abandon-it-instead-of-unin", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin.uninstall", "recipe-installation-does-not-exist", 1],
         ["control/src/vonk_control/recipe_progress.py", "RecipeRequestInvalid", "_canonical_distributed_readiness", "distributed-readiness-interface-is-invalid", 1],
         ["control/src/vonk_control/recipe_progress.py", "RecipeRequestInvalid", "_canonical_distributed_readiness", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_profile_effect_scope", "profile-stop-target-scope-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_run_start_intent", "recipe-run-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_validated_result", "recipe-operation-result-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_workload_owner_scope", "recipe-installation-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_workload_owner_scope", "recipe-run-does-not-exist", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_workload_owner_scope", "workload-reconciliation-kind-is-invalid", 1]
+        ["control/src/vonk_control/recipe_operations/intent.py", "RecipeRequestInvalid", "_profile_effect_scope", "profile-stop-target-scope-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/intent.py", "RecipeRequestInvalid", "_run_start_intent", "recipe-run-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/results.py", "RecipeRequestInvalid", "_validated_result", "recipe-operation-result-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/intent.py", "RecipeRequestInvalid", "_workload_owner_scope", "recipe-installation-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/intent.py", "RecipeRequestInvalid", "_workload_owner_scope", "recipe-run-does-not-exist", 1],
+        ["control/src/vonk_control/recipe_operations/intent.py", "RecipeRequestInvalid", "_workload_owner_scope", "workload-reconciliation-kind-is-invalid", 1]
       ]
     },
     {
@@ -6630,16 +6814,16 @@
       "category": "security-edge",
       "reason": "Fence authority guarding a destructive effect: a Stop is built only from the run's exact durable Start authority, a JobRun runtime is stopped only when its exact identity matches the accepted profile Stop, and a job joins only the workload intent it was admitted under. Without that proof the Controller must not invent a destructive payload or take a newer intent, so it fails closed.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._exact_stop_authority", "recipe-stop-exact-target-ownership-differs", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._exact_stop_authority", "recipe-stop-target-lacks-its-exact-durable-start-authority", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "accepted-profile-does-not-authorize-this-exact-jobrun-stop", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "artifact-jobrun-escaped-its-immutable-run-membership", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "artifact-jobrun-is-not-the-exact-current-run-effect", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "artifact-jobrun-physical-stop-identity-is-ambiguous", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "artifact-jobrun-request-cannot-authorize-exact-stop", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._profile_jobrun_stop_in_session", "profile-jobrun-stop-parent-contract-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "_bound_workload_intent", "workload-operation-lacks-its-admitted-intent", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "_run_start_intent", "recipe-run-lacks-its-original-workload-authority", 1],
+        ["control/src/vonk_control/recipe_operations/stop_dispatch.py", "RecipeStopAuthorityRefused", "StopDispatchMixin._exact_stop_authority", "recipe-stop-exact-target-ownership-differs", 1],
+        ["control/src/vonk_control/recipe_operations/stop_dispatch.py", "RecipeStopAuthorityRefused", "StopDispatchMixin._exact_stop_authority", "recipe-stop-target-lacks-its-exact-durable-start-authority", 1],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "RecipeStopAuthorityRefused", "ProfileJobRunStopMixin._profile_jobrun_stop_in_session", "accepted-profile-does-not-authorize-this-exact-jobrun-stop", 1],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "RecipeStopAuthorityRefused", "ProfileJobRunStopMixin._profile_jobrun_stop_in_session", "artifact-jobrun-escaped-its-immutable-run-membership", 2],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "RecipeStopAuthorityRefused", "ProfileJobRunStopMixin._profile_jobrun_stop_in_session", "artifact-jobrun-is-not-the-exact-current-run-effect", 1],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "RecipeStopAuthorityRefused", "ProfileJobRunStopMixin._profile_jobrun_stop_in_session", "artifact-jobrun-physical-stop-identity-is-ambiguous", 1],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "RecipeStopAuthorityRefused", "ProfileJobRunStopMixin._profile_jobrun_stop_in_session", "artifact-jobrun-request-cannot-authorize-exact-stop", 1],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "RecipeStopAuthorityRefused", "ProfileJobRunStopMixin._profile_jobrun_stop_in_session", "profile-jobrun-stop-parent-contract-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/intent.py", "RecipeStopAuthorityRefused", "_bound_workload_intent", "workload-operation-lacks-its-admitted-intent", 1],
+        ["control/src/vonk_control/recipe_operations/intent.py", "RecipeStopAuthorityRefused", "_run_start_intent", "recipe-run-lacks-its-original-workload-authority", 1],
         ["control/src/vonk_control/recipe_stop_payloads.py", "StopPayloadRefused", "durable_run_stop_payloads", "recipe-stop-run-membership-differs", 1]
       ]
     },
@@ -7213,34 +7397,24 @@
       ]
     },
     {
-      "family": "recipe_operations.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class InstallAdmissionBusy is an unknown outcome with no proven retry loop.",
-      "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._admit_workload_intent", "workload-intent-differs-across-the-target-sparks", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_install_in_session", "stored-compiled-execution-plan-is-unreadable-for-install-ret", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.check_build_source", "recipe-build-service-is-unavailable", 1]
-      ]
-    },
-    {
       "family": "recipe_operations.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class DistributedRecoveryInvalid is of the input-validation error type.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "DistributedRecoveryInvalid", "RecipeOperationService.queue_recovery_stop_in_session", "singleton-recovery-was-superseded-by-a-newer-workload-intent", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService.__init__", "recipe-run-health-age-is-invalid", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService._profile_jobrun_stop_in_session", "accepted-profile-has-no-unique-stop-for-this-run", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "RecipeOperationService.cancel", "noncanonical-cancellation-request-key", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InvalidValue", "prepare_exact_recipe_run_observation_nodes", "recipe-run-observation-is-not-assigned", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._reconciliation_authority_in_session", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._record_node_result_once", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService._start_once.start_payload", "recipe-start-endpoint-address-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.get", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "MissingRecord", "RecipeOperationService.run_status", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._activate_job_run_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._install_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._record_node_result_once", "node-is-not-part-of-operation-group", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._start_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1]
+        ["control/src/vonk_control/recipe_operations/stop_dispatch.py", "DistributedRecoveryInvalid", "StopDispatchMixin.queue_recovery_stop_in_session", "singleton-recovery-was-superseded-by-a-newer-workload-intent", 1],
+        ["control/src/vonk_control/recipe_operations/service.py", "InvalidValue", "RecipeOperationService.__init__", "recipe-run-health-age-is-invalid", 1],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "InvalidValue", "ProfileJobRunStopMixin._profile_jobrun_stop_in_session", "accepted-profile-has-no-unique-stop-for-this-run", 1],
+        ["control/src/vonk_control/recipe_operations/cancellation.py", "InvalidValue", "CancellationMixin.cancel", "noncanonical-cancellation-request-key", 1],
+        ["control/src/vonk_control/recipe_operations/observation_helpers.py", "InvalidValue", "prepare_exact_recipe_run_observation_nodes", "recipe-run-observation-is-not-assigned", 1],
+        ["control/src/vonk_control/recipe_operations/reconciliation_authority.py", "MissingRecord", "ReconciliationAuthorityMixin._reconciliation_authority_in_session", "message", 1],
+        ["control/src/vonk_control/recipe_operations/result_consumption.py", "MissingRecord", "ResultConsumptionMixin._record_node_result_once", "message", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "MissingRecord", "StartMixin._start_once.start_payload", "recipe-start-endpoint-address-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/cancellation.py", "MissingRecord", "CancellationMixin.get", "message", 1],
+        ["control/src/vonk_control/recipe_operations/run_observation.py", "MissingRecord", "RunObservationMixin.run_status", "message", 1],
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
+        ["control/src/vonk_control/recipe_operations/install.py", "RecipeRequestInvalid", "InstallMixin._install_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1],
+        ["control/src/vonk_control/recipe_operations/result_consumption.py", "RecipeRequestInvalid", "ResultConsumptionMixin._record_node_result_once", "node-is-not-part-of-operation-group", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "reviewed-plan-digest-does-not-match-the-submitted-plan", 1]
       ]
     },
     {
@@ -7704,35 +7878,35 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: Malformed/replayed/stale user request.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._build_once", "recipe-build-cancellation-is-awaiting-cleanup", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._build_once", "recipe-build-preview-is-stale", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_current_build_locked", "build.shared_consumers", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_current_build_locked", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_prebuilt_build", "build.shared_consumers", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._cancel_prebuilt_build", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._dispatch_stop_after_withdrawal", "request-key-was-already-used-differently", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._idempotent_job_in_session", "request-key-was-already-used-differently", 4],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._one_shot_stop_prerequisite", "artifact-job-cancellation-authority-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._one_shot_stop_prerequisite", "artifact-job-has-no-cancellation-authority", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "reconciliation-authority-changed-after-preview", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._reconcile_installation_once", "request-key-was-already-used-differently", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "logical-recipe-run-changed-while-stopping", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "profile-jobrun-stop-authority-is-stale", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "profile-jobrun-stop-request-changed-its-owner", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "request-key-was-already-used-differently", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.abandon_never_installed", "installation-is-not-a-never-installed-plan-it-cannot-be-aba", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.cancel", "cancellation-request-identity-is-invalid", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.cancel", "cancellation-request-key-was-already-used-differently", 3],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.cancel", "recipe-operation-is-not-cancellable", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.consume_agent_result", "installation-cancellation-scope-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.consume_agent_result", "recipe-cancellation-was-not-requested", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.consume_agent_result", "run-cancellation-scope-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.enqueue_one_shot_job_in_session", "recipe-run-is-not-accepting-jobs", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.prepare_installation", "install-plan-is-blocked", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.uninstall", "request-key-was-already-used-differently", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService.uninstall", "uninstall-plan-is-stale-or-blocked", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "_cancel_reason", "cancellation-reason-is-required", 1]
+        ["control/src/vonk_control/recipe_operations/build.py", "RecipeRequestInvalid", "BuildMixin._build_once", "recipe-build-cancellation-is-awaiting-cleanup", 2],
+        ["control/src/vonk_control/recipe_operations/build.py", "RecipeRequestInvalid", "BuildMixin._build_once", "recipe-build-preview-is-stale", 2],
+        ["control/src/vonk_control/recipe_operations/build_cancellation.py", "RecipeRequestInvalid", "BuildCancellationMixin._cancel_current_build_locked", "build.shared_consumers", 1],
+        ["control/src/vonk_control/recipe_operations/build_cancellation.py", "RecipeRequestInvalid", "BuildCancellationMixin._cancel_current_build_locked", "message", 1],
+        ["control/src/vonk_control/recipe_operations/build_cancellation.py", "RecipeRequestInvalid", "BuildCancellationMixin._cancel_prebuilt_build", "build.shared_consumers", 1],
+        ["control/src/vonk_control/recipe_operations/build_cancellation.py", "RecipeRequestInvalid", "BuildCancellationMixin._cancel_prebuilt_build", "message", 1],
+        ["control/src/vonk_control/recipe_operations/stop_dispatch.py", "RecipeRequestInvalid", "StopDispatchMixin._dispatch_stop_after_withdrawal", "request-key-was-already-used-differently", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._idempotent_job_in_session", "request-key-was-already-used-differently", 4],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "RecipeRequestInvalid", "ProfileJobRunStopMixin._one_shot_stop_prerequisite", "artifact-job-cancellation-authority-changed", 1],
+        ["control/src/vonk_control/recipe_operations/profile_job_run_stop.py", "RecipeRequestInvalid", "ProfileJobRunStopMixin._one_shot_stop_prerequisite", "artifact-job-has-no-cancellation-authority", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "message", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin._reconcile_installation_once", "reconciliation-authority-changed-after-preview", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin._reconcile_installation_once", "request-key-was-already-used-differently", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "logical-recipe-run-changed-while-stopping", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "profile-jobrun-stop-authority-is-stale", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "profile-jobrun-stop-request-changed-its-owner", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "request-key-was-already-used-differently", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin.abandon_never_installed", "installation-is-not-a-never-installed-plan-it-cannot-be-aba", 1],
+        ["control/src/vonk_control/recipe_operations/cancellation.py", "RecipeRequestInvalid", "CancellationMixin.cancel", "cancellation-request-identity-is-invalid", 2],
+        ["control/src/vonk_control/recipe_operations/cancellation.py", "RecipeRequestInvalid", "CancellationMixin.cancel", "cancellation-request-key-was-already-used-differently", 3],
+        ["control/src/vonk_control/recipe_operations/cancellation.py", "RecipeRequestInvalid", "CancellationMixin.cancel", "recipe-operation-is-not-cancellable", 2],
+        ["control/src/vonk_control/recipe_operations/result_consumption.py", "RecipeRequestInvalid", "ResultConsumptionMixin.consume_agent_result", "installation-cancellation-scope-changed", 1],
+        ["control/src/vonk_control/recipe_operations/result_consumption.py", "RecipeRequestInvalid", "ResultConsumptionMixin.consume_agent_result", "recipe-cancellation-was-not-requested", 1],
+        ["control/src/vonk_control/recipe_operations/result_consumption.py", "RecipeRequestInvalid", "ResultConsumptionMixin.consume_agent_result", "run-cancellation-scope-changed", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin.enqueue_one_shot_job_in_session", "recipe-run-is-not-accepting-jobs", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.prepare_installation", "install-plan-is-blocked", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin.uninstall", "request-key-was-already-used-differently", 1],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin.uninstall", "uninstall-plan-is-stale-or-blocked", 1],
+        ["control/src/vonk_control/recipe_operations/intent.py", "RecipeRequestInvalid", "_cancel_reason", "cancellation-reason-is-required", 1]
       ]
     },
     {
@@ -7775,32 +7949,33 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._admit_workload_intent", "install.capacity_busy", 2],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._install_once", "install.capacity_busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.capacity_busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._lock_reconciliation_rows_in_session", "reconcile.membership_changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._queue_in_session", "install.capacity_busy", 3],
-        ["control/src/vonk_control/recipe_operations.py", "InstallAdmissionBusy", "RecipeOperationService._reconcile_installation_once", "reconcile.capacity_busy", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._build_once", "message", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeBuildAdmissionBusy", "RecipeOperationService._queue_prebuilt_build_in_session", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeBuildOwnershipBusy", "RecipeOperationService._cancel_current_build", "build.consumer_busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeReconciliationBlocked", "RecipeOperationService._reconciliation_authority_in_session.blocked", "message", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._retry_build_in_session", "stored-recipe-build-plan-is-unreadable-it-is-recorded-and-t", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_build_in_session", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "compiled-execution-plan-is-unavailable-for-the-installed-rec", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-installation-is-not-runnable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._start_once", "recipe-node-endpoint-evidence-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.preview_build", "recipe-build-service-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "prior-installation-intent-requires-exact-observation-before", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "recipe-installation-is-being-reconciled", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService.start_installation", "stored-installation-plan-is-unreadable-it-is-recorded-and-t", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._activate_job_run_once", "run-capacity-writer-is-busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._admit_workload_intent", "run-capacity-writer-is-busy", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._queue_in_session", "run-capacity-writer-is-busy", 3],
-        ["control/src/vonk_control/recipe_operations.py", "RunAdmissionBusy", "RecipeOperationService._start_once", "run-capacity-writer-is-busy", 1],
-        ["control/src/vonk_control/recipe_operations.py", "_RouteNotWithdrawn", "RecipeOperationService._dispatch_stop_after_withdrawal", "message", 1]
+        ["control/src/vonk_control/recipe_operations/persistence.py", "InstallAdmissionBusy", "PersistenceMixin._admit_workload_intent", "install.capacity_busy", 2],
+        ["control/src/vonk_control/recipe_operations/install.py", "InstallAdmissionBusy", "InstallMixin._install_once", "install.capacity_busy", 1],
+        ["control/src/vonk_control/recipe_operations/reconciliation_authority.py", "InstallAdmissionBusy", "ReconciliationAuthorityMixin._lock_reconciliation_rows_in_session", "reconcile.capacity_busy", 1],
+        ["control/src/vonk_control/recipe_operations/reconciliation_authority.py", "InstallAdmissionBusy", "ReconciliationAuthorityMixin._lock_reconciliation_rows_in_session", "reconcile.membership_changed", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "InstallAdmissionBusy", "PersistenceMixin._queue_in_session", "install.capacity_busy", 3],
+        ["control/src/vonk_control/recipe_operations/uninstall.py", "InstallAdmissionBusy", "UninstallMixin._reconcile_installation_once", "reconcile.capacity_busy", 2],
+        ["control/src/vonk_control/recipe_operations/build.py", "RecipeBuildAdmissionBusy", "BuildMixin._build_once", "message", 2],
+        ["control/src/vonk_control/recipe_operations/build.py", "RecipeBuildAdmissionBusy", "BuildMixin._queue_prebuilt_build_in_session", "message", 1],
+        ["control/src/vonk_control/recipe_operations/build_cancellation.py", "RecipeBuildOwnershipBusy", "BuildCancellationMixin._cancel_current_build", "build.consumer_busy", 1],
+        ["control/src/vonk_control/recipe_operations/reconciliation_authority.py", "RecipeReconciliationBlocked", "ReconciliationAuthorityMixin._reconciliation_authority_in_session.blocked", "message", 1],
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRetryLater", "RetryMixin._retry_build_in_session", "recipe-build-service-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRetryLater", "RetryMixin._retry_build_in_session", "stored-recipe-build-plan-is-unreadable-it-is-recorded-and-t", 1],
+        ["control/src/vonk_control/recipe_operations/build.py", "RecipeRetryLater", "BuildMixin._start_build_in_session", "recipe-build-service-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRetryLater", "StartMixin._start_once", "compiled-execution-plan-is-unavailable-for-the-installed-rec", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRetryLater", "StartMixin._start_once", "recipe-installation-is-not-runnable", 1],
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRetryLater", "StartMixin._start_once", "recipe-node-endpoint-evidence-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRetryLater", "JobRunStopMixin._stop_logical_job_run", "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde", 1],
+        ["control/src/vonk_control/recipe_operations/build.py", "RecipeRetryLater", "BuildMixin.preview_build", "recipe-build-service-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRetryLater", "InstallationPreparationMixin.start_installation", "prior-installation-intent-requires-exact-observation-before", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRetryLater", "InstallationPreparationMixin.start_installation", "recipe-installation-is-being-reconciled", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRetryLater", "InstallationPreparationMixin.start_installation", "stored-installation-plan-is-unreadable-it-is-recorded-and-t", 1],
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RunAdmissionBusy", "JobActivationMixin._activate_job_run_once", "run-capacity-writer-is-busy", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RunAdmissionBusy", "PersistenceMixin._admit_workload_intent", "run-capacity-writer-is-busy", 2],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RunAdmissionBusy", "PersistenceMixin._queue_in_session", "run-capacity-writer-is-busy", 3],
+        ["control/src/vonk_control/recipe_operations/start.py", "RunAdmissionBusy", "StartMixin._start_once", "run-capacity-writer-is-busy", 1],
+        ["control/src/vonk_control/recipe_operations/stop_dispatch.py", "_RouteNotWithdrawn", "StopDispatchMixin._dispatch_stop_after_withdrawal", "message", 1],
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RunAdmissionBusy", "PersistenceMixin._admit_workload_intent", "workload-intent-differs-across-the-target-sparks", 1]
       ]
     },
     {
@@ -7819,10 +7994,10 @@
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_run_jobrun_stop_target", "accepted-run-jobrun-stop-was-superseded", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_run_jobrun_stop_target", "issued-run-jobrun-stop-child-changed", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_run_jobrun_stop_target", "run-jobrun-stop-phase-target-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._queue_in_session", "accepted-logical-stop-identity-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_logical_job_run", "reviewed-stop-plan-digest-does-not-match-current-effects", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._run_jobrun_stop_in_session", "accepted-exact-jobrun-stop-targets-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._run_jobrun_stop_in_session", "new-jobrun-effect-escaped-the-accepted-stop-scope", 1]
+        ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "accepted-logical-stop-identity-changed", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRequestInvalid", "JobRunStopMixin._stop_logical_job_run", "reviewed-stop-plan-digest-does-not-match-current-effects", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeStopAuthorityRefused", "JobRunStopMixin._run_jobrun_stop_in_session", "accepted-exact-jobrun-stop-targets-changed", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeStopAuthorityRefused", "JobRunStopMixin._run_jobrun_stop_in_session", "new-jobrun-effect-escaped-the-accepted-stop-scope", 1]
       ]
     },
     {
@@ -7838,10 +8013,10 @@
       "reason": "Native Stop uses the canonical bounded admission transaction retry for unknown source observation; every retry preserves the original request key and preview digest, rolls back before re-observing, and retains claims on final refusal.",
       "family": "exact-ordinary-jobrun-stop-already-retried",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._run_jobrun_stop_in_session", "accepted-jobrun-stop-source-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._run_jobrun_stop_in_session", "exact-jobrun-installation-authority-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._run_jobrun_stop_in_session", "unknown-jobrun-exact-target-is-not-reachable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRetryLater", "RecipeOperationService._run_jobrun_stop_in_session", "unknown-jobrun-has-no-exact-source-authority", 1]
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRetryLater", "JobRunStopMixin._run_jobrun_stop_in_session", "accepted-jobrun-stop-source-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRetryLater", "JobRunStopMixin._run_jobrun_stop_in_session", "exact-jobrun-installation-authority-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRetryLater", "JobRunStopMixin._run_jobrun_stop_in_session", "unknown-jobrun-exact-target-is-not-reachable", 1],
+        ["control/src/vonk_control/recipe_operations/job_run_stop.py", "RecipeRetryLater", "JobRunStopMixin._run_jobrun_stop_in_session", "unknown-jobrun-has-no-exact-source-authority", 1]
       ]
     },
     {
@@ -7849,27 +8024,27 @@
       "category": "security-edge",
       "reason": "Exact destructive Stop authority rejects substituted runtime generation, immutable payload, missing owner, changed execution order, or unproven absence; deferred accepted requests retain claims and original evidence for bounded worker retry.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-absence-only-stop-no-longer-has-exact-absence-evide", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-profile-stop-owner-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-already-has-issued-work", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-profile-binding-is-inconsistent", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-generation-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-payload-authority-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._defer_accepted_service_stop", "accepted-stop-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._dispatch_stop_after_withdrawal", "accepted-stop-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-authority-is-unreadable", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-child-action-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-child-is-ambiguous", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-installation-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-owner-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-parent-binding-changed", 2],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-phase-is-unavailable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_profile_stop_owner", "accepted-profile-stop-request-does-not-name-its-exact-phase", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-does-not-match-its-immutable-binding", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-document-is-unreadable", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._service_stop_document", "accepted-stop-owner-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._stop_service_run_once.claim_withdrawal", "accepted-stop-disappeared", 1]
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._check_service_stop", "accepted-absence-only-stop-no-longer-has-exact-absence-evide", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._check_service_stop", "accepted-profile-stop-owner-changed", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._check_service_stop", "accepted-stop-already-has-issued-work", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._check_service_stop", "accepted-stop-profile-binding-is-inconsistent", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._check_service_stop", "accepted-stop-runtime-generation-changed", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._check_service_stop", "accepted-stop-runtime-payload-authority-changed", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._defer_accepted_service_stop", "accepted-stop-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations/stop_dispatch.py", "RecipeStopAuthorityRefused", "StopDispatchMixin._dispatch_stop_after_withdrawal", "accepted-stop-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-authority-changed", 1],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-authority-is-unreadable", 2],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-child-action-changed", 1],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-child-is-ambiguous", 1],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-installation-disappeared", 1],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-owner-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-parent-binding-changed", 2],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-phase-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeStopAuthorityRefused", "StopAcceptanceMixin._service_profile_stop_owner", "accepted-profile-stop-request-does-not-name-its-exact-phase", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._service_stop_document", "accepted-stop-document-does-not-match-its-immutable-binding", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._service_stop_document", "accepted-stop-document-is-unreadable", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._service_stop_document", "accepted-stop-owner-changed", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeStopAuthorityRefused", "StopMixin._stop_service_run_once.claim_withdrawal", "accepted-stop-disappeared", 1]
       ]
     },
     {
@@ -7877,11 +8052,11 @@
       "category": "input-validation",
       "reason": "Reject a changed caller preview, request key binding, or reviewed Stop effects before publication or native execution; own verified withdrawal alone preserves the originally reviewed route state.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._accept_service_stop", "stop-plan-is-stale-or-blocked", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._check_service_stop", "reviewed-stop-effects-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._check_service_stop", "reviewed-stop-route-state-changed", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._service_stop_pending", "request-key-was-already-used-differently", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeRequestInvalid", "RecipeOperationService._stop_service_run_once", "the-run-s-route-withdrawal-was-superseded-retry-the-stop", 1]
+        ["control/src/vonk_control/recipe_operations/stop_acceptance.py", "RecipeRequestInvalid", "StopAcceptanceMixin._accept_service_stop", "stop-plan-is-stale-or-blocked", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeRequestInvalid", "StopMixin._check_service_stop", "reviewed-stop-effects-changed", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeRequestInvalid", "StopMixin._check_service_stop", "reviewed-stop-route-state-changed", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeRequestInvalid", "StopMixin._service_stop_pending", "request-key-was-already-used-differently", 1],
+        ["control/src/vonk_control/recipe_operations/stop.py", "RecipeRequestInvalid", "StopMixin._stop_service_run_once", "the-run-s-route-withdrawal-was-superseded-retry-the-stop", 1]
       ]
     },
     {
@@ -8031,7 +8206,7 @@
       "category": "already-retried",
       "reason": "A duplicate continuation observes the immutable receipt for its request key and immediately returns the committed operation. The transaction unwinds before any withdrawal effect; the replay signal is caught before admission retry.",
       "sites": [
-        ["control/src/vonk_control/recipe_operations.py", "_ServiceStopReplay", "RecipeOperationService._check_service_stop", "message", 1]
+        ["control/src/vonk_control/recipe_operations/stop.py", "_ServiceStopReplay", "StopMixin._check_service_stop", "message", 1]
       ]
     },
     {
@@ -8248,6 +8423,30 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/run_switch_operations/result_helpers.py", "RunSwitchRetryLater", "_phase_result", "run-switch-phase-receipt-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "action_plans.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations/action_plans.py", "RecipeRetryLater", "ActionPlansMixin._uninstall_plan_in_session", "recipe-revision-authority-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "build.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations/build.py", "RecipeRetryLater", "BuildMixin._check_build_source_once", "recipe-build-service-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "retry.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRetryLater", "RetryMixin._retry_install_in_session", "stored-compiled-execution-plan-is-unreadable-for-install-ret", 1]
       ]
     }
   ]

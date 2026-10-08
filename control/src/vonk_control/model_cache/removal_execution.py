@@ -87,7 +87,10 @@ class RemovalExecutionMixin:
         cache = cast("ModelCacheService", self)
         now = now or cache._clock()
         with cache._session() as session:
-            operation = session.get(ModelCacheOperation, operation_id)
+            # Observe contention before reference scans or storage effects.
+            operation = session.get(
+                ModelCacheOperation, operation_id, with_for_update={"nowait": True}
+            )
             if operation is None or operation.kind != "remove":
                 return False
             if operation.state not in model_cache_states.LIVE:
