@@ -7,7 +7,6 @@
     "control/src/vonk_control/enrollment.py": 1749,
     "control/src/vonk_control/recipe_packages.py": 1542,
     "control/src/vonk_control/recipe_routes.py": 1894,
-    "control/src/vonk_control/runtime_image_preparation.py": 1646,
     "control/web/src/components/artifact-job-workspace.tsx": 1640,
     "control/web/src/pages/activity.tsx": 1674,
     "control/web/src/pages/library.css": 3366,

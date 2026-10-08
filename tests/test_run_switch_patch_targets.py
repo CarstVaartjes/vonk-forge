@@ -14,6 +14,7 @@ FACADES = frozenset(
         "vonk_control.recipe_operations",
         "vonk_control.operation_api",
         "vonk_control.artifact_jobs",
+        "vonk_control.runtime_image_preparation",
         "vonk_control.models",
         "vonk_control.recipe_builds",
         "vonk_control.distributed_recovery",
