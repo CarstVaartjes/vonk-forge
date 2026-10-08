@@ -469,7 +469,14 @@ class CallGraph:
             for cls in cls_list:
                 for base in cls.bases:
                     self.parents[cls.name].add(base)
-                    self.children[base].extend([cls])
+                    self.children[base].append(cls)
+                    # Imported mixin aliases name the same parent. Descendant
+                    # dispatch must see the assembled class when a sibling
+                    # mixin calls a method supplied by that parent.
+                    module = self.modules[cls.path]
+                    for parent in self._classes_named(module, base):
+                        if parent.name != base:
+                            self.children[parent.name].append(cls)
                 if "Protocol" in cls.bases:
                     cls.is_protocol = True
         self._collect_factories()
@@ -704,8 +711,9 @@ class CallGraph:
         if own is not None:
             found.add(own)
         for sub in self.descendants(cls):
-            if method in sub.methods:
-                found.add(sub.methods[method])
+            inherited = self.find_method(sub, method)
+            if inherited is not None:
+                found.add(inherited)
         if cls.is_protocol:
             for impl in self.implementations(cls):
                 target = self.find_method(impl, method)
@@ -866,7 +874,9 @@ class CallGraph:
         info = self.info[function]
         module = self._module_of(function)
         if name in ("self", "cls") and info.self_class is not None:
-            return {info.self_class.name}
+            # An explicit receiver cast can name the assembled mixin class.
+            # Keep that interface for cross-mixin methods and attributes.
+            return set(env.get(name) or {info.self_class.name})
         if name in env:
             return set(env[name])
         if self._is_local(function, name):
@@ -898,7 +908,10 @@ class CallGraph:
         module = self._module_of(function)
         callee = node.func
         if isinstance(callee, ast.Name):
-            if callee.id == "cast" and node.args:
+            if (
+                callee.id == "cast"
+                or module.imports.get(callee.id) == ("typing", "cast")
+            ) and node.args:
                 return annotation_names(node.args[0])
             if callee.id not in env and not self._is_local(function, callee.id):
                 if self._classes_named(module, callee.id):

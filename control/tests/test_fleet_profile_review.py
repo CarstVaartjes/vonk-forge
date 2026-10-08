@@ -471,15 +471,27 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
     assert service.tick()
     observed = service.application(retried.id)
     if remove_review_source:
-        # A load whose review source is gone is ended (superseded), never failed
-        # or parked: the owner's rule is to stay non-blocking, and the client
-        # loads again.
-        assert observed.state == "superseded"
-        assert "review source" in (observed.status_reason or "")
+        from types import SimpleNamespace
+
+        from vonk_agent_protocol import LifecycleState, SupersedeCode
+
+        from .non_blocking import assert_ended_without_blocking
+
+        ended, fresh = assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            retried,
+            end=lambda _receipt: observed,
+            fresh=lambda _world: service.apply(
+                profile.id, request_key=str(uuid4()), actor="admin"
+            ),
+        )
+        assert ended.state == LifecycleState.SUPERSEDED
+        assert (
+            ended.progress.supersede_code
+            == SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
+        )
         assert adapter.starts == []
-        fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
         assert fresh.id not in {original.id, retried.id}
-        assert fresh.state in {"queued", "running"}, fresh.state
     else:
         assert observed.state == "running", observed.status_reason
         assert len(adapter.starts) == 1

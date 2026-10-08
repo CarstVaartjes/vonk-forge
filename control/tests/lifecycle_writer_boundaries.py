@@ -56,7 +56,7 @@ DICT_STATE_OWNERS = frozenset(
     {
         *AGENT_JOB_MODULES,
         "control/src/vonk_control/artifact_jobs.py",
-        "control/src/vonk_control/fleet_profiles.py",
+        "control/src/vonk_control/fleet_profiles/",
         "control/src/vonk_control/jobs.py",
         "control/src/vonk_control/model_cache/artifacts.py",
         "control/src/vonk_control/model_cache/availability.py",
@@ -504,7 +504,10 @@ class _Collector:
         self.resolver = _Resolver(tree, self.aliases, path)
         self.writes: list[Write] = []
         self.unresolved: list[tuple[str, str, int]] = []
-        self.dict_owner = path in DICT_STATE_OWNERS
+        self.dict_owner = any(
+            path == owner or (owner.endswith("/") and path.startswith(owner))
+            for owner in DICT_STATE_OWNERS
+        )
         self._walk(tree.body, [], {})
 
     def _add(self, scope: list[str], model: str, kind: str, node: ast.AST) -> None:

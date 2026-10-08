@@ -17,6 +17,7 @@ _OPERATOR_PREPARATION = re.compile(
 )
 _SCANNED = (
     *sorted((ROOT / "control/src/vonk_control").glob("*.py")),
+    *sorted((ROOT / "control/src/vonk_control/fleet_profiles").glob("*.py")),
     ROOT / "src/cluster_profiles/cli.py",
     ROOT / "docs/runbooks/development-agent-workloads.md",
 )

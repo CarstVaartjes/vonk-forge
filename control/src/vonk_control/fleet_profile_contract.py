@@ -25,6 +25,15 @@ from vonk_agent_protocol import (
     machine_adopter,
     state_adopter,
 )
+from vonk_agent_protocol.agent_words import (
+    ProfileAction,
+    ProfileChildPhase,
+    ProfileEffectState,
+    ProfileInstallationPolicy,
+    ProfileOperationKind,
+    ProfileReportedPhase,
+    ProfileSwitchChildKind,
+)
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .endpoint_contract import EndpointResponse
@@ -73,7 +82,6 @@ def profile_switch_child_request_key(
     )
 
 
-#: The most warnings one profile view carries.
 MAX_PROFILE_WARNINGS = 128
 
 _UUID_PATTERN = (
@@ -108,7 +116,6 @@ Alias = Annotated[
 OptionSlug = Annotated[
     str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
 ]
-# Recipe option name -> chosen value, as the recipe declares them.
 OptionChoices = Annotated[dict[OptionSlug, OptionSlug], Field(max_length=16)]
 RecipeSelector = Annotated[
     str,
@@ -119,15 +126,13 @@ RecipeSelector = Annotated[
     ),
 ]
 
-# Each closed profile value set is named once here and used by the contract's
-# own field annotations and by the Fleet profile helpers that build those
-# fields. A shared alias is what keeps a helper signature from drifting away
-# from the set the model will accept, so the two cannot disagree without a
-# type error.
-FleetProfileInstallationPolicy = Literal["keep-cached", "exact"]
 if TYPE_CHECKING:
-    # A type checker reads the state as the contract's enum: comparing it with a
-    # state word then narrows nothing, as a closed set of enum literals would.
+    FleetProfileInstallationPolicy = Literal["keep-cached", "exact"]
+else:
+    FleetProfileInstallationPolicy = Literal[
+        tuple(member.value for member in ProfileInstallationPolicy)
+    ]
+if TYPE_CHECKING:
     FleetProfileOperationState = LifecycleState
     FleetProfileCancellationState = LifecycleState
 else:
@@ -141,19 +146,13 @@ else:
             LifecycleState.CANCELLED,
             LifecycleState.SUPERSEDED,
         ],
-        # An application written before the rename may still say ``waiting-for-operator``.
         BeforeValidator(state_adopter(LifecycleSubject.FLEET_PROFILE_APPLICATION)),
     ]
-    #: The state of a cancellation intent: observed while it is being driven (it was
-    #: ``cancelling``), then cancelled.
     FleetProfileCancellationState = Annotated[
         Literal[LifecycleState.OBSERVING, LifecycleState.CANCELLED],
         BeforeValidator(state_adopter(LifecycleSubject.FLEET_PROFILE_APPLICATION)),
     ]
-#: Why an application ended ``superseded`` (never ``failed``): a newer accepted
-#: intent, or the Controller's own automatic retry, took over its work.
 FleetProfileSupersedeCode = SupersedeCode
-#: Application states from which nothing more happens; one name for every consumer.
 FLEET_PROFILE_ENDED_STATES = frozenset(
     {
         LifecycleState.SUCCEEDED.value,
@@ -162,31 +161,44 @@ FLEET_PROFILE_ENDED_STATES = frozenset(
         "superseded",
     }
 )
-FleetProfileChildPhase = Literal[
-    "model-download",
-    "container-download",
-    "container-build",
-    "target-copy",
-    "runtime-install",
-    "start",
-    "final-verify",
-    "transfer",
-    "verify",
-    "prepare",
-    "cleanup",
-    "stop",
-    "uninstall",
-    "final_verify",
-]
+if TYPE_CHECKING:
+    FleetProfileChildPhase = Literal[
+        "model-download",
+        "container-download",
+        "container-build",
+        "target-copy",
+        "runtime-install",
+        "start",
+        "final-verify",
+        "transfer",
+        "verify",
+        "prepare",
+        "cleanup",
+        "stop",
+        "uninstall",
+        "final_verify",
+    ]
+else:
+    FleetProfileChildPhase = Literal[
+        tuple(member.value for member in (*ProfileChildPhase, *ProfileReportedPhase))
+    ]
 DesiredAssignmentStateField = Annotated[
     DesiredAssignmentState, BeforeValidator(machine_adopter(DesiredAssignmentState))
 ]
 FleetProfileAssignmentState = Annotated[
     ObservedAssignmentState, BeforeValidator(machine_adopter(ObservedAssignmentState))
 ]
-FleetProfileAction = Literal["switch", "keep", "adopt"]
+if TYPE_CHECKING:
+    FleetProfileAction = Literal["switch", "keep", "adopt"]
+else:
+    FleetProfileAction = Literal[tuple(member.value for member in ProfileAction)]
 FleetProfilePlanStepKind = Literal["switch", "prepare"]
-FleetProfileOperationKind = Literal["fleet-profile.apply"]
+if TYPE_CHECKING:
+    FleetProfileOperationKind = Literal["fleet-profile.apply"]
+else:
+    FleetProfileOperationKind = Literal[
+        tuple(member.value for member in ProfileOperationKind)
+    ]
 FleetProfileEndpointState = Annotated[
     EndpointState, BeforeValidator(machine_adopter(EndpointState))
 ]
@@ -254,7 +266,6 @@ class FleetProfileEndpointsView(StrictModel):
     application_id: UuidId | None = None
     application_state: FleetProfileOperationState | None = None
     observed_at: datetime
-    # Required nullable: [] means membership is known to be empty, while null
     # means the immutable application could not be validated.
     assignments: list[FleetProfileEndpointAssignmentView] | None = Field(max_length=64)
     projection_issue: FleetProfileEndpointProjectionIssue | None = None
@@ -893,7 +904,12 @@ class FleetProfileChildProgress(StrictModel):
         return self
 
 
-FleetProfileSwitchChildKind = Literal["install", "run", "stop", "cleanup"]
+if TYPE_CHECKING:
+    FleetProfileSwitchChildKind = Literal["install", "run", "stop", "cleanup"]
+else:
+    FleetProfileSwitchChildKind = Literal[
+        tuple(member.value for member in ProfileSwitchChildKind)
+    ]
 
 
 class FleetProfileSwitchQueueItem(StrictModel):
@@ -1109,6 +1125,16 @@ class FleetProfileApplicationCancellationView(StrictModel):
     deadline_at: datetime | None = None
 
 
+if TYPE_CHECKING:
+    FleetProfileEffectState = Literal[
+        "not-issued", "pending", "succeeded", "failed", "cancelled", "unknown"
+    ]
+else:
+    FleetProfileEffectState = Literal[
+        tuple(member.value for member in ProfileEffectState)
+    ]
+
+
 class FleetProfileEffectProgress(StrictModel):
     """Observational receipt for one immutable accepted queue effect."""
 
@@ -1123,9 +1149,7 @@ class FleetProfileEffectProgress(StrictModel):
     request_key: UuidId
     operation_id: UuidId | None = None
     original_operation_id: UuidId | None = None
-    state: Literal[
-        "not-issued", "pending", "succeeded", "failed", "cancelled", "unknown"
-    ]
+    state: FleetProfileEffectState
     result: FleetProfileSwitchChildResult | None = None
     progress: RunSwitchProgress | None = None
     stop_effect: FleetProfileRunEffect | None = None

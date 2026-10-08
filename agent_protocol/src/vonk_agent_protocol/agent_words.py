@@ -171,3 +171,125 @@ __all__ = [
     "ProgressPhase",
     "adopt_progress_phase",
 ]
+
+
+class ProfileInstallationPolicy(WireEnum):
+    """Fleet profile InstallationPolicy contract words."""
+
+    KEEP_CACHED = "keep-cached"
+    EXACT = "exact"
+
+
+class ProfileChildPhase(WireEnum):
+    """Fleet profile ChildPhase contract words."""
+
+    MODEL_DOWNLOAD = "model-download"
+    CONTAINER_DOWNLOAD = "container-download"
+    CONTAINER_BUILD = "container-build"
+    TARGET_COPY = "target-copy"
+    RUNTIME_INSTALL = "runtime-install"
+    START = "start"
+    FINAL_VERIFY = "final-verify"
+    TRANSFER = "transfer"
+    VERIFY = "verify"
+    PREPARE = "prepare"
+    CLEANUP = "cleanup"
+    STOP = "stop"
+    UNINSTALL = "uninstall"
+
+
+class ProfileReportedPhase(WireEnum):
+    """Run-switch phase projected into a profile child checkpoint."""
+
+    FINAL_VERIFY = "final_verify"
+
+
+class ProfileAction(WireEnum):
+    """Fleet profile Action contract words."""
+
+    SWITCH = "switch"
+    KEEP = "keep"
+    ADOPT = "adopt"
+
+
+class ProfileOperationKind(WireEnum):
+    """Fleet profile OperationKind contract words."""
+
+    APPLY = "fleet-profile.apply"
+
+
+class ProfileSwitchChildKind(WireEnum):
+    """Fleet profile SwitchChildKind contract words."""
+
+    INSTALL = "install"
+    RUN = "run"
+    STOP = "stop"
+    CLEANUP = "cleanup"
+
+
+class ProfileEffectState(WireEnum):
+    """Fleet profile EffectState contract words."""
+
+    NOT_ISSUED = "not-issued"
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
+
+
+class ProfileCancellationCause(WireEnum):
+    """Fleet profile CancellationCause contract words."""
+
+    OPERATOR = "operator"
+    SUPERSEDED = "superseded"
+
+
+class ProfileChildJobKind(WireEnum):
+    """Fleet profile ChildJobKind contract words."""
+
+    RUN_SWITCH = "recipe.run-switch.v2"
+    STOP = "recipe.stop.v2"
+    CLEANUP = "recipe.cleanup.v2"
+
+
+class ProfileChildSource(WireEnum):
+    """Fleet profile ChildSource contract words."""
+
+    SWITCH_ADAPTER = "switch-adapter"
+
+
+class ProfileDocumentState(WireEnum):
+    """Profile views and catalogue documents used by profile resolution."""
+
+    ACTIVE = "active"
+    DRAFT = "draft"
+    READY = "ready"
+    LOADED = "loaded"
+    NOT_CREATED = "not-created"
+
+
+class ProfileReasonSeverity(WireEnum):
+    """A profile reason and its upstream assessment severity."""
+
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    BLOCKER = "blocker"
+
+
+class ProfileProjectionKind(WireEnum):
+    """Typed identities in profile effects and operation projections."""
+
+    JOB = "job"
+    APPLICATION = "profile-application"
+    STEP = "profile-step"
+    AGENT_OPERATION = "agent-operation"
+    FLEET_APPLICATION = "fleet-profile-application"
+
+
+class ProfileRetryDisposition(WireEnum):
+    """An accepted profile intent either retries or ends as superseded."""
+
+    WAIT = "wait"
+    SUPERSEDE = "supersede"

@@ -232,6 +232,10 @@
       "kind": "controller-contract"
     },
     {
+      "module": "control/src/vonk_control/fleet_profiles/contracts.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/fleet_projection.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"

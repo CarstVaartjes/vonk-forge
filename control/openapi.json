@@ -14313,6 +14313,48 @@
           "placement_load_state": {
             "$ref": "#/components/schemas/PlacementLoadState"
           },
+          "profile_action": {
+            "$ref": "#/components/schemas/ProfileAction"
+          },
+          "profile_cancellation_cause": {
+            "$ref": "#/components/schemas/ProfileCancellationCause"
+          },
+          "profile_child_job_kind": {
+            "$ref": "#/components/schemas/ProfileChildJobKind"
+          },
+          "profile_child_phase": {
+            "$ref": "#/components/schemas/ProfileChildPhase"
+          },
+          "profile_child_source": {
+            "$ref": "#/components/schemas/ProfileChildSource"
+          },
+          "profile_document_state": {
+            "$ref": "#/components/schemas/ProfileDocumentState"
+          },
+          "profile_effect_state": {
+            "$ref": "#/components/schemas/ProfileEffectState"
+          },
+          "profile_installation_policy": {
+            "$ref": "#/components/schemas/ProfileInstallationPolicy"
+          },
+          "profile_operation_kind": {
+            "$ref": "#/components/schemas/ProfileOperationKind"
+          },
+          "profile_projection_kind": {
+            "$ref": "#/components/schemas/ProfileProjectionKind"
+          },
+          "profile_reason_severity": {
+            "$ref": "#/components/schemas/ProfileReasonSeverity"
+          },
+          "profile_reported_phase": {
+            "$ref": "#/components/schemas/ProfileReportedPhase"
+          },
+          "profile_retry_disposition": {
+            "$ref": "#/components/schemas/ProfileRetryDisposition"
+          },
+          "profile_switch_child_kind": {
+            "$ref": "#/components/schemas/ProfileSwitchChildKind"
+          },
           "progress_phase": {
             "$ref": "#/components/schemas/ProgressPhase"
           },
@@ -14357,6 +14399,20 @@
           }
         },
         "required": [
+          "profile_installation_policy",
+          "profile_child_phase",
+          "profile_reported_phase",
+          "profile_retry_disposition",
+          "profile_action",
+          "profile_document_state",
+          "profile_reason_severity",
+          "profile_projection_kind",
+          "profile_operation_kind",
+          "profile_switch_child_kind",
+          "profile_effect_state",
+          "profile_cancellation_cause",
+          "profile_child_job_kind",
+          "profile_child_source",
           "state",
           "agent_result_state",
           "effect",
@@ -19612,6 +19668,97 @@
         "title": "PreparationReason",
         "type": "object"
       },
+      "ProfileAction": {
+        "description": "Fleet profile Action contract words.",
+        "enum": [
+          "switch",
+          "keep",
+          "adopt"
+        ],
+        "title": "ProfileAction",
+        "type": "string"
+      },
+      "ProfileCancellationCause": {
+        "description": "Fleet profile CancellationCause contract words.",
+        "enum": [
+          "operator",
+          "superseded"
+        ],
+        "title": "ProfileCancellationCause",
+        "type": "string"
+      },
+      "ProfileChildJobKind": {
+        "description": "Fleet profile ChildJobKind contract words.",
+        "enum": [
+          "recipe.run-switch.v2",
+          "recipe.stop.v2",
+          "recipe.cleanup.v2"
+        ],
+        "title": "ProfileChildJobKind",
+        "type": "string"
+      },
+      "ProfileChildPhase": {
+        "description": "Fleet profile ChildPhase contract words.",
+        "enum": [
+          "model-download",
+          "container-download",
+          "container-build",
+          "target-copy",
+          "runtime-install",
+          "start",
+          "final-verify",
+          "transfer",
+          "verify",
+          "prepare",
+          "cleanup",
+          "stop",
+          "uninstall"
+        ],
+        "title": "ProfileChildPhase",
+        "type": "string"
+      },
+      "ProfileChildSource": {
+        "description": "Fleet profile ChildSource contract words.",
+        "enum": [
+          "switch-adapter"
+        ],
+        "title": "ProfileChildSource",
+        "type": "string"
+      },
+      "ProfileDocumentState": {
+        "description": "Profile views and catalogue documents used by profile resolution.",
+        "enum": [
+          "active",
+          "draft",
+          "ready",
+          "loaded",
+          "not-created"
+        ],
+        "title": "ProfileDocumentState",
+        "type": "string"
+      },
+      "ProfileEffectState": {
+        "description": "Fleet profile EffectState contract words.",
+        "enum": [
+          "not-issued",
+          "pending",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "unknown"
+        ],
+        "title": "ProfileEffectState",
+        "type": "string"
+      },
+      "ProfileInstallationPolicy": {
+        "description": "Fleet profile InstallationPolicy contract words.",
+        "enum": [
+          "keep-cached",
+          "exact"
+        ],
+        "title": "ProfileInstallationPolicy",
+        "type": "string"
+      },
       "ProfileJobRunStopAuthorization": {
         "description": "Current accepted profile Stop owns this immutable JobRun scope.",
         "properties": {
@@ -19946,6 +20093,14 @@
         "title": "ProfileJobRunStopTarget",
         "type": "object"
       },
+      "ProfileOperationKind": {
+        "description": "Fleet profile OperationKind contract words.",
+        "enum": [
+          "fleet-profile.apply"
+        ],
+        "title": "ProfileOperationKind",
+        "type": "string"
+      },
       "ProfilePartialStop": {
         "additionalProperties": false,
         "description": "The reachable ranks a profile Stop reaches and the ranks it cannot.",
@@ -19979,6 +20134,18 @@
         ],
         "title": "ProfilePartialStop",
         "type": "object"
+      },
+      "ProfileProjectionKind": {
+        "description": "Typed identities in profile effects and operation projections.",
+        "enum": [
+          "job",
+          "profile-application",
+          "profile-step",
+          "agent-operation",
+          "fleet-profile-application"
+        ],
+        "title": "ProfileProjectionKind",
+        "type": "string"
       },
       "ProfileReasonCode": {
         "description": "Reasons a fleet profile cannot be applied or is waiting.",
@@ -20022,6 +20189,34 @@
           "profile.asset_reservation_unavailable"
         ],
         "title": "ProfileReasonCode",
+        "type": "string"
+      },
+      "ProfileReasonSeverity": {
+        "description": "A profile reason and its upstream assessment severity.",
+        "enum": [
+          "info",
+          "warning",
+          "error",
+          "blocker"
+        ],
+        "title": "ProfileReasonSeverity",
+        "type": "string"
+      },
+      "ProfileReportedPhase": {
+        "description": "Run-switch phase projected into a profile child checkpoint.",
+        "enum": [
+          "final_verify"
+        ],
+        "title": "ProfileReportedPhase",
+        "type": "string"
+      },
+      "ProfileRetryDisposition": {
+        "description": "An accepted profile intent either retries or ends as superseded.",
+        "enum": [
+          "wait",
+          "supersede"
+        ],
+        "title": "ProfileRetryDisposition",
         "type": "string"
       },
       "ProfileStopOwnerBinding": {
@@ -20173,6 +20368,17 @@
         ],
         "title": "ProfileStopOwnerBinding",
         "type": "object"
+      },
+      "ProfileSwitchChildKind": {
+        "description": "Fleet profile SwitchChildKind contract words.",
+        "enum": [
+          "install",
+          "run",
+          "stop",
+          "cleanup"
+        ],
+        "title": "ProfileSwitchChildKind",
+        "type": "string"
       },
       "ProgressPhase": {
         "description": "What an operation is doing, as the measured progress names it.",

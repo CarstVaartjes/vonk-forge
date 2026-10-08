@@ -1209,12 +1209,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_profile_intent_ordering.py",
-      "function": "test_malformed_sibling_retry_root_does_not_block_new_pending_admission",
-      "kind": "transient-failed-assertion",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_profile_load_submission.py",
       "function": "test_change_between_fresh_review_and_admission_refuses_load",
       "kind": "refused-read-assertion",
@@ -2136,12 +2130,6 @@
       "path": "control/tests/test_runtime_image_preparation.py",
       "function": "test_verified_lookup_treats_a_vanished_archive_as_a_miss",
       "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_selected_profile_postgres.py",
-      "function": "test_failed_newer_load_stays_selected_instead_of_falling_back_to_success",
-      "kind": "transient-failed-assertion",
       "count": 1
     },
     {

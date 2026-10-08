@@ -72,6 +72,34 @@ from ..models.placement_install_state import check_placement_install_state
 from ..models.placement_install_state import PlacementInstallState
 from ..models.placement_load_state import check_placement_load_state
 from ..models.placement_load_state import PlacementLoadState
+from ..models.profile_action import check_profile_action
+from ..models.profile_action import ProfileAction
+from ..models.profile_cancellation_cause import check_profile_cancellation_cause
+from ..models.profile_cancellation_cause import ProfileCancellationCause
+from ..models.profile_child_job_kind import check_profile_child_job_kind
+from ..models.profile_child_job_kind import ProfileChildJobKind
+from ..models.profile_child_phase import check_profile_child_phase
+from ..models.profile_child_phase import ProfileChildPhase
+from ..models.profile_child_source import check_profile_child_source
+from ..models.profile_child_source import ProfileChildSource
+from ..models.profile_document_state import check_profile_document_state
+from ..models.profile_document_state import ProfileDocumentState
+from ..models.profile_effect_state import check_profile_effect_state
+from ..models.profile_effect_state import ProfileEffectState
+from ..models.profile_installation_policy import check_profile_installation_policy
+from ..models.profile_installation_policy import ProfileInstallationPolicy
+from ..models.profile_operation_kind import check_profile_operation_kind
+from ..models.profile_operation_kind import ProfileOperationKind
+from ..models.profile_projection_kind import check_profile_projection_kind
+from ..models.profile_projection_kind import ProfileProjectionKind
+from ..models.profile_reason_severity import check_profile_reason_severity
+from ..models.profile_reason_severity import ProfileReasonSeverity
+from ..models.profile_reported_phase import check_profile_reported_phase
+from ..models.profile_reported_phase import ProfileReportedPhase
+from ..models.profile_retry_disposition import check_profile_retry_disposition
+from ..models.profile_retry_disposition import ProfileRetryDisposition
+from ..models.profile_switch_child_kind import check_profile_switch_child_kind
+from ..models.profile_switch_child_kind import ProfileSwitchChildKind
 from ..models.progress_phase import check_progress_phase
 from ..models.progress_phase import ProgressPhase
 from ..models.reservation_state import check_reservation_state
@@ -191,6 +219,21 @@ class LifecycleVocabulary:
             placement_install_state (PlacementInstallState): How much of a placement's installation is already on its
                 Sparks.
             placement_load_state (PlacementLoadState): Whether a placement's recipe is loaded on its Sparks.
+            profile_action (ProfileAction): Fleet profile Action contract words.
+            profile_cancellation_cause (ProfileCancellationCause): Fleet profile CancellationCause contract words.
+            profile_child_job_kind (ProfileChildJobKind): Fleet profile ChildJobKind contract words.
+            profile_child_phase (ProfileChildPhase): Fleet profile ChildPhase contract words.
+            profile_child_source (ProfileChildSource): Fleet profile ChildSource contract words.
+            profile_document_state (ProfileDocumentState): Profile views and catalogue documents used by profile resolution.
+            profile_effect_state (ProfileEffectState): Fleet profile EffectState contract words.
+            profile_installation_policy (ProfileInstallationPolicy): Fleet profile InstallationPolicy contract words.
+            profile_operation_kind (ProfileOperationKind): Fleet profile OperationKind contract words.
+            profile_projection_kind (ProfileProjectionKind): Typed identities in profile effects and operation projections.
+            profile_reason_severity (ProfileReasonSeverity): A profile reason and its upstream assessment severity.
+            profile_reported_phase (ProfileReportedPhase): Run-switch phase projected into a profile child checkpoint.
+            profile_retry_disposition (ProfileRetryDisposition): An accepted profile intent either retries or ends as
+                superseded.
+            profile_switch_child_kind (ProfileSwitchChildKind): Fleet profile SwitchChildKind contract words.
             progress_phase (ProgressPhase): What an operation is doing, as the measured progress names it.
             reservation_state (ReservationState): The standing of a resource reservation.
             resource_blocker_code (ResourceBlockerCode): The capacity-fit codes the resource planner gives a node that
@@ -269,6 +312,20 @@ class LifecycleVocabulary:
     outcome_kind: OutcomeKind
     placement_install_state: PlacementInstallState
     placement_load_state: PlacementLoadState
+    profile_action: ProfileAction
+    profile_cancellation_cause: ProfileCancellationCause
+    profile_child_job_kind: ProfileChildJobKind
+    profile_child_phase: ProfileChildPhase
+    profile_child_source: ProfileChildSource
+    profile_document_state: ProfileDocumentState
+    profile_effect_state: ProfileEffectState
+    profile_installation_policy: ProfileInstallationPolicy
+    profile_operation_kind: ProfileOperationKind
+    profile_projection_kind: ProfileProjectionKind
+    profile_reason_severity: ProfileReasonSeverity
+    profile_reported_phase: ProfileReportedPhase
+    profile_retry_disposition: ProfileRetryDisposition
+    profile_switch_child_kind: ProfileSwitchChildKind
     progress_phase: ProgressPhase
     reservation_state: ReservationState
     resource_blocker_code: ResourceBlockerCode
@@ -351,6 +408,34 @@ class LifecycleVocabulary:
 
         placement_load_state: str = self.placement_load_state
 
+        profile_action: str = self.profile_action
+
+        profile_cancellation_cause: str = self.profile_cancellation_cause
+
+        profile_child_job_kind: str = self.profile_child_job_kind
+
+        profile_child_phase: str = self.profile_child_phase
+
+        profile_child_source: str = self.profile_child_source
+
+        profile_document_state: str = self.profile_document_state
+
+        profile_effect_state: str = self.profile_effect_state
+
+        profile_installation_policy: str = self.profile_installation_policy
+
+        profile_operation_kind: str = self.profile_operation_kind
+
+        profile_projection_kind: str = self.profile_projection_kind
+
+        profile_reason_severity: str = self.profile_reason_severity
+
+        profile_reported_phase: str = self.profile_reported_phase
+
+        profile_retry_disposition: str = self.profile_retry_disposition
+
+        profile_switch_child_kind: str = self.profile_switch_child_kind
+
         progress_phase: str = self.progress_phase
 
         reservation_state: str = self.reservation_state
@@ -414,6 +499,20 @@ class LifecycleVocabulary:
             "outcome_kind": outcome_kind,
             "placement_install_state": placement_install_state,
             "placement_load_state": placement_load_state,
+            "profile_action": profile_action,
+            "profile_cancellation_cause": profile_cancellation_cause,
+            "profile_child_job_kind": profile_child_job_kind,
+            "profile_child_phase": profile_child_phase,
+            "profile_child_source": profile_child_source,
+            "profile_document_state": profile_document_state,
+            "profile_effect_state": profile_effect_state,
+            "profile_installation_policy": profile_installation_policy,
+            "profile_operation_kind": profile_operation_kind,
+            "profile_projection_kind": profile_projection_kind,
+            "profile_reason_severity": profile_reason_severity,
+            "profile_reported_phase": profile_reported_phase,
+            "profile_retry_disposition": profile_retry_disposition,
+            "profile_switch_child_kind": profile_switch_child_kind,
             "progress_phase": progress_phase,
             "reservation_state": reservation_state,
             "resource_blocker_code": resource_blocker_code,
@@ -592,6 +691,76 @@ class LifecycleVocabulary:
 
 
 
+        profile_action = check_profile_action(d.pop("profile_action"))
+
+
+
+
+        profile_cancellation_cause = check_profile_cancellation_cause(d.pop("profile_cancellation_cause"))
+
+
+
+
+        profile_child_job_kind = check_profile_child_job_kind(d.pop("profile_child_job_kind"))
+
+
+
+
+        profile_child_phase = check_profile_child_phase(d.pop("profile_child_phase"))
+
+
+
+
+        profile_child_source = check_profile_child_source(d.pop("profile_child_source"))
+
+
+
+
+        profile_document_state = check_profile_document_state(d.pop("profile_document_state"))
+
+
+
+
+        profile_effect_state = check_profile_effect_state(d.pop("profile_effect_state"))
+
+
+
+
+        profile_installation_policy = check_profile_installation_policy(d.pop("profile_installation_policy"))
+
+
+
+
+        profile_operation_kind = check_profile_operation_kind(d.pop("profile_operation_kind"))
+
+
+
+
+        profile_projection_kind = check_profile_projection_kind(d.pop("profile_projection_kind"))
+
+
+
+
+        profile_reason_severity = check_profile_reason_severity(d.pop("profile_reason_severity"))
+
+
+
+
+        profile_reported_phase = check_profile_reported_phase(d.pop("profile_reported_phase"))
+
+
+
+
+        profile_retry_disposition = check_profile_retry_disposition(d.pop("profile_retry_disposition"))
+
+
+
+
+        profile_switch_child_kind = check_profile_switch_child_kind(d.pop("profile_switch_child_kind"))
+
+
+
+
         progress_phase = check_progress_phase(d.pop("progress_phase"))
 
 
@@ -694,6 +863,20 @@ class LifecycleVocabulary:
             outcome_kind=outcome_kind,
             placement_install_state=placement_install_state,
             placement_load_state=placement_load_state,
+            profile_action=profile_action,
+            profile_cancellation_cause=profile_cancellation_cause,
+            profile_child_job_kind=profile_child_job_kind,
+            profile_child_phase=profile_child_phase,
+            profile_child_source=profile_child_source,
+            profile_document_state=profile_document_state,
+            profile_effect_state=profile_effect_state,
+            profile_installation_policy=profile_installation_policy,
+            profile_operation_kind=profile_operation_kind,
+            profile_projection_kind=profile_projection_kind,
+            profile_reason_severity=profile_reason_severity,
+            profile_reported_phase=profile_reported_phase,
+            profile_retry_disposition=profile_retry_disposition,
+            profile_switch_child_kind=profile_switch_child_kind,
             progress_phase=progress_phase,
             reservation_state=reservation_state,
             resource_blocker_code=resource_blocker_code,

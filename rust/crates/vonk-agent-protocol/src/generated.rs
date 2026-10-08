@@ -5195,6 +5195,20 @@ pub struct LifecycleVocabulary {
     pub outcome_kind: OutcomeKind,
     pub placement_install_state: PlacementInstallState,
     pub placement_load_state: PlacementLoadState,
+    pub profile_action: ProfileAction,
+    pub profile_cancellation_cause: ProfileCancellationCause,
+    pub profile_child_job_kind: ProfileChildJobKind,
+    pub profile_child_phase: ProfileChildPhase,
+    pub profile_child_source: ProfileChildSource,
+    pub profile_document_state: ProfileDocumentState,
+    pub profile_effect_state: ProfileEffectState,
+    pub profile_installation_policy: ProfileInstallationPolicy,
+    pub profile_operation_kind: ProfileOperationKind,
+    pub profile_projection_kind: ProfileProjectionKind,
+    pub profile_reason_severity: ProfileReasonSeverity,
+    pub profile_reported_phase: ProfileReportedPhase,
+    pub profile_retry_disposition: ProfileRetryDisposition,
+    pub profile_switch_child_kind: ProfileSwitchChildKind,
     pub progress_phase: ProgressPhase,
     pub reservation_state: ReservationState,
     pub resource_blocker_code: ResourceBlockerCode,
@@ -7187,6 +7201,481 @@ impl ::std::convert::TryFrom<::std::string::String> for PrebuiltImageCode {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileAction {
+    #[serde(rename = "switch")]
+    Switch,
+    #[serde(rename = "keep")]
+    Keep,
+    #[serde(rename = "adopt")]
+    Adopt,
+}
+impl ::std::fmt::Display for ProfileAction {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Switch => f.write_str("switch"),
+            Self::Keep => f.write_str("keep"),
+            Self::Adopt => f.write_str("adopt"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileAction {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "switch" => Ok(Self::Switch),
+            "keep" => Ok(Self::Keep),
+            "adopt" => Ok(Self::Adopt),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileAction {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileAction {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileCancellationCause {
+    #[serde(rename = "operator")]
+    Operator,
+    #[serde(rename = "superseded")]
+    Superseded,
+}
+impl ::std::fmt::Display for ProfileCancellationCause {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Operator => f.write_str("operator"),
+            Self::Superseded => f.write_str("superseded"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileCancellationCause {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "operator" => Ok(Self::Operator),
+            "superseded" => Ok(Self::Superseded),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileCancellationCause {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileCancellationCause {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum ProfileChildJobKind {
+    #[serde(rename = "recipe.run-switch.v2")]
+    RecipeRunSwitchV2,
+    #[serde(rename = "recipe.stop.v2")]
+    RecipeStopV2,
+    #[serde(rename = "recipe.cleanup.v2")]
+    RecipeCleanupV2,
+}
+impl ::std::fmt::Display for ProfileChildJobKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::RecipeRunSwitchV2 => f.write_str("recipe.run-switch.v2"),
+            Self::RecipeStopV2 => f.write_str("recipe.stop.v2"),
+            Self::RecipeCleanupV2 => f.write_str("recipe.cleanup.v2"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileChildJobKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "recipe.run-switch.v2" => Ok(Self::RecipeRunSwitchV2),
+            "recipe.stop.v2" => Ok(Self::RecipeStopV2),
+            "recipe.cleanup.v2" => Ok(Self::RecipeCleanupV2),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileChildJobKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileChildJobKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileChildPhase {
+    #[serde(rename = "model-download")]
+    ModelDownload,
+    #[serde(rename = "container-download")]
+    ContainerDownload,
+    #[serde(rename = "container-build")]
+    ContainerBuild,
+    #[serde(rename = "target-copy")]
+    TargetCopy,
+    #[serde(rename = "runtime-install")]
+    RuntimeInstall,
+    #[serde(rename = "start")]
+    Start,
+    #[serde(rename = "final-verify")]
+    FinalVerify,
+    #[serde(rename = "transfer")]
+    Transfer,
+    #[serde(rename = "verify")]
+    Verify,
+    #[serde(rename = "prepare")]
+    Prepare,
+    #[serde(rename = "cleanup")]
+    Cleanup,
+    #[serde(rename = "stop")]
+    Stop,
+    #[serde(rename = "uninstall")]
+    Uninstall,
+}
+impl ::std::fmt::Display for ProfileChildPhase {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ModelDownload => f.write_str("model-download"),
+            Self::ContainerDownload => f.write_str("container-download"),
+            Self::ContainerBuild => f.write_str("container-build"),
+            Self::TargetCopy => f.write_str("target-copy"),
+            Self::RuntimeInstall => f.write_str("runtime-install"),
+            Self::Start => f.write_str("start"),
+            Self::FinalVerify => f.write_str("final-verify"),
+            Self::Transfer => f.write_str("transfer"),
+            Self::Verify => f.write_str("verify"),
+            Self::Prepare => f.write_str("prepare"),
+            Self::Cleanup => f.write_str("cleanup"),
+            Self::Stop => f.write_str("stop"),
+            Self::Uninstall => f.write_str("uninstall"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileChildPhase {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "model-download" => Ok(Self::ModelDownload),
+            "container-download" => Ok(Self::ContainerDownload),
+            "container-build" => Ok(Self::ContainerBuild),
+            "target-copy" => Ok(Self::TargetCopy),
+            "runtime-install" => Ok(Self::RuntimeInstall),
+            "start" => Ok(Self::Start),
+            "final-verify" => Ok(Self::FinalVerify),
+            "transfer" => Ok(Self::Transfer),
+            "verify" => Ok(Self::Verify),
+            "prepare" => Ok(Self::Prepare),
+            "cleanup" => Ok(Self::Cleanup),
+            "stop" => Ok(Self::Stop),
+            "uninstall" => Ok(Self::Uninstall),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileChildPhase {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileChildPhase {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileChildSource {
+    #[serde(rename = "switch-adapter")]
+    SwitchAdapter,
+}
+impl ::std::fmt::Display for ProfileChildSource {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::SwitchAdapter => f.write_str("switch-adapter"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileChildSource {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "switch-adapter" => Ok(Self::SwitchAdapter),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileChildSource {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileChildSource {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileDocumentState {
+    #[serde(rename = "active")]
+    Active,
+    #[serde(rename = "draft")]
+    Draft,
+    #[serde(rename = "ready")]
+    Ready,
+    #[serde(rename = "loaded")]
+    Loaded,
+    #[serde(rename = "not-created")]
+    NotCreated,
+}
+impl ::std::fmt::Display for ProfileDocumentState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Active => f.write_str("active"),
+            Self::Draft => f.write_str("draft"),
+            Self::Ready => f.write_str("ready"),
+            Self::Loaded => f.write_str("loaded"),
+            Self::NotCreated => f.write_str("not-created"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileDocumentState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "active" => Ok(Self::Active),
+            "draft" => Ok(Self::Draft),
+            "ready" => Ok(Self::Ready),
+            "loaded" => Ok(Self::Loaded),
+            "not-created" => Ok(Self::NotCreated),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileDocumentState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileDocumentState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileEffectState {
+    #[serde(rename = "not-issued")]
+    NotIssued,
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "succeeded")]
+    Succeeded,
+    #[serde(rename = "failed")]
+    Failed,
+    #[serde(rename = "cancelled")]
+    Cancelled,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for ProfileEffectState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::NotIssued => f.write_str("not-issued"),
+            Self::Pending => f.write_str("pending"),
+            Self::Succeeded => f.write_str("succeeded"),
+            Self::Failed => f.write_str("failed"),
+            Self::Cancelled => f.write_str("cancelled"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileEffectState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "not-issued" => Ok(Self::NotIssued),
+            "pending" => Ok(Self::Pending),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileEffectState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileEffectState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileInstallationPolicy {
+    #[serde(rename = "keep-cached")]
+    KeepCached,
+    #[serde(rename = "exact")]
+    Exact,
+}
+impl ::std::fmt::Display for ProfileInstallationPolicy {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::KeepCached => f.write_str("keep-cached"),
+            Self::Exact => f.write_str("exact"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileInstallationPolicy {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "keep-cached" => Ok(Self::KeepCached),
+            "exact" => Ok(Self::Exact),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileInstallationPolicy {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileInstallationPolicy {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileOperationKind {
+    #[serde(rename = "fleet-profile.apply")]
+    FleetProfileApply,
+}
+impl ::std::fmt::Display for ProfileOperationKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::FleetProfileApply => f.write_str("fleet-profile.apply"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileOperationKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "fleet-profile.apply" => Ok(Self::FleetProfileApply),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileOperationKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileOperationKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileProjectionKind {
+    #[serde(rename = "job")]
+    Job,
+    #[serde(rename = "profile-application")]
+    ProfileApplication,
+    #[serde(rename = "profile-step")]
+    ProfileStep,
+    #[serde(rename = "agent-operation")]
+    AgentOperation,
+    #[serde(rename = "fleet-profile-application")]
+    FleetProfileApplication,
+}
+impl ::std::fmt::Display for ProfileProjectionKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Job => f.write_str("job"),
+            Self::ProfileApplication => f.write_str("profile-application"),
+            Self::ProfileStep => f.write_str("profile-step"),
+            Self::AgentOperation => f.write_str("agent-operation"),
+            Self::FleetProfileApplication => f.write_str("fleet-profile-application"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileProjectionKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "job" => Ok(Self::Job),
+            "profile-application" => Ok(Self::ProfileApplication),
+            "profile-step" => Ok(Self::ProfileStep),
+            "agent-operation" => Ok(Self::AgentOperation),
+            "fleet-profile-application" => Ok(Self::FleetProfileApplication),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileProjectionKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileProjectionKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
 pub enum ProfileReasonCode {
     #[serde(rename = "profile.admission_busy")]
@@ -7381,6 +7870,174 @@ impl ::std::convert::TryFrom<&str> for ProfileReasonCode {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for ProfileReasonCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileReasonSeverity {
+    #[serde(rename = "info")]
+    Info,
+    #[serde(rename = "warning")]
+    Warning,
+    #[serde(rename = "error")]
+    Error,
+    #[serde(rename = "blocker")]
+    Blocker,
+}
+impl ::std::fmt::Display for ProfileReasonSeverity {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Info => f.write_str("info"),
+            Self::Warning => f.write_str("warning"),
+            Self::Error => f.write_str("error"),
+            Self::Blocker => f.write_str("blocker"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileReasonSeverity {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "info" => Ok(Self::Info),
+            "warning" => Ok(Self::Warning),
+            "error" => Ok(Self::Error),
+            "blocker" => Ok(Self::Blocker),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileReasonSeverity {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileReasonSeverity {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileReportedPhase {
+    #[serde(rename = "final_verify")]
+    FinalVerify,
+}
+impl ::std::fmt::Display for ProfileReportedPhase {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::FinalVerify => f.write_str("final_verify"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileReportedPhase {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "final_verify" => Ok(Self::FinalVerify),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileReportedPhase {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileReportedPhase {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileRetryDisposition {
+    #[serde(rename = "wait")]
+    Wait,
+    #[serde(rename = "supersede")]
+    Supersede,
+}
+impl ::std::fmt::Display for ProfileRetryDisposition {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Wait => f.write_str("wait"),
+            Self::Supersede => f.write_str("supersede"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileRetryDisposition {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "wait" => Ok(Self::Wait),
+            "supersede" => Ok(Self::Supersede),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileRetryDisposition {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileRetryDisposition {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ProfileSwitchChildKind {
+    #[serde(rename = "install")]
+    Install,
+    #[serde(rename = "run")]
+    Run,
+    #[serde(rename = "stop")]
+    Stop,
+    #[serde(rename = "cleanup")]
+    Cleanup,
+}
+impl ::std::fmt::Display for ProfileSwitchChildKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Install => f.write_str("install"),
+            Self::Run => f.write_str("run"),
+            Self::Stop => f.write_str("stop"),
+            Self::Cleanup => f.write_str("cleanup"),
+        }
+    }
+}
+impl ::std::str::FromStr for ProfileSwitchChildKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "install" => Ok(Self::Install),
+            "run" => Ok(Self::Run),
+            "stop" => Ok(Self::Stop),
+            "cleanup" => Ok(Self::Cleanup),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for ProfileSwitchChildKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for ProfileSwitchChildKind {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -20515,6 +21172,20 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub outcome_kind: OutcomeKind,
             pub placement_install_state: PlacementInstallState,
             pub placement_load_state: PlacementLoadState,
+            pub profile_action: ProfileAction,
+            pub profile_cancellation_cause: ProfileCancellationCause,
+            pub profile_child_job_kind: ProfileChildJobKind,
+            pub profile_child_phase: ProfileChildPhase,
+            pub profile_child_source: ProfileChildSource,
+            pub profile_document_state: ProfileDocumentState,
+            pub profile_effect_state: ProfileEffectState,
+            pub profile_installation_policy: ProfileInstallationPolicy,
+            pub profile_operation_kind: ProfileOperationKind,
+            pub profile_projection_kind: ProfileProjectionKind,
+            pub profile_reason_severity: ProfileReasonSeverity,
+            pub profile_reported_phase: ProfileReportedPhase,
+            pub profile_retry_disposition: ProfileRetryDisposition,
+            pub profile_switch_child_kind: ProfileSwitchChildKind,
             pub progress_phase: ProgressPhase,
             pub reservation_state: ReservationState,
             pub resource_blocker_code: ResourceBlockerCode,
@@ -20564,6 +21235,20 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             outcome_kind: raw.outcome_kind,
             placement_install_state: raw.placement_install_state,
             placement_load_state: raw.placement_load_state,
+            profile_action: raw.profile_action,
+            profile_cancellation_cause: raw.profile_cancellation_cause,
+            profile_child_job_kind: raw.profile_child_job_kind,
+            profile_child_phase: raw.profile_child_phase,
+            profile_child_source: raw.profile_child_source,
+            profile_document_state: raw.profile_document_state,
+            profile_effect_state: raw.profile_effect_state,
+            profile_installation_policy: raw.profile_installation_policy,
+            profile_operation_kind: raw.profile_operation_kind,
+            profile_projection_kind: raw.profile_projection_kind,
+            profile_reason_severity: raw.profile_reason_severity,
+            profile_reported_phase: raw.profile_reported_phase,
+            profile_retry_disposition: raw.profile_retry_disposition,
+            profile_switch_child_kind: raw.profile_switch_child_kind,
             progress_phase: raw.progress_phase,
             reservation_state: raw.reservation_state,
             resource_blocker_code: raw.resource_blocker_code,
@@ -23035,6 +23720,637 @@ impl<'de> ::serde::Deserialize<'de> for PrebuiltImageCode {
         })
     }
 }
+impl ProfileAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Switch => "switch",
+            Self::Keep => "keep",
+            Self::Adopt => "adopt",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileAction {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileAction {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileAction {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileAction {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ProfileAction"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "switch")]
+            Switch,
+            #[serde(rename = "keep")]
+            Keep,
+            #[serde(rename = "adopt")]
+            Adopt,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Switch => Self::Switch,
+            Raw::Keep => Self::Keep,
+            Raw::Adopt => Self::Adopt,
+        })
+    }
+}
+impl ProfileCancellationCause {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Operator => "operator",
+            Self::Superseded => "superseded",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileCancellationCause {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileCancellationCause {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileCancellationCause {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileCancellationCause {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("ProfileCancellationCause"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "operator")]
+            Operator,
+            #[serde(rename = "superseded")]
+            Superseded,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Operator => Self::Operator,
+            Raw::Superseded => Self::Superseded,
+        })
+    }
+}
+impl ProfileChildJobKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RecipeRunSwitchV2 => "recipe.run-switch.v2",
+            Self::RecipeStopV2 => "recipe.stop.v2",
+            Self::RecipeCleanupV2 => "recipe.cleanup.v2",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileChildJobKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileChildJobKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileChildJobKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileChildJobKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ProfileChildJobKind"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "recipe.run-switch.v2")]
+            RecipeRunSwitchV2,
+            #[serde(rename = "recipe.stop.v2")]
+            RecipeStopV2,
+            #[serde(rename = "recipe.cleanup.v2")]
+            RecipeCleanupV2,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::RecipeRunSwitchV2 => Self::RecipeRunSwitchV2,
+            Raw::RecipeStopV2 => Self::RecipeStopV2,
+            Raw::RecipeCleanupV2 => Self::RecipeCleanupV2,
+        })
+    }
+}
+impl ProfileChildPhase {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ModelDownload => "model-download",
+            Self::ContainerDownload => "container-download",
+            Self::ContainerBuild => "container-build",
+            Self::TargetCopy => "target-copy",
+            Self::RuntimeInstall => "runtime-install",
+            Self::Start => "start",
+            Self::FinalVerify => "final-verify",
+            Self::Transfer => "transfer",
+            Self::Verify => "verify",
+            Self::Prepare => "prepare",
+            Self::Cleanup => "cleanup",
+            Self::Stop => "stop",
+            Self::Uninstall => "uninstall",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileChildPhase {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileChildPhase {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileChildPhase {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileChildPhase {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ProfileChildPhase"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "model-download")]
+            ModelDownload,
+            #[serde(rename = "container-download")]
+            ContainerDownload,
+            #[serde(rename = "container-build")]
+            ContainerBuild,
+            #[serde(rename = "target-copy")]
+            TargetCopy,
+            #[serde(rename = "runtime-install")]
+            RuntimeInstall,
+            #[serde(rename = "start")]
+            Start,
+            #[serde(rename = "final-verify")]
+            FinalVerify,
+            #[serde(rename = "transfer")]
+            Transfer,
+            #[serde(rename = "verify")]
+            Verify,
+            #[serde(rename = "prepare")]
+            Prepare,
+            #[serde(rename = "cleanup")]
+            Cleanup,
+            #[serde(rename = "stop")]
+            Stop,
+            #[serde(rename = "uninstall")]
+            Uninstall,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ModelDownload => Self::ModelDownload,
+            Raw::ContainerDownload => Self::ContainerDownload,
+            Raw::ContainerBuild => Self::ContainerBuild,
+            Raw::TargetCopy => Self::TargetCopy,
+            Raw::RuntimeInstall => Self::RuntimeInstall,
+            Raw::Start => Self::Start,
+            Raw::FinalVerify => Self::FinalVerify,
+            Raw::Transfer => Self::Transfer,
+            Raw::Verify => Self::Verify,
+            Raw::Prepare => Self::Prepare,
+            Raw::Cleanup => Self::Cleanup,
+            Raw::Stop => Self::Stop,
+            Raw::Uninstall => Self::Uninstall,
+        })
+    }
+}
+impl ProfileChildSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SwitchAdapter => "switch-adapter",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileChildSource {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileChildSource {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileChildSource {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileChildSource {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ProfileChildSource"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "switch-adapter")]
+            SwitchAdapter,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::SwitchAdapter => Self::SwitchAdapter,
+        })
+    }
+}
+impl ProfileDocumentState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Draft => "draft",
+            Self::Ready => "ready",
+            Self::Loaded => "loaded",
+            Self::NotCreated => "not-created",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileDocumentState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileDocumentState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileDocumentState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileDocumentState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ProfileDocumentState"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "active")]
+            Active,
+            #[serde(rename = "draft")]
+            Draft,
+            #[serde(rename = "ready")]
+            Ready,
+            #[serde(rename = "loaded")]
+            Loaded,
+            #[serde(rename = "not-created")]
+            NotCreated,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Active => Self::Active,
+            Raw::Draft => Self::Draft,
+            Raw::Ready => Self::Ready,
+            Raw::Loaded => Self::Loaded,
+            Raw::NotCreated => Self::NotCreated,
+        })
+    }
+}
+impl ProfileEffectState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NotIssued => "not-issued",
+            Self::Pending => "pending",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileEffectState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileEffectState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileEffectState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileEffectState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ProfileEffectState"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "not-issued")]
+            NotIssued,
+            #[serde(rename = "pending")]
+            Pending,
+            #[serde(rename = "succeeded")]
+            Succeeded,
+            #[serde(rename = "failed")]
+            Failed,
+            #[serde(rename = "cancelled")]
+            Cancelled,
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::NotIssued => Self::NotIssued,
+            Raw::Pending => Self::Pending,
+            Raw::Succeeded => Self::Succeeded,
+            Raw::Failed => Self::Failed,
+            Raw::Cancelled => Self::Cancelled,
+            Raw::Unknown => Self::Unknown,
+        })
+    }
+}
+impl ProfileInstallationPolicy {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::KeepCached => "keep-cached",
+            Self::Exact => "exact",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileInstallationPolicy {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileInstallationPolicy {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileInstallationPolicy {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileInstallationPolicy {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("ProfileInstallationPolicy"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "keep-cached")]
+            KeepCached,
+            #[serde(rename = "exact")]
+            Exact,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::KeepCached => Self::KeepCached,
+            Raw::Exact => Self::Exact,
+        })
+    }
+}
+impl ProfileOperationKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::FleetProfileApply => "fleet-profile.apply",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileOperationKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileOperationKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileOperationKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileOperationKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ProfileOperationKind"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "fleet-profile.apply")]
+            FleetProfileApply,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::FleetProfileApply => Self::FleetProfileApply,
+        })
+    }
+}
+impl ProfileProjectionKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Job => "job",
+            Self::ProfileApplication => "profile-application",
+            Self::ProfileStep => "profile-step",
+            Self::AgentOperation => "agent-operation",
+            Self::FleetProfileApplication => "fleet-profile-application",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileProjectionKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileProjectionKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileProjectionKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileProjectionKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("ProfileProjectionKind"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "job")]
+            Job,
+            #[serde(rename = "profile-application")]
+            ProfileApplication,
+            #[serde(rename = "profile-step")]
+            ProfileStep,
+            #[serde(rename = "agent-operation")]
+            AgentOperation,
+            #[serde(rename = "fleet-profile-application")]
+            FleetProfileApplication,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Job => Self::Job,
+            Raw::ProfileApplication => Self::ProfileApplication,
+            Raw::ProfileStep => Self::ProfileStep,
+            Raw::AgentOperation => Self::AgentOperation,
+            Raw::FleetProfileApplication => Self::FleetProfileApplication,
+        })
+    }
+}
 impl ProfileReasonCode {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -23227,6 +24543,240 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
             Raw::ProfileRuntimeImageChanged => Self::ProfileRuntimeImageChanged,
             Raw::ProfileSelectionLost => Self::ProfileSelectionLost,
             Raw::ProfileAssetReservationUnavailable => Self::ProfileAssetReservationUnavailable,
+        })
+    }
+}
+impl ProfileReasonSeverity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warning => "warning",
+            Self::Error => "error",
+            Self::Blocker => "blocker",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileReasonSeverity {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileReasonSeverity {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileReasonSeverity {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileReasonSeverity {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("ProfileReasonSeverity"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "info")]
+            Info,
+            #[serde(rename = "warning")]
+            Warning,
+            #[serde(rename = "error")]
+            Error,
+            #[serde(rename = "blocker")]
+            Blocker,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Info => Self::Info,
+            Raw::Warning => Self::Warning,
+            Raw::Error => Self::Error,
+            Raw::Blocker => Self::Blocker,
+        })
+    }
+}
+impl ProfileReportedPhase {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::FinalVerify => "final_verify",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileReportedPhase {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileReportedPhase {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileReportedPhase {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileReportedPhase {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("ProfileReportedPhase"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "final_verify")]
+            FinalVerify,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::FinalVerify => Self::FinalVerify,
+        })
+    }
+}
+impl ProfileRetryDisposition {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Wait => "wait",
+            Self::Supersede => "supersede",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileRetryDisposition {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileRetryDisposition {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileRetryDisposition {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileRetryDisposition {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("ProfileRetryDisposition"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "wait")]
+            Wait,
+            #[serde(rename = "supersede")]
+            Supersede,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Wait => Self::Wait,
+            Raw::Supersede => Self::Supersede,
+        })
+    }
+}
+impl ProfileSwitchChildKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Install => "install",
+            Self::Run => "run",
+            Self::Stop => "stop",
+            Self::Cleanup => "cleanup",
+        }
+    }
+}
+impl ::std::ops::Deref for ProfileSwitchChildKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for ProfileSwitchChildKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for ProfileSwitchChildKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for ProfileSwitchChildKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("ProfileSwitchChildKind"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "install")]
+            Install,
+            #[serde(rename = "run")]
+            Run,
+            #[serde(rename = "stop")]
+            Stop,
+            #[serde(rename = "cleanup")]
+            Cleanup,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Install => Self::Install,
+            Raw::Run => Self::Run,
+            Raw::Stop => Self::Stop,
+            Raw::Cleanup => Self::Cleanup,
         })
     }
 }

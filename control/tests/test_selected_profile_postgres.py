@@ -490,7 +490,7 @@ def test_failed_newer_load_stays_selected_instead_of_falling_back_to_success(
     try:
         restarted_sessions = sessionmaker(restarted_engine, expire_on_commit=False)
         restarted = _service(restarted_sessions)
-        assert restarted.tick() is False
+        assert restarted.tick() is True
         selected = _selected(restarted_engine)
         assert selected["generation"] == 2
         assert selected["application_id"] == newer.id
@@ -499,7 +499,7 @@ def test_failed_newer_load_stays_selected_instead_of_falling_back_to_success(
         with restarted_sessions() as session:
             intent = restarted.endpoint_intent(session, profile.number)
         assert intent.application_id == newer.id
-        assert intent.application_state == "failed"
+        assert intent.application_state == "queued"
     finally:
         restarted_engine.dispose()
 

@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 0e44e8cf7084e846fca96b834e45a0ed7d207538eb1b4dd734b2ae24ecf5425d. Do not edit.
+// Generated from canonical OpenAPI SHA256 e13c356f5f5d962f9fb80d261473ad17872ad026969d0b95214bdaf8de01aee4. Do not edit.
 export interface NormalizationShape {
   type?: string | string[];
   preserveIntegerFloat?: boolean;
@@ -2000,15 +2000,29 @@ export const normalize1620: Validator;
 export const componentPrebuiltImage: Validator;
 export const componentPrebuiltImageCode: Validator;
 export const componentPreparationReason: Validator;
+export const componentProfileAction: Validator;
+export const componentProfileCancellationCause: Validator;
+export const componentProfileChildJobKind: Validator;
+export const componentProfileChildPhase: Validator;
+export const componentProfileChildSource: Validator;
+export const componentProfileDocumentState: Validator;
+export const componentProfileEffectState: Validator;
+export const componentProfileInstallationPolicy: Validator;
 export const componentProfileJobRunStopAuthorization: Validator;
 export const componentProfileJobRunStopJob: Validator;
 export const normalize1621: Validator;
 export const normalize1622: Validator;
 export const componentProfileJobRunStopPhaseItem: Validator;
 export const componentProfileJobRunStopTarget: Validator;
+export const componentProfileOperationKind: Validator;
 export const componentProfilePartialStop: Validator;
+export const componentProfileProjectionKind: Validator;
 export const componentProfileReasonCode: Validator;
+export const componentProfileReasonSeverity: Validator;
+export const componentProfileReportedPhase: Validator;
+export const componentProfileRetryDisposition: Validator;
 export const componentProfileStopOwnerBinding: Validator;
+export const componentProfileSwitchChildKind: Validator;
 export const componentProgressPhase: Validator;
 export const componentProjectionCode: Validator;
 export const componentProjectionReason: Validator;

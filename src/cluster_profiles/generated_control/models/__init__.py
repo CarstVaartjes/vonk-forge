@@ -490,13 +490,27 @@ from .prebuilt_image import PrebuiltImage
 from .prebuilt_image_code import PrebuiltImageCode
 from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
+from .profile_action import ProfileAction
+from .profile_cancellation_cause import ProfileCancellationCause
+from .profile_child_job_kind import ProfileChildJobKind
+from .profile_child_phase import ProfileChildPhase
+from .profile_child_source import ProfileChildSource
+from .profile_document_state import ProfileDocumentState
+from .profile_effect_state import ProfileEffectState
+from .profile_installation_policy import ProfileInstallationPolicy
 from .profile_job_run_stop_authorization import ProfileJobRunStopAuthorization
 from .profile_job_run_stop_job import ProfileJobRunStopJob
 from .profile_job_run_stop_phase_item import ProfileJobRunStopPhaseItem
 from .profile_job_run_stop_target import ProfileJobRunStopTarget
+from .profile_operation_kind import ProfileOperationKind
 from .profile_partial_stop import ProfilePartialStop
+from .profile_projection_kind import ProfileProjectionKind
 from .profile_reason_code import ProfileReasonCode
+from .profile_reason_severity import ProfileReasonSeverity
+from .profile_reported_phase import ProfileReportedPhase
+from .profile_retry_disposition import ProfileRetryDisposition
 from .profile_stop_owner_binding import ProfileStopOwnerBinding
+from .profile_switch_child_kind import ProfileSwitchChildKind
 from .progress_phase import ProgressPhase
 from .projection_code import ProjectionCode
 from .projection_reason import ProjectionReason
@@ -1364,13 +1378,27 @@ __all__ = (
     "PrebuiltImageCode",
     "PreparationReason",
     "PreparationReasonSeverity",
+    "ProfileAction",
+    "ProfileCancellationCause",
+    "ProfileChildJobKind",
+    "ProfileChildPhase",
+    "ProfileChildSource",
+    "ProfileDocumentState",
+    "ProfileEffectState",
+    "ProfileInstallationPolicy",
     "ProfileJobRunStopAuthorization",
     "ProfileJobRunStopJob",
     "ProfileJobRunStopPhaseItem",
     "ProfileJobRunStopTarget",
+    "ProfileOperationKind",
     "ProfilePartialStop",
+    "ProfileProjectionKind",
     "ProfileReasonCode",
+    "ProfileReasonSeverity",
+    "ProfileReportedPhase",
+    "ProfileRetryDisposition",
     "ProfileStopOwnerBinding",
+    "ProfileSwitchChildKind",
     "ProgressPhase",
     "ProjectionCode",
     "ProjectionReason",

@@ -505,9 +505,7 @@ def test_an_application_row_is_written_only_through_the_adapter() -> None:
     from tests.lifecycle_writer_boundaries import scan_lifecycle_writes
 
     writes = [
-        write
-        for write in scan_lifecycle_writes()
-        if write.path.endswith("fleet_profiles.py")
+        write for write in scan_lifecycle_writes() if "/fleet_profiles/" in write.path
     ]
     assert writes == []
 
