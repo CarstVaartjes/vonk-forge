@@ -1189,10 +1189,12 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
 
 def test_cancel_under_native_repair_contention_persists_before_proof(faulty_install):
     """A NOWAIT repair refusal cannot refuse or erase the accepted cancel."""
-    from concurrent.futures import ThreadPoolExecutor
     from types import SimpleNamespace
     from uuid import uuid4
 
+    from psycopg.errors import LockNotAvailable
+    from sqlalchemy import event
+    from sqlalchemy.engine import ExceptionContext
     from vonk_control.job_documents import RunSwitchRunIntent
     from vonk_control.run_switch_journal_contract import (
         RunSwitchJournalRepairPendingState,
@@ -1233,16 +1235,43 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
         )
         is not None
     )
+    request_key = str(uuid4())
+    refused = False
+
+    def observe_native_refusal(context: ExceptionContext) -> None:
+        nonlocal refused
+        if not isinstance(context.original_exception, LockNotAvailable):
+            return
+        assert context.statement is not None
+        assert "agent_operations" in context.statement
+        assert "FOR UPDATE OF agent_operations NOWAIT" in context.statement
+        # Observe the real database refusal, while the holder still owns the
+        # native row. A separate connection must already see committed intent;
+        # persisting it after repair (or only on the same transaction) fails.
+        with sessions() as session:
+            row = session.get(RunSwitchJournalRepairPending, switch_id)
+            assert row is not None
+            state = RunSwitchJournalRepairPendingState.model_validate_json(
+                canonical_message(row.progress), strict=True
+            )
+            assert state.cancellation is not None
+            assert state.cancellation.request_key == request_key
+        refused = True
+
+    engine = holder.get_bind()
+    event.listen(engine, "handle_error", observe_native_refusal)
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            accepted = executor.submit(
-                planner.cancel,
-                switch_id,
-                actor="admin",
-                request_key=str(uuid4()),
-                reason="cancel under native contention",
-            ).result(timeout=1)
-        assert accepted.state == "unknown"
+        # The lock acquisition above is the synchronization point. No worker
+        # scheduling or one-second wall-clock race is needed: NOWAIT itself
+        # proves nonblocking contention under the owning database budgets.
+        accepted = planner.cancel(
+            switch_id,
+            actor="admin",
+            request_key=request_key,
+            reason="cancel under native contention",
+        )
+        assert refused
+        assert accepted.operation_id == switch_id
         with sessions() as session:
             row = session.get(RunSwitchJournalRepairPending, switch_id)
             assert row is not None
@@ -1251,6 +1280,7 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
             )
             assert pending.cancellation is not None
     finally:
+        event.remove(engine, "handle_error", observe_native_refusal)
         holder.rollback()
         holder.close()
     clock[0] = pending.deadline_at
@@ -1270,4 +1300,4 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
             actor="admin",
         ),
     )
-    assert ended.state == "cancelled"
+    assert ended.state == LifecycleState.CANCELLED.value
