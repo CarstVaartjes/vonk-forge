@@ -9,9 +9,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import (
-    CertificateCode,
-)
 from vonk_agent_protocol.state_machines import (
     CertificateIssuancePurpose,
     CertificateRecordState,
@@ -60,7 +57,6 @@ from .persistence import (
     _validate_issued_binding,
 )
 from .types import (
-    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     RenewalConflictRevocationUncertain,
     RenewalInProgress,
@@ -95,7 +91,12 @@ class RotationService(EnrollmentCore):
                 and (
                     intent.csr_public_key_fingerprint != csr_fingerprint
                     or intent.source_serial != serial
-                    or intent.state == CertificateRotationState.REVOCATION_PENDING
+                    or intent.state
+                    not in {
+                        CertificateRotationState.ISSUING,
+                        CertificateRotationState.MANUAL_RECOVERY,
+                    }
+                    or not intent.csr_pem.isascii()
                 )
             ) or (
                 staged is not None
@@ -174,7 +175,17 @@ class RotationService(EnrollmentCore):
                 else None
             )
         if competing is not None:
-            self._issue_rotation_claim(competing, now)
+            try:
+                self._issue_rotation_claim(competing, now)
+            except (
+                EnrollmentDenied,
+                RenewalIssuanceUncertain,
+                RenewalInProgress,
+                StepCAIssuancePending,
+            ):
+                # Source authentication above belongs to the fresh request.
+                # An obsolete binding's answer cannot deny the newer intent.
+                self._end_rotation(node_id)
         recovery = self._prepare_rotation_recovery(
             node_id,
             serial,
@@ -258,6 +269,21 @@ class RotationService(EnrollmentCore):
             if intent is not None:
                 if (
                     intent.source_serial != serial
+                    or _issuance_binding(intent.provider_request) is None
+                    or not intent.csr_pem.isascii()
+                ):
+                    from .ending import retain_ended_effect
+
+                    retain_ended_effect(
+                        session,
+                        _issuance_binding(intent.provider_request),
+                        intent.csr_pem,
+                        now,
+                    )
+                    session.delete(intent)
+                    return None
+                if (
+                    intent.source_serial != serial
                     or intent.csr_public_key_fingerprint != csr_fingerprint
                     or intent.csr_pem != normalized_csr.decode("ascii")
                 ):
@@ -272,7 +298,16 @@ class RotationService(EnrollmentCore):
                         intent.state != CertificateRotationState.REVOCATION_PENDING
                         or intent.source_serial != serial
                     ):
-                        raise RenewalInProgress("certificate rotation state is invalid")
+                        from .ending import retain_ended_effect
+
+                        retain_ended_effect(
+                            session,
+                            _issuance_binding(intent.provider_request),
+                            intent.csr_pem,
+                            now,
+                        )
+                        session.delete(intent)
+                        return None
                 if intent.state == CertificateRotationState.REVOCATION_PENDING:
                     retiring = next(
                         (
@@ -402,19 +437,15 @@ class RotationService(EnrollmentCore):
                     )
                     if (
                         intent is not None
-                        and _issuance_binding(intent.provider_request) is None
                         and intent.provider_request_id == claim.provider_request_id
                     ):
                         session.delete(intent)
                 raise RenewalInProgress(
                     "historical certificate rotation has no exact journal binding"
                 )
-            try:
-                issued = self._authority.observe_node(
-                    claim.csr_pem, now, request=claim.provider_request
-                )
-            except StepCAIssuancePending:
-                issued = None
+            issued = self._authority.observe_node(
+                claim.csr_pem, now, request=claim.provider_request
+            )
             if issued is None:
                 issued = self._authority.renew_node(
                     claim.node_id,
@@ -425,20 +456,11 @@ class RotationService(EnrollmentCore):
             _validate_issued_binding(issued, claim.provider_request)
             self._validate_renewal_result(issued, claim)
             disposition = self._persist_rotation(issued, claim)
-        except StepCAIssuancePending as error:
-            raise RenewalInProgress(
-                "certificate rotation issuance is in progress"
-            ) from error
+        except StepCAIssuancePending:
+            raise
         except (EnrollmentDenied, RenewalInProgress):
             raise
         except Exception as error:
-            if (
-                isinstance(error, StepCAError)
-                and error.reason_code == CertificateCode.RESPONSE_UNREPRESENTABLE
-            ):
-                raise CertificateResponseCapacityRefused(
-                    "certificate response exceeds the supported wire budget"
-                ) from error
             if isinstance(error, StepCAError) and not isinstance(
                 error, StepCAUnavailable
             ):
@@ -528,7 +550,26 @@ class RotationService(EnrollmentCore):
                         raise RenewalInProgress(
                             "a different certificate rotation is already staged"
                         )
-                    return _certificate_issued(staged)
+                    try:
+                        return _certificate_issued(staged)
+                    except (RuntimeError, ValueError, UnicodeError):
+                        binding = _issuance_binding(staged.provider_request)
+                        if binding is not None:
+                            return _RotationClaim(
+                                node_id=node_id,
+                                source_serial=serial,
+                                generation=binding.generation,
+                                csr_pem=normalized_csr,
+                                csr_public_key_fingerprint=csr_fingerprint,
+                                provider_request_id=binding.request_id,
+                                provider_request=binding,
+                                state=CertificateRotationState.ISSUING,
+                                owner=False,
+                            )
+                        # No exact reference remains; retire the damaged projection.
+                        staged.state = CertificateRecordState.REVOKED
+                        staged.revoked_at = staged.revoked_at or now
+
             intent = session.scalar(
                 select(AgentCertificateRotation)
                 .where(AgentCertificateRotation.node_id == node_id)
@@ -666,6 +707,14 @@ class RotationService(EnrollmentCore):
                     None,
                 )
                 if committed is not None:
+                    committed.certificate_pem = issued.certificate_pem.decode("ascii")
+                    committed.chain_pem = issued.chain_pem.decode("ascii")
+                    committed.provider_request = (
+                        claim.provider_request.model_dump(mode="json")
+                        if claim.provider_request is not None
+                        else None
+                    )
+                    committed.csr_pem = claim.csr_pem.decode("ascii")
                     return CertificateRecordState.STAGED
             if (
                 intent is None
@@ -709,6 +758,10 @@ class RotationService(EnrollmentCore):
                     chain_pem=issued.chain_pem.decode("ascii"),
                     csr_public_key_fingerprint=claim.csr_public_key_fingerprint,
                     revoked_at=revoked_at,
+                    provider_request=claim.provider_request.model_dump(mode="json")
+                    if claim.provider_request is not None
+                    else None,
+                    csr_pem=claim.csr_pem.decode("ascii"),
                 )
             )
             if denied:

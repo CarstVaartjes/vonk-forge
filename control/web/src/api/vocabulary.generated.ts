@@ -518,6 +518,7 @@ export const EnrollmentGrantState = {
 export type EnrollmentGrantState = (typeof EnrollmentGrantState)[keyof typeof EnrollmentGrantState];
 
 export const EnrollmentRecordState = {
+  ENDED: "ended",
   ISSUING: "issuing",
   CERTIFICATE_ISSUED: "certificate_issued",
 } as const;
@@ -560,6 +561,19 @@ export const CertificateIssuancePurpose = {
   ROTATION: "rotation",
 } as const;
 export type CertificateIssuancePurpose = (typeof CertificateIssuancePurpose)[keyof typeof CertificateIssuancePurpose];
+
+export const CertificateJournalState = {
+  ISSUED: "issued",
+  PENDING: "pending",
+  ABSENT: "absent",
+} as const;
+export type CertificateJournalState = (typeof CertificateJournalState)[keyof typeof CertificateJournalState];
+
+export const CertificateRequestMode = {
+  ISSUE: "issue",
+  OBSERVE: "observe",
+} as const;
+export type CertificateRequestMode = (typeof CertificateRequestMode)[keyof typeof CertificateRequestMode];
 
 export const ModelFileState = {
   PARTIAL: "partial",
@@ -774,6 +788,19 @@ export type CacheReferenceReason = (typeof CacheReferenceReason)[keyof typeof Ca
 
 export const CertificateCode = {
   RESPONSE_UNREPRESENTABLE: "certificate.response_unrepresentable",
+  REQUEST_INVALID: "certificate.request_invalid",
+  AUTHENTICATION_REFUSED: "certificate.authentication_refused",
+  BINDING_REFUSED: "certificate.binding_refused",
+  SOURCE_REVOKED: "certificate.source_revoked",
+  SOURCE_IDENTITY_REFUSED: "certificate.source_identity_refused",
+  ISSUANCE_IN_PROGRESS: "certificate.issuance_in_progress",
+  ISSUANCE_UNAVAILABLE: "certificate.issuance_unavailable",
+  REQUEST_BINDING_MISMATCH: "certificate.request_binding_mismatch",
+  SERIAL_ALREADY_RESERVED: "certificate.serial_already_reserved",
+  SERIAL_ALREADY_ISSUED: "certificate.serial_already_issued",
+  ATTEMPT_SUPERSEDED: "certificate.attempt_superseded",
+  ISSUANCE_REVOKED: "certificate.issuance_revoked",
+  ROTATION_SOURCE_REVOKED: "certificate.rotation_source_revoked",
 } as const;
 export type CertificateCode = (typeof CertificateCode)[keyof typeof CertificateCode];
 

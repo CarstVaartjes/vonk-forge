@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
-from vonk_agent_protocol import ModelCacheCode
+from vonk_agent_protocol import ModelCacheCode, WaitReason
 
 from .. import model_cache_states
 from ..bounded_retry import bounded_attempts
@@ -156,8 +156,11 @@ class AvailabilityMixin:
             None,
         )
         if spec is None:
-            raise ModelCacheNotFoundRefused(
-                ModelCacheCode.ARTIFACT_MISSING, "verified cache artifact was not found"
+            raise ModelCacheConflictUnknown(
+                ModelCacheCode.ARTIFACT_UNVERIFIED,
+                "requested content is absent from the local cache manifest",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                retry_after_seconds=_RETRY_BASE_SECONDS,
             )
         # Only this object is served, so only this object is checked. Whole-set
         # coverage is proven when the assignment is created; repeating it here

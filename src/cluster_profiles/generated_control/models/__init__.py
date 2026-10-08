@@ -111,9 +111,10 @@ from .catalog_sync_code import CatalogSyncCode
 from .catalog_sync_state import CatalogSyncState
 from .certificate_code import CertificateCode
 from .certificate_issuance_binding import CertificateIssuanceBinding
-from .certificate_issuance_binding_purpose import CertificateIssuanceBindingPurpose
 from .certificate_issuance_purpose import CertificateIssuancePurpose
+from .certificate_journal_state import CertificateJournalState
 from .certificate_record_state import CertificateRecordState
+from .certificate_request_mode import CertificateRequestMode
 from .certificate_rotation_state import CertificateRotationState
 from .certificate_state import CertificateState
 from .cli_token_download import CliTokenDownload
@@ -176,12 +177,13 @@ from .endpoint_response import EndpointResponse
 from .endpoint_state import EndpointState
 from .enrollment_grant_response import EnrollmentGrantResponse
 from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInstallerUrl
-from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_grant_state import EnrollmentGrantState
 from .enrollment_grant_status import EnrollmentGrantStatus
+from .enrollment_observation_outcome import EnrollmentObservationOutcome
 from .enrollment_profile_state import EnrollmentProfileState
 from .enrollment_purpose import EnrollmentPurpose
 from .enrollment_record_state import EnrollmentRecordState
+from .enrollment_revocation_status import EnrollmentRevocationStatus
 from .enum_parameter import EnumParameter
 from .error_catalog import ErrorCatalog
 from .error_category import ErrorCategory
@@ -758,6 +760,7 @@ from .run_switch_code import RunSwitchCode
 from .run_switch_container_build_result import RunSwitchContainerBuildResult
 from .run_switch_container_build_result_state import RunSwitchContainerBuildResultState
 from .run_switch_distribution_child_result import RunSwitchDistributionChildResult
+from .run_switch_distribution_ended_result import RunSwitchDistributionEndedResult
 from .run_switch_final_verify_result import RunSwitchFinalVerifyResult
 from .run_switch_final_verify_result_subphase_type_0 import RunSwitchFinalVerifyResultSubphaseType0
 from .run_switch_installation_verify_result import RunSwitchInstallationVerifyResult
@@ -1017,9 +1020,10 @@ __all__ = (
     "CatalogSyncState",
     "CertificateCode",
     "CertificateIssuanceBinding",
-    "CertificateIssuanceBindingPurpose",
     "CertificateIssuancePurpose",
+    "CertificateJournalState",
     "CertificateRecordState",
+    "CertificateRequestMode",
     "CertificateRotationState",
     "CertificateState",
     "CliTokenDownload",
@@ -1082,12 +1086,13 @@ __all__ = (
     "EndpointState",
     "EnrollmentGrantResponse",
     "EnrollmentGrantResponseInstallerUrl",
-    "EnrollmentGrantResponsePurpose",
     "EnrollmentGrantState",
     "EnrollmentGrantStatus",
+    "EnrollmentObservationOutcome",
     "EnrollmentProfileState",
     "EnrollmentPurpose",
     "EnrollmentRecordState",
+    "EnrollmentRevocationStatus",
     "EnumParameter",
     "ErrorCatalog",
     "ErrorCategory",
@@ -1664,6 +1669,7 @@ __all__ = (
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildResultState",
     "RunSwitchDistributionChildResult",
+    "RunSwitchDistributionEndedResult",
     "RunSwitchFinalVerifyResult",
     "RunSwitchFinalVerifyResultSubphaseType0",
     "RunSwitchInstallationVerifyResult",

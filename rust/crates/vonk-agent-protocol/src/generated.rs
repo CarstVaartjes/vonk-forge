@@ -1625,15 +1625,67 @@ impl ::std::convert::TryFrom<::std::string::String> for CatalogSyncState {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
 pub enum CertificateCode {
     #[serde(rename = "certificate.response_unrepresentable")]
     CertificateResponseUnrepresentable,
+    #[serde(rename = "certificate.request_invalid")]
+    CertificateRequestInvalid,
+    #[serde(rename = "certificate.authentication_refused")]
+    CertificateAuthenticationRefused,
+    #[serde(rename = "certificate.binding_refused")]
+    CertificateBindingRefused,
+    #[serde(rename = "certificate.source_revoked")]
+    CertificateSourceRevoked,
+    #[serde(rename = "certificate.source_identity_refused")]
+    CertificateSourceIdentityRefused,
+    #[serde(rename = "certificate.issuance_in_progress")]
+    CertificateIssuanceInProgress,
+    #[serde(rename = "certificate.issuance_unavailable")]
+    CertificateIssuanceUnavailable,
+    #[serde(rename = "certificate.request_binding_mismatch")]
+    CertificateRequestBindingMismatch,
+    #[serde(rename = "certificate.serial_already_reserved")]
+    CertificateSerialAlreadyReserved,
+    #[serde(rename = "certificate.serial_already_issued")]
+    CertificateSerialAlreadyIssued,
+    #[serde(rename = "certificate.attempt_superseded")]
+    CertificateAttemptSuperseded,
+    #[serde(rename = "certificate.issuance_revoked")]
+    CertificateIssuanceRevoked,
+    #[serde(rename = "certificate.rotation_source_revoked")]
+    CertificateRotationSourceRevoked,
 }
 impl ::std::fmt::Display for CertificateCode {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
             Self::CertificateResponseUnrepresentable => {
                 f.write_str("certificate.response_unrepresentable")
+            }
+            Self::CertificateRequestInvalid => f.write_str("certificate.request_invalid"),
+            Self::CertificateAuthenticationRefused => {
+                f.write_str("certificate.authentication_refused")
+            }
+            Self::CertificateBindingRefused => f.write_str("certificate.binding_refused"),
+            Self::CertificateSourceRevoked => f.write_str("certificate.source_revoked"),
+            Self::CertificateSourceIdentityRefused => {
+                f.write_str("certificate.source_identity_refused")
+            }
+            Self::CertificateIssuanceInProgress => f.write_str("certificate.issuance_in_progress"),
+            Self::CertificateIssuanceUnavailable => f.write_str("certificate.issuance_unavailable"),
+            Self::CertificateRequestBindingMismatch => {
+                f.write_str("certificate.request_binding_mismatch")
+            }
+            Self::CertificateSerialAlreadyReserved => {
+                f.write_str("certificate.serial_already_reserved")
+            }
+            Self::CertificateSerialAlreadyIssued => {
+                f.write_str("certificate.serial_already_issued")
+            }
+            Self::CertificateAttemptSuperseded => f.write_str("certificate.attempt_superseded"),
+            Self::CertificateIssuanceRevoked => f.write_str("certificate.issuance_revoked"),
+            Self::CertificateRotationSourceRevoked => {
+                f.write_str("certificate.rotation_source_revoked")
             }
         }
     }
@@ -1643,6 +1695,19 @@ impl ::std::str::FromStr for CertificateCode {
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
             "certificate.response_unrepresentable" => Ok(Self::CertificateResponseUnrepresentable),
+            "certificate.request_invalid" => Ok(Self::CertificateRequestInvalid),
+            "certificate.authentication_refused" => Ok(Self::CertificateAuthenticationRefused),
+            "certificate.binding_refused" => Ok(Self::CertificateBindingRefused),
+            "certificate.source_revoked" => Ok(Self::CertificateSourceRevoked),
+            "certificate.source_identity_refused" => Ok(Self::CertificateSourceIdentityRefused),
+            "certificate.issuance_in_progress" => Ok(Self::CertificateIssuanceInProgress),
+            "certificate.issuance_unavailable" => Ok(Self::CertificateIssuanceUnavailable),
+            "certificate.request_binding_mismatch" => Ok(Self::CertificateRequestBindingMismatch),
+            "certificate.serial_already_reserved" => Ok(Self::CertificateSerialAlreadyReserved),
+            "certificate.serial_already_issued" => Ok(Self::CertificateSerialAlreadyIssued),
+            "certificate.attempt_superseded" => Ok(Self::CertificateAttemptSuperseded),
+            "certificate.issuance_revoked" => Ok(Self::CertificateIssuanceRevoked),
+            "certificate.rotation_source_revoked" => Ok(Self::CertificateRotationSourceRevoked),
             _ => Err("invalid value".into()),
         }
     }
@@ -1701,6 +1766,49 @@ impl ::std::convert::TryFrom<::std::string::String> for CertificateIssuancePurpo
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateJournalState {
+    #[serde(rename = "issued")]
+    Issued,
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "absent")]
+    Absent,
+}
+impl ::std::fmt::Display for CertificateJournalState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Issued => f.write_str("issued"),
+            Self::Pending => f.write_str("pending"),
+            Self::Absent => f.write_str("absent"),
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateJournalState {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "issued" => Ok(Self::Issued),
+            "pending" => Ok(Self::Pending),
+            "absent" => Ok(Self::Absent),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateJournalState {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateJournalState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CertificateRecordState {
     #[serde(rename = "active")]
     Active,
@@ -1736,6 +1844,45 @@ impl ::std::convert::TryFrom<&str> for CertificateRecordState {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for CertificateRecordState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum CertificateRequestMode {
+    #[serde(rename = "issue")]
+    Issue,
+    #[serde(rename = "observe")]
+    Observe,
+}
+impl ::std::fmt::Display for CertificateRequestMode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Issue => f.write_str("issue"),
+            Self::Observe => f.write_str("observe"),
+        }
+    }
+}
+impl ::std::str::FromStr for CertificateRequestMode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "issue" => Ok(Self::Issue),
+            "observe" => Ok(Self::Observe),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CertificateRequestMode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CertificateRequestMode {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -2870,6 +3017,7 @@ impl ::std::convert::TryFrom<::std::string::String> for EnrollmentGrantState {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct EnrollmentObservationReply {
     pub detail: UnknownError,
+    pub state: LifecycleState,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum EnrollmentProfileState {
@@ -2947,6 +3095,8 @@ impl ::std::convert::TryFrom<::std::string::String> for EnrollmentPurpose {
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum EnrollmentRecordState {
+    #[serde(rename = "ended")]
+    Ended,
     #[serde(rename = "issuing")]
     Issuing,
     #[serde(rename = "certificate_issued")]
@@ -2955,6 +3105,7 @@ pub enum EnrollmentRecordState {
 impl ::std::fmt::Display for EnrollmentRecordState {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         match *self {
+            Self::Ended => f.write_str("ended"),
             Self::Issuing => f.write_str("issuing"),
             Self::CertificateIssued => f.write_str("certificate_issued"),
         }
@@ -2964,6 +3115,7 @@ impl ::std::str::FromStr for EnrollmentRecordState {
     type Err = self::error::ConversionError;
     fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
         match value {
+            "ended" => Ok(Self::Ended),
             "issuing" => Ok(Self::Issuing),
             "certificate_issued" => Ok(Self::CertificateIssued),
             _ => Err("invalid value".into()),
@@ -6024,7 +6176,9 @@ pub struct LifecycleVocabulary {
     pub blocker_category: BlockerCategory,
     pub catalog_sync_state: CatalogSyncState,
     pub certificate_issuance_purpose: CertificateIssuancePurpose,
+    pub certificate_journal_state: CertificateJournalState,
     pub certificate_record_state: CertificateRecordState,
+    pub certificate_request_mode: CertificateRequestMode,
     pub certificate_rotation_state: CertificateRotationState,
     pub certificate_state: CertificateState,
     pub desired_assignment_state: DesiredAssignmentState,
@@ -17799,6 +17953,19 @@ impl CertificateCode {
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CertificateResponseUnrepresentable => "certificate.response_unrepresentable",
+            Self::CertificateRequestInvalid => "certificate.request_invalid",
+            Self::CertificateAuthenticationRefused => "certificate.authentication_refused",
+            Self::CertificateBindingRefused => "certificate.binding_refused",
+            Self::CertificateSourceRevoked => "certificate.source_revoked",
+            Self::CertificateSourceIdentityRefused => "certificate.source_identity_refused",
+            Self::CertificateIssuanceInProgress => "certificate.issuance_in_progress",
+            Self::CertificateIssuanceUnavailable => "certificate.issuance_unavailable",
+            Self::CertificateRequestBindingMismatch => "certificate.request_binding_mismatch",
+            Self::CertificateSerialAlreadyReserved => "certificate.serial_already_reserved",
+            Self::CertificateSerialAlreadyIssued => "certificate.serial_already_issued",
+            Self::CertificateAttemptSuperseded => "certificate.attempt_superseded",
+            Self::CertificateIssuanceRevoked => "certificate.issuance_revoked",
+            Self::CertificateRotationSourceRevoked => "certificate.rotation_source_revoked",
         }
     }
 }
@@ -17834,14 +18001,54 @@ impl<'de> ::serde::Deserialize<'de> for CertificateCode {
             PartialEq,
             PartialOrd,
         )]
+        #[allow(clippy::enum_variant_names)]
         enum Raw {
             #[serde(rename = "certificate.response_unrepresentable")]
             CertificateResponseUnrepresentable,
+            #[serde(rename = "certificate.request_invalid")]
+            CertificateRequestInvalid,
+            #[serde(rename = "certificate.authentication_refused")]
+            CertificateAuthenticationRefused,
+            #[serde(rename = "certificate.binding_refused")]
+            CertificateBindingRefused,
+            #[serde(rename = "certificate.source_revoked")]
+            CertificateSourceRevoked,
+            #[serde(rename = "certificate.source_identity_refused")]
+            CertificateSourceIdentityRefused,
+            #[serde(rename = "certificate.issuance_in_progress")]
+            CertificateIssuanceInProgress,
+            #[serde(rename = "certificate.issuance_unavailable")]
+            CertificateIssuanceUnavailable,
+            #[serde(rename = "certificate.request_binding_mismatch")]
+            CertificateRequestBindingMismatch,
+            #[serde(rename = "certificate.serial_already_reserved")]
+            CertificateSerialAlreadyReserved,
+            #[serde(rename = "certificate.serial_already_issued")]
+            CertificateSerialAlreadyIssued,
+            #[serde(rename = "certificate.attempt_superseded")]
+            CertificateAttemptSuperseded,
+            #[serde(rename = "certificate.issuance_revoked")]
+            CertificateIssuanceRevoked,
+            #[serde(rename = "certificate.rotation_source_revoked")]
+            CertificateRotationSourceRevoked,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
             Raw::CertificateResponseUnrepresentable => Self::CertificateResponseUnrepresentable,
+            Raw::CertificateRequestInvalid => Self::CertificateRequestInvalid,
+            Raw::CertificateAuthenticationRefused => Self::CertificateAuthenticationRefused,
+            Raw::CertificateBindingRefused => Self::CertificateBindingRefused,
+            Raw::CertificateSourceRevoked => Self::CertificateSourceRevoked,
+            Raw::CertificateSourceIdentityRefused => Self::CertificateSourceIdentityRefused,
+            Raw::CertificateIssuanceInProgress => Self::CertificateIssuanceInProgress,
+            Raw::CertificateIssuanceUnavailable => Self::CertificateIssuanceUnavailable,
+            Raw::CertificateRequestBindingMismatch => Self::CertificateRequestBindingMismatch,
+            Raw::CertificateSerialAlreadyReserved => Self::CertificateSerialAlreadyReserved,
+            Raw::CertificateSerialAlreadyIssued => Self::CertificateSerialAlreadyIssued,
+            Raw::CertificateAttemptSuperseded => Self::CertificateAttemptSuperseded,
+            Raw::CertificateIssuanceRevoked => Self::CertificateIssuanceRevoked,
+            Raw::CertificateRotationSourceRevoked => Self::CertificateRotationSourceRevoked,
         })
     }
 }
@@ -17898,6 +18105,66 @@ impl<'de> ::serde::Deserialize<'de> for CertificateIssuancePurpose {
         Ok(match raw {
             Raw::Enrollment => Self::Enrollment,
             Raw::Rotation => Self::Rotation,
+        })
+    }
+}
+impl CertificateJournalState {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Issued => "issued",
+            Self::Pending => "pending",
+            Self::Absent => "absent",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateJournalState {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateJournalState {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateJournalState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateJournalState {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("CertificateJournalState"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "issued")]
+            Issued,
+            #[serde(rename = "pending")]
+            Pending,
+            #[serde(rename = "absent")]
+            Absent,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Issued => Self::Issued,
+            Raw::Pending => Self::Pending,
+            Raw::Absent => Self::Absent,
         })
     }
 }
@@ -17958,6 +18225,62 @@ impl<'de> ::serde::Deserialize<'de> for CertificateRecordState {
             Raw::Active => Self::Active,
             Raw::Staged => Self::Staged,
             Raw::Revoked => Self::Revoked,
+        })
+    }
+}
+impl CertificateRequestMode {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Issue => "issue",
+            Self::Observe => "observe",
+        }
+    }
+}
+impl ::std::ops::Deref for CertificateRequestMode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CertificateRequestMode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CertificateRequestMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CertificateRequestMode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("CertificateRequestMode"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "issue")]
+            Issue,
+            #[serde(rename = "observe")]
+            Observe,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Issue => Self::Issue,
+            Raw::Observe => Self::Observe,
         })
     }
 }
@@ -19522,10 +19845,14 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentObservationReply {
         #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
         struct Raw {
             pub detail: UnknownError,
+            pub state: LifecycleState,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self { detail: raw.detail })
+        Ok(Self {
+            detail: raw.detail,
+            state: raw.state,
+        })
     }
 }
 impl EnrollmentProfileState {
@@ -19637,6 +19964,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentPurpose {
 impl EnrollmentRecordState {
     pub const fn as_str(&self) -> &'static str {
         match self {
+            Self::Ended => "ended",
             Self::Issuing => "issuing",
             Self::CertificateIssued => "certificate_issued",
         }
@@ -19677,6 +20005,8 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentRecordState {
             PartialOrd,
         )]
         enum Raw {
+            #[serde(rename = "ended")]
+            Ended,
             #[serde(rename = "issuing")]
             Issuing,
             #[serde(rename = "certificate_issued")]
@@ -19685,6 +20015,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentRecordState {
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(match raw {
+            Raw::Ended => Self::Ended,
             Raw::Issuing => Self::Issuing,
             Raw::CertificateIssued => Self::CertificateIssued,
         })
@@ -23241,7 +23572,9 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub blocker_category: BlockerCategory,
             pub catalog_sync_state: CatalogSyncState,
             pub certificate_issuance_purpose: CertificateIssuancePurpose,
+            pub certificate_journal_state: CertificateJournalState,
             pub certificate_record_state: CertificateRecordState,
+            pub certificate_request_mode: CertificateRequestMode,
             pub certificate_rotation_state: CertificateRotationState,
             pub certificate_state: CertificateState,
             pub desired_assignment_state: DesiredAssignmentState,
@@ -23316,7 +23649,9 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             blocker_category: raw.blocker_category,
             catalog_sync_state: raw.catalog_sync_state,
             certificate_issuance_purpose: raw.certificate_issuance_purpose,
+            certificate_journal_state: raw.certificate_journal_state,
             certificate_record_state: raw.certificate_record_state,
+            certificate_request_mode: raw.certificate_request_mode,
             certificate_rotation_state: raw.certificate_rotation_state,
             certificate_state: raw.certificate_state,
             desired_assignment_state: raw.desired_assignment_state,

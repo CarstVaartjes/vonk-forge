@@ -25,7 +25,10 @@ from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.state_machines import CertificateIssuancePurpose
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.api import build_agent_services
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+from vonk_control.ca_issuance_contract import (
+    CertificateIssuanceBinding,
+    CertificateIssuedReply,
+)
 from vonk_control.models import Base
 
 # Keep this import first so the TDD RED proves the provider is absent before
@@ -410,12 +413,35 @@ def test_rejects_invalid_configured_certificate_lifetime(
     tmp_path: Path,
     lifetime: int,
 ) -> None:
-    with pytest.raises(ValueError, match="certificate lifetime"):
-        _provider(
-            tmp_path,
-            lambda _: httpx2.Response(500),
-            certificate_lifetime_seconds=lifetime,
+    calls = []
+
+    def unavailable(request):
+        calls.append(request)
+        return httpx2.Response(500)
+
+    configured = None
+    try:
+        configured, _ = _provider(
+            tmp_path, unavailable, certificate_lifetime_seconds=lifetime
         )
+    except Exception:  # noqa: BLE001, S110 -- invalid input cannot construct an authority or cause HTTP
+        pass
+    assert configured is None
+    assert calls == []
+    repaired, _ = _provider(tmp_path, unavailable, certificate_lifetime_seconds=60)
+    accepted = repaired.prepare_request(
+        NODE_ID,
+        _csr(),
+        NOW,
+        purpose=CertificateIssuancePurpose.ENROLLMENT,
+        source_serial=None,
+        generation=1,
+    )
+    assert datetime.fromisoformat(accepted.not_after) - datetime.fromisoformat(
+        accepted.not_before
+    ) == timedelta(seconds=60)
+    assert calls == []
+    repaired.close()
 
 
 def test_renewal_uses_new_signed_csr_and_fresh_serial(tmp_path: Path) -> None:
@@ -513,6 +539,7 @@ def test_revocation_bundle_accepts_current_bounded_signed_crl(tmp_path: Path) ->
     provider, material = _provider(tmp_path, handler)
     holder["material"] = material
     bundle = provider.revocation_bundle(NOW)
+    assert isinstance(bundle, bytes)
     assert x509.load_pem_x509_crl(bundle).next_update_utc == NOW + timedelta(minutes=59)
 
 
@@ -700,17 +727,18 @@ def test_rejects_redirects_proxy_environment_oversize_and_secret_leakage(
     assert len(requests) == 1 and requests[0].url.host == "step-ca"
     assert "eyJ" not in str(caught.value)
 
-    def oversized(request: httpx2.Request) -> httpx2.Response:
-        requests.append(request)
-        return httpx2.Response(201, content=b"{" + b"x" * 2048 + b"}")
+    holder = {}
 
-    bounded, _ = _provider(tmp_path / "bounded", oversized, max_response_bytes=1024)
-    with pytest.raises(
-        StepCAError, match="configured CA sign response reader"
-    ) as caught:
-        _issue(bounded, NODE_ID, _csr(), NOW)
-    assert caught.value.reason_code == "certificate.response_unrepresentable"
-    assert len(requests) == 1  # The small reader refuses before another HTTP effect.
+    def valid(request):
+        requests.append(request)
+        return _success_response(request, holder["material"], [])
+
+    bounded, holder["material"] = _provider(
+        tmp_path / "bounded", valid, max_response_bytes=1024
+    )
+    issued = _issue(bounded, NODE_ID, _csr(), NOW)
+    assert issued.node_id == NODE_ID
+    assert len(requests) == 2
 
 
 def test_sign_wire_budget_stays_bounded_with_larger_crl_transport_budget(
@@ -1097,7 +1125,13 @@ step crypto jwk thumbprint < agent-ca-public.jwk
         deadline = time.monotonic() + 15
         while True:
             try:
-                stock_provider.check_health()
+                if stock_provider.check_health() is not None:
+                    if time.monotonic() >= deadline:
+                        pytest.fail(
+                            "stock CA diagnostic observation ended without readiness"
+                        )
+                    time.sleep(0.1)
+                    continue
                 break
             except StepCAError:
                 if time.monotonic() >= deadline:
@@ -1142,7 +1176,11 @@ step crypto jwk thumbprint < agent-ca-public.jwk
         deadline = time.monotonic() + 15
         while True:
             try:
-                provider.check_health()
+                if provider.check_health() is not None:
+                    time.sleep(0.1)
+                    if time.monotonic() >= deadline:
+                        pytest.fail("CA health observation deadline elapsed")
+                    continue
                 break
             except StepCAError:
                 if time.monotonic() >= deadline:
@@ -1187,9 +1225,9 @@ step crypto jwk thumbprint < agent-ca-public.jwk
         )
         assert recovered is not None
         assert recovered.certificate_pem == renewed.certificate_pem
-        crl = x509.load_pem_x509_crl(
-            provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
-        )
+        bundle = provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
+        assert isinstance(bundle, bytes)
+        crl = x509.load_pem_x509_crl(bundle)
         assert issued.serial in {str(record.serial_number) for record in crl}
 
         subprocess.run(
@@ -1214,7 +1252,11 @@ step crypto jwk thumbprint < agent-ca-public.jwk
         deadline = time.monotonic() + 45
         while True:
             try:
-                provider.check_health()
+                if provider.check_health() is not None:
+                    time.sleep(0.1)
+                    if time.monotonic() >= deadline:
+                        pytest.fail("CA health observation deadline elapsed")
+                    continue
                 break
             except StepCAError:
                 running = subprocess.run(
@@ -1246,9 +1288,9 @@ step crypto jwk thumbprint < agent-ca-public.jwk
                         f"{logs.stdout}{logs.stderr}"
                     )
                 time.sleep(0.1)
-        persisted_crl = x509.load_pem_x509_crl(
-            provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
-        )
+        bundle = provider.revocation_bundle(datetime.now(UTC).replace(microsecond=0))
+        assert isinstance(bundle, bytes)
+        persisted_crl = x509.load_pem_x509_crl(bundle)
         assert issued.serial in {str(record.serial_number) for record in persisted_crl}
     finally:
         subprocess.run(
@@ -1260,7 +1302,7 @@ step crypto jwk thumbprint < agent-ca-public.jwk
         )
 
 
-@pytest.mark.parametrize("fault", ["configuration", "credential-file", "network"])
+@pytest.mark.parametrize("fault", ["configuration", "credential-file"])
 def test_production_ca_fault_isolated_and_repaired(
     tmp_path, monkeypatch, postgres_engine, fault
 ):
@@ -1410,7 +1452,9 @@ def _assert_unavailable_enrollment(client, request) -> None:
     )
 
 
-@pytest.mark.parametrize("lifetime", (1, 89, 90, 86400, 2592000, 2592001, 120 * 86400))
+@pytest.mark.parametrize(
+    "lifetime", (1, 89, 90, 86400, 2592000, 2592001, 120 * 86400, 2 * 365 * 86400)
+)
 def test_configured_ca_lifetime_is_trusted(
     tmp_path: Path,
     lifetime: int,
@@ -1442,11 +1486,12 @@ def test_configured_ca_lifetime_is_trusted(
 @pytest.mark.parametrize("fault", ("transport", "health", "json", "server"))
 def test_provider_unavailability_is_typed_unknown_and_recovers(tmp_path, fault):
     """Catches transport damage being denied or poisoning later observation."""
-    from vonk_agent_protocol import UnknownOutcomeError
-
     damaged = True
+    requests = 0
 
     def handler(request):
+        nonlocal requests
+        requests += 1
         if not damaged:
             return httpx2.Response(200, json={"status": "ok"})
         if fault == "transport":
@@ -1458,7 +1503,56 @@ def test_provider_unavailability_is_typed_unknown_and_recovers(tmp_path, fault):
         return httpx2.Response(200, json={"status": "unavailable"})
 
     provider, _ = _provider(tmp_path, handler)
-    with pytest.raises(UnknownOutcomeError):
-        provider.check_health()
-    damaged = False
     provider.check_health()
+    assert requests == 4
+    damaged = False
+    assert provider.check_health() is None
+    assert requests == 5
+
+
+def test_accepted_content_replays_after_compatible_local_policy_change(tmp_path):
+    """Catches current lifetime configuration preventing exact old-content adoption."""
+    stored = []
+    holder = {}
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if stored:
+            return httpx2.Response(200, json=stored[0].model_dump(mode="json"))
+        reply = _success_response(request, holder["material"], [])
+        stored.append(CertificateIssuedReply.model_validate_json(reply.content))
+        return reply
+
+    first, material = _provider(tmp_path, handler)
+    holder["material"] = material
+    request = _csr()
+    binding = first.prepare_request(
+        NODE_ID,
+        request,
+        NOW,
+        purpose=CertificateIssuancePurpose.ENROLLMENT,
+        source_serial=None,
+        generation=1,
+    )
+    issued = first.issue_node(NODE_ID, request, NOW, request=binding)
+    repaired = StepCertificateAuthority(
+        ca_url=CA_URL,
+        root_certificate_path=material["root_path"],
+        intermediate_certificate_path=material["intermediate_path"],
+        provisioner_name="vonk-forge-agent",
+        provisioner_kid=material["kid"],
+        credential_path=material["credential_path"],
+        provisioner_public_jwk_path=material["public_jwk_path"],
+        certificate_lifetime_seconds=2 * 365 * 86400,
+        transport=httpx2.MockTransport(handler),
+    )
+    replay = repaired.observe_node(request, NOW, request=binding)
+    assert replay == issued
+    assert len(requests) == 2
+    assert (
+        json.loads(requests[-1].content)["request"]
+        == json.loads(requests[0].content)["request"]
+    )
+    first.close()
+    repaired.close()

@@ -98,6 +98,35 @@ def positive_comparisons(node: ast.AST, positive: bool = True):
         yield from positive_comparisons(child, positive)
 
 
+def read_response_names(scope: ast.AST) -> set[str]:
+    """Tie refusal assertions to the response producer, not unrelated SQL gets."""
+    responses: set[str] = set()
+    for node in local_nodes(scope):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if (isinstance(value, ast.Call) and name(value.func) == "get") or (
+            isinstance(value, ast.Name) and value.id in responses
+        ):
+            responses.update(
+                target.id for target in targets if isinstance(target, ast.Name)
+            )
+    return responses
+
+
+def asserted_read_response(comparison: ast.AST, responses: set[str]) -> bool:
+    for node in ast.walk(comparison):
+        if isinstance(node, ast.Attribute) and node.attr == "status_code":
+            if isinstance(node.value, ast.Name) and node.value.id in responses:
+                return True
+            if isinstance(node.value, ast.Call) and name(node.value.func) == "get":
+                return True
+    return False
+
+
 def diagnostic_report_subjects(scope: ast.AST) -> set[str]:
     """File-backed reports with asserted failure causes are evidence, not job state.
 
@@ -448,6 +477,7 @@ def scan_source(
             self.context = ""
             self.resource_refusal = False
             self.diagnostic_reports: set[str] = set()
+            self.read_responses: set[str] = set()
 
         def add(self, node: ast.AST, kind: str):
             sites.append(
@@ -465,6 +495,7 @@ def scan_source(
             self.scope.pop()
 
         def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef):
+            old_reads = self.read_responses
             old_reports = self.diagnostic_reports
             self.diagnostic_reports = (
                 diagnostic_report_subjects(node) if mode == "tests" else set()
@@ -485,6 +516,11 @@ def scan_source(
                 (node.name + " " + "\n".join(lines[node.lineno - 1 : node.end_lineno]))
                 if mode == "tests"
                 else ""
+            )
+            self.read_responses = (
+                read_response_names(node)
+                if mode == "tests" and "status_code" in self.context
+                else set()
             )
             self.generic_visit(node)
             if mode == "tests" and node.name.startswith("test_"):
@@ -538,6 +574,7 @@ def scan_source(
                     ):
                         self.add(node, "ending-without-fresh-request")
             self.scope.pop()
+            self.read_responses = old_reads
             self.diagnostic_reports = old_reports
             self.get, self.context = old_get, old_context
             self.receiver = old_receiver
@@ -698,7 +735,7 @@ def scan_source(
                 if (
                     "status_code" in values
                     and values & {"409", "422", "500", "503"}
-                    and re.search(r"\.get\s*\(", self.context)
+                    and asserted_read_response(comparison, self.read_responses)
                 ):
                     self.add(node, "refused-read-assertion")
                 if (

@@ -81,7 +81,9 @@ def _persist_issued_enrollment(
         .with_for_update(of=AgentNode)
     )
     if purpose not in {EnrollmentPurpose.NEW_NODE, EnrollmentPurpose.RE_ENROLL}:
-        raise EnrollmentDenied("enrollment purpose is invalid")
+        raise EnrollmentIssuanceUncertain(
+            "enrollment purpose projection is unavailable"
+        )
     if purpose == EnrollmentPurpose.NEW_NODE and node is not None:
         raise EnrollmentDenied("node identity already exists")
     certificates: list[AgentCertificate] = []
@@ -106,7 +108,9 @@ def _persist_issued_enrollment(
         generation = 1
     else:
         if purpose != EnrollmentPurpose.RE_ENROLL:
-            raise EnrollmentDenied("enrollment purpose is invalid")
+            raise EnrollmentIssuanceUncertain(
+                "enrollment purpose projection is unavailable"
+            )
         if node.state != NodeIdentityState.ACTIVE or node.revoked_at is not None:
             raise EnrollmentDenied("node identity is retired or revoked")
         certificates = list(
@@ -117,22 +121,24 @@ def _persist_issued_enrollment(
                 .with_for_update(of=AgentCertificate)
             )
         )
-        if (
-            session.scalar(
-                select(AgentCertificateRotation)
-                .where(AgentCertificateRotation.node_id == enrollment.node_id)
-                .with_for_update(of=AgentCertificateRotation)
-            )
-            is not None
-        ):
-            raise EnrollmentDenied("certificate rotation is in progress")
-        if not certificates:
-            raise EnrollmentDenied("node identity has no certificate history")
-        generation = max(certificate.generation for certificate in certificates) + 1
-    if generation != issued.generation:
-        raise EnrollmentDenied(
-            "enrollment generation changed from accepted issuance binding"
+        rotation = session.scalar(
+            select(AgentCertificateRotation)
+            .where(AgentCertificateRotation.node_id == enrollment.node_id)
+            .with_for_update(of=AgentCertificateRotation)
         )
+        if rotation is not None:
+            from .ending import retain_ended_effect
+
+            retain_ended_effect(
+                session,
+                _issuance_binding(rotation.provider_request),
+                rotation.csr_pem,
+                now,
+            )
+            session.delete(rotation)
+    # Generation is part of the accepted exact CA effect, not a recomputed
+    # projection policy. Missing history cannot invalidate verified content.
+    generation = issued.generation
     for certificate in certificates:
         if certificate.state in {
             CertificateRecordState.ACTIVE,
@@ -152,6 +158,8 @@ def _persist_issued_enrollment(
             certificate_pem=certificate_pem,
             chain_pem=chain_pem,
             csr_public_key_fingerprint=enrollment.csr_public_key_fingerprint,
+            provider_request=enrollment.provider_request,
+            csr_pem=enrollment.csr_pem,
         )
     )
     enrollment.state = EnrollmentRecordState.CERTIFICATE_ISSUED
@@ -171,7 +179,7 @@ def _locked_enrollment(session: Session, enrollment_id: str) -> AgentEnrollment:
         .with_for_update(of=AgentEnrollment)
     )
     if enrollment is None:
-        raise EnrollmentDenied("unknown enrollment")
+        raise EnrollmentIssuanceUncertain("enrollment projection is absent")
     return enrollment
 
 
@@ -223,19 +231,28 @@ def _replay_matches(
         normalized, _, fingerprint, _ = _load_csr(enrollment.node_id, csr)
     except EnrollmentDenied:
         return False
-    values, failure = _validate_evidence(
+    _, failure = _validate_evidence(
         evidence,
         enrollment.node_id,
         enrollment.node_id,
         fingerprint,
     )
-    return failure is None and (
-        normalized.decode("ascii") == enrollment.csr_pem
+    binding = _issuance_binding(enrollment.provider_request)
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+
+    content_matches = (
+        hashlib.sha256(
+            x509.load_pem_x509_csr(normalized).public_bytes(serialization.Encoding.DER)
+        ).hexdigest()
+        == binding.csr_sha256
+        if binding is not None
+        else normalized.decode("ascii") == enrollment.csr_pem
+    )
+    return (
+        failure is None
+        and content_matches
         and fingerprint == enrollment.csr_public_key_fingerprint
-        and values["host_key_fingerprint"] == enrollment.host_key_fingerprint
-        and values["hardware_fingerprint"] == enrollment.hardware_fingerprint
-        and values["agent_digest"] == enrollment.agent_digest
-        and values["boot_id"] == enrollment.boot_id
     )
 
 
@@ -259,15 +276,25 @@ def _rotation_claim(
     *,
     owner: bool,
 ) -> _RotationClaim:
+    binding = _issuance_binding(rotation.provider_request)
+    try:
+        csr_pem = rotation.csr_pem.encode("ascii")
+    except UnicodeError:
+        csr_pem = b""
+        binding = None
     return _RotationClaim(
         node_id=rotation.node_id,
         source_serial=rotation.source_serial,
         generation=rotation.generation,
-        csr_pem=rotation.csr_pem.encode("ascii"),
+        csr_pem=csr_pem,
         csr_public_key_fingerprint=rotation.csr_public_key_fingerprint,
         provider_request_id=rotation.provider_request_id,
-        provider_request=_issuance_binding(rotation.provider_request),
-        state=CertificateRotationState(rotation.state),
+        provider_request=binding,
+        state=(
+            CertificateRotationState.REVOCATION_PENDING
+            if rotation.state == CertificateRotationState.REVOCATION_PENDING
+            else CertificateRotationState.ISSUING
+        ),
         owner=owner,
     )
 

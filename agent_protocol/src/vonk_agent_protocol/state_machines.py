@@ -331,6 +331,7 @@ __all__ = [
 
 
 class EnrollmentRecordState(WireEnum):
+    ENDED = "ended"
     ISSUING = "issuing"
     CERTIFICATE_ISSUED = "certificate_issued"
 
@@ -365,3 +366,14 @@ class CertificateIssuancePurpose(WireEnum):
 
 class EnrollmentProfileState(WireEnum):
     READY = "ready"
+
+
+class CertificateJournalState(WireEnum):
+    ISSUED = "issued"
+    PENDING = "pending"
+    ABSENT = "absent"
+
+
+class CertificateRequestMode(WireEnum):
+    ISSUE = "issue"
+    OBSERVE = "observe"

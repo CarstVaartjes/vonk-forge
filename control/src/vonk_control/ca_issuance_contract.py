@@ -5,6 +5,12 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, model_validator
 from vonk_agent_protocol import CertificateCode
+from vonk_agent_protocol.enrollment import CertificateGeneration
+from vonk_agent_protocol.state_machines import (
+    CertificateIssuancePurpose,
+    CertificateJournalState,
+    CertificateRequestMode,
+)
 
 from .strict_json import StrictJSONModel
 
@@ -30,9 +36,9 @@ class CertificateIssuanceBinding(StrictJSONModel):
         str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,128}$")
     ]
     policy_sha256: Digest
-    purpose: Literal["enrollment", "rotation"]
+    purpose: CertificateIssuancePurpose
     source_serial: Serial | None
-    generation: int = Field(gt=0, le=2**64 - 1)
+    generation: CertificateGeneration
 
     @model_validator(mode="after")
     def exact_effect(self) -> "CertificateIssuanceBinding":
@@ -43,7 +49,9 @@ class CertificateIssuanceBinding(StrictJSONModel):
             and int(self.source_serial).bit_length() > 159
         ):
             raise ValueError("source serial exceeds 159 bits")
-        if (self.purpose == "rotation") != (self.source_serial is not None):
+        if (self.purpose == CertificateIssuancePurpose.ROTATION) != (
+            self.source_serial is not None
+        ):
             raise ValueError("source serial must identify only rotation requests")
         before = datetime.fromisoformat(self.not_before)
         after = datetime.fromisoformat(self.not_after)
@@ -58,11 +66,11 @@ class CertificateSignRequest(StrictJSONModel):
     csr: str
     ott: str
     request: CertificateIssuanceBinding
-    mode: Literal["issue", "observe"]
+    mode: CertificateRequestMode
 
 
 class CertificateIssuedReply(StrictJSONModel):
-    state: Literal["issued"]
+    state: Literal[CertificateJournalState.ISSUED]
     request: CertificateIssuanceBinding
     crt: str
     ca: str
@@ -70,31 +78,17 @@ class CertificateIssuedReply(StrictJSONModel):
 
 
 class CertificatePendingReply(StrictJSONModel):
-    state: Literal["pending"]
+    state: Literal[CertificateJournalState.PENDING]
     request: CertificateIssuanceBinding
-    reason_code: Literal["certificate.issuance_in_progress"]
+    reason_code: Literal[CertificateCode.ISSUANCE_IN_PROGRESS]
 
 
 class CertificateAbsentReply(StrictJSONModel):
-    state: Literal["absent"]
+    state: Literal[CertificateJournalState.ABSENT]
     request: CertificateIssuanceBinding
 
 
-CertificateRefusalReason = Literal[
-    "certificate.request_invalid",
-    "certificate.authentication_refused",
-    "certificate.binding_refused",
-    "certificate.source_revoked",
-    "certificate.source_identity_refused",
-    "certificate.issuance_unavailable",
-    "certificate.request_binding_mismatch",
-    "certificate.serial_already_reserved",
-    "certificate.serial_already_issued",
-    "certificate.attempt_superseded",
-    "certificate.issuance_revoked",
-    "certificate.rotation_source_revoked",
-    CertificateCode.RESPONSE_UNREPRESENTABLE,
-]
+CertificateRefusalReason = CertificateCode
 
 
 class CertificateRefusalReply(StrictJSONModel):

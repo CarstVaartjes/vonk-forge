@@ -17,6 +17,8 @@ use crate::{
 
 #[derive(Debug, Error)]
 pub enum RotationError {
+    #[error("certificate observation ended without a settled effect")]
+    ObservationEnded,
     #[error("active agent certificate has expired")]
     ActiveIdentityExpired,
     #[error("agent.expired_renewal_grace_exhausted: re-enrollment required")]
@@ -40,6 +42,9 @@ impl RotationError {
                 SecurityRefusalReason::AgentExpiredRenewalGraceExhausted.to_string()
             }
             Self::ActiveIdentityExpired => SecurityRefusalReason::LocalIdentityExpired.to_string(),
+            Self::ObservationEnded => {
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable.to_string()
+            }
             Self::Client(error) => error
                 .code()
                 .map(str::to_owned)
@@ -56,7 +61,7 @@ impl RotationError {
     /// fatal: it is never used, and renewal is retried idle.
     pub fn fatal(&self) -> bool {
         match self {
-            Self::ActiveIdentityExpired => false,
+            Self::ActiveIdentityExpired | Self::ObservationEnded => false,
             Self::Client(error) => error.fatal(),
             Self::Identity(_) | Self::Issued(_) | Self::ExpiredRecoveryGraceExhausted => true,
         }

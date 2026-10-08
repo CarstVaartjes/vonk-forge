@@ -16,7 +16,6 @@ from vonk_agent_protocol.enrollment import (
 
 from ..contract_graph import raw_json_body
 from ..enrollment import (
-    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     RenewalIssuanceUncertain,
@@ -24,7 +23,6 @@ from ..enrollment import (
 from ..enrollment.responses import unknown_response
 from ..enrollment_body import (
     _bounded_enrollment_body,
-    _consume_enrollment_denial,
     _scan_enrollment_grants,
 )
 from ..enrollment_contract import EnrollmentObservationReply
@@ -92,7 +90,9 @@ def install_enrollment_routes(
         required = _require_services(services)
         if not limiter.admit():
             raise HTTPException(
-                status_code=429, detail="enrollment rate limit exceeded"
+                status_code=429,
+                detail="enrollment rate limit exceeded",
+                headers={"retry-after": str(limiter.retry_after())},
             )
         raw = await _bounded_enrollment_body(request, required)
         scan = _scan_enrollment_grants(raw)
@@ -105,7 +105,6 @@ def install_enrollment_routes(
             )
             is None
         ):
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=415,
                 detail="enrollment content type must be application/json",
@@ -113,54 +112,32 @@ def install_enrollment_routes(
         try:
             body = json.loads(raw.decode("utf-8"))
         except (TypeError, UnicodeDecodeError, ValueError, RecursionError):
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=422, detail="enrollment request must be JSON"
             ) from None
         if not isinstance(body, dict):
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=422, detail="enrollment request must be a JSON object"
             )
         if scan.top_level_keys != 1:
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=422, detail="enrollment grant is ambiguous")
         try:
             submitted = EnrollmentSubmitRequest.model_validate(body)
         except ValidationError:
-            _consume_enrollment_denial(required, scan.tokens)
-            if scan.tokens:
-                # Keep the enrollment oracle closed: a discoverable grant is
-                # consumed and reported as denied even when the request shape
-                # is malformed.  The canonical model handles valid requests;
-                # this branch preserves the bounded burn-on-invalid policy.
-                raise HTTPException(
-                    status_code=403, detail="enrollment denied"
-                ) from None
             raise HTTPException(
                 status_code=422, detail="enrollment request is invalid"
             ) from None
-        try:
-            csr_bytes = submitted.csr.encode("ascii")
-        except UnicodeEncodeError:
-            _consume_enrollment_denial(required, scan.tokens)
-            raise HTTPException(
-                status_code=422, detail="CSR must be ASCII PEM"
-            ) from None
+        csr_bytes = submitted.csr.encode("ascii")
         try:
             outcome = _require_enrollment(required).submit(
                 submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except CertificateResponseCapacityRefused as error:
-            return _json_response(
-                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
-                status_code=422,
-            )
         except EnrollmentDenied as error:
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=403, detail=str(error)) from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
         if isinstance(outcome, UnknownError):
             return unknown_response(outcome)
         return _json_response(_issued_response(outcome))

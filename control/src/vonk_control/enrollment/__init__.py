@@ -12,9 +12,6 @@ from .service import EnrollmentService as EnrollmentService
 from .types import _NODE_ID as _NODE_ID
 from .types import _TOKEN as _TOKEN
 from .types import MAX_ENROLLMENT_GRANT_TTL_SECONDS as MAX_ENROLLMENT_GRANT_TTL_SECONDS
-from .types import (
-    CertificateResponseCapacityRefused as CertificateResponseCapacityRefused,
-)
 from .types import EnrollmentDenied as EnrollmentDenied
 from .types import EnrollmentGrant as EnrollmentGrant
 from .types import EnrollmentIssuanceUncertain as EnrollmentIssuanceUncertain

@@ -33,7 +33,7 @@ class EnrollmentGrantStatus:
             expires_at (datetime.datetime):
             id (str):
             node_id (None | str):
-            purpose (EnrollmentPurpose):
+            purpose (EnrollmentPurpose | None):
             revoked_at (datetime.datetime | None):
             state (EnrollmentGrantState): The standing of an enrollment grant.
      """
@@ -43,7 +43,7 @@ class EnrollmentGrantStatus:
     expires_at: datetime.datetime
     id: str
     node_id: None | str
-    purpose: EnrollmentPurpose
+    purpose: EnrollmentPurpose | None
     revoked_at: datetime.datetime | None
     state: EnrollmentGrantState
 
@@ -68,7 +68,11 @@ class EnrollmentGrantStatus:
         node_id: None | str
         node_id = self.node_id
 
-        purpose: str = self.purpose
+        purpose: None | str
+        if isinstance(self.purpose, str):
+            purpose = self.purpose
+        else:
+            purpose = self.purpose
 
         revoked_at: None | str
         if isinstance(self.revoked_at, datetime.datetime):
@@ -140,9 +144,22 @@ class EnrollmentGrantStatus:
         node_id = _parse_node_id(d.pop("node_id"))
 
 
-        purpose = check_enrollment_purpose(d.pop("purpose"))
+        def _parse_purpose(data: object) -> EnrollmentPurpose | None:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                purpose_type_0 = check_enrollment_purpose(data)
 
 
+
+                return purpose_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(EnrollmentPurpose | None, data)
+
+        purpose = _parse_purpose(d.pop("purpose"))
 
 
         def _parse_revoked_at(data: object) -> datetime.datetime | None:

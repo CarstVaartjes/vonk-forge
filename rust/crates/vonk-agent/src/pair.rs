@@ -30,6 +30,8 @@ const MACHINE_EVIDENCE_PATH: &str = "/var/lib/vonk-forge-agent/machine-evidence"
 
 #[derive(Debug, Error)]
 pub enum PairingError {
+    #[error("pairing observation ended without verified certificate content")]
+    ObservationEnded,
     #[error("controller CA could not be read")]
     CaRead(#[from] std::io::Error),
     #[error("controller CA is invalid")]
@@ -110,15 +112,54 @@ pub async fn pair(
         grant_token: token.to_owned(),
     };
     let body = canonical_generated_json(&request).map_err(|_| PairingError::Response)?;
-    let response = client
-        .post(endpoint)
-        .header("content-type", "application/json")
-        .body(body)
-        .send()
-        .await?;
-    let status = response.status().as_u16();
-    let body = bounded_pairing_body(response).await?;
-    let issued = validate_enrollment_response(status, &body, &config.node_id)?;
+    // Reconnect with the identical token and durable CSR.
+    let mut issued = None;
+    for attempt in 0..4_u32 {
+        if attempt != 0 {
+            tokio::time::sleep(Duration::from_secs(1 << (attempt - 1))).await;
+        }
+        let response = match client
+            .post(endpoint.clone())
+            .header("content-type", "application/json")
+            .body(body.clone())
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(_) => continue,
+        };
+        let status = response.status().as_u16();
+        if status == 429 {
+            let resume = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(1);
+            if attempt < 3 {
+                tokio::time::sleep(Duration::from_secs(resume.min(60))).await;
+            }
+            continue;
+        }
+        if status != 200 && !matches!(status, 401 | 403 | 422) {
+            continue;
+        }
+        let observed = match bounded_pairing_body(response).await {
+            Ok(observed) => observed,
+            Err(_) => continue,
+        };
+        if status == 200 && serde_json::from_slice::<IssuedCertificateResponse>(&observed).is_err()
+        {
+            continue;
+        }
+        issued = match validate_enrollment_response(status, &observed, &config.node_id) {
+            Ok(value) => Some(value),
+            Err(PairingError::Response) => continue,
+            Err(error) => return Err(error),
+        };
+        break;
+    }
+    let issued = issued.ok_or(PairingError::ObservationEnded)?;
     validate_issued(&issued, &pending, &config.node_id)?;
     persist_paired_identity(
         &credential_root,
@@ -181,7 +222,7 @@ pub fn validate_enrollment_response(
             }
             Ok(issued)
         }
-        401 | 403 | 409 | 410 => Err(PairingError::Rejected),
+        401 | 403 => Err(PairingError::Rejected),
         _ => Err(PairingError::Status(status)),
     }
 }

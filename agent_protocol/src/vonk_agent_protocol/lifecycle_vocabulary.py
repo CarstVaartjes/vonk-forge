@@ -48,7 +48,9 @@ from .state_machines import (
     AssetAvailability,
     CatalogSyncState,
     CertificateIssuancePurpose,
+    CertificateJournalState,
     CertificateRecordState,
+    CertificateRequestMode,
     CertificateRotationState,
     CertificateState,
     DesiredAssignmentState,
@@ -850,6 +852,8 @@ class LifecycleVocabulary(WireModel):
     node_identity_state: NodeIdentityState
     enrollment_purpose: EnrollmentPurpose
     certificate_issuance_purpose: CertificateIssuancePurpose
+    certificate_journal_state: CertificateJournalState
+    certificate_request_mode: CertificateRequestMode
     model_file_state: ModelFileState
     catalog_sync_state: CatalogSyncState
     reservation_state: ReservationState

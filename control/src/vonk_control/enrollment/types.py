@@ -5,8 +5,6 @@ from __future__ import annotations
 import re
 
 from vonk_agent_protocol import (
-    CertificateCode,
-    InvalidRequestError,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -44,12 +42,6 @@ class EnrollmentIssuanceUncertain(UnknownOutcomeError, RuntimeError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message, reason=WaitReason.OBSERVATION_UNAVAILABLE)
-
-
-class CertificateResponseCapacityRefused(InvalidRequestError):
-    """The provider refused representability before committing any certificate."""
-
-    reason_code = CertificateCode.RESPONSE_UNREPRESENTABLE
 
 
 class RemoteRevocationUncertain(UnknownOutcomeError, RuntimeError):

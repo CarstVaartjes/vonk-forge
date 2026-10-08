@@ -33,6 +33,7 @@ from vonk_control.enrollment.types import (
     EnrollmentIssuanceUncertain,
     RenewalIssuanceUncertain,
 )
+from vonk_control.enrollment_contract import EnrollmentGrant
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -332,6 +333,7 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
         if purpose == "rotation":
             source_csr = csr()
             source_grant = service.create(NODE_ID, "admin", 600)
+            assert isinstance(source_grant, EnrollmentGrant)
             source = service.submit(
                 source_grant.token, source_csr, evidence(source_csr)
             )

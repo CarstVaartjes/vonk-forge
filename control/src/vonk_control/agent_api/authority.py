@@ -27,7 +27,6 @@ from ..agent_jobs import CLAIM_LEASE_SECONDS, StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..contract_graph import raw_json_body
 from ..enrollment import (
-    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     ExpiredRenewalGraceExhausted,
@@ -242,7 +241,9 @@ def install_authority_routes(
         required = _require_services(services)
         if not limiter.admit():
             raise HTTPException(
-                status_code=429, detail="enrollment rate limit exceeded"
+                status_code=429,
+                detail="enrollment rate limit exceeded",
+                headers={"retry-after": str(limiter.retry_after())},
             )
         raw = await _bounded_enrollment_body(request, required)
         try:
@@ -257,11 +258,6 @@ def install_authority_routes(
             )
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except CertificateResponseCapacityRefused as error:
-            return _json_response(
-                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
-                status_code=422,
-            )
         except (EnrollmentDenied, ValueError) as error:
             code = (
                 error.reason_code
@@ -298,11 +294,6 @@ def install_authority_routes(
             ) from None
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except CertificateResponseCapacityRefused as error:
-            return _json_response(
-                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
-                status_code=422,
-            )
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
         if isinstance(issued, UnknownError):
@@ -335,29 +326,30 @@ def install_authority_routes(
             ) from None
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except CertificateResponseCapacityRefused as error:
-            return _json_response(
-                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
-                status_code=422,
-            )
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
-    @agent.post("/renew/activate", status_code=status.HTTP_204_NO_CONTENT)
+    @agent.post(
+        "/renew/activate",
+        status_code=status.HTTP_204_NO_CONTENT,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     def activate(body: ActivateRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_activation_identity(request, required)
         _body_node_matches(body.node_id, identity)
         try:
-            _require_enrollment(required).activate(
+            outcome = _require_enrollment(required).activate(
                 identity.node_id,
                 identity.certificate_serial,
                 body.generation,
             )
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
+        if isinstance(outcome, UnknownError):
+            return unknown_response(outcome)
         return Response(status_code=status.HTTP_204_NO_CONTENT)

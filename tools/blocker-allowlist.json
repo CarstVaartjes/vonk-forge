@@ -505,7 +505,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 106,
+    "total": 75,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -1290,59 +1290,56 @@
       "path": "control/src/vonk_control/enrollment/service.py",
       "function": "EnrollmentService.submit",
       "catches": [
+        "SQLAlchemyError",
+        "EnrollmentIssuanceUncertain",
+        "RenewalIssuanceUncertain",
         "RenewalConflictRevocationUncertain",
         "RemoteRevocationUncertain",
-        "RenewalInProgress"
+        "RenewalInProgress",
+        "StepCAIssuancePending"
       ],
-      "reason": "Four bounded attempts re-observe bookkeeping conflicts outside SQL transactions; issuance uncertainty escapes to the certificate transport observation boundary without hiding the exact journal handoff."
+      "reason": "Four exact observation attempts and bounded cleanup attempts occur outside transactions. Exhausted owners retain exact late-effect revocation evidence and release their gates; pending followers end observation without cancelling the accepted owner. Durable creation deadlines expire abandoned owners in the worker. Revocation retains local denial and pending serials for worker confirmation."
     },
     {
       "path": "control/src/vonk_control/enrollment/service.py",
       "function": "EnrollmentService.renew",
       "catches": [
+        "SQLAlchemyError",
+        "EnrollmentIssuanceUncertain",
+        "RenewalIssuanceUncertain",
         "RenewalConflictRevocationUncertain",
         "RemoteRevocationUncertain",
-        "RenewalInProgress"
+        "RenewalInProgress",
+        "StepCAIssuancePending"
       ],
-      "reason": "Four bounded attempts re-observe bookkeeping conflicts outside SQL transactions; issuance uncertainty escapes to the certificate transport observation boundary without hiding the exact journal handoff."
+      "reason": "Four exact observation attempts and bounded cleanup attempts occur outside transactions. Exhausted owners retain exact late-effect revocation evidence and release their gates; pending followers end observation without cancelling the accepted owner. Durable creation deadlines expire abandoned owners in the worker. Revocation retains local denial and pending serials for worker confirmation."
     },
     {
       "path": "control/src/vonk_control/enrollment/service.py",
       "function": "EnrollmentService.recover_rotation",
       "catches": [
+        "SQLAlchemyError",
+        "EnrollmentIssuanceUncertain",
+        "RenewalIssuanceUncertain",
         "RenewalConflictRevocationUncertain",
         "RemoteRevocationUncertain",
-        "RenewalInProgress"
+        "RenewalInProgress",
+        "StepCAIssuancePending"
       ],
-      "reason": "Four bounded attempts re-observe bookkeeping conflicts outside SQL transactions; issuance uncertainty escapes to the certificate transport observation boundary without hiding the exact journal handoff."
+      "reason": "Four exact observation attempts and bounded cleanup attempts occur outside transactions. Exhausted owners retain exact late-effect revocation evidence and release their gates; pending followers end observation without cancelling the accepted owner. Durable creation deadlines expire abandoned owners in the worker. Revocation retains local denial and pending serials for worker confirmation."
     },
     {
       "path": "control/src/vonk_control/enrollment/service.py",
       "function": "EnrollmentService.revoke_node",
       "catches": [
+        "SQLAlchemyError",
+        "EnrollmentIssuanceUncertain",
+        "RenewalIssuanceUncertain",
         "RenewalConflictRevocationUncertain",
         "RemoteRevocationUncertain",
         "RenewalInProgress"
       ],
-      "reason": "Four bounded attempts re-observe bookkeeping conflicts outside SQL transactions; issuance uncertainty escapes to the certificate transport observation boundary without hiding the exact journal handoff."
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/enrollment.py",
-      "function": "install_enrollment_routes.enroll",
-      "catches": [
-        "EnrollmentIssuanceUncertain",
-        "RenewalIssuanceUncertain"
-      ],
-      "reason": "Certificate observation boundary returns the typed unknown outcome with a five-second Retry-After. Enrollment and renewal clients retry the same durable CSR/request through bounded transport attempts; the service observes the exact fenced CA journal before issuing, including after Controller restart. No SQL transaction spans the retry delay."
-    },
-    {
-      "path": "control/src/vonk_control/agent_api/authority.py",
-      "function": "install_authority_routes.renew",
-      "catches": [
-        "EnrollmentIssuanceUncertain",
-        "RenewalIssuanceUncertain"
-      ],
-      "reason": "Certificate observation boundary returns the typed unknown outcome with a five-second Retry-After. Enrollment and renewal clients retry the same durable CSR/request through bounded transport attempts; the service observes the exact fenced CA journal before issuing, including after Controller restart. No SQL transaction spans the retry delay."
+      "reason": "Four exact observation attempts and bounded cleanup attempts occur outside transactions. Exhausted owners retain exact late-effect revocation evidence and release their gates; pending followers end observation without cancelling the accepted owner. Durable creation deadlines expire abandoned owners in the worker. Revocation retains local denial and pending serials for worker confirmation."
     },
     {
       "path": "control/src/vonk_control/agent_api/authority.py",
@@ -1361,6 +1358,107 @@
         "RenewalIssuanceUncertain"
       ],
       "reason": "Certificate observation boundary returns the typed unknown outcome with a five-second Retry-After. Enrollment and renewal clients retry the same durable CSR/request through bounded transport attempts; the service observes the exact fenced CA journal before issuing, including after Controller restart. No SQL transaction spans the retry delay."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/issuance.py",
+      "function": "EnrollmentCore._reconcile_competing_enrollment",
+      "catches": [
+        "EnrollmentDenied",
+        "EnrollmentIssuanceUncertain",
+        "RenewalInProgress",
+        "StepCAIssuancePending"
+      ],
+      "reason": "Authenticates the newer grant and CSR before observing the exact older owner once. Failed or obsolete observation retains late-effect evidence and ends the old owner; the caller admits the newer authorized request under the node lock."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/rotation.py",
+      "function": "RotationService._recover_rotation_once",
+      "catches": [
+        "EnrollmentDenied",
+        "RenewalIssuanceUncertain",
+        "RenewalInProgress",
+        "StepCAIssuancePending"
+      ],
+      "reason": "Authenticates the current source before observing the older exact effect. An obsolete owner is fenced and retained for revocation; the same invocation admits the requested CSR through the normal renewal path."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/issuance.py",
+      "function": "EnrollmentCore._create",
+      "catches": [
+        "SQLAlchemyError",
+        "EnrollmentIssuanceUncertain"
+      ],
+      "reason": "Four bounded ownership attempts re-observe the same request after transaction rollback. Exhaustion returns a typed terminal observation without adding any admission gate; the exact request can be observed afresh after the database conflict clears."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/issuance.py",
+      "function": "EnrollmentCore.revoke_grant",
+      "catches": [
+        "SQLAlchemyError",
+        "EnrollmentIssuanceUncertain"
+      ],
+      "reason": "Four bounded ownership attempts re-observe the same request after transaction rollback. Exhaustion returns a typed terminal observation without adding any admission gate; the exact request can be observed afresh after the database conflict clears."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/service.py",
+      "function": "EnrollmentService.activate",
+      "catches": [
+        "SQLAlchemyError",
+        "EnrollmentIssuanceUncertain"
+      ],
+      "reason": "Four bounded ownership attempts re-observe the same request after transaction rollback. Exhaustion returns a typed terminal observation without adding any admission gate; the exact request can be observed afresh after the database conflict clears."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/service.py",
+      "function": "EnrollmentService.renew_expired",
+      "catches": [
+        "SQLAlchemyError",
+        "EnrollmentIssuanceUncertain"
+      ],
+      "reason": "Four bounded ownership attempts re-observe the same request after transaction rollback. Exhaustion returns a typed terminal observation without adding any admission gate; the exact request can be observed afresh after the database conflict clears."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/service.py",
+      "function": "EnrollmentService._repair_certificate_material",
+      "catches": [
+        "StepCAUnavailable",
+        "EnrollmentIssuanceUncertain"
+      ],
+      "reason": "Returns a material miss to the four-attempt expired-renewal observation loop. Exact CA content is re-observed before projection repair; exhaustion ends without adopting unknown bytes or adding an admission gate."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/service.py",
+      "function": "EnrollmentService.reconcile_revocations",
+      "catches": [
+        "StepCAUnavailable",
+        "EnrollmentIssuanceUncertain"
+      ],
+      "reason": "Each exact revocation serial has a persisted next-attempt time and a bounded provider call. The worker ends each callback, preserves local denial and pending confirmation, and resumes only due serials on subsequent ticks without holding an enrollment gate."
+    },
+    {
+      "path": "control/src/vonk_control/enrollment/service.py",
+      "function": "EnrollmentService._revoke_node_once",
+      "catches": [
+        "StepCAUnavailable",
+        "EnrollmentIssuanceUncertain"
+      ],
+      "reason": "Local denial commits before CA effects. Failed confirmation records uncertainty which the four-attempt revoke wrapper observes; the production worker resumes outstanding exact serials after the fault clears."
+    },
+    {
+      "path": "control/src/vonk_control/step_ca.py",
+      "function": "StepCertificateAuthority.check_health",
+      "catches": [
+        "StepCAUnavailable"
+      ],
+      "reason": "Four bounded diagnostic reads re-observe peer availability outside transactions. Exhaustion returns the shared typed unknown without retaining a gate; a fresh read immediately uses the same provider after fault recovery. Parsed cryptographic/content refusals remain security ingress failures."
+    },
+    {
+      "path": "control/src/vonk_control/step_ca.py",
+      "function": "StepCertificateAuthority.revocation_bundle",
+      "catches": [
+        "StepCAUnavailable"
+      ],
+      "reason": "Four bounded diagnostic reads re-observe peer availability outside transactions. Exhaustion returns the shared typed unknown without retaining a gate; a fresh read immediately uses the same provider after fault recovery. Parsed cryptographic/content refusals remain security ingress failures."
     }
   ],
   "call_edges": [
@@ -1382,9 +1480,13 @@
         {
           "path": "control/src/vonk_control/worker.py",
           "function": "Worker._run_model_cache"
+        },
+        {
+          "path": "control/src/vonk_control/enrollment/service.py",
+          "function": "EnrollmentService.reconcile_revocations"
         }
       ],
-      "reason": "run_once stores the model-cache source in its source list and calls it as source() inside its try; the declaration names that call."
+      "reason": "run_once stores sources in its list and invokes source() inside the typed handler. Production registers enrollment revocation reconciliation as a background source alongside model cache; the connected Worker callback regression exercises that exact path."
     }
   ],
   "route_guards": [
@@ -1454,7 +1556,7 @@
       "<module>": "fe410163b343e2652f7393f52080b63902f952b1b62ee497d7d343361eacaa74"
     },
     "control/src/vonk_control/agent_api/authority.py": {
-      "install_authority_routes": "9755966c0b4b8aa5b97f550d89e71038009bc59a79d49335591286203cce9b2d",
+      "install_authority_routes": "b4d1249bf82d4183abdeb64741bb606536ac27741c58aa3b43e8fde157a1bf36",
       "install_authority_routes.helper_identity": "5763db4d78e939fd006e410c7c7ed2290b7b69dc9e0fac9bcbecc221c8482bef",
       "install_authority_routes.host_runtime_service": "4e11351a91114686019906242c62b7d40464524b66c38d0983cf5f9ee3640729",
       "install_authority_routes.host_runtime_grant": "46ec7b67c363452afb886dd27823030e15cb7ed33fa44f98b12ebae5619439ac",
@@ -1462,15 +1564,10 @@
       "install_authority_routes.agent_upgrade_grant": "25666eb0c9792e810ad7faab6022ed30e77a52da836b7446a2afc293c15f806f",
       "install_authority_routes.heartbeat": "4e3ae76afb95baef7e1faab74cf806806f3c2cdb86d68c17f80d2d056bf530be",
       "install_authority_routes.result": "66484ead06a92cd70a06516342f20f082070d80cedc55e1db1c54104ffc0c5ea",
-      "install_authority_routes.renew_expired": "f8c3520a2770afa28678c88674976bcacb72d5f3627bf37d99db532e309e06bb",
-      "install_authority_routes.renew": "c596fa919c26bde145c741c79d62eb4584431df063426ef8e6d0183fc2460b41",
-      "install_authority_routes.recover_renewal": "60c996a2c0819c868109dc58f4ffa45112297ca02034cd413abd222d45b18bf9",
-      "install_authority_routes.activate": "0c18a9fdfc3668fe403837bd2663b9041c3154869758fe5c09aed3d488e14312"
-    },
-    "control/src/vonk_control/agent_api/enrollment.py": {
-      "install_enrollment_routes": "a05b340e90e0190c7cb2d944bfad9465b71b55f1cd8c7f6ce40c5b6fac722c1c",
-      "install_enrollment_routes.enrollment_bootstrap": "d1a4262eace2147871483485806ce30c95b289dc80d573eeabcb889545fdaeb4",
-      "install_enrollment_routes.enroll": "cc22f342530ef2033ab03fa033748293b77d193fc34eff92c469a1e1a4c92e83"
+      "install_authority_routes.renew_expired": "9ba1cd9903768408c2461bbcb97f7e54819100fb598e75ec97818e2e7fd4e03d",
+      "install_authority_routes.renew": "fa4abef61e63d514d5db46bc796f75415da591882ef120b3c4d365ef44d59df8",
+      "install_authority_routes.recover_renewal": "a1f6cf80ae1176a88ce872120aed51cc7e2de968806e006b1470fb6c9af5cb59",
+      "install_authority_routes.activate": "b66070dd10cd99a0d9cce48126846379f50a01ef63f6db7e0092fc97febd8da2"
     },
     "control/src/vonk_control/agent_jobs/__init__.py": {},
     "control/src/vonk_control/agent_jobs/aggregation.py": {
@@ -2410,175 +2507,165 @@
     "control/src/vonk_control/distribution.py": {
       "DistributionError": "75ad18fa0293f0e4930136d8ca0273e4ca5236718f40198bbd310240c33e44f5",
       "DistributionError.__init__": "c58da4fea52607536a83acc163cbfbf81e53311ca94511e38a3290a53170791b",
+      "DistributionInputError": "d7099a520afa1889ee8f7aacae7c18b92e120bb45ff8851e76956ffbd783add5",
+      "DistributionInputError.__init__": "546146a4cd33cdb9e526fd672b7477e8c5850872818efd12c901fb33a75571f1",
+      "DistributionUnknown": "c7a6580f575d38fe5ac5f505d59372a5fc7ab08c91846900442a145824ed53f0",
+      "DistributionUnknown.__init__": "fce40a5b3a67eb42d9ccf97811bebc9021c11cb217d5a2e1c692d7e9a66726a0",
       "DistributionRefused": "3ac07d2926458ec3486e62d6bbb201fe043b8af34dc254aa36446984ed0722da",
       "DistributionRefused.__init__": "69cb7d56af0fedb7293d7194b90312aa485b13a4b47459e4f68a3f6d22c47779",
+      "DistributionIntegrityError": "791565ebe1aa03e7073e768f9db10145c6d3c7ada1df6d4d6aead85bb7d6a290",
+      "DistributionIntegrityError.__init__": "6d2e6ccc82134ae881ef3e4773c5a29d222b461bb89c837e428beabf684b4282",
       "OpenedObject": "af9dbef797dbe82694ff5e721ed74ad16f4f56f2a84f4192bc0b06cd39c5ed55",
       "ObjectSource": "2f828a7c42e8fd04e86c76fd2fb0d58d25e552f78adef7d578f4a633d72525b6",
       "ObjectSource.open_object": "3083592e22efd6376cf367c950c82ae67cb253523ef13c97cd2f8e3b456ddd27",
       "ObjectSource.verify_artifact_set": "48ff44937dc1cf8f3d8b8732de39244605d614cdd22516becc3ead7006251ec7",
       "ObjectSource.verify_runtime_image": "3f3478f0f2cc74df927eb05ab360a9e371f13865321c8b414df5a708dce1996d",
       "artifact_set_sha256": "cf7b574970aed5c3795264b50f74b6f9ef1bf6c8af71222fc459e38985bb5f8e",
-      "FilesystemObjectSource": "6fb779a73ba020e6733612c2dd969b8bd4d45dd355bb1d6d1a97f4cbe019a4a5",
+      "FilesystemObjectSource": "cbe10e777bc324ecea9af68800b7000206f17c2582f314f4aac13c70a5c9c9e7",
       "FilesystemObjectSource.__init__": "da41958c452818ab10f93ca2025010a0d3cad8899db0080dfd0cb61707aca934",
       "FilesystemObjectSource.verify_runtime_image": "d1e797c0fd24329c4c79b5f9b14ad6d658cb5385a9fb7bb253de1d89393594f8",
       "FilesystemObjectSource.verify_artifact_set": "32daf55b23395efb9d038adceb4fc5c679cff044f0521e4823901f53a67d27a7",
-      "FilesystemObjectSource.open_object": "760464f4d6bc9793191a4b34b92ed95587f81fca0ca458cfdc18689269859bbe",
+      "FilesystemObjectSource.open_object": "07b4a4adbb969c102fc4119683c190c677e233d9f7d824264f7a282d0f804726",
       "RecipeBuildObjectSource": "60ee5da1ba10c434cbd5df2d5ca414ddcf9a467acb83514036ea3a41a451317d",
       "RecipeBuildObjectSource.__init__": "f2f1a61637ed1efce756d17409cc4b177939ab8712bb9a74f530f1ce49bcc177",
       "RecipeBuildObjectSource.verify_artifact_set": "797e35d909dbf406fdca0821645f47e2122797679fe5aecf9257322a9aae3043",
       "RecipeBuildObjectSource.verify_runtime_image": "41897aa12f015fbac580e4134662963cb9fe749295b441de34cded576eae95f3",
       "RecipeBuildObjectSource.open_object": "da0709928a2bdf9820f3a09d3cfeb1c942236a458a03d2e23c69d7b2fb8ceb55",
-      "ModelCacheObjectSource": "acc9a85a59a3c270bcf3050adef0f7ba4992a8ff0544b57071dd52fd15894045",
+      "ModelCacheObjectSource": "4914e5e1660066f80f1f004d6f7b78b0dcc35d9adabe7cd16252368443db50d4",
       "ModelCacheObjectSource.__init__": "68d58bb8dd00bb6e56e1996cc40388685c17a2788a1da7459a07af82be636f3a",
-      "ModelCacheObjectSource.open_object": "0ff87d9e6d4c77b2dc3477bce5950d54ed26c588d2cabfc6b90a08dfef1fa11e",
+      "ModelCacheObjectSource.open_object": "691db78a193e01710d023297452b20b9de845739096c714c6d667bd6dfe6039e",
       "ModelCacheObjectSource.verify_runtime_image": "660757c621d6f51a2b5703fd7e95582284ac556fddcadc8b9c5ab96aca8383fe",
       "ModelCacheObjectSource.from_service": "31d55ae58c88cc6957e991b4f92c9c5ac133ad686af7045c2d64e58b6659f193",
-      "ModelCacheObjectSource._from_cache_service": "4408efd48d335dbc349ede84ade8e4114073a271173177f5250287bec8e2c960",
+      "ModelCacheObjectSource._from_cache_service": "7f85755506535e3f6871e536bbe93a7cf84f34cf1a84b67103c3ef8083202f39",
       "ModelCacheObjectSource._load_manifest": "74d1af8db119dff90ee503cff98ad1659841fb60d21c0b769c59328b26dea3ee",
-      "ModelCacheObjectSource._describe": "7368aeced6ba6e22ee53c959542386c7364273febcf68dc4b11f084a9480660c",
-      "ModelCacheObjectSource._open_cache_object": "533c0016a85c925570021d70f7253de3ffc2c89e400b8d4f005db23136dbb8c0",
+      "ModelCacheObjectSource._describe": "298bcfdfaa0ad14d5f24bf318a1a2abffc43b49db53dfd393ccb0f884b40cb71",
+      "ModelCacheObjectSource._open_cache_object": "0e5b6ac1e4ffa3e9c7d78b5ce23ff98f4531c8a137fe364ba1cceab6446a818a",
       "ModelCacheObjectSource.verify_artifact_set": "5cb72b9ca70966b894368dd9867f2ffc042c7a05e34539c784019329323dcbf7",
       "ModelCacheObjectSource.objects_for_set": "807396e70f8ae961a0a0563ecbf8cf11c7eb3baf97f7cc6f454252e8c469f7e7",
-      "ModelCacheObjectSource.verified_model_objects_for_set": "dbab81d299c91a5ea41d3f2b8abeedbe9a4682a39d3704de47bddedf5c75db75",
-      "CompositeObjectSource": "ce50b3736e7b8aa15731518b8099b42b4fdf8048dbc3bfcb1fb5c10aada2194d",
+      "ModelCacheObjectSource.verified_model_objects_for_set": "0a7cc3ba0372d45ebf66307fd622d029ab17e8cf8af1bd81ea6683730a0668b0",
+      "verified_model_receipts": "83b1bfbe76f0da8ff8ea4f584aaaa6a6be10e61bc363fa6b0c0510b8be35a709",
+      "CompositeObjectSource": "775a7997a0fb17c014b5f5d38a80cfb72b46f8c5c062f668a3d1f297a59ac518",
       "CompositeObjectSource.__init__": "0a1e6acc9c994ab8477d2b2f5f098a655a2f46dd513139efd34871018af07fca",
       "CompositeObjectSource.verify_artifact_set": "f165c3dbc3eaaf9fe26ca912cee2295c14a7e397761ffdfa98c82fc4cb3d8792",
       "CompositeObjectSource.verify_runtime_image": "763532bbe7c6c0e09054193d4ed136f511c625af0047dd1beb44ab3da1fd1b7d",
-      "CompositeObjectSource.verified_model_objects_for_set": "122aa3e99cc917aaeacecb3155b79f5600554ca58d78ea8d36eefdeec9f1db4a",
+      "CompositeObjectSource.verified_model_objects_for_set": "889169ab58460535e040a47f99989f9c2449d94f4cf2873870417da773b698b1",
       "CompositeObjectSource.open_object": "f6efb227e5241a14f4aefc439886494631673cb1f883edae63d6b9265dde5f51",
-      "MemoryObjectSource": "ff961d7a98a857604f6be879821e9a1e1b1b8af1c90848b5838037b9400e0238",
+      "MemoryObjectSource": "442b048fad4740e7cb07fdefc2f9b83863583c27f2109874c39e81900199733c",
       "MemoryObjectSource.__init__": "df2292de588cd62f1430b9714f0348cf440067621e323c1c8717883e888c9aa8",
       "MemoryObjectSource.put": "a61edf9e3506812d69964bf5f74aebf89f0687e63cf74a2d08e0d337c26db30d",
       "MemoryObjectSource.register_runtime_image": "e90d6a583c62b8afbd658e1c38602ae3c308c2ef4c11e1aaf38110dde605a24a",
       "MemoryObjectSource.verify_runtime_image": "d1e797c0fd24329c4c79b5f9b14ad6d658cb5385a9fb7bb253de1d89393594f8",
       "MemoryObjectSource.register_artifact_set": "a5dd0afa2d1192f597b1b1135e91c11072794693077265521a5a1bfa4961038a",
       "MemoryObjectSource.verify_artifact_set": "2ebd706cd0cc75040aedb54cdac727f726b691dff8b063515b38eee2270f581d",
-      "MemoryObjectSource.open_object": "25b10ab08472bd8db0f4b4aa05cd24ce079681f7d8dfb977d92897436b8588ae",
+      "MemoryObjectSource.open_object": "ae82bdca56361c673c5d4e6f98cab3fc1bed81db8948a104838245637ac876ca",
       "ObjectLocation": "4857e40534b2193b80fd09a5272094fbe502bf750653b2772c687e60e6606cf3",
-      "_may_replace": "bc9a691adc60c4886b75356fe139653df8b01df9e692dc3bc834c1933e56b99f",
-      "_may_replace.grant": "1dc0389ef4cce50fedb7fa7dec7f552bd799d60b4144e8ea4912120c04fabca5",
+      "_may_replace": "95d947960468027caef976809148e74419ebc3b35d71c21f6ddfb558711faf71",
+      "_may_replace.grant": "112211900deb895b4a305ee7183eedb33223d74e39205d736e20305d534ab69c",
       "_still_stored": "410dc4a0a2535d4a7f8e9534b847ce6f61ab6a354eb8b5d5bcf27a95aee7c99f",
-      "DistributionService": "a94dda76a6bc9e942247428837ae6ca46702735c098fe05740d6cd3e5f92c69f",
+      "DistributionService": "2f56f0978ce947185e3a4beb4a23bf98daf490e83625b9d07699fef6585cb708",
       "DistributionService.__init__": "8896ae50844172f1de6745dddf2108a6855fdd9417eaf4e44c5549a130599dd9",
       "DistributionService.attach_sessions": "ce7416c53ea1b730694d0026a652eca7b8afb551dc9740f1d1ff0dd16af0523b",
-      "DistributionService.register": "b3df77e93ceee9b0efcac0d9fdfd9d76c73d1fc61d462023c8c69c43f0566a47",
-      "DistributionService._register_row": "1e3ed6992e493aab54059f9cfd414a165d8a53342917706c62e56a030fa6065a",
+      "DistributionService.register": "42781085f4bbce824115e0be82e8d0c94dc2137042e3c7872e6145723e829149",
+      "DistributionService._register_row": "cf29bb549deed58623b996d7ab0cf06eded4c65fd16dba18775617660615744e",
       "DistributionService._from_row": "82876d0778eabb9510e565cfe60616bb8ddd39d385056f107105a440e30faa45",
       "DistributionService.revoke": "3f7810ef9d529c98ee8f005ff712e61bd0a210e281c98177e8f4673067a41976",
       "DistributionService.authorize": "73538bd0b15b782ef8aa005d99b4f13b68b3689b5b4cce819c13b646e4480f43",
       "DistributionService._authorize_uncached": "a47b6c307cea275c4a6ebbfd28ec912fda60dbc629402ab56eef91eabde1f430",
       "DistributionService.locate_object": "b4d473a2a0cb304610529a018010a4e72fde24039541f2ff1f7d2c3bc820e983",
-      "DistributionService.open_object": "b7ce0a6275ea3bdbe7fd22c7151e3ee5b446d532a4d95ab2536355b1bcf4d72c",
+      "DistributionService.open_object": "94b1c84441a23dff917206d55139d4211149850f8794b2c5c1b5e5508444631c",
       "record_distributed_runtime_image": "cd13be509addbbc48fb3a6ae09f0b2681f1e8ef318ae344818ed037d1f443552",
       "build_distribution_service": "90d71fa5561622844c14f716149298ade8a3dd91eb26ce66e64ddd667684da07",
       "build_distribution_service_from_components": "cfe34867778564e9f3aa745892abd7d0cadd3713b5474b0a6617d4d6e4e5f5f7",
-      "<module>": "000809e28efdc4aaab780e37d97dabfb26d9bf3569b1e2bbc2d734ac2b7b6cf1"
+      "<module>": "f2a084030b92bc396ab446c275b3d528dcb87f06b53b14fbcc6e159ef43a4877"
     },
-    "control/src/vonk_control/distribution_executor.py": {
-      "RuntimeImagePull": "ba1d5118e46bc69b4ca1e665c0c450ddf3247fdcb93a7a384635dc3bd6acc03e",
-      "_ChildView": "3705c4a008199c1d1af9844eaa7055a6cc8d1e53a39fac1f64c8d08146b67636",
-      "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
-      "_phase_receipt": "da3fef88dc994840c9dedfc3e3f66705c7c3a2a6f554f123eb7957e5a9e4fbc2",
-      "_child_receipt": "88edff8ff7e7d8e1cef0b35fc6f9525bf80eecd5ab8013876fee17103b488910",
-      "_typed_failure": "cc9e487f8ceded968908107806b604c02ff6cb7987d8957b29d6c658b57e3870",
-      "_evidence_projection": "32e1414057fe560be9cd3c46d0ccd7667d78e1f64895bce73b8c1aaddd33465c",
-      "DurableDistributionPhaseExecutor": "8f71e61039626265304b0ca762c44451398852337a43705c04a19af458c19cef",
-      "DurableDistributionPhaseExecutor.__init__": "26f5c704678602f9f0c62d0d511f6cb04fadcafb69e715cdec1cc23e873254a7",
-      "DurableDistributionPhaseExecutor.execute": "b1c42d9ca3e70c3098616aabbb92fb21a77a240fbe525f26af46eedc4ecc4a89",
-      "DurableDistributionPhaseExecutor.abandon": "3fe415540f9b7017fd75db969e03eadd7374ed2c599e8c61f47afd7bd106c638",
-      "DurableDistributionPhaseExecutor.get": "4f8cfecf3a31683b4360c474004339cd9dbcccbe59851a809997cc348c37c90e",
-      "DurableDistributionPhaseExecutor._verification_result": "dca78d6d984770bb2c64c0d2ea92543fcc14ac0baaeb417ad26e1538e90967b0",
-      "DurableDistributionPhaseExecutor._adopt_child": "d59f1401354fb44060610ea2997c112feae4aac5967ec2e89bcaa9ad9b703a4d",
-      "DurableDistributionPhaseExecutor._ensure_child": "797cb018a4ed9f3a22e767083ae9b43758e7db524bc22782fc4281ccf7a2bddf",
-      "DurableDistributionPhaseExecutor._model_objects": "7f329ff1f097dcc1e51d893ff704ab8cb6d93faf7b3fb2e88cb71db89eaf5fbe",
-      "DurableDistributionPhaseExecutor._runtime_identity": "3018371712332cf081ef6faa841f36eb9b9e361c2ce66882eac04f0651ba5f4f",
-      "DurableDistributionPhaseExecutor._source_runtime_storage": "7a1856b4a9c400c18c454bfcc2db753ae08bfe4b64a58be49b142fa2cb938ac0",
-      "DurableDistributionPhaseExecutor._archive": "43c456ca180de404f879f20126c3df08f01f1870fa0a29aa8111e58394cb5b98",
-      "DurableDistributionPhaseExecutor._stored_config_digest": "0d2c3d3be5982faa6d0b00977d6026bda88daf46b76efb9343aa875147ce27b6",
-      "DurableDistributionPhaseExecutor._assignment": "8a5075cd9baa429f4d2344283863bef5d4ddad1f36cc9a04d7b1d126cd90242f",
-      "DurableDistributionPhaseExecutor._cached_targets": "236f6bf07d8af9ea08fb48512482b10f9668289238ae7f57bd54c930de0293d7",
-      "DurableDistributionPhaseExecutor._target_bytes": "febfe369902c560320c09bf4dea5ccb8b9a67795d86c410462b220abb0e09ada",
-      "DurableDistributionPhaseExecutor._verify_evidence": "3629668f8b30f5d694e4a42cf315c02e5762c4c172342304f28b00556ed8c177",
-      "DurableDistributionPhaseExecutor._member_state": "20ced512b3544d175603fed6c6274bad8cbdcd5b86b2449737c0ba1ae8312996",
-      "DurableDistributionPhaseExecutor._int": "23f785a8220b8ddd3323d2f4d0bc8373fc842103b85483a1404e3d705a667f9b",
-      "DurableDistributionPhaseExecutor._digest": "026fc484cd30b8648c047b41bd09118ea764c40fc7fa3db4fed897f60bbe2370",
-      "CompositeDistributionPhaseExecutor": "00ca973c3c598a7bc67bec8df73843cd17fdb9fd5ab8ed5accd2a96dc2d907df",
+    "control/src/vonk_control/distribution_executor/preparation.py": {
+      "CompositeDistributionPhaseExecutor": "4d2bbdb3158ae64621d41874bb509c4b538081425decbdf30b3a22668edc3d96",
       "CompositeDistributionPhaseExecutor.__init__": "0a2ca4ae8caedd100668af236f590a182c815e5ab7bcce1389d8dd8d0d30f2d4",
       "CompositeDistributionPhaseExecutor.memory_footprint": "ac93d09598e40ba98532886d65e00f66c982d13add5a24e557de3975428d325b",
       "CompositeDistributionPhaseExecutor.close": "7fe75185b69aa1ae560c9876c3b10d0a6171e30439f18c8cf78742a9046e1dd0",
-      "CompositeDistributionPhaseExecutor.execute": "dc0485d89c0cd0f7f14c82d5c0b4c135f81aa040a16a37731c9e1618d50dcea6",
-      "CompositeDistributionPhaseExecutor._prepare_runtime_image": "ab5bb221163a05594ca5df708dbc1de993860b676e27bdb9e466929cf0dcf58c",
+      "CompositeDistributionPhaseExecutor.execute": "ae5b6ca02dfd8ba14cd5016f1b34dad8f8bbb7350d27797c2e56b8acd11123a8",
+      "CompositeDistributionPhaseExecutor._prepare_runtime_image": "6848e9b75ac92e2c4d33fdaf49c2ac97098ffc6790f9f80cc38a5809bb0c0c35",
       "CompositeDistributionPhaseExecutor._prepare_runtime_image.before_publish": "c9b00e0448534b05701e876eb8bfd1c9b402628984159db3422fe40ff321d925",
       "CompositeDistributionPhaseExecutor._prepare_runtime_image.persist_reference": "1f214ae4fc81d21fdfa5058399b8f56e34c5a7f8176b932859c01f065751bacc",
       "CompositeDistributionPhaseExecutor.get": "3925260150357e56c329665f7c3f87b73f48abafee316602ef5c7fb7dc5d8735",
-      "CompositeDistributionPhaseExecutor._cache_state": "67285a481816574b36d780a9f44023c2ac18d9a350abb0b8ffadf8f9c98b5087",
-      "CompositeDistributionPhaseExecutor._cache_result": "ddcdf2d1318a6d0e245b8f7533388a7848c2e71103af773022de376cf6d00f86",
-      "<module>": "e47108b63ec263ee2c85f3d612ed57e171d836d211d057723b7b10e529025c01"
+      "CompositeDistributionPhaseExecutor._cache_state": "7a6f0e1d2e8dbc81099ee5bd4b4db87c774d59347212afaae713d6ce315ca667",
+      "CompositeDistributionPhaseExecutor._cache_result": "9d8252f6294b9a1a28e97e2b3368819a96d52cc05fda91699e3e0fd2d876a060",
+      "<module>": "9f5ad4b76ce5d18c110a30270dedbd39a63e796529c0131132dc438e35a53489"
     },
     "control/src/vonk_control/enrollment/__init__.py": {},
     "control/src/vonk_control/enrollment/issuance.py": {
-      "EnrollmentCore": "f802ef62b100cfc15541ae39112d5676a0529aa9fc56e4c45bb85c2f25e308a0",
+      "_submission_input": "c45186e9374eebaf49e26a18233f7c13d7ea1002d100482f0ac65e99064a9518",
+      "EnrollmentCore": "ab564d61add133e9eeeaf7cc25f5a369cedb2a39a758301e2bea06c4370a1517",
+      "EnrollmentCore._end_submission": "7f7d1a906a391c8e2bb1163270dc7728c1f288c63aa83d298f18d8e8986232eb",
+      "EnrollmentCore._end_rotation": "ec9efafb421d2d428a7a12bf98a0e062027b8c238453ab70808b9b15b2cd41e1",
       "EnrollmentCore.__init__": "c6bcb1f864eabb97725b48534d7ce9efa55c936ec7ea0a2df541b6861c75800a",
-      "EnrollmentCore._transaction": "3fd5596348c6fdcb19c83396221b6d767ebf56c1f497130da8c70dcd774a47a1",
-      "EnrollmentCore.create": "78eec955c24c3c4da2f648eb1391971117b36b8252bb433e58047bc18b3b70b5",
-      "EnrollmentCore.create_named": "c9b242a53814474a9ad0b9751e275454844258971a00520e81b72cf3f537b32d",
-      "EnrollmentCore.create_reenrollment": "f5e79fd973ecd4d7f9770dde4ea55eac28a9861f4ee25590415d8fd91fdd18c3",
-      "EnrollmentCore._create": "f07db2a5451e2ff84fd4ee38c47dbcb1af3992fa6717649568cdec415e5125d1",
-      "EnrollmentCore._grant_status": "e4a0875b5e701b9cca9c3842ee36535f9cce1c3bd52a82cad20efa9319d2fbeb",
+      "EnrollmentCore._transaction": "e94a1099204a19673bad5b93cc75a1529f607c0a19ef9def940bec6336f8dab5",
+      "EnrollmentCore.create": "ff875231c8ed6fd9ade718026a7c6b750f97d02941bedcec488bd66bada5e59b",
+      "EnrollmentCore.create_named": "741ec3b43fa03becf4473e7d098f4134f8c9f37090c2613c85ffddcff2c040a1",
+      "EnrollmentCore.create_reenrollment": "11f75fe778a6d68fb9112ff0f6d635bd6c7e0f432ee6c367a11f0e76e8a86b23",
+      "EnrollmentCore._create": "567e564a7b28d4fe26830b9774c6b4f9a0fc738ed90e54d5a194bb2828490e52",
+      "EnrollmentCore._grant_status": "0e0416b38535053a951d7b45d81c83e44277451d91e478a7e48a5a017388872f",
       "EnrollmentCore.grant_status": "f543aeaab698b043914708bc1de46fcee250017cf09b5acde8ca0af534acfeff",
-      "EnrollmentCore.revoke_grant": "e5714fbae2e52d7389ff2e15b654ed733d9eb86638bd0badaab68364fc384690",
-      "EnrollmentCore._submit_once": "cea45dd81a536ed7f7f18a8de1d6584f38825ddada01bf0e376a4dae7877210b",
-      "EnrollmentCore._issue_enrollment_claim": "d7ffda6dd7aed672ab19d3764883c2b11593f3f0c4d50b99388524a54ff3bd27",
-      "EnrollmentCore._wait_for_issuance": "97e562041de2ae912e78e725e14271bd7d3eed8000affdd6a677f6fb836d3f65",
+      "EnrollmentCore.revoke_grant": "7a77987f0f097be4b97c7287d7a0d8a777fe024aacf166058a5b5fcd5f432eeb",
+      "EnrollmentCore._revoke_grant_once": "b1ac0be3a8b7ad03baf1395e5b3e3f8bc07256025a599bdef4a1ca8dd1fa063b",
+      "EnrollmentCore._submit_once": "970843063d98277d6a889a4e37759f17508725039087643a225ad90704a5e7b2",
+      "EnrollmentCore._issue_enrollment_claim": "6b695444521fc2bea85730489bcf148c71572b06389f1d14950560c1b14bd5bf",
+      "EnrollmentCore._wait_for_issuance": "887a1096f339e243bc856a0a6f36a030397cfc02f43dffadaf7f74f0559768ea",
       "EnrollmentCore._confirm_remote_revocation": "420ac5993278f93f84da59ea8bf89606b79b3d7c752cd729ebb17f5fd3be51b2",
-      "EnrollmentCore._reconcile_competing_enrollment": "8773400d7b81190f9f3a1dc4fe2d41bf98326d01bd78d81203d801c688b86149",
-      "<module>": "f96e762666f24d441cb4744ac7f1d2e9309b90802b558bf3029dec736ca536ca"
+      "EnrollmentCore._reconcile_competing_enrollment": "76aea7c75dea9c1985f197bb26809b4094aef33834d120fae61223bfbbfe7c5e",
+      "<module>": "bd4f840e9f6944e3674e6223b098650f7ded00340a04a890966a3eb602cddc7f"
     },
     "control/src/vonk_control/enrollment/persistence.py": {
-      "_persist_issued_enrollment": "e261e9fe15645f51e05bab9bdb7a331d9adfac493fbf21d27948667957a70a6e",
-      "_locked_enrollment": "dcddc3b45f1bf0be63e838ea0d5a872640c1932dbbcc0396d528e09a378a700b",
+      "_persist_issued_enrollment": "17bd0c4d277b7942f050116107527294117e035074dbd02c578da5e1bf615b35",
+      "_locked_enrollment": "f730dce1f730e72643062aa8b4f696b5a6a07f876775b6266cae041ab9968cda",
       "_lock_node_issuance": "38b0e365a61a6f269c12ce0ad2439ddeddde3ef1aee94b54ddbc197d6165c414",
       "_issued": "49fa56cc60db268a5a354415c86e8ad35e24fa59198bfa36f3045f1dddf9c196",
-      "_replay_matches": "e40725a7ecac5e246002eb46dad9a2a0ea89ab1969637ad6e31a00efa7e88936",
+      "_replay_matches": "3635119c58b3a23dc91cdf6f0394c3b5ad395bda61e63f31d82261515aa87d57",
       "_certificate_issued": "65282e14dd076e440c7f7165c7501b2f75f29bd5cb89971b10c55fba3527de4d",
-      "_rotation_claim": "7decdaec6678ad542b435c937132e9348b8f29bf338d0caf6c5db158ba79d4e7",
+      "_rotation_claim": "80eba4aae9d7dfb656795cca9b5ae732a86840bea44085f9fcec650d0130ba14",
       "_issuance_binding": "6620850eb4a036b8311153de08c4257f3cb4d87b8b0b6c91511e70d385265f7e",
       "_validate_issued_binding": "cad35abb0db64db5916c296267cfc8c6d7311716cb06fcf4e361c9367d1032b1",
       "_require_issuance_binding": "7894bb27fbc2f544674b15a689bbcea76979bf1f5ba8ab4d9b8a019bdbfc4b90",
       "_rotation_source_valid": "372f0bac495f93b981557cf4cc6bb674c5c399638c2c833f59f1715912d0f1ec"
     },
     "control/src/vonk_control/enrollment/responses.py": {
-      "unknown_response": "4a79a8b11e664636d617eb7d5a8423b5d1bf4ba6fcd385c127a39c868a6136d4",
+      "unknown_response": "19e5d3f0596ad423961527b803728f58953615abc7c081c27e6488aa0fcc4261",
       "_wire": "f0b0320dac12d86b105d006d714986df8881c8614ba403b9d6a5cb141ad6194f",
       "_now": "67dc007c5635ac1e8ab9e24f33e72c196795a809ce55c7ed4c5a18cffafdf419",
       "_issued_response": "08a31e51182ef955851a3074c6128673f955a08cc15674ba8af9c91af70a999b",
       "_json_response": "092d7c5ee5ac57997818d6ddfcb2ebf739565ef137c252ed1a48795db7309045"
     },
     "control/src/vonk_control/enrollment/rotation.py": {
-      "RotationService": "786698a2103638b59466aa65199fe57125f727b48757ddaa2e2a512e5ca413e8",
-      "RotationService._renew_once": "df604ef2258b64367e670b617d3683545ffe52d19bf742f4f0cd70608a132fb5",
-      "RotationService._recover_rotation_once": "0f443103ae1fe8aab9e098934645576663c690ffbd395e5077ac5b4c69d5d421",
-      "RotationService._prepare_rotation_recovery": "a2e2f18cdc2be99b48918c98a08b87c3809d91dc559bcbf2aa81821b605ab18a",
+      "RotationService": "24e55ce6face6b3eddb03aaa96ed697cc9de2b3c8d90041a25246349f8d19231",
+      "RotationService._renew_once": "4382fd1cf2c67c02b9c1165a929a6793f019db33524aea65928453af2394cb65",
+      "RotationService._recover_rotation_once": "499b1feaf62499a56c03623f6ba161af044117bde91e0f4323693a39f17311e4",
+      "RotationService._prepare_rotation_recovery": "4edfacf95f8420162531cdfe31ccd727e210c9413bbd444115ac1ea7184fed93",
       "RotationService._finish_rotation_recovery": "f52f2f3e584ee789824ba2b1d08a56a41122b8ce8ded574271483fb4a3c5a0b3",
-      "RotationService._issue_rotation_claim": "06568e86e7b0784bf3519b32b167650578cf1ac6331deddef370866a9f3b9655",
-      "RotationService._claim_rotation": "216ec8a07bd218171ecfcee683f051909b8dadf418d2b4f574a0c5feac30504b",
+      "RotationService._issue_rotation_claim": "08891dc7eea35c68946abce512d470c9b6094a9a0d2c1ca11b9eb76e2970d85d",
+      "RotationService._claim_rotation": "914c5811a195dfdebd3284ef7ac3b1f6fd113fef6d33974ee363188f692d8edf",
       "RotationService._validate_renewal_result": "2359924d07c0a8b4a441cedd86667364a17cddc805844418a7da463f6784d11d",
-      "RotationService._persist_rotation": "1682b0c3dffb0508792d545a54663f8578e6f93ad0284d74b1bba66ec9862639",
+      "RotationService._persist_rotation": "757823c143c15c1ff5466aaced5e7536b7e59689049b765fbab30635e15bbf55",
       "RotationService._record_orphan_revocation": "f3d477a39ed5efca6732b1328d01eedf69ec9c0691622039461e9aed7f265de7",
       "RotationService._revoke_denied_rotation": "154ff775fd997f815576eb6e9d5651b0aaa69c255097dd8973a53664bf63869c",
       "RotationService._mark_rotation_uncertain": "8bbf3da69cac0dc906fa07b0809413b2da043674531673177bf577163a1ad89d",
-      "<module>": "2a50236f4754a3d2f11e07defce8b364c8f2deb4f3573c037603c1b27fa62d24"
+      "<module>": "f776dc86fd3d5d6cbdb9e28ddf55f546ce1be7fccbfecc2450d1206d24eb9650"
     },
     "control/src/vonk_control/enrollment/service.py": {
-      "EnrollmentService": "d42d9369173d58f8d8ddc00d50e8f692c9af62e5f6937ee2b882c3c485dd25a8",
-      "EnrollmentService.activate": "7449721cc8d843cb90a6f482dacc52fc56766b6c5ef29000f6ad032f0b71dede",
-      "EnrollmentService._revoke_node_once": "da161b77a9efe0446368de54242a6e77b8f238cb1f29ff04abb15d718d98debb",
-      "EnrollmentService.renew_expired": "b9b919fca8b51f4458fb51169540f132126f095f175a87fbbb9b753e1f638c58",
-      "EnrollmentService.submit": "16884895ee8461433e6a1904392583137a83ac886ee4fc8b741e16bfb4c21c0c",
-      "EnrollmentService.renew": "8261f3cf6ab43fc169b7f956b47c69fb330fbb8426b85acc0fb757f51470527c",
-      "EnrollmentService.recover_rotation": "4c56500b37980684ad2f3bd73c7b2c98be077d9ecb2c6c54da4f63f41ca2e7d4",
-      "EnrollmentService.revoke_node": "aa59c529e41f18f91e166cb69d901b245727b27fe8e1f8ecd4c92f510daa0206",
-      "<module>": "d42d9369173d58f8d8ddc00d50e8f692c9af62e5f6937ee2b882c3c485dd25a8"
+      "_require_expired_source": "1e60450576313d3ac24861508f69f5db0109ec2c363eefcde917349107557174",
+      "EnrollmentService": "001626960c0fb2fa0208d9fc9eb1046c7f23885f04e757568a4c63531b3a0f87",
+      "EnrollmentService._repair_certificate_material": "345cfed6f5be403ca1d097a528206a801235a8091e3cc7fb4d243ec9180488c7",
+      "EnrollmentService.revocation_status": "58406304cae1e513cf3d670fe976fef95bf0b793652b067f45bc9cf28a9b4acc",
+      "EnrollmentService.reconcile_revocations": "bb915e2dd48b38c4412a9517f5095b085f7dbc04a9b80f83ab065a6d0b8bbdd1",
+      "EnrollmentService.activate": "75cb6d4f1b54d5fae1c478b92886b83789b851d3bb626e67b83d62008e629585",
+      "EnrollmentService._activate_once": "7b44480b1b1e12e1d46255bedd68aef419fd88dc5d6efab56c1b6855c39b84b4",
+      "EnrollmentService._revoke_node_once": "524a937f1574be0d01b4ba15f47f011b6562f0d7dda4607fcd79e9559ce5b916",
+      "EnrollmentService.renew_expired": "d94f7d0c3421004b6a3473196bc424fd91fd766603ae5f1ff255542a29239909",
+      "EnrollmentService._renew_expired_once": "3f0ba5bf78b8bcb0582934dbb1a15837b00d41c808e095fc18295a9db9a53ca7",
+      "EnrollmentService.submit": "642b72dab689b1939e51f550b5bdc2846d5bb04ab4f7a7fc7efdfe91a64c2594",
+      "EnrollmentService.renew": "ef876db50aeb5d0833f071a1841805f36fdc14dc15578dd8cd2e6a860c027328",
+      "EnrollmentService.recover_rotation": "b82fe78df4804f4469c863224148da2e1f247a92bd365702c2679ac7500ac9c6",
+      "EnrollmentService.revoke_node": "166be4104863895414ba0edfa5f84bf9cfccc61cdd48ba023172be815197b161",
+      "<module>": "001626960c0fb2fa0208d9fc9eb1046c7f23885f04e757568a4c63531b3a0f87"
     },
     "control/src/vonk_control/enrollment/types.py": {
       "EnrollmentDenied": "4c1d3e6028c7bba017eff8da614e187acd473353853aa5366617a4016422f6a6",
@@ -2587,7 +2674,6 @@
       "ExpiredRenewalGraceExhausted.__init__": "a7d7684e2997500141e5c1bd4d59d4b7ba23b9955b4e66cabbd60180da55feb2",
       "EnrollmentIssuanceUncertain": "bfb2ec751a90a8f6a5fc9e73af0495143987ec0c1cfdd39699a441bf4cd331b9",
       "EnrollmentIssuanceUncertain.__init__": "d543d26ba24cbba016ec0e3a3e2d435c42e7d06e17d2c5e7c73d28d5b401570d",
-      "CertificateResponseCapacityRefused": "3b30cc7f76e73b67932009f4b5dcf6c0b41f513c4be3cb8f93ca8b27e9054a29",
       "RemoteRevocationUncertain": "e482b3f7e4198c387b3e9b2fbee841ba5d067383fc11ee62ef5d56342781c66e",
       "RemoteRevocationUncertain.__init__": "d543d26ba24cbba016ec0e3a3e2d435c42e7d06e17d2c5e7c73d28d5b401570d",
       "RenewalInProgress": "239d935481f0b15970432cef3374be697a994fcc8460d88889ec1270feab7865",
@@ -2596,15 +2682,14 @@
       "RenewalIssuanceUncertain.__init__": "d543d26ba24cbba016ec0e3a3e2d435c42e7d06e17d2c5e7c73d28d5b401570d",
       "RenewalConflictRevocationUncertain": "a5a75f05b46f99ced35c8e229899dff58d1fbc637a7ec6106a335f225a3b3d04",
       "RenewalConflictRevocationUncertain.__init__": "d543d26ba24cbba016ec0e3a3e2d435c42e7d06e17d2c5e7c73d28d5b401570d",
-      "<module>": "3e0f501201b537d32931e5a519371466dc769507241f603017b27800f60aac00"
+      "<module>": "c36396a4230110dc629999833de0c7f4c93672cd7fd3232b5269afb8420363d0"
     },
     "control/src/vonk_control/enrollment_body.py": {
       "_json_string_end": "0d0da8b0b4b8e99fbe61378842d742f7f1cac7c74ad5a16cf7705dd470b5bc5c",
       "_skip_json_whitespace": "7a404a8e22726268286d3dd6a555cc76ebee1d085e7f441736bcb5026eab376e",
       "_decode_bounded_json_string": "cb527d4cbf130d30c000f230a6761d15405393de74fa948843e3bc6b348910b1",
       "_scan_enrollment_grants": "974d92e7c4acbc7db77384c0c3ca53d94bb4ca4521fcdc11f6dd540219f1c35e",
-      "_consume_enrollment_denial": "a312bb679935dcfb8e321e40796a8ad83a492ae8d5c39eb1206367c07f2acd9d",
-      "_bounded_enrollment_body": "e86ba7eff1620fe96b16f9eb84da0cbe01569bd648dbff99013351aeda0699a9",
+      "_bounded_enrollment_body": "82ed32ed2435efcd93b145108b24aa609dc32ca315e4af031e5fca9a0daa7f07",
       "<module>": "6c1710028a11c3022d3eec244b6789007706607a012d83eae9f55fdb028b77cf"
     },
     "control/src/vonk_control/enrollment_validation.py": {
@@ -2625,9 +2710,9 @@
       "ExecutionPlanReceiptRefused.__init__": "00517a618d8b6327c860ffee66a8f19a65566b9d5086a0d3879b2a6d157acc94",
       "ExecutionPlanEvidenceUnknown": "09425bcd6c9041ad9df62d2d28994ec02848d3383a6eb574d1a02a7fe6357b8d",
       "ExecutionPlanEvidenceUnknown.__init__": "a6433f0ffdbaf267488b744934f81827b9ffc770ce5e0f5fb896430fd9085cca",
-      "ControllerExecutionPlanService": "21c91191f57f3f872b8306ee00145d6397441fdae8691e89432e812aa513e96c",
+      "ControllerExecutionPlanService": "9d335555967a19c1eb5a864959551c6559b9dbf7b633d969294ad15a5bf58353",
       "ControllerExecutionPlanService.__init__": "5e573c9b09ab4b22ab7abf439c2bde9336602e2d6a71dc3939e6797998873e5f",
-      "ControllerExecutionPlanService.compile_installation": "679bd3bb10c43147f2623260269319b48e83c4d7eae0f45c4de9d0764817164a",
+      "ControllerExecutionPlanService.compile_installation": "1f859a0ca9c4a7598fedf87dd4d58ee2993b217598ee7f873998481253ed44ca",
       "ControllerExecutionPlanService._runtime_image": "c78d684bf34f62aeeb7e2f38033589181878b25026780994a3e4b265b1e72ac8",
       "_runtime_image_receipt": "4c810c33f9d37e7fa4f061f4ba998dd938bed0c952dd3e5f1b0bedcb400d8d0a",
       "_build_package": "dd5d3ea0ecb4320b88da6f1a78ce9023cc9c90eb8dd39d8fbc104c1319984f79",
@@ -2636,7 +2721,7 @@
       "_PlacementTarget": "fc14f411a039c764fcae563c8d158fd7954052545d9984d53689309c6ffcdc45",
       "_placement": "a4a8e8e255108cf25d8f0b6992ff917de706b9441ce59a03835781997f9a42a0",
       "_bind_runtime_artifacts": "04c066288f5687c804ce309075f7c36a2edbc8d35023b138d5d42ca96204f76a",
-      "<module>": "a1a4be0a2024f64644c7716a113d511bc7c90bc949eda09fc471e05af9e85ffa"
+      "<module>": "5d1dc29dff3093ccfc1189c6d57663fe49d46563d9ddec53830b54e0973d6510"
     },
     "control/src/vonk_control/failure_evidence.py": {
       "EvidenceModel": "e980258579b21d0b738940b76fcf850ddb6b730592b4bfe4795c338e119437f3",
@@ -3537,15 +3622,15 @@
       "<module>": "bb6b7978947982d22b21955f14f8412414eccde837a95a17685f387b76466fb9"
     },
     "control/src/vonk_control/model_cache/availability.py": {
-      "AvailabilityMixin": "bb630b55532dff37962b490543d8f31c3eeebe2280c4032f2b5b04c9af5f32d6",
+      "AvailabilityMixin": "4d912d692fec3b04a04e1f8dad053a28414f432c48b6679be1fcbe368bfa7c9b",
       "AvailabilityMixin._require_managed_cache_coverage": "89bbf4258ab838c91715709a583ef58976a9a17f37eff5c9bb32e2ed37854582",
       "AvailabilityMixin._reverify_set": "d62c860655b42b15fa7202bac0e9851386a4d3aae5655ed5a444dcb658e144fc",
       "AvailabilityMixin.cached_artifact_file": "038ab12b40a7bcdfc2f6029076de0ce8389679934a06c22e270c5e7f20280522",
-      "AvailabilityMixin.cached_artifact_file_once": "22b9b879d4ff066e4f5afcc80c486a8a6f85d1ce1f08842353102cf55d2d4938",
+      "AvailabilityMixin.cached_artifact_file_once": "c36f16dbe2307cbfb267ccbb5452fd52c0a2e96e0be8e042efc8665ea26c8812",
       "AvailabilityMixin.adopt_verified_set": "718ee13c796cc33e4eb88457e47ddb4af5f5c70442af71d39363569bad3e519b",
       "AvailabilityMixin.resolve_verified_artifact_set": "6608150711e993f403b5330fa60c66020e3514c642e83efc0cda48c15aaeb4a8",
       "AvailabilityMixin.read_verified_artifact": "db0bb33ad787cc3bd0ffbf56df30a211366bf2f0992ff7563e99000c4da5cef7",
-      "<module>": "7ab96bacd5d40a9d88fc1b6f9a08ac9b2176f4f4d3338a62465db67ee0a79901"
+      "<module>": "55365dd466b4453d24a3f27cd70bd023f7ba30a8a2e539a9dfeb23747452be97"
     },
     "control/src/vonk_control/model_cache/cancellation.py": {
       "CancellationMixin": "401e2d008dc4f64cbd04b304ad1cf3b3af33d28502eb76565c0638a37a11cc5c",
@@ -4145,8 +4230,9 @@
       "FleetEnrollRequest": "0ab14a50318dac745aceadc673298ec383bd7e57d0f864c90754bc0e5c2129f6",
       "FleetReenrollRequest": "b828f5ff5d5b899407ba1b27ed97ec08a9d0a75da76c51602283a7926685c493",
       "FleetUpgradeRequest": "70a5dfdd71ba1d22ffb4152bbe1524635489b0e197a336fff84933991e4a29d6",
-      "FleetActionResponse": "a4621aa967c43140f8750f96b47b95f4bbdc1ae835caea2378550762b0de0845",
+      "FleetActionResponse": "3dc22285a130fe35a8a9e93de033ce93a236c60e910eb51ab23ce4850d5b3387",
       "FleetActionResponse._omit_unused_request_key": "60d18520bf08e48fe6606ad0b38c0530b83045a5c0327d7be2f676430e6cbe9c",
+      "_fleet_work_state": "3168f50c7928295455a2c09d24e8622c6543b01782dc73ac63ac659429ee4479",
       "FleetLockHolder": "07f047958b133aed145cde5cb157b6c0c3fe03a092dcff7fcee56e6b2b319ebc",
       "FleetOpenTransaction": "55fe35a827b1310c9c392ab44c94820778633e4cbae75061a91a880570d322b9",
       "FleetLocksResponse": "bb11125a3c60f62578c9bc763ecd73a07c19233cf4f32813fb0ce90330ffab86",
@@ -4154,12 +4240,12 @@
       "FleetLogResponse": "608e97b5e7056e1c1ff7ca5290aff088a779309b8ba09e0f7f3ba51b7afff4bc",
       "FleetLogProvider": "7089a288f89f19bef5f315ca23ac9c6beb644b57ed408d848c9e184981d61800",
       "FleetLogProvider.list": "baca04831c034b6473f10673bbdcaaae9d28498466855e0c2370add9390181eb",
-      "FleetEnrollmentProvider": "e0361f2f93d3f686e97c0f1896f335ea6201e88f3fe9b9273fc8538e29b46f1f",
+      "FleetEnrollmentProvider": "1112a333d103feae432a87bc7435c0f0c109b2206664e65a9b726b6dd65f99aa",
       "FleetEnrollmentProvider.create_named": "06a17d55c139907ded669335c5f7214932a103e1767613b25951933e0247002e",
       "FleetEnrollmentProvider.create_reenrollment": "b315357560ded752d1d19b106280782ff1e85d037466a5d3121b67ebf1ca2c13",
-      "FleetEnrollmentProvider.revoke_node": "e554f33e79d23c3e00045947c160f511372782b575345d4bf98a805c2dec91f3",
+      "FleetEnrollmentProvider.revoke_node": "324c10e5c84a96848dfb2bcaaa3e6987bf7fc0ee0d7509fc16ece3004be80475",
       "FleetEnrollmentProvider.grant_status": "3b0a38252947b9f7557016134fd8e95e0fedc34c40818434016efb416085bd1b",
-      "FleetEnrollmentProvider.revoke_grant": "8cea7930e84409e418d2d25736cda9ac3ec1018bff85252878aa752936cfcd9f",
+      "FleetEnrollmentProvider.revoke_grant": "de30349c8e606ef1a0377249e224c1de4f12e23eba422ff41236a9974fdf4bf3",
       "FleetUpgradeProvider": "64bdcc4a7c2c70c0435928298ab99bdd439220f8746a99b14d7a54858c55fbe0",
       "FleetUpgradeProvider.current_package": "fd15a22dbb5e6e6fd39863a16e91d678ab703842740cd0cc65e16e2d5a5917b9",
       "FleetUpgradeProvider.get_request": "af49da963ae3cdaf75695dac0a36fd5c2c2265913e83e3d9dfe838cc42cf2cc3",
@@ -4167,15 +4253,15 @@
       "FleetUpgradeProvider.apply": "c742e859712e8d5b1b05d635c25274b6e1ccce8f8d273c8896b8406647a0265a",
       "FleetOperatorServices": "59a5ccc5050c38645bc841f3752eb8eb0f15b0689e8fbab00182384e24e0e74d",
       "FleetOperatorServices.__init__": "6477f3b5e6d0196d013209f45d2357b530dd8ff7ebde4dbcd1638b2d6f881ed1",
-      "_AgentEnrollmentAdapter": "fdc052a26f49a3268a1ec41c1d3143c4f0c40e4f3edccfd63a18f50c72fff2ef",
+      "_AgentEnrollmentAdapter": "e2e9d90728ee4ddaa942d467d20b2ab085eef6a8b1b394b69ce3302b4f01c96b",
       "_AgentEnrollmentAdapter.__init__": "574a3bb25b4411aad51e31dd6d3bdcfe7a8f41c6ec6183c603ce4afc3871742d",
       "_AgentEnrollmentAdapter._required": "46870ae836a41085387553b04690c14eb139a658a0295222a92b359027d26642",
-      "_AgentEnrollmentAdapter._response": "9f27d004c26fe62f5190a572df9ea9a16e21208163e8db8f2e1707e19a62b73b",
-      "_AgentEnrollmentAdapter.create_named": "67ea83fe3d523d449e6ca914ec852c6a8ea81db1437c6eb0c7516c4271449fc0",
-      "_AgentEnrollmentAdapter.create_reenrollment": "1e05267154537690a43e9d824762a0bdcf368d21052cd66a2c19814a77081513",
+      "_AgentEnrollmentAdapter._response": "9901753f25a3f73ccac22eb0b2453105ae1322785aff06e75915acfae23dc003",
+      "_AgentEnrollmentAdapter.create_named": "4b555b1cabb907ed184c4839261f7aeae08f976bf806b1f48d2f10344a7d8bd3",
+      "_AgentEnrollmentAdapter.create_reenrollment": "5c671b35bfd35b2a3d623f8eaa45952b67c1b45897e1f1ea08d418a1f9adc6c0",
       "_AgentEnrollmentAdapter.grant_status": "98ed1c53da3a8d00de1fd7de02d267d65ca76cff8ecf5b0408ff3e8cbecf1a60",
-      "_AgentEnrollmentAdapter.revoke_grant": "3dd69e69ceca3f9a1c4efffa9b66f78d7518ad36d31aa395a393a325a3f7b44e",
-      "_AgentEnrollmentAdapter.revoke_node": "d9cec709fc47e0c3734d11b9fcd5b390c1bd495fd66ec31798b6a3c76ea699a8",
+      "_AgentEnrollmentAdapter.revoke_grant": "81f93e0c1edc32aa3be947f0a82898eb38b26dade85ad90970949085b086cbdb",
+      "_AgentEnrollmentAdapter.revoke_node": "ca16b454589ed36bd4d23c3596a87f3a2edb2a6fddb25c20e7a57dd0d9577e7a",
       "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",
       "_agent_log_source": "b03b77527b4982a82c7d761326dc51e2bc0db7c99c12949a05ecf0092f41a1b5",
       "_phase_start_deadline": "59542ebd709fdad723562e34f25e1d87c1c3d03e07442d020e8ba022d9d38cd2",
@@ -4192,7 +4278,7 @@
       "_domain_refusal_detail": "0736b3a999cbaf58971f98a22fe6c04dd5e1ca3ca8948acd0217847c4f6b2120",
       "_operator_error": "120eda13feb897e918d3b9351e052f83df24c7dbf289f17ed5aacb65fff3931f",
       "_require_mutation": "6964700409889ca511bcf38153dd9699d51cc5a6806a802f4849b967802d6bc6",
-      "install_operator_projection_routes": "11774396ad5a54ef3a75fb6e019e4f2ce205e1e20e2bd4d2be3154017c717f22",
+      "install_operator_projection_routes": "6e69036384ad117a475025c0b704b84754b8ba7c6e2ba991392bfebcce5ed0c5",
       "install_operator_projection_routes.fleet": "b482a7459232d1f723d47bb3b9ddfaa9433a3adbf67bceafc4a3d748fd04a81e",
       "install_operator_projection_routes.snapshot": "2f6c9c4f94cbcaf65895f14ddded5e61a50b9c540c0eee857f260c057266facb",
       "install_operator_projection_routes.selected": "9206305a31143209a53999a58d308b26c4e19900290a73e484d3e847687afee1",
@@ -4204,10 +4290,10 @@
       "install_operator_projection_routes.fleet_enroll": "db148c3e57ec29e8473db3ac5d807829f6f08da5d6bc0ab235f90bef343082e4",
       "install_operator_projection_routes.fleet_reenroll": "942b9473d7c8cb6bf532e3293d2fa3f5ab358cb3d5d4cdd72d2e3a2a0e17a55f",
       "install_operator_projection_routes.get_enrollment": "3d74f9bf1c8e65c68a5f76ef7d042492b8bb105769cacce11a40d3d18d964a9d",
-      "install_operator_projection_routes.revoke_enrollment": "05c99485eec50554f0ff96080fb096075482a1ee00c92ca8a161af4400f80de7",
-      "install_operator_projection_routes.fleet_remove": "1d1ccb6528a46c76e76e5020c147ab1ebb05d817c8d98b9f3611386117089141",
-      "install_operator_projection_routes.fleet_upgrade": "7c07abd4fb0e6b9ba6e2c6c9f31bb361f7d637c03c51af63c20ce91d929b20bf",
-      "<module>": "9b169683b706278acf4e21af467c97c93070db1c0ddf439ee4c94efdf929d5eb"
+      "install_operator_projection_routes.revoke_enrollment": "2ced70b33c101135b3a15269ac054b0232be1d4288233cc5aa6206599b286625",
+      "install_operator_projection_routes.fleet_remove": "9e9c0f1bb6c106aa0f54c48d7081f258f588862cf84dacc5b6fc655ff4e97b1e",
+      "install_operator_projection_routes.fleet_upgrade": "c18ad38914f80761166f89f4ab970ac212a113a695a0067f68d9168f4a356b87",
+      "<module>": "c169a08ec8113c807dba66966846b2b1127d214247a758cac64af1eba08480d8"
     },
     "control/src/vonk_control/passwords.py": {
       "PasswordPolicyError": "a4d18cac684a2276fd48ae96f2774dd995b600a8131364148d54247437f78d68",
@@ -5473,14 +5559,14 @@
       "<module>": "187d53f90ec1e8391222d2fdd01b82c14b81b5f4a17d7d7473c927cee5fa1cee"
     },
     "control/src/vonk_control/run_switch_operations/endings.py": {
-      "EndingsMixin": "28bba87cb9d49ae8577c8cba7a999e18c7d5d67eada69e5dcb262dce0a0a553f",
+      "EndingsMixin": "5fa88925371224cf7e73f422755b3c6f77b12900ef76f89e8ea13804d5aecc90",
       "EndingsMixin._settle_stop_observation": "04dbd9a49d584e31905da65a22f7102a8afe77ba395bb044f96453883ad0a8a9",
-      "EndingsMixin._get_child_operation": "5bc473b63ea405c4a64c88f02e4b1fd6c55552a701cba30a9d1390cddd55550e",
+      "EndingsMixin._get_child_operation": "c861efc9302bc9b5380925ef9580a3d62991eaff938b315919d0cc5bd6181f0f",
       "EndingsMixin._fail": "64e4b6014d867effcc7bfd0a9ccfcc7f79ff72aa0eaed1997ba6e28038e7c32c",
       "EndingsMixin._settle_invalid_receipt": "f6c609fdc97f5308c258bc28764dc9c200239e079061e8b5d5c6bb50d9857d18",
       "EndingsMixin._schedule_checkpoint_retry": "24b73ca9c25ec6ad3421aeca8b1d607638a04a1d91575408b63bc0bf91cf19c3",
       "EndingsMixin._mark_failed": "7de0f8b9781bc0b44e28ad044b7111ec53da35e1eac4a1d590d8780e9059b1cc",
-      "<module>": "7afa49c5dd3bc5a588934a36f3693d53bd921c6f40b16739a460c342e29ca2f7"
+      "<module>": "66fb80c07de2bd3e51a74239147c5e91c6d817577463f8888064a4cc3d01dc3c"
     },
     "control/src/vonk_control/run_switch_operations/endings_helpers.py": {
       "_reject_invalid_operation": "5509131ef88abf14a9f748e78aae0e34ca6140923c5a0d7bed6f6e9941a12c0b"
@@ -5513,7 +5599,7 @@
       "RecipeLifecyclePhaseExecutor.__init__": "2e93122dafabf6f7bcbc163da50d44d52c8a9721009e5f66efb8db0464702803",
       "RecipeLifecyclePhaseExecutor.abandon": "7d9267e71671256de72308011844400938c66b4597bedd3b7e7c89b9ac2f447d",
       "RecipeLifecyclePhaseExecutor.get": "2f17efff1bdf2281461916e10fe2960501bdf0f4527c5c655afba2bc80e91b03",
-      "<module>": "f1e1efb6d4c7cf589b3045a44276353fcf177c144d6a33d40d64e21d5887a626"
+      "<module>": "a328376416ea272b7ab28581b017958dba59f55c23547094ecc73f3a6bdf0467"
     },
     "control/src/vonk_control/run_switch_operations/executor_phases.py": {
       "ExecutorPhasesMixin": "fc224207fbf0f292a64047efd8497116b53b81a4de7aa7c5c1707b3e1f952a57",
@@ -5577,7 +5663,7 @@
       "_ResourceFits.requires_early_stop": "4cfb765770e6bd80bc3ad04ec0b415c1e3779abd2070356f843e312d775b2534",
       "_ResourceFits.stop_before_prepare": "d939cc0e765dc0662c14f3cf3ece70d1413313203d37f473cf4d2e6560158924",
       "_ResourceFits.stop_before_transfer": "89de86e4251e8f62ca1f5f6dfd93689c9976c12389434c2ce4967f2fa3e15b4b",
-      "<module>": "b5e524363950ee63f97fa4e9b00db7bf1fb2a7cf393e945ea76d6771377882a2"
+      "<module>": "992204f0bd1233ca0f16a1b39c21e403935c08caa2382c8aa6404b07191e7c37"
     },
     "control/src/vonk_control/run_switch_operations/observation.py": {
       "ObservationMixin": "a13490fc9e0f66364d0aa7c36cf9d9992382108b580791dfde4377c76c5a88af",
@@ -5720,8 +5806,8 @@
       "_wait_blockers": "71f0e39edf79d1383260e1caee99d76a7979602ef5f6fa4a53b1c59595bc3f83",
       "_persisted_result": "6522df6de4cc7538cef1b094283d9a6e824320141d07f87fee462e23f23e94fd",
       "_phase_result": "15b12fff5eccd352fd6afd9aeacff21a30d8218a94c5d3e9de15f7173276f0d6",
-      "_child_result": "cd3f7da0ef8a0fb10418b9b7683d17ed0f0e4b5da8e715c438b1ee3d5a5428d7",
-      "_child_progress_payload": "d995216f70842350d7efb60914c4a980fe0cc22535931aac605001fe5f391fef",
+      "_child_result": "63d08457443d746de3630aeaff37bd2f09056bb9af4ed7c0807eb9d449fa21a7",
+      "_child_progress_payload": "9d2f8aac4a64a085a63aa3bb4303efbb3b017adfa74f064b45ac319596814af3",
       "_child_failure_code": "1b3d52c22042348dfa80affad5af2731f577e0196ccd15a63bac5b15797678cf",
       "_child_failure_kind": "c66bad7519a38ae2bfdab53db3d790a387363b7f1e50bdee81863bdb2932a0ce",
       "_without_observation_time": "5cc3ed67a5aec4f74cdbc1f6f82c18ff03cb6f0ca2647b5da477342e84bde94b",
@@ -5992,37 +6078,35 @@
       "_RevokeRequest": "533ea3273fef22d0c70f54a172e6db1363f4bedf652f0df63c3a637c46af6e92",
       "_StatusReply": "76b9f2bba1f9b8f5dfe4bbdfa9f2e08c7209eada02b1c8208b61feb6fc2dc389",
       "_PublicJwk": "62c83008eedf951ce21f033983c5885dc55ef117aa02a309ea99c2ca025adc6e",
-      "StepCAError": "2a5c4a32fe47f95cccbcc460560e59c004f76edd0e8cd3a4dc039dca7a29892c",
-      "StepCAError.__init__": "a3f0545b70866687dcf3e7bf68c9c7daf4d6bae0e4d10255e4d72c9184b0304e",
-      "StepCAResponseCapacityRefused": "a654250444fe4dd7b181381382499cb5e88f086e58c71ebac69b2df62d002251",
-      "StepCAResponseCapacityRefused.__init__": "aa060dc5fd652d0a3a5589bcf33db5d7dbd77fdda5f53ccc9cc1e7d9812666e2",
+      "StepCAError": "ad07ae19565fa556112a5251e4911d4641113891f1e0ddfdced35b55ada56ff1",
+      "StepCAError.__init__": "75d0c35b85fe4677ffffc59a4595011d5fa6a4bc70b8ddcacddd73e5154cbc80",
       "StepCAUnavailable": "0ad2240459ea89e627d5804e38889d47573363c7adde0642673e85e61fbc53ea",
       "StepCAUnavailable.__init__": "d543d26ba24cbba016ec0e3a3e2d435c42e7d06e17d2c5e7c73d28d5b401570d",
       "StepCAIssuancePending": "d0c0012a3e4e6003b91dc1748660925c7e85a95008c0a3d73ee092e607bc64c9",
-      "StepCertificateAuthority": "ef99ad25b7c82686db5839bbd926ae75574038673ef5ce9c68f64bbf8399f4c4",
-      "StepCertificateAuthority.__init__": "6a29380afd6baf7c560fbeab0230f54b9fe0dcbdf349e855fb519613d176ca10",
+      "StepCertificateAuthority": "a856c4b9339234b7f50867cf32152cc6f12d577790ce7dd9f96272743a64ef0b",
+      "StepCertificateAuthority.__init__": "0b26ab769a70851f4de0478479a022ab212ed517683245c050ef11b28848b9e4",
       "StepCertificateAuthority.prepare_request": "41e6b112978621aa5d9ad66ec8887bc7441e0a7ac90b583465e623c3d36c8c5c",
-      "StepCertificateAuthority.issue_node": "ceedfb0601a723b607a4733724b6cf0a11b946f0af6b946ce638e76a655d8cf3",
-      "StepCertificateAuthority.observe_node": "f7904168dbd1581977062fc021076e3e18d30d736a412e4ffd3a7922e72f3257",
+      "StepCertificateAuthority.issue_node": "22948611dd1f65d84635f9e133075fd9cfb8588d46e6c755c22a8f10b237706f",
+      "StepCertificateAuthority.observe_node": "dced958ff759136af112c525fd835d3f346c9f8524906e8f71fb8dc3c3076d31",
       "StepCertificateAuthority.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
-      "StepCertificateAuthority.check_health": "31ef94c8cfcb1accff91515d715db55eb219090cdb4c52268d3ecf8481b246f7",
-      "StepCertificateAuthority.renew_node": "d42904369682e550d0079136fce15f74f93e1a952cb7b746b158e2236d44419b",
+      "StepCertificateAuthority.check_health": "632839a5be38055db87b2b27c5205326e91c95e7fe7b9ffcf9bf52f56bfd4853",
+      "StepCertificateAuthority.renew_node": "35ec6131e51466a123bee55d48b4ee6e7863aaf9b6666850166a239be0bc684b",
       "StepCertificateAuthority.revoke_node": "e5dcd3d61b4d40e69b1150dd3b8afa332897f469d00944c87d49f92bfe18c981",
-      "StepCertificateAuthority.revocation_bundle": "525a7ed5f10025694ae20280944f1122b6b82d4817e416c9e5bbba2fc553135d",
-      "StepCertificateAuthority._sign": "f3185d9995bfe7f15cc2dd41e0ae439a12e2145053f15306d12a1fe6ddb9372f",
-      "StepCertificateAuthority._validate_leaf": "72ac22e31927e58ebaf6f6e6ec3ec0c2388a3040fd09092e5e1e981bf4eb09b7",
+      "StepCertificateAuthority.revocation_bundle": "7fc3bc6c88df6fb55e37355d0e72b5f5199116e4fcb32ba84f9ef9ba29e0b068",
+      "StepCertificateAuthority._revocation_bundle_once": "f6f445b565779ddc0514f095860fb4b7b58cf4bb0891f65eace6ca085190c580",
+      "StepCertificateAuthority._sign": "860e8e565627177b9da2d5a944199a6133ddad8fcf8509719f5ed4fd528e7a60",
+      "StepCertificateAuthority._validate_leaf": "c3bee898ba0e3bb5ccb6a4863141e774c6ee57ba653909adecae081027f3440d",
       "StepCertificateAuthority._token": "ab8926f9d3d1327ceb494231514f93a418e8afbbd9edfde4cb9448fcc85ac6cb",
       "StepCertificateAuthority._json_request": "c75ec7a28c1c502cd86b512308e96671190922b03dd1eeb61dbf0738c29b3285",
-      "StepCertificateAuthority._validate_sign_response_capacity": "8f1d0fdb6db6ac30615c6af42e167393f0be72ecbf6149f318820eae6d29f699",
-      "StepCertificateAuthority._request": "9a4b952f49bfc15278450a2bb5dc14d40b39c9a9a2810372ac062450a0103714",
+      "StepCertificateAuthority._request": "0b9c51641777673189a807c186dd3eedc447287bb8a14ba47cce6f71b1d7f728",
       "_signature_verifying_key": "ab4d2636b62a3dc6b59f6f0923ff9b23e1cd93f6762b4c286b2e971be0c64172",
       "_one_certificate": "5faa26381884724f154c00b066b2993580230a18910fba89190fc5d35118e634",
-      "_verify_ca_chain": "02b432c891c3daf9a23794deeb4db4ca3fbe6db10cfa280742280ee4bd9ec7a4",
+      "_verify_ca_chain": "60d3dcb47dac36f0666a1b2ce7bd4f90cd79e9aaaf8c0211166d780fdcf1bce2",
       "_rfc3339": "f6460196c130c1e1f3bcaa605e9ef368ef96b335f1ab14e720ff4c029ee063e1",
       "_is_ok": "be409a4b8538033101a130135a6f52fa1eba5f4ba1575d0a3ee5217c9f596525",
       "_jwk_thumbprint": "980236714b705f091bb0749383d1be714be4e2773b638bd89d141341d6555811",
       "_validate_crl_freshness": "323f4d3c0b294161d33c92d56e4170ddeb967606d34b0ed968ada330426c927e",
-      "<module>": "4dd90691d3191b2cadab36d6a962e52b32c32d97dc8c41be3bd615cc6a8b34de"
+      "<module>": "056c04d03dc80ffb52ef9588534429eb7d48c4b39d27f0ab59fc98253f754df8"
     },
     "control/src/vonk_control/strict_json.py": {
       "_serialized_field_name": "151bb9bbaf2c39c68e75ee889a325d0fdca084f5e1bc21e865d8e49cf08cfe71",
@@ -6086,7 +6170,7 @@
       "Worker._run_model_cache": "71b5e55a99203d0981a8ab4b9f9cd931551506c0005e26fe1758be0fb3d3c5f3",
       "Worker._run_generic": "2dd47b9bd5040ae1a719b5aa39aca6b9390d39fcda8273fd5fd0bc7f5dacc12d",
       "assemble_production_worker": "9a2fb6fe2de2f24b9bc18c008a0a937c8942af8b0345fb8c674555a7995cfe47",
-      "<module>": "42cf5201dff1769a075ccdb2fee521f8af1c4d064df0e5bd2e5c95ce7b58a3c3"
+      "<module>": "1ddfec77caea0680b04fcaf57b7ad2710c4c16b9e50dc7648bde5f72573f8370"
     }
   },
   "operator_waits": [
@@ -6300,7 +6384,7 @@
       "category": "security-edge",
       "reason": "The Controller-to-agent serving seam: only a file the set's manifest lists, under a validated relative path and exact digests, is served. A path, digest or (object, path) pair the manifest does not list is refused (path safety, no caller-controlled filesystem path).",
       "sites": [
-        ["control/src/vonk_control/model_cache/availability.py", "ModelCacheNotFoundRefused", "AvailabilityMixin.cached_artifact_file_once", "model_cache.artifact_missing", 2]
+        ["control/src/vonk_control/model_cache/availability.py", "ModelCacheNotFoundRefused", "AvailabilityMixin.cached_artifact_file_once", "model_cache.artifact_missing", 1]
       ]
     },
     {
@@ -6629,26 +6713,6 @@
       ]
     },
     {
-      "family": "distribution.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/distribution.py", "DistributionError", "CompositeObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._register_row", "distribution.assignment_conflict", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService._register_row", "message", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.open_object", "distribution.model_set_mismatch", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.open_object", "distribution.object_unavailable", 2],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.register", "distribution.assignment_conflict", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.register", "distribution.model_set_mismatch", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "DistributionService.register", "distribution.runtime_image_mismatch", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "FilesystemObjectSource.open_object", "distribution.object_unavailable", 2],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "MemoryObjectSource.open_object", "distribution.object_unavailable", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource._describe", "distribution.model_set_mismatch", 2],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource._open_cache_object", "distribution.object_unavailable", 3],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "ModelCacheObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 4]
-      ]
-    },
-    {
       "family": "distribution.security-edge",
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: message names an authentication, signature, secret or path-safety check. Refuses distribution access after the grant expires. Refuses distribution access without a grant. Refuses a node requesting another node's distribution grant. Refuses bytes not covered by this node's distribution grant.",
@@ -6661,7 +6725,9 @@
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "forbidden", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "FilesystemObjectSource.open_object", "permission-denied", 1],
         ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "nas-cache-object-access-was-refused", 1],
-        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "permission-denied", 1]
+        ["control/src/vonk_control/distribution.py", "DistributionRefused", "ModelCacheObjectSource._open_cache_object", "permission-denied", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionIntegrityError", "DistributionService._register_row", "distribution.assignment_conflict", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionIntegrityError", "DistributionService.register", "distribution.assignment_conflict", 1]
       ]
     },
     {
@@ -6669,7 +6735,7 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class ExecutionPlanCompilationError validates a contract or request.",
       "sites": [
-        ["control/src/vonk_control/distribution_executor.py", "RecipeRuntimeSpecError", "CompositeDistributionPhaseExecutor._prepare_runtime_image", "canonical-model-projection-is-invalid", 1]
+        ["control/src/vonk_control/distribution_executor/preparation.py", "RecipeRuntimeSpecError", "CompositeDistributionPhaseExecutor._prepare_runtime_image", "canonical-model-projection-is-invalid", 1]
       ]
     },
     {
@@ -8193,14 +8259,14 @@
         ["control/src/vonk_control/run_switch_operations/service.py", "InvalidValue", "RunSwitchOperationService.__init__", "run-switch-memory-floor-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations/planning_helpers.py", "InvalidValue", "_now", "run-switch-clock-must-be-timezone-aware", 1],
         ["control/src/vonk_control/run_switch_operations/planning_helpers.py", "InvalidValue", "_settings_view", "effective-settings-are-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations/executor.py", "MissingRecord", "RecipeLifecyclePhaseExecutor.get", "message", 1],
         ["control/src/vonk_control/run_switch_operations/provider.py", "MissingRecord", "RunSwitchOperationProvider.get_operation", "message", 1],
         ["control/src/vonk_control/run_switch_operations/cleanup_planning.py", "MissingRecord", "CleanupPlanningMixin._preview_cleanup_once", "message", 1],
         ["control/src/vonk_control/run_switch_operations/run_planning.py", "MissingRecord", "RunPlanningMixin._preview_run", "message", 1],
         ["control/src/vonk_control/run_switch_operations/cancellation_retry.py", "MissingRecord", "CancellationRetryMixin._cancel_once", "message", 1],
         ["control/src/vonk_control/run_switch_operations/acceptance.py", "MissingRecord", "AcceptanceMixin.get", "message", 1],
         ["control/src/vonk_control/run_switch_operations/service.py", "MissingRecord", "RunSwitchOperationService.inspect_candidate", "message", 1],
-        ["control/src/vonk_control/run_switch_operations/stop_planning.py", "MissingRecord", "StopPlanningMixin.preview_stop", "message", 1]
+        ["control/src/vonk_control/run_switch_operations/stop_planning.py", "MissingRecord", "StopPlanningMixin.preview_stop", "message", 1],
+        ["control/src/vonk_control/run_switch_operations/executor.py", "MissingRecord", "RecipeLifecyclePhaseExecutor.get", "message", 1]
       ]
     },
     {
@@ -8379,7 +8445,6 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/run_switch_operations/ownership.py", "RecipeBuildAdmissionBusy", "_lock_current_build_parent", "message", 1],
-        ["control/src/vonk_control/run_switch_operations/result_helpers.py", "RunSwitchRetryLater", "_bound_workload_intent", "run-switch-workload-intent-is-unbound", 1],
         ["control/src/vonk_control/run_switch_operations/image_receipts.py", "RunSwitchRetryLater", "_build_receipt_in_session", "run-switch.container-build-receipt-unavailable", 2],
         ["control/src/vonk_control/run_switch_operations/ownership.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-parent-invalid", 2],
         ["control/src/vonk_control/run_switch_operations/ownership.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-plan-invalid", 2],
@@ -8398,7 +8463,8 @@
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-no-longer-has-a-workload-claim", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-was-cancelled-or-superseded", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-progress-no-longer-owns-image-publication", 2],
-        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-spark-scope-or-workload-claim-changed", 1]
+        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-spark-scope-or-workload-claim-changed", 1],
+        ["control/src/vonk_control/run_switch_operations/result_helpers.py", "RunSwitchRetryLater", "_bound_workload_intent", "run-switch-workload-intent-is-unbound", 1]
       ]
     },
     {
@@ -8534,16 +8600,6 @@
         ["control/src/vonk_control/run_admission.py", "RunAdmissionBusy", "RunAdmissionService._accept_run_locked_in_session", "run-target-membership-changed-during-admission", 1],
         ["control/src/vonk_control/run_admission.py", "RunAdmissionBusy", "RunAdmissionService.accept_run_in_session", "run-capacity-writer-is-busy", 2],
         ["control/src/vonk_control/run_admission.py", "RunAdmissionBusy", "require_admissible", "run-is-waiting-for-current-inventory-or-capacity", 1]
-      ]
-    },
-    {
-      "family": "step_ca.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class StepCAResponseCapacityRefused is of the input-validation error type.",
-      "sites": [
-        ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "configured-ca-sign-response-reader-cannot-accept-the", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "issued-response-cannot-fit", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAResponseCapacityRefused", "StepCertificateAuthority._validate_sign_response_capacity", "issued-response-metadata-cannot-fit-the-enrollment-contract", 1]
       ]
     },
     {
@@ -8747,7 +8803,8 @@
       "reason": "Code-reviewed boundary:  Rejects a malformed requested object digest before opening storage. Rejects an invalid requested object length before opening storage. Rejects archive download for a runtime image; this source only supports layered pulls.",
       "sites": [
         ["control/src/vonk_control/distribution.py", "DistributionError", "FilesystemObjectSource.open_object", "distribution.object_invalid", 2],
-        ["control/src/vonk_control/distribution.py", "DistributionError", "RecipeBuildObjectSource.open_object", "distribution.object_unavailable", 1]
+        ["control/src/vonk_control/distribution.py", "DistributionError", "RecipeBuildObjectSource.open_object", "distribution.object_unavailable", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionInputError", "CompositeObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 1]
       ]
     },
     {
@@ -8983,7 +9040,7 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/model_cache/availability.py", "ModelCacheConflictUnknown", "AvailabilityMixin.cached_artifact_file_once", "model_cache.artifact_unverified", 1]
+        ["control/src/vonk_control/model_cache/availability.py", "ModelCacheConflictUnknown", "AvailabilityMixin.cached_artifact_file_once", "model_cache.artifact_unverified", 2]
       ]
     },
     {
@@ -9356,15 +9413,12 @@
       "sites": [
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "ca-refused-exact-certificate-request", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-redirects-are-forbidden", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._request", "step-ca-response-is-too-large", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "ca-certificate-differs-from-the-accepted-exact-effect", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-invalid-certificate-chain", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-invalid-sign-response", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-an-unexpected-intermediate", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-inconsistent-certificate-chain-fields", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-ca-certificate", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-for-another-public-key", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-outside-the-allowed-clock-ske", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-with-an-invalid-signature", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-certificate-with-the-wrong-key-type", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-authority-key-identifier", 1],
@@ -9372,42 +9426,15 @@
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-certificate-subject", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-node-uri-san", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-a-mismatched-subject-key-identifier", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-invalid-certificate-lifetime", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-unexpected-certificate-extension-profile", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-an-unverifiable-authority-key-identifier", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-certificate-extension-criticality", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-extended-key-usage", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._validate_leaf", "step-ca-returned-invalid-key-usage", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.issue_node", "ca-issue-returned-absence", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-returned-an-invalid-revocation-bundle", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-revocation-bundle-issuer-is-invalid", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority.revocation_bundle", "step-ca-revocation-bundle-signature-is-invalid", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._revocation_bundle_once", "step-ca-returned-an-invalid-revocation-bundle", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._revocation_bundle_once", "step-ca-revocation-bundle-issuer-is-invalid", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._revocation_bundle_once", "step-ca-revocation-bundle-signature-is-invalid", 1],
         ["control/src/vonk_control/step_ca.py", "StepCAError", "_validate_crl_freshness", "step-ca-revocation-bundle-freshness-window-is-invalid", 1]
-      ]
-    },
-    {
-      "family": "step_ca.exact-journal-pending",
-      "category": "bookkeeping-debt",
-      "reason": "Provider issuance observation may remain pending; end bounded observation without granting unverified effects. Full call-path retry proof remains debt.",
-      "sites": [
-        ["control/src/vonk_control/step_ca.py", "StepCAIssuancePending", "StepCertificateAuthority._sign", "certificate.issuance_in_progress", 1]
-      ]
-    },
-    {
-      "family": "enrollment.already-retried",
-      "category": "already-retried",
-      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RenewalInProgress is a busy/pending/superseded handoff.",
-      "sites": [
-        ["control/src/vonk_control/enrollment/rotation.py", "RenewalInProgress", "RotationService._issue_rotation_claim", "certificate-rotation-issuance-is-in-progress", 1]
-      ]
-    },
-    {
-      "family": "enrollment.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CertificateResponseCapacityRefused is of the input-validation error type.",
-      "sites": [
-        ["control/src/vonk_control/enrollment/issuance.py", "CertificateResponseCapacityRefused", "EnrollmentCore._issue_enrollment_claim", "certificate-response-exceeds-the-supported-wire-budget", 1],
-        ["control/src/vonk_control/enrollment/rotation.py", "CertificateResponseCapacityRefused", "RotationService._issue_rotation_claim", "certificate-response-exceeds-the-supported-wire-budget", 1]
       ]
     },
     {
@@ -9428,7 +9455,6 @@
         ["control/src/vonk_control/enrollment/rotation.py", "EnrollmentDenied", "RotationService._claim_rotation", "certificate-is-not-currently-valid", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "EnrollmentDenied", "RotationService._claim_rotation", "certificate-serial-does-not-identify-node", 2],
         ["control/src/vonk_control/enrollment/rotation.py", "EnrollmentDenied", "RotationService._claim_rotation", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore._create", "enrollment-grant-identity-already-exists-inspect-its-status", 1],
         ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore._issue_enrollment_claim", "enrollment-grant-is-revoked-or-missing", 1],
         ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore._issue_enrollment_claim", "node-identity-already-exists", 1],
         ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore._issue_enrollment_claim", "node-identity-is-retired-or-revoked", 1],
@@ -9439,26 +9465,21 @@
         ["control/src/vonk_control/enrollment/rotation.py", "EnrollmentDenied", "RotationService._validate_renewal_result", "certificate-authority-returned-non-pem-certificate-material", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "EnrollmentDenied", "RotationService._validate_renewal_result", "certificate-authority-reused-renewal-serial", 1],
         ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore._wait_for_issuance", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-generation-does-not-match", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-is-not-staged-for-activation", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-serial-does-not-identify-node", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService.activate", "node-identity-is-retired-or-revoked", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-identity-is-removed-or-revoked", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-key-is-not-ed25519", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-proof-is-invalid", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-proof-is-stale", 1],
-        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore.revoke_grant", "enrollment-grant-is-consumed-inspect-the-enrolled-spark", 1],
-        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._revoke_node_once", "node-identity-does-not-exist", 1],
-        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore._submit_once", "csr-is-too-large", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._activate_once", "certificate-generation-does-not-match", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._activate_once", "certificate-is-not-staged-for-activation", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._activate_once", "certificate-serial-does-not-identify-node", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._activate_once", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "_require_expired_source", "expired-renewal-identity-is-removed-or-revoked", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._renew_expired_once", "expired-renewal-key-is-not-ed25519", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._renew_expired_once", "expired-renewal-proof-is-invalid", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._renew_expired_once", "expired-renewal-proof-is-stale", 1],
         ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore._submit_once", "message", 1],
-        ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_locked_enrollment", "unknown-enrollment", 1],
         ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-authority-returned-non-pem-certificate-material", 1],
         ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-grant-is-revoked-or-missing", 1],
-        ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-purpose-is-invalid", 2],
         ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-already-exists", 1],
         ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-is-retired-or-revoked", 1],
         ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1],
-        ["control/src/vonk_control/enrollment/service.py", "ExpiredRenewalGraceExhausted", "EnrollmentService.renew_expired", "expired-renewal-grace-exhausted-re-enrollment-required", 1]
+        ["control/src/vonk_control/enrollment/service.py", "ExpiredRenewalGraceExhausted", "EnrollmentService._renew_expired_once", "expired-renewal-grace-exhausted-re-enrollment-required", 1]
       ]
     },
     {
@@ -9481,7 +9502,6 @@
         ["control/src/vonk_control/enrollment/rotation.py", "RenewalInProgress", "RotationService._issue_rotation_claim", "historical-certificate-rotation-has-no-exact-journal-binding", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "RenewalInProgress", "RotationService._issue_rotation_claim", "superseded-rotation-effect-reconciled", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "RenewalInProgress", "RotationService._persist_rotation", "certificate-rotation-issuance-identity-changed", 1],
-        ["control/src/vonk_control/enrollment/rotation.py", "RenewalInProgress", "RotationService._prepare_rotation_recovery", "certificate-rotation-state-is-invalid", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "RenewalIssuanceUncertain", "RotationService._issue_rotation_claim", "certificate-rotation-observation-is-unavailable", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "RenewalIssuanceUncertain", "RotationService._prepare_rotation_recovery", "certificate-rotation-observation-is-unavailable", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "RenewalIssuanceUncertain", "RotationService._revoke_denied_rotation", "issued-certificate-is-denied-locally-remote-revocation-requ", 1]
@@ -9514,26 +9534,6 @@
       ]
     },
     {
-      "family": "enrollment.observation-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Typed unknowns preserve security checks. Recovery is partial until every provider health and competing-intent path has a proven bounded retry and fresh admission; no security relabel hides this remaining work.",
-      "sites": [
-        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority.check_health", "step-ca-health-response-is-invalid", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority.revoke_node", "step-ca-returned-an-invalid-revocation-response", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._json_request", "step-ca-returned-malformed-json", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._request", "step-ca-request-failed-with-status", 1],
-        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._request", "step-ca-request-failed", 1]
-      ]
-    },
-    {
-      "family": "enrollment.provider-observation-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Unavailable provider observation remains typed unknown; complete call-path retry proof is not yet present. Authorization denial refuses only provider authority.",
-      "sites": [
-        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._request", "step-ca-provider-is-unavailable", 1]
-      ]
-    },
-    {
       "family": "issuance.proven-retry",
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
@@ -9551,16 +9551,6 @@
       ]
     },
     {
-      "family": "enrollment.remaining-state-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Re-enrollment local history, generation and competing rotation gates still refuse instead of healing. Audit debt retained until these paths are repaired.",
-      "sites": [
-        ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_persist_issued_enrollment", "certificate-rotation-is-in-progress", 1],
-        ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-has-no-certificate-history", 1],
-        ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentDenied", "_persist_issued_enrollment", "enrollment-generation-changed-from-accepted-issuance-binding", 1]
-      ]
-    },
-    {
       "family": "enrollment.provider-verification",
       "category": "security-edge",
       "reason": "Refuses provider certificate identity, signature or authority failures; StepCAUnavailable transport/health unknowns bypass this refusal.",
@@ -9568,6 +9558,83 @@
         ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentDenied", "EnrollmentCore._issue_enrollment_claim", "certificate-authority-verification-failed", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "EnrollmentDenied", "RotationService._issue_rotation_claim", "certificate-authority-verification-failed", 1],
         ["control/src/vonk_control/enrollment/rotation.py", "EnrollmentDenied", "RotationService._recover_rotation_once", "rotation-source-authority-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "distribution.already-retried",
+      "category": "already-retried",
+      "reason": "Managed-storage absence or unreadable descriptors are typed DistributionUnknown. Existing registered Run/Switch phase and admission observation loops re-enter the same content identity with durable bounded backoff; the HTTP boundary returns a bounded retry hint to the agent. No grant, claim or artifact availability is fabricated. The retry proof covers every call path.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService._register_row", "message", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.open_object", "distribution.object_unavailable", 2],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "FilesystemObjectSource.open_object", "distribution.object_unavailable", 2],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "MemoryObjectSource.open_object", "distribution.object_unavailable", 2],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "ModelCacheObjectSource._describe", "distribution.model_set_identity_unavailable", 2],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "ModelCacheObjectSource._open_cache_object", "distribution.object_unavailable", 3],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.open_object", "distribution.model_set_identity_unavailable", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.register", "distribution.model_set_identity_unavailable", 1],
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "DistributionService.register", "distribution.runtime_image_mismatch", 1]
+      ]
+    },
+    {
+      "family": "distribution.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/distribution.py", "DistributionUnknown", "ModelCacheObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 3]
+      ]
+    },
+    {
+      "family": "enrollment.bounded-observation",
+      "category": "already-retried",
+      "reason": "Exact observation retries and owner ending are implemented by the registered service loops, with durable late-effect revocation evidence and fresh same-node admission covered by connected recovery tests.",
+      "sites": [
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._submit_once", "grant-purpose-projection-is-unavailable", 1],
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._submit_once", "enrollment-attempt-ended-without-a-receipt", 1],
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._submit_once", "enrollment-observation-ended", 1],
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._submit_once", "competing-enrollment-projection-changed", 1],
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._issue_enrollment_claim", "enrollment-observation-ended", 1],
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._issue_enrollment_claim", "late-enrollment-effect-belongs-to-an-ended-attempt", 1],
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._wait_for_issuance", "enrollment-observation-ended", 1],
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._wait_for_issuance", "enrollment-projection-is-unusable", 1],
+        ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentIssuanceUncertain", "_persist_issued_enrollment", "enrollment-purpose-projection-is-unavailable", 2],
+        ["control/src/vonk_control/enrollment/persistence.py", "EnrollmentIssuanceUncertain", "_locked_enrollment", "enrollment-projection-is-absent", 1],
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentIssuanceUncertain", "EnrollmentService._renew_expired_once", "expired-certificate-projection-is-unavailable", 2],
+        ["control/src/vonk_control/enrollment/issuance.py", "EnrollmentIssuanceUncertain", "EnrollmentCore._transaction", "local-transaction-ownership-is-busy", 1]
+      ]
+    },
+    {
+      "family": "enrollment.exact-ingress-authority",
+      "category": "security-edge",
+      "reason": "Refuses a revoked source credential, CSR bytes whose digest differs from the accepted authenticated binding, or a parsed CA reply naming a different accepted effect. Unknown envelopes and local projection damage do not enter these checks.",
+      "sites": [
+        ["control/src/vonk_control/enrollment/service.py", "EnrollmentDenied", "EnrollmentService._renew_expired_once", "expired-certificate-authority-is-revoked", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "ca-request-differs-from-the-supplied-csr", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAError", "StepCertificateAuthority._sign", "step-ca-returned-another-accepted-effect", 1]
+      ]
+    },
+    {
+      "family": "enrollment.provider-bounded-observation",
+      "category": "already-retried",
+      "reason": "Exact enrollment, renewal and revocation paths have bounded service observation and gate ending. Diagnostic health/CRL reads return a typed unknown after four attempts without a gate. Connected canonical HTTP fault regressions cover unknown replies followed by same-node fresh admission.",
+      "sites": [
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority.issue_node", "ca-issue-observation-is-absent", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._sign", "step-ca-sign-response-is-unreadable", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._request", "step-ca-response-is-too-large", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._request", "message", 1]
+      ]
+    },
+    {
+      "family": "step_ca.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/step_ca.py", "StepCAIssuancePending", "StepCertificateAuthority._sign", "certificate.issuance_in_progress", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._json_request", "step-ca-returned-malformed-json", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._request", "step-ca-provider-is-unavailable", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._request", "step-ca-request-failed", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority._request", "step-ca-request-failed-with-status", 1],
+        ["control/src/vonk_control/step_ca.py", "StepCAUnavailable", "StepCertificateAuthority.revoke_node", "step-ca-returned-an-invalid-revocation-response", 1]
       ]
     }
   ]

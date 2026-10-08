@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import (
     Integer,
+    Numeric,
+    String,
 )
+from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.sql.functions import FunctionElement
+from sqlalchemy.types import TypeDecorator, TypeEngine
 from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
@@ -94,3 +100,32 @@ def _uuid_shape(column: str) -> str:
         f"substr({column}, 14, 1) = '-' AND substr({column}, 19, 1) = '-' AND "
         f"substr({column}, 24, 1) = '-' AND ({_lower_hex(compact, 32)})"
     )
+
+
+class CertificateGenerationStorage(TypeDecorator[int]):
+    """Exact unsigned certificate generations, ordered identically in both dialects.
+
+    Production PostgreSQL owns an exact decimal integer. SQLite fixtures use
+    fixed-width decimal text because its NUMERIC affinity otherwise rounds uint64
+    values through a float. Neither representation changes the wire integer.
+    """
+
+    impl = Numeric(20, 0)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine:
+        return dialect.type_descriptor(
+            String(20) if dialect.name == "sqlite" else Numeric(20, 0)
+        )
+
+    def process_bind_param(
+        self, value: int | None, dialect: Dialect
+    ) -> str | Decimal | None:
+        if value is None:
+            return None
+        return f"{value:020d}" if dialect.name == "sqlite" else Decimal(value)
+
+    def process_result_value(
+        self, value: str | Decimal | None, dialect: Dialect
+    ) -> int | None:
+        return None if value is None else int(value)

@@ -15,10 +15,11 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
 )
 
-from ..distribution import DistributionError
+from ..distribution import DistributionError, DistributionUnknown
 from ..download_contract import download_responses, upload_request_body
 from ..models import RecipeBuild
 from ..runtime_image_preparation import IMAGE_CACHE_DIRECTORY
+from ..strict_json import _retry_later_response
 from .common import (
     _DISTRIBUTION_ERROR_CODE,
     AgentApiServices,
@@ -256,14 +257,15 @@ def install_artifacts_routes(
         return _served_from_edge(required, path, f'"sha256:{sha256}"')
 
     def _distribution_error(error: DistributionError) -> HTTPException:
-        # Name the refusing check on the wire.  Without it the generic 403
-        # boundary code is all the agent can report, so an authority denial
-        # cannot be attributed to an assignment, node or expiry.
+        # Preserve the typed cause and bounded observation retry on the wire.
         headers = (
             {"x-vonk-error-code": error.code}
             if _DISTRIBUTION_ERROR_CODE.fullmatch(error.code)
             else {}
         )
+        if isinstance(error, DistributionUnknown):
+            headers.update(_retry_later_response(error).headers)
+            headers["Cache-Control"] = "no-store"
         if isinstance(error, SecurityRefusalError) or error.code in {
             DistributionCode.UNASSIGNED,
             DistributionCode.WRONG_NODE,

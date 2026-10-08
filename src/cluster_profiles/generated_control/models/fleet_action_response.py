@@ -8,13 +8,22 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.enrollment_grant_state import check_enrollment_grant_state
+from ..models.enrollment_grant_state import EnrollmentGrantState
 from ..models.fleet_action_response_action import check_fleet_action_response_action
 from ..models.fleet_action_response_action import FleetActionResponseAction
+from ..models.lifecycle_state import check_lifecycle_state
+from ..models.lifecycle_state import LifecycleState
+from ..models.model_cache_operator_status import check_model_cache_operator_status
+from ..models.model_cache_operator_status import ModelCacheOperatorStatus
 from ..types import UNSET, Unset
 from typing import cast
 
 if TYPE_CHECKING:
   from ..models.enrollment_grant_response import EnrollmentGrantResponse
+  from ..models.enrollment_grant_status import EnrollmentGrantStatus
+  from ..models.enrollment_observation_outcome import EnrollmentObservationOutcome
+  from ..models.enrollment_revocation_status import EnrollmentRevocationStatus
 
 
 
@@ -29,26 +38,32 @@ class FleetActionResponse:
     """
         Attributes:
             action (FleetActionResponseAction):
-            state (str):
+            state (EnrollmentGrantState | LifecycleState | ModelCacheOperatorStatus):
             detail (None | str | Unset):
             display_name (None | str | Unset):
             grant (EnrollmentGrantResponse | None | Unset):
+            grant_status (EnrollmentGrantStatus | None | Unset):
             node_id (None | str | Unset):
+            observation (EnrollmentObservationOutcome | None | Unset):
             operation_id (None | str | Unset):
             plan_digest (None | str | Unset):
             request_key (None | str | Unset):
+            revocation (EnrollmentRevocationStatus | None | Unset):
             targets (list[str] | Unset):
      """
 
     action: FleetActionResponseAction
-    state: str
+    state: EnrollmentGrantState | LifecycleState | ModelCacheOperatorStatus
     detail: None | str | Unset = UNSET
     display_name: None | str | Unset = UNSET
     grant: EnrollmentGrantResponse | None | Unset = UNSET
+    grant_status: EnrollmentGrantStatus | None | Unset = UNSET
     node_id: None | str | Unset = UNSET
+    observation: EnrollmentObservationOutcome | None | Unset = UNSET
     operation_id: None | str | Unset = UNSET
     plan_digest: None | str | Unset = UNSET
     request_key: None | str | Unset = UNSET
+    revocation: EnrollmentRevocationStatus | None | Unset = UNSET
     targets: list[str] | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -58,9 +73,19 @@ class FleetActionResponse:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.enrollment_grant_response import EnrollmentGrantResponse # noqa: PLC0415
+        from ..models.enrollment_grant_status import EnrollmentGrantStatus # noqa: PLC0415
+        from ..models.enrollment_observation_outcome import EnrollmentObservationOutcome # noqa: PLC0415
+        from ..models.enrollment_revocation_status import EnrollmentRevocationStatus # noqa: PLC0415
         action: str = self.action
 
-        state = self.state
+        state: str
+        if isinstance(self.state, str):
+            state = self.state
+        elif isinstance(self.state, str):
+            state = self.state
+        else:
+            state = self.state
+
 
         detail: None | str | Unset
         if isinstance(self.detail, Unset):
@@ -82,11 +107,27 @@ class FleetActionResponse:
         else:
             grant = self.grant
 
+        grant_status: dict[str, Any] | None | Unset
+        if isinstance(self.grant_status, Unset):
+            grant_status = UNSET
+        elif isinstance(self.grant_status, EnrollmentGrantStatus):
+            grant_status = self.grant_status.to_dict()
+        else:
+            grant_status = self.grant_status
+
         node_id: None | str | Unset
         if isinstance(self.node_id, Unset):
             node_id = UNSET
         else:
             node_id = self.node_id
+
+        observation: dict[str, Any] | None | Unset
+        if isinstance(self.observation, Unset):
+            observation = UNSET
+        elif isinstance(self.observation, EnrollmentObservationOutcome):
+            observation = self.observation.to_dict()
+        else:
+            observation = self.observation
 
         operation_id: None | str | Unset
         if isinstance(self.operation_id, Unset):
@@ -105,6 +146,14 @@ class FleetActionResponse:
             request_key = UNSET
         else:
             request_key = self.request_key
+
+        revocation: dict[str, Any] | None | Unset
+        if isinstance(self.revocation, Unset):
+            revocation = UNSET
+        elif isinstance(self.revocation, EnrollmentRevocationStatus):
+            revocation = self.revocation.to_dict()
+        else:
+            revocation = self.revocation
 
         targets: list[str] | Unset = UNSET
         if not isinstance(self.targets, Unset):
@@ -125,14 +174,20 @@ class FleetActionResponse:
             field_dict["display_name"] = display_name
         if grant is not UNSET:
             field_dict["grant"] = grant
+        if grant_status is not UNSET:
+            field_dict["grant_status"] = grant_status
         if node_id is not UNSET:
             field_dict["node_id"] = node_id
+        if observation is not UNSET:
+            field_dict["observation"] = observation
         if operation_id is not UNSET:
             field_dict["operation_id"] = operation_id
         if plan_digest is not UNSET:
             field_dict["plan_digest"] = plan_digest
         if request_key is not UNSET:
             field_dict["request_key"] = request_key
+        if revocation is not UNSET:
+            field_dict["revocation"] = revocation
         if targets is not UNSET:
             field_dict["targets"] = targets
 
@@ -143,13 +198,46 @@ class FleetActionResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.enrollment_grant_response import EnrollmentGrantResponse # noqa: PLC0415
+        from ..models.enrollment_grant_status import EnrollmentGrantStatus # noqa: PLC0415
+        from ..models.enrollment_observation_outcome import EnrollmentObservationOutcome # noqa: PLC0415
+        from ..models.enrollment_revocation_status import EnrollmentRevocationStatus # noqa: PLC0415
         d = dict(src_dict)
         action = check_fleet_action_response_action(d.pop("action"))
 
 
 
 
-        state = d.pop("state")
+        def _parse_state(data: object) -> EnrollmentGrantState | LifecycleState | ModelCacheOperatorStatus:
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                state_type_0 = check_enrollment_grant_state(data)
+
+
+
+                return state_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                state_type_1 = check_lifecycle_state(data)
+
+
+
+                return state_type_1
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, str):
+                raise TypeError()
+            state_type_2 = check_model_cache_operator_status(data)
+
+
+
+            return state_type_2
+
+        state = _parse_state(d.pop("state"))
+
 
         def _parse_detail(data: object) -> None | str | Unset:
             if data is None:
@@ -191,6 +279,26 @@ class FleetActionResponse:
         grant = _parse_grant(d.pop("grant", UNSET))
 
 
+        def _parse_grant_status(data: object) -> EnrollmentGrantStatus | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                grant_status_type_0 = EnrollmentGrantStatus.from_dict(data)
+
+
+
+                return grant_status_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(EnrollmentGrantStatus | None | Unset, data)
+
+        grant_status = _parse_grant_status(d.pop("grant_status", UNSET))
+
+
         def _parse_node_id(data: object) -> None | str | Unset:
             if data is None:
                 return data
@@ -199,6 +307,26 @@ class FleetActionResponse:
             return cast(None | str | Unset, data)
 
         node_id = _parse_node_id(d.pop("node_id", UNSET))
+
+
+        def _parse_observation(data: object) -> EnrollmentObservationOutcome | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                observation_type_0 = EnrollmentObservationOutcome.from_dict(data)
+
+
+
+                return observation_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(EnrollmentObservationOutcome | None | Unset, data)
+
+        observation = _parse_observation(d.pop("observation", UNSET))
 
 
         def _parse_operation_id(data: object) -> None | str | Unset:
@@ -231,6 +359,26 @@ class FleetActionResponse:
         request_key = _parse_request_key(d.pop("request_key", UNSET))
 
 
+        def _parse_revocation(data: object) -> EnrollmentRevocationStatus | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                revocation_type_0 = EnrollmentRevocationStatus.from_dict(data)
+
+
+
+                return revocation_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(EnrollmentRevocationStatus | None | Unset, data)
+
+        revocation = _parse_revocation(d.pop("revocation", UNSET))
+
+
         targets = cast(list[str], d.pop("targets", UNSET))
 
 
@@ -240,10 +388,13 @@ class FleetActionResponse:
             detail=detail,
             display_name=display_name,
             grant=grant,
+            grant_status=grant_status,
             node_id=node_id,
+            observation=observation,
             operation_id=operation_id,
             plan_digest=plan_digest,
             request_key=request_key,
+            revocation=revocation,
             targets=targets,
         )
 

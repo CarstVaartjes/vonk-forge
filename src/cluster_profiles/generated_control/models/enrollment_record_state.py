@@ -1,8 +1,8 @@
 from typing import Literal
 
-EnrollmentRecordState = Literal['certificate_issued', 'issuing']
+EnrollmentRecordState = Literal['certificate_issued', 'ended', 'issuing']
 
-ENROLLMENT_RECORD_STATE_VALUES: set[EnrollmentRecordState] = { 'certificate_issued', 'issuing',  }
+ENROLLMENT_RECORD_STATE_VALUES: set[EnrollmentRecordState] = { 'certificate_issued', 'ended', 'issuing',  }
 
 def check_enrollment_record_state(value: str) -> EnrollmentRecordState:
     if value in ENROLLMENT_RECORD_STATE_VALUES:

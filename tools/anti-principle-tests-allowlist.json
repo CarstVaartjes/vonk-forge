@@ -76,43 +76,7 @@
     },
     {
       "path": "control/tests/test_agent_api.py",
-      "function": "test_a_concluded_operation_never_acquires_a_boundary_refusal_note",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
       "function": "test_bootstrap_requires_the_host_helper_authority",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
-      "function": "test_boundary_failures_record_a_correlated_operator_reason",
-      "kind": "refused-read-assertion",
-      "count": 2
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
-      "function": "test_builder_uploads_digest_verified_docker_archive_without_a_registry",
-      "kind": "refused-read-assertion",
-      "count": 2
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
-      "function": "test_claim_api_rejects_noncanonical_runtime_architecture",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
-      "function": "test_claim_rejects_retired_supervisor_identity_fields",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
-      "function": "test_claim_requires_a_trusted_policy_bounded_source",
       "kind": "refused-read-assertion",
       "count": 1
     },
@@ -124,32 +88,8 @@
     },
     {
       "path": "control/tests/test_agent_api.py",
-      "function": "test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs",
-      "kind": "refused-read-assertion",
-      "count": 2
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
-      "function": "test_recipe_run_disposition_names_every_run_the_controller_does_not_want",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
       "function": "test_recipe_run_observation_report_applies_process_state_per_run",
       "kind": "transient-failed-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
-      "function": "test_unsupported_protocol_version_is_rejected_without_recording_contact",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_api.py",
-      "function": "test_untrusted_and_stale_requests_do_not_record_agent_contact",
-      "kind": "refused-read-assertion",
       "count": 1
     },
     {
@@ -279,12 +219,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_artifact_job_api.py",
-      "function": "test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes",
-      "kind": "refused-read-assertion",
-      "count": 5
-    },
-    {
       "path": "control/tests/test_artifact_job_lifecycle.py",
       "function": "test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it",
       "kind": "ending-without-fresh-request",
@@ -411,12 +345,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_auth_api.py",
-      "function": "test_login_rejects_non_exact_or_unbounded_strict_documents",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_availability_build_observation.py",
       "function": "test_settled_child_failure_gets_new_execution_identity_on_recovery",
       "kind": "transient-failed-assertion",
@@ -525,12 +453,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_cache_request_recovery.py",
-      "function": "test_recipe_lookup_preserves_id_visibility_and_private_request_correlation",
-      "kind": "refused-read-assertion",
-      "count": 3
-    },
-    {
       "path": "control/tests/test_catalog_sync.py",
       "function": "test_stale_running_sync_never_blocks_a_new_sync",
       "kind": "transient-failed-assertion",
@@ -579,12 +501,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_distribution.py",
-      "function": "test_distribution_rejects_unassigned_wrong_node_and_corrupt_object",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_distribution_executor.py",
       "function": "test_abandon_closes_only_a_parked_distribution_child",
       "kind": "operator-wait-assertion",
@@ -624,24 +540,6 @@
       "path": "control/tests/test_fleet_events.py",
       "function": "test_recorder_installation_is_idempotent_and_uninstall_removes_listeners",
       "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_profile_api.py",
-      "function": "test_a_rejected_profile_save_names_the_field_and_the_reason",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_profile_api.py",
-      "function": "test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision",
-      "kind": "refused-read-assertion",
-      "count": 3
-    },
-    {
-      "path": "control/tests/test_fleet_profile_api.py",
-      "function": "test_profile_load_bound_to_a_review_refuses_a_plan_that_changed",
-      "kind": "refused-read-assertion",
       "count": 1
     },
     {
@@ -685,12 +583,6 @@
       "function": "test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_effects",
       "kind": "ending-without-fresh-request",
       "count": 1
-    },
-    {
-      "path": "control/tests/test_fleet_profile_cancel.py",
-      "function": "test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch",
-      "kind": "refused-read-assertion",
-      "count": 2
     },
     {
       "path": "control/tests/test_fleet_profile_cancel.py",
@@ -849,12 +741,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_gateway_keys.py",
-      "function": "test_create_list_and_revoke_client_keys",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
       "path": "control/tests/test_host_helper_authority.py",
       "function": "test_service_stop_grant_signs_exact_durable_prior_start",
       "kind": "ending-without-fresh-request",
@@ -924,7 +810,7 @@
       "path": "control/tests/test_installation_reconciliation_api.py",
       "function": "test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child",
       "kind": "refused-read-assertion",
-      "count": 3
+      "count": 1
     },
     {
       "path": "control/tests/test_installation_reconciliation_postgres.py",
@@ -1023,12 +909,6 @@
       "count": 1
     },
     {
-      "path": "control/tests/test_model_cache.py",
-      "function": "test_operator_download_replays_original_before_catalog_or_storage_readmission",
-      "kind": "refused-read-assertion",
-      "count": 2
-    },
-    {
       "path": "control/tests/test_model_removal_finalization_contention.py",
       "function": "test_finalization_gate_contention_defers_without_blocking_unrelated_removal",
       "kind": "ending-without-fresh-request",
@@ -1120,12 +1000,6 @@
     },
     {
       "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_refuses_live_current_attempt_without_transition",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
       "function": "test_durable_retire_retains_uncertain_run_capacity",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1152,12 +1026,6 @@
       "path": "control/tests/test_operation_api.py",
       "function": "test_resume_action_disappearing_after_preflight_is_refused",
       "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
-      "function": "test_resume_action_disappearing_after_preflight_is_refused",
-      "kind": "refused-read-assertion",
       "count": 1
     },
     {
@@ -1200,30 +1068,6 @@
       "path": "control/tests/test_profile_intent_ordering.py",
       "function": "test_direct_queue_cannot_overtake_later_terminal_receipt",
       "kind": "transient-failed-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_profile_load_submission.py",
-      "function": "test_change_between_fresh_review_and_admission_refuses_load",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_profile_load_submission.py",
-      "function": "test_load_precondition_and_original_replay_use_current_authority",
-      "kind": "refused-read-assertion",
-      "count": 2
-    },
-    {
-      "path": "control/tests/test_profile_load_submission.py",
-      "function": "test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent",
-      "kind": "refused-read-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_profile_load_submission.py",
-      "function": "test_workload_change_between_review_and_acceptance_is_refused",
-      "kind": "refused-read-assertion",
       "count": 1
     },
     {
@@ -1290,12 +1134,6 @@
       "path": "control/tests/test_recipe_observation_wire_bridge.py",
       "function": "test_observation_deadline_applies_to_first_observation_not_renewal",
       "kind": "transient-failed-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_recipe_observation_wire_bridge.py",
-      "function": "test_production_start_rust_observation_and_controller_consume",
-      "kind": "refused-read-assertion",
       "count": 1
     },
     {
@@ -2207,14 +2045,6 @@
   ],
   "exceptions": [
     {
-      "path": "control/tests/export_artifact_workspace_fixture.py",
-      "function": "export",
-      "kind": "refused-read-assertion",
-      "count": 1,
-      "reason": "service-absent",
-      "justification": "GET Fleet succeeds; POST artifact create has no installed artifact service and deliberately returns503. No read refusal or lifecycle completion."
-    },
-    {
       "path": "control/tests/export_observation_transfer_fixtures.py",
       "function": "_export_peer_response_errors",
       "kind": "refused-read-assertion",
@@ -2290,7 +2120,7 @@
       "path": "control/tests/test_observation_transfer.py",
       "function": "test_global_validation_error_bytes_match_streamed_route_and_cli_contract",
       "kind": "refused-read-assertion",
-      "count": 2,
+      "count": 1,
       "reason": "input-validation",
       "justification": "Invalid integer input deliberately422; validates actual global problem schema and CLI exception. No valid request is refused."
     },
@@ -2301,14 +2131,6 @@
       "count": 1,
       "reason": "dependency-unavailable",
       "justification": "Mock capture raises canonical retry503; proves exact API schema/RetryAfter and CLI ControlUnavailable. Real SQL restoration proof is separate index4."
-    },
-    {
-      "path": "control/tests/test_operation_response_budget_installed_cli.py",
-      "function": "test_installed_activity_byte_continuation_and_aggregate_fact_recovery",
-      "kind": "refused-read-assertion",
-      "count": 1,
-      "reason": "resource-bound",
-      "justification": "Protected large optional progress becomes unknown200; same detail repairs. Indivisible identity allocation503 obeys existing byte owner; exact continuation resumes after field repair with same IDs/total."
     },
     {
       "path": "control/tests/test_profile_adapter_continuity.py",
@@ -2556,17 +2378,11 @@
       "test_a_kind_of_the_job_table_may_spell_a_word_differently": "5292b39a313e7b1e47f061adda1d63a2dbc83ac595e52d2746e773ba4160056d",
       "<module>": "95a144cbf54491586901d7001d3bef75902227390f924845823eba09e2b87b18"
     },
-    "control/tests/export_artifact_workspace_fixture.py": {
-      "_recipe_transform": "a2ed18d400d11e0addffc0600aa1dedc0dd33d9959f9e240499db3f5c4b761a5",
-      "export": "4b55a479b98357c331fa5c87b07238458db5ab9805b3735b32534019f1038688",
-      "verify": "bd11a88b611f779e34451775385e162ab3fba55082cfecee481e1d456a9f0f48",
-      "<module>": "7bebef8ba6d052ed03521a2097e32c7e262cec0fa7766fcf7cb583f9cd597945"
-    },
     "control/tests/export_observation_transfer_fixtures.py": {
       "_collect": "40135c0cd9c9651686a95e7737bab806f551f86388e1e4dbba2200c559134ac5",
       "_export_saved_event_recovery": "a48337ede79c21fba9930239dbc5bbede69420a909e69e7037b5d489ee2171de",
       "_export_response_errors": "6977b458c9c2f332b2bc13f80ad0dcf9a3d2d802efd89ac4624e7673e161871e",
-      "_export_peer_response_errors": "804619ed0e2ea179a73c18a2022299b5deadee2104d6200b7f3cc8daa3eb4863",
+      "_export_peer_response_errors": "c4e698cf6227849a44d5db305e54ac183b55df9ecad8115e97d963f71313361e",
       "_export_peer_response_errors.validation_fixture": "20a60fe3abfba130ca9d301b5e3e16c51360f0cdb60a1efb2a8dc9a9b0ff87aa",
       "export": "949ec2507a278df1a49608922e7413fca4532d10d7e8a8e92b8c59076f5b5383",
       "<module>": "bf83e74b9c50f230e6dfb35b2f3cdb84b9365e82308880c3ef03105e475bd886"
@@ -2661,13 +2477,13 @@
       "test_builder_can_download_only_its_authorized_canonical_source_bundle": "2d5dc6e4ca1c7addb1a5f3763196552a3f76c1946ce216a1d2e60958fd02339a",
       "test_builder_uploads_digest_verified_docker_archive_without_a_registry": "81f188de57347a374bd2e0a0fc07082a223ae6897b5588db67ab97907f9143c3",
       "test_recipe_image_upload_lock_preserves_interrupted_bytes": "a6c8b1559e4fb36217bb24a4f14304ce71126f2f99061a7a4f927d58252cd467",
-      "test_recipe_image_fsync_does_not_block_concurrent_agent_requests": "16d04170f106d6e2713197d4ffb38f151834b9b5ee515a9f70a74b255f04b410",
+      "test_recipe_image_fsync_does_not_block_concurrent_agent_requests": "2856a83c0369de3fc545eb5b06bbea1fc8f7418f2a2b512d7bd4c021fc0fbdb1",
       "test_recipe_image_fsync_does_not_block_concurrent_agent_requests.slow_fsync": "6d979a62c5854988940637b1654b4ebbafb405ba57ed3a3ec22e8cf14fca07e9",
       "test_recipe_image_fsync_does_not_block_concurrent_agent_requests.observe_responsiveness": "66100d9d88a26e46951a94a6acb1f927e03f1c256bfcd37b4a5a3c697063cc1a",
       "test_recipe_image_fsync_does_not_block_concurrent_agent_requests.exercise": "8f12445f19ac50633f7fc443f86a79cf6be74d66e5215de848d82087708f07eb",
       "admin_headers": "084e79a99c9bcb66d29d4b941810365451f57a726928add5d9cc04ba228b3808",
-      "enrollment_grant": "c728c0657c7f319e0376c76305ac78fc324d3d3ce2dacd3de1e886cd28c59a15",
-      "assert_grant_consumed": "ee2cb32d6338443326b6fe0f96dad13ff8be270bc10d67067941786de6943706",
+      "enrollment_grant": "ce1cff7950cf4ab23c16be0b1c2530b3bb4f2646f0f6971136dc8de8856388a9",
+      "assert_grant_available": "c470a9bb5c7b0adfef8ee1fde878d708b16eb05ca48d190f76ff1c318a12b224",
       "valid_enrollment_body": "9b1380c7dfa26709afc5df33f596d35781232c5323a31a3774e1043b6198bba8",
       "asgi_post": "3758478e0f4c031d72ab54de19fd7cb040a2107caad07d0688847a4cdda94e04",
       "asgi_post.request": "38fbf20cacb81c20a810c4cdf3d49d23b346a8fe2c4aa7877a644a00c1e2b631",
@@ -2711,12 +2527,14 @@
       "test_recipe_run_observation_report_applies_process_state_per_run": "29b6c7d33be30a379713d32a01bb2e369eee15f1a59d7fd530746d72ba98c10b",
       "test_recipe_run_observation_report_applies_process_state_per_run.report": "c064b3bcd6df8ca066cecff3f847b0cb5b9c87d6c2802dd9cfa257f8f509f974",
       "test_rust_agent_enrollment_shape_remains_controller_compatible": "4b857b626aa4d835e982bd713baee8eab7cb62dc2ef81496edee9d448c545d67",
-      "test_uncertain_enrollment_provider_write_returns_503_without_reissuing": "5845083ddd2934ed9cf237cc113c69c7681c37d9fe2dfcacecd61a33d338f26d",
+      "test_uncertain_enrollment_provider_write_returns_503_without_reissuing": "3dd03888689e87ec6d047ed21978d8746ea3613b4394689a488e1689cee887f0",
       "test_uncertain_enrollment_provider_write_returns_503_without_reissuing.fail_issue": "942fd3e6eb145c1307d254ec870c024d40e348a146e06960350c07f549657b6d",
-      "test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied": "3d7ac035d58746c2ac564d3f2ed0c58a9e361c84560ed5318ddc4d71a6293bc5",
+      "test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied": "734b23e0560539711bac2deafeabf96bd2b1850afbe20b9340246400e344214a",
       "_csr_for": "dd40e264cd084ed674d2051cafa5fe1c5996fcc92ea6052f43a675b88296dc7c",
       "_csr_fingerprint": "a7cbb47ee802551d2d8ef19ac13ee0178b8ae0c2608d0d3b3c7fcae5617d8da1",
-      "test_fresh_rotation_follower_receives_canonical_retryable_response": "2a775eeee69b73ce100c9a61b44ca438eab9b35093189ba9a2f1768450d774f6",
+      "test_fresh_rotation_follower_receives_canonical_retryable_response": "3dfef50ee8494259a5a2f23944f38612f552fff6d81eb5fefbf9988890ebd069",
+      "test_fresh_rotation_follower_receives_canonical_retryable_response.observed": "a0788a96ad0be5574583dca8e0cebe415d3ad2c39e7df9c86922cafdf437beff",
+      "test_fresh_rotation_follower_receives_canonical_retryable_response.forbidden_issue": "ff8e280b255d6f3e94f4dce0aa19d94e810527663f45cc3210911df2de962ce9",
       "test_staged_certificate_can_only_activate_and_activation_is_idempotent_after_response_loss": "fe6e4b9310c699fc38ce4156401bc214589ab49aeb365659ed9a913071703486",
       "test_failed_result_preserves_canonical_evidence_and_maps_parent_reason": "0f222f7c53fc190b8ae6fb7e904dc8e383297610722627f41a1e01e44b9db00b",
       "test_failed_result_error_code_obeys_the_shared_contract_rule": "51bfde8cc37bbb55d6ea561c1971afbed847ae3f6395bfb784545ac449277834",
@@ -2731,16 +2549,12 @@
       "test_enrollment_rate_limit_rejects_before_reading_request_body": "46ccdb5653869bd3dfc499114f7a087f8b65e2fbacfce4268c5bba9cbd26e45c",
       "test_enrollment_rate_limit_rejects_before_reading_request_body.receive": "84ea24321db17507e8cdc88bbf59ade75c087aa9603d165c056a1a9a6bccd5a2",
       "test_enrollment_rate_limit_rejects_before_reading_request_body.send": "55020fdf0bdcf1347e7eb23901c4201fafc6ce2b08524bcb318a08e57536486d",
-      "test_duplicate_enrollment_grants_consume_unicode_escaped_token_values": "6fe55234eee935e93c33c8a77e72604498dbf63d1988a144eb7dabda2dacb6c9",
+      "test_malformed_enrollment_preserves_grant_then_corrected_request_succeeds": "d6a5e4acbce12181fd0c309156281ee7f81f418a76e614f804c7e3312c500f42",
       "test_normal_enrollment_object_still_succeeds": "82742766695284b90ebd489545735af2a9b917695b84140e8f8aeffcbacbf9c8",
-      "test_oversized_enrollment_preserves_split_discovery_prefix": "f2e6a02af197a218747b66049dc0e84aeb9d1e4daf88be4bebe3f5ac9c2cdeb9",
-      "test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix": "1ed29d5fad605452224c70509e3f6b378376ead3e4377c07cd0ef3454c05dfcd",
+      "test_oversized_enrollment_preserves_split_discovery_prefix": "1d66a7ba6d55e1dcd0d7fc755ee81ff3c885abf031252e60b4d79ef6b6431176",
+      "test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix": "f57ad086f9ed5b335046a2b9c9d18344f693c630fc188b5b4e6beede4ad28941",
       "test_enrollment_rejects_non_object_json_without_server_error": "60f5d4d9f539a70bdf0e246072f59e05e44b443bc008d54d6217724913854e25",
-      "test_non_object_enrollment_consumes_identifiable_nested_grant": "23ff1d72a827aab3aa11ac09ae5efdc9be71cf4f60d9107286b0ceefc542ca65",
-      "test_service_denied_enrollment_consumes_every_discovered_grant": "5426edcf4abc1838c45d68d52c47e26534c03b598f65cef32ab3ff4f66d7a2bd",
-      "test_invalid_enrollment_json_consumes_identifiable_grant": "6db7e46359711599be138b94d44a149a67d298a0b1899e3328bdff44a3bdac6c",
-      "test_wrong_enrollment_content_type_consumes_identifiable_grant": "1b97dd4ba1c835b0aa40ba288eb7b2047193c4902f74e32fd4e275df61b91f8c",
-      "test_enrollment_evidence_has_a_fixed_bounded_schema": "7416494fd3b07119eef5f30e507ca2f929ed1eb7cc8e029f4efcf3185285ab33",
+      "test_enrollment_evidence_has_a_fixed_bounded_schema": "4edd07776338ebbd284ca036fcae063443212d3f6ba84a714d0ec77e6f64f55d",
       "test_artifact_access_is_owned_content_addressed_and_range_bounded": "aeaa5d913ef99bfcbca62a063107432fd855aa2fc184e5585219cceca2419e2e",
       "test_artifact_symlink_is_never_served": "9f1e79e04ca44bdb02a8386f79833fcf1c6376270a9117219b58d06138829b67",
       "test_artifact_is_named_to_the_edge_without_hashing_or_reading_the_file": "a2e5462c34f4df1dae18e2af11c29a34fe9489dd8097cfc76a42f8cc3f34fa74",
@@ -2757,9 +2571,9 @@
       "test_cli_enrollment_file_and_recovery_use_the_actual_authority.OpenedResponse.__exit__": "98f1141c2e76594d017dd5de8c1a9ed6267a54279be1a3a4358a645cf356525c",
       "test_cli_enrollment_file_and_recovery_use_the_actual_authority.opener": "43cda55e96044cc699daf73bc4b43a2f639c7f58cb3f21fb7d34ba6d5a3c7155",
       "test_reenrollment_refuses_an_unprivileged_actor_before_node_lookup": "0e7b03bb051e281f3344ee8db890676e7e1aa2b02491aed06b90bb3390bf2717",
-      "test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial": "0fcc8733197dd1891992a0aa912c85af587563ea00d8d1a1dde16e1e40fac1ed",
-      "test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial.refuse_capacity": "54e757371c987e0a0c384b55f45d67e162b4bf483ca509f320072c5bc88b38fa",
-      "test_expired_renewal_endpoint_requires_enrolled_key_without_mtls": "0290b3558dbfc650e53598af2c206e8ff9c96c4faf56cf05c2f87cfa9cffea7c",
+      "test_enrollment_reader_miss_ends_and_fresh_same_node_is_admitted": "46b70b312e75894b1a313ebe4f9d4c376b1a0c8974f132c87d08af0a6347030d",
+      "test_enrollment_reader_miss_ends_and_fresh_same_node_is_admitted.unavailable": "70a772f606b4420cef5dd269e7e561ec42aad8a22840f5a85a18299fc85ca5e9",
+      "test_expired_renewal_endpoint_requires_enrolled_key_without_mtls": "3ae74c5db9431f3b5b8d07139d8568c86cab0ba40edd3f9ad38c18dce1764eb2",
       "test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers": "3db82ebd046d875d345ab62c30688c24efd8b70c134a2611fe8ecb1336b9c541",
       "<module>": "9d0d1247064c95cdf5033c68a9d504100da7aad8e23fc783292c49afc961095f"
     },
@@ -3215,32 +3029,6 @@
       "test_artifact_cancel_preserves_declared_evidence_and_meaningful_values": "a13041e1ef314400527c646e44056bab022ad8184b56a634eac21728afc09053",
       "<module>": "c72762285b0c961300d9b74f2826ccc67a99bd81427168a5a214fe4574c0bc0f"
     },
-    "control/tests/test_auth_api.py": {
-      "Jobs": "7d3b689e080f58a32daed261e04785f2e41a0d335741585c18b612029af88d3f",
-      "Jobs.enqueue": "1e44071ec662df713fb05382e033c3eafc7f36f350a763ace6e0414a06e09399",
-      "Jobs.get": "a8c5ed3bc7d758b6bf5cb023395727db6a83f83f9d7f989e5b426c546c86eca2",
-      "_client": "b56d2fe986523547d077405a65756c72b74938fe6a4a9d896385c8d3aeef0ee6",
-      "_login": "e4468a2c78c19b9a4ebf222a3037ebdf643ad8af122628c20da7def54b0c5d08",
-      "test_auth_openapi_documents_every_runtime_error_status": "372d0aed61d1fa8a68a873d27a44f80680d4d6f05634e42c1ccb7aa9fce1629c",
-      "_chunked_asgi_login": "17c94af4247f8ca93c324cbe363f0f635f73a79c11d303fd46eca1151fa0e480",
-      "_chunked_asgi_login.request": "3680057ef15c6bf2a40b2d28f8e9b1875ecd626232bfe339bf508aa2d35b5e6f",
-      "_chunked_asgi_login.request.receive": "c1485c894507afe334d224937de6a8292c458c586e71a9bf9778f198cb8f2654",
-      "_chunked_asgi_login.request.send": "86b640dc162c000431934a9316e8a7a22684355956d80dce5f6b55a6b19d0297",
-      "test_login_returns_only_a_session_summary_and_exact_secure_cookies": "bc4f2b30b5ae76080082002f2966a08a0510b6cbd1b442de0958f5020078f306",
-      "test_login_rejects_non_exact_or_unbounded_strict_documents": "75e5cb6c2d4b0a3e43a63d815c396229bef6dec08c4c23f2630726db587fb0c6",
-      "test_login_rejects_duplicate_or_malformed_json_without_echoing_it": "e26f30ee516ceb59fa6419aa91b1ae2e0520bac0ea8febf77024f963de639579",
-      "test_login_stops_reading_asgi_chunks_at_the_actual_request_limit": "900b75425f57a780b2d512c3118ececeb9163a85671df72f44bb802fb0ad0611",
-      "test_login_requires_the_exact_https_request_origin": "9f3978b58541675bd6f34a84cdc09f3f9e8e82652f994efc71e88f65ef84e349",
-      "test_login_uses_generic_credential_failure": "848ceabc9c66c46e2dd851058869fa0329f0934611d4059247565392d2e92aef",
-      "test_login_uses_generic_throttle_response": "8ed40615e34866c97b00174a4e75a57a0f9f995a3aa4afccb603d1e3642f3902",
-      "test_session_status_and_logout_use_the_durable_cookie_session": "0c26290c54f5b370d88efbb98a52a36f2770b670a6b40cfc3aea964752dbfce7",
-      "test_cli_token_is_a_browser_session_only_download_with_expiry": "76154df49bfc9f02d20e532369a6b707049b698eef41558847c142bd99c54d1e",
-      "test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf": "9fe3313395c5992c2028441879c7dfb743834532a65938c22cd95ad066706787",
-      "test_cli_token_checks_csrf_even_when_actor_dependency_already_authenticated": "85d3570af3c9d035016beba096d030bbf479de61827a7ba7c1546fb34ec3c321",
-      "test_login_without_host_is_refused_before_password_verification": "0c7d8b6b88d19c235659ee65c47b3d068f270bca20eada02c5a8e02eaa575e19",
-      "test_login_without_host_is_refused_before_password_verification.without_host": "dab21314dd3c2e80b4a6b2b4d56b60d9aa080c81610531092d49c2a34d5ec313",
-      "<module>": "5394bf44be8029e6ac735e7ee65bab6174f28616abfeb698ad02be59caececb9"
-    },
     "control/tests/test_availability_build_observation.py": {
       "test_build_observer_yields_and_recovers_a_committed_child_before_replanning": "584e3a237a9036700ff2253eddee1a8546b4ba7edfe22b83b3e0f5fcdcaeceaa",
       "test_build_observer_yields_and_recovers_a_committed_child_before_replanning.production": "7701408cb89d0e31711381c4977ca1057a7784df9d1eaaaf79db6b8d9b77408e",
@@ -3380,18 +3168,6 @@
       "_service": "c55016d9a8df2bd17e7830e047df8ce7109238d43f6153f3a1261f5102966440",
       "test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_peer": "c6712abb8c2879ff58e6ef29fb56500bd87e8c2c10d0d325082974554112848c"
     },
-    "control/tests/test_cache_request_recovery.py": {
-      "_collide_inserts": "b7dfd824ba66a9279c837163a1904292c8716855b03fc32feb848f16013f8100",
-      "_collide_inserts.before_insert": "0faf7258485c13bf09bfcddd662bd04174d498d8cfcc8ac0a9db71ebd97b92b3",
-      "_collide_inserts.capture": "8fbb4cae917b627777641e278363fde0c345534c9a710e21ac4d9bcb2a760479",
-      "_start_together": "03715ec1c8713a6bdf8977439d6d11b5c257cc792c8f898a3edf0713b680aa32",
-      "_start_together.capture": "67111b4ecb1dbcecca865421477ef725d26859e6f651f84890a45cb7f8443f79",
-      "test_model_duplicate_insert_adopts_only_identical_issuer_intent": "0f340986c97829dfd643a4a161674efc19bf12aceab69b55f976cc710a141a3e",
-      "test_model_duplicate_insert_adopts_only_identical_issuer_intent.submit": "d35f41a00b129a9107e66e1106ee504f4c68ebcfca6327a58a430d6a4881aa77",
-      "test_recipe_duplicate_insert_adopts_only_identical_original_intent": "80b668a13c43698e0776d30888b652a3a0eb0298ec3d0e6a0f04a85b1d474c53",
-      "test_recipe_duplicate_insert_adopts_only_identical_original_intent.submit": "816eb0af859d8f4fbe6ec3ddd13cc7705fbc23842642719b686d45e5c21f53c9",
-      "test_recipe_lookup_preserves_id_visibility_and_private_request_correlation": "785eb439d1b96566738d143b9f6100f982be3d2799eecf7d76e28d41eb02b788"
-    },
     "control/tests/test_catalog_sync.py": {
       "_active_revision": "b3168bd864cc3f9fbfac874a7ea00a1f4e76d1a6412ea1df8af3b5be81f45f61",
       "_document_section": "ea1d304767c895d83a98af76360c33cf1809810f51d6f1ad95b6b92f9c862d98",
@@ -3426,7 +3202,7 @@
       "test_automatic_sync_reuses_same_commit_without_refetch": "9a9c6f210ee28e8e87061ad4177568a11cfceaef8b62f282b34a2cb8358fffcc",
       "test_automatic_sync_retries_partial_same_commit_without_refetching_successes": "4c80a8efc4b56597440634c9b5852f4856ff26d53475a258efc2e76377f5a6f5",
       "test_automatic_sync_retries_untyped_fetch_failure_and_keeps_other_items": "52daf30cb6059dbe6f1f901d58322ddc3d31e03b6ea7daaa6b588acb2c7fec38",
-      "test_sync_rejects_preview_commit_mismatch_without_catalog_mutation": "a781f52cd4ad44f996e63f00604262db02b1e3722f61ca341a52a65ddfab6fa6",
+      "test_sync_rejects_preview_commit_mismatch_without_catalog_mutation": "6d38e771251945c4c0b0041a778db7ae87300a0e57afe3fb706164c5485f08ec",
       "test_sync_marks_reader_failure_failed_and_releases_active_slot": "d09f5678249c8d518464e0d882f7f239f503e4b99c1a1c3ca369e6ae2a86dad2",
       "test_sync_heals_an_unreadable_stored_result_by_resync": "947474b2120d49773d948b9d467bc04e69808003d95e211fa0f17fbee2f88b2b",
       "test_old_and_new_stored_results_both_read": "33fdab4c9efb2396da736a1003b3453250001899a4669f347518d21ac859bb88",
@@ -3474,7 +3250,7 @@
       "<module>": "f6c4845f84e7274b4a133dfed966c313d61aa1d6a388b18a8f8ef624239751fb"
     },
     "control/tests/test_distributed_recovery_bookkeeping.py": {
-      "test_the_recovery_derivation_does_not_raise_a_refusal_for_bookkeeping": "83a76bd4e7d873885b914dae94abb91eb90fbe031c05fead260d983831fef258",
+      "test_the_recovery_derivation_does_not_raise_a_refusal_for_bookkeeping": "de5203526f81659ae1766e609192a7ccc52172348a963c245366fa766f6a043f",
       "test_a_start_that_is_not_the_exact_accepted_authority_is_retired_with_its_reason": "736d7ee38e2aab0ddfaa1ef96486ade8d334a9d01cde8ef477a1f351bc15464a",
       "test_a_repeated_recovery_stop_request_is_answered_with_the_queued_job": "7e94c4cd2bf940f838e7b5e934c2ceb5f06855f02b81a023c02a6f5ce3426167",
       "test_damaged_stored_phases_decode_to_nothing_instead_of_raising": "c5f3b7adfed9f3c9019649eab4de4519485f98a395735280fb3c9e9c54186f61",
@@ -3492,7 +3268,7 @@
     "control/tests/test_distribution.py": {
       "_assignment": "bd67f2ef4a818efda9491aa896c506913279bde2f9e104d2ad8d86b37c7e35e2",
       "test_controller_serves_one_verified_assignment_to_two_nodes": "9d352467e8c387f18cc255068d8ad8e0154c52d12366878f54572fc02ac5dd71",
-      "test_distribution_rejects_unassigned_wrong_node_and_corrupt_object": "451a9446e0328511d03602676fa247c491b6f725add325b365dfba9aa7d0522b",
+      "test_distribution_rejects_unassigned_wrong_node_and_corrupt_object": "6c677201c5659402094dc29bcae289085f46083b5cebabfb428c817f90cb2a30",
       "test_distribution_assignment_survives_controller_service_restart": "ac65fca61facdd08f8fafd62ee0353e2f0ddf9c9032bf517e7c3c2b205e607d6",
       "test_separate_api_process_serves_worker_registered_model_files": "50e5e19fa1553a1f67c7fe4ca6b8f190191b187ead95f7297cecb34d1aa00424",
       "test_separate_api_process_serves_worker_registered_model_files.Cache": "08fc2292a16aa967ab968231d8dbed510faf4cd5afb9f36965c957828491b21d",
@@ -3501,14 +3277,14 @@
       "test_separate_api_process_serves_worker_registered_model_files.Cache.resolve_verified_artifact_set": "3e111dac79977159ef7e97b6faf58ebe608ade2221588bbd77919d1a4abde6b5",
       "test_separate_api_process_serves_worker_registered_model_files.Cache.cached_artifact_file": "f74f8a050f234b7f890321357a44ab68ebce47a9de4f4c91b40b245ca3d594c0",
       "test_separate_api_process_serves_worker_registered_model_files.process_service": "d2040257fedbd38a1e4f7b50fc23952eb3cafc43799430287313b0d2191d8972",
-      "test_distribution_binds_opaque_cache_and_image_identities": "45d6669f1e141c5b644a753e4a7c012d977c74b06294b1d98923dbf47bb4952e",
+      "test_distribution_binds_opaque_cache_and_image_identities": "0eda9a080d5d63ae481030f729a4eed5a4d331d0fe29a7b9a513a1e756ced729",
       "test_model_cache_adapter_consumes_service_manifest_identity": "69f2a7885ea14dfc6599a7e65b53be721c4549a2ee1f6b574f28b7a41c7ddc74",
       "test_model_cache_adapter_consumes_service_manifest_identity.Cache": "7f44dd46b5a2069040bf6fea426714b10f14a2043a9be3442da2b1226de2b03f",
       "test_model_cache_adapter_consumes_service_manifest_identity.Cache.Manifest": "03d5b19efba8f1a12757b21fdb17e286dce4cfc8ab4d2e6b17a6baf695d19784",
       "test_model_cache_adapter_consumes_service_manifest_identity.Cache.manifest_for_artifact_set": "1ce96183188d099b41ca8f7b2e0919f7111eccbc6550b87e12c0a9df29ae9fc2",
       "test_model_cache_adapter_consumes_service_manifest_identity.Cache.resolve_verified_artifact_set": "a3cf38bfb2aef08d2cf4f99e0faca0051d7ad078856a14d2ba56a2abd3009453",
       "test_model_cache_adapter_consumes_service_manifest_identity.Cache.cached_artifact_file": "0578d6d3ff5585b7f44e8332084f622849e21bfe94df13e08a7c544ab6ee75d8",
-      "test_stored_object_is_served_by_name_and_size_without_hashing": "33aa17c2a4250f9c2f8c9f01b3a618f677de8872130cb3079ee44aeb25cb2210",
+      "test_stored_object_is_served_by_name_and_size_without_hashing": "568f3c450f2df8da3c9b6bfdb53f4800133d46b572f6eb6c3bcef56506f3b761",
       "test_model_cache_manifest_publication_is_atomic_across_readers": "149b9b3ad99ab37b58a11c0eedb3fd92f554be98960e6ac2d49c623ba3275ecc",
       "test_model_cache_manifest_publication_is_atomic_across_readers.Cache": "568b3e53338e051628fa19545a31481ec5d8a1a0006e9a72cb84a0eaf38ca3ac",
       "test_model_cache_manifest_publication_is_atomic_across_readers.Cache.manifest_for_artifact_set": "78c2d8ec5be7fe89c10bcab8cbebc4b606ffe33917bc24aae6ded3e6e6adc290",
@@ -3516,9 +3292,9 @@
       "test_model_cache_manifest_publication_is_atomic_across_readers.Cache.cached_artifact_file": "54a1029e9a527577a05b0815c9392df2b409291e02d0aada9b6d34e6eaaf3718",
       "test_authorization_is_decided_once_per_assignment_not_per_range": "511ede48bbf211db53d287c983cc4ed4f7a17995a244cba0ba736ec50b39a76a",
       "test_authorization_is_decided_once_per_assignment_not_per_range.count": "fb536e59e3182ffe407a1d5838d075654182fbfba246c0a25c9f49ac57777901",
-      "test_object_location_is_resolved_once_per_window_and_follows_the_file": "59ad7fb1d73429f2f199d842b7cf626004c7be0cbd0ac593a35c060095492565",
-      "test_object_location_is_resolved_once_per_window_and_follows_the_file.CountingSource": "22381a041f76c4f00db1ba404398c677e3d128425bcdf5221c3099ef772f01f6",
-      "test_object_location_is_resolved_once_per_window_and_follows_the_file.CountingSource.open_object": "35eec17bb5b5a2ef52fa7f5c28ba4aa419b0f211bcad1771dc40c407d012625a",
+      "test_object_location_is_resolved_once_per_window_and_follows_the_file": "ad5d65edbef5a60ed74204c03be62d11ef829f6c3efaad4c20661634805b75d8",
+      "test_object_location_is_resolved_once_per_window_and_follows_the_file.CountingSource": "8abcfc4ccf49d8e88154cf766f58623cb86bf8067285a7152f4ba9fd50dcfde4",
+      "test_object_location_is_resolved_once_per_window_and_follows_the_file.CountingSource.open_object": "39bed990b7fcc051d131398fc7ae6d92e5f7053d8e8b9b4e206bf68f2f270611",
       "test_revoked_distribution_is_a_refusal_on_the_agent_wire": "9693012f946737d4ec27529b96aba2cab4a5d71281163d8894d4e158b75e01f5",
       "test_denied_nas_source_cannot_fall_back_then_recovers_after_access_restored": "3a54d8b9c60e62a1896d2bfde003210e8133bf4c717c5590d93ea725b7a6d497",
       "test_denied_nas_source_cannot_fall_back_then_recovers_after_access_restored.Cache": "658ee79e1d163b129fbdbdf3a175f2b511f1f06294916ff70901fb9218e6b5a1",
@@ -3562,7 +3338,7 @@
       "test_zero_byte_model_download_records_the_already_verified_set.Cache.download_preview": "82248dd1c183509b1e9c31ce085792e542fded7843cb7037154ea925c087169d",
       "test_zero_byte_model_download_records_the_already_verified_set.Cache.start_download": "1f223d5d392235cfa0aa1dbae45a077769113709fc82ca813b68ab02762e2937",
       "test_zero_byte_model_download_records_the_already_verified_set.Cache.adopt_verified_set": "26f2a27c55dbded3306cbc1e3c0fab1cab093efdfc7d6a793595210bb16f767b",
-      "test_child_persistence_retains_in_place_default_members": "80de13a9e5dc214ee568fc45c13ec0d86dc016996e58c8c011f22cc6df370e2c",
+      "test_child_persistence_retains_in_place_default_members": "c6b3aa30d113af31c46f6ea8c56d921a60113b08056c6cd544c2c340ab20a9cd",
       "test_child_persistence_retains_in_place_default_members.mutated_receipt": "11dc07d145235e05f2d4b18619bc218f8bf0c31d136c1ebfdccbcdc0ff297541",
       "test_child_persistence_retains_in_place_default_members.check_written_receipt": "3d07142b44b62d94a9f7ce67410a50bc93c33192ead2e87af4dc9259d184dc34"
     },
@@ -3621,29 +3397,6 @@
       "test_durable_operation_projection_resume_records_waiting_then_queued": "aff4b6c6b10ddd54163d47ed074e3d50a29f4be8a3e214e00ab1fade0d9ffa87",
       "test_outbox_preserves_current_values_without_field_presence": "a4655936a74e2a279f58198e1abc70d4ab8aa553410e16c8f50df7320d94c350",
       "<module>": "ae2f2af046a4b969eca36111c2ad4bfc760c08ec4b6dced3d1ba400a79a0fb07"
-    },
-    "control/tests/test_fleet_profile_api.py": {
-      "_client": "31532a9f112d44dadfcc4d20fe5f2f0766ecb68d86e8e2d3b9e37a128f5f9a51",
-      "_headers": "2855ea18c04a3a2f5d3ef3d4e685105337c35612ad50e39512a7e1a4145af49d",
-      "test_profile_preview_requires_administrator_before_reading_profile": "5bd531eefa6c53553508d1741cb7c74b16a0dd734207c9cf989e3523955d3b40",
-      "test_non_admin_cannot_change_an_accepted_profile": "656b274bab4ad42e6dc7aa2a458af5956ad355076a1bb7c9ac06db9a49df79c7",
-      "test_profile_operator_routes_are_singular_and_unversioned": "3552566837e08c532524e4692c10f669fe8ef8eec20eb80439e555d41b71ac25",
-      "test_profile_request_lookup_is_authenticated_and_reports_missing_key": "ebff594bdba4835062d2bbca88e0e7db07ebeac04e588430ba11635e443b7772",
-      "test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope": "3c38830a2ef0656d155ad5a628455d489fdf4eb1c08d03c3321b691a8a706868",
-      "test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope.profile_endpoint": "4b3c6567329988823c55b990b5ad9a12868a555dedac3b5bcc827b3a3c4e788c",
-      "test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision": "106c06d05a51503d06cb2bb891563e26ba0ed204477bbc5894c437803ef54c0e",
-      "test_cli_edits_and_exports_the_persisted_definition_through_real_api": "b2d2079e019eac29cd6127f976fd188ff3e5d6afec59f055169f64f9ba24e0a7",
-      "test_cli_edits_and_exports_the_persisted_definition_through_real_api.Response": "26a7f50f62b667df261704df02dc2d4ccfec452cc123838eb4bd51cabcd4daa5",
-      "test_cli_edits_and_exports_the_persisted_definition_through_real_api.Response.__init__": "c33eed9b576f9768d79d1cb6dd2f3b27c456dbe4894f26f36dbecd774a020afe",
-      "test_cli_edits_and_exports_the_persisted_definition_through_real_api.Response.__exit__": "98f1141c2e76594d017dd5de8c1a9ed6267a54279be1a3a4358a645cf356525c",
-      "test_cli_edits_and_exports_the_persisted_definition_through_real_api.opener": "1900dc31875dfe307930bbecc1b2bf775db184f6150b7f58feff4366d3b72e0f",
-      "test_profile_mutation_role_is_declared_for_final_route": "cc171a806f8e6185b2ec6d179d77847958d368e9bb7f5017d52c22cd96ee3421",
-      "test_production_app_composes_fleet_profiles_with_preparation_authority": "87552c12a701f541f3c13f037178555028593de09030fa4e5b971fd61e150249",
-      "test_profile_load_applies_the_current_saved_profile": "42ab9c7c04c44b5988cc227853845069c35ea11d725ca28fa1501331a27297e2",
-      "test_profile_load_bound_to_a_review_refuses_a_plan_that_changed": "8e7731b0cbfadf165da3649057beacc68f4d4b6540cfbe186d0353bd8172bd31",
-      "test_saving_a_profile_fills_option_defaults_and_replaces_stale_choices": "57ae172cdc9503ba891cd56d562e6f8ae73cf52356b81a85185aadc823ea3c8c",
-      "test_saving_a_profile_fills_option_defaults_and_replaces_stale_choices.body": "b2aca8bed87b5205bfa2f359eba36777b343ca5828719c255afb80e9c0ab5ab0",
-      "test_a_rejected_profile_save_names_the_field_and_the_reason": "07b8483320b53fc84456c26773263691ebf17ba9dd041f44ef2428af860bb535"
     },
     "control/tests/test_fleet_profile_bookkeeping.py": {
       "_service": "d77b9038d69b635eef22dabafdab420b676ae49757dbbbc2469963a6e24730b0",
@@ -3972,35 +3725,6 @@
       "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt": "e8b88a3be1465b6806cd2087bee53617812c88c22bf319e50131885982824423",
       "<module>": "f6c4845f84e7274b4a133dfed966c313d61aa1d6a388b18a8f8ef624239751fb"
     },
-    "control/tests/test_gateway_keys.py": {
-      "FakeLiteLlm": "cf60f4f468ad0af90a09ab8d93811487b7923e9f1a452ef1d57e3c27d4df65a7",
-      "FakeLiteLlm.__init__": "84eeffafe2eddc3dd91f1bd830a14e8a48cc1ffb07f164b3afb4048d8e0cad92",
-      "FakeLiteLlm.handle": "8ad23929e010484918500d252fd6d38905939960e1631adcec36fc21daf756c9",
-      "_service": "6a51e5ec9460af4ef92fe4c27563c254dbb82dbfbcba8ffc040ad90f82413834",
-      "_client": "d31ea9f8f2905f96e5fa22456de90d01036d08d055985304e97240020bcd7a98",
-      "test_roll_replaces_the_secret_and_keeps_name_and_models": "3a12eff24fc2535fded9c449749b99d9604733f4bd64e353dee2613fcfce8bb7",
-      "test_roll_that_fails_to_create_keeps_the_old_key_working": "30f2c5eafa7eb1a562566fcb6016be1df2696034486a94a7a0dd02b28b405134",
-      "test_create_list_and_revoke_client_keys": "6cd031df1001c72472e8204940101c5ccab420e8925b34b1b85ae2cbd064668a",
-      "test_only_administrators_create_or_revoke_keys": "649a557dcfba231083d636a8a9b97c47c64759ae21ada1b9520cbcf4b9f7fef0",
-      "test_unreachable_litellm_returns_bounded_typed_observation": "503a4788a0d753135ebde94be51cefb8433caab501bb3458a368fd6eaf868df2",
-      "test_unreachable_litellm_returns_bounded_typed_observation.refuse": "e591f36854fe28b157eccf64a6aed279bdf771074d6df4ab987d407e10513c09",
-      "test_default_key_is_created_once_and_heals": "5304d97d626150166715723ed7e75d6ee6e2bc0d44e904e91b3382d950d96838",
-      "test_the_default_key_is_asked_for_again_until_the_gateway_answers": "53bf7555170430c287f3a603bf3686f6c802a7095d71792e6b74d4befda974a0",
-      "test_the_default_key_is_asked_for_again_until_the_gateway_answers._Service": "1f033d826756aa28cb4ee03fc5e4e98aff3f17c37250bbf8bceb78c6a632f38a",
-      "test_the_default_key_is_asked_for_again_until_the_gateway_answers._Service.__init__": "641be20eccce23896350b5bb541307fd7b2c5f4af6e1974183db37b42ee819ee",
-      "test_the_default_key_is_asked_for_again_until_the_gateway_answers._Service.ensure_default": "c772c0a8c6e5d7e471a47c7d4b266782059f6cfd892c260ffe015f393d9134f8",
-      "test_the_default_key_is_asked_for_again_until_the_gateway_answers.run": "981bfcffdb95f694a67eac213a391e1c4b2cd7a2f4604a19549455ceea3773d3",
-      "test_lost_create_reply_reconciles_exact_secret_without_replaying_effect": "e5f8afa530e06e8381d986ba3ff063ed7ab5bb45894666b176a7ed3ca0f8fcd1",
-      "test_lost_create_reply_reconciles_exact_secret_without_replaying_effect.lost_reply": "17e31f5647bdfb29abbd79196ac32219e92a1fe0a18ea8853fdfc28998b41e3a",
-      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted": "442ef7d329eeb4304d0123162ee6c1e487282713f234912f4eb21901babcd3ff",
-      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted.end": "6fc507f507a3e9236ee5ef08fcffab52ea0169f0796a250d9c67c51c02bba4f4",
-      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted.fresh": "1c7e346cd9d52681e5837e715e77db75e3160a334e9efeb9c70bb3743491ea34",
-      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted.assert_released": "e7f5643f09d5af9ea21f01d65276e7a66251ed2f3031a62542e02761a5bcd169",
-      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted.assert_reason": "89fbae53681be192db136fba6e61018624e582324487f00e5e6f1ebd4f7ce428",
-      "test_gateway_denial_is_not_softened_to_bookkeeping_unknown": "3323fdf5fdf7aaa8ca7693d0d174a0ce5566e59a9acca466c569d72bdec3647f",
-      "test_gateway_denial_is_not_softened_to_bookkeeping_unknown.handle": "5aa8ae1933fad9bd58969b762ad6e87cd280b1cbe0c6e83de283f42afbb7adaa",
-      "<module>": "5ea09a10507878cec32930a143ab1c2a841e98dd06c813521a172f75c1d78dd7"
-    },
     "control/tests/test_host_helper_authority.py": {
       "_RuntimePlanBinding": "402fbdc08b3cf9d8be84173beebc9177fa1d66ccba0f50844e024086fc5071d7",
       "runtime_plan_binding": "f310111ee545ec3e5e756c48d20c7ddc8ffabd1ff5ef9bd6956f827db22206dc",
@@ -4166,10 +3890,10 @@
       "test_library_cursor_refuses_a_changed_accepted_catalog": "46d17b9d69076c3f47a7a46e6e809b4f0c164f54e199484024368184cad1565c",
       "test_library_cursor_refuses_a_changed_accepted_catalog.read": "2a8be041e99b94d2a41b283793603437c66ec1d0ed727d774b7f2d9a2e6567a5",
       "test_model_detail_resolves_every_model_cache_selector_form": "837963ddab895ba81ac82f015d3db496be17a7542cc2ff8a7d897a9ce92fcecc",
-      "small_wire_budget": "33df11564e7086c6c9b6d51d8a05935634b7cb24703c2cf1ce3b6edf8f674abd",
+      "small_wire_budget": "da2988171b71a9dbfdea88564434f482a56bc81fbb30260c3e337170064d39ba",
       "test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit": "cc43a9fe59023caf8de346214ba11cb1cba9972106146ce63d070745065783f5",
       "test_model_library_pages_by_wire_bytes_without_losing_entries": "0e93e4ddec51a355002a1718e93392d6d6392ff3afcafb9d8da69b32bc3ac9f8",
-      "test_library_item_at_one_byte_over_wire_budget_is_refused": "238cfc81cd7321161be35903013c63b6626158fa27e9468e6816a9254c795c67",
+      "test_library_item_at_one_byte_over_wire_budget_is_refused": "04024a46370d377cd85f727d1ee3f09c78716f4354351ff0d52bd2226e9b79fc",
       "test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably": "684c0962e96ab486b3fdc4e85a503046c44822e46197dc4cbf3f378bd6d47596",
       "<module>": "dad01cf55bafe95e7405af8eeea1852d7b260a603db39d2994401b9223dea6b7"
     },
@@ -4288,7 +4012,7 @@
       "test_operation_transfer_progress_counts_only_missing_objects": "e9758778a1bbcb17072c03709ff1589bb5ead4aed97c5c130f75f87f7b11dbfa",
       "test_download_mutation_is_queued_until_the_controller_worker_runs": "0a2e641ed5f95b88d3337840958c7aebc0911eac4e017d3a2c7b0eacad37fa76",
       "test_activity_provider_filters_pages_and_projects_attempt_and_progress": "a3b07f7484849e83acad9993527ebcdcdafad48d166c230e76301740790fbacc",
-      "test_malformed_pagination_boundary_fails_instead_of_ending_the_page": "bdd293c668158cd0f58bad640fda0a3229f511e8b1e3a06b1cbcefdf5f4865a0",
+      "test_malformed_pagination_boundary_fails_instead_of_ending_the_page": "59fca588b8cd918eb9f64510456eb02d44c56fd0738076cfd239d084e38af084",
       "test_interrupted_download_checkpoint_resumes_after_service_restart": "3aaba3efc892fea81a1b76c8647d477366b344de1d6f98c64fa4af2cee9e7d8d",
       "test_transient_download_failure_requeues_with_exact_identity_and_bound": "ccbd0273dc084dcdca439d742db4755b6094f9dd278ebabf9df2ff1294f9a936",
       "test_transient_download_failure_requeues_with_exact_identity_and_bound.flaky_source": "7c732e8f1c386a64c9fde7333c029eb5b10a234e670b66a32dc8952c1609e2c7",
@@ -4451,7 +4175,7 @@
       "test_stream_response_schema_validates_its_actual_canonical_record": "e9d6f0434b8f295656439f943a4ebd28c05d8197ed26d10f0bc67461cc5f541d",
       "test_stream_authentication_error_retains_declared_json_media": "11e7d0ea8ee03f8a6b25ae3d5309c0251d330ede0f86bbf6ba5b2ab3a1ab7990",
       "test_global_validation_error_bytes_match_streamed_route_and_cli_contract": "0c4bff1a2af70ea6c33e38fafe22fc857e850d8f94960b237462d8661fdfdf88",
-      "test_platform_capture_failure_bytes_preserve_retry_through_cli": "1c125cad64c0886c80f4b96e23d6178ccd79f506f7660df813ed637cae9ae4d1",
+      "test_platform_capture_failure_bytes_preserve_retry_through_cli": "d9e6fe2e54009971d6da21ae614e87a0cef924eeacf586a113d1fae8cd023b05",
       "test_platform_capture_failure_bytes_preserve_retry_through_cli.unreadable_capture": "ee5310a95171a36deedde5f2a509be5914c48d81a63f3f2bfdfa70543b627730",
       "<module>": "8c9bd58312d8f627be2d01d50f29c550f3a3469d681ef41de45f14077c43bd71"
     },
@@ -4520,20 +4244,13 @@
       "test_zero_target_upgrade_job_still_projects_a_valid_progress_object": "01e67ee19f6519e975061e4c97f2ecbfa1562e25818842c7c50f5b697157a5c5",
       "<module>": "7ea1acdfbaf8ff241594f4060df078b031315b862a341e132709f92ecc459d29"
     },
-    "control/tests/test_operation_response_budget_installed_cli.py": {
-      "_members": "f54f1951a26d32b395f95010704ba6359e0a4d50cf9b0612808ce275c9406f79",
-      "test_installed_activity_byte_continuation_and_aggregate_fact_recovery": "a1234ad203cb7f46c1f8f686d50b758f9cb5fcaf88f00c6362c856918cb84cfa",
-      "test_installed_activity_byte_continuation_and_aggregate_fact_recovery.detail": "5cc224544a931c5dae7d8c7aa55df529a22b8fb9a5fb1512d4698be9e301bebe",
-      "test_installed_activity_byte_continuation_and_aggregate_fact_recovery.page": "ee207e4b78fcdd1f89a9f78d07ddfcf3643de41225deda85e7056ac4605f39d7",
-      "<module>": "0260d39b66bffde85144091a08b86144904c45732887ce568649ca45c8011bc3"
-    },
     "control/tests/test_operator_projection_api.py": {
-      "_Enrollment": "1d86a5ff0a5243676f3e34389cb6a9ae67001d90b38d1a4e99dca4e0b98316a8",
+      "_Enrollment": "c5443c1b04ed2090829e200c65eedbe2b8ccfcf7dda324663d58ee9e400f3eea",
       "_Enrollment.grant_status": "41627760d804f7295568ce3c71ca8c83f69e9cffdfa31e401951a65c572d2249",
       "_Enrollment.revoke_grant": "871ba6fa6638b1ac7fd8eff2fa4d7dea6b076d45e4976099d24571a4de0ee5c0",
       "_Enrollment.create_named": "3cd3f38599838184a5bbec91b5009433c7bfc9bd158c643838d4606c03ac7f9a",
       "_Enrollment.create_reenrollment": "b8bb131be41be592c4837efb764e499394546ed67d3478621f6fb3372cabbc8f",
-      "_Enrollment.revoke_node": "c6831493d714b5af41841367927d819126c41cc060154bd43cb4bb8db97a6605",
+      "_Enrollment.revoke_node": "a8b620b0176e682f84bf61546c28a5eb20752a0c5a9b82892fa5a21a4c81cccf",
       "_app": "60431012d4f9b36373d9a9f60ea1a15971567873ce6b8d436a482e00a6845710",
       "_app.request_id": "40f51e6e7258ce731f162f35fae7ea19f31acb1a8a0d8f8794c286211632a425",
       "test_operator_routes_use_singular_namespaces_and_shared_mutation_roles": "2dd53f1794ce1e5b0757cd60e469f958cf417890cad5c54e4604e5d2ffd6679b",
@@ -4571,11 +4288,11 @@
       "test_upgrade_request_replay_returns_the_same_durable_job.ReplayUpgrade.current_package": "18fc3401542cdb8097b5aace31c0aa6dcc985ba268eaf88345842e434b63aa9b",
       "test_upgrade_request_replay_returns_the_same_durable_job.ReplayUpgrade.preview": "0bd769639ef28c3bc3b72b3f4126de7b68886dbbc08141a6f5ef9fa07bc91658",
       "test_upgrade_request_replay_returns_the_same_durable_job.ReplayUpgrade.apply": "3b09da206463bab5c0ea80f3b68af5b0341259a30aa70bf8dc44f89b77e9598d",
-      "_RefusingEnrollment": "58393d572847748896e66ca794d835c15c7c7eb675e248198e5469d57d0d6bf4",
+      "_RefusingEnrollment": "4cd83f0eebeea1d43f4d74ef4d283e973f3fffd667482a7381c0d6ef57f0fb2a",
       "_RefusingEnrollment.__init__": "db45e9411226be12cf1d7c78b1a5ab9a049a7f14a6706f2b175b0bf767671a33",
       "_RefusingEnrollment.create_named": "d10d49cfbd12fbc6c8638ccce4e11281051ca16bc3fabca9e9f1197d3b315994",
       "_RefusingEnrollment.create_reenrollment": "b8bb131be41be592c4837efb764e499394546ed67d3478621f6fb3372cabbc8f",
-      "_RefusingEnrollment.revoke_node": "a30bb82004fa803028a807d8da1a96ef99d3f2a805f29c7773d1436398b691f3",
+      "_RefusingEnrollment.revoke_node": "e69ba67a3edfea3ca7cbfafc0b1b84be55ac17813e22c471223b4b76ad0897dc",
       "test_a_refused_removal_names_the_enrollment_layer": "903ffcf5dda50fc678ebadf6942a57570f7abf49bb8bc49e7ab5c4c206dc8c6f",
       "test_zero_target_upgrade_receipt_is_a_complete_succeeded_receipt": "9ee1b7d99ad0aa18e85952b5854025c91c71f4e3a49897180643c8193ee9466d",
       "test_zero_target_upgrade_receipt_is_a_complete_succeeded_receipt.NothingToUpgrade": "610dc2633d7799bff4a0c7708ee8020e38b2a67196142c9a07aea62bc8f3df94",
@@ -4583,7 +4300,7 @@
       "test_zero_target_upgrade_receipt_is_a_complete_succeeded_receipt.NothingToUpgrade.current_package": "f543b8f7bc46e6d6fd9e42d311914b31b67871e4ea551c050a950d435a4539c3",
       "test_zero_target_upgrade_receipt_is_a_complete_succeeded_receipt.NothingToUpgrade.preview": "34c8e45f9f6b27cbef70aab6114e722c0929af9683227bddfaafd1a8bc171259",
       "test_zero_target_upgrade_receipt_is_a_complete_succeeded_receipt.NothingToUpgrade.apply": "0e327c4122d453d363a3396391694c3fd3c43d23bd2fbca23fac3eb59b4679bc",
-      "<module>": "8c028c4e8098b074bb4445aa1cdebbbc96db868e9c792ccae0afa56db84e3709"
+      "<module>": "5c27dbf7d0a4414fb36b7461e13d53b9e51ac2061b9f5f2f670e4103d49d521a"
     },
     "control/tests/test_prebuilt_images.py": {
       "_Reader": "daef44bd10495879c13909bcdc3f6b24ccc02844956f053f1e80fc22ebcf2bbc",
@@ -4597,7 +4314,7 @@
       "_Registry.import_reference": "e02c04e05c920f3d8b14a210fba4883fc7af952933ebbacbf0da53ccdcd396e3",
       "_Registry.import_archive": "e0d7797840a8c1ef9b4708d444ada8a8bf3c365917da3c12db21f7e1ec4ef70e",
       "_start": "fb40bf62df134e8a2f9b85507d41b4e7a99e3ce11ce4340ee436f6b18bb10e34",
-      "test_a_recipe_the_controller_refuses_gets_no_image_and_says_why": "0895fd5527cee90df4863877e7b7fddb620a5e75a355273a7b980a852c201d4a",
+      "test_a_recipe_the_controller_refuses_gets_no_image_and_says_why": "e8f27ae9c06381b51edd2c23bc84174eca47943860fe9da97e135acd1b08e516",
       "test_a_recipe_the_controller_refuses_gets_no_image_and_says_why.refuse": "53d9315a65e377191d6dfbde1cc34dc25f46f6f700c15f945bab177ec180990d",
       "test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark": "bd68324270429c024b9283314fb655b84a618b7676da83ce3f34fbcc9336ece8",
       "test_prebuilt_image_from_other_inputs_falls_back_to_a_spark_build": "38e5aa32e2bae4915561ab904f83186b7ff1ccc5ed5d029e79c06171326a308e",
@@ -4653,7 +4370,7 @@
       "test_a_resumed_load_reserves_what_its_transient_failure_released": "2ed590e804968e47b64f123da7b71b4d62336707089830ec1b222ba3045211e2",
       "test_a_resumed_load_reserves_what_its_transient_failure_released.advance_once_flaky": "0b4e51b37fa22bdd6003bce3485af1073da71a61276ef50a6dd2b9c588e6f56c",
       "test_a_load_survives_the_release_of_the_installation_that_held_its_claim": "b86f60e481397070bfd782d350eb512f69fbf338148a9bc212b7f00fcfb0b700",
-      "test_active_claims_with_different_owners_are_named_not_adopted": "a94bf178170096c7274348935d435d79c1e27184df3c68de9b26a20cf2dfd124",
+      "test_active_claims_with_different_owners_are_named_not_adopted": "3b3809fd6f765e640b068b16016ad579a8a4e27d670345e1ddc431646c0860a1",
       "test_without_room_a_lost_claim_waits_visibly_and_resumes": "a10b7f3320787252f3ee0d414d6c6d1d1fd05d09a316846a444d4cdadd21d73d",
       "test_without_room_a_lost_claim_waits_visibly_and_resumes.stalled": "f02f026d752c08c8b13314f062a9f592d7a8b19a16535c16d2cb13cf832ef26a",
       "test_without_room_a_lost_claim_waits_visibly_and_resumes.blockers": "190c36cafdb509fa3d19c575d091d5115914afc5911dfebf36575e94a396e792"
@@ -4697,40 +4414,6 @@
     },
     "control/tests/test_profile_jobrun_host_wire_bridge.py": {
       "test_selected_profile_job_target_grant_is_accepted_by_rust_helper": "743c43f78d7fe828930426b5b651a551daaaeeba213a1019636c85a3cac31633"
-    },
-    "control/tests/test_profile_load_submission.py": {
-      "_profile_api": "043be1cea40d37a2b3fb93aa9e775cab717a2762f2ba79d88493cea6c7f914b1",
-      "test_load_precondition_and_original_replay_use_current_authority": "1f4ec95d9e34557203a83048657058d8e1ec75a455bc7f8ce5e9c2518548c0ed",
-      "test_revoked_actor_cannot_submit_new_load": "328028a22b40f436bd426336200743070ca68b91331cd5d3a408dcfea341388a",
-      "test_accepted_profile_roster_maintenance_survives_actor_revocation": "de29715fd2cab39bfa601e1559ecbcbd7e9d8b583cfac7f80d5942f55ea2f396",
-      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit": "d703788d31a24e787c9d0805089f5e46fa235687dada4f5e35635ad24d4c9dc6",
-      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit.Response": "199680d5a68c72a86fcf24dc52b5c595ae0dc7e2b85686e841647a9f149321ef",
-      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit.Response.__init__": "3520e38917c80bd64a608d60374562a6ee5cd6673090e73619d9c5f8c2aa70ca",
-      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit.Response.__exit__": "98f1141c2e76594d017dd5de8c1a9ed6267a54279be1a3a4358a645cf356525c",
-      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit.opener": "9bfc8d79c63460d1c04b95a8f336d681fa2333ba0e49ef9b7767444d0a70738e",
-      "test_load_retries_a_transient_admission_owner": "2ffa7a5fae047dfe0555498e4815f8a8a281300d383000c5d93072b6103ae225",
-      "test_load_retries_a_transient_admission_owner.busy_then_queue": "a25e6ae1a729742f3a1fc787e8ee8de4a4dc654ea22918c0258b8822f05f9066",
-      "test_change_between_fresh_review_and_admission_refuses_load": "6307c31f9e0f258850354152418a6ba7f6a2d79b98ae8da03707cbfcd5d6f6e6",
-      "test_change_between_fresh_review_and_admission_refuses_load.after_preview": "e3dbc9536a7aba1d297d8d9f09680abfa604993ea4a0f56fc3b0b48e8c8eea8b",
-      "test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review": "340cc0c04f2e9d95580aa88c6676f940e204a1d614e4d8eed577e91e2c35faa8",
-      "test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review.preview_after_lookup": "46f0ff111ca6b90c9b94747b815453b554b108d024f4ad9deb0d5e4fe44f9d05",
-      "test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review.submit": "f66a4a4ac4c9e3fa80a970e6089751d5315e5c226e0e1af9cfd07569607988af",
-      "test_admission_serializes_insertion_of_a_previously_unknown_spark": "75ccc808dfee8045d8488c775fde46d901ada6244ab07cfee6a446a53ba24974",
-      "test_admission_serializes_insertion_of_a_previously_unknown_spark.after_roster_read": "f819b959c39840910bb56a6e109b0ecc033df2bf38b7ffbb74e062b74502fc17",
-      "test_admission_serializes_insertion_of_a_previously_unknown_spark.add_node": "31a7eeb2e9f82251a9922e4a88662f1e54764c9886ccc467802212733de607fb",
-      "test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent": "200f6ffbc2528112b224efd3d22494e0cb017b6cae84da7cee300a0373181728",
-      "test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent.change_head": "ad65d0b5cf0422322f51f5f140f2048214d08cfd3741293fe5624f55e67c42e0",
-      "_running_profile_api": "499bb1d5d88ac4a94277aa821f7da4420a5e6868e5325dcf4996506bff9a5fba",
-      "test_workload_change_between_review_and_acceptance_is_refused": "1b44d8db830292d4eb8cef6671813249f26fa7eb64c762fc9bb0c7caa9836d54",
-      "test_workload_change_between_review_and_acceptance_is_refused.change_effect": "0dd12a0f5c395eb6230d5695a4be01ad6cf1c1ff4c29d6fb1b2a82a11287c727",
-      "test_admission_serializes_run_replacement_until_acceptance_commits": "c273aefc3f035b24505df0e156d0ac20be6b15f5d0f09d8245bd11850b64a14a",
-      "test_admission_serializes_run_replacement_until_acceptance_commits.after_roster_read": "f819b959c39840910bb56a6e109b0ecc033df2bf38b7ffbb74e062b74502fc17",
-      "test_admission_serializes_run_replacement_until_acceptance_commits.change_run": "2450cc4928240ec59ba23032db1217c7a17a0e31016f67715771f7d0974f323a",
-      "test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance": "c436239e6fc5631df6ada4255910827d3553c37b281210a8bf4fbf20be9e894a",
-      "test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation": "fe5fddb57b6b6beb80cd354bfe739a15e8b34c6901e18e2ce4d0fb2482dd7ba8",
-      "test_superseded_child_contention_is_parked_without_holding_admission": "d3208bf6a90f2b0ea5ea369b46434d62cb8acfeabe219bc343cebf745742faee",
-      "test_superseded_child_contention_is_parked_without_holding_admission.names_locked_owner": "1a3839eee1f5fd38f32977601737b05485e4c0495f9790aa777463dbd4a9e625",
-      "test_superseded_child_contention_is_parked_without_holding_admission.before_lock": "e65e4b680a43fbabc26e88972605d58902f7a27802ea4749f3b52ad0ea871207"
     },
     "control/tests/test_profile_memory_claims.py": {
       "test_accepted_memory_blocks_competition_and_transfers_same_claim": "bf0065eb52d67fb6ce030b5a9588c9cddad31fa26e93d1cbad246bab57edcf7c",
@@ -4796,7 +4479,7 @@
       "test_build_resolution_rejects_incomplete_or_mismatched_cache_receipts": "d9b7776e58d8976fbeb1090bfa4de2b1b12fb74db1b3c70e0f793aa94935fe01",
       "test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission": "b8ed26b48368d93bf40786234ff2ee983275ba30c05201618fba8e0098336986",
       "test_build_plan_from_intent_rechecks_selected_builder_capacity": "d9d26b2cd449a3fc5049c0dbd5ffadfe7c2dccf458a128d71ba068b191ba1c5a",
-      "test_build_identity_changes_when_archive_format_changes": "5bbf6a242e9055c29adb083ac01afb032f104fb555b4d5c196897df656439ac8",
+      "test_build_identity_changes_when_archive_format_changes": "97e0e8ab80310b021fa823849f57de18d0293798a9e394426fa73201f062f714",
       "test_build_reservation_rejects_changed_builder_runtime": "84a9e0ba0370a550cec86961378627c86073c1c38f3cf1fad16c7a526e354956",
       "test_stored_build_envelope_names_the_field_that_invalidated_it": "d5fe98a84f04411947d1ee29df2642e9aafb4c4f9dc5bbbd9514a761af6ad59e",
       "test_removal_does_not_corrupt_the_stored_build_envelope": "86e3f6352825dc5034aad0de3e28145f81bfc5a21fb64b79bf972b9335c3adfa",
@@ -5383,7 +5066,7 @@
       "test_a_changed_accepted_image_ends_the_operation_but_a_stop_gap_is_observed": "bcb5a3db18441c9dba1244a25ee1035f63e127b49eb8fac822d3f1351aa641cf",
       "module_conflict": "3a384b98250d28e1b3b18a7d5a3c7d6ffb6c7577d7da69cde92b04681e359f27",
       "test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist": "b9b646da375f484b3d723c7da7818149d81e722fda31da33cc9559cf919b907f",
-      "test_an_unknown_outcome_of_a_phase_is_retried_even_when_not_flagged_retryable": "605ff8e73d336675d20e5f50414372b36341a49a50eb1a8921b2366a928e02a4",
+      "test_an_unknown_outcome_of_a_phase_is_retried_even_when_not_flagged_retryable": "ec3c36578be64aab949dc4cd2f4f745319f09c61f6153982bd5161054b6d5f09",
       "test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick": "26e767cfc26e1d124acacf02d2ee34950817d8a78175ed2d1689fa03ca1bb93e",
       "test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick.advance": "01a6c1166fd1c588273b282df729cada5fbe293e43486f96c729f83ffb228cbe",
       "<module>": "69862979fb6ffc95a428b7b0a842cdef850a3811e7a7b6328196e9de2efdd7c5"
@@ -5651,8 +5334,9 @@
       "test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it": "c969a81b10d6decffc83cd9281edb2ee405e20bd9cf7bcb315bfed5d7d93faeb",
       "test_stale_receipt_is_discarded_once_by_scan": "3b002f8bd12273550404edd66f2c3edd66c5743870f8432261af49a708f1ab31",
       "test_receipt_content_is_the_identity_and_provenance_never_conflicts": "6f99e2ac681411e6883a6472f1eda199b2a41aa1496a2914631030ddff68f9a9",
-      "test_temporary_unreadable_receipt_does_not_block_verified_reuse": "835b419394d66013ac3da23011ae8afcd78a647dd5994f99e2b2b69c5a7ba0c2",
+      "test_temporary_unreadable_receipt_does_not_block_verified_reuse": "5bc18d6a37f5af99e1848c18ad231ae4f5fb2fe14d4eae2686fc4e7529dbedcf",
       "test_temporary_unreadable_receipt_does_not_block_verified_reuse.read": "665ea628a619b9bc30d96b74d84154e4004abe01206dbeab343ec10e8eb6ca11",
+      "test_temporary_unreadable_receipt_does_not_block_verified_reuse.find_other": "622cfba41e1d228da35f496d1c8e135382c3b0fbf67e17917c19636d88b02812",
       "test_receipt_permission_denial_remains_a_security_refusal": "11f2504fec92bb7472564f9d1da24e433a2b868da3a8f67e7c333d96c1ad965a",
       "test_receipt_permission_denial_remains_a_security_refusal.read": "82d5219caf28e53765beb556b4539d058349b41d4529cc6f4fa8ee7695b45577",
       "<module>": "1891efddcdee22ce4f959ae09253e2e9782c6e27a52a9d7bbca756c54cb76ce6"
@@ -5848,12 +5532,12 @@
       "_reconciliation_plan": "bc38379202f50fe89c03d72f8201741a5ef4c531ac725aef46593db9f0162f37",
       "_reconciliation_operation": "a4e3bbe77df444652787402bd7b9c30e5423f24b953dfad9ed1abe8eb7d6a137",
       "_operation_owner_page": "2fddebee6ee70409b584696096d092c6b9a4bda0fe851473d79cfb913db052d7",
-      "_allow_minimal_reconciliation_plan": "081e1a20217f69effdbdcba4be27d0d6d4e461dc2733d784571d4141c0384906",
+      "_allow_minimal_reconciliation_plan": "4924f08b91a129c75bc978683df90e029c55c222b1784d2f9d788b73d9fef3ef",
       "_allow_minimal_reconciliation_plan.validate": "8151b3851204979db1f03ce4851fa349dd6011f904e5dc533e5e55435ff33462",
       "test_recipe_installation_reconcile_review_uses_typed_preview_route": "6398ca55923d7673c0f20f7e5ea8ee0bc29f5816d071c2e3148335db6bc527ef",
       "test_recipe_installation_reconcile_submits_without_a_preview": "4a7ce76f0b2e8951a3718f46faa8a67a5486e5d5ce9c217da55129d25a604e94",
       "test_recipe_installation_reconcile_reconnects_parent_from_realistic_activity_rows": "30d3ad30298c6fb89a55f0bb3749470e5b8bdb264145baa1258f61c53934f9c5",
-      "test_recipe_installation_reconcile_bounds_request_lookup_under_submission_deadline": "4be3541e62b273eb636601f1dd25104a22e1db0164be155ee4eb1581d6011d07",
+      "test_recipe_installation_reconcile_bounds_request_lookup_under_submission_deadline": "e2f2b46efdb89e4475dbaba591f8efe193f842fcf822ede1e9005a247500edb1",
       "test_recipe_installation_reconcile_bounds_request_lookup_under_submission_deadline.BoundedClient": "62de9b293f781282029ee40ba7350fc9494bfa2976f3b8453609ea2dbb578314",
       "test_recipe_installation_reconcile_bounds_request_lookup_under_submission_deadline.BoundedClient.__init__": "a15147df274a9733e1984c418572da4270cb9edbd6bd7337d9ce6486d049cbff",
       "test_recipe_installation_reconcile_bounds_request_lookup_under_submission_deadline.BoundedClient.request": "e4c9f8b62b5cf39f48b7e33093a3ad9baf95778b881495615f0dde298ede91a6",
@@ -5889,7 +5573,7 @@
       "test_recipe_remove_reconnects_to_existing_key_without_posting": "e6676f4c581a808f4b29af694948b57cc8b14f3cc836d3b9c78adc756f4fe50e",
       "test_recipe_remove_reconnect_rejects_foreign_selector_or_retention": "7d60318be4ffe172b6ecba693da4ac0ba1cbfbd4d719643a1966389967e350e6",
       "test_cache_remove_rejects_receipt_for_another_intent_before_follow": "46e35c7f2a9dcf344588dd38586cbc09d81abbf7518e2731cffee4df1b8e1781",
-      "test_fleet_remove_resolves_and_confirms_stable_node_before_post": "07295cbbefcc5b6459b079e3049d755cf4c82fdaf452be0e9cdc35ff5bad19ae",
+      "test_fleet_remove_resolves_and_confirms_stable_node_before_post": "d5f4f1e02f99d618c5fc7d1d84c43f85a2985ed3158c93ffbf93671791c91d43",
       "test_fleet_remove_resolves_and_confirms_stable_node_before_post.TTYInput": "05e69e7e1a979ccaee8f557e5711e9f19f310df8e651b9154e41e7ef69cf7429",
       "test_fleet_remove_resolves_and_confirms_stable_node_before_post.TTYInput.isatty": "465540a51930226933dbf24e81d80bec445f5d6d970d6f1adde0fcb4e7a3e388",
       "test_fleet_remove_resolves_and_confirms_stable_node_before_post.TTYInput.readline": "017009ea64b303c1014c4bc8c63c05fb350c5f54d8d31c8c0425cf1d5c4b9546",
@@ -5937,7 +5621,7 @@
       "test_profile_selection_and_progress_use_numbered_current_routes": "1de2d171440b55d453e3b67c6c531fd5af83717f0ed56ac8254246165c245107",
       "test_profile_endpoint_uses_scoped_current_controller_projection": "399f67bff686f9920d3cc09e1657e70bb58fa7673fba0c19f4da87f01e29ede5",
       "test_profile_endpoint_alias_uses_controller_membership_query_and_json": "76c7aa6f289e208c2ec3d618772620823c4d367a8c8be4778f2b8aadf54104fc",
-      "test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent": "84ee34e7e24966a8a30c4f5eb279f94ae8b5bdce1f5896fc6e249ad6b508b1b4",
+      "test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent": "c9666374df304493a560bdc507d2736394437d7af436d34ba62713b6f4e5db14",
       "test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent.UnavailableEndpointClient": "b3a8141f34528dcf0f15c8c3436d159b2ce1db3cdfb089a21e9cb31660e4bde4",
       "test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent.UnavailableEndpointClient.profile_endpoints": "48322e42c913c19fdeee6794ebbd3e024b6fad599ecd5e2f55bf273469beb75b",
       "test_fleet_actions_use_readable_selectors_and_avoid_legacy_agent_routes": "8b7226b38313f337b29e2307fc55e0ec4ef6e7352f71c520e61354b3a37092a1",
@@ -5975,7 +5659,7 @@
       "test_fleet_upgrade_unknown_acceptance_recommends_exact_request_replay": "28f4d1f0c38dcb207717f618da09e75af35e5524037896e33a1c5434d1ada64d",
       "test_log_since_rejects_ambiguous_windows_before_request": "63007750f8b03c55466c79499ecf4a21d209b7f07ef0a00ae73d0958af70da66",
       "test_fleet_progress_never_reports_another_job": "9388bd627bba1924ba37e61fda6010cfaed34dad572bcfef4af68f83e4311c6a",
-      "test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe": "a24f351305cc5773850ed74541085ff2c86b8101c576319c65d93ff448fa8eb9",
+      "test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe": "32fea9e07796d00ff78b60fcc55f543fd4edf5d168a6da0bc6785a84b8a81b77",
       "test_run_parser_exposes_spark_confirmation_and_wait_controls": "7a7f1693d8277eb706e3a35cc70b53d74b8453f6624c49059cf33d52feede824",
       "test_run_reviews_and_waits_before_reporting_endpoint": "565bcae6e2066769a72b578149162f95df93f61a45186a2674c1fae0b1362ec9",
       "test_run_reviews_and_waits_before_reporting_endpoint.RunClient": "98adb098bcac62c35a7c38a12825c7702924d5aa5bb180931ca0abb94f1ef2f8",

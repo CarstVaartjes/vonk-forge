@@ -10,10 +10,6 @@ if TYPE_CHECKING:
 
 from fastapi import HTTPException, Request
 
-from .enrollment import (
-    EnrollmentDenied,
-)
-
 
 def _json_string_end(value: bytes | bytearray, start: int) -> int | None:
     """Return the exclusive end of one bounded JSON string literal."""
@@ -110,21 +106,6 @@ def _scan_enrollment_grants(value: bytes | bytearray) -> _EnrollmentGrantScan:
     return _EnrollmentGrantScan(tuple(tokens), top_level_keys)
 
 
-def _consume_enrollment_denial(
-    services: AgentApiServices, tokens: tuple[str, ...]
-) -> None:
-    from .agent_api import _require_enrollment
-
-    if not tokens:
-        return
-    enrollment = _require_enrollment(services)
-    for token in tokens:
-        try:
-            enrollment.submit(token, b"", {})
-        except EnrollmentDenied:
-            pass
-
-
 async def _bounded_enrollment_body(
     request: Request, services: AgentApiServices
 ) -> bytearray:
@@ -141,8 +122,6 @@ async def _bounded_enrollment_body(
             token_prefix.extend(chunk[:prefix_remaining])
         remaining = _MAX_ENROLLMENT_BODY_BYTES - len(buffered)
         if len(chunk) > remaining:
-            scan = _scan_enrollment_grants(token_prefix)
-            _consume_enrollment_denial(services, scan.tokens)
             raise HTTPException(
                 status_code=413, detail="enrollment request is too large"
             )

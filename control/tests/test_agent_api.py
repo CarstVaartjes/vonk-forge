@@ -37,7 +37,6 @@ from vonk_agent_protocol import (
     RunState,
     SecurityRefusalReason,
     SignedHostHelperGrant,
-    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.host_helper import (
@@ -55,9 +54,9 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, AgentSource, TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
+from vonk_control.enrollment import EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
-from vonk_control.enrollment_contract import EnrollmentObservationReply
+from vonk_control.enrollment_contract import EnrollmentGrant, EnrollmentObservationReply
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -1464,14 +1463,23 @@ def admin_headers(codec: TokenCodec, role: str = "administrator") -> dict[str, s
 def enrollment_grant(services: AgentApiServices) -> str:
     enrollment = services.enrollment
     assert enrollment is not None
-    return enrollment.create(NODE_C, "administrator", 60).token
+    grant = enrollment.create(NODE_C, "administrator", 60)
+    assert isinstance(grant, EnrollmentGrant)
+    return grant.token
 
 
-def assert_grant_consumed(services: AgentApiServices, token: str) -> None:
-    enrollment = services.enrollment
-    assert enrollment is not None
-    with pytest.raises(EnrollmentDenied, match="consumed"):
-        enrollment.submit(token, b"", {})
+def assert_grant_available(services: AgentApiServices, token: str) -> None:
+    from vonk_control.enrollment import _decode_token, _digest
+    from vonk_control.models import AgentEnrollmentGrant
+
+    assert services.enrollment is not None
+    with services.enrollment._sessions() as session:
+        grant = session.scalar(
+            select(AgentEnrollmentGrant).where(
+                AgentEnrollmentGrant.token_digest == _digest(_decode_token(token))
+            )
+        )
+        assert grant is not None and grant.consumed_at is None
 
 
 def valid_enrollment_body(token: str) -> bytes:
@@ -2535,8 +2543,7 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
 
     assert first.status_code == replay.status_code == 503
     for response in (first, replay):
-        observation = EnrollmentObservationReply.model_validate_json(response.content)
-        assert observation.detail.reason is WaitReason.OBSERVATION_UNAVAILABLE
+        EnrollmentObservationReply.model_validate_json(response.content)
         assert 0 < int(response.headers["Retry-After"]) <= 300
         assert response.headers["Cache-Control"] == "no-store"
     assert calls == 1
@@ -2547,6 +2554,7 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
 ) -> None:
     client, services, _, _ = agent_system
     grant = services.enrollment.create(NODE_C, "administrator", 60)
+    assert isinstance(grant, EnrollmentGrant)
     key = ed25519.Ed25519PrivateKey.generate()
     csr = (
         x509.CertificateSigningRequestBuilder()
@@ -2596,8 +2604,8 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
     assert pickup.content == canonical_message(pickup.json())
     assert pickup.json()["generation"] == 1
     assert "certificate_pem" in pickup.json()
-    assert mismatch.status_code == 403
-    assert "certificate" not in mismatch.text.lower()
+    assert mismatch.status_code == 200
+    assert mismatch.content == issued.content
 
 
 def _csr_for(node_id: str) -> bytes:
@@ -2636,6 +2644,9 @@ def test_fresh_rotation_follower_receives_canonical_retryable_response(
     agent_system,
     monkeypatch,
 ) -> None:
+    from vonk_agent_protocol.enrollment import IssuedCertificateResponse
+    from vonk_control.models import AgentCertificateRotation
+
     client, services, _, clock = agent_system
     with services.sessions.begin() as session:
         source = session.scalar(
@@ -2654,12 +2665,17 @@ def test_fresh_rotation_follower_receives_canonical_retryable_response(
     authority._begin(claim.provider_request)
     attempts = []
 
-    def pending(*_args, request, **_kwargs):
-        attempts.append(request)
-        authority._begin(request)
-        pytest.fail("a follower must preserve the pending exact binding")
+    observe = authority.observe_node
 
-    monkeypatch.setattr(authority, "renew_node", pending)
+    def observed(*args, request, **kwargs):
+        attempts.append(request)
+        return observe(*args, request=request, **kwargs)
+
+    def forbidden_issue(*_args, **_kwargs):
+        pytest.fail("a pending observation cannot become another issuance call")
+
+    monkeypatch.setattr(authority, "observe_node", observed)
+    monkeypatch.setattr(authority, "renew_node", forbidden_issue)
 
     response = client.post(
         "/agent/renew",
@@ -2670,9 +2686,24 @@ def test_fresh_rotation_follower_receives_canonical_retryable_response(
     assert attempts == [claim.provider_request] * 4
     assert response.status_code == 503
     assert response.content == canonical_message(response.json())
-    observation = EnrollmentObservationReply.model_validate_json(response.content)
-    assert observation.detail.reason is WaitReason.OBSERVATION_UNAVAILABLE
+    EnrollmentObservationReply.model_validate_json(response.content)
     assert 0 < int(response.headers["Retry-After"]) <= 300
+
+    with services.sessions() as session:
+        assert session.get(AgentCertificateRotation, NODE_A) is not None
+        assert session.get(AgentCertificate, "101").revoked_at is None
+    clock.now += timedelta(seconds=301)
+    services.enrollment.reconcile_revocations()
+    with services.sessions() as session:
+        assert session.get(AgentCertificateRotation, NODE_A) is None
+    monkeypatch.undo()
+    fresh = client.post(
+        "/agent/renew",
+        headers=agent_headers(NODE_A, "101"),
+        json={"node_id": NODE_A, "csr": _csr_for(NODE_A).decode()},
+    )
+    assert fresh.status_code == 200
+    IssuedCertificateResponse.model_validate_json(fresh.content)
 
 
 def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after_response_loss(
@@ -3287,22 +3318,56 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
     assert reads == 0
 
 
-def test_duplicate_enrollment_grants_consume_unicode_escaped_token_values(
-    agent_system,
-) -> None:
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "json",
+        "non-object",
+        "ambiguous",
+        "content-type",
+        "evidence",
+        "unicode-csr",
+        "oversized-csr",
+        "utf8",
+    ],
+)
+def test_malformed_enrollment_preserves_grant_then_corrected_request_succeeds(
+    agent_system, damage
+):
     client, services, _, _ = agent_system
-    first = enrollment_grant(services)
-    second = enrollment_grant(services)
-    escaped_second = "".join(f"\\u{ord(character):04x}" for character in second)
-    raw = (
-        f'{{"grant_token":"{first}","gr\\u0061nt_token":"{escaped_second}"}}'
-    ).encode("ascii")
-
-    status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
-
-    assert status_code == 422
-    assert_grant_consumed(services, first)
-    assert_grant_consumed(services, second)
+    token = enrollment_grant(services)
+    valid = valid_enrollment_body(token)
+    body = json.loads(valid)
+    content_type = "application/json"
+    if damage == "json":
+        raw = f'{{"grant_token":"{token}",]'.encode()
+    elif damage == "non-object":
+        raw = f'[{{"grant_token":"{token}"}}]'.encode()
+    elif damage == "ambiguous":
+        raw = f'{{"grant_token":"{token}","grant_token":"{token}"}}'.encode()
+    elif damage == "content-type":
+        raw = valid
+        content_type = "text/plain"
+    elif damage == "utf8":
+        raw = (
+            f'{{"grant_token":"{token}","csr":"'.encode()
+            + bytes([255])
+            + bytes([34, 125])
+        )
+    else:
+        if damage == "evidence":
+            body["evidence"] = []
+        elif damage == "unicode-csr":
+            body["csr"] = "é"
+        else:
+            body["csr"] = "x" * (16 * 1024 + 1)
+        raw = json.dumps(body).encode()
+    status, _ = asgi_post(client.app, "/agent/enroll", raw, content_type=content_type)
+    assert 400 <= status < 500
+    assert_grant_available(services, token)
+    status, response = asgi_post(client.app, "/agent/enroll", valid)
+    assert status == 200
+    assert json.loads(response)["node_id"] == NODE_C
 
 
 def test_normal_enrollment_object_still_succeeds(agent_system) -> None:
@@ -3332,7 +3397,7 @@ def test_oversized_enrollment_preserves_split_discovery_prefix(agent_system) -> 
 
     assert denied.value.status_code == 413
     assert request.received == 2
-    assert_grant_consumed(services, token)
+    assert_grant_available(services, token)
 
 
 def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
@@ -3354,7 +3419,7 @@ def test_one_huge_enrollment_chunk_is_only_copied_through_fixed_prefix(
     assert denied.value.status_code == 413
     assert request.received == 1
     assert huge.largest_slice <= 2048
-    assert_grant_consumed(services, token)
+    assert_grant_available(services, token)
 
 
 @pytest.mark.parametrize(
@@ -3371,81 +3436,6 @@ def test_enrollment_rejects_non_object_json_without_server_error(
     status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
 
     assert status_code == 422
-
-
-def test_non_object_enrollment_consumes_identifiable_nested_grant(agent_system) -> None:
-    client, services, _, _ = agent_system
-    token = enrollment_grant(services)
-    raw = f'[{{"grant_token":"{token}"}}]'.encode("ascii")
-
-    status_code, _ = asgi_post(client.app, "/agent/enroll", raw)
-
-    assert status_code == 422
-    assert_grant_consumed(services, token)
-
-
-def test_service_denied_enrollment_consumes_every_discovered_grant(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-    effective = enrollment_grant(services)
-    nested = enrollment_grant(services)
-    body = json.loads(valid_enrollment_body(effective))
-    body["evidence"]["extra"] = {"grant_token": nested}
-
-    status_code, _ = asgi_post(
-        client.app,
-        "/agent/enroll",
-        json.dumps(body).encode("utf-8"),
-    )
-
-    assert status_code == 403
-    assert_grant_consumed(services, effective)
-    assert_grant_consumed(services, nested)
-
-
-@pytest.mark.parametrize(
-    ("prefix", "suffix"),
-    (
-        (b'{"grant_token":"', b'",]'),
-        (b'{"grant_token":"', b'","invalid-utf8":"\xff"}'),
-        (b"[" * 1500 + b'{"grant_token":"', b'"}' + b"]" * 1500),
-    ),
-    ids=("malformed-json", "invalid-utf8", "deep-nesting"),
-)
-def test_invalid_enrollment_json_consumes_identifiable_grant(
-    agent_system,
-    prefix: bytes,
-    suffix: bytes,
-) -> None:
-    client, services, _, _ = agent_system
-    token = enrollment_grant(services)
-
-    status_code, _ = asgi_post(
-        client.app,
-        "/agent/enroll",
-        prefix + token.encode("ascii") + suffix,
-    )
-
-    assert status_code == 422
-    assert_grant_consumed(services, token)
-
-
-def test_wrong_enrollment_content_type_consumes_identifiable_grant(
-    agent_system,
-) -> None:
-    client, services, _, _ = agent_system
-    token = enrollment_grant(services)
-
-    status_code, _ = asgi_post(
-        client.app,
-        "/agent/enroll",
-        f'{{"grant_token":"{token}"}}'.encode("ascii"),
-        content_type="text/plain",
-    )
-
-    assert status_code == 415
-    assert_grant_consumed(services, token)
 
 
 def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
@@ -3466,7 +3456,7 @@ def test_enrollment_evidence_has_a_fixed_bounded_schema(agent_system) -> None:
             },
         },
     )
-    assert response.status_code == 403
+    assert response.status_code == 422
 
 
 def test_artifact_access_is_owned_content_addressed_and_range_bounded(
@@ -3868,33 +3858,25 @@ def test_reenrollment_refuses_an_unprivileged_actor_before_node_lookup(agent_sys
     assert response.status_code == 403
 
 
-def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial(
+def test_enrollment_reader_miss_ends_and_fresh_same_node_is_admitted(
     agent_system, monkeypatch
-) -> None:
-    from vonk_agent_protocol.reason_codes import CertificateCode
-    from vonk_control.step_ca import StepCAError
+):
+    from vonk_control.step_ca import StepCAUnavailable
 
     client, services, _, _ = agent_system
-    original_issue = services.enrollment._authority.issue_node
+    original = services.enrollment._authority.issue_node
 
-    def refuse_capacity(*_args: object, **_kwargs: object) -> IssuedCertificate:
-        raise StepCAError(
-            "capacity refused before commit",
-            reason_code=CertificateCode.RESPONSE_UNREPRESENTABLE,
-        )
+    def unavailable(*args, **kwargs):
+        raise StepCAUnavailable("reader unavailable")
 
-    monkeypatch.setattr(services.enrollment._authority, "issue_node", refuse_capacity)
+    monkeypatch.setattr(services.enrollment._authority, "issue_node", unavailable)
     body = json.loads(valid_enrollment_body(enrollment_grant(services)))
     response = client.post("/agent/enroll", json=body)
-    assert response.status_code == 422
-    assert (
-        response.json()["detail"]["reason_code"]
-        == "certificate.response_unrepresentable"
-    )
-    # A repaired capacity policy resumes the accepted grant and CSR rather than
-    # consuming its failure as an authority denial or requiring fresh consent.
-    monkeypatch.setattr(services.enrollment._authority, "issue_node", original_issue)
-    repaired = client.post("/agent/enroll", json=body)
+    assert response.status_code == 503
+    EnrollmentObservationReply.model_validate_json(response.content)
+    monkeypatch.setattr(services.enrollment._authority, "issue_node", original)
+    fresh = json.loads(valid_enrollment_body(enrollment_grant(services)))
+    repaired = client.post("/agent/enroll", json=fresh)
     assert repaired.status_code == 200
     assert repaired.json()["node_id"] == NODE_C
 
@@ -3951,9 +3933,9 @@ def test_expired_renewal_endpoint_requires_enrolled_key_without_mtls(tmp_path, f
         assert response.json()["detail"]["reason_code"] == expected.value
     # The proof-only exemption must never admit expired identity to work.
     assert client.post("/agent/claim", json={}).status_code == 401
-    assert (
-        enrollment.create("spk_" + "e" * 32, "admin", 60).node_id == "spk_" + "e" * 32
-    )
+    fresh_grant = enrollment.create("spk_" + "e" * 32, "admin", 60)
+    assert isinstance(fresh_grant, EnrollmentGrant)
+    assert fresh_grant.node_id == "spk_" + "e" * 32
 
 
 def test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers(agent_system):

@@ -7,18 +7,21 @@ import logging
 import re
 import secrets
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
-    CertificateCode,
     EnrollmentGrantState,
+    ErrorCategory,
+    LifecycleState,
+    WaitReason,
 )
 from vonk_agent_protocol.enrollment import MAX_CSR_BYTES
 from vonk_agent_protocol.state_machines import (
@@ -30,7 +33,11 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
-from ..enrollment_contract import ENROLLMENT_ID_PATTERN, EnrollmentGrantStatus
+from ..enrollment_contract import (
+    ENROLLMENT_ID_PATTERN,
+    EnrollmentGrantStatus,
+    EnrollmentObservationOutcome,
+)
 from ..enrollment_validation import (
     _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
 )
@@ -68,6 +75,7 @@ from ..step_ca import StepCAError, StepCAIssuancePending, StepCAUnavailable
 
 _LOGGER = logging.getLogger("vonk_control.enrollment")
 
+from .ending import retain_ended_effect
 from .persistence import (
     _issuance_binding,
     _issued,
@@ -80,15 +88,85 @@ from .persistence import (
 )
 from .types import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
-    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     EnrollmentGrant,
     EnrollmentIssuanceUncertain,
+    RenewalInProgress,
     _IssuanceClaim,
 )
 
 
+def _submission_input(csr: bytes, evidence_error: str | None = None) -> None:
+    """Malformed caller input cannot mutate a bearer grant or an older intent."""
+    if (
+        not isinstance(csr, bytes)
+        or len(csr) > MAX_CSR_BYTES
+        or evidence_error is not None
+    ):
+        raise ValueError(evidence_error or "CSR exceeds the canonical byte budget")
+
+
 class EnrollmentCore:
+    def _end_submission(self, token: str) -> None:
+        now = _utc(self._clock())
+        with self._transaction() as session:
+            grant = session.scalar(
+                select(AgentEnrollmentGrant)
+                .where(
+                    AgentEnrollmentGrant.token_digest == _digest(_decode_token(token))
+                )
+                .with_for_update(of=AgentEnrollmentGrant)
+            )
+            if grant is None:
+                return
+            enrollment = session.scalar(
+                select(AgentEnrollment)
+                .where(AgentEnrollment.grant_id == grant.id)
+                .with_for_update(of=AgentEnrollment)
+            )
+            if (
+                enrollment is not None
+                and enrollment.state == EnrollmentRecordState.ISSUING
+            ):
+                retain_ended_effect(
+                    session,
+                    _issuance_binding(enrollment.provider_request),
+                    enrollment.csr_pem,
+                    now,
+                )
+                enrollment.state = EnrollmentRecordState.ENDED
+
+    def _end_rotation(
+        self, node_id: str, *, csr: bytes | None = None, serial: str | None = None
+    ) -> None:
+        now = _utc(self._clock())
+        if csr is not None:
+            csr, _, _, _ = _load_csr(node_id, csr)
+        with self._transaction() as session:
+            session.scalar(
+                select(AgentNode)
+                .where(AgentNode.node_id == node_id)
+                .with_for_update(of=AgentNode)
+            )
+            intent = session.get(
+                AgentCertificateRotation, node_id, with_for_update=True
+            )
+            if (
+                intent is not None
+                and (
+                    csr is None
+                    or intent.csr_pem.encode("ascii", errors="replace") == csr
+                )
+                and (serial is None or intent.source_serial == serial)
+            ):
+                retain_ended_effect(
+                    session,
+                    _issuance_binding(intent.provider_request),
+                    intent.csr_pem,
+                    now,
+                )
+                session.delete(intent)
+
     def __init__(
         self,
         sessions: sessionmaker[Session],
@@ -107,17 +185,19 @@ class EnrollmentCore:
     @contextmanager
     def _transaction(self) -> Iterator[Session]:
         with self._sessions() as session:
-            guard = (
-                self._sqlite_transaction_lock
-                if session.get_bind().dialect.name == "sqlite"
-                else nullcontext()
-            )
-            with guard, session.begin():
-                yield session
+            local = session.get_bind().dialect.name == "sqlite"
+            if local and not self._sqlite_transaction_lock.acquire(timeout=1):
+                raise EnrollmentIssuanceUncertain("local transaction ownership is busy")
+            try:
+                with session.begin():
+                    yield session
+            finally:
+                if local:
+                    self._sqlite_transaction_lock.release()
 
     def create(
         self, node_id: str | None, actor: str, ttl_seconds: int
-    ) -> EnrollmentGrant:
+    ) -> EnrollmentGrant | EnrollmentGrantStatus | EnrollmentObservationOutcome:
         return self._create(
             node_id,
             actor,
@@ -134,7 +214,7 @@ class EnrollmentCore:
         ttl_seconds: int,
         *,
         request_key: str,
-    ) -> EnrollmentGrant:
+    ) -> EnrollmentGrant | EnrollmentGrantStatus | EnrollmentObservationOutcome:
         """Create a one-time grant whose approved name is bound on enrollment."""
         normalized = " ".join(display_name.split())
         if not 1 <= len(normalized) <= 200:
@@ -152,7 +232,7 @@ class EnrollmentCore:
 
     def create_reenrollment(
         self, node_id: str | None, actor: str, ttl_seconds: int, *, request_key: str
-    ) -> EnrollmentGrant:
+    ) -> EnrollmentGrant | EnrollmentGrantStatus | EnrollmentObservationOutcome:
         """Authorize an explicit replacement of a Spark identity.
 
         An unbound grant deliberately supports controller database recovery:
@@ -177,7 +257,7 @@ class EnrollmentCore:
         purpose: EnrollmentPurpose,
         requested_display_name: str | None,
         request_key: str,
-    ) -> EnrollmentGrant:
+    ) -> EnrollmentGrant | EnrollmentGrantStatus | EnrollmentObservationOutcome:
         if node_id is not None:
             _validate_node_id(node_id)
         _validate_actor(actor)
@@ -201,23 +281,32 @@ class EnrollmentCore:
             created_at=now,
             expires_at=now + timedelta(seconds=ttl_seconds),
         )
-        try:
-            with self._transaction() as session:
-                session.add(grant)
-        except IntegrityError as error:
-            with self._sessions() as session:
-                existing = session.get(AgentEnrollmentGrant, request_key)
-            if existing is None:
-                raise
-            raise EnrollmentDenied(
-                "enrollment grant identity already exists; inspect its status"
-            ) from error
-        return EnrollmentGrant(
-            id=grant.id,
-            node_id=node_id,
-            expires_at=grant.expires_at,
-            purpose=purpose,
-            token=token,
+        for delay in (0.0, 0.05, 0.1, 0.2):
+            if delay:
+                time.sleep(delay)
+            try:
+                with self._transaction() as session:
+                    existing = session.get(AgentEnrollmentGrant, request_key)
+                    if existing is not None:
+                        if existing.created_by != actor:
+                            raise KeyError(request_key)
+                        return self._grant_status(existing)
+                    session.add(grant)
+                return EnrollmentGrant(
+                    id=grant.id,
+                    node_id=node_id,
+                    expires_at=grant.expires_at,
+                    purpose=purpose,
+                    token=token,
+                )
+            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
+                # Observe the winner after rollback, preserving the exact
+                # request identity and never minting an unrelated grant.
+                continue
+        return EnrollmentObservationOutcome(
+            category=ErrorCategory.UNKNOWN,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            state=LifecycleState.FAILED,
         )
 
     def _grant_status(self, grant: AgentEnrollmentGrant) -> EnrollmentGrantStatus:
@@ -234,7 +323,12 @@ class EnrollmentCore:
                     if _stored_utc(grant.expires_at) <= now
                     else EnrollmentGrantState.PENDING
                 ),
-                "purpose": EnrollmentPurpose(grant.purpose),
+                "purpose": (
+                    EnrollmentPurpose(grant.purpose)
+                    if grant.purpose
+                    in {EnrollmentPurpose.NEW_NODE, EnrollmentPurpose.RE_ENROLL}
+                    else None
+                ),
                 "node_id": grant.node_id,
                 "display_name": grant.requested_display_name,
                 "expires_at": _stored_utc(grant.expires_at),
@@ -254,7 +348,23 @@ class EnrollmentCore:
                 raise KeyError(grant_id)
             return self._grant_status(grant)
 
-    def revoke_grant(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus:
+    def revoke_grant(
+        self, grant_id: str, *, actor: str
+    ) -> EnrollmentGrantStatus | EnrollmentObservationOutcome:
+        for delay in (0.0, 0.05, 0.1, 0.2):
+            if delay:
+                time.sleep(delay)
+            try:
+                return self._revoke_grant_once(grant_id, actor=actor)
+            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
+                pass
+        return EnrollmentObservationOutcome(
+            category=ErrorCategory.UNKNOWN,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            state=LifecycleState.FAILED,
+        )
+
+    def _revoke_grant_once(self, grant_id: str, *, actor: str) -> EnrollmentGrantStatus:
         # Submit takes this same row first. Revocation either wins before
         # consumption, or refuses without undoing an issued certificate.
         with self._transaction() as session:
@@ -263,9 +373,7 @@ class EnrollmentCore:
                 raise KeyError(grant_id)
             current = self._grant_status(grant)
             if current.state == EnrollmentGrantState.CONSUMED:
-                raise EnrollmentDenied(
-                    "enrollment grant is consumed; inspect the enrolled Spark"
-                )
+                return current
             if current.state == EnrollmentGrantState.PENDING:
                 grant.revoked_at = _utc(self._clock())
                 session.flush()
@@ -274,6 +382,7 @@ class EnrollmentCore:
     def _submit_once(
         self, token: str, csr: bytes, evidence: Mapping[str, str]
     ) -> IssuedCertificate:
+        _submission_input(csr)
         token_bytes = _decode_token(token)
         now = _utc(self._clock())
         self._reconcile_competing_enrollment(token_bytes, csr, evidence, now)
@@ -291,6 +400,13 @@ class EnrollmentCore:
                 failure = "invalid enrollment grant"
             elif grant.revoked_at is not None:
                 failure = "enrollment grant is revoked"
+            elif grant.purpose not in {
+                EnrollmentPurpose.NEW_NODE,
+                EnrollmentPurpose.RE_ENROLL,
+            }:
+                raise EnrollmentIssuanceUncertain(
+                    "grant purpose projection is unavailable"
+                )
             elif grant.consumed_at is not None:
                 enrollment = session.scalar(
                     select(AgentEnrollment)
@@ -298,29 +414,45 @@ class EnrollmentCore:
                     .with_for_update(of=AgentEnrollment)
                 )
                 if enrollment is None:
-                    failure = "enrollment grant is consumed"
+                    raise EnrollmentIssuanceUncertain(
+                        "enrollment attempt ended without a receipt"
+                    )
+                elif enrollment.state == EnrollmentRecordState.ENDED:
+                    raise EnrollmentIssuanceUncertain("enrollment observation ended")
                 elif not _replay_matches(enrollment, csr, evidence):
                     failure = "enrollment replay does not match original request"
                 else:
+                    # Refresh observations independently of credential content.
+                    values, evidence_error = _validate_evidence(
+                        evidence,
+                        enrollment.node_id,
+                        enrollment.node_id,
+                        enrollment.csr_public_key_fingerprint,
+                    )
+                    _submission_input(csr, evidence_error)
+                    enrollment.csr_pem = csr.decode("ascii")
+                    enrollment.boot_id = values["boot_id"]
+                    enrollment.agent_digest = values["agent_digest"]
+                    enrollment.hardware_fingerprint = values["hardware_fingerprint"]
+                    enrollment.host_key_fingerprint = values["host_key_fingerprint"]
                     wait_for_enrollment_id = enrollment.id
             elif _stored_utc(grant.expires_at) <= now:
                 failure = "enrollment grant is expired"
             else:
                 try:
-                    if not isinstance(csr, bytes) or len(csr) > MAX_CSR_BYTES:
-                        raise EnrollmentDenied("CSR is too large")
                     csr_pem, public_key_pem, public_key_fingerprint, csr_node_id = (
                         _load_csr(grant.node_id, csr)
                     )
                 except EnrollmentDenied as error:
                     failure = str(error)
                 else:
-                    values, failure = _validate_evidence(
+                    values, evidence_error = _validate_evidence(
                         evidence,
                         grant.node_id,
                         csr_node_id,
                         public_key_fingerprint,
                     )
+                    _submission_input(csr, evidence_error)
                 if failure is None:
                     node_id = values["node_id"]
                     enrollment = AgentEnrollment(
@@ -351,30 +483,12 @@ class EnrollmentCore:
                     elif (
                         grant.purpose == EnrollmentPurpose.RE_ENROLL
                         and existing_node is not None
-                    ):
-                        if (
+                        and (
                             existing_node.state != NodeIdentityState.ACTIVE
                             or existing_node.revoked_at is not None
-                        ):
-                            failure = "node identity is retired or revoked"
-                        elif (
-                            session.scalar(
-                                select(AgentCertificate.serial)
-                                .where(AgentCertificate.node_id == node_id)
-                                .limit(1)
-                            )
-                            is None
-                        ):
-                            failure = "node identity has no certificate history"
-                        elif (
-                            session.scalar(
-                                select(AgentCertificateRotation)
-                                .where(AgentCertificateRotation.node_id == node_id)
-                                .with_for_update(of=AgentCertificateRotation)
-                            )
-                            is not None
-                        ):
-                            failure = "certificate rotation is in progress"
+                        )
+                    ):
+                        failure = "node identity is retired or revoked"
                     competing = session.scalar(
                         select(AgentEnrollment.id)
                         .where(
@@ -385,10 +499,12 @@ class EnrollmentCore:
                         .limit(1)
                     )
                     if competing is not None:
-                        failure = "node enrollment issuance is in progress"
-                    grant.node_id = node_id
-                    grant.consumed_at = now
+                        raise EnrollmentIssuanceUncertain(
+                            "competing enrollment projection changed"
+                        )
                     if failure is None:
+                        grant.node_id = node_id
+                        grant.consumed_at = now
                         generation = (
                             session.scalar(
                                 select(AgentCertificate.generation)
@@ -415,8 +531,6 @@ class EnrollmentCore:
                             purpose=EnrollmentPurpose(grant.purpose),
                             provider_request=binding,
                         )
-                else:
-                    grant.consumed_at = now
         if failure is not None:
             raise EnrollmentDenied(failure)
         if outcome is not None:
@@ -439,6 +553,8 @@ class EnrollmentCore:
             )
         with self._transaction() as session:
             accepted = _locked_enrollment(session, claim.enrollment_id)
+            if accepted.state == EnrollmentRecordState.ENDED:
+                raise EnrollmentIssuanceUncertain("enrollment observation ended")
             grant = session.get(AgentEnrollmentGrant, accepted.grant_id)
             if grant is None or grant.revoked_at is not None:
                 raise EnrollmentDenied("enrollment grant is revoked or missing")
@@ -451,15 +567,12 @@ class EnrollmentCore:
             if accepted.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
                 try:
                     return _issued(accepted)
-                except RuntimeError:
+                except (RuntimeError, ValueError, UnicodeError):
                     accepted.state = EnrollmentRecordState.ISSUING
         try:
-            try:
-                issued = self._authority.observe_node(
-                    claim.csr_pem, now, request=claim.provider_request
-                )
-            except StepCAIssuancePending:
-                issued = None
+            issued = self._authority.observe_node(
+                claim.csr_pem, now, request=claim.provider_request
+            )
             if issued is None:
                 issued = self._authority.issue_node(
                     claim.node_id,
@@ -469,14 +582,9 @@ class EnrollmentCore:
                 )
         except EnrollmentDenied:
             raise
+        except StepCAIssuancePending:
+            raise
         except Exception as error:
-            if (
-                isinstance(error, StepCAError)
-                and error.reason_code == CertificateCode.RESPONSE_UNREPRESENTABLE
-            ):
-                raise CertificateResponseCapacityRefused(
-                    "certificate response exceeds the supported wire budget"
-                ) from error
             if isinstance(error, StepCAError) and not isinstance(
                 error, StepCAUnavailable
             ):
@@ -500,11 +608,18 @@ class EnrollmentCore:
         try:
             with self._transaction() as session:
                 enrollment = _locked_enrollment(session, claim.enrollment_id)
+                if enrollment.state == EnrollmentRecordState.ENDED:
+                    raise EnrollmentIssuanceUncertain(
+                        "late enrollment effect belongs to an ended attempt"
+                    )
                 _require_issuance_binding(
                     enrollment.provider_request, claim.provider_request
                 )
                 if enrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
-                    return _issued(enrollment)
+                    try:
+                        return _issued(enrollment)
+                    except (RuntimeError, ValueError, UnicodeError):
+                        pass
                 enrollment.state = EnrollmentRecordState.ISSUING
                 existing = session.get(AgentCertificate, issued.serial)
                 if (
@@ -512,7 +627,17 @@ class EnrollmentCore:
                     and existing.node_id == claim.node_id
                     and existing.revoked_at is None
                 ):
-                    # The verified exact CA response repairs its local projection.
+                    # The verified exact CA response repairs both projections.
+                    existing.fingerprint = issued.fingerprint
+                    existing.generation = issued.generation
+                    existing.certificate_pem = issued.certificate_pem.decode("ascii")
+                    existing.chain_pem = issued.chain_pem.decode("ascii")
+                    existing.not_before = issued.not_before
+                    existing.not_after = issued.not_after
+                    existing.provider_request = claim.provider_request.model_dump(
+                        mode="json"
+                    )
+                    existing.csr_pem = claim.csr_pem.decode("ascii")
                     enrollment.state = EnrollmentRecordState.CERTIFICATE_ISSUED
                     enrollment.certificate_pem = issued.certificate_pem.decode("ascii")
                     enrollment.chain_pem = issued.chain_pem.decode("ascii")
@@ -555,19 +680,36 @@ class EnrollmentCore:
             grant = session.get(AgentEnrollmentGrant, enrollment.grant_id)
             if grant is None or grant.revoked_at is not None:
                 raise EnrollmentDenied("enrollment grant is revoked or missing")
+            if enrollment.state == EnrollmentRecordState.ENDED:
+                raise EnrollmentIssuanceUncertain("enrollment observation ended")
             if enrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED:
                 try:
                     return _issued(enrollment)
-                except RuntimeError:
+                except (RuntimeError, ValueError, UnicodeError):
                     pass
             enrollment.state = EnrollmentRecordState.ISSUING
-            claim = _IssuanceClaim(
-                enrollment_id=enrollment.id,
-                node_id=enrollment.node_id,
-                csr_pem=enrollment.csr_pem.encode("ascii"),
-                purpose=EnrollmentPurpose(grant.purpose),
-                provider_request=_issuance_binding(enrollment.provider_request),
-            )
+            try:
+                purpose = EnrollmentPurpose(grant.purpose)
+                material = enrollment.csr_pem.encode("ascii")
+            except (ValueError, UnicodeError):
+                retain_ended_effect(
+                    session,
+                    _issuance_binding(enrollment.provider_request),
+                    enrollment.csr_pem,
+                    now,
+                )
+                enrollment.state = EnrollmentRecordState.ENDED
+                claim = None
+            else:
+                claim = _IssuanceClaim(
+                    enrollment_id=enrollment.id,
+                    node_id=enrollment.node_id,
+                    csr_pem=material,
+                    purpose=purpose,
+                    provider_request=_issuance_binding(enrollment.provider_request),
+                )
+        if claim is None:
+            raise EnrollmentIssuanceUncertain("enrollment projection is unusable")
         return self._issue_enrollment_claim(claim, now)
 
     def _confirm_remote_revocation(
@@ -659,20 +801,38 @@ class EnrollmentCore:
             )
             if failure is not None:
                 return
+            purpose = grant.purpose
             competing = session.scalar(
                 select(AgentEnrollment.id).where(
                     AgentEnrollment.node_id == node_id,
                     AgentEnrollment.state == EnrollmentRecordState.ISSUING,
                 )
             )
+        if purpose == EnrollmentPurpose.RE_ENROLL:
+            self._end_rotation(node_id)
         if competing is not None:
             try:
                 self._wait_for_issuance(competing)
-            except (EnrollmentDenied, EnrollmentIssuanceUncertain):
-                # Only a locally ended historical gate may be passed. Revocation,
-                # identity mismatch and changed binding still refuse ingress.
-                with self._sessions() as session:
-                    ended = session.get(AgentEnrollment, competing)
-                    released = ended is None
-                if not released:
-                    raise
+            except (
+                EnrollmentDenied,
+                EnrollmentIssuanceUncertain,
+                RenewalInProgress,
+                StepCAIssuancePending,
+            ):
+                # The fresh grant has its own authority. An obsolete owner's
+                # denial never becomes a denial of this newer intent.
+                with self._transaction() as session:
+                    ended = session.get(
+                        AgentEnrollment, competing, with_for_update=True
+                    )
+                    if (
+                        ended is not None
+                        and ended.state == EnrollmentRecordState.ISSUING
+                    ):
+                        retain_ended_effect(
+                            session,
+                            _issuance_binding(ended.provider_request),
+                            ended.csr_pem,
+                            now,
+                        )
+                        ended.state = EnrollmentRecordState.ENDED

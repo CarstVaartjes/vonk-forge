@@ -26,8 +26,12 @@ from ..models.catalog_sync_state import CatalogSyncState
 from ..models.catalog_sync_state import check_catalog_sync_state
 from ..models.certificate_issuance_purpose import CertificateIssuancePurpose
 from ..models.certificate_issuance_purpose import check_certificate_issuance_purpose
+from ..models.certificate_journal_state import CertificateJournalState
+from ..models.certificate_journal_state import check_certificate_journal_state
 from ..models.certificate_record_state import CertificateRecordState
 from ..models.certificate_record_state import check_certificate_record_state
+from ..models.certificate_request_mode import CertificateRequestMode
+from ..models.certificate_request_mode import check_certificate_request_mode
 from ..models.certificate_rotation_state import CertificateRotationState
 from ..models.certificate_rotation_state import check_certificate_rotation_state
 from ..models.certificate_state import CertificateState
@@ -189,7 +193,9 @@ class LifecycleVocabulary:
             blocker_category (BlockerCategory): The categories of the blocker allowlist (fail-closed raises).
             catalog_sync_state (CatalogSyncState): The outcome of a catalog synchronization, as the catalog shows it.
             certificate_issuance_purpose (CertificateIssuancePurpose):
+            certificate_journal_state (CertificateJournalState):
             certificate_record_state (CertificateRecordState):
+            certificate_request_mode (CertificateRequestMode):
             certificate_rotation_state (CertificateRotationState):
             certificate_state (CertificateState): The standing of a node's client certificate, as the fleet projection shows
                 it.
@@ -328,7 +334,9 @@ class LifecycleVocabulary:
     blocker_category: BlockerCategory
     catalog_sync_state: CatalogSyncState
     certificate_issuance_purpose: CertificateIssuancePurpose
+    certificate_journal_state: CertificateJournalState
     certificate_record_state: CertificateRecordState
+    certificate_request_mode: CertificateRequestMode
     certificate_rotation_state: CertificateRotationState
     certificate_state: CertificateState
     desired_assignment_state: DesiredAssignmentState
@@ -414,7 +422,11 @@ class LifecycleVocabulary:
 
         certificate_issuance_purpose: str = self.certificate_issuance_purpose
 
+        certificate_journal_state: str = self.certificate_journal_state
+
         certificate_record_state: str = self.certificate_record_state
+
+        certificate_request_mode: str = self.certificate_request_mode
 
         certificate_rotation_state: str = self.certificate_rotation_state
 
@@ -551,7 +563,9 @@ class LifecycleVocabulary:
             "blocker_category": blocker_category,
             "catalog_sync_state": catalog_sync_state,
             "certificate_issuance_purpose": certificate_issuance_purpose,
+            "certificate_journal_state": certificate_journal_state,
             "certificate_record_state": certificate_record_state,
+            "certificate_request_mode": certificate_request_mode,
             "certificate_rotation_state": certificate_rotation_state,
             "certificate_state": certificate_state,
             "desired_assignment_state": desired_assignment_state,
@@ -667,7 +681,17 @@ class LifecycleVocabulary:
 
 
 
+        certificate_journal_state = check_certificate_journal_state(d.pop("certificate_journal_state"))
+
+
+
+
         certificate_record_state = check_certificate_record_state(d.pop("certificate_record_state"))
+
+
+
+
+        certificate_request_mode = check_certificate_request_mode(d.pop("certificate_request_mode"))
 
 
 
@@ -987,7 +1011,9 @@ class LifecycleVocabulary:
             blocker_category=blocker_category,
             catalog_sync_state=catalog_sync_state,
             certificate_issuance_purpose=certificate_issuance_purpose,
+            certificate_journal_state=certificate_journal_state,
             certificate_record_state=certificate_record_state,
+            certificate_request_mode=certificate_request_mode,
             certificate_rotation_state=certificate_rotation_state,
             certificate_state=certificate_state,
             desired_assignment_state=desired_assignment_state,

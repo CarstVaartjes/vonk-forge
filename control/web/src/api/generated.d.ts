@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 068b6bf2492f0115dc687edd5a3c0c8269a03c1dbac13f854a0c5208b2f55abe. Do not edit.
+// Generated from canonical OpenAPI SHA256 fe1770f069622a92185dea3ec1af12bf621aef26f0d7d501580d1db5d4a11653. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -2638,7 +2638,7 @@ export interface components {
          * @description Owned certificate issuance admission refusals.
          * @enum {string}
          */
-        CertificateCode: "certificate.response_unrepresentable";
+        CertificateCode: "certificate.response_unrepresentable" | "certificate.request_invalid" | "certificate.authentication_refused" | "certificate.binding_refused" | "certificate.source_revoked" | "certificate.source_identity_refused" | "certificate.issuance_in_progress" | "certificate.issuance_unavailable" | "certificate.request_binding_mismatch" | "certificate.serial_already_reserved" | "certificate.serial_already_issued" | "certificate.attempt_superseded" | "certificate.issuance_revoked" | "certificate.rotation_source_revoked";
         /** CertificateIssuanceBinding */
         CertificateIssuanceBinding: {
             /** Csr Sha256 */
@@ -2659,11 +2659,7 @@ export interface components {
             provisioner_kid: string;
             /** Provisioner Name */
             provisioner_name: string;
-            /**
-             * Purpose
-             * @enum {string}
-             */
-            purpose: "enrollment" | "rotation";
+            purpose: components["schemas"]["CertificateIssuancePurpose"];
             /** Request Id */
             request_id: string;
             /** Serial */
@@ -2677,10 +2673,20 @@ export interface components {
          */
         CertificateIssuancePurpose: "enrollment" | "rotation";
         /**
+         * CertificateJournalState
+         * @enum {string}
+         */
+        CertificateJournalState: "issued" | "pending" | "absent";
+        /**
          * CertificateRecordState
          * @enum {string}
          */
         CertificateRecordState: "active" | "staged" | "revoked";
+        /**
+         * CertificateRequestMode
+         * @enum {string}
+         */
+        CertificateRequestMode: "issue" | "observe";
         /**
          * CertificateRotationState
          * @enum {string}
@@ -3301,11 +3307,7 @@ export interface components {
              * @enum {string}
              */
             installer_url: "https://install.vonkforge.ai/spark" | "https://install.vonkforge.ai/dev/spark";
-            /**
-             * Purpose
-             * @enum {string}
-             */
-            purpose: "new-node" | "re-enroll";
+            purpose: components["schemas"]["EnrollmentPurpose"];
             /** Service Hostnames */
             service_hostnames?: string[];
             /** Token */
@@ -3332,10 +3334,20 @@ export interface components {
             id: string;
             /** Node Id */
             node_id: string | null;
-            purpose: components["schemas"]["EnrollmentPurpose"];
+            purpose: components["schemas"]["EnrollmentPurpose"] | null;
             /** Revoked At */
             revoked_at: string | null;
             state: components["schemas"]["EnrollmentGrantState"];
+        };
+        /** EnrollmentObservationOutcome */
+        EnrollmentObservationOutcome: {
+            /**
+             * Category
+             * @constant
+             */
+            category: "unknown";
+            reason: components["schemas"]["WaitReason"];
+            state: components["schemas"]["LifecycleState"];
         };
         /**
          * EnrollmentProfileState
@@ -3351,7 +3363,14 @@ export interface components {
          * EnrollmentRecordState
          * @enum {string}
          */
-        EnrollmentRecordState: "issuing" | "certificate_issued";
+        EnrollmentRecordState: "ended" | "issuing" | "certificate_issued";
+        /** EnrollmentRevocationStatus */
+        EnrollmentRevocationStatus: {
+            /** Ca Confirmation Complete */
+            ca_confirmation_complete: boolean;
+            /** Local Denial Complete */
+            local_denial_complete: boolean;
+        };
         /** EnumParameter */
         EnumParameter: {
             /** Allowed Values */
@@ -3546,16 +3565,19 @@ export interface components {
             /** Display Name */
             display_name?: string | null;
             grant?: components["schemas"]["EnrollmentGrantResponse"] | null;
+            grant_status?: components["schemas"]["EnrollmentGrantStatus"] | null;
             /** Node Id */
             node_id?: string | null;
+            observation?: components["schemas"]["EnrollmentObservationOutcome"] | null;
             /** Operation Id */
             operation_id?: string | null;
             /** Plan Digest */
             plan_digest?: string | null;
             /** Request Key */
             request_key?: string | null;
+            revocation?: components["schemas"]["EnrollmentRevocationStatus"] | null;
             /** State */
-            state: string;
+            state: components["schemas"]["EnrollmentGrantState"] | components["schemas"]["LifecycleState"] | components["schemas"]["ModelCacheOperatorStatus"];
             /** Targets */
             targets?: string[];
         };
@@ -5855,7 +5877,9 @@ export interface components {
             blocker_category: components["schemas"]["BlockerCategory"];
             catalog_sync_state: components["schemas"]["CatalogSyncState"];
             certificate_issuance_purpose: components["schemas"]["CertificateIssuancePurpose"];
+            certificate_journal_state: components["schemas"]["CertificateJournalState"];
             certificate_record_state: components["schemas"]["CertificateRecordState"];
+            certificate_request_mode: components["schemas"]["CertificateRequestMode"];
             certificate_rotation_state: components["schemas"]["CertificateRotationState"];
             certificate_state: components["schemas"]["CertificateState"];
             desired_assignment_state: components["schemas"]["DesiredAssignmentState"];
@@ -10981,6 +11005,24 @@ export interface components {
              */
             subphase: "target-copy";
         };
+        /**
+         * RunSwitchDistributionEndedResult
+         * @description A missing durable distribution child; no node effect is asserted.
+         */
+        RunSwitchDistributionEndedResult: {
+            error_code: components["schemas"]["DistributionCode"];
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "transfer";
+            reason: components["schemas"]["WaitReason"];
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "target-copy";
+        };
         /** RunSwitchFinalVerifyResult */
         RunSwitchFinalVerifyResult: {
             /** Final Verified */
@@ -11337,7 +11379,7 @@ export interface components {
             /** Failure Code */
             failure_code?: string | null;
             /** Final Observation */
-            final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"] | null;
+            final_observation?: components["schemas"]["RunSwitchDistributionEndedResult"] | components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"] | null;
             /** Final Verify Started At */
             final_verify_started_at?: (number | ExactNumber) | null;
             /**
@@ -11367,7 +11409,7 @@ export interface components {
              */
             phase_index: number;
             /** Phase Results */
-            phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
+            phase_results?: (components["schemas"]["RunSwitchDistributionEndedResult"] | components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchUninstallResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | components["schemas"]["RunSwitchCleanupVerifyResult"] | components["schemas"]["RunSwitchInstallationVerifyResult"])[];
             /**
              * Phase Retry Generation
              * @default 0
@@ -14164,7 +14206,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["EnrollmentGrantStatus"];
+                    "application/json": components["schemas"]["EnrollmentGrantStatus"] | components["schemas"]["EnrollmentObservationOutcome"];
                 };
             };
             /** @description Unauthorized */

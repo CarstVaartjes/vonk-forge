@@ -40,7 +40,7 @@ from ..run_switch_contract import (
 )
 
 if TYPE_CHECKING:
-    from ..distribution_executor import _ChildView
+    from ..distribution_executor.receipts import _ChildView
 
 
 @dataclass(frozen=True, slots=True)

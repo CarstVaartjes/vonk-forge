@@ -4,7 +4,7 @@
       "additionalProperties": false,
       "properties": {
         "generation": {
-          "maximum": 2147483647,
+          "maximum": 18446744073709551615,
           "minimum": 1,
           "title": "Generation",
           "type": "integer"
@@ -1263,7 +1263,20 @@
     "CertificateCode": {
       "description": "Owned certificate issuance admission refusals.",
       "enum": [
-        "certificate.response_unrepresentable"
+        "certificate.response_unrepresentable",
+        "certificate.request_invalid",
+        "certificate.authentication_refused",
+        "certificate.binding_refused",
+        "certificate.source_revoked",
+        "certificate.source_identity_refused",
+        "certificate.issuance_in_progress",
+        "certificate.issuance_unavailable",
+        "certificate.request_binding_mismatch",
+        "certificate.serial_already_reserved",
+        "certificate.serial_already_issued",
+        "certificate.attempt_superseded",
+        "certificate.issuance_revoked",
+        "certificate.rotation_source_revoked"
       ],
       "title": "CertificateCode",
       "type": "string"
@@ -1276,6 +1289,15 @@
       "title": "CertificateIssuancePurpose",
       "type": "string"
     },
+    "CertificateJournalState": {
+      "enum": [
+        "issued",
+        "pending",
+        "absent"
+      ],
+      "title": "CertificateJournalState",
+      "type": "string"
+    },
     "CertificateRecordState": {
       "enum": [
         "active",
@@ -1283,6 +1305,14 @@
         "revoked"
       ],
       "title": "CertificateRecordState",
+      "type": "string"
+    },
+    "CertificateRequestMode": {
+      "enum": [
+        "issue",
+        "observe"
+      ],
+      "title": "CertificateRequestMode",
       "type": "string"
     },
     "CertificateRotationState": {
@@ -2526,10 +2556,14 @@
       "properties": {
         "detail": {
           "$ref": "#/$defs/UnknownError"
+        },
+        "state": {
+          "$ref": "#/$defs/LifecycleState"
         }
       },
       "required": [
-        "detail"
+        "detail",
+        "state"
       ],
       "title": "EnrollmentObservationReply",
       "type": "object"
@@ -2551,6 +2585,7 @@
     },
     "EnrollmentRecordState": {
       "enum": [
+        "ended",
         "issuing",
         "certificate_issued"
       ],
@@ -4893,7 +4928,7 @@
           "type": "string"
         },
         "generation": {
-          "maximum": 2147483647,
+          "maximum": 18446744073709551615,
           "minimum": 1,
           "title": "Generation",
           "type": "integer"
@@ -5041,8 +5076,14 @@
         "certificate_issuance_purpose": {
           "$ref": "#/$defs/CertificateIssuancePurpose"
         },
+        "certificate_journal_state": {
+          "$ref": "#/$defs/CertificateJournalState"
+        },
         "certificate_record_state": {
           "$ref": "#/$defs/CertificateRecordState"
+        },
+        "certificate_request_mode": {
+          "$ref": "#/$defs/CertificateRequestMode"
         },
         "certificate_rotation_state": {
           "$ref": "#/$defs/CertificateRotationState"
@@ -5286,6 +5327,8 @@
         "node_identity_state",
         "enrollment_purpose",
         "certificate_issuance_purpose",
+        "certificate_journal_state",
+        "certificate_request_mode",
         "model_file_state",
         "catalog_sync_state",
         "reservation_state",

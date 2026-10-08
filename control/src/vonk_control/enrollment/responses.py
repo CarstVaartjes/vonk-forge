@@ -5,10 +5,13 @@ from datetime import UTC, datetime
 
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
-from vonk_agent_protocol import UnknownError, canonical_message
+from vonk_agent_protocol import LifecycleState, UnknownError, canonical_message
 from vonk_agent_protocol.enrollment import IssuedCertificateResponse
 
-from ..enrollment_contract import EnrollmentObservationReply
+from ..enrollment_contract import (
+    EnrollmentObservationOutcome,
+    EnrollmentObservationReply,
+)
 from ..pki import IssuedCertificate
 from .types import EnrollmentIssuanceUncertain, RenewalIssuanceUncertain
 
@@ -21,7 +24,12 @@ def unknown_response(
         assert typed is not None
         observation = typed
     return JSONResponse(
-        EnrollmentObservationReply(detail=observation).model_dump(mode="json"),
+        EnrollmentObservationReply(
+            detail=observation,
+            state=observation.state
+            if isinstance(observation, EnrollmentObservationOutcome)
+            else LifecycleState.OBSERVING,
+        ).model_dump(mode="json"),
         status_code=503,
         headers={"retry-after": "5", "Cache-Control": "no-store"},
     )

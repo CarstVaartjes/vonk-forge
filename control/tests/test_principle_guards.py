@@ -499,3 +499,13 @@ def test_nested_package_get_helper_refusal_follows_concrete_import(
     ] == ["get-helper-refusal"]
     (package / "common.py").write_text("def required():\n    return 1\n")
     assert not guards.scan_source(route, path=path, mode="reads")
+
+
+def test_refusal_assertion_follows_its_http_response_producer():
+    """Catches treating an unrelated database get as a refused HTTP read."""
+    write = "def test_submit():\n    response = client.post('/renew')\n    row = session.get(Certificate, serial)\n    assert response.status_code == 503\n"
+    read = write.replace("client.post", "client.get")
+    assert not scan_source(write, path="test_enrollment.py", mode="tests")
+    assert scan_source(read, path="test_enrollment.py", mode="tests")
+    direct = "def test_read():\n    assert client.get('/status').status_code == 503\n"
+    assert scan_source(direct, path="test_enrollment.py", mode="tests")

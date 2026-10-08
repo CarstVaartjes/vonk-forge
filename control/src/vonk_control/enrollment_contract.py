@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated
 
 from pydantic import ConfigDict, Field, StringConstraints
-from vonk_agent_protocol import UnknownError
+from vonk_agent_protocol import LifecycleState, UnknownError
 from vonk_agent_protocol.state_machines import (
     CertificateRotationState,
     EnrollmentPurpose,
@@ -25,7 +25,7 @@ class EnrollmentGrantStatus(StrictJSONModel):
 
     id: EnrollmentId
     state: EnrollmentGrantStateField
-    purpose: EnrollmentPurpose
+    purpose: EnrollmentPurpose | None
     node_id: str | None = Field(pattern=r"^spk_[0-9a-f]{32}$")
     display_name: str | None
     expires_at: datetime
@@ -76,3 +76,13 @@ class EnrollmentRotationRecoveryClaim(StrictJSONModel):
 
 class EnrollmentObservationReply(StrictJSONModel):
     detail: UnknownError
+    state: LifecycleState
+
+
+class EnrollmentObservationOutcome(UnknownError):
+    state: LifecycleState
+
+
+class EnrollmentRevocationStatus(StrictJSONModel):
+    local_denial_complete: bool
+    ca_confirmation_complete: bool

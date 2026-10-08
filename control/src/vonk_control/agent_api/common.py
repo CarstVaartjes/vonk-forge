@@ -6,6 +6,7 @@ import dataclasses
 import fcntl
 import hashlib
 import logging
+import math
 import os
 import re
 import stat
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -34,6 +35,7 @@ from vonk_agent_protocol.host_helper import (
 )
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
+from vonk_agent_protocol.state_machines import EnrollmentPurpose
 
 from ..agent_jobs import AgentJobService
 from ..auth import (
@@ -231,12 +233,20 @@ class EnrollmentRateLimiter:
             self._admitted.append(now)
             return True
 
+    def retry_after(self) -> int:
+        with self._lock:
+            if not self._admitted:
+                return 1
+            return max(
+                1, math.ceil(self._admitted[0] + self._window_seconds - self._clock())
+            )
+
 
 class EnrollmentGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: EnrollmentId
     expires_at: str = Field(min_length=1, max_length=64)
-    purpose: Literal["new-node", "re-enroll"]
+    purpose: EnrollmentPurpose
     token: str = Field(min_length=43, max_length=64)
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
