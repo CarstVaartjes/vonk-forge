@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     GatewayRouteState,
     LifecycleState,
     LifecycleSubject,
+    UnknownError,
 )
 from vonk_agent_protocol.route_activation import ActivationMarker
 
@@ -132,6 +133,8 @@ class _DurableOperationProjection:
         self, snapshot: _ActiveRouteSnapshot
     ) -> tuple[ActivationMarker, RouteBundleDocument]:
         bundle = verify_active_route_bundle(self._route_root)
+        if isinstance(bundle, UnknownError):
+            raise RuntimeError(bundle.reason)  # noqa: TRY004 - observation, not type validation
         active_marker = bundle.marker
         if (
             active_marker != snapshot.marker

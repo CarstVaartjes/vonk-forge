@@ -26,6 +26,7 @@ from vonk_agent_protocol import GatewayRouteState, RoutePublicationState, RunSta
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.enrollment import NodeId
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.outcome import UnknownError
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_forge_contracts import read_recipe
 
@@ -351,19 +352,19 @@ class AtomicRecipeRoutePublisher:
             marker = self._publisher._read_marker(optional=True, verify_files=True)
         except RouteRuntimeError:
             return None
-        return None if marker is None else marker.digest
+        if marker is None or isinstance(marker, UnknownError):
+            return None
+        return marker.digest
 
     def accepted_run(
         self, run_id: str, policy: ManagementAddressPolicy
     ) -> _RecipeCandidate | None:
-        """Reuse only a checksum-verified immutable route already owned by this run.
-
-        The active bundle owns endpoint and runtime-model facts; SQL/history
-        cannot manufacture them when a current projection becomes unreadable.
-        """
+        """Reuse only the checksum-verified immutable route owned by this run."""
         if not (self._publisher._root / "activation.json").exists():
             return None
         bundle = verify_active_route_bundle(self._publisher._root)
+        if isinstance(bundle, UnknownError):
+            return None
         if (
             bundle.marker.authority_id != self._AUTHORITY_ID
             or bundle.marker.state != GatewayRouteState.PUBLISHED
@@ -450,13 +451,14 @@ class AtomicRecipeRoutePublisher:
     ) -> LiteLlmGeneration:
         self._publisher._identity(self._AUTHORITY_ID, route_digest, route_digest)
         acknowledgement_error: Exception | None = None
-        with self._publisher._locked():
+        with self._publisher._locked() as uncertainty:
+            if uncertainty is not None:
+                raise RecipeRouteNotReady(uncertainty.reason)
             try:
                 current = self._publisher._read_marker(optional=True, verify_files=True)
             except RouteRuntimeError:
-                # An unreadable or retired marker is replaced by a fresh
-                # generation instead of blocking publication forever.
                 current = None
+            current = None if isinstance(current, UnknownError) else current
 
             def route_bytes(generation: int) -> bytes:
                 document = RouteBundleDocument(
@@ -482,11 +484,7 @@ class AtomicRecipeRoutePublisher:
                     + "\n"
                 ).encode()
 
-            # Activation is durable before the supervisor acknowledgement and
-            # before the database projection. After a lost acknowledgement,
-            # adopt only the exact active, checksum-verified candidate. Merely
-            # matching its route digest could reuse an unrelated generation
-            # with different rendered bytes.
+            # Adopt a lost acknowledgement only by exact verified bundle content.
             reuse_current = (
                 current is not None
                 and current.state == state
@@ -511,12 +509,13 @@ class AtomicRecipeRoutePublisher:
                     routes=route_bytes(generation),
                     litellm=litellm,
                 )
-        # The acknowledgement wait can last minutes. It runs after the file
-        # lock is released so a newer publication is never queued behind it;
-        # a superseded marker simply never acknowledges and its caller
-        # discards that result.
+        if isinstance(marker, UnknownError):
+            raise RecipeRouteNotReady(marker.reason)
+        # Release the file lock before waiting for a live acknowledgement.
         try:
-            self._publisher._require_supervisor_ack(marker)
+            uncertainty = self._publisher._require_supervisor_ack(marker)
+            if uncertainty is not None:
+                acknowledgement_error = RecipeRouteNotReady(uncertainty.reason)
         except Exception as error:  # noqa: BLE001
             acknowledgement_error = error
         config_sha256 = hashlib.sha256(litellm).hexdigest()

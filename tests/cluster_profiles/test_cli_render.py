@@ -12,7 +12,7 @@ def test_library_keeps_canonical_cache_evidence_and_exact_selection(
     width, monkeypatch, capsys
 ):
     monkeypatch.setattr(
-        "cluster_profiles.cli_render.shutil.get_terminal_size",
+        "cluster_profiles.cli_render.common.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((width, 24)),
     )
     selector = "publisher/模型-" + "a" * 150
@@ -142,7 +142,7 @@ def test_rename_reports_the_new_name_of_the_renamed_spark(capsys):
 
 def test_node_state_and_blocker_survive_narrow_output(monkeypatch, capsys):
     monkeypatch.setattr(
-        "cluster_profiles.cli_render.shutil.get_terminal_size",
+        "cluster_profiles.cli_render.common.shutil.get_terminal_size",
         lambda fallback: os.terminal_size((60, 24)),
     )
     reason = "Inventory is stale; " + "refresh evidence before placement " * 8

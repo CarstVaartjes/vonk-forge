@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import ErrorCategory, UnknownError, WaitReason
 
 from .auth import AgentIdentity, AgentSource, AuthError
 from .models import AgentCertificate, AgentNode, AgentPresence
@@ -257,7 +258,7 @@ class AgentPresenceService:
         node_id: str,
         *,
         maximum_age_seconds: int,
-    ) -> ManagementAddressObservation:
+    ) -> ManagementAddressObservation | UnknownError:
         with self._sessions.begin() as session:
             return self.latest_in_session(
                 session,
@@ -271,7 +272,7 @@ class AgentPresenceService:
         node_id: str,
         *,
         maximum_age_seconds: int,
-    ) -> ManagementAddressObservation:
+    ) -> ManagementAddressObservation | UnknownError:
         """Resolve presence using a caller-owned, Node-first transaction."""
         if _NODE_ID.fullmatch(node_id) is None:
             raise PresenceError("node ID is invalid")
@@ -280,7 +281,10 @@ class AgentPresenceService:
         now = _utc(self._clock(), label="presence clock")
         row = session.get(AgentPresence, node_id)
         if row is None:
-            raise PresenceError("management address presence is unavailable")
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         try:
             identity = AgentIdentity(
                 node_id=row.node_id,
