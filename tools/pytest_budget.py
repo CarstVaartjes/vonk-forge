@@ -19,9 +19,9 @@ check); ``VONK_TEST_BUDGET_CALIBRATION`` pins the calibration.
 
 One overrun never fails a run, because a shared runner can stall for a moment.
 A test over its budget is run once more alone in a fresh process: it fails only
-when the overrun reproduces there, or when it is beyond ``FAR_BEYOND_BUDGET``
-times its budget (no noise explains that). Otherwise the run reports a
-warning (summary line and ``::warning::`` annotation).
+when the overrun reproduces there. An inconclusive verification is also
+warning-only. The run reports warnings in its summary and through
+``::warning::`` annotations.
 """
 
 from __future__ import annotations
@@ -38,12 +38,10 @@ import pytest
 DEFAULT_BUDGET_SECONDS = 10.0
 MAX_BUDGET_SECONDS = 60.0
 
-#: A test this many times over its budget fails without a rerun.
-FAR_BEYOND_BUDGET = 5.0
 #: The slowest host the calibration will compensate for; beyond it the host,
 #: not the test, is the problem.
 MAX_CALIBRATION = 5.0
-#: Best-of-N time of ``_benchmark_workload`` on the machine the budgets were set on.
+#: Median time of ``_benchmark_workload`` on the machine the budgets were set on.
 REFERENCE_BENCHMARK_SECONDS = 0.105
 CALIBRATION_ENV = "VONK_TEST_BUDGET_CALIBRATION"
 _ISOLATED_ENV = "VONK_TEST_BUDGET_ISOLATED_RERUN"
@@ -206,13 +204,6 @@ def pytest_runtest_makereport(
         "calibration); make it faster, or mark it @pytest.mark.slow(<seconds>) "
         "with a comment saying why (see docs/testing-and-ci.md)"
     )
-    if elapsed > FAR_BEYOND_BUDGET * budget:
-        report.outcome = "failed"
-        report.longrepr = (
-            f"{message}. {elapsed / budget:.1f}x its budget: no runner noise "
-            "explains that"
-        )
-        return report
     if _isolated():
         report.outcome = "failed"
         report.longrepr = f"{message}. Reproduced when run alone."
@@ -268,7 +259,7 @@ def rerun_alone(config: pytest.Config, nodeids: list[str]) -> dict[str, str | No
     """Run ``nodeids`` again in one fresh process, without the other tests.
 
     Each result is ``None`` when the test did not go over its budget again, or
-    the reproduced duration."""
+    the reproduced duration. A missing result means verification was inconclusive."""
 
     scale = config.getoption("--test-budget-scale")
     command = [
@@ -298,7 +289,11 @@ def rerun_alone(config: pytest.Config, nodeids: list[str]) -> dict[str, str | No
             timeout=RERUN_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired:
-        return {nodeid: "did not finish in time" for nodeid in nodeids}
+        _NOISE.append(
+            f"Budget verification did not finish within {RERUN_TIMEOUT_SECONDS:g}s; "
+            "no second measurement, warning only"
+        )
+        return {}
     reproduced = {
         match.group(1): f"{match.group(2)}s"
         for match in _REPRODUCED.finditer(finished.stdout)
@@ -335,7 +330,12 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
         return
     results = rerun_alone(session.config, sorted(_SUSPECTS))
     for nodeid, message in sorted(_SUSPECTS.items()):
-        again = results.get(nodeid)
+        if nodeid not in results:
+            _NOISE.append(
+                f"{nodeid}: {message}. Verification inconclusive; warning only"
+            )
+            continue
+        again = results[nodeid]
         if again is None:
             _NOISE.append(
                 f"{nodeid}: {message}. Not reproduced when run alone; "

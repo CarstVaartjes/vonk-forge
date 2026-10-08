@@ -1192,6 +1192,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
 
 def test_cancel_under_native_repair_contention_persists_before_proof(faulty_install):
     """A NOWAIT repair refusal cannot refuse or erase the accepted cancel."""
+    from threading import Event
     from types import SimpleNamespace
     from uuid import uuid4
 
@@ -1239,10 +1240,9 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
         is not None
     )
     request_key = str(uuid4())
-    refused = False
+    refused = Event()
 
     def observe_native_refusal(context: ExceptionContext) -> None:
-        nonlocal refused
         if not isinstance(context.original_exception, LockNotAvailable):
             return
         assert context.statement is not None
@@ -1259,7 +1259,7 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
             )
             assert state.cancellation is not None
             assert state.cancellation.request_key == request_key
-        refused = True
+        refused.set()
 
     engine = holder.get_bind()
     event.listen(engine, "handle_error", observe_native_refusal)
@@ -1273,7 +1273,7 @@ def test_cancel_under_native_repair_contention_persists_before_proof(faulty_inst
             request_key=request_key,
             reason="cancel under native contention",
         )
-        assert refused
+        assert refused.is_set()
         assert accepted.operation_id == switch_id
         with sessions() as session:
             row = session.get(RunSwitchJournalRepairPending, switch_id)
