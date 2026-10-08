@@ -3,7 +3,6 @@
   "note": "Exact line counts of existing authored sources over 1500 lines. Counts may only fall; remove an entry when it reaches 1500. Generated client and wire outputs are excluded by the scanner.",
   "files": {
     "control/src/vonk_control/availability_production.py": 1553,
-    "control/src/vonk_control/distribution_executor.py": 1637,
     "control/src/vonk_control/enrollment.py": 1749,
     "control/src/vonk_control/recipe_routes.py": 1894,
     "control/web/src/components/artifact-job-workspace.tsx": 1640,

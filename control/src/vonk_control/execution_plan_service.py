@@ -36,7 +36,7 @@ from .compiled_execution_plan import (
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
-from .distribution import ModelCacheObjectSource
+from .distribution import verified_model_receipts
 from .models import CatalogDocumentRevision, ClusterMappingNode, RecipeBuild
 from .recipe_runtime_specs import (
     RecipeRuntimeSpecError,
@@ -280,11 +280,9 @@ class ControllerExecutionPlanService:
                     VerifiedModelObject.model_validate(item) for item in direct_objects
                 )
             else:
-                model_source = ModelCacheObjectSource.from_service(self._model_cache)
-                # Describe the shared verified bytes with this revision's
-                # model identities, whichever revision cached them first.
-                model_objects = model_source.verified_model_objects_for_set(
-                    artifact_set_sha256, manifest
+                # Resolve the shared bytes with this revision's canonical identities.
+                model_objects = verified_model_receipts(
+                    self._model_cache, artifact_set_sha256, manifest
                 )
         except (UnknownOutcomeError, SecurityRefusalError):
             # Unconfirmed storage or bookkeeping keeps its type: the admitting
