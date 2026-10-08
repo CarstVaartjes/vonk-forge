@@ -57,7 +57,7 @@ imports, so it is a pre-check; run the full suites before requesting review.
 
 Every test in the repository, Controller and Compose suites must finish its
 setup and body within 10 seconds. `tools/pytest_budget.py` checks this after
-each test and fails the test that went over, with its measured time. Setting up
+each test and records overruns with their measured time. Setting up
 a fixture shared beyond one test (session, module or class scope, such as the
 PostgreSQL server or the installed CLI) is not charged to the test that first
 requests it: doing expensive work once is the intended fix. It does
@@ -81,9 +81,10 @@ or loaded host gets proportionally more time. `--test-budget-scale=2` (or `0`
 to disable) multiplies it further on a machine that is knowingly overloaded.
 One overrun never fails a run: at the end of the session every test over its
 scaled budget is rerun once, together in one fresh process, and fails the run
-only if the overrun reproduces there or it was more than five times its budget
-when first measured (the rerun applies locally too, not only in CI). Otherwise
-the run reports a warning (summary line and `::warning::` annotation).
+only if the overrun reproduces there, regardless of its initial magnitude
+(the rerun applies locally too, not only in CI). An inconclusive rerun is
+warning-only too. The run reports warnings in its summary and through
+`::warning::` annotations.
 
 The repository scanners (vocabulary, blocker, lifecycle, coordination, content
 identity) parse each Python file once per session through

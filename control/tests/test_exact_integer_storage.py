@@ -711,6 +711,7 @@ def test_real_schema_lock_conflict_releases_and_same_database_retry_converges(
 ) -> None:
     """Catches unbounded startup lock waits and poisoned retries after release."""
     engine = legacy_engine
+    normal_budgets = adoption_module.DATABASE_WAIT_BUDGETS
     monkeypatch.setattr(
         adoption_module,
         "DATABASE_WAIT_BUDGETS",
@@ -737,6 +738,10 @@ def test_real_schema_lock_conflict_releases_and_same_database_retry_converges(
         finally:
             transaction.rollback()
     assert _schema(engine) == before
+    # The short budget belongs to the blocked attempt, not the successful
+    # migration. Keeping it would race SQLite's progress interrupt against
+    # ALTER TABLE on a loaded runner instead of testing lock recovery.
+    monkeypatch.setattr(adoption_module, "DATABASE_WAIT_BUDGETS", normal_budgets)
     _adopt(engine)
     with engine.connect() as connection:
         columns = {
