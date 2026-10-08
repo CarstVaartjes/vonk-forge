@@ -735,6 +735,9 @@ def evaluate_guard_gate(
     section = document["categorized_raises"]
     grandfathered: dict[str, int] = section["grandfathered"]  # type: ignore[index, assignment]
     current = Counter(site.path for site in sites)
+    from .package_moves import PackageMoves
+
+    grandfathered = PackageMoves(REPO_ROOT).counts(grandfathered, dict(current))
     first = {site.path: site for site in reversed(sites)}
     messages: list[str] = []
     for path, count in sorted(current.items()):
@@ -781,6 +784,45 @@ def _require_text(
     if not isinstance(value, str) or len(value.split()) < words:
         raise ValueError(f"{where}: {field} must be written text")
     return value
+
+
+def relocate_document(document, moves=None):
+    from .package_moves import PackageMoves
+
+    moves = moves or PackageMoves(REPO_ROOT)
+
+    def entry(value):
+        result = {**value, "path": moves.function(value["path"], value["function"])}
+        if "calls" in value:
+            result["calls"] = [entry(call) for call in value["calls"]]
+        return result
+
+    result = {**document}
+    for group in ("operator_waits", "retry_loops", "call_edges", "route_guards"):
+        if group in document:
+            result[group] = [entry(value) for value in document[group]]
+    result["fail_closed"] = [
+        {
+            **family,
+            "sites": [
+                [moves.function(path, function), exception, function, code, count]
+                for path, exception, function, code, count in family["sites"]
+            ],
+        }
+        for family in document["fail_closed"]
+    ]
+    if "scope" in document:
+        result["scope"] = {**document["scope"]}
+        for field in ("audited_paths", "guard_paths"):
+            if field in document["scope"]:
+                result["scope"][field] = sorted(
+                    {
+                        target
+                        for path in document["scope"][field]
+                        for target in moves.paths(path)
+                    }
+                )
+    return result
 
 
 def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
@@ -842,7 +884,7 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
                 raise ValueError(
                     f"{where}: a site is [path, class, function, code, count]"
                 )
-    return document
+    return relocate_document(document)
 
 
 def audited_paths(document: dict[str, object]) -> frozenset[str]:
@@ -996,6 +1038,9 @@ def _lowered_guard(
         return section
     current = Counter(site.path for site in guard)
     recorded: dict[str, int] = section["grandfathered"]  # type: ignore[assignment]
+    from .package_moves import PackageMoves
+
+    recorded = PackageMoves(REPO_ROOT).counts(recorded, dict(current))
     lowered = {
         path: min(count, current[path])
         for path, count in recorded.items()
@@ -1012,6 +1057,7 @@ def write_counts(
 ) -> dict[str, object]:
     """Lower recorded counts and drop vanished entries; never add a site."""
 
+    document = relocate_document(document)
     current_waits = Counter(site.identity for site in waits)
     kept_waits = []
     for entry in document["operator_waits"]:  # type: ignore[attr-defined]

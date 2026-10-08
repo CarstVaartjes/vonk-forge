@@ -813,6 +813,7 @@ def problems(
 ) -> list[str]:
     """Every way the repository breaks the ratchet, in a stable order."""
 
+    baseline = relocated_baseline(counts, baseline)
     found: list[str] = []
     for tier in TIERS:
         recorded = baseline.get(tier, {})
@@ -859,11 +860,29 @@ def flat_problems(
     return found
 
 
+def relocated_baseline(counts, baseline, moves=None):
+    from .package_moves import PackageMoves
+
+    moves = moves or PackageMoves(REPO_ROOT)
+    return {
+        tier: dict(
+            sorted(
+                moves.counts(
+                    baseline.get(tier, {}),
+                    {path: n for (t, path), n in counts.items() if t == tier},
+                ).items()
+            )
+        )
+        for tier in TIERS
+    }
+
+
 def lowered_baseline(
     counts: Counter[tuple[str, str]], baseline: dict[str, dict[str, int]]
 ) -> dict[str, dict[str, int]]:
     """The baseline with every fallen count lowered; a risen count is left to fail."""
 
+    baseline = relocated_baseline(counts, baseline)
     updated: dict[str, dict[str, int]] = {}
     for tier in TIERS:
         updated[tier] = {}

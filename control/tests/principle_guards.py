@@ -973,7 +973,24 @@ def load_allowlist(path: Path) -> dict:
     return doc
 
 
+def relocate(document: dict, moves=None) -> dict:
+    from .package_moves import PackageMoves
+
+    moves = moves or PackageMoves(ROOT)
+    return {
+        **document,
+        **{
+            group: [
+                {**entry, "path": moves.function(entry["path"], entry["function"])}
+                for entry in document[group]
+            ]
+            for group in ("debt", "exceptions")
+        },
+    }
+
+
 def evaluate_gate(sites: Sequence[Site], document: dict) -> list[str]:
+    document = relocate(document)
     actual = Counter(s.key for s in sites)
     expected = {
         (e["path"], e["function"], e["kind"]): e["count"]
@@ -988,6 +1005,7 @@ def evaluate_gate(sites: Sequence[Site], document: dict) -> list[str]:
 
 
 def lower(document: dict, sites: Sequence[Site]) -> dict:
+    document = relocate(document)
     actual = Counter(s.key for s in sites)
     expected = {
         (e["path"], e["function"], e["kind"]): e["count"]
@@ -1006,41 +1024,22 @@ def lower(document: dict, sites: Sequence[Site]) -> dict:
     return result
 
 
-def history_gate(document: dict, previous: dict) -> list[str]:
+def history_gate(document: dict, previous: dict, moves=None) -> list[str]:
     """Editing the allowlist cannot raise an existing allowance or add debt."""
+    previous = relocate(previous, moves)
     old = {
-        (e["path"], e["function"], e["kind"]): e["count"]
+        (group, e["path"], e["function"], e["kind"]): e["count"]
         for group in ("debt", "exceptions")
         for e in previous[group]
-    }
-    # A package split relocates an existing allowance, rather than creating one.
-    # Only removed debt keys can fund a move, and each count is consumed once.
-    current = {
-        (e["path"], e["function"], e["kind"])
-        for group in ("debt", "exceptions")
-        for e in document[group]
-    }
-    relocated = {
-        (e["path"], e["function"], e["kind"]): e["count"]
-        for e in previous["debt"]
-        if (e["path"], e["function"], e["kind"]) not in current
     }
     messages = []
     for group in ("debt", "exceptions"):
         for entry in document[group]:
-            key = (entry["path"], entry["function"], entry["kind"])
+            key = (group, entry["path"], entry["function"], entry["kind"])
             if key in old and entry["count"] > old[key]:
                 messages.append(f"allowance increased: {key}")
             elif key not in old and group == "debt":
-                candidates = [
-                    source
-                    for source, count in relocated.items()
-                    if source[1:] == key[1:] and count >= entry["count"]
-                ]
-                if len(candidates) == 1:
-                    relocated[candidates[0]] -= entry["count"]
-                else:
-                    messages.append(f"new debt is forbidden: {key}; use a fixed reason")
+                messages.append(f"new debt is forbidden: {key}; use a fixed reason")
     return messages
 
 

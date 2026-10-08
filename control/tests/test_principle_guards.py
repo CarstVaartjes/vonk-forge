@@ -460,10 +460,17 @@ def test_failure_report_is_evidence_not_a_terminal_operation(subject):
     "count,keep_original,rejected",
     [(1, False, False), (2, False, True), (1, True, True)],
 )
-def test_history_relocations_conserve_debt(count, keep_original, rejected):
+def test_history_relocations_conserve_debt(count, keep_original, rejected, tmp_path):
     """Catch package moves buying new debt or keeping the old allowance too."""
+    from .package_moves import PackageMoves
+
+    package = tmp_path / "old"
+    package.mkdir()
+    source = "def bounded_scan():\n    return 1\n"
+    (package / "scan.py").write_text(source)
+    moves = PackageMoves(tmp_path, lambda path: source)
     entry = {"path": "old.py", "function": "bounded_scan", "kind": "wait", "count": 1}
     previous = {"debt": [entry], "exceptions": []}
-    moved = {**entry, "path": "package/scan.py", "count": count}
+    moved = {**entry, "path": "old/scan.py", "count": count}
     current = {"debt": [moved, *([entry] if keep_original else [])], "exceptions": []}
-    assert bool(history_gate(current, previous)) is rejected
+    assert bool(history_gate(current, previous, moves)) is rejected
