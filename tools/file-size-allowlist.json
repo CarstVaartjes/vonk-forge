@@ -13,7 +13,6 @@
     "control/src/vonk_control/recipe_builds.py": 1957,
     "control/src/vonk_control/recipe_packages.py": 1542,
     "control/src/vonk_control/recipe_routes.py": 1895,
-    "control/src/vonk_control/runtime_image_preparation.py": 1646,
     "control/src/vonk_control/unused_storage_collection.py": 1864,
     "control/web/src/components/artifact-job-workspace.tsx": 1640,
     "control/web/src/pages/activity.tsx": 1674,
