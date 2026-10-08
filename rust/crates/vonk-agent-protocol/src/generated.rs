@@ -1527,6 +1527,76 @@ pub struct ClaimRequest {
     pub runtime_identity: AgentRuntimeIdentity,
     pub wait_seconds: u32,
 }
+#[derive(::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CliReleaseArtifacts {
+    #[serde(rename = "cli-wheel")]
+    pub cli_wheel: CliWheelProjection,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CliReleaseProjection {
+    pub artifacts: CliReleaseArtifacts,
+    pub channel: CliReleaseProjectionChannel,
+    pub generation: ::std::string::String,
+    pub schema_version: crate::integer::Integer,
+    pub source_sha: ::std::string::String,
+    pub version: ::std::string::String,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum CliReleaseProjectionChannel {
+    #[serde(rename = "dev")]
+    Dev,
+    #[serde(rename = "stable")]
+    Stable,
+}
+impl ::std::fmt::Display for CliReleaseProjectionChannel {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Dev => f.write_str("dev"),
+            Self::Stable => f.write_str("stable"),
+        }
+    }
+}
+impl ::std::str::FromStr for CliReleaseProjectionChannel {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "dev" => Ok(Self::Dev),
+            "stable" => Ok(Self::Stable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for CliReleaseProjectionChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for CliReleaseProjectionChannel {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct CliWheelProjection {
+    pub path: ::std::string::String,
+    pub sha256: ::std::string::String,
+    pub size: u32,
+}
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
 pub enum ClusterMappingCode {
@@ -16649,6 +16719,90 @@ impl<'de> ::serde::Deserialize<'de> for ClaimRequest {
             protocol_version: raw.protocol_version,
             runtime_identity: raw.runtime_identity,
             wait_seconds: raw.wait_seconds,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CliReleaseArtifacts {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("CliReleaseArtifacts"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+        struct Raw {
+            #[serde(rename = "cli-wheel")]
+            pub cli_wheel: CliWheelProjection,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            cli_wheel: raw.cli_wheel,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CliReleaseProjection {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("CliReleaseProjection"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+        struct Raw {
+            pub artifacts: CliReleaseArtifacts,
+            pub channel: CliReleaseProjectionChannel,
+            pub generation: ::std::string::String,
+            pub schema_version: crate::integer::Integer,
+            pub source_sha: ::std::string::String,
+            pub version: ::std::string::String,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            artifacts: raw.artifacts,
+            channel: raw.channel,
+            generation: raw.generation,
+            schema_version: raw.schema_version,
+            source_sha: raw.source_sha,
+            version: raw.version,
+        })
+    }
+}
+impl CliReleaseProjectionChannel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Stable => "stable",
+        }
+    }
+}
+impl ::std::ops::Deref for CliReleaseProjectionChannel {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for CliReleaseProjectionChannel {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for CliReleaseProjectionChannel {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for CliWheelProjection {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("CliWheelProjection"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq, Eq)]
+        struct Raw {
+            pub path: ::std::string::String,
+            pub sha256: ::std::string::String,
+            pub size: u32,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            path: raw.path,
+            sha256: raw.sha256,
+            size: raw.size,
         })
     }
 }
@@ -32133,6 +32287,15 @@ impl<'de> ::serde::Deserialize<'de> for WaitVerdict {
             Raw::FixAction => Self::FixAction,
             Raw::Derived => Self::Derived,
         })
+    }
+}
+impl From<&CliWheelProjection> for InstallerReleaseObject {
+    fn from(value: &CliWheelProjection) -> Self {
+        Self {
+            path: value.path.clone(),
+            sha256: value.sha256.clone(),
+            size: value.size,
+        }
     }
 }
 impl From<&ExpiredRenewRequest> for RenewRequest {
