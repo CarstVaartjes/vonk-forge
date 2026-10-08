@@ -212,20 +212,6 @@
       "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
     },
     {
-      "path": "control/src/vonk_control/distribution_executor.py",
-      "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
-      "kind": "provenance_comparison",
-      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
-      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
-    },
-    {
-      "path": "control/src/vonk_control/distribution_executor.py",
-      "function": "DurableDistributionPhaseExecutor._runtime_identity",
-      "kind": "provenance_comparison",
-      "expression": "receipt.build_id != build_id",
-      "reason": "Operation-internal binding: the verified runtime image receipt must name the exact build already selected by this distribution operation; image digest, archive digest and byte identity are checked separately. A foreign receipt cannot complete the accepted transfer."
-    },
-    {
       "path": "control/src/vonk_control/fleet_profile_adapter_conversion.py",
       "function": "_job_proof",
       "kind": "provenance_comparison",
@@ -716,13 +702,6 @@
       "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/run_switch_contract.py",
-      "function": "RunSwitchPlan.cleanup_authority_matches_effect",
-      "kind": "provenance_comparison",
-      "expression": "authority.recipe_revision_id != self.recipe_revision_id",
-      "reason": "Signed plan self-consistency: a cleanup authority must name the same revision as the plan whose effect it cleans up."
-    },
-    {
       "path": "control/src/vonk_control/run_switch_operations/executor_verification.py",
       "function": "ExecutorVerificationMixin._bound_installation",
       "kind": "provenance_comparison",
@@ -980,6 +959,20 @@
       "kind": "provenance_comparison",
       "expression": "newest[0] == installation.recipe_revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/distribution_executor/preparation.py",
+      "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_contract.py",
+      "function": "RunSwitchPlan.cleanup_authority_matches_effect",
+      "kind": "provenance_comparison",
+      "expression": "authority.recipe_revision_id != self.recipe_revision_id",
+      "reason": "Signed plan self-consistency: a cleanup authority must name the same revision as the plan whose effect it cleans up."
     }
   ],
   "content_identities": {
@@ -1200,31 +1193,33 @@
       "_launch_generation": "d4e0fe33d6ff8b33daf0d8420ac2f3712bcd01b4497b24ec5f339ee9ac96c488",
       "_validate_singleton_recovery_start_origin": "c9cf469ddc9cac7ed8647b9d54613c65f90004bd93bfbc7cc2d99f081be583aa"
     },
-    "control/src/vonk_control/distribution_executor.py": {
-      "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
-      "_phase_receipt": "da3fef88dc994840c9dedfc3e3f66705c7c3a2a6f554f123eb7957e5a9e4fbc2",
-      "_child_receipt": "88edff8ff7e7d8e1cef0b35fc6f9525bf80eecd5ab8013876fee17103b488910",
-      "_typed_failure": "cc9e487f8ceded968908107806b604c02ff6cb7987d8957b29d6c658b57e3870",
-      "_evidence_projection": "32e1414057fe560be9cd3c46d0ccd7667d78e1f64895bce73b8c1aaddd33465c",
-      "DurableDistributionPhaseExecutor.__init__": "26f5c704678602f9f0c62d0d511f6cb04fadcafb69e715cdec1cc23e873254a7",
+    "control/src/vonk_control/distribution_executor/__init__.py": {
+      "<module>": "e47108b63ec263ee2c85f3d612ed57e171d836d211d057723b7b10e529025c01"
+    },
+    "control/src/vonk_control/distribution_executor/children.py": {
+      "DistributionChildren._adopt_child": "d59f1401354fb44060610ea2997c112feae4aac5967ec2e89bcaa9ad9b703a4d",
+      "DistributionChildren._ensure_child": "797cb018a4ed9f3a22e767083ae9b43758e7db524bc22782fc4281ccf7a2bddf"
+    },
+    "control/src/vonk_control/distribution_executor/durable.py": {
       "DurableDistributionPhaseExecutor.execute": "b1c42d9ca3e70c3098616aabbb92fb21a77a240fbe525f26af46eedc4ecc4a89",
       "DurableDistributionPhaseExecutor.abandon": "3fe415540f9b7017fd75db969e03eadd7374ed2c599e8c61f47afd7bd106c638",
-      "DurableDistributionPhaseExecutor.get": "4f8cfecf3a31683b4360c474004339cd9dbcccbe59851a809997cc348c37c90e",
-      "DurableDistributionPhaseExecutor._verification_result": "dca78d6d984770bb2c64c0d2ea92543fcc14ac0baaeb417ad26e1538e90967b0",
-      "DurableDistributionPhaseExecutor._adopt_child": "d59f1401354fb44060610ea2997c112feae4aac5967ec2e89bcaa9ad9b703a4d",
-      "DurableDistributionPhaseExecutor._ensure_child": "797cb018a4ed9f3a22e767083ae9b43758e7db524bc22782fc4281ccf7a2bddf",
-      "DurableDistributionPhaseExecutor._model_objects": "7f329ff1f097dcc1e51d893ff704ab8cb6d93faf7b3fb2e88cb71db89eaf5fbe",
-      "DurableDistributionPhaseExecutor._runtime_identity": "3018371712332cf081ef6faa841f36eb9b9e361c2ce66882eac04f0651ba5f4f",
-      "DurableDistributionPhaseExecutor._source_runtime_storage": "7a1856b4a9c400c18c454bfcc2db753ae08bfe4b64a58be49b142fa2cb938ac0",
-      "DurableDistributionPhaseExecutor._archive": "43c456ca180de404f879f20126c3df08f01f1870fa0a29aa8111e58394cb5b98",
-      "DurableDistributionPhaseExecutor._stored_config_digest": "0d2c3d3be5982faa6d0b00977d6026bda88daf46b76efb9343aa875147ce27b6",
-      "DurableDistributionPhaseExecutor._assignment": "8a5075cd9baa429f4d2344283863bef5d4ddad1f36cc9a04d7b1d126cd90242f",
-      "DurableDistributionPhaseExecutor._cached_targets": "236f6bf07d8af9ea08fb48512482b10f9668289238ae7f57bd54c930de0293d7",
-      "DurableDistributionPhaseExecutor._target_bytes": "febfe369902c560320c09bf4dea5ccb8b9a67795d86c410462b220abb0e09ada",
-      "DurableDistributionPhaseExecutor._verify_evidence": "3629668f8b30f5d694e4a42cf315c02e5762c4c172342304f28b00556ed8c177",
-      "DurableDistributionPhaseExecutor._member_state": "20ced512b3544d175603fed6c6274bad8cbdcd5b86b2449737c0ba1ae8312996",
-      "DurableDistributionPhaseExecutor._int": "23f785a8220b8ddd3323d2f4d0bc8373fc842103b85483a1404e3d705a667f9b",
-      "DurableDistributionPhaseExecutor._digest": "026fc484cd30b8648c047b41bd09118ea764c40fc7fa3db4fed897f60bbe2370",
+      "DurableDistributionPhaseExecutor.get": "4f8cfecf3a31683b4360c474004339cd9dbcccbe59851a809997cc348c37c90e"
+    },
+    "control/src/vonk_control/distribution_executor/identity.py": {
+      "DistributionIdentity.__init__": "26f5c704678602f9f0c62d0d511f6cb04fadcafb69e715cdec1cc23e873254a7",
+      "DistributionIdentity._model_objects": "7f329ff1f097dcc1e51d893ff704ab8cb6d93faf7b3fb2e88cb71db89eaf5fbe",
+      "DistributionIdentity._runtime_identity": "3018371712332cf081ef6faa841f36eb9b9e361c2ce66882eac04f0651ba5f4f",
+      "DistributionIdentity._source_runtime_storage": "7a1856b4a9c400c18c454bfcc2db753ae08bfe4b64a58be49b142fa2cb938ac0",
+      "DistributionIdentity._archive": "43c456ca180de404f879f20126c3df08f01f1870fa0a29aa8111e58394cb5b98",
+      "DistributionIdentity._stored_config_digest": "0d2c3d3be5982faa6d0b00977d6026bda88daf46b76efb9343aa875147ce27b6",
+      "DistributionIdentity._assignment": "8a5075cd9baa429f4d2344283863bef5d4ddad1f36cc9a04d7b1d126cd90242f",
+      "DistributionIdentity._cached_targets": "236f6bf07d8af9ea08fb48512482b10f9668289238ae7f57bd54c930de0293d7",
+      "DistributionIdentity._target_bytes": "febfe369902c560320c09bf4dea5ccb8b9a67795d86c410462b220abb0e09ada",
+      "DistributionIdentity._member_state": "20ced512b3544d175603fed6c6274bad8cbdcd5b86b2449737c0ba1ae8312996",
+      "DistributionIdentity._int": "23f785a8220b8ddd3323d2f4d0bc8373fc842103b85483a1404e3d705a667f9b",
+      "DistributionIdentity._digest": "026fc484cd30b8648c047b41bd09118ea764c40fc7fa3db4fed897f60bbe2370"
+    },
+    "control/src/vonk_control/distribution_executor/preparation.py": {
       "CompositeDistributionPhaseExecutor.__init__": "0a2ca4ae8caedd100668af236f590a182c815e5ab7bcce1389d8dd8d0d30f2d4",
       "CompositeDistributionPhaseExecutor.memory_footprint": "ac93d09598e40ba98532886d65e00f66c982d13add5a24e557de3975428d325b",
       "CompositeDistributionPhaseExecutor.close": "7fe75185b69aa1ae560c9876c3b10d0a6171e30439f18c8cf78742a9046e1dd0",
@@ -1234,8 +1229,18 @@
       "CompositeDistributionPhaseExecutor._prepare_runtime_image.persist_reference": "1f214ae4fc81d21fdfa5058399b8f56e34c5a7f8176b932859c01f065751bacc",
       "CompositeDistributionPhaseExecutor.get": "3925260150357e56c329665f7c3f87b73f48abafee316602ef5c7fb7dc5d8735",
       "CompositeDistributionPhaseExecutor._cache_state": "67285a481816574b36d780a9f44023c2ac18d9a350abb0b8ffadf8f9c98b5087",
-      "CompositeDistributionPhaseExecutor._cache_result": "ddcdf2d1318a6d0e245b8f7533388a7848c2e71103af773022de376cf6d00f86",
-      "<module>": "e47108b63ec263ee2c85f3d612ed57e171d836d211d057723b7b10e529025c01"
+      "CompositeDistributionPhaseExecutor._cache_result": "ddcdf2d1318a6d0e245b8f7533388a7848c2e71103af773022de376cf6d00f86"
+    },
+    "control/src/vonk_control/distribution_executor/receipts.py": {
+      "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
+      "_phase_receipt": "da3fef88dc994840c9dedfc3e3f66705c7c3a2a6f554f123eb7957e5a9e4fbc2",
+      "_child_receipt": "88edff8ff7e7d8e1cef0b35fc6f9525bf80eecd5ab8013876fee17103b488910",
+      "_typed_failure": "cc9e487f8ceded968908107806b604c02ff6cb7987d8957b29d6c658b57e3870",
+      "_evidence_projection": "32e1414057fe560be9cd3c46d0ccd7667d78e1f64895bce73b8c1aaddd33465c"
+    },
+    "control/src/vonk_control/distribution_executor/verification.py": {
+      "DistributionVerification._verification_result": "dca78d6d984770bb2c64c0d2ea92543fcc14ac0baaeb417ad26e1538e90967b0",
+      "DistributionVerification._verify_evidence": "3629668f8b30f5d694e4a42cf315c02e5762c4c172342304f28b00556ed8c177"
     },
     "control/src/vonk_control/fleet_profile_adapter_conversion.py": {
       "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",

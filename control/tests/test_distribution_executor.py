@@ -28,7 +28,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
-from vonk_control import distribution_executor as executor_module
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
@@ -44,6 +43,8 @@ from vonk_control.distribution_executor import (
     RuntimeImagePull,
     _phase_receipt,
 )
+from vonk_control.distribution_executor import children as executor_module
+from vonk_control.distribution_executor import durable as durable_executor_module
 from vonk_control.job_documents import (
     DistributionJobPayload,
     DistributionTransferProgress,
@@ -1776,7 +1777,8 @@ def test_child_persistence_retains_in_place_default_members(
     initial,
 ):
     """Both child writers must retain mutations nested in their typed receipt."""
-    original = executor_module._child_receipt
+    writer_module = executor_module if initial else durable_executor_module
+    original = writer_module._child_receipt
     member = OperationMemberProgress(member_id=NODE_A, phase=ProgressPhase.TRANSFER)
     writes = []
 
@@ -1802,7 +1804,7 @@ def test_child_persistence_retains_in_place_default_members(
                     writes.append(receipt)
                     assert receipt.progress.operation.members == [member]
 
-    monkeypatch.setattr(executor_module, "_child_receipt", mutated_receipt)
+    monkeypatch.setattr(writer_module, "_child_receipt", mutated_receipt)
     sessions = agent_system[1].sessions
     event.listen(sessions, "after_flush", check_written_receipt)
     try:
