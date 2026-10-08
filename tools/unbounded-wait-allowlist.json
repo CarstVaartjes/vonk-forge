@@ -237,24 +237,6 @@
       "count": 3
     },
     {
-      "path": "rust/crates/vonk-agent-helper/src/package_rollback.rs",
-      "function": "command_with_nonce",
-      "kind": "rust-wait-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent-helper/src/package_rollback.rs",
-      "function": "digest",
-      "kind": "rust-loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent-helper/src/package_rollback.rs",
-      "function": "digest_process",
-      "kind": "rust-loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "rust/crates/vonk-agent/src/agent_upgrade.rs",
       "function": "download",
       "kind": "rust-loop-without-deadline",

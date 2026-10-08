@@ -695,28 +695,18 @@ fn failed_post_pair_readiness_is_resumed_without_another_token() {
 }
 
 #[test]
-fn enrollment_bootstrap_must_match_the_prompted_ca_before_sudo() {
+fn stale_bootstrap_observation_is_refetched_before_effects() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
     fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
     let ca = controller_ca();
-    let bootstrap = serde_json::json!({
-        "controller_endpoint": "https://controller.example.test",
-        "enrollment_endpoint": "https://enroll.example.test",
-        "ca_fingerprint": "0".repeat(64),
-        "ca_pem": String::from_utf8(ca.clone()).unwrap(),
-        "host_helper_authority_public_key": "11".repeat(32),
-        "controller_address": null,
-        "service_hostnames": [],
-    });
-    let mut runner = RecordingRunner {
-        commands: Vec::new(),
-        outputs: [CommandOutput::success(
-            serde_json::to_vec(&bootstrap).unwrap(),
-        )]
-        .into(),
-        ..Default::default()
-    };
+    let mut runner = runner_with_bootstrap(&ca);
+    let mut bootstrap: vonk_agent_protocol::generated::EnrollmentBootstrapResponse =
+        serde_json::from_slice(&runner.outputs.front().unwrap().stdout).unwrap();
+    bootstrap.ca_fingerprint = "0".repeat(64);
+    runner.outputs.push_front(CommandOutput::success(
+        serde_json::to_vec(&bootstrap).unwrap(),
+    ));
     let mut prompt = fresh_answers(&ca);
 
     let result = prepare_setup(
@@ -727,11 +717,40 @@ fn enrollment_bootstrap_must_match_the_prompted_ca_before_sudo() {
         CallerIdentity::unprivileged(1000),
     );
 
-    assert!(result.is_err());
-    assert_eq!(runner.commands.len(), 1);
-    assert_eq!(
-        runner.commands[0].program,
-        std::path::Path::new("/usr/bin/curl")
+    let prepared = result.unwrap();
+    assert!(!install_paths.config.exists());
+    assert!(!install_paths.helper_authority.exists());
+    assert!(
+        runner
+            .commands
+            .iter()
+            .all(|command| command.program == std::path::Path::new("/usr/bin/curl"))
+    );
+    assert_eq!(runner.commands.len(), 3);
+    let mut handoff = RecordingRunner::default();
+    handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+        .unwrap();
+    assert!(
+        apply_setup_from(
+            handoff.commands[0].stdin.as_slice(),
+            prepared.package_path(),
+            prepared.executable_path(),
+            &install_paths,
+            &mut RecordingRunner::default(),
+            CallerIdentity::sudo_root(1000)
+        )
+        .is_ok()
+    );
+    assert_eq!(fs::read(&install_paths.ca).unwrap(), ca);
+    assert!(
+        prepare_setup(
+            &request(temporary.path()),
+            &install_paths,
+            &mut NoPrompt,
+            &mut RecordingRunner::default(),
+            CallerIdentity::unprivileged(1000)
+        )
+        .is_ok()
     );
 }
 

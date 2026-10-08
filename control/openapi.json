@@ -19529,6 +19529,18 @@
         "title": "OutputLimits",
         "type": "object"
       },
+      "PackageActivationOutcome": {
+        "enum": [
+          "awaiting_controller_activation",
+          "candidate_install_failed",
+          "controller_confirmed_activation",
+          "restoring_captured_source",
+          "source_restored_and_restarted",
+          "source_restore_failed"
+        ],
+        "title": "PackageActivationOutcome",
+        "type": "string"
+      },
       "PackageActivationPhase": {
         "description": "Where a package activation transaction stands.",
         "enum": [
@@ -19578,9 +19590,7 @@
             "type": "string"
           },
           "outcome": {
-            "pattern": "^[a-z_]{1,128}$",
-            "title": "Outcome",
-            "type": "string"
+            "$ref": "#/components/schemas/PackageActivationOutcome"
           },
           "phase": {
             "$ref": "#/components/schemas/PackageActivationPhase"

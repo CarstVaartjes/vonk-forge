@@ -95,51 +95,57 @@ pub(super) fn canonicalize_selected_path(path: &Path) -> Result<PathBuf, SetupEr
     ))
 }
 
-pub(super) fn validate_existing_bundle(bundle: &Path) -> Result<(), SetupError> {
+pub(super) fn validate_existing_bundle(
+    bundle: &Path,
+    payload: &CanonicalTemplatePayload,
+) -> Result<(), SetupError> {
     let bundle = canonicalize_selected_path(bundle)?;
     require_real_directory(&bundle)?;
-    for entry in fs::read_dir(&bundle)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        if is_stale_staging_directory_name(&name) {
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)?;
-            if metadata.is_dir() && !metadata.file_type().is_symlink() {
-                match fs::remove_dir(&path) {
-                    Ok(()) => continue,
-                    Err(error) if error.kind() == io::ErrorKind::DirectoryNotEmpty => {}
-                    Err(error) => return Err(error.into()),
-                }
-            }
-        }
-        if name != ".env"
-            && name != "docker-compose.yaml"
-            && name != "secrets"
-            && !BUNDLE_DIRECTORIES
-                .iter()
-                .any(|directory| name == *directory)
-        {
-            // A synced/NAS-hosted bundle keeps its rclone bisync database in a
-            // real `.sync` directory at the bundle root.  Tolerate exactly that
-            // directory and never read, write, delete, or recurse into it.  A
-            // regular file or symlink of the same name still fails closed,
-            // because a symlink could redirect a later release-controlled
-            // write.  `DirEntry::file_type` reports the entry itself, not the
-            // symlink target, so the check does not follow links.
-            let file_type = entry.file_type()?;
-            if name != ".sync" || !file_type.is_dir() {
-                return Err(SetupError::UnsafeDestination(format!(
-                    "{} is an unexpected top-level entry",
-                    entry.path().display()
-                )));
+    // Only consumed paths are authority. Unrelated entries, including symlinks,
+    // are never traversed or modified. Empty owned staging directories may be
+    // retired; nonempty entries are isolated by their unique staging names.
+    if let Ok(entries) = fs::read_dir(&bundle) {
+        for entry in entries.flatten() {
+            if is_stale_staging_directory_name(&entry.file_name())
+                && entry.file_type().is_ok_and(|kind| kind.is_dir())
+            {
+                let _ = fs::remove_dir(entry.path());
             }
         }
     }
-    require_regular_file(&bundle.join("docker-compose.yaml"))?;
     require_regular_file(&bundle.join(".env"))?;
     let secrets = bundle.join("secrets");
     require_real_directory(&secrets)?;
-    validate_secret_tree(&secrets, true)?;
+    let generated = generated_secrets(payload);
+    let mut inputs: Vec<&str> = payload
+        .secrets
+        .iter()
+        .map(|secret| secret.file.as_str())
+        .collect();
+    inputs.extend(
+        generated
+            .random_text
+            .iter()
+            .map(|secret| secret.file.as_str()),
+    );
+    inputs.extend(
+        generated
+            .ed25519_pkcs8_pem
+            .iter()
+            .map(|secret| secret.file.as_str()),
+    );
+    for secret in &generated.postgres_urls {
+        inputs.extend([secret.file.as_str(), secret.password_file.as_str()]);
+    }
+    if let Some(request) = &payload.step_ca_controller {
+        inputs.extend(step_ca_files(&request.files));
+    }
+    if let Some(group) = &payload.group_readable_secrets {
+        inputs.extend(group.files.iter().map(String::as_str));
+    }
+    for input in inputs {
+        validate_secret_input(&secrets, input)?;
+    }
     for directory in BUNDLE_DIRECTORIES {
         if fs::symlink_metadata(bundle.join(directory)).is_ok() {
             require_real_directory(&bundle.join(directory))?;
@@ -164,40 +170,30 @@ pub(super) fn is_stale_staging_directory_name(name: &std::ffi::OsStr) -> bool {
         && sequence.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-pub(super) fn validate_secret_tree(directory: &Path, top_level: bool) -> Result<(), SetupError> {
-    for entry in fs::read_dir(directory)? {
-        let entry = entry?;
-        let path = entry.path();
-        let name = entry
-            .file_name()
-            .into_string()
-            .map_err(|_| SetupError::UnsafeDestination("non-UTF-8 secret path".to_owned()))?;
-        if !is_safe_secret_component(&name) {
-            return Err(SetupError::UnsafeDestination(format!(
-                "{} has an unsafe path component",
-                path.display()
-            )));
-        }
-        let metadata = fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink() {
-            return Err(SetupError::UnsafeDestination(format!(
-                "{} is a symbolic link",
-                path.display()
-            )));
-        }
-        if metadata.is_dir() {
-            // The gateway directory holds Controller-owned client keys that
-            // the bundle owner may not be able to list; it is not a secret
-            // input, so only its type is checked.
-            if top_level && name == GATEWAY_SECRET_DIRECTORY {
-                continue;
+fn validate_secret_input(root: &Path, relative: &str) -> Result<(), SetupError> {
+    let mut current = root.to_path_buf();
+    let parts: Vec<_> = Path::new(relative).components().collect();
+    for (index, component) in parts.iter().enumerate() {
+        let Component::Normal(name) = component else {
+            return Err(SetupError::InvalidPayload("invalid secret path".into()));
+        };
+        current.push(name);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata)
+                if !metadata.file_type().is_symlink()
+                    && (if index + 1 == parts.len() {
+                        metadata.is_file()
+                    } else {
+                        metadata.is_dir()
+                    }) => {}
+            Ok(_) => {
+                return Err(SetupError::UnsafeDestination(format!(
+                    "{} is outside the secret input authority",
+                    current.display()
+                )));
             }
-            validate_secret_tree(&path, false)?;
-        } else if !metadata.is_file() {
-            return Err(SetupError::UnsafeDestination(format!(
-                "{} is not a regular secret file",
-                path.display()
-            )));
+            Err(error) if error.kind() == io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error.into()),
         }
     }
     Ok(())
@@ -218,24 +214,11 @@ pub(super) fn require_regular_file(path: &Path) -> Result<(), SetupError> {
 }
 
 pub(super) fn create_staging_directory(parent: &Path) -> Result<PathBuf, SetupError> {
-    for _ in 0..32 {
-        let sequence = STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let candidate = parent.join(format!(
-            ".vonk-forge.setup-{}-{sequence}",
-            std::process::id()
-        ));
-        match fs::create_dir(&candidate) {
-            Ok(()) => {
-                set_directory_mode(&candidate)?;
-                return Ok(candidate);
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Err(SetupError::UnsafeDestination(
-        "could not reserve a staging directory".to_owned(),
-    ))
+    let temporary = tempfile::Builder::new()
+        .prefix(".vonk-forge.setup-")
+        .tempdir_in(parent)?;
+    set_directory_mode(temporary.path())?;
+    Ok(temporary.keep())
 }
 
 pub(super) fn create_secure_directory(path: &Path) -> Result<(), SetupError> {
@@ -261,10 +244,8 @@ pub(super) fn ensure_secure_directory(path: &Path) -> Result<(), SetupError> {
 
 /// Make the group-readable secrets 0640 with the payload's group, leaving the
 /// owner alone. Idempotent: files that already match are not touched. Only
-/// root (or a member of the group) may assign the group; any other caller
-/// keeps the owner-only 0600 and is told to rerun the installer with sudo, so
-/// a bundle prepared on a workstation still installs and is repaired on the
-/// NAS.
+/// root (or a member of the group) may assign the group. Other callers keep
+/// the files owner-only and report the existing OS authorization decision.
 pub(super) fn apply_secret_group<R: BufRead, W: Write, S: SecretInput<R, W>>(
     payload: &CanonicalTemplatePayload,
     root: &Path,
@@ -303,9 +284,10 @@ pub(super) fn apply_secret_group<R: BufRead, W: Write, S: SecretInput<R, W>>(
     }
     if !pending.is_empty() {
         prompt.note(&format!(
-            "Secret permissions NOT applied to {} (changing the group to {} needs root). They stay owner-only; rerun this installer once with sudo from the install directory.",
-            pending.join(", "),
-            group.gid
+            "{}: group {}: {}",
+            vonk_agent_protocol::generated::SecurityRefusalReason::PermissionDenied,
+            group.gid,
+            pending.join(", ")
         ))?;
     }
     Ok(())
@@ -428,13 +410,16 @@ pub(super) fn stage_replacement(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| SetupError::UnsafeDestination("replacement path is invalid".to_owned()))?;
-    let temporary = parent.join(format!(
-        ".{file_name}.tmp-{}-{}",
-        std::process::id(),
-        STAGING_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ));
-    write_new_file(&temporary, content, mode)?;
-    Ok(temporary)
+    let mut temporary = tempfile::Builder::new()
+        .prefix(&format!(".{file_name}.tmp-"))
+        .tempfile_in(parent)?;
+    set_file_mode(temporary.path(), mode)?;
+    temporary.write_all(content)?;
+    sync_file(temporary.as_file())?;
+    let (_, path) = temporary
+        .keep()
+        .map_err(|error| SetupError::Io(error.error))?;
+    Ok(path)
 }
 
 pub(super) fn atomic_replace_controller_leaf(
@@ -585,6 +570,39 @@ pub(super) fn set_file_mode(_path: &Path, _mode: u32) -> Result<(), SetupError> 
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[test]
+    fn old_staging_names_do_not_poison_new_publication() {
+        let root = tempfile::tempdir().unwrap();
+        for sequence in 0..32 {
+            fs::create_dir(root.path().join(format!(
+                ".vonk-forge.setup-{}-{sequence}",
+                std::process::id()
+            )))
+            .unwrap();
+            fs::write(
+                root.path()
+                    .join(format!(".compose.tmp-{}-{sequence}", std::process::id())),
+                b"preserved",
+            )
+            .unwrap();
+        }
+        let staging = create_staging_directory(root.path()).unwrap();
+        assert!(staging.is_dir());
+        let target = root.path().join("compose");
+        for content in [b"first".as_slice(), b"second".as_slice()] {
+            atomic_replace(&target, content, 0o600).unwrap();
+            assert_eq!(fs::read(&target).unwrap(), content);
+        }
+        assert_eq!(
+            fs::read(
+                root.path()
+                    .join(format!(".compose.tmp-{}-0", std::process::id()))
+            )
+            .unwrap(),
+            b"preserved"
+        );
+    }
 
     #[test]
     fn unsupported_full_sync_falls_back_to_posix_fsync() {

@@ -3,6 +3,7 @@
 use super::*;
 use vonk_agent_protocol::generated::{
     InstallerPackageArtifact, InstallerReleaseManifest, InstallerReleaseObject as ReleaseArtifact,
+    SparkFirewallConfig,
 };
 
 #[derive(Debug, Clone)]
@@ -54,17 +55,15 @@ pub enum SetupError {
         "Spark installation requires Debian or Ubuntu with systemd on the selected architecture"
     )]
     UnsupportedHost,
-    #[error("existing installation is incomplete or unsafe")]
+    #[error("existing installation observation is unavailable")]
     ExistingInstall,
+    #[error("{0}")]
+    ObservationUnavailable(vonk_agent_protocol::generated::WaitReason),
     #[error("interactive setup failed")]
     Prompt,
     #[error("controller CA is invalid or does not match its supplied SHA-256")]
     ControllerCa,
-    #[error(
-        "controller CA changed (this Spark trusts {stored}, the controller advertises \
-         {advertised}); refresh /etc/vonk-forge-agent/controller-ca.pem and ca_sha256 before \
-         re-enrolling"
-    )]
+    #[error("controller CA authority differs: pinned {stored}, observed {advertised}")]
     ControllerCaChanged { stored: String, advertised: String },
     #[error(
         "enrollment bootstrap is invalid or does not match the supplied endpoint and CA SHA-256"
@@ -78,6 +77,27 @@ pub enum SetupError {
     CallerPhase,
     #[error("setup I/O failed")]
     PrivilegedWrite(#[source] io::Error),
+}
+
+pub(super) fn observe_enrollment(
+    enrollment_url: &Url,
+    ca_sha256: &str,
+    controller_address: Option<Ipv4Addr>,
+    runner: &mut dyn CommandRunner,
+) -> Result<EnrollmentDiscovery, SetupError> {
+    for attempt in 0..3 {
+        match discover_enrollment(enrollment_url, ca_sha256, controller_address, runner) {
+            Ok(discovery) => return Ok(discovery),
+            Err(error @ (SetupError::ControllerCa | SetupError::UnsafeInput(_))) => {
+                return Err(error);
+            }
+            Err(_) if attempt < 2 => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(_) => break,
+        }
+    }
+    Err(SetupError::ObservationUnavailable(
+        vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+    ))
 }
 
 pub fn validate_system_host(_request: &SetupRequest) -> Result<(), SetupError> {
@@ -184,10 +204,7 @@ pub fn prepare_setup_with_authority(
         &release.architecture,
         true,
     )?;
-    let plan = match (
-        install_state(paths, StateValidation::MetadataOnly)?,
-        request.enroll,
-    ) {
+    let plan = match (install_state(paths)?, request.enroll) {
         (InstallState::Fresh, _) => {
             let enrollment_url = match &request.enrollment_url {
                 Some(url) => url.clone(),
@@ -203,7 +220,7 @@ pub fn prepare_setup_with_authority(
             if !valid_token(&pairing_token) {
                 return Err(SetupError::UnsafeInput("pairing token"));
             }
-            let discovery = discover_enrollment(
+            let discovery = observe_enrollment(
                 &enrollment_url,
                 &ca_sha256,
                 request.controller_address,
@@ -227,10 +244,8 @@ pub fn prepare_setup_with_authority(
                 helper_authority: discovery.helper_authority,
             }
         }
-        (InstallState::ConfiguredUnpaired, _) => {
+        (InstallState::UnpairedV1, _) => {
             let config = paired_configuration(&paths.config, paths)?;
-            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
-            verify_ca(&ca, &config.ca_sha256)?;
             let pairing_token = prompt
                 .secret("Pairing token")
                 .map_err(|_| SetupError::Prompt)?;
@@ -243,14 +258,12 @@ pub fn prepare_setup_with_authority(
                 pairing_token,
             }
         }
-        (InstallState::Existing, false) => ApplyOperation::Upgrade,
+        (InstallState::PairedV1, false) => ApplyOperation::Upgrade,
         // An explicit grant replaces the identity even when an earlier setup
         // stopped during readiness. That identity may no longer exist after
         // Controller recovery; retrying it cannot satisfy the new enrollment.
-        (InstallState::Existing | InstallState::Recovering, true) => {
+        (InstallState::PairedV1 | InstallState::RecoveringV1, true) => {
             let config = paired_configuration(&paths.config, paths)?;
-            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
-            verify_ca(&ca, &config.ca_sha256)?;
             // Fail closed before prompting for a grant when the controller no
             // longer advertises the CA this Spark pinned.
             verify_reenroll_controller_ca(&config, request.controller_address, runner)?;
@@ -266,14 +279,61 @@ pub fn prepare_setup_with_authority(
                 pairing_token,
             }
         }
-        (InstallState::Recovering, false) => ApplyOperation::Recover,
+        (InstallState::RecoveringV1, false) => ApplyOperation::Recover,
     };
+    let mut repair_firewall = None;
+    let mut repair_ca_pem = None;
+    let mut repair_helper_authority = None;
+    if !matches!(plan, ApplyOperation::Fresh { .. }) {
+        let config = paired_configuration(&paths.config, paths)?;
+        if !safe_existing_file(&paths.firewall_config, paths.required_owner).unwrap_or(false)
+            || installed_firewall_configuration(paths).is_err()
+        {
+            let firewall = FirewallConfig::collect(
+                &request.firewall_inputs,
+                request.controller_address,
+                prompt,
+                runner,
+            )?;
+            if firewall.node_fabric_ip != config.fabric_address {
+                return Err(SetupError::UnsafeInput("Spark fabric address"));
+            }
+            repair_firewall = Some(SparkFirewallConfig {
+                nas_management_ip: firewall.nas_management_ip.into(),
+                node_management_ip: firewall.node_management_ip.into(),
+                node_fabric_ip: firewall.node_fabric_ip.into(),
+                peer_fabric_ip: firewall.peer_fabric_ip.into(),
+                endpoint_host_ports: firewall.endpoint_host_ports,
+                host_endpoint_ports: firewall.host_endpoint_ports,
+                rendezvous_port: firewall.rendezvous_port,
+                fabric_bandwidth_mbps: firewall.fabric_bandwidth_mbps,
+            });
+        }
+        if !safe_existing_file(&paths.ca, paths.required_owner).unwrap_or(false)
+            || !safe_existing_file(&paths.helper_authority, paths.required_owner).unwrap_or(false)
+            || !fs::read(&paths.ca).is_ok_and(|ca| verify_ca(&ca, &config.ca_sha256).is_ok())
+            || installed_helper_authority(paths).is_err()
+        {
+            // Re-observe through the pinned CA ingress, never invent authority.
+            let discovery = observe_enrollment(
+                &config.enrollment_url,
+                &config.ca_sha256,
+                request.controller_address,
+                runner,
+            )?;
+            repair_ca_pem = Some(hex::encode(discovery.ca_pem));
+            repair_helper_authority = Some(hex::encode(discovery.helper_authority));
+        }
+    }
     let envelope = ApplyEnvelope {
         schema_version: 1,
         caller_uid,
         release_manifest: release.raw,
         release_signature: release.signature,
         plan,
+        repair_firewall,
+        repair_ca_pem,
+        repair_helper_authority,
     };
     Ok(PreparedSetup {
         executable: request.executable.clone(),
