@@ -167,6 +167,7 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
                 code,
                 HelperErrorCode::OperationIo
                     | HelperErrorCode::RuntimeImageInspectFailed
+                    | HelperErrorCode::InstallationIntentObservationRequired
                     | HelperErrorCode::InstallationReconciliationStorageUnavailable
             )
         }

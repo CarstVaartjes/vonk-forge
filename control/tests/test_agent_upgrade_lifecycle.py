@@ -7,11 +7,16 @@ touching a live dispatch or an order that is running.
 
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
+from vonk_agent_protocol import AgentFailureKind, HelperErrorCode, LifecycleState
+from vonk_agent_protocol.contracts import AgentFailureResult, AgentUpgradePayload
+from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_upgrades import AgentUpgradeService
 from vonk_control.lifecycle import (
     CancelRequested,
     Effect,
@@ -25,11 +30,13 @@ from vonk_control.lifecycle.agent_upgrade import (
     UNSUPPORTED_DISPATCH,
     AgentUpgradeAdapter,
 )
+from vonk_control.lifecycle.core import RECOVERY
 from vonk_control.models import AgentOperation, Job, JobAttempt
 
 from .test_agent_upgrades import (  # noqa: F401  (published_source is autouse)
     NODE_A,
     OLD_IDENTITY,
+    PACKAGE_MODEL,
     Clock,
     _claim_upgrade,
     _record_delayed_worker_running,
@@ -208,3 +215,66 @@ def test_a_projection_never_writes_a_wait() -> None:
     adapter.project(job, NOW, reason=None)
     assert job.state == "queued"
     assert replace(adapter.adopt(job)).state is State.QUEUED
+
+
+def test_package_preparation_dependency_retries_same_package_across_restart_then_ends_and_admits_fresh(
+    tmp_path,
+):
+    from .agent_fences import fenced_attempt, fenced_operation
+
+    clock = Clock()
+    sessions, operations, upgrades, _job = _rollout(
+        tmp_path, "preparation-budget", clock=clock
+    )
+    original_id = None
+    original_package = None
+    for number in range(1, RECOVERY.max_failures + 1):
+        claim = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+        stored = fenced_operation(sessions, claim)
+        if original_id is None:
+            original_id = stored.id
+            original_package = AgentUpgradePayload.model_validate_json(
+                json.dumps(stored.payload)
+            ).package_sha256
+        assert stored.id == original_id
+        assert (
+            AgentUpgradePayload.model_validate_json(
+                json.dumps(stored.payload)
+            ).package_sha256
+            == original_package
+        )
+        assert fenced_attempt(sessions, claim).attempt == number
+        operations._finish(
+            claim,
+            LifecycleState.FAILED.value,
+            result=AgentFailureResult(
+                status=LifecycleState.FAILED.value,
+                reason="package preparation observation unavailable",
+                failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
+                helper_error_code=HelperErrorCode.PACKAGE_PREPARATION_UNAVAILABLE.value,
+                retry_after_seconds=2,
+            ),
+            reason=None,
+        )
+        # Reconstruct the actual queue owner from persisted rows, retaining
+        # request/package identity and its attempt-derived finite budget.
+        operations = AgentJobService(sessions, clock=clock)
+        upgrades = AgentUpgradeService(sessions, operations, clock=clock)
+        operations.set_result_consumer(upgrades.consume_agent_result)
+        clock.advance(seconds=960)
+    assert operations.claim(NODE_A, "serial-a", runtime_identity=OLD_IDENTITY) is None
+    with sessions() as session:
+        ended = session.get(AgentOperation, original_id)
+        assert ended is not None
+        assert ended.next_action_at is None
+    plan = upgrades.preview(None, PACKAGE_MODEL)
+    fresh_job = upgrades.apply(
+        None,
+        PACKAGE_MODEL,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    fresh = _claim_upgrade(operations, NODE_A, "serial-a", OLD_IDENTITY)
+    assert fenced_operation(sessions, fresh).id != original_id
+    assert fenced_operation(sessions, fresh).parent_job_id == fresh_job.id

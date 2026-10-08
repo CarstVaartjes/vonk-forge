@@ -105,6 +105,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map_err(|_| OperationError::InvalidOperation)?;
         let installation_id = identity.installation_id.to_string();
         let _lock = self.lock_installation_runtime(&installation_id)?;
+        self.runtime_reconcile_installation_locked(identity)
+    }
+
+    pub(super) fn runtime_reconcile_installation_locked(
+        &self,
+        identity: &RecipeReconciliationIdentity,
+    ) -> Result<(), OperationError> {
+        let installation_id = identity.installation_id.to_string();
         let root = self.installation_reconciliation_root()?;
         let receipt_path = root.join(format!("{installation_id}.json"));
         let existing = read_helper_reconciliation_receipt(

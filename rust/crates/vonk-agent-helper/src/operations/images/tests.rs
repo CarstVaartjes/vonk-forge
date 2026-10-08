@@ -260,7 +260,7 @@ fn runtime_image_receipt_binds_manifest_config_and_local_reference() {
         .lock()
         .unwrap()
         .insert(local_reference.clone(), config.clone());
-    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner, None).unwrap();
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
     executor
         .write_image_receipt(RuntimeImageReceipt {
             schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
@@ -269,27 +269,15 @@ fn runtime_image_receipt_binds_manifest_config_and_local_reference() {
             local_image_reference: local_reference.clone(),
         })
         .unwrap();
-    executor
-        .require_image_receipt(&address, &manifest, &manifest, &local_reference, &config)
-        .unwrap();
-    let other = format!("sha256:{}", "d".repeat(64));
-    for (registry, platform, local, image) in [
-        (&other, &manifest, &local_reference, &config),
-        (&manifest, &other, &local_reference, &config),
-        (&manifest, &manifest, &local_reference, &other),
-    ] {
-        assert!(
-            executor
-                .require_image_receipt(&address, registry, platform, local, image)
-                .is_err()
-        );
-    }
-    // Another address has no receipt at all.
-    assert!(
-        executor
-            .require_image_receipt(&"b".repeat(64), &other, &other, &local_reference, &config)
-            .is_err()
-    );
+    executor.project_image_receipt(RuntimeImageReceipt {
+        schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+        platform_manifest_digest: manifest.clone(),
+        image_config_id: config.clone(),
+        local_image_reference: local_reference.clone(),
+    });
+    let receipt = executor.read_image_receipt(&address).unwrap();
+    assert_eq!(receipt.image_config_id, config);
+    assert!(runner.calls.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -358,15 +346,12 @@ fn lost_docker_names_reuse_accepted_content_without_a_receipt_or_pull() {
             .inspect_accepted_runtime_image(&reference, &config_digest, &manifest_digest)
             .unwrap();
         assert_eq!(operational, config_digest);
-        executor
-            .require_image_receipt(
-                &manifest,
-                &manifest_digest,
-                &manifest_digest,
-                &reference,
-                &config_digest,
-            )
-            .unwrap();
+        executor.project_image_receipt(RuntimeImageReceipt {
+            schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+            platform_manifest_digest: manifest_digest.clone(),
+            image_config_id: config_digest.clone(),
+            local_image_reference: reference.clone(),
+        });
     }
     assert!(
         !runner
@@ -449,4 +434,41 @@ fn containerd_alias_loss_uses_the_observed_managed_launch_name() {
         .unwrap();
     assert_eq!(observed.0, format!("sha256:{manifest}"));
     assert_eq!(launch, local);
+}
+
+#[test]
+fn receipt_projection_reuses_verified_observation_after_daemon_loss() {
+    // A second daemon query during bookkeeping would veto accepted content.
+    let temp = tempfile::tempdir().unwrap();
+    let roots = ManagedRoots::under(temp.path());
+    let runner = PullRunner::default();
+    let address = "a".repeat(64);
+    let manifest = format!("sha256:{address}");
+    let config = format!("sha256:{}", "c".repeat(64));
+    let reference = format!("localhost/vonk/compiled-runtime-{address}@{manifest}");
+    runner
+        .images
+        .lock()
+        .unwrap()
+        .insert(reference.clone(), config.clone());
+    let executor = OperationExecutor::new(roots, &[0; 32], runner.clone(), None).unwrap();
+    let (observed, _) = executor
+        .inspect_accepted_runtime_image(&reference, &config, &manifest)
+        .unwrap();
+    let calls = runner.calls.lock().unwrap().len();
+    runner.images.lock().unwrap().clear();
+    executor.project_image_receipt(RuntimeImageReceipt {
+        schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+        platform_manifest_digest: manifest,
+        image_config_id: observed.0,
+        local_image_reference: reference,
+    });
+    assert_eq!(runner.calls.lock().unwrap().len(), calls);
+    assert_eq!(
+        executor
+            .read_image_receipt(&address)
+            .unwrap()
+            .image_config_id,
+        config
+    );
 }

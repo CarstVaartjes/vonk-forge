@@ -7,14 +7,12 @@ use std::{
     os::{fd::OwnedFd, unix::net::UnixStream},
     process::{Command, ExitCode, Stdio},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
 };
-
-use wait_timeout::ChildExt;
 
 const LISTEN: &str = "0.0.0.0:18080";
 const MAX_HEADER_BYTES: usize = 16 * 1024;
@@ -423,6 +421,7 @@ impl Drop for ResolverOwner {
 }
 
 fn resolver_output(command: &mut Command, deadline: Instant) -> Result<Vec<u8>, ()> {
+    supervise_retained_resolvers();
     let owner = ResolverOwner::acquire()?;
     let (mut output_stream, child_output) = UnixStream::pair().map_err(|_| ())?;
     let mut child = command
@@ -461,25 +460,63 @@ fn resolver_output(command: &mut Command, deadline: Instant) -> Result<Vec<u8>, 
     }
 }
 
-// The request relinquishes its worker, but the exact child's resource claim
-// stays held until wait confirms reaping. Termination failure is observation
-// uncertainty, never permission to abandon a live child.
+// Each failed request has a bounded termination phase. After that phase an
+// exact child/claim pair belongs to the service supervisor, never to a waiting
+// request thread. Fresh admission drives a bounded supervision pass even when
+// every slot is retained; claims are released only after confirmed reap.
+static RETAINED_RESOLVERS: Mutex<Vec<(std::process::Child, ResolverOwner)>> =
+    Mutex::new(Vec::new());
+const RESOLVER_REAP_BUDGET: Duration = Duration::from_secs(1);
+
 fn retain_resolver(
+    child: std::process::Child,
+    owner: ResolverOwner,
+    terminate: impl FnMut(&mut std::process::Child) + Send + 'static,
+) {
+    retain_resolver_until(
+        child,
+        owner,
+        terminate,
+        Instant::now() + RESOLVER_REAP_BUDGET,
+    );
+}
+
+fn retain_resolver_until(
     mut child: std::process::Child,
     owner: ResolverOwner,
     mut terminate: impl FnMut(&mut std::process::Child) + Send + 'static,
+    deadline: Instant,
 ) {
     thread::spawn(move || {
-        let _owner = owner;
-        loop {
-            match child.wait_timeout(Duration::from_millis(100)) {
-                Ok(Some(_)) => break,
-                Ok(None) => terminate(&mut child),
-                Err(_) => {
-                    terminate(&mut child);
-                    thread::sleep(Duration::from_millis(100));
-                }
+        while Instant::now() < deadline {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return;
             }
+            terminate(&mut child);
+            thread::sleep(
+                Duration::from_millis(10).min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+        // No child or claim is dropped on budget expiry. The service takes
+        // ownership in one short critical section, with no external wait.
+        RETAINED_RESOLVERS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((child, owner));
+    });
+}
+
+fn supervise_retained_resolvers() {
+    let Ok(mut retained) = RETAINED_RESOLVERS.try_lock() else {
+        return;
+    };
+    // Actual admission bounds this collection to MAX_CONNECTIONS children.
+    retained.retain_mut(|(child, _owner)| {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            false
+        } else {
+            let _ = child.kill();
+            true
         }
     });
 }

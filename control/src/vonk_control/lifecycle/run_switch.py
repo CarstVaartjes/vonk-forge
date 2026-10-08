@@ -554,8 +554,8 @@ class RunSwitchAdapter:
     ) -> Lifecycle:
         """A phase could not be settled: observe it again later (rules 1, 2 and 5).
 
-        The retry clock is the core's (stable jittered backoff); the operation
-        never fails for it.  A cancel in flight wins and is driven instead.
+        The retry clock and finite attempt budget are the core's. A cancel in
+        flight wins and is driven instead.
         """
 
         if reset_on_change and progress.retry_reason != reason[:_MAX_REASON]:
@@ -572,7 +572,7 @@ class RunSwitchAdapter:
             now,
             visible=visible,
             retry_reason=reason if record_reason else _KEEP,
-            reason=_KEEP,
+            reason=reason,
         )
         if row.state is State.BACKOFF and row.next_action_at is not None:
             due = aware(row.next_action_at)

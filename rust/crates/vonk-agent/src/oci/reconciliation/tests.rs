@@ -121,7 +121,8 @@ fn damaged_checkpoint_recovers_after_restart_and_does_not_poison_new_install() {
         {
             let path = data.join("distribution/models").join(&artifact.sha256);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path, bytes).unwrap();
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         }
         restarted
             .install(

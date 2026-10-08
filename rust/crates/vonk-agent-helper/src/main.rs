@@ -60,6 +60,7 @@ struct HelperRejection {
     detail: String,
     diagnostic: Option<String>,
     process_logs: Option<Box<HostHelperProcessLogs>>,
+    installation_intent_nonce: Option<String>,
 }
 
 impl HelperRejection {
@@ -71,6 +72,7 @@ impl HelperRejection {
             detail: detail.into(),
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
         }
     }
 
@@ -86,6 +88,7 @@ impl HelperRejection {
             detail: detail.into(),
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
         }
     }
 
@@ -106,6 +109,10 @@ impl HelperRejection {
         package_install: bool,
         error: OperationError,
     ) -> Self {
+        let installation_intent_nonce = match &error {
+            OperationError::InstallationIntentObservationRequired { nonce } => Some(nonce.clone()),
+            _ => None,
+        };
         let (diagnostic, process_logs) = match &error {
             // The container's own output is the evidence for an exited
             // workload, so it crosses as its own typed per-stream document
@@ -151,6 +158,12 @@ impl HelperRejection {
             _ => (None, None),
         };
         let (error_code, exit_code) = match error {
+            OperationError::InstallationIntentObservationRequired { .. } => {
+                (HelperErrorCode::InstallationIntentObservationRequired, None)
+            }
+            OperationError::PackagePreparationUnavailable => {
+                (HelperErrorCode::PackagePreparationUnavailable, None)
+            }
             OperationError::InvalidArtifact if package_install => {
                 (HelperErrorCode::PackageVerificationFailed, None)
             }
@@ -214,6 +227,7 @@ impl HelperRejection {
             detail: error.safe_detail().to_owned(),
             diagnostic,
             process_logs,
+            installation_intent_nonce,
         }
     }
 }
@@ -343,6 +357,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         exit_code,
         error_code: Some(error.error_code.to_string()),
         process_running: None,
+        installation_intent_nonce: error.installation_intent_nonce.clone(),
     };
     if let Ok(body) = vonk_agent_protocol::canonical_generated_json(&response) {
         let _ = write_frame(stream, &body);
@@ -396,6 +411,7 @@ fn handle(
                 // reads like a workload with nothing to say.
                 diagnostic: inspected.log_error,
                 process_logs: inspected.logs.map(|logs| *logs),
+                installation_intent_nonce: None,
                 schema_version: 1,
                 request_id: Some(inspection.request_id),
                 status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
@@ -435,6 +451,7 @@ fn handle(
     let response = HelperResponse {
         diagnostic: outcome.diagnostic.clone(),
         process_logs: outcome.process_logs.clone(),
+        installation_intent_nonce: None,
         schema_version: 1,
         request_id: Some(request.claims.request_id),
         status: outcome.status,
@@ -742,6 +759,8 @@ mod tests {
         let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
+                installation_intent_nonce: None,
+                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::RunInspect,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),
@@ -787,6 +806,7 @@ mod tests {
         let response = HelperResponse {
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: HostHelperResponseStatus::Rejected,
@@ -807,6 +827,7 @@ mod tests {
         let response = HelperResponse {
             diagnostic: None,
             process_logs: None,
+            installation_intent_nonce: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: HostHelperResponseStatus::PackageInstalled,
@@ -933,6 +954,8 @@ mod tests {
         let operation = HostOperation::ExecuteContainerRuntimeRequestOperation(
             vonk_agent_protocol::generated::ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
+                installation_intent_nonce: None,
+                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::ImagePull,
                 fence: uuid::Uuid::nil(),
                 request_sha256: "a".repeat(64),

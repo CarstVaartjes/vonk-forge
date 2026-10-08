@@ -33,7 +33,8 @@ use thiserror::Error;
 use vonk_agent_protocol::generated::{
     CompiledExecutionPlan, ConfirmPackageActivationOperation,
     ExecuteContainerRuntimeRequestOperation, HostHelperProcessLogs, HostHelperResponseStatus,
-    InstallVonkDebOperation, RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload,
+    InstallVonkDebOperation, InstallationIntentFence, RecipeJobRunRequest, RecipeStartPayload,
+    RecipeStopPayload,
 };
 
 use vonk_agent_protocol::{
@@ -116,6 +117,10 @@ pub enum OperationError {
     UnsafePath,
     #[error("artifact verification failed")]
     InvalidArtifact,
+    #[error("current installation intent observation is required")]
+    InstallationIntentObservationRequired { nonce: String },
+    #[error("package preparation observation is unavailable")]
+    PackagePreparationUnavailable,
     #[error("package metadata verification failed")]
     PackageMetadataInvalid,
     #[error("package activation prerequisites failed")]
@@ -271,9 +276,11 @@ pub struct RunInspection {
     pub log_error: Option<String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Clone, Copy)]
 struct RuntimeRequestGrantBinding<'a> {
     fence: &'a uuid::Uuid,
+    installation_intent_nonce: Option<&'a str>,
+    installation_intent_ordinal: Option<u64>,
     installation_id: Option<&'a uuid::Uuid>,
     reconciliation_identity: Option<&'a RecipeReconciliationIdentity>,
     start_plan_sha256: Option<&'a str>,
@@ -437,3 +444,5 @@ use storage::*;
 mod test_support;
 
 mod errors;
+
+mod installation_intent;

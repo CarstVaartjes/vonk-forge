@@ -4,10 +4,15 @@ use super::*;
 
 impl<R: CommandRunner> OperationExecutor<R> {
     pub fn prepare_package_custody(&self) -> Result<(), OperationError> {
+        self.observe_package_custody(|| {})
+    }
+
+    fn observe_package_custody(&self, observing: impl FnOnce()) -> Result<(), OperationError> {
         let _install_guard = self
             .package_install
             .try_lock()
-            .map_err(|_| OperationError::CommandFailed)?;
+            .map_err(|_| OperationError::PackagePreparationUnavailable)?;
+        observing();
         if !self.roots.package_custody.is_absolute() {
             return Err(OperationError::UnsafePath);
         }
@@ -75,7 +80,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let _install_guard = self
             .package_install
             .try_lock()
-            .map_err(|_| OperationError::CommandFailed)?;
+            .map_err(|_| OperationError::PackagePreparationUnavailable)?;
         require_safe_directory(&self.roots.incoming, self.package_owner_uid)?;
         let incoming = self.roots.incoming.join(format!("{digest}.deb"));
         let package = self.take_package_custody(&incoming, digest, detached_signature)?;
@@ -127,6 +132,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
         expected_digest: &str,
         detached_signature: &str,
     ) -> Result<CustodiedPackage, OperationError> {
+        self.take_package_custody_until(
+            incoming,
+            expected_digest,
+            detached_signature,
+            Instant::now() + Duration::from_secs(120),
+        )
+    }
+
+    fn take_package_custody_until(
+        &self,
+        incoming: &Path,
+        expected_digest: &str,
+        detached_signature: &str,
+        deadline: Instant,
+    ) -> Result<CustodiedPackage, OperationError> {
         if !self.roots.package_custody.is_absolute() {
             return Err(OperationError::UnsafePath);
         }
@@ -170,12 +190,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut digest = Sha256::new();
         let mut consumed = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
-        // Package preparation shares the host package operation's 120-second
-        // budget; a growing or slow source cannot occupy its owner forever.
-        let deadline = Instant::now() + Duration::from_secs(120);
+        // Bound copy observations between regular-file I/O calls.
         loop {
             if Instant::now() >= deadline {
-                return Err(OperationError::CommandFailed);
+                return Err(OperationError::PackagePreparationUnavailable);
             }
             let count = source.read(&mut buffer)?;
             if count == 0 {
@@ -278,3 +296,6 @@ impl Drop for CustodiedPackage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

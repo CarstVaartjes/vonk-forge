@@ -49,6 +49,8 @@ fn start_authority_binds_generation_plan_identity_and_projected_arguments() {
     let plan_sha256 = hex_sha256(&canonical_json(&start_plan).unwrap());
     let grant = RuntimeRequestGrantBinding {
         fence: &fence,
+        installation_intent_nonce: None,
+        installation_intent_ordinal: Some(1),
         installation_id: None,
         reconciliation_identity: None,
         start_plan_sha256: Some(&plan_sha256),
@@ -126,6 +128,8 @@ fn stop_authority_binds_exact_target_node_plan_and_cancellation_semantics() {
     let plan_sha256 = hex_sha256(&canonical_json(&stop_plan).unwrap());
     let grant = RuntimeRequestGrantBinding {
         fence: &fence,
+        installation_intent_nonce: None,
+        installation_intent_ordinal: Some(1),
         installation_id: None,
         reconciliation_identity: None,
         start_plan_sha256: None,
@@ -338,6 +342,11 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
     };
     let calls = runner.calls.clone();
     let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
+    let nonce =
+        match executor.accept_installation_intent(current.installation_id, None, Some(1), false) {
+            Err(OperationError::InstallationIntentObservationRequired { nonce }) => nonce,
+            _ => panic!("current intent challenge was not issued"),
+        };
     // A new authorized Start reserves its generation before validating or
     // invoking Docker. Force it to fail at the malformed launch boundary,
     // then prove the old named container is still rejected as generation
@@ -348,7 +357,9 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
             current,
             current.runtime_id,
             &current_plan_digest,
-            &format!("sha256:{}", "c".repeat(64))
+            &format!("sha256:{}", "c".repeat(64)),
+            Some(&nonce),
+            Some(1),
         ),
         Err(OperationError::InvalidOperation)
     ));

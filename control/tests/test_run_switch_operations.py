@@ -2305,7 +2305,7 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
 ) -> None:
     switch = _cold_compile_switch(tmp_path)
     # One retry clock: the lifecycle core's stable jittered backoff (2..60 s).
-    expected_caps = [2, 4, 8, 16, 32, 60, 60, 60, 60]
+    expected_caps = [2, 4, 8, 16]
     observed_delays: list[int] = []
     for cap in expected_caps:
         current = switch.service.get(switch.operation.operation_id)
@@ -2335,12 +2335,12 @@ def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
     with switch.sessions() as session:
         original = dict(session.get(Job, operation.operation_id).payload)
     # A phase may compile more than once while refreshing bound build evidence.
-    # Keep the fault present until six durable failures have actually occurred,
+    # Keep the fault present until four durable failures have actually occurred,
     # independent of the number of compiler calls made by each phase attempt.
     for _ in range(60):
         view = service.get(operation.operation_id)
         assert view.state in {"queued", "running"}, view.status_reason
-        if (_result(view).retry_attempt or 1) >= 7:
+        if (_result(view).retry_attempt or 1) >= 5:
             break
         assert "runtime-install" not in switch.executor.events
         switch.drive()
@@ -2355,8 +2355,8 @@ def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
             if held.result.observation_due_at > switch.clock.now:
                 assert service.tick() is False
     else:
-        pytest.fail("cold compilation never exercised six failed recovery cycles")
-    assert _result(view).retry_attempt == 7
+        pytest.fail("cold compilation never exercised four failed recovery cycles")
+    assert _result(view).retry_attempt == 5
     with switch.sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []
     switch.compiler._slow_compiles = 0
@@ -6054,7 +6054,7 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
         row = session.get(Job, operation.operation_id)
         assert row is not None
         original = dict(row.payload)
-    for _ in range(7):
+    for _ in range(4):
         assert service.tick()
         waiting = service.get(operation.operation_id)
         assert waiting.state == "running", waiting.status_reason
@@ -6092,10 +6092,10 @@ def test_temporary_phase_failure_preserves_exact_intent_across_restart(
         assert current.state == "running"
         assert current.result is not None
         assert "transfer" in current.result.completed_phases
-        assert len(executor.identities) == 8
+        assert len(executor.identities) == 5
     else:
         assert current.state == ("failed" if ending == "revoked" else "cancelled")
-        assert len(executor.identities) == 7
+        assert len(executor.identities) == 4
     assert len(set(executor.identities)) == 1
 
 

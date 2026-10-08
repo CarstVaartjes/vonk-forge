@@ -13,8 +13,5 @@ path = "src/main.rs"
 name = "vonk-runtime-probe"
 path = "src/runtime_probe.rs"
 
-[dependencies]
-wait-timeout.workspace = true
-
 [dev-dependencies]
 tempfile.workspace = true

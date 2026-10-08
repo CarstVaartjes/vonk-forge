@@ -119,6 +119,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         };
         let (_image, embedded_digest) = parse_local_image_reference(image_reference)?;
         if &embedded_digest != platform_manifest_digest
+            || platform_manifest_digest.strip_prefix("sha256:") != Some(archive_sha256.as_str())
+            || registry_index_digest != platform_manifest_digest
             || !lower_hex(archive_sha256, 64)
             || !valid_oci_digest(registry_index_digest)
             || !valid_oci_digest(platform_manifest_digest)
@@ -139,13 +141,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
-        self.require_image_receipt(
-            archive_sha256,
-            registry_index_digest,
-            platform_manifest_digest,
-            image_reference,
-            image_config_id,
-        )
+        self.project_image_receipt(RuntimeImageReceipt {
+            schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+            platform_manifest_digest: platform_manifest_digest.to_owned(),
+            image_config_id: inspected.0,
+            local_image_reference: image_reference.to_owned(),
+        });
+        Ok(())
     }
 }
 
@@ -304,62 +306,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
-    pub(super) fn require_image_receipt(
-        &self,
-        archive_sha256: &str,
-        registry_index_digest: &str,
-        platform_manifest_digest: &str,
-        local_image_reference: &str,
-        image_config_id: &str,
-    ) -> Result<(), OperationError> {
-        if !lower_hex(archive_sha256, 64)
-            || !valid_oci_digest(registry_index_digest)
-            || !valid_oci_digest(platform_manifest_digest)
-            || !valid_local_image_reference(local_image_reference)
-            || !valid_oci_digest(image_config_id)
+    // The caller has already verified this observation against signed content.
+    // Projection performs no daemon lookup and cannot veto that observation.
+    pub(super) fn project_image_receipt(&self, receipt: RuntimeImageReceipt) {
+        let address = receipt.platform_manifest_digest.strip_prefix("sha256:");
+        if address
+            .is_some_and(|address| self.read_image_receipt(address).ok().as_ref() == Some(&receipt))
         {
-            return Err(OperationError::InvalidOperation);
+            return;
         }
-        if platform_manifest_digest.strip_prefix("sha256:") != Some(archive_sha256)
-            || registry_index_digest != platform_manifest_digest
-            || parse_local_image_reference(local_image_reference)?.1 != platform_manifest_digest
-        {
-            return Err(OperationError::InvalidOperation);
-        }
-        // A receipt is a cache, never identity authority. The caller supplies
-        // the config digest bound by the signed compiled plan. Classic Docker
-        // names the verified config; containerd names the verified manifest.
-        // Neither arbitrary tag labels nor disposable receipt bytes can bless
-        // another object, and a missing RepoDigest does not veto this content.
-        let (inspected, _) = self.inspect_accepted_runtime_image(
-            local_image_reference,
-            image_config_id,
-            platform_manifest_digest,
-        )?;
-        if inspected.0 != image_config_id && inspected.0 != platform_manifest_digest {
-            return Err(OperationError::RuntimeImageIdentityInvalid);
-        }
-        if self
-            .read_image_receipt(archive_sha256)
-            .ok()
-            .is_some_and(|receipt| {
-                receipt.schema_version == RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
-                    && receipt.platform_manifest_digest == platform_manifest_digest
-                    && receipt.local_image_reference == local_image_reference
-                    && receipt.image_config_id == inspected.0
-            })
-        {
-            return Ok(());
-        }
-        // Receipt publication is best effort; the verified daemon observation
-        // above is enough for this request and later reads can reconstruct it.
-        let _ = self.write_image_receipt(RuntimeImageReceipt {
-            schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
-            platform_manifest_digest: platform_manifest_digest.to_owned(),
-            image_config_id: inspected.0,
-            local_image_reference: local_image_reference.to_owned(),
-        });
-        Ok(())
+        let _ = self.write_image_receipt(receipt);
     }
 }
 

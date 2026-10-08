@@ -2960,6 +2960,10 @@ pub struct ExecuteContainerRuntimeRequestOperation {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub installation_id: ::std::option::Option<::uuid::Uuid>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_intent_nonce: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_intent_ordinal: ::std::option::Option<u64>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -3592,6 +3596,8 @@ pub enum HelperErrorCode {
     InstallationReconciliationBusy,
     #[serde(rename = "installation_reconciliation_storage_unavailable")]
     InstallationReconciliationStorageUnavailable,
+    #[serde(rename = "installation_intent_observation_required")]
+    InstallationIntentObservationRequired,
     #[serde(rename = "message_framing_invalid")]
     MessageFramingInvalid,
     #[serde(rename = "operation_command_failed")]
@@ -3616,6 +3622,8 @@ pub enum HelperErrorCode {
     PackageInstallFailed,
     #[serde(rename = "package_metadata_failed")]
     PackageMetadataFailed,
+    #[serde(rename = "package_preparation_unavailable")]
+    PackagePreparationUnavailable,
     #[serde(rename = "package_preflight_failed")]
     PackagePreflightFailed,
     #[serde(rename = "package_verification_failed")]
@@ -3732,6 +3740,9 @@ impl ::std::fmt::Display for HelperErrorCode {
             Self::InstallationReconciliationStorageUnavailable => {
                 f.write_str("installation_reconciliation_storage_unavailable")
             }
+            Self::InstallationIntentObservationRequired => {
+                f.write_str("installation_intent_observation_required")
+            }
             Self::MessageFramingInvalid => f.write_str("message_framing_invalid"),
             Self::OperationCommandFailed => f.write_str("operation_command_failed"),
             Self::OperationFailed => f.write_str("operation_failed"),
@@ -3744,6 +3755,7 @@ impl ::std::fmt::Display for HelperErrorCode {
             Self::PackageCustodyFailed => f.write_str("package_custody_failed"),
             Self::PackageInstallFailed => f.write_str("package_install_failed"),
             Self::PackageMetadataFailed => f.write_str("package_metadata_failed"),
+            Self::PackagePreparationUnavailable => f.write_str("package_preparation_unavailable"),
             Self::PackagePreflightFailed => f.write_str("package_preflight_failed"),
             Self::PackageVerificationFailed => f.write_str("package_verification_failed"),
             Self::PeerIdentityInvalid => f.write_str("peer_identity_invalid"),
@@ -3848,6 +3860,9 @@ impl ::std::str::FromStr for HelperErrorCode {
             "installation_reconciliation_storage_unavailable" => {
                 Ok(Self::InstallationReconciliationStorageUnavailable)
             }
+            "installation_intent_observation_required" => {
+                Ok(Self::InstallationIntentObservationRequired)
+            }
             "message_framing_invalid" => Ok(Self::MessageFramingInvalid),
             "operation_command_failed" => Ok(Self::OperationCommandFailed),
             "operation_failed" => Ok(Self::OperationFailed),
@@ -3860,6 +3875,7 @@ impl ::std::str::FromStr for HelperErrorCode {
             "package_custody_failed" => Ok(Self::PackageCustodyFailed),
             "package_install_failed" => Ok(Self::PackageInstallFailed),
             "package_metadata_failed" => Ok(Self::PackageMetadataFailed),
+            "package_preparation_unavailable" => Ok(Self::PackagePreparationUnavailable),
             "package_preflight_failed" => Ok(Self::PackagePreflightFailed),
             "package_verification_failed" => Ok(Self::PackageVerificationFailed),
             "peer_identity_invalid" => Ok(Self::PeerIdentityInvalid),
@@ -3964,6 +3980,8 @@ pub enum HelperOperationCode {
     HelperInstallationReconciliationBusy,
     #[serde(rename = "helper.installation_reconciliation_storage_unavailable")]
     HelperInstallationReconciliationStorageUnavailable,
+    #[serde(rename = "helper.installation_intent_observation_required")]
+    HelperInstallationIntentObservationRequired,
     #[serde(rename = "helper.io_failed")]
     HelperIoFailed,
     #[serde(rename = "helper.operation_invalid")]
@@ -3972,6 +3990,8 @@ pub enum HelperOperationCode {
     HelperPackageInstallFailed,
     #[serde(rename = "helper.package_metadata_invalid")]
     HelperPackageMetadataInvalid,
+    #[serde(rename = "helper.package_preparation_unavailable")]
+    HelperPackagePreparationUnavailable,
     #[serde(rename = "helper.package_preflight_failed")]
     HelperPackagePreflightFailed,
     #[serde(rename = "helper.runtime_endpoint_firewall_rejected")]
@@ -4014,10 +4034,16 @@ impl ::std::fmt::Display for HelperOperationCode {
             Self::HelperInstallationReconciliationStorageUnavailable => {
                 f.write_str("helper.installation_reconciliation_storage_unavailable")
             }
+            Self::HelperInstallationIntentObservationRequired => {
+                f.write_str("helper.installation_intent_observation_required")
+            }
             Self::HelperIoFailed => f.write_str("helper.io_failed"),
             Self::HelperOperationInvalid => f.write_str("helper.operation_invalid"),
             Self::HelperPackageInstallFailed => f.write_str("helper.package_install_failed"),
             Self::HelperPackageMetadataInvalid => f.write_str("helper.package_metadata_invalid"),
+            Self::HelperPackagePreparationUnavailable => {
+                f.write_str("helper.package_preparation_unavailable")
+            }
             Self::HelperPackagePreflightFailed => f.write_str("helper.package_preflight_failed"),
             Self::HelperRuntimeEndpointFirewallRejected => {
                 f.write_str("helper.runtime_endpoint_firewall_rejected")
@@ -4066,10 +4092,16 @@ impl ::std::str::FromStr for HelperOperationCode {
             "helper.installation_reconciliation_storage_unavailable" => {
                 Ok(Self::HelperInstallationReconciliationStorageUnavailable)
             }
+            "helper.installation_intent_observation_required" => {
+                Ok(Self::HelperInstallationIntentObservationRequired)
+            }
             "helper.io_failed" => Ok(Self::HelperIoFailed),
             "helper.operation_invalid" => Ok(Self::HelperOperationInvalid),
             "helper.package_install_failed" => Ok(Self::HelperPackageInstallFailed),
             "helper.package_metadata_invalid" => Ok(Self::HelperPackageMetadataInvalid),
+            "helper.package_preparation_unavailable" => {
+                Ok(Self::HelperPackagePreparationUnavailable)
+            }
             "helper.package_preflight_failed" => Ok(Self::HelperPackagePreflightFailed),
             "helper.runtime_endpoint_firewall_rejected" => {
                 Ok(Self::HelperRuntimeEndpointFirewallRejected)
@@ -4173,6 +4205,8 @@ pub struct HostHelperResponse {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub exit_code: ::std::option::Option<u32>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_intent_nonce: ::std::option::Option<::std::string::String>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub process_running: ::std::option::Option<bool>,
@@ -4266,6 +4300,51 @@ impl ::std::convert::From<ExecuteContainerRuntimeRequestOperation> for HostOpera
         Self::ExecuteContainerRuntimeRequestOperation(value)
     }
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum HostOperationKind {
+    #[serde(rename = "install-vonk-deb")]
+    InstallVonkDeb,
+    #[serde(rename = "confirm-package-activation")]
+    ConfirmPackageActivation,
+    #[serde(rename = "execute-container-runtime-request")]
+    ExecuteContainerRuntimeRequest,
+}
+impl ::std::fmt::Display for HostOperationKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::InstallVonkDeb => f.write_str("install-vonk-deb"),
+            Self::ConfirmPackageActivation => f.write_str("confirm-package-activation"),
+            Self::ExecuteContainerRuntimeRequest => {
+                f.write_str("execute-container-runtime-request")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for HostOperationKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "install-vonk-deb" => Ok(Self::InstallVonkDeb),
+            "confirm-package-activation" => Ok(Self::ConfirmPackageActivation),
+            "execute-container-runtime-request" => Ok(Self::ExecuteContainerRuntimeRequest),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for HostOperationKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for HostOperationKind {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -4288,6 +4367,8 @@ pub struct HostRuntimeGrantRequest {
     pub fence: ::uuid::Uuid,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub installation_id: ::std::option::Option<::uuid::Uuid>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub installation_intent_nonce: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
     pub request_sha256: ::std::string::String,
@@ -4731,6 +4812,16 @@ pub struct InstallVonkDebOperation {
     pub rollback: PackageRollbackAuthority,
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct InstallationIntentFence {
+    pub cancelled: bool,
+    pub highest_ordinal: u64,
+    pub installation_id: ::uuid::Uuid,
+    pub nonce: ::std::string::String,
+    pub schema_version: u8,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -19264,6 +19355,10 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub installation_id: ::std::option::Option<::uuid::Uuid>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_intent_nonce: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_intent_ordinal: ::std::option::Option<u64>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -19287,6 +19382,8 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
             action: raw.action,
             fence: raw.fence,
             installation_id: raw.installation_id,
+            installation_intent_nonce: raw.installation_intent_nonce,
+            installation_intent_ordinal: raw.installation_intent_ordinal,
             reconciliation_identity: raw.reconciliation_identity,
             request_sha256: raw.request_sha256,
             run_generation: raw.run_generation,
@@ -19943,6 +20040,9 @@ impl HelperErrorCode {
             Self::InstallationReconciliationStorageUnavailable => {
                 "installation_reconciliation_storage_unavailable"
             }
+            Self::InstallationIntentObservationRequired => {
+                "installation_intent_observation_required"
+            }
             Self::MessageFramingInvalid => "message_framing_invalid",
             Self::OperationCommandFailed => "operation_command_failed",
             Self::OperationFailed => "operation_failed",
@@ -19955,6 +20055,7 @@ impl HelperErrorCode {
             Self::PackageCustodyFailed => "package_custody_failed",
             Self::PackageInstallFailed => "package_install_failed",
             Self::PackageMetadataFailed => "package_metadata_failed",
+            Self::PackagePreparationUnavailable => "package_preparation_unavailable",
             Self::PackagePreflightFailed => "package_preflight_failed",
             Self::PackageVerificationFailed => "package_verification_failed",
             Self::PeerIdentityInvalid => "peer_identity_invalid",
@@ -20070,6 +20171,8 @@ impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
             InstallationReconciliationBusy,
             #[serde(rename = "installation_reconciliation_storage_unavailable")]
             InstallationReconciliationStorageUnavailable,
+            #[serde(rename = "installation_intent_observation_required")]
+            InstallationIntentObservationRequired,
             #[serde(rename = "message_framing_invalid")]
             MessageFramingInvalid,
             #[serde(rename = "operation_command_failed")]
@@ -20094,6 +20197,8 @@ impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
             PackageInstallFailed,
             #[serde(rename = "package_metadata_failed")]
             PackageMetadataFailed,
+            #[serde(rename = "package_preparation_unavailable")]
+            PackagePreparationUnavailable,
             #[serde(rename = "package_preflight_failed")]
             PackagePreflightFailed,
             #[serde(rename = "package_verification_failed")]
@@ -20210,6 +20315,9 @@ impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
             Raw::InstallationReconciliationStorageUnavailable => {
                 Self::InstallationReconciliationStorageUnavailable
             }
+            Raw::InstallationIntentObservationRequired => {
+                Self::InstallationIntentObservationRequired
+            }
             Raw::MessageFramingInvalid => Self::MessageFramingInvalid,
             Raw::OperationCommandFailed => Self::OperationCommandFailed,
             Raw::OperationFailed => Self::OperationFailed,
@@ -20222,6 +20330,7 @@ impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
             Raw::PackageCustodyFailed => Self::PackageCustodyFailed,
             Raw::PackageInstallFailed => Self::PackageInstallFailed,
             Raw::PackageMetadataFailed => Self::PackageMetadataFailed,
+            Raw::PackagePreparationUnavailable => Self::PackagePreparationUnavailable,
             Raw::PackagePreflightFailed => Self::PackagePreflightFailed,
             Raw::PackageVerificationFailed => Self::PackageVerificationFailed,
             Raw::PeerIdentityInvalid => Self::PeerIdentityInvalid,
@@ -20295,10 +20404,14 @@ impl HelperOperationCode {
             Self::HelperInstallationReconciliationStorageUnavailable => {
                 "helper.installation_reconciliation_storage_unavailable"
             }
+            Self::HelperInstallationIntentObservationRequired => {
+                "helper.installation_intent_observation_required"
+            }
             Self::HelperIoFailed => "helper.io_failed",
             Self::HelperOperationInvalid => "helper.operation_invalid",
             Self::HelperPackageInstallFailed => "helper.package_install_failed",
             Self::HelperPackageMetadataInvalid => "helper.package_metadata_invalid",
+            Self::HelperPackagePreparationUnavailable => "helper.package_preparation_unavailable",
             Self::HelperPackagePreflightFailed => "helper.package_preflight_failed",
             Self::HelperRuntimeEndpointFirewallRejected => {
                 "helper.runtime_endpoint_firewall_rejected"
@@ -20367,6 +20480,8 @@ impl<'de> ::serde::Deserialize<'de> for HelperOperationCode {
             HelperInstallationReconciliationBusy,
             #[serde(rename = "helper.installation_reconciliation_storage_unavailable")]
             HelperInstallationReconciliationStorageUnavailable,
+            #[serde(rename = "helper.installation_intent_observation_required")]
+            HelperInstallationIntentObservationRequired,
             #[serde(rename = "helper.io_failed")]
             HelperIoFailed,
             #[serde(rename = "helper.operation_invalid")]
@@ -20375,6 +20490,8 @@ impl<'de> ::serde::Deserialize<'de> for HelperOperationCode {
             HelperPackageInstallFailed,
             #[serde(rename = "helper.package_metadata_invalid")]
             HelperPackageMetadataInvalid,
+            #[serde(rename = "helper.package_preparation_unavailable")]
+            HelperPackagePreparationUnavailable,
             #[serde(rename = "helper.package_preflight_failed")]
             HelperPackagePreflightFailed,
             #[serde(rename = "helper.runtime_endpoint_firewall_rejected")]
@@ -20415,10 +20532,14 @@ impl<'de> ::serde::Deserialize<'de> for HelperOperationCode {
             Raw::HelperInstallationReconciliationStorageUnavailable => {
                 Self::HelperInstallationReconciliationStorageUnavailable
             }
+            Raw::HelperInstallationIntentObservationRequired => {
+                Self::HelperInstallationIntentObservationRequired
+            }
             Raw::HelperIoFailed => Self::HelperIoFailed,
             Raw::HelperOperationInvalid => Self::HelperOperationInvalid,
             Raw::HelperPackageInstallFailed => Self::HelperPackageInstallFailed,
             Raw::HelperPackageMetadataInvalid => Self::HelperPackageMetadataInvalid,
+            Raw::HelperPackagePreparationUnavailable => Self::HelperPackagePreparationUnavailable,
             Raw::HelperPackagePreflightFailed => Self::HelperPackagePreflightFailed,
             Raw::HelperRuntimeEndpointFirewallRejected => {
                 Self::HelperRuntimeEndpointFirewallRejected
@@ -20589,6 +20710,8 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub exit_code: ::std::option::Option<u32>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_intent_nonce: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub process_logs: ::std::option::Option<HostHelperProcessLogs>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub process_running: ::std::option::Option<bool>,
@@ -20603,6 +20726,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             diagnostic: raw.diagnostic,
             error_code: raw.error_code,
             exit_code: raw.exit_code,
+            installation_intent_nonce: raw.installation_intent_nonce,
             process_logs: raw.process_logs,
             process_running: raw.process_running,
             request_id: raw.request_id,
@@ -20736,6 +20860,64 @@ impl<'de> ::serde::Deserialize<'de> for HostOperation {
         )))
     }
 }
+impl HostOperationKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::InstallVonkDeb => "install-vonk-deb",
+            Self::ConfirmPackageActivation => "confirm-package-activation",
+            Self::ExecuteContainerRuntimeRequest => "execute-container-runtime-request",
+        }
+    }
+}
+impl ::std::ops::Deref for HostOperationKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for HostOperationKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for HostOperationKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HostOperationKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("HostOperationKind"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "install-vonk-deb")]
+            InstallVonkDeb,
+            #[serde(rename = "confirm-package-activation")]
+            ConfirmPackageActivation,
+            #[serde(rename = "execute-container-runtime-request")]
+            ExecuteContainerRuntimeRequest,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::InstallVonkDeb => Self::InstallVonkDeb,
+            Raw::ConfirmPackageActivation => Self::ConfirmPackageActivation,
+            Raw::ExecuteContainerRuntimeRequest => Self::ExecuteContainerRuntimeRequest,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for HostOperationOutcome {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value =
@@ -20780,6 +20962,8 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub installation_id: ::std::option::Option<::uuid::Uuid>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub installation_intent_nonce: ::std::option::Option<::std::string::String>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub reconciliation_identity: ::std::option::Option<RecipeReconciliationIdentity>,
             pub request_sha256: ::std::string::String,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -20802,6 +20986,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
             expires_in_seconds: raw.expires_in_seconds,
             fence: raw.fence,
             installation_id: raw.installation_id,
+            installation_intent_nonce: raw.installation_intent_nonce,
             reconciliation_identity: raw.reconciliation_identity,
             request_sha256: raw.request_sha256,
             run_generation: raw.run_generation,
@@ -21240,6 +21425,33 @@ impl<'de> ::serde::Deserialize<'de> for InstallVonkDebOperation {
             package_signature: raw.package_signature,
             rollback: raw.rollback,
             type_: raw.type_,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for InstallationIntentFence {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("InstallationIntentFence"),
+        )?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub cancelled: bool,
+            pub highest_ordinal: u64,
+            pub installation_id: ::uuid::Uuid,
+            pub nonce: ::std::string::String,
+            pub schema_version: u8,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            cancelled: raw.cancelled,
+            highest_ordinal: raw.highest_ordinal,
+            installation_id: raw.installation_id,
+            nonce: raw.nonce,
+            schema_version: raw.schema_version,
         })
     }
 }

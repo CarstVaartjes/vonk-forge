@@ -461,8 +461,8 @@ def test_final_verification_that_cannot_be_observed_is_retried_not_failed(
     service._phase_executor = _Faulty()
     service._clock = lambda: now[0]
 
-    def drive() -> None:
-        for _ in range(8):
+    def drive(limit=8) -> None:
+        for _ in range(limit):
             service.tick()
             view = service.get(operation.operation_id)
             if view.state in {"succeeded", "failed"}:
@@ -471,7 +471,7 @@ def test_final_verification_that_cannot_be_observed_is_retried_not_failed(
             if due is not None and due > now[0]:
                 now[0] = due
 
-    drive()
+    drive(3)
     held = service.get(operation.operation_id)
     assert state["calls"] >= 1
     assert held.state in {"running", LifecycleState.OBSERVING}, held.status_reason

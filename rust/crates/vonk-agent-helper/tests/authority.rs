@@ -127,6 +127,8 @@ fn every_permitted_operation_has_an_exact_typed_shape() {
         HostOperation::ExecuteContainerRuntimeRequestOperation(
             ExecuteContainerRuntimeRequestOperation {
                 type_: "execute-container-runtime-request".into(),
+                installation_intent_nonce: None,
+                installation_intent_ordinal: Some(1),
                 action: ContainerRuntimeAction::Start,
                 fence: Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap(),
                 request_sha256: "a".repeat(64),
@@ -579,6 +581,8 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
     HostOperation::ExecuteContainerRuntimeRequestOperation(
         ExecuteContainerRuntimeRequestOperation {
             type_: "execute-container-runtime-request".into(),
+            installation_intent_nonce: None,
+            installation_intent_ordinal: Some(1),
             action: match request.action {
                 HostRuntimeAction::RuntimePreflight => ContainerRuntimeAction::RuntimePreflight,
                 HostRuntimeAction::ImagePull => ContainerRuntimeAction::ImagePull,
@@ -664,7 +668,16 @@ fn installation_cleanup_is_bound_to_the_signed_request_identity() {
     let executor =
         OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
 
-    executor.execute(&operation).unwrap();
+    let nonce = match executor.execute(&operation) {
+        Err(OperationError::InstallationIntentObservationRequired { nonce }) => nonce,
+        _ => panic!("cleanup must first obtain current authority"),
+    };
+    let mut accepted = operation.clone();
+    let HostOperation::ExecuteContainerRuntimeRequestOperation(binding) = &mut accepted else {
+        unreachable!()
+    };
+    binding.installation_intent_nonce = Some(nonce);
+    executor.execute(&accepted).unwrap();
     let mut mismatched = runtime_operation(&request, request_digest);
     let HostOperation::ExecuteContainerRuntimeRequestOperation(operation) = &mut mismatched else {
         unreachable!();

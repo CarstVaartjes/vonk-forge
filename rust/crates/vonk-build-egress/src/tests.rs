@@ -325,3 +325,48 @@ fn failed_termination_retains_child_and_exhausted_owners_recover_after_reaping()
     drop(owners);
     assert_eq!(OWNERS.load(Ordering::Acquire), 0);
 }
+
+#[test]
+fn exhausted_reap_budget_hands_actual_child_to_supervision_and_fresh_admission_recovers() {
+    // The old per-child infinite loop never reached a terminal ownership handoff.
+    static OWNERS: AtomicUsize = AtomicUsize::new(0);
+    let owner = ResolverOwner::acquire_at(&OWNERS).unwrap();
+    let child = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+    let pid = child.id();
+    retain_resolver_until(
+        child,
+        owner,
+        |_| {},
+        Instant::now() + Duration::from_millis(30),
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let handed_off = RETAINED_RESOLVERS
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(child, _)| child.id() == pid);
+        if handed_off {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(OWNERS.load(Ordering::Acquire), 1);
+    while OWNERS.load(Ordering::Acquire) != 0 {
+        assert!(Instant::now() < deadline);
+        supervise_retained_resolvers();
+        thread::sleep(Duration::from_millis(10));
+    }
+    let fresh = ResolverOwner::acquire_at(&OWNERS).unwrap();
+    assert_eq!(
+        resolver_output(
+            Command::new("/bin/echo").arg("1.1.1.1:443"),
+            Instant::now() + Duration::from_secs(1)
+        )
+        .unwrap(),
+        b"1.1.1.1:443\n"
+    );
+    drop(fresh);
+    assert_eq!(OWNERS.load(Ordering::Acquire), 0);
+}
