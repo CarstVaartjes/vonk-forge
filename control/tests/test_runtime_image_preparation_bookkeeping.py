@@ -105,7 +105,12 @@ def test_every_raise_of_a_storage_fault_names_its_retry() -> None:
         "runtime_image.receipt_write_failed",
         "runtime_image.receipt_persistence_failed",
     }
-    tree = ast.parse(Path(module.__file__).read_text())
+    tree = ast.parse(
+        "\n".join(
+            path.read_text()
+            for path in sorted(Path(module.__file__).parent.glob("*.py"))
+        )
+    )
     seen: set[str] = set()
     for node in ast.walk(tree):
         if (

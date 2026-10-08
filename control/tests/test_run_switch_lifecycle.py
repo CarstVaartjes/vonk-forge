@@ -700,22 +700,49 @@ def test_an_unknown_outcome_of_a_phase_is_retried_even_when_not_flagged_retryabl
     preparation owner's ``retryable`` flag defaults to false, and an unknown
     outcome must not read that as a definite failure."""
 
+    from vonk_agent_protocol import RuntimeImageCode
+    from vonk_agent_protocol.agent_words import ProfileChildPhase
     from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
 
     executor = _ScriptedExecutor()
     unknown = RuntimeImagePreparationUnknown(
-        "runtime_image.receipt_unavailable", "the image receipt is unavailable"
+        RuntimeImageCode.RECEIPT_UNAVAILABLE, "the image receipt is unavailable"
     )
     assert unknown.retryable is False
-    for kind in ("prepare", "transfer", "stop", "verify"):
+    for kind in (
+        ProfileChildPhase.PREPARE,
+        ProfileChildPhase.TRANSFER,
+        ProfileChildPhase.STOP,
+        ProfileChildPhase.VERIFY,
+    ):
         executor.faults[kind] = unknown
     harness = _Harness(tmp_path, executor)
     for _ in range(3):
         harness.service.tick()
         harness.advance_to_due()
     view = harness.view()
-    assert view.state != "failed", (view.state, view.status_reason)
-    assert _retrying(view) or view.state in {"queued", "running"}
+    assert view.state != LifecycleState.FAILED, (view.state, view.status_reason)
+    assert _retrying(view) or view.state in {
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+    }
+    held_phase = _result(view).phase_index
+    executor.faults.clear()
+    harness.restart()
+    for _ in range(12):
+        harness.advance_to_due()
+        harness.service.tick()
+        if _result(harness.view()).phase_index > held_phase:
+            break
+    assert _result(harness.view()).phase_index > held_phase
+    assert harness.view().state != LifecycleState.FAILED
+    request = _request(harness.sessions, harness.nodes[0])
+    fresh = harness.service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    assert fresh.operation_id != harness.id
+    assert fresh.state != LifecycleState.FAILED
 
 
 def test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick(

@@ -1130,7 +1130,7 @@ def test_receipt_content_is_the_identity_and_provenance_never_conflicts(
     assert storage.read_receipt(digest).local_image_config_id == ("sha256:" + "9" * 64)
 
 
-@pytest.mark.parametrize("lookup", ["image", "build"])
+@pytest.mark.parametrize("lookup", ["image", "build", "exact-build"])
 def test_temporary_unreadable_receipt_does_not_block_verified_reuse(
     tmp_path: Path, monkeypatch, lookup: str
 ) -> None:
@@ -1175,15 +1175,36 @@ def test_temporary_unreadable_receipt_does_not_block_verified_reuse(
     found = (
         storage.find_verified(published.image_digest, **arguments)
         if lookup == "image"
-        else storage.find_build(published.build_input_sha256, **arguments)
+        else storage.find_build(
+            published.build_input_sha256,
+            expected_archive_sha256=(
+                published.oci_archive_sha256 if lookup == "exact-build" else None
+            ),
+            **arguments,
+        )
     )
     assert found == published
     assert len(transport.calls) == 1
+
+    def find_other():
+        assert other.build_input_sha256 is not None
+        return (
+            storage.find_verified(other.image_digest, **arguments)
+            if lookup == "image"
+            else storage.find_build(
+                other.build_input_sha256,
+                expected_archive_sha256=(
+                    other.oci_archive_sha256 if lookup == "exact-build" else None
+                ),
+                **arguments,
+            )
+        )
+
     with pytest.raises(RuntimeImagePreparationUnknown):
-        storage.find_verified(other.image_digest, **arguments)
+        find_other()
     assert receipt_path.exists()
     faulty[0] = False
-    assert storage.find_verified(other.image_digest, **arguments) == other
+    assert find_other() == other
     assert len(transport.calls) == 1
 
 

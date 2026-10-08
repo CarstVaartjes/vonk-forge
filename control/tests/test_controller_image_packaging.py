@@ -74,11 +74,15 @@ def test_skopeo_image_stage_has_no_host_socket_or_privileged_runtime_contract() 
 def test_skopeo_is_used_only_where_images_enter_the_layered_store() -> None:
     source = ROOT / "control/src/vonk_control"
     store = (source / "oci_image_store.py").read_text(encoding="utf-8")
-    preparation = (source / "runtime_image_preparation.py").read_text(encoding="utf-8")
+    preparation_modules = sorted((source / "runtime_image_preparation").rglob("*.py"))
+    assert preparation_modules
 
     # The packaged binary is the one the store copies registry images with.
     assert 'skopeo: str = "/usr/bin/skopeo"' in store
     assert "--preserve-digests" in store
     # Preparation reads the layout directly and starts no process.
-    assert "import subprocess" not in preparation
-    assert "/usr/bin/skopeo" not in preparation
+    for module in preparation_modules:
+        preparation = module.read_text(encoding="utf-8")
+        assert "import subprocess" not in preparation, module
+        assert "from subprocess import" not in preparation, module
+        assert "/usr/bin/skopeo" not in preparation, module
