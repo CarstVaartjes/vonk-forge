@@ -347,6 +347,7 @@ from .run_switch_progress import (
 from .run_switch_progress import (
     _progress_view as _progress_view,  # noqa: PLC0414 -- shared helper export
 )
+from .run_switch_results import _stored_result
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImagePreparationRefused,
@@ -9741,29 +9742,6 @@ def _observe_progress(
 
 def _progress_phase(value: object) -> RunSwitchPhaseKind | None:
     return value if value in _PHASES else None
-
-
-def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:
-    """Parse stored JSON strictly, including nested datetime and tuple fields.
-
-    A damaged stored result is a :class:`Residue` (typed unknown), never an
-    exception: a reader shows what it can, and the advancing tick retires the
-    one operation (``_reject_invalid_operation``) while retaining the bytes.
-    """
-
-    if value is None:
-        return None
-    loaded = read_or_rebuild(
-        kind="run-switch.result",
-        subject="stored-result",
-        read=lambda: read_stored_document(
-            lambda document: RunSwitchOperationResult.model_validate_json(
-                json.dumps(document), strict=True
-            ),
-            value,
-        ),
-    )
-    return loaded
 
 
 def _parse_persisted_result(value: object) -> RunSwitchOperationResult | None:
