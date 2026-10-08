@@ -34,6 +34,7 @@ from vonk_agent_protocol import (
     InstallVonkDebOperation,
     PackageRollbackAuthority,
     RecipeStopPayload,
+    RunState,
     SignedHostHelperGrant,
     canonical_message,
 )
@@ -2457,15 +2458,33 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         assert restored == diagnostics
 
     # New live evidence clears the old failure; it cannot poison a recovered run.
+    recovered_at = clock.now + timedelta(seconds=1)
     assert (
-        report(run | {"process_running": True, "failure_diagnostics": None}).status_code
+        report(
+            run | {"process_running": True, "failure_diagnostics": None},
+            observed_at=recovered_at,
+        ).status_code
         == 204
     )
     with services.sessions() as session:
         node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
         assert node is not None
-        assert node.state == "running"
+        assert node.state == RunState.RUNNING
         assert node.observation_failure_diagnostics is None
+        assert node.observation_process_running is True
+        assert node.observation_observed_at is not None
+        assert node.observation_observed_at.replace(tzinfo=UTC) == recovered_at
+
+    # A delayed replay of the failure cannot undo the newer live observation.
+    assert report(run).status_code == 204
+    with services.sessions() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert node is not None
+        assert node.state == RunState.RUNNING
+        assert node.observation_failure_diagnostics is None
+        assert node.observation_process_running is True
+        assert node.observation_observed_at is not None
+        assert node.observation_observed_at.replace(tzinfo=UTC) == recovered_at
 
 
 def test_rust_agent_enrollment_shape_remains_controller_compatible(

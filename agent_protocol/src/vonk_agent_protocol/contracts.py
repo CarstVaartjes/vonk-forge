@@ -1151,6 +1151,10 @@ class AgentResult(OptionalEvidenceModel, _ProtocolEnvelopeModel):
                     "helper_error_code",
                     "helper_exit_code",
                 )
+            )
+            + (
+                ("result", "preload_diagnostics"),
+                ("result", "result", "preload_diagnostics"),
             ),
         ),
     )

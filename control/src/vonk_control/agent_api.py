@@ -1169,7 +1169,9 @@ def install_agent_routes(
                         # its process result remains valid evidence for
                         # Controller-owned recovery.
                         node.state = "failed"
-                    elif node.state != "failed":
+                    else:
+                        # Failure is an observation, not a latch: fresh live
+                        # evidence can recover a rank still owned by this run.
                         # A running process whose own health probe fails is
                         # failed only once that has lasted the grace period;
                         # one missed probe never takes a workload down.

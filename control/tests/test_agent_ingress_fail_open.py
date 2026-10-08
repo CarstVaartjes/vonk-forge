@@ -25,7 +25,10 @@ from vonk_agent_protocol import (
     AgentEvidenceCode,
     AgentProgress,
     AgentResult,
+    AgentResultState,
     InventoryRequest,
+    OutcomeKind,
+    RecipeStartResult,
 )
 from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.optional_evidence import EvidenceGroup, OptionalEvidenceModel
@@ -268,6 +271,25 @@ CASES: list[
             "result.stage": _failed_result(stage="s" * 200),
             "result.helper_error_code": _failed_result(helper_error_code=""),
             "result.helper_exit_code": _failed_result(helper_exit_code=900),
+            "result.preload_diagnostics": {
+                "fence": _FENCE,
+                "state": AgentResultState.SUCCEEDED,
+                "result": {
+                    "endpoint": "127.0.0.1:8888",
+                    "preload_diagnostics": {"phase": 1},
+                },
+            },
+            "result.result.preload_diagnostics": {
+                "fence": _FENCE,
+                "state": AgentResultState.SUCCEEDED,
+                "result": {
+                    "kind": OutcomeKind.DONE,
+                    "result": {
+                        "endpoint": "127.0.0.1:8888",
+                        "preload_diagnostics": {"phase": 1},
+                    },
+                },
+            },
         },
     ),
     (
@@ -326,6 +348,11 @@ def test_invalid_optional_evidence_keeps_the_mandatory_core(
             assert getattr(accepted, name) == getattr(core, name)
     # The json path (what the agent actually sends) is tolerant the same way.
     assert model.model_validate_json(json.dumps(poisoned)).evidence_warnings
+    if (
+        isinstance(accepted, AgentResult)
+        and accepted.state == AgentResultState.SUCCEEDED
+    ):
+        assert accepted.stored_result() == RecipeStartResult(endpoint="127.0.0.1:8888")
 
 
 def test_telemetry_batch_survives_one_samples_invalid_reading() -> None:
