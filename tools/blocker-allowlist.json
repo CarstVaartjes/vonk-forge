@@ -611,7 +611,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 1135,
+    "total": 1129,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -6143,7 +6143,7 @@
       "numeric_non_root_user": "1127496bde1af2b204f3de1ded23d9c0b2abdde446033625a68fabec30c6c133"
     },
     "rust/crates/vonk-agent-helper/src/operations/authority.rs": {
-      "execute_runtime_request": "f0c42d986e9471abbc7aa7100021785694e5c1e65a69635e5d2a451df874f2dc",
+      "execute_runtime_request": "e68cbfb875428f461c3eb4aedd67990ab3a36897d98ceca93465828f4f8a388c",
       "authorize_runtime_effect": "fcba06a9d1ad882c4b9c22836d695c78971b052f13e79defbec487f2de8fb47a",
       "projected_runtime_arguments": "5b4a02efc5e213f27f3d3a9b52d5e95b92a333cb7b1b3c8d6ffae70bb997cbce",
       "read_runtime_request": "2e6e095a0d13e3388e239476b789b3c4f063c51b0e974d7559922f7b4d4dcda9"
@@ -6182,16 +6182,14 @@
     },
     "rust/crates/vonk-agent-helper/src/operations/images.rs": {
       "runtime_image_pull": "470d6f639ba90c7077bb3ed5af2f1f7378bef87e2a56226af4fcb70252f9cf22",
-      "repair_signed_image_receipt": "3eea2ed16c465c43e7d2b459db2e112785bfa4736a90c3b36c24857a0b05440a",
       "runtime_image_inspect": "8065681fb3ff423f1d711956b25bbb6d56db3e8e5390e990dd502fc381103959",
       "inspect_runtime_image": "a4d1fd7696996552465d19755c98d5f50e4222389c06838d85c4f79dcc907717",
       "inspect_runtime_image_if_present": "4783a2228535de08f77e169d76ce53e8fa0ae7d7705d7744c5b8014ef71d5078",
       "inspect_runtime_image_for_reference": "ebef1d9400b5c4f9ac432dc692f84b78594c295579bd578085c278ab81d4e595",
       "inspect_runtime_image_for_reference_if_present": "6b54ad616365a8dc89ffff077f0b407b47881167aa5ed5be178d494ebdef6857",
-      "write_image_receipt": "6b8f0fe32896a9492fbe06d6e3f6f0de9680d5542380cd2cc4601f5572ad01c8",
-      "write_image_receipt_at": "47b5e9e60917c0eca7dc53ba061661533b188278855dbce3ee3cdb367f7ba608",
-      "require_image_receipt": "e172ddebe350f5febf3eb8c9ed2c8f67f75a07781286498d70baaae484ea116e",
-      "read_image_receipt": "28b0a88fec750ff823e6638baab4befa79d066916e61a610c14cc0df82f604d0"
+      "write_image_receipt": "626d49a234263b3078e65823881eccb557aa8a3872590b912ef3343c584b8f25",
+      "require_image_receipt": "e5cdc3a1bb12d9e076e4edfb44b943c7d14bae6ad6fecb3b0df7083267c81d88",
+      "read_image_receipt": "03d7c9f2b2a6258d2f570570756a1ce0fde830b56e38cee398f22b9c58bcc321"
     },
     "rust/crates/vonk-agent-helper/src/operations/inspection.rs": {
       "process_exited": "6d099e25fc80229e9c409f029da0ddb1bb2c31d084bf271e09ba307667e706c2",
@@ -6857,7 +6855,7 @@
       "install_unlocked": "ac9d2ea4e78eecc4029749d7058658ee63bc78984973234bfc3e0cf5a3c4b999",
       "install_with_space_check": "5f9fe353fdaf3cb48696057b8a7b35c8433a9ddd4574fd65a8fcc74bcc6fcf45",
       "install_with_space_check_observed": "70c04301447a1ce83e9f45c34e84ec46ae80538779847c270958ac1238b37915",
-      "reuse_completed_install": "9bbf3adb2bfcdc4f682e9e37c97141cba52b0e5bd984fe6bc6e225f00503bf10",
+      "reuse_completed_install": "2e0e872a48b63ba9818b8864c70ad995423a659e1b3b0e66876184e084dbb154",
       "materialize_compiled_models": "e2e04f1766d0cb6b46e50c2797eeed6f750a638965dc449b9903a4c032902c1e",
       "verify_image": "4399b3efa630c8a9730be4f786cc83dd5e43eb2a5c082342df930acca5ef1230"
     },
@@ -11080,19 +11078,13 @@
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "inspect_runtime_image_if_present", "OperationError :: InvalidArtifact", 1],
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "inspect_runtime_image_if_present", "OperationError :: RuntimeImageInspectFailed", 1],
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "read_image_receipt", "OperationError :: InvalidArtifact", 1],
-        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "read_image_receipt", "error . into ( )", 1],
-        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "repair_signed_image_receipt", "OperationError :: RuntimeImageIdentityInvalid", 1],
-        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "repair_signed_image_receipt", "OperationError :: RuntimeImageReceiptFailed", 1],
-        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "repair_signed_image_receipt", "error", 1],
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "require_image_receipt", "OperationError :: InvalidOperation", 1],
-        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "require_image_receipt", "OperationError :: RuntimeImageReceiptFailed", 1],
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_inspect", "OperationError :: InvalidArtifact", 1],
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_inspect", "OperationError :: InvalidOperation", 2],
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: InvalidOperation", 2],
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: RuntimeImageIdentityInvalid", 3],
         ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: RuntimeImageInspectFailed", 1],
-        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: RuntimeImageLoadFailed", 1],
-        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "write_image_receipt_at", "OperationError :: InvalidArtifact", 1]
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: RuntimeImageLoadFailed", 1]
       ]
     },
     {

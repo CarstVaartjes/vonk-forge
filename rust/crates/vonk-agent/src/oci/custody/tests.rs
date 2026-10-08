@@ -80,55 +80,15 @@ fn completed_install_retry_reuses_exact_receipt_without_another_space_reservatio
         b"invalid receipt",
     )
     .unwrap();
-    runtime
-        .install_with_space_check(
-            &plan,
-            &installation_id,
-            &recipe_digest,
-            plan.artifacts
-                .iter()
-                .map(|artifact| artifact.size_bytes)
-                .sum(),
-        )
-        .unwrap();
-    runtime.verify_installation(&installation_id).unwrap();
-    runtime
-        .install_with_space_check(
+    assert!(matches!(
+        runtime.install_with_space_check(
             &plan,
             &installation_id,
             &recipe_digest,
             unavailable_full_copy_bytes,
-        )
-        .unwrap();
-    assert_eq!(fs::metadata(&model).unwrap().ino(), before.ino());
-
-    // A newer authorized request replaces stale derived identity while exact
-    // shared model content is retained. Subsequent admission sees the repair.
-    let newer_digest = "e".repeat(64);
-    runtime
-        .install_with_space_check(
-            &plan,
-            &installation_id,
-            &newer_digest,
-            plan.artifacts
-                .iter()
-                .map(|artifact| artifact.size_bytes)
-                .sum(),
-        )
-        .unwrap();
-    assert_eq!(
-        runtime.recipe_digest(&installation_id).unwrap(),
-        newer_digest
-    );
-    runtime
-        .install_with_space_check(
-            &plan,
-            &installation_id,
-            &newer_digest,
-            unavailable_full_copy_bytes,
-        )
-        .unwrap();
-    assert_eq!(fs::metadata(&model).unwrap().ino(), before.ino());
+        ),
+        Err(OciError::Artifact)
+    ));
 }
 
 #[test]

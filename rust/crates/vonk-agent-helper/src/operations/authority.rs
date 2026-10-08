@@ -76,21 +76,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 else {
                     return Err(OperationError::InvalidOperation);
                 };
-                // The already verified start/job plan binds the manifest to
-                // its config digest. Rebuild derived image evidence under that
-                // current authority, without asking for an unrelated pull grant.
-                let compiled = request
-                    .start_plan
-                    .as_ref()
-                    .map(|plan| &plan.compiled_execution_plan)
-                    .or_else(|| {
-                        request
-                            .job_plan
-                            .as_ref()
-                            .map(|plan| &plan.compiled_execution_plan)
-                    })
-                    .ok_or(OperationError::InvalidOperation)?;
-                self.repair_signed_image_receipt(compiled)?;
                 self.runtime_start_authorized(
                     &request.arguments,
                     identity,
