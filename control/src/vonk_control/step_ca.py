@@ -734,23 +734,30 @@ class StepCertificateAuthority(CertificateAuthority):
                         raise StepCAError("step-ca response is too large")
                     output.extend(chunk)
                 if not response.is_success:
-                    if response.status_code in {401, 403}:
-                        raise StepCAError("CA authorization denied")
-                    if response.status_code >= 500:
-                        raise StepCAUnavailable("step-ca provider is unavailable")
-                    if path == "/1.0/vonk/sign" and response.status_code != 404:
+                    # The CA's canonical refusal names the actual cause; read it
+                    # before falling back to the status class.
+                    sign_refusal = (
+                        path == "/1.0/vonk/sign" and response.status_code != 404
+                    )
+                    refusal: CertificateRefusalReply | None = None
+                    if sign_refusal:
                         try:
                             refusal = CertificateRefusalReply.model_validate_json(
                                 bytes(output)
                             )
-                        except ValidationError as error:
-                            raise StepCAError(
-                                "CA returned an invalid refusal response"
-                            ) from error
+                        except ValidationError:
+                            refusal = None
+                    if refusal is not None:
                         raise StepCAError(
                             f"CA refused exact certificate request: {refusal.detail}",
                             reason_code=refusal.reason_code,
                         )
+                    if response.status_code in {401, 403}:
+                        raise StepCAError("CA authorization denied")
+                    if response.status_code >= 500:
+                        raise StepCAUnavailable("step-ca provider is unavailable")
+                    if sign_refusal:
+                        raise StepCAError("CA returned an invalid refusal response")
                     raise StepCAUnavailable(
                         f"step-ca request failed with status {response.status_code}"
                     )
