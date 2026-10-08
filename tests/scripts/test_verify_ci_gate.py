@@ -34,6 +34,7 @@ def _valid(**overrides: str):
     }
     results = {
         "lint": "success",
+        "repository-guards": "success",
         "rust-quality": "success",
         "rust-tests": "success",
         "rust-platform": "success",
@@ -153,5 +154,18 @@ def test_an_unrelated_change_does_not_wait_for_the_lane() -> None:
     results["lane-proof"] = "success"
     assert any(
         "lane-proof" in error
+        for error in _module().verify("success", selected, results)
+    )
+
+
+@pytest.mark.parametrize("result", ["skipped", "failure", "cancelled", None])
+def test_repository_guards_are_required_when_heavy_repository_is_skipped(
+    result,
+) -> None:
+    selected, results = _valid()
+    assert selected["repository"] == "false"
+    results["repository-guards"] = result
+    assert any(
+        "repository-guards" in error
         for error in _module().verify("success", selected, results)
     )

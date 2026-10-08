@@ -584,6 +584,23 @@ to `main` runs the required checks and the suites selected for that change. Conc
 superseded pull-request runs so a stale commit does not consume another
 complete check cycle.
 
+### Repository guards run for every change
+
+`Repository guards` runs the fast cross-area checks on every CI invocation,
+including documentation-only and control-only PRs, merge queues, and main/release
+pushes through the release workflow. `CI gate` requires its success independently
+of `scripts/select-ci-areas`. The expensive repository suite stays selector-driven
+and excludes the same files/nodes to avoid running guards twice.
+
+`tests/repository_guards.py` owns the guard selection and the reviewed scope of
+all other test files under `tests/`. The inventory test rejects new or stale
+unclassified files, including scans delegated to helpers. A new whole-tree guard
+belongs in `GUARDS`; a narrower test needs its owning boundary in `SCOPED`.
+Mixed integration files select their cross-area guard nodes individually. The
+local command `scripts/test guards` runs them. The runner
+`python3 scripts/repository-guards` prints that selection; `--exclusions`
+prints its complement's pytest options. No test reads Git history for this decision.
+
 ### Acceptance lane code proves itself on hardware
 
 The Spark upgrade-carry lane runs on every release candidate and gates its
