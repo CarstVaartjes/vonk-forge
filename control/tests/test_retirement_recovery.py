@@ -7,7 +7,16 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_agent_protocol import (
+    AgentFailureKind,
+    AgentFailureResult,
+    AgentResult,
+    InstallationState,
+    LifecycleState,
+    ReservationState,
+    SecurityRefusalReason,
+    canonical_message,
+)
 from vonk_control.agent_jobs import (
     AgentJobService,
     OperatorRetirementRefused,
@@ -24,12 +33,15 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.operation_api import durable_operation_services
+from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationResult
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recovery_policy import RecoveryPolicy
+from vonk_control.stored_json import read_row_column
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .non_blocking import assert_ended_without_blocking
+from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
     NOW,
@@ -438,12 +450,23 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
     with sessions() as session:
         assert (
             _required(session.get(RecipeInstallation, install.owner_id)).state
-            != "uninstalled"
+            != InstallationState.UNINSTALLED
         )
         child = _required(
             session.get(AgentOperation, fenced_operation(sessions, cleanup).id)
         )
-        assert child.state == "failed" and child.next_action_at is None
+        assert child.state == LifecycleState.FAILED and child.next_action_at is None
+        denied_attempt = _required(
+            session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == child.id,
+                    AgentOperationAttempt.attempt == child.current_attempt,
+                )
+            )
+        )
+        denial = read_row_column(denied_attempt, "result")
+        assert isinstance(denial, AgentFailureResult)
+        assert denial.failure_kind == AgentFailureKind.INVALID_AUTHORITY
         assert (
             session.scalar(
                 select(ResourceReservation.state).where(
@@ -451,7 +474,28 @@ def test_retired_installation_requires_uninstall_receipt_and_preserves_denial(
                     ResourceReservation.owner_id == install.owner_id,
                 )
             )
-            == "active"
+            == ReservationState.ACTIVE
         )
         retired = _required(session.get(Job, install.id))
-        assert "inspect/correct the blocker" in (retired.status_reason or "")
+        reason_code = SecurityRefusalReason.STALE_FENCE
+        assert reason_code.value in (retired.status_reason or "")
+        # A denial cannot certify uninstall or release uncertain physical space.
+        retirement = read_row_column(retired, "result")
+        assert isinstance(retirement, RecipeOperationCancellationResult)
+        assert retirement.recovery is None
+
+    record_passing_preflight(sessions, now[0])
+    fresh_plan = lifecycle.preview_install(mapping_id, build_id)
+    fresh = lifecycle.install(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id="after-denied-retirement",
+    )
+    assert fresh.id != install.id
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+    with sessions() as session:
+        original_denial = read_row_column(
+            _required(session.get(AgentOperationAttempt, denied_attempt.id)), "result"
+        )
+        assert original_denial == denial
