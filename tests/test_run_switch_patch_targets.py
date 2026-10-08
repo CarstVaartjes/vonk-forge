@@ -15,6 +15,13 @@ FACADES = frozenset(
         "vonk_control.operation_api",
         "vonk_control.artifact_jobs",
         "vonk_control.models",
+        "vonk_control.recipe_builds",
+        "vonk_control.distributed_recovery",
+        "vonk_control.unused_storage_collection",
+        "vonk_control.library_projection",
+        "vonk_control.api",
+        "vonk_control.fleet_projection",
+        "vonk_control.agent_api",
     }
 )
 

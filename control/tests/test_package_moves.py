@@ -490,3 +490,35 @@ def test_rust_facade_split_carries_findings_without_pooling_debt(tmp_path, old):
     # A function still present at its original owner is not a move.
     facade.write_text("mod storage;\n" + target.read_text())
     assert principles.history_gate(current, previous, PackageMoves(tmp_path))
+
+
+def test_extracted_typed_method_carries_its_scope_and_rejects_changed_effects(tmp_path):
+    """A class extraction preserves one allowance; a changed call cannot borrow it."""
+    source = "class Service:\n    def work(self):\n        event.wait()\n"
+    target = tmp_path / NEW
+    target.parent.mkdir(parents=True)
+    target.write_text("def work(self: Service):\n    event.wait()\n")
+    moves = PackageMoves(tmp_path, {OLD: identities(source)})
+    assert moves.function(OLD, "Service.work") == NEW
+    assert moves.scope(OLD, "Service.work") == "work"
+    previous = {
+        "debt": [
+            {
+                "path": OLD,
+                "function": "Service.work",
+                "kind": "wait-without-timeout",
+                "count": 1,
+            }
+        ],
+        "exceptions": [],
+        "content_identities": {OLD: identities(source)},
+    }
+    current = principles.relocate(previous, moves)
+    assert principles.history_gate(current, previous, moves) == []
+    target.write_text("def work(self: Service):\n    different.wait()\n")
+    assert (
+        PackageMoves(tmp_path, previous["content_identities"]).function(
+            OLD, "Service.work"
+        )
+        == OLD
+    )
