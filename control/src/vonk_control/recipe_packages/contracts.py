@@ -97,7 +97,6 @@ class RecipePackageRequestInvalid(InvalidRequestError, RecipePackageError):
 def _snapshot_content(value: RecipeLibrarySnapshot) -> bytes:
     return canonical_message(
         (
-            value.repository,
             sorted(
                 [
                     (

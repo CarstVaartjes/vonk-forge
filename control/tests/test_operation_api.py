@@ -421,19 +421,19 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
 
     def provider_for(ids: tuple[str, ...]) -> OperationProvider:
         def list_rows(query: OperationQuery) -> OperationListPage:
+            def boundary(row):
+                observed = operation_api._operation_boundary(operation_item(row))
+                assert observed is not None
+                return observed
+
             selected = [rows[row_id] for row_id in ids]
             if query.node_id is not None:
                 selected = [row for row in selected if query.node_id in row["node_ids"]]
             total = len(selected)
             if query.after is not None:
-                selected = [
-                    row
-                    for row in selected
-                    if operation_api._operation_boundary(operation_item(row))
-                    < query.after
-                ]
+                selected = [row for row in selected if boundary(row) < query.after]
             selected.sort(
-                key=lambda row: operation_api._operation_boundary(operation_item(row)),
+                key=boundary,
                 reverse=True,
             )
             return OperationListPage(selected[: query.limit], None, total)

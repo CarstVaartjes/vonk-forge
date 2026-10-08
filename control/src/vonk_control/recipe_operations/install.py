@@ -76,7 +76,6 @@ class InstallMixin:
             plan.mapping_id,
             plan.recipe_build_id,
             now=now,
-            compiled_execution_plans=plan.compiled_plan_by_node,
         )
         if not plan.allowed:
             service._request_install_storage(plan)

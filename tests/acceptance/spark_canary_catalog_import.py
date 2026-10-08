@@ -156,7 +156,7 @@ def main() -> None:
                 request_key=str(payload["request_key"]),
                 trigger="manual",
                 actor=SYNC_ACTOR,
-                expected_commit=reader.snapshot.commit,
+                reviewed_snapshot=reader.snapshot,
             )
             break
         except CatalogSyncError as error:

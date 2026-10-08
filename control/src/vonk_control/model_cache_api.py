@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Path, status
 from vonk_agent_protocol import (
     OperationProgress,
+    SecurityRefusalError,
 )
 
 from .auth import MUTATION_ROLES, Actor, CursorCodec
@@ -35,6 +36,7 @@ from .operation_api import (
     OperationApiServices,
     OperationListPage,
     OperationProvider,
+    OperationQuery,
     bounded_error_responses,
 )
 from .operation_contract import AvailabilityOperationFailure
@@ -289,7 +291,20 @@ class ModelCacheOperationProvider:
 
         self._cursors = cursors or observation_cursors()
 
-    def list_operations(self, query: Any = None) -> Any:
+    def list_operations(self, query: OperationQuery | None = None) -> OperationListPage:
+        page = OperationListPage([], None, None, continuation_unavailable=True)
+        for _attempt in range(3):
+            try:
+                page = self._list_operations_once(query)
+                if not page.continuation_unavailable:
+                    return page
+            except SecurityRefusalError:
+                raise
+            except (OSError, RuntimeError, TypeError, ValueError, KeyError):
+                continue
+        return page
+
+    def _list_operations_once(self, query: OperationQuery | None) -> OperationListPage:
         limit = int(getattr(query, "limit", 100) or 100)
         after = getattr(query, "after", None)
         state = getattr(query, "state", None)
@@ -302,25 +317,35 @@ class ModelCacheOperationProvider:
             node_id=node_id,
             request_id=request_id,
         )
-        items = [
-            self._summary(item)
-            for item in require_sequence(page["operations"], "page operations")
-        ]
+        items = []
+        unreadable = False
+        for item in require_sequence(page["operations"], "page operations"):
+            try:
+                items.append(self._summary(item))
+            except (TypeError, ValueError, KeyError):
+                unreadable = True
         next_cursor = self._next_cursor(
             page.get("_next_boundary"),
             state=state,
             node_id=node_id,
             request_id=request_id,
         )
+        try:
+            total = require_integer(page["total"], "page total")
+        except (TypeError, ValueError, KeyError):
+            total = None
+            unreadable = True
+        unavailable = unreadable or (
+            page.get("_next_boundary") is not None and next_cursor is None
+        )
         return OperationListPage(
             items=items,
             next_cursor=next_cursor,
-            total=require_integer(page["total"], "page total"),
-            projection_issue=(
-                "Operation pagination observation is unavailable."
-                if page.get("_next_boundary") is not None and next_cursor is None
-                else None
-            ),
+            total=total,
+            projection_issue="Operation pagination observation is unavailable."
+            if unavailable
+            else None,
+            continuation_unavailable=unavailable,
         )
 
     def _next_cursor(

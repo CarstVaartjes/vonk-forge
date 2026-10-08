@@ -12,10 +12,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import OperationProgress
-from vonk_control.auth import Actor, CursorError, TokenCodec
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.library_api import install_library_routes
-from vonk_control.library_contract import _MAX_PAGE_RECIPES
+from vonk_control.library_contract import _MAX_PAGE_RECIPES, ModelLibraryResponse
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.model_cache_contract import ModelCacheOperationProgress
 from vonk_control.models import (
@@ -956,7 +956,7 @@ def test_cached_download_progress_preserves_exact_totals_and_reads_negative_as_u
 
 
 @pytest.mark.parametrize("kind", ["model", "recipe"])
-def test_library_cursor_refuses_a_changed_accepted_catalog(tmp_path: Path, kind: str):
+def test_library_cursor_observes_a_changed_accepted_catalog(tmp_path: Path, kind: str):
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     engine = create_engine(f"sqlite:///{tmp_path / 'changing-library.sqlite'}")
     Base.metadata.create_all(engine)
@@ -1018,8 +1018,20 @@ def test_library_cursor_refuses_a_changed_accepted_catalog(tmp_path: Path, kind:
         )
         assert head is not None
         head.active_revision_id = new.id
-    with pytest.raises(CursorError):
-        read(first.next_cursor)
+    continued = read(first.next_cursor)
+    items = (
+        continued.models
+        if isinstance(continued, ModelLibraryResponse)
+        else continued.recipes
+    )
+    assert len(items) == 1
+    assert items[0].identity.content_sha256 == new.content_digest
+    # A fresh read remains available after the changed collection is observed.
+    fresh = read()
+    assert (
+        len(fresh.models if isinstance(fresh, ModelLibraryResponse) else fresh.recipes)
+        == 1
+    )
 
 
 def test_model_detail_resolves_every_model_cache_selector_form(tmp_path: Path) -> None:
@@ -1070,7 +1082,7 @@ _SMALL_WIRE_BUDGET = 64 * 1024
 
 @pytest.fixture
 def small_wire_budget(monkeypatch: pytest.MonkeyPatch) -> int:
-    from vonk_control import library_projection
+    from vonk_control.library_projection import common as library_projection
 
     monkeypatch.setattr(
         library_projection, "MAX_CONTROL_DOCUMENT_BYTES", _SMALL_WIRE_BUDGET
@@ -1260,7 +1272,7 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
         assert exact_wire_bytes <= MAX_CONTROL_DOCUMENT_BYTES
 
         monkeypatch.setattr(
-            "vonk_control.library_projection.MAX_CONTROL_DOCUMENT_BYTES",
+            "vonk_control.library_projection.common.MAX_CONTROL_DOCUMENT_BYTES",
             exact_wire_bytes,
         )
         exactly_fitting = client.get("/api/recipe/library", params={})
@@ -1271,7 +1283,7 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
         # An envelope-bracket undercount of two bytes would incorrectly accept
         # and return a response larger than this configured budget.
         monkeypatch.setattr(
-            "vonk_control.library_projection.MAX_CONTROL_DOCUMENT_BYTES",
+            "vonk_control.library_projection.common.MAX_CONTROL_DOCUMENT_BYTES",
             exact_wire_bytes - 1,
         )
         over_budget = client.get("/api/recipe/library", params={})

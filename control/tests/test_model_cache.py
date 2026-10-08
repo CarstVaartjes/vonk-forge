@@ -1887,10 +1887,11 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     )
 
 
+@pytest.mark.parametrize("clears", [False, True])
 def test_malformed_pagination_observation_is_partial_and_recovers(
-    cache, monkeypatch
+    cache, monkeypatch, clears
 ) -> None:
-    """Local pagination damage retains rows and never signs an unusable cursor."""
+    """The public provider observes at most three times and retains readable rows."""
     from vonk_control.operation_api import OperationQuery
 
     service, _sessions = cache
@@ -1898,22 +1899,27 @@ def test_malformed_pagination_observation_is_partial_and_recovers(
         service, TokenCodec(b"c" * 32).cursor_codec()
     )
     original = service.activity_operations
-    damaged = [True]
+    calls = 0
 
     def observe(*args, **kwargs):
+        nonlocal calls
+        calls += 1
         page = original(*args, **kwargs)
-        if damaged[0]:
+        if not clears or calls < 3:
             page["_next_boundary"] = ("only-one",)
         return page
 
     monkeypatch.setattr(service, "activity_operations", observe)
     query = OperationQuery(limit=10, after=None, state=None, node_id=None)
-    partial = provider.list_operations(query)
-    assert partial.projection_issue is not None and partial.next_cursor is None
-    damaged[0] = False
-    restored = provider.list_operations(query)
-    assert restored.projection_issue is None
-    assert restored.items == partial.items and restored.total == partial.total
+    result = provider.list_operations(query)
+    assert calls == 3
+    assert result.continuation_unavailable is not clears
+    assert result.next_cursor is None
+    # A fresh request has a fresh budget; the previous read retains no gate.
+    monkeypatch.setattr(service, "activity_operations", original)
+    fresh = provider.list_operations(query)
+    assert not fresh.continuation_unavailable
+    assert fresh.items == result.items and fresh.total == result.total
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(

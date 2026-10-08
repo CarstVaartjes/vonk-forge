@@ -343,7 +343,9 @@ def operation_detail_response(
         state=item.state,
         attempt=item.attempt,
         progress=_progress_projection(item.progress, item.state, now=now),
-        created_at=_required_text(item.created_at, "operation created_at is invalid"),
+        created_at=item.created_at if _operation_boundary(item) is not None else None,
+        observation_unavailable=_operation_boundary(item) is None
+        or item.result_unreadable,
         updated_at=item.updated_at,
         failure=failure,
         evidence_download=item.evidence_download,
@@ -366,21 +368,6 @@ def operation_detail_response(
 def _response_bytes(response: StrictModel) -> int:
     # JSONResponse emits compact UTF-8; key ordering does not affect byte size.
     return len(canonical_message(serialize_json_value(response)))
-
-
-class _OperationResponseTooLarge(Exception):
-    """Internal unwind to the owning prefix/detail response, never lifecycle state.
-
-    Only the fixed reader allocation is enforced. A later list row preserves
-    its fitting prefix; an indivisible first row is a declared read failure.
-    """
-
-    def __init__(self, observed_bytes: int) -> None:
-        super().__init__(
-            f"Operation observation requires {observed_bytes} bytes; "
-            f"reader budget is {MAX_CONTROL_DOCUMENT_BYTES} bytes. "
-            "Durable operation state is unchanged."
-        )
 
 
 def bounded_operation_detail(
@@ -419,8 +406,18 @@ def bounded_operation_detail(
         detail = detail.model_copy(update={field: None, "projection_issues": issues})
         if _response_bytes(detail) + envelope_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
             return detail
-    # Never truncate identity or authority to manufacture a fitting observation.
-    raise _OperationResponseTooLarge(_response_bytes(detail) + envelope_bytes)
+    # Exact operation membership and known state survive an unavailable stored
+    # projection; decorations confer no actions when their evidence is missing.
+    return OperationDetailResponse(
+        id=detail.id,
+        parent_id=detail.parent_id,
+        node_ids=detail.node_ids,
+        kind=detail.kind,
+        state=detail.state,
+        attempt=detail.attempt,
+        created_at=detail.created_at,
+        observation_unavailable=True,
+    )
 
 
 def bounded_operations_response(
@@ -434,13 +431,17 @@ def bounded_operations_response(
 ) -> OperationsResponse:
     """Largest contiguous byte-sized page, with true total and signed boundary."""
     context = {"state": state, "node_id": node_id, "request_id": request_id}
+    continuation_unavailable = page.continuation_unavailable or any(
+        _operation_boundary(operation_item(item)) is None for item in page.items
+    )
 
     def continuation(index: int) -> str | None:
         if index == len(details) - 1:
             return page.next_cursor
-        created_at, operation_id = _operation_boundary(
-            operation_item(page.items[index])
-        )
+        boundary = _operation_boundary(operation_item(page.items[index]))
+        if boundary is None:
+            return None
+        created_at, operation_id = boundary
         return cursors.encode(
             resource="operations",
             order="created-at-desc/id-desc/v1",
@@ -458,6 +459,7 @@ def bounded_operations_response(
             total=page.total,
             next_cursor=None,
             projection_issue=page.projection_issue,
+            continuation_unavailable=continuation_unavailable,
         )
     )
     for index, detail in enumerate(details):
@@ -467,16 +469,10 @@ def bounded_operations_response(
             total=page.total,
             next_cursor=cursor,
             projection_issue=page.projection_issue,
+            continuation_unavailable=continuation_unavailable,
         )
         envelope = _response_bytes(single) - _response_bytes(detail)
-        try:
-            projected_detail = bounded_operation_detail(detail, envelope_bytes=envelope)
-        except _OperationResponseTooLarge:
-            if not projected:
-                raise
-            # This row remains the first boundary of a later page. It cannot
-            # poison an earlier fitting contiguous prefix or be skipped.
-            break
+        projected_detail = bounded_operation_detail(detail, envelope_bytes=envelope)
         projected.append(projected_detail)
         prefix_bytes += _response_bytes(projected_detail)
         comma_bytes = len(projected) - 1
@@ -486,6 +482,7 @@ def bounded_operations_response(
                 total=page.total,
                 next_cursor=cursor,
                 projection_issue=page.projection_issue,
+                continuation_unavailable=continuation_unavailable,
             )
         )
         if exact_envelope + prefix_bytes + comma_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
@@ -503,12 +500,19 @@ def bounded_operations_response(
             total=page.total,
             next_cursor=page.next_cursor,
             projection_issue=page.projection_issue,
+            continuation_unavailable=continuation_unavailable,
         )
     if best_count == 0:
-        raise _OperationResponseTooLarge(cursorless_envelope + prefix_bytes)
+        return OperationsResponse(
+            operations=[],
+            total=page.total,
+            continuation_unavailable=True,
+            projection_issue="Operation observations exceed the current reader allocation.",
+        )
     return OperationsResponse(
         operations=projected[:best_count],
         total=page.total,
         next_cursor=best_cursor,
         projection_issue=page.projection_issue,
+        continuation_unavailable=continuation_unavailable,
     )

@@ -18313,10 +18313,17 @@
             ]
           },
           "created_at": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Created At",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "evidence_download": {
             "anyOf": [
@@ -18387,6 +18394,11 @@
             "maxItems": 1024,
             "title": "Node Ids",
             "type": "array"
+          },
+          "observation_unavailable": {
+            "default": false,
+            "title": "Observation Unavailable",
+            "type": "boolean"
           },
           "owner": {
             "anyOf": [
@@ -18480,8 +18492,7 @@
           "node_ids",
           "kind",
           "state",
-          "attempt",
-          "created_at"
+          "attempt"
         ],
         "title": "OperationDetailResponse",
         "type": "object"
@@ -19063,6 +19074,11 @@
       "OperationsResponse": {
         "additionalProperties": false,
         "properties": {
+          "continuation_unavailable": {
+            "default": false,
+            "title": "Continuation Unavailable",
+            "type": "boolean"
+          },
           "next_cursor": {
             "anyOf": [
               {
@@ -30036,6 +30052,36 @@
         "title": "RunSwitchDistributionChildResult",
         "type": "object"
       },
+      "RunSwitchDistributionEndedResult": {
+        "additionalProperties": false,
+        "description": "A missing durable distribution child; no node effect is asserted.",
+        "properties": {
+          "error_code": {
+            "$ref": "#/components/schemas/DistributionCode"
+          },
+          "phase": {
+            "const": "transfer",
+            "title": "Phase",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/WaitReason"
+          },
+          "subphase": {
+            "const": "target-copy",
+            "title": "Subphase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "subphase",
+          "reason",
+          "error_code"
+        ],
+        "title": "RunSwitchDistributionEndedResult",
+        "type": "object"
+      },
       "RunSwitchFinalVerifyResult": {
         "additionalProperties": false,
         "properties": {
@@ -31108,6 +31154,9 @@
           "final_observation": {
             "anyOf": [
               {
+                "$ref": "#/components/schemas/RunSwitchDistributionEndedResult"
+              },
+              {
                 "$ref": "#/components/schemas/RunSwitchContainerBuildResult"
               },
               {
@@ -31277,6 +31326,9 @@
           "phase_results": {
             "items": {
               "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunSwitchDistributionEndedResult"
+                },
                 {
                   "$ref": "#/components/schemas/RunSwitchContainerBuildResult"
                 },

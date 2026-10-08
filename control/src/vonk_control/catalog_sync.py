@@ -22,16 +22,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncCode,
     CatalogSyncState,
-    InvalidRequestError,
-    InvalidRequestReason,
     LifecycleState,
-    SecurityRefusalError,
-    SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
 )
+from vonk_forge_contracts import document_sha256
 
+from .catalog_queries import active_head_revision
+from .catalog_revision_contract import (
+    CatalogRevisionContractError,
+    read_catalog_document,
+)
 from .catalog_service import CatalogService
 from .catalog_sync_contract import (
     SEMVER_PATTERN,
@@ -40,14 +42,13 @@ from .catalog_sync_contract import (
     ManagedCatalogSyncResult,
     ManagedCatalogWithdrawnRecipe,
 )
-from .models import RecipeLibrarySyncRun
+from .models import CatalogDocument, CatalogDocumentRevision, RecipeLibrarySyncRun
 from .recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
 from .recipe_packages.contracts import _snapshot_content
-from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import SourceBundleUnknown
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,26 +79,6 @@ class CatalogSyncError(RuntimeError):
         self.code = code
         self.detail = detail[:256]
         super().__init__(self.detail)
-
-
-class CatalogSyncRefused(SecurityRefusalError, CatalogSyncError):
-    """A source outside the configured repository cannot publish catalog effects."""
-
-    def __init__(self, code: CatalogSyncCode, detail: str) -> None:
-        CatalogSyncError.__init__(self, code, detail)
-        self.typed_reason = SecurityRefusalReason.FORBIDDEN
-
-
-class CatalogSyncRequestInvalid(InvalidRequestError, CatalogSyncError):
-    """The requested sync no longer matches its reviewed input."""
-
-    def __init__(self, code: CatalogSyncCode, detail: str) -> None:
-        super().__init__(
-            code,
-            detail,
-            reason=InvalidRequestReason.CONFLICT,
-            field="reviewed_snapshot",
-        )
 
 
 class CatalogSyncUnsettled(UnknownOutcomeError, CatalogSyncError):
@@ -175,10 +156,9 @@ class ManagedRecipeCatalogSyncService:
         request_key: str,
         trigger: str,
         actor: str,
-        expected_commit: str | None = None,
         reviewed_snapshot: RecipeLibrarySnapshot | None = None,
     ) -> CatalogSyncView:
-        self._validate_request(request_key, trigger, actor, expected_commit)
+        self._validate_request(request_key, trigger, actor)
         reviewed_content = (
             hashlib.sha256(_snapshot_content(reviewed_snapshot)).hexdigest()
             if reviewed_snapshot is not None
@@ -187,7 +167,7 @@ class ManagedRecipeCatalogSyncService:
         existing = self._by_request_key(request_key)
         if existing is not None:
             if (existing.trigger, existing.actor) != (trigger, actor) or (
-                _result(existing.result).reviewed_content_sha256 != reviewed_content
+                existing.reviewed_content_sha256 != reviewed_content
             ):
                 raise CatalogSyncError(
                     CatalogSyncCode.REQUEST_REUSED,
@@ -200,7 +180,10 @@ class ManagedRecipeCatalogSyncService:
             state="running",
             active_slot="managed-recipes",
             repository=self._repository,
-            expected_commit=expected_commit,
+            expected_commit=reviewed_snapshot.commit
+            if reviewed_snapshot is not None
+            else None,
+            reviewed_content_sha256=reviewed_content,
             observed_commit=None,
             total_count=0,
             processed_count=0,
@@ -245,7 +228,7 @@ class ManagedRecipeCatalogSyncService:
             replay = self._by_request_key(request_key)
             if replay is not None:
                 if (replay.trigger, replay.actor) != (trigger, actor) or (
-                    _result(replay.result).reviewed_content_sha256 != reviewed_content
+                    replay.reviewed_content_sha256 != reviewed_content
                 ):
                     raise CatalogSyncError(
                         CatalogSyncCode.REQUEST_REUSED,
@@ -257,15 +240,10 @@ class ManagedRecipeCatalogSyncService:
             ) from error
         try:
             snapshot = self._reader.list()
-            if snapshot.repository != self._repository:
-                raise CatalogSyncRefused(
-                    CatalogSyncCode.REPOSITORY_CHANGED,
-                    "recipe library repository identity changed",
-                )
             if reviewed_snapshot is not None and _snapshot_content(
                 snapshot
             ) != _snapshot_content(reviewed_snapshot):
-                raise CatalogSyncRequestInvalid(
+                raise CatalogSyncUnsettled(
                     CatalogSyncCode.PREVIEW_CHANGED,
                     "recipe library changed since it was reviewed",
                 )
@@ -412,15 +390,63 @@ class ManagedRecipeCatalogSyncService:
                 current is not None
                 and _result(current.result).state == CatalogSyncState.CURRENT
                 and current.controller_marker == _controller_marker()
+                and self._snapshot_available(snapshot)
             ):
                 return _view(current)
         return self.sync(
             request_key=str(uuid.uuid4()),
             trigger="automatic",
             actor="system:recipe-library-sync",
-            expected_commit=snapshot.commit,
             reviewed_snapshot=snapshot,
         )
+
+    def _snapshot_available(self, snapshot: RecipeLibrarySnapshot) -> bool:
+        """Observe exact current heads, rather than historical publication success."""
+        local = self._catalog.recipe_catalog_local_revisions(
+            [(item.publisher, item.slug) for item in snapshot.items]
+        )
+        for item in snapshot.items:
+            row = local.get((item.publisher, item.slug))
+            if row is None or row.content_sha256 != item.content_sha256:
+                return False
+            if (
+                item.package_sha256 is not None
+                and row.package_sha256 != item.package_sha256
+            ):
+                return False
+            if (
+                item.source_bundle_sha256 is not None
+                and row.source_bundle_sha256 != item.source_bundle_sha256
+            ):
+                return False
+        with self._sessions() as session:
+            for document in snapshot.catalog_entities:
+                digest = document_sha256(document)
+                row = session.scalar(
+                    select(CatalogDocumentRevision)
+                    .join(
+                        CatalogDocument,
+                        CatalogDocument.id == CatalogDocumentRevision.document_id,
+                    )
+                    .where(
+                        CatalogDocumentRevision.content_digest == digest,
+                    )
+                )
+                if row is None:
+                    return False
+                selected = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.document_id == row.document_id,
+                        active_head_revision(),
+                    )
+                )
+                if selected is None:
+                    return False
+                try:
+                    read_catalog_document(row)
+                except CatalogRevisionContractError:
+                    return False
+        return not snapshot.problems
 
     def _record_read_failure(self, code: str, detail: str) -> None:
         """Persist one automatic read failure; a repeat only refreshes its time."""
@@ -539,6 +565,10 @@ class ManagedRecipeCatalogSyncService:
                     item.package_sha256 is None
                     or previous.package_sha256 == item.package_sha256
                 )
+                and (
+                    item.source_bundle_sha256 is None
+                    or previous.source_bundle_sha256 == item.source_bundle_sha256
+                )
             ):
                 result.unchanged_count += 1
             else:
@@ -569,32 +599,6 @@ class ManagedRecipeCatalogSyncService:
                         if not self._progress(run_id, result):
                             return None
                         continue
-                    if previous is not None and previous.node_count is not None:
-                        try:
-                            incoming_count = recipe_topology(
-                                hydrated.document
-                            ).node_count
-                        except (RecipeRuntimeSpecError, TypeError, ValueError):
-                            incoming_count = None
-                        if (
-                            incoming_count is not None
-                            and incoming_count != previous.node_count
-                        ):
-                            # A different Spark count is a different recipe.
-                            # Keep the current revision; running profiles are
-                            # untouched and the next sync retries by itself.
-                            self._record_problem(
-                                result,
-                                item,
-                                CatalogSyncCode.RECIPE_TOPOLOGY_CHANGED,
-                                f"new revision needs {incoming_count} Spark(s) but "
-                                f"the current one needs {previous.node_count}; "
-                                "a different Spark count needs a new recipe id, "
-                                "so the revision was not imported",
-                            )
-                            if not self._progress(run_id, result):
-                                return None
-                            continue
                     self._store_source_bundle(hydrated, actor)
                     self._catalog.import_recipe_library(
                         actor,
@@ -798,9 +802,7 @@ class ManagedRecipeCatalogSyncService:
             return row
 
     @staticmethod
-    def _validate_request(
-        request_key: str, trigger: str, actor: str, expected_commit: str | None
-    ) -> None:
+    def _validate_request(request_key: str, trigger: str, actor: str) -> None:
         try:
             parsed = uuid.UUID(request_key)
         except ValueError as error:
@@ -818,14 +820,6 @@ class ManagedRecipeCatalogSyncService:
         if not actor.strip() or len(actor) > 200:
             raise CatalogSyncError(
                 CatalogSyncCode.ACTOR_INVALID, "sync actor is invalid"
-            )
-        if expected_commit is not None and (
-            len(expected_commit) != 40
-            or any(char not in "0123456789abcdef" for char in expected_commit)
-        ):
-            raise CatalogSyncError(
-                CatalogSyncCode.COMMIT_INVALID,
-                "expected commit must be lowercase Git SHA-1",
             )
 
 

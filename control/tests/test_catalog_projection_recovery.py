@@ -137,36 +137,47 @@ def test_verified_import_supersedes_an_unreadable_pending_candidate(changed_cont
         )
 
 
-def test_local_library_observation_recovers_on_the_next_read():
+@pytest.mark.parametrize("clears", [False, True])
+def test_public_library_read_reobserves_and_ends_with_no_retained_gate(clears):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
-    observation = [False]
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    CatalogService(
+        sessions, clock=lambda: datetime.now(UTC), cursors=CursorCodec(b"c" * 32)
+    ).import_catalog_models("test", [document])
+    calls = 0
 
     def observe():
-        if not observation[0]:
+        nonlocal calls
+        calls += 1
+        if calls <= (2 if clears else 3):
             raise OSError("local observation unavailable")
         return {}
 
     projection = LibraryProjection(
-        sessionmaker(engine),
-        local_state=observe,
-        cursors=CursorCodec(b"c" * 32),
+        sessions, local_state=observe, cursors=CursorCodec(b"c" * 32)
     )
-    snapshot = projection._local_state_snapshot()
+    read = projection.models()
+    assert calls == 3
+    assert len(read.models) == 1
     assert (
-        projection._local("a" * 64, kind="model", snapshot=snapshot).controller
-        == AssetAvailability.UNKNOWN.value
-    )
-    observation[0] = True
-    assert (
-        projection._local(
-            "a" * 64, kind="model", snapshot=projection._local_state_snapshot()
-        ).controller
-        != AssetAvailability.UNKNOWN.value
-    )
+        read.models[0].local.controller == AssetAvailability.UNKNOWN.value
+    ) is not clears
+    # A completed unknown observation owns no gate against the same fresh read.
+    fresh = projection.models()
+    assert calls == 4
+    assert len(fresh.models) == 1
+    assert fresh.models[0].identity == read.models[0].identity
+    assert fresh.models[0].local.controller != AssetAvailability.UNKNOWN.value
 
 
-def test_activity_keeps_healthy_siblings_and_recovers_provider_observations():
+@pytest.mark.parametrize("clears", [False, True])
+def test_activity_keeps_healthy_siblings_and_recovers_provider_observations(clears):
     healthy = OperationItem(
         id="healthy",
         kind="test",
@@ -175,10 +186,21 @@ def test_activity_keeps_healthy_siblings_and_recovers_provider_observations():
         created_at="2026-10-08T00:00:00+00:00",
     )
     damaged = healthy.model_copy(update={"id": "damaged", "created_at": "unreadable"})
-    rows = [damaged, healthy]
+    calls = 0
+
+    def observe(_query):
+        nonlocal calls
+        calls += 1
+        row = (
+            damaged
+            if calls <= (2 if clears else 3)
+            else damaged.model_copy(update={"created_at": healthy.created_at})
+        )
+        return OperationListPage([row, healthy], None, 2)
+
     provider = OperationProvider(
         family="test",
-        list_operations=lambda _query: OperationListPage(rows, None, 2),
+        list_operations=observe,
         get_operation=lambda _id: healthy,
     )
 
@@ -193,8 +215,91 @@ def test_activity_keeps_healthy_siblings_and_recovers_provider_observations():
         )
 
     page = read()
-    assert [OperationItem.model_validate(row).id for row in page.items] == [healthy.id]
-    assert page.total == 2 and page.projection_issue is not None
-    rows[0] = damaged.model_copy(update={"created_at": healthy.created_at})
+    assert calls == 3
+    assert healthy.id in [OperationItem.model_validate(row).id for row in page.items]
+    assert len(page.items) == (2 if clears else 1)
+    assert page.total == 2
+    assert page.continuation_unavailable is not clears
     restored = read()
+    assert calls == 4
     assert len(restored.items) == 2 and restored.projection_issue is None
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_exact_ingress_restores_missing_root_and_selected_consumer():
+    from sqlalchemy import delete
+    from vonk_control.catalog_queries import active_head_revision
+    from vonk_control.models import CatalogDocument, CatalogDocumentHead
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = CatalogService(
+        sessions, clock=lambda: datetime.now(UTC), cursors=CursorCodec(b"c" * 32)
+    )
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    service.import_catalog_models("test", [document])
+    with sessions() as session:
+        row = session.scalar(select(CatalogDocumentRevision))
+        assert row is not None
+        exact_id, root_id = row.id, row.document_id
+    with engine.begin() as connection:
+        connection.execute(delete(CatalogDocumentHead))
+        connection.execute(delete(CatalogDocument))
+    service.import_catalog_models("test", [document])
+    with sessions() as session:
+        selected = session.scalar(
+            select(CatalogDocumentRevision).where(active_head_revision())
+        )
+        assert selected is not None and selected.id == exact_id
+        assert session.get(CatalogDocument, root_id) is not None
+    projection = LibraryProjection(sessions, cursors=CursorCodec(b"c" * 32))
+    assert [item.identity.content_sha256 for item in projection.models().models] == [
+        selected.content_digest
+    ]
+    service.import_catalog_models("test", [document])
+    assert len(projection.models().models) == 1
+
+
+@pytest.mark.parametrize("clears", [False, True])
+def test_activity_detail_observes_provider_faults_with_a_finite_budget(clears):
+    from vonk_control.operation_api.providers import get_operation_from_providers
+
+    calls = 0
+    healthy = OperationItem(
+        id="same",
+        kind="test",
+        state=LifecycleState.QUEUED.value,
+        attempt=0,
+        created_at="2026-10-08T00:00:00+00:00",
+        supported_actions=["cancel"],
+    )
+
+    def fetch(_id):
+        nonlocal calls
+        calls += 1
+        if calls <= (2 if clears else 3):
+            raise OSError("unreadable local provider")
+        return healthy
+
+    faulty = OperationProvider(
+        family="test",
+        list_operations=lambda _q: OperationListPage([], None, 0),
+        get_operation=fetch,
+    )
+    readable = OperationProvider(
+        family="other",
+        list_operations=lambda _q: OperationListPage([], None, 0),
+        get_operation=lambda _id: healthy,
+    )
+    observed = get_operation_from_providers((faulty, readable), "same")
+    assert calls == 3
+    assert observed.id == healthy.id and observed.state == healthy.state
+    assert observed.supported_actions == (["cancel"] if clears else [])
+    # Ending an unavailable read cannot block the same identity's fresh read.
+    assert get_operation_from_providers((faulty, readable), "same") == healthy
+    assert calls == 4

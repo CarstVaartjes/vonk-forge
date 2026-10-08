@@ -19,11 +19,11 @@ from vonk_control.catalog_entities import (
     CatalogValidationError,
 )
 from vonk_control.catalog_revision_contract import (
-    CatalogRevisionContractError,
     RecipeRevisionProjection,
-    read_catalog_document,
     read_catalog_projection,
 )
+from vonk_control.catalog_service import CatalogService
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -401,6 +401,7 @@ def test_refresh_rederives_a_projection_an_earlier_release_wrote(
     assert revision.projected == again
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_refresh_does_not_repair_a_projection_of_a_document_that_does_not_match(
     session: Session,
     service: CatalogEntityService,
@@ -421,9 +422,37 @@ def test_refresh_does_not_repair_a_projection_of_a_document_that_does_not_match(
 
     revision = session.get(CatalogDocumentRevision, revision.id)
     assert revision is not None and revision.projected == broken
-    # Damaged source bytes are never promoted into a reusable projection.
-    with pytest.raises(CatalogRevisionContractError):
-        read_catalog_document(revision)
+    identity = (revision.publisher, revision.slug)
+    session.expunge_all()
+    session.commit()
+    sessions = sessionmaker(session.get_bind(), expire_on_commit=False)
+    catalog = CatalogService(
+        sessions, clock=lambda: NOW, cursors=CursorCodec(b"c" * 32)
+    )
+    assert catalog.recipe_catalog_local_revisions([identity]) == {}
+    document = _recipe(_model())
+
+    def ingest():
+        return catalog.import_recipe_library(
+            "operator",
+            library_commit="a" * 40,
+            source_path="recipe.json",
+            document=document,
+            expected_content_sha256=document_sha256(document),
+            dependency_documents=[_model()],
+        )
+
+    repaired = ingest()
+    assert ingest().recipe_id == repaired.recipe_id
+    library = LibraryProjection(sessions, cursors=CursorCodec(b"c" * 32))
+    detail = library.authoring_recipe_detail(repaired.recipe_id)
+    assert detail.definition == RecipeDefinition.model_validate(document)
+    assert detail.model_documents[0].model_document == ModelDefinition.model_validate(
+        _model()
+    )
+    assert catalog.recipe_catalog_local_revisions([identity])[
+        identity
+    ].content_sha256 == document_sha256(document)
 
 
 def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(

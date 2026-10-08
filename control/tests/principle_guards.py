@@ -82,10 +82,17 @@ def literals(node: ast.AST) -> set[str]:
 
 def local_nodes(node: ast.AST):
     """Walk a scope without accidentally charging nested helpers to its owner."""
-    yield node
-    for child in ast.iter_child_nodes(node):
-        if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            yield from local_nodes(child)
+    pending = [node]
+    while pending:
+        current = pending.pop()
+        yield current
+        pending.extend(
+            child
+            for child in reversed(list(ast.iter_child_nodes(current)))
+            if not isinstance(
+                child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+            )
+        )
 
 
 def positive_comparisons(node: ast.AST, positive: bool = True):
@@ -323,6 +330,45 @@ def _calls_observation_deadline(
     )
 
 
+def relative_import_owner(path: str, node: ast.ImportFrom) -> Path | None:
+    """Resolve concrete relative owners, including a module just split into a package."""
+    if not node.level or node.module is None:
+        return None
+    owner = ROOT / path
+    if not owner.exists() and owner.with_suffix("").is_dir():
+        owner = owner.with_suffix("") / "__moved__.py"
+    parent = owner.parent
+    for _ in range(node.level - 1):
+        parent = parent.parent
+    return parent.joinpath(*node.module.split("."))
+
+
+def imported_helpers(
+    tree: ast.Module, path: str
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Follow explicit sibling helper imports so extraction cannot hide GET refusals."""
+    helpers = {}
+    for imported in tree.body:
+        if not isinstance(imported, ast.ImportFrom) or imported.level != 1:
+            continue
+        owner = relative_import_owner(path, imported)
+        if (
+            owner is None
+            or not (owner.parent.parent / "__init__.py").is_file()
+            or not owner.with_suffix(".py").is_file()
+        ):
+            continue
+        definitions = {
+            node.name: node
+            for node in ast.parse(owner.with_suffix(".py").read_text()).body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        for alias in imported.names:
+            if alias.name in definitions:
+                helpers[alias.asname or alias.name] = definitions[alias.name]
+    return helpers
+
+
 def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
@@ -379,25 +425,26 @@ def scan_source(
         alias.asname or alias.name
         for imported in tree.body
         if isinstance(imported, ast.ImportFrom)
-        and imported.module == "operation_api"
-        and imported.level == 1
+        and any(alias.name == "_OperationResponseTooLarge" for alias in imported.names)
+        and (
+            (imported.module == "operation_api" and imported.level == 1)
+            or relative_import_owner(path, imported)
+            == ROOT / "control/src/vonk_control/operation_api"
+        )
         for alias in imported.names
         if alias.name == "_OperationResponseTooLarge"
     }
     # An unrelated local class or assignment cannot borrow the owner's name.
-    resource_errors -= (
-        {
-            node.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
-        }
-        | {
-            node.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
-        }
-        | {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
-    )
+    if resource_errors:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                resource_errors.discard(node.id)
+            elif isinstance(
+                node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
+            ):
+                resource_errors.discard(node.name)
+            elif isinstance(node, ast.arg):
+                resource_errors.discard(node.arg)
 
     class Collector(ast.NodeVisitor):
         def __init__(self):
@@ -682,6 +729,8 @@ def scan_source(
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         }
+        local_functions = set(functions)
+        functions.update(imported_helpers(tree, path))
         bad = {
             key
             for key, node in functions.items()
@@ -703,6 +752,8 @@ def scan_source(
                 break
             bad = propagated
         for key, node in functions.items():
+            if key not in local_functions:
+                continue
             is_get = any(
                 isinstance(d, ast.Call)
                 and (
@@ -983,6 +1034,7 @@ def relocate(document: dict, moves=None) -> dict:
             group: [
                 {
                     **entry,
+                    "function": moves.scope(entry["path"], entry["function"]),
                     "path": moves.function(
                         entry["path"],
                         entry["function"],

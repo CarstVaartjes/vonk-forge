@@ -3,90 +3,6 @@
   "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
   "debt": [
     {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "artifact",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "distribution_manifest",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "distribution_object",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "enrollment_bootstrap",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "install_agent_routes.distribution_manifest",
-      "kind": "get-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "install_agent_routes.distribution_object",
-      "kind": "get-refusal",
-      "count": 2
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "install_agent_routes.enrollment_bootstrap",
-      "kind": "get-refusal",
-      "count": 3
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "install_agent_routes.recipe_run_disposition",
-      "kind": "get-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "recipe_run_disposition",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "source_bundle",
-      "kind": "get-helper-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/api.py",
-      "function": "create_app.fleet_event_stream",
-      "kind": "get-refusal",
-      "count": 2
-    },
-    {
-      "path": "control/src/vonk_control/api.py",
-      "function": "create_app.job_view",
-      "kind": "get-refusal",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/api.py",
-      "function": "create_app.operation_view",
-      "kind": "get-refusal",
-      "count": 4
-    },
-    {
-      "path": "control/src/vonk_control/api.py",
-      "function": "create_app.operations_view",
-      "kind": "get-refusal",
-      "count": 3
-    },
-    {
       "path": "control/src/vonk_control/artifact_job_api.py",
       "function": "agent_input",
       "kind": "get-helper-refusal",
@@ -355,130 +271,132 @@
       "function": "review_remove",
       "kind": "get-helper-refusal",
       "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "artifact",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "distribution_manifest",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "distribution_object",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/enrollment.py",
+      "function": "enrollment_bootstrap",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "install_artifacts_routes.distribution_manifest",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/artifacts.py",
+      "function": "install_artifacts_routes.distribution_object",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/enrollment.py",
+      "function": "install_enrollment_routes.enrollment_bootstrap",
+      "kind": "get-refusal",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/observations.py",
+      "function": "install_observations_routes.recipe_run_disposition",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/observations.py",
+      "function": "recipe_run_disposition",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/agent_api/observations.py",
+      "function": "source_bundle",
+      "kind": "get-helper-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.fleet_event_stream",
+      "kind": "get-refusal",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.job_view",
+      "kind": "get-refusal",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.operation_view",
+      "kind": "get-refusal",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/api/application.py",
+      "function": "create_app.operations_view",
+      "kind": "get-refusal",
+      "count": 3
     }
   ],
   "exceptions": [
     {
-      "path": "control/src/vonk_control/agent_api.py",
-      "function": "install_agent_routes.source_bundle",
+      "path": "control/src/vonk_control/agent_api/observations.py",
+      "function": "install_observations_routes.source_bundle",
       "kind": "get-refusal",
       "count": 2,
       "reason": "security-edge",
       "justification": "The authenticated agent source transfer must preserve explicit denied-access HTTP403; its existing HTTP503 reports actual source storage outage without inventing bundle bytes. These are transport authorization/dependency refusals, not damaged stored progress admission gates."
-    },
-    {
-      "path": "control/src/vonk_control/api.py",
-      "function": "create_app.operations_view",
-      "kind": "get-resource-refusal",
-      "count": 1,
-      "reason": "resource-bound",
-      "justification": "The canonical OperationResponseTooLarge handler protects the installed reader 1MiB response allocation after optional progress/cancellation projections are replaced by explicit typed unavailable evidence. It measures UTF-8 bytes and reports observed/allowed bytes; identity, authority, durable operation state and continuation are preserved. List paging returns any fitting earlier prefix with its signed cursor, so only an indivisible remaining first row can refuse. Malformed stored observations are not this exception and remain separate read debt."
-    },
-    {
-      "path": "control/src/vonk_control/api.py",
-      "function": "create_app.operation_view",
-      "kind": "get-resource-refusal",
-      "count": 1,
-      "reason": "resource-bound",
-      "justification": "The canonical OperationResponseTooLarge handler protects the installed reader 1MiB response allocation after optional progress/cancellation projections are replaced by explicit typed unavailable evidence. It measures UTF-8 bytes and reports observed/allowed bytes; identity, authority, durable operation state and continuation are preserved. List paging returns any fitting earlier prefix with its signed cursor, so only an indivisible remaining first row can refuse. Malformed stored observations are not this exception and remain separate read debt."
     }
   ],
   "content_identities": {
-    "control/src/vonk_control/agent_api.py": {
-      "_log_evidence_dropped": "f29e4b35acb7907008e3d75500e2925b3bcba6969844f9af88e7e7cc947ba946",
-      "_log_evidence_warnings": "5ab77d387e76027051e35147864a66a77c9e6682fc901c60119a0b859593acf3",
-      "_strict_json_datetime": "91dfcc0b4a1e1b780f2da6df279a9894ceed934033d33cfe6dbbdd4f685c54fd",
-      "AgentApiServices": "7a417335112ce0a28c70ac6a30fb34164d18113b003c7969a1f4daee9e46ba72",
-      "EnrollmentRateLimiter": "52fe9e7b68fbe4c14b26c4388281f673747c652aa9814532ffc55ed55082a833",
-      "EnrollmentRateLimiter.__init__": "b3d557791aa0a4bbbb659728b5a75151e21a82814537c8bdef08038f0e1fd692",
-      "EnrollmentRateLimiter.admit": "2780575ed32724da9a2b3331b9edd6ea9f122627515eadfe1a95c8b0213d5558",
-      "EnrollmentGrantResponse": "4dc439605eeef593d534904748385c0e7b18e6d4a20eeeeb7d2ac2d9c38b0bd8",
-      "AgentGrantRequest": "92a4dc3c187e150d0331460ac38de2ebd2e472fddc9a265dc2b57a79f3d971d5",
-      "HostRuntimeGrantRequest": "52a1d998844af929cf4911fd227af77778f264ce9912442c3bbc5f48d57060d8",
-      "HostRuntimeGrantRequest.runtime_binding": "35a6fd72a13a41042ef26f3d4c917f9ae098146ce3dac5f24ab54ba51d62b6c8",
-      "PackageActivationGrantRequest": "f63f4d5270f26315f196e3d7ac1cd88df86c9f7d021376dcc71ba6214d5910e3",
-      "AgentUpgradeGrantRequest": "23f94b338afcbad2342856715660a1ae11e828676afc5eefb0f325b31545bf8d",
-      "HostHelperGrantResponse": "658c0694532349bf49db03a43fcc760e2aa6ad0146803792a99fd52698d016b4",
-      "_host_grant_response": "9ca7d66b603ccbe7e136b6ff100af17edd135085fa543a03ff1517015c2c651f",
-      "_wire": "f0b0320dac12d86b105d006d714986df8881c8614ba403b9d6a5cb141ad6194f",
-      "_now": "67dc007c5635ac1e8ab9e24f33e72c196795a809ce55c7ed4c5a18cffafdf419",
-      "_issued_response": "08a31e51182ef955851a3074c6128673f955a08cc15674ba8af9c91af70a999b",
-      "_json_response": "092d7c5ee5ac57997818d6ddfcb2ebf739565ef137c252ed1a48795db7309045",
-      "_require_services": "6ebe2a76b34d095a911e5ca2242360d24487b9fea40bc74d72022abca3f1cb6e",
-      "_require_enrollment": "be833ffa26a020e9931969f9fb2ce24f7351235d664372ae24c26cdeebd6f99b",
-      "_scope_identity": "12cdb2b97797816259d9d8561e94e2102f4895b188374ed7de300e93a0fcd2b1",
-      "active_agent_identity": "a3c7238532a9a49744e31217f916070677a5a402a57c6204ad44d99ce8367267",
-      "activation_agent_identity": "1696aacbd6131a191f56d3b66c85a572c6ff2b055b49df37742d86ecdb7f963f",
-      "_agent_identity_state": "45fedb32f8530bb35a043c48a02e86eec14e6d8a28554f6e50415d1c68c76041",
-      "_authenticated_identity": "40f58f270c2556ad7f34f10ffd7330ce3448874dfffd1fd6ed40ade7bc1dda60",
-      "_authenticated_activation_identity": "39ea4e02c2b9d08fb7512b572430d1c11a958b9512eaa0a651b4353a38b7ac17",
-      "_body_node_matches": "bfff9a922bb34d304830508d65a80f52ee1cb9caf0bd0273f656bec236158469",
-      "_validated_authenticated_source": "b42a3dc79b906c0946622e3ef3705e0aa99dea3fedd3c25dfcae8dae9765a1b6",
-      "_EnrollmentGrantScan": "7f809ceaf10f98e98b33751f6953b10055c3b24468bf044e81140f74b12f9a7a",
-      "_references_digest": "87af9b7445ef99e481b57efa86b99ecd13bf17bd8d280873f2064cffa77983e0",
-      "_sha256_path": "b36317e29d9ba817218deeca021dee275d8ecc37ce346a56f673830c897f8f12",
-      "RecipeImageUploadHeaders": "5485541cc1db8022b5917f719be61f8fdfa63a8ec58f2a964909b4905a1df0e9",
-      "RecipeImageUploadStatus": "bce22f41685c415c8cc8b660640c94687adb7deffecf0bd175a92ab4016dca9f",
-      "RecipeImageUploadStatus.response": "2301e49885d0f5039c6ce1dd99ac1863522556e3d412c49c6e22c4885f554dba",
-      "_prepare_recipe_image_upload": "310e40241cc4396be9fd7dec9264fa9c85abcf65071d2a2b7a97f8c985d25b33",
-      "_flush_and_sync": "6bbc447a7685d1fcf85ed2653beb07cf2d5877997f2bc605999516525254243c",
-      "_commit_recipe_image_upload": "1a440b928ae5652174433b7fea14c06c110c183e6e2e6ee3d4ba26aa24864a42",
-      "_unlink_if_present": "2a7aab7a0fc6f3441f648bb060f8500e792c7c657e6952d2d3727296585a4a4f",
-      "_owned_artifact": "40500b94ec9f65e5ea34c113a8c3b62a210bbfba1b52b139e151c97680647550",
-      "_served_from_edge": "2848f994f4197d39ee27cf6793b79a0468109bbb53594380be19c118d77e8ae2",
-      "_range": "99fc96f6b1c58449414bb6c37b6af1d1763d1f5dd5a8feff697205d3bc3e6ce6",
-      "install_agent_routes": "cd0e1b3dbb7b3c4c79743caa652be70c459d4a3b18f2cde96be5c89f8f60c5ac",
-      "install_agent_routes.enrollment_bootstrap": "d1a4262eace2147871483485806ce30c95b289dc80d573eeabcb889545fdaeb4",
-      "install_agent_routes.enroll": "e708918ebd76ec2a1ecca69caec7cfc918ecb93611adf1721f1f6ea0f883f1a3",
-      "install_agent_routes.claim": "f7e1b263077dfdcef35cf1f7525a14a71eff2aed1e2cc0cc1925f96e1328c339",
-      "install_agent_routes.inventory": "7dbd080d897bb42f6df3fe66606dd85364645f7282f70fb87c5a74ddc986ec94",
-      "install_agent_routes.telemetry": "91dc9e3c27097d58261036c72f4d453bd518381b9c019e30d70189221dc157b6",
-      "install_agent_routes.recipe_run_observations": "091ca5e147ed3e8fdda4568090c7664b395b66ce55cf7ba7ebedcf0958e6712c",
-      "install_agent_routes.recipe_run_disposition": "34b97af81e53d328e2e8beff8515a0a56e9eb7cbf9f5d46c714a74f062bbb692",
-      "install_agent_routes.source_bundle": "af8d74262ec3f30f120fded9172a865fea750e54ae91678982128f5851148a2d",
-      "install_agent_routes.helper_identity": "5763db4d78e939fd006e410c7c7ed2290b7b69dc9e0fac9bcbecc221c8482bef",
-      "install_agent_routes.host_runtime_service": "4e11351a91114686019906242c62b7d40464524b66c38d0983cf5f9ee3640729",
-      "install_agent_routes.host_runtime_grant": "46ec7b67c363452afb886dd27823030e15cb7ed33fa44f98b12ebae5619439ac",
-      "install_agent_routes.package_activation_grant": "dfac82dd3041c48dd97f2f65d78fbf540ea1fdf1541d9241e36ca3fd31f7bcc4",
-      "install_agent_routes.agent_upgrade_grant": "25666eb0c9792e810ad7faab6022ed30e77a52da836b7446a2afc293c15f806f",
-      "install_agent_routes.heartbeat": "4ce49ab8ccdc9c06e9671519271cf74e2d7932e5422be1b6bc5fc86c5b503566",
-      "install_agent_routes.result": "66484ead06a92cd70a06516342f20f082070d80cedc55e1db1c54104ffc0c5ea",
-      "install_agent_routes.renew_expired": "d1c0e69e99a21afaa4b38fed5c5600bbc30c455e6af58eed10eae2a4fc978215",
-      "install_agent_routes.renew": "ffc9c885aff95b881b33fdd92df4a4960d91c115645bcc6e31e0f3865589a7d9",
-      "install_agent_routes.recover_renewal": "38212f7bf2efae0155bb7e2590873801cb9be23a5a636116c7cd5dab1be5a583",
-      "install_agent_routes.activate": "0c18a9fdfc3668fe403837bd2663b9041c3154869758fe5c09aed3d488e14312",
-      "install_agent_routes.image_upload_context": "df5fae0b8a4a0201b99d302b8e4b07ed7664d25cb1bd4abc0f86f5608ac64bc9",
-      "install_agent_routes.recipe_image_upload_status": "9c7b2511de16c700db78b5b0d5800f8340596d1a04931c551bcff838990dd5a1",
-      "install_agent_routes.upload_recipe_image": "f1be4c3a139e8949bec05d7618c4b6dc82d6c9ba5450d2d35b341794ad30775f",
-      "install_agent_routes.artifact": "528c2fb723b873ec50cb9cdea5690071002aa9f10aa16bddbba4386506b2329f",
-      "install_agent_routes._distribution_error": "6371d07f2d94633382c90b588ed71ae7d2638f87a443b1e4ae1052d0c25192d8",
-      "install_agent_routes.distribution_manifest": "d7cf34744378783681abcdc3f348e0a4ce864bd281f361572908402c7d1fd594",
-      "install_agent_routes.distribution_object": "2a7ab684cf47750985f890f43b414adb35202d4511a0d1a09e4c3d92728d9f84",
-      "install_agent_routes.openapi_with_enrollment_contract": "7e5225da3574f9335b8f837170069f5a760467ee4029d4b519c93fbd4468d7bd",
-      "<module>": "43edd8533ec4469c03ff5693f81b299fb7bfb3843b708eb4cc2286bdc41d7688"
+    "control/src/vonk_control/agent_api/artifacts.py": {
+      "install_artifacts_routes": "33aadceddb698f05b8e95f86d91dd9956f99a488fbb83492fcc14b19cec34391",
+      "install_artifacts_routes.image_upload_context": "df5fae0b8a4a0201b99d302b8e4b07ed7664d25cb1bd4abc0f86f5608ac64bc9",
+      "install_artifacts_routes.recipe_image_upload_status": "9c7b2511de16c700db78b5b0d5800f8340596d1a04931c551bcff838990dd5a1",
+      "install_artifacts_routes.upload_recipe_image": "f1be4c3a139e8949bec05d7618c4b6dc82d6c9ba5450d2d35b341794ad30775f",
+      "install_artifacts_routes.artifact": "528c2fb723b873ec50cb9cdea5690071002aa9f10aa16bddbba4386506b2329f",
+      "install_artifacts_routes._distribution_error": "a54f1fe6502014d58067994190b69382f8d7d0158b0aa814786b2721c3bb0cb9",
+      "install_artifacts_routes.distribution_manifest": "d7cf34744378783681abcdc3f348e0a4ce864bd281f361572908402c7d1fd594",
+      "install_artifacts_routes.distribution_object": "2a7ab684cf47750985f890f43b414adb35202d4511a0d1a09e4c3d92728d9f84"
     },
-    "control/src/vonk_control/api.py": {
-      "_bounded_error_content": "b316ea52ec7e6fbc28d5e5ce8f99bb546fdfa920d740fd309c5c0d86c01b579c",
-      "_validation_detail": "745c89073fa43458db5bf9de88fde563ccdbbde6fe18abb26ed6f1e8a55e5d5e",
-      "_invalid_login_content": "8cf9b0c37c552731c07273e9c4d5b4ccdbc8ca34ed404669fed3d0be72ed0f89",
-      "_catalog_error_content": "7833ae66c2cb5d810ec98b61c009ea7b9136c22f8a8d649b782ed7d9efe8829b",
-      "_http_error_code": "3e1c23db474d16ec90b102e5d9b21983a9ec0db913cc44bb9a4f34b58bcfe43b",
-      "_FleetEventStreamResponse": "e09a1df929386935495285db0399ca7731119598473ce7f8991ae09fc4cac8b0",
-      "_DuplicateJsonKey": "636c783c5194c52824877818a509d7face7c82ca93b68ff620c6fffb4e23cfab",
-      "_RequestBodyTooLarge": "dc28b0a6892765ca7d77016861aba525652ec5c17ee4b084a9b23217334c8d11",
-      "_reject_duplicate_json_keys": "6f6563c25431a91bdb677e1318a213cc4f8936047798f0c15ec45b9d3799c036",
-      "_log_request_failure": "e009783878e5b77610aa06aac7851095200409871ed0e36114269f2af4bfead3",
-      "_log_agent_rejection": "e5b55f4050190ba8919ec8f9fa8712770f69c2f5cdc4123934a255c991fe469c",
-      "_bounded_request_body": "860603ad736eee48342c74372a154dfc337e82b14c8e836ac77ad370a3c533ff",
-      "SpaFiles": "8a44f65e1425e596bf7f2cf6f1388177dd612d2860739f571745f117b46bab7d",
-      "SpaFiles.get_response": "f96c86bdd256f136cf53d1572cd381b264e8917093e61a234d60f27420af26a9",
-      "JobQueue": "5576b326ce671cca79ba8a53e84a41810a37a40b2bfdc8fa71c59a9478f9dffd",
-      "JobQueue.enqueue": "a8b7d79abe0dd38b8050c75dc3dae85939d51459d1c81990149c819c0514971c",
-      "JobQueue.get": "e3588c3634d46238df176afa6fabb6056122e2ed0383190c2cd08bcda706a4b4",
-      "refresh_fleet_metrics": "a07d3a2bed89706b23d6b048dda4db978c12c78b3f21b25b6bc63d2aa802ad6a",
-      "create_app": "546facbc68e166f9e7a6dbc072a22a8f20d930a1f4bd0c725d019a0477ca93da",
-      "create_app.canonical_agent_http_error": "653fc6baafa5688c50361f374667ceedab6f0edb35f200d418bc58282c6097c5",
-      "create_app.canonical_agent_validation_error": "690a4bc610fcb3492536a9a4634bce03da1a939ea5b3084b6c1f0de24701b42d",
+    "control/src/vonk_control/agent_api/enrollment.py": {
+      "install_enrollment_routes": "a6b68db218aec51d94f217480562668c7c8c49e4b7ba420efe0b2471ab00a12a",
+      "install_enrollment_routes.enrollment_bootstrap": "d1a4262eace2147871483485806ce30c95b289dc80d573eeabcb889545fdaeb4",
+      "install_enrollment_routes.enroll": "e708918ebd76ec2a1ecca69caec7cfc918ecb93611adf1721f1f6ea0f883f1a3"
+    },
+    "control/src/vonk_control/agent_api/observations.py": {
+      "install_observations_routes": "0dbe085e59817e1d35abd500b07a82939081ab2c4eba9f4bab19ab946002ec99",
+      "install_observations_routes.helper_identity": "5763db4d78e939fd006e410c7c7ed2290b7b69dc9e0fac9bcbecc221c8482bef",
+      "install_observations_routes.claim": "f7e1b263077dfdcef35cf1f7525a14a71eff2aed1e2cc0cc1925f96e1328c339",
+      "install_observations_routes.inventory": "7dbd080d897bb42f6df3fe66606dd85364645f7282f70fb87c5a74ddc986ec94",
+      "install_observations_routes.telemetry": "91dc9e3c27097d58261036c72f4d453bd518381b9c019e30d70189221dc157b6",
+      "install_observations_routes.recipe_run_observations": "a8418840f88082b6dc9afc811a96ae633fdab46013d8b64ce49feaef72ff8062",
+      "install_observations_routes.recipe_run_disposition": "34b97af81e53d328e2e8beff8515a0a56e9eb7cbf9f5d46c714a74f062bbb692",
+      "install_observations_routes.source_bundle": "af8d74262ec3f30f120fded9172a865fea750e54ae91678982128f5851148a2d"
+    },
+    "control/src/vonk_control/api/application.py": {
+      "create_app": "a6775e0d44290b5380220ec9757eba0ca9582465a0d6b28f7cdd398646247d1e",
+      "create_app.canonical_agent_http_error": "a19386e56bb3020631ce156c0dca49d957ce44e8c05fc6a47ada0b92303a2ad6",
+      "create_app.canonical_agent_validation_error": "9370c6435fd37361b25ac47a3a87094fff645768302cff43fcce5776f18e7271",
       "create_app.telemetry_request_boundary": "4ad757859f145d52d4710b622a1da76bed1bd1f7ffd1ffe7986efafb79e1d0ba",
       "create_app.request_boundary": "dea0683672054081e08434f4d3057df9732017415a05a162d4f086f9dda3fcf6",
       "create_app.actor": "5488b053a5e1eebf48dab66b7f73d4ca2cda976497e605bbd3e806ab22910196",
@@ -489,19 +407,10 @@
       "create_app.platform_metrics": "012e93e35ccdb0b943679f26b627032ae351abdf0dbb2f53900c8b7463f89971",
       "create_app.fleet_event_stream": "43d71b7a25aaab33528874a5632c5e5922b21b08371252b573cee60ee5977128",
       "create_app.activity_detail": "8412f0f9369c7524c04523790e998674cc7d3770e6116372c3b70db0ebcedec7",
-      "create_app.operations_view": "43b82b31bc52f0215d3fc7332ff823479f55dbbb5f2475ac5394bb93fe56cd98",
-      "create_app.operation_view": "4ec8e93665d6efa5fb7f3e559ac901eea65b63e2d78548f1c8983a231217b13b",
+      "create_app.operations_view": "27b7eb7d735218d29972e3b88ca1f12ca45f9afa2cfaefdd132aef444a75a878",
+      "create_app.operation_view": "ac3827a195516dd23cbe94182bd244b1300bbb3d2b56df8dada1541fe855b79b",
       "create_app.job_view": "754d9f4c9f68c4126defc8680f2bdbd2e5c05a5459c4b2efc9c40b039222bbcc",
-      "create_app.resume_job": "7f58e9155e4110534855ce1e7074124b65d339c0621845b27eca7d9063063bd5",
-      "_close_model_cache": "9eca711a4633a9cd077f803b4fe7d91ab554e4c0baed874694524a381d7fb36f",
-      "production_app": "52fa35532717f44f854f44bcaf0f4b19143b88cefba9eb1dffb96cd98bdce1e8",
-      "production_app.clock": "3c87c7fecd6efb5bf9a23b9256ee2cf26c0be1d7b831864e8bc856c1538e0dba",
-      "production_app.build_cache": "948c3e7d9b1ac2a7754013491fbc75a505a55c2afc4f73e7e2c4a3ef35628054",
-      "production_app.build_artifact_jobs": "4c060fb9071db6525f6b00b04f34bbdf69feb911acdf0127aead9c8c0832cc48",
-      "production_app.consume_agent_result": "7a81b5bc855cd0ef6226f12d62d761eeef766e27f855376c92026e359d2a50f5",
-      "production_app.refresh_metrics": "6010a6955dfb9d83961b17c53ca8835afb64b6db803a02f1499d0ef482828bcf",
-      "production_app.lifespan": "ab66612f1805f1cc6dac4ba6c5251c445698c50fd9c3a41919b9024f333b5f54",
-      "<module>": "a805a829801ad698869050c894b358a12641ef6296305c69b74a7b697b9b7cde"
+      "create_app.resume_job": "7f58e9155e4110534855ce1e7074124b65d339c0621845b27eca7d9063063bd5"
     },
     "control/src/vonk_control/artifact_job_api.py": {
       "ArtifactJobModel": "b4084114cb3587178219f696217f1f0888af4cea51c932b39ab7d4b216dc772b",
@@ -659,16 +568,17 @@
       "install_model_operator_routes.download": "f110a83d5be13f5bca65b96e626527ef899fd472cbaf08b48e9815127b214a87",
       "install_model_operator_routes.remove": "4ea2bb6055220b70e06cc7e840f1b92b2045f0ae02dfeff9c0dc40eba5a7dc44",
       "install_model_operator_routes.cancel_operation": "ea8636ee483d7d9668351943d9abaea72c8d31e2488338e687a869de0e49fa90",
-      "ModelCacheOperationProvider": "4f8c7227f6755cbfd1038b5026f83c5512221d39c8206f03d376428e861c4fe9",
+      "ModelCacheOperationProvider": "73fe12d8e0add3fcd5c88dc666d51993942e880b6096a3eb16250890ca8c8e86",
       "ModelCacheOperationProvider.__init__": "784ecbc0f906b3355f33a9741e10be67908ba470c8b7fb8b4c63e815bdfa5219",
-      "ModelCacheOperationProvider.list_operations": "3601f5e3dcc4a789b360d2ed86baccc643c3efc4142788ae4e7e7da3f83dbbe7",
+      "ModelCacheOperationProvider.list_operations": "c793ef9c888d51fc8a1d631e2cf9c2ba61dc8bc0a96c43eaee97c05f277bff86",
+      "ModelCacheOperationProvider._list_operations_once": "4ba1732406d3310c9461ff0997b318644227b20a1f048ae297a87be28e8ee6b2",
       "ModelCacheOperationProvider._next_cursor": "ee7a8718c0bf06c65721783e65be8d4404d1959a7d34b8ca960147913678aba8",
       "ModelCacheOperationProvider.get_operation": "6f41ab65e52adfdb9162739faf075298e3ec242b8fd44c6dd42300cad9c1b2af",
       "ModelCacheOperationProvider._summary": "3b81ea90ae9172673ddd118d4604d714bd98ff22b3ac182b0faab4f32387fc56",
       "ModelCacheOperationProvider._progress": "5f8019106fd1fb64ddc2d03c7180c0834e32c731ce9b8d89371f8f4c18d6ae75",
       "model_cache_operation_provider": "7d3452c6c89b65a0e32207964e01d7bbfcc7eecbe8d7dd5e8e940b7dea478b00",
       "register_model_cache_operation_provider": "5977cdfff7b887e0ef9c4421676a2cf2b59b89946e48d31bd452cfb0e646ef47",
-      "<module>": "cbcaef2f057de600476089b567bb2dac2708bbb0b3efa821ed5d2f7588a0aecd"
+      "<module>": "7c7e2e3f03e90a49f440a9bf6fb15bcd83d7cc4b97e316f8d7b105c6251b6e34"
     },
     "control/src/vonk_control/operator_projection_api.py": {
       "FleetRenameRequest": "f2e72589415ee5e7744d16a007fb8c998186168d6483b186e81bb53b065340c2",

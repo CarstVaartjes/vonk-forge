@@ -33,7 +33,7 @@ from .catalog_entities import (
     CatalogEntityService,
     CatalogValidationError,
     _head,
-    recipe_document_projection,
+    _rederive_projection,
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
@@ -119,6 +119,7 @@ class RecipeCatalogLocalRevision:
     # The package the active revision's source bundle was imported from; None
     # when an older import recorded none or the projection cannot be read.
     package_sha256: str | None = None
+    source_bundle_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +280,9 @@ class CatalogService:
                         release_version=_release_version(row.document),
                         node_count=_node_count(row.document),
                         package_sha256=_projected_package_sha256(row),
+                        source_bundle_sha256=read_catalog_projection(
+                            row
+                        ).source_bundle_sha256,
                     )
         return result
 
@@ -545,7 +549,7 @@ class CatalogService:
                         installed_bytes=parsed.installed_bytes,
                     )
                     if isinstance(parsed, ModelDefinition)
-                    else recipe_document_projection(parsed)
+                    else _rederive_projection(session, existing, parsed)
                 )
                 session.execute(
                     update(CatalogDocumentRevision)
@@ -556,20 +560,39 @@ class CatalogService:
                     )
                 )
                 session.refresh(existing)
-            if existing.state != "active":
-                # Exact ingress content may reuse a failed or pending identity.
-                # It must not collide with the unique historical digest row.
-                root = session.get(
-                    CatalogDocument, existing.document_id, with_for_update=True
+            root = session.get(
+                CatalogDocument, existing.document_id, with_for_update=True
+            )
+            if root is None:
+                root = CatalogDocument(
+                    id=existing.document_id,
+                    kind=kind,
+                    publisher=identity.publisher,
+                    slug=identity.slug,
+                    title=(
+                        parsed.identity.model.title
+                        if isinstance(parsed, ModelDefinition)
+                        else parsed.metadata.title
+                    ),
+                    created_by=actor,
+                    created_at=self._clock(),
+                    updated_at=self._clock(),
                 )
-                if root is not None:
-                    service = CatalogEntityService(
-                        session, clock=self._clock, cursors=self._cursors
-                    )
-                    head = _head(session, root)
-                    service.fail_candidate(root.id)
-                    head.candidate_revision_id = existing.id
-                    return service.resolve(existing.id, actor=actor), True
+                session.add(root)
+                session.flush()
+            service = CatalogEntityService(
+                session, clock=self._clock, cursors=self._cursors
+            )
+            head = _head(session, root)
+            if existing.state != "active":
+                service.fail_candidate(root.id)
+                head.candidate_revision_id = existing.id
+                return service.resolve(existing.id, actor=actor), True
+            if head.active_revision_id is None:
+                service.fail_candidate(root.id)
+                head.active_revision_id = existing.id
+                head.generation += 1
+                session.flush()
             return existing, False
         service = CatalogEntityService(
             session, clock=self._clock, cursors=self._cursors

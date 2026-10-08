@@ -184,7 +184,8 @@ class OperationDetailResponse(StrictModel):
     state: str = Field(min_length=1, max_length=80)
     attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     progress: JobOperationProgress | None = None
-    created_at: str = Field(min_length=1, max_length=64)
+    created_at: str | None = Field(default=None, min_length=1, max_length=64)
+    observation_unavailable: bool = False
     updated_at: str | None = None
     failure: OperationFailure | None = None
     evidence_download: OperationEvidenceDownload | None = None
@@ -227,6 +228,7 @@ class OperationsResponse(StrictModel):
     next_cursor: str | None = Field(default=None, max_length=512)
     total: int | None = Field(ge=0)
     projection_issue: str | None = Field(default=None, max_length=256)
+    continuation_unavailable: bool = False
 
 
 class JobProgress(StrictModel):
@@ -338,6 +340,7 @@ class OperationListPage:
     next_cursor: str | None
     total: int | None
     projection_issue: str | None = None
+    continuation_unavailable: bool = False
 
 
 @dataclass(frozen=True)
