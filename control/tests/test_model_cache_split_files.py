@@ -17,7 +17,6 @@ from pathlib import Path
 
 import httpx2
 import pytest
-import vonk_control.model_cache as model_cache_module
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -496,7 +495,9 @@ def test_parts_fetched_as_parallel_ranges_are_appended_and_removed(
     service, hub, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Real parts (~17 GB) always take the ranged path; force it for small ones.
-    monkeypatch.setattr(model_cache_module, "_PARALLEL_RANGE_MIN_BYTES", 100_000)
+    monkeypatch.setattr(
+        "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 100_000
+    )
     whole = _payload()
     artifact = _artifact(whole, _split(whole))
     operation = _start(service, artifact, KEY.format(10))
@@ -513,7 +514,9 @@ def test_parts_fetched_as_parallel_ranges_are_appended_and_removed(
 def test_a_half_fetched_next_part_counts_toward_resume_bytes(
     service, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(model_cache_module, "_PARALLEL_RANGE_MIN_BYTES", 100_000)
+    monkeypatch.setattr(
+        "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 100_000
+    )
     whole = _payload()
     pieces = _split(whole)
     spec = _spec(whole)

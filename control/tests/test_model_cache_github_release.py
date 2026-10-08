@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState
+from vonk_control.bounded_retry import REQUEST_PAUSES
 from vonk_control.model_cache import (
     ModelCacheService,
     ModelCacheStorageError,
@@ -466,9 +467,7 @@ def test_github_transfer_error_does_not_persist_signed_cdn_url(
         assert CDN_URL not in durable_view
         assert [str(request.url) for request in requests] == [
             RELEASE_URL,
-            ASSET_URL,
-            CDN_URL,
-        ]
+        ] + [ASSET_URL, CDN_URL] * (len(REQUEST_PAUSES) + 1)
         assert all(
             request.headers.get("authorization") is None
             and request.headers.get("cookie") is None

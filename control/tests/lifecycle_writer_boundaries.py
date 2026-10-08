@@ -58,7 +58,40 @@ DICT_STATE_OWNERS = frozenset(
         "control/src/vonk_control/artifact_jobs.py",
         "control/src/vonk_control/fleet_profiles.py",
         "control/src/vonk_control/jobs.py",
-        "control/src/vonk_control/model_cache.py",
+        "control/src/vonk_control/model_cache/artifacts.py",
+        "control/src/vonk_control/model_cache/availability.py",
+        "control/src/vonk_control/model_cache/cancellation.py",
+        "control/src/vonk_control/model_cache/catalog.py",
+        "control/src/vonk_control/model_cache/catalog_helpers.py",
+        "control/src/vonk_control/model_cache/checkpoints.py",
+        "control/src/vonk_control/model_cache/constants.py",
+        "control/src/vonk_control/model_cache/core.py",
+        "control/src/vonk_control/model_cache/download.py",
+        "control/src/vonk_control/model_cache/download_admission.py",
+        "control/src/vonk_control/model_cache/errors.py",
+        "control/src/vonk_control/model_cache/failure.py",
+        "control/src/vonk_control/model_cache/github.py",
+        "control/src/vonk_control/model_cache/http.py",
+        "control/src/vonk_control/model_cache/inventory.py",
+        "control/src/vonk_control/model_cache/operations.py",
+        "control/src/vonk_control/model_cache/persistence.py",
+        "control/src/vonk_control/model_cache/provider_contracts.py",
+        "control/src/vonk_control/model_cache/removal_acceptance.py",
+        "control/src/vonk_control/model_cache/removal_execution.py",
+        "control/src/vonk_control/model_cache/removal_reconcile.py",
+        "control/src/vonk_control/model_cache/removal_review.py",
+        "control/src/vonk_control/model_cache/removal_scope.py",
+        "control/src/vonk_control/model_cache/repair.py",
+        "control/src/vonk_control/model_cache/resolution.py",
+        "control/src/vonk_control/model_cache/retry.py",
+        "control/src/vonk_control/model_cache/scheduler.py",
+        "control/src/vonk_control/model_cache/service.py",
+        "control/src/vonk_control/model_cache/source_helpers.py",
+        "control/src/vonk_control/model_cache/split_transfer.py",
+        "control/src/vonk_control/model_cache/storage.py",
+        "control/src/vonk_control/model_cache/transfer.py",
+        "control/src/vonk_control/model_cache/updates.py",
+        "control/src/vonk_control/model_cache/views.py",
         "control/src/vonk_control/recipe_operations.py",
         "control/src/vonk_control/run_switch_operations.py",
     }
@@ -86,7 +119,104 @@ NON_LIFECYCLE_STATE_VARIABLES: dict[str, frozenset[str]] = {
         path: frozenset({"installation", "reservation", "run"})
         for path in AGENT_JOB_MODULES
     },
-    "control/src/vonk_control/model_cache.py": frozenset({"row"}),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/artifacts.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/availability.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/cancellation.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/catalog.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/catalog_helpers.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/checkpoints.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/constants.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/core.py": frozenset({"row"}),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/download.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/download_admission.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/errors.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/failure.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/github.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/http.py": frozenset({"row"}),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/inventory.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/operations.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/persistence.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/provider_contracts.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/removal_acceptance.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/removal_execution.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/removal_reconcile.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/removal_review.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/removal_scope.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/repair.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/resolution.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/retry.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/scheduler.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/service.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/source_helpers.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/split_transfer.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/storage.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/transfer.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/updates.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
+    "control/src/vonk_control/model_cache/views.py": frozenset(
+        {"row"}
+    ),  # ModelCacheSet
     "control/src/vonk_control/recipe_operations.py": frozenset(
         {
             "build",

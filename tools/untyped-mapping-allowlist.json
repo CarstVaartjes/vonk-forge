@@ -421,8 +421,36 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/model_cache.py",
-      "count": 38
+      "path": "control/src/vonk_control/model_cache/artifacts.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/availability.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/download_admission.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/inventory.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/operations.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/repair.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/updates.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/model_cache/views.py",
+      "count": 4
     },
     {
       "path": "control/src/vonk_control/model_cache_api.py",

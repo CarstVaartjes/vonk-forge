@@ -161,6 +161,10 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
+      "module": "control/src/vonk_control/ca_issuance_contract.py",
+      "kind": "controller-contract"
+    },
+    {
       "module": "control/src/vonk_control/cache_removal_review.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
@@ -265,7 +269,11 @@
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
     {
-      "module": "control/src/vonk_control/model_cache.py",
+      "module": "control/src/vonk_control/model_cache/input_contracts.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/model_cache/provider_contracts.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -427,10 +435,6 @@
     },
     {
       "module": "control/src/vonk_control/worker_memory_contract.py",
-      "kind": "controller-contract"
-    },
-    {
-      "module": "control/src/vonk_control/ca_issuance_contract.py",
       "kind": "controller-contract"
     }
   ],

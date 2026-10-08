@@ -12,7 +12,6 @@
     "control/src/vonk_control/fleet_profiles.py": 11720,
     "control/src/vonk_control/fleet_projection.py": 1656,
     "control/src/vonk_control/library_projection.py": 1811,
-    "control/src/vonk_control/model_cache.py": 11014,
     "control/src/vonk_control/models.py": 2319,
     "control/src/vonk_control/operation_api.py": 2486,
     "control/src/vonk_control/recipe_builds.py": 1976,
