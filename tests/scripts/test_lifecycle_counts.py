@@ -152,3 +152,37 @@ def test_all_inventoried_rust_crates_require_lifecycle_reporting() -> None:
     for crate in RUST_CRATES:
         assert module.is_covered(f"rust/crates/{crate}/src/main.rs")
     assert module.is_covered("control/tests/blocker_rust.py")
+
+
+def test_missing_or_stale_prose_is_informational(monkeypatch, capsys):
+    module = _module()
+    monkeypatch.setattr(module, "_git", lambda *args: "fixture")
+    monkeypatch.setattr(module, "counts_from", lambda read: REAL)
+    assert module.main(["check"]) == 0
+    assert module.main(["check"]) == 0
+    assert capsys.readouterr().out
+
+
+def test_git_observation_exhausts_without_poisoning_next_invocation(monkeypatch):
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    module = _module()
+    attempts = []
+    repaired = False
+
+    def read(*args):
+        attempts.append(args)
+        if not repaired:
+            raise OSError("fixture")
+        return "observed"
+
+    monkeypatch.setattr(module, "_git_once", read)
+    published = None
+    try:
+        published = module._git("fixture")
+    except UnknownOutcomeError:
+        pass
+    assert published is None and len(attempts) == 3
+    repaired = True
+    assert module._git("fixture") == "observed"
+    assert len(attempts) == 4

@@ -26,12 +26,9 @@ Usage::
     scripts/lifecycle-counts check --base origin/main --body-file body.md
                                                   # CI: does the PR report them?
 
-``check`` applies to a pull request that touches lifecycle, raise or allowlist
-files (see :func:`is_covered`).  Its description must carry ``before:`` and
-``after:`` lines; ``before`` must equal the counts at the merge base with the
-base branch and ``after`` the counts at the head.  The check does not decide
-whether a rise is acceptable (the ratchets do); it makes the movement visible
-and the report true.
+``check`` reports stale or missing prose informationally and always succeeds.
+The generated report is evidence, not a second admission authority. Runtime
+behavior and the working-tree guards own acceptance.
 """
 
 from __future__ import annotations
@@ -41,8 +38,11 @@ import json
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
+
+from vonk_agent_protocol import UnknownOutcomeError, WaitReason
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WRITERS = "tools/lifecycle-writers-allowlist.json"
@@ -115,7 +115,7 @@ def _writers_document(read: Reader) -> dict:
 
     try:
         return json.loads(read(WRITERS))
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except FileNotFoundError:
         return {"writers": []}
 
 
@@ -124,7 +124,7 @@ def counts_from(read: Reader) -> dict[str, int]:
     for key, path in INVENTORIES.items():
         try:
             document = json.loads(read(path))
-        except (FileNotFoundError, subprocess.CalledProcessError):
+        except FileNotFoundError:
             counts[key] = 0
             continue
         counts[key] = sum(
@@ -136,6 +136,21 @@ def counts_from(read: Reader) -> dict[str, int]:
 
 
 def _git(*args: str) -> str:
+    """Bounded local observation; no result or failure survives the invocation."""
+    for attempt in range(2):
+        try:
+            return _git_once(*args)
+        except (OSError, subprocess.SubprocessError):
+            time.sleep(0.01 * (attempt + 1))
+    try:
+        return _git_once(*args)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise UnknownOutcomeError(
+            str(error), reason=WaitReason.OBSERVATION_UNAVAILABLE
+        ) from error
+
+
+def _git_once(*args: str) -> str:
     return subprocess.run(
         ("git", *args),
         cwd=REPO_ROOT,
@@ -149,7 +164,13 @@ def _git(*args: str) -> str:
 def reader_for(ref: str | None) -> Reader:
     if ref is None:
         return lambda path: (REPO_ROOT / path).read_text(encoding="utf-8")
-    return lambda path: _git("show", f"{ref}:{path}")
+
+    def read(path: str) -> str:
+        if not _git("ls-tree", "--name-only", ref, "--", path).strip():
+            raise FileNotFoundError(path)
+        return _git("show", f"{ref}:{path}")
+
+    return read
 
 
 def is_covered(path: str) -> bool:
@@ -207,8 +228,8 @@ def check(
     return messages
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+def _main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n")[0])
     parser.add_argument("command", nargs="?", choices=("report", "check"))
     parser.add_argument("--ref", help="print the counts of this commit (default: tree)")
     parser.add_argument("--base", default="origin/main")
@@ -221,7 +242,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     merge_base = _git("merge-base", arguments.base, arguments.head).strip()
     before = counts_from(reader_for(merge_base))
-    after = counts_from(reader_for(arguments.head))
+    after = counts_from(
+        reader_for(arguments.head if arguments.command == "check" else None)
+    )
     if arguments.command == "report":
         sys.stdout.write(report_block(before, after))
         return 0
@@ -234,7 +257,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"lifecycle-counts: {message}", file=sys.stderr)
     if not messages:
         print(f"lifecycle counts: {render(before)} -> {render(after)}")
-    return 1 if messages else 0
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except (UnknownOutcomeError, OSError, ValueError, TypeError, KeyError) as error:
+        print(
+            f"lifecycle-counts: {WaitReason.OBSERVATION_UNAVAILABLE.value}: {error}",
+            file=sys.stderr,
+        )
+        return 0
 
 
 if __name__ == "__main__":

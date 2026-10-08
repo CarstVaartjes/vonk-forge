@@ -5,12 +5,13 @@ from __future__ import annotations
 import ast
 import copy
 import hashlib
-import re
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import TypeAdapter
+
+from .source_observation import observe
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTENT_IDENTITIES = TypeAdapter(dict[str, dict[str, str]])
@@ -21,7 +22,7 @@ def record_identities(document: dict, root: Path = ROOT) -> dict:
     paths: set[str] = set()
 
     def visit(value) -> None:
-        if isinstance(value, str) and value.endswith(".py"):
+        if isinstance(value, str) and value.endswith((".py", ".rs")):
             paths.add(value)
         elif isinstance(value, dict):
             for key, item in value.items():
@@ -37,7 +38,9 @@ def record_identities(document: dict, root: Path = ROOT) -> dict:
     return {
         **document,
         "content_identities": {
-            path: identities((root / path).read_text())
+            path: observe(
+                lambda path=path: source_identities((root / path).read_text(), path)
+            )
             for path in sorted(paths)
             if (root / path).is_file()
         },
@@ -75,6 +78,14 @@ def identities(source: str) -> dict[str, str]:
     return result
 
 
+def source_identities(source: str, path: str) -> dict[str, str]:
+    if path.endswith(".rs"):
+        from .blocker_rust import rust_identities
+
+        return rust_identities(source)
+    return identities(source)
+
+
 class PackageMoves:
     def __init__(
         self,
@@ -88,6 +99,19 @@ class PackageMoves:
         self._targets: dict[str, dict[str, dict[str, str]]] = {}
         self._candidates: dict[str, list] = {}
         self._candidate_stamps: dict[str, tuple] = {}
+        self._rust_cache: dict[Path, tuple[int, int, dict[str, str]]] = {}
+
+    def _rust_functions(self, path: Path) -> dict[str, str]:
+        stat = path.stat()
+        cached = self._rust_cache.get(path)
+        if cached is None or cached[:2] != (stat.st_size, stat.st_mtime_ns):
+            cached = (
+                stat.st_size,
+                stat.st_mtime_ns,
+                source_identities(path.read_text(), path.name),
+            )
+            self._rust_cache[path] = cached
+        return cached[2]
 
     def targets(self, path: str) -> dict[str, dict[str, str]]:
         if path in self._targets:
@@ -123,35 +147,28 @@ class PackageMoves:
         function: str,
         matches_site: Callable[[str, str], bool] | None = None,
     ) -> str:
+        return observe(lambda: self._function_once(path, function, matches_site))
+
+    def _function_once(self, path, function, matches_site):
         old = self.root / path
         package = old.with_suffix("")
         if old.suffix == ".rs":
-            if old.exists():
-                source = old.read_text()
-                if re.search(r"\bfn\s+" + re.escape(function) + r"\b", source):
-                    return path
-                module_root = old.parent if old.name == "lib.rs" else package
-                candidates = [
-                    module_root / (name + ".rs")
-                    for name in re.findall(r"(?m)^(?:pub\s+)?mod\s+(\w+)\s*;", source)
-                ]
-            elif package.is_dir():
-                candidates = sorted(package.rglob("*.rs"))
-            else:
+            previous = self.recorded.get(path, {}).get(function)
+            if not previous:
                 return path
-            # Rust inventories predate body snapshots. Carry only a uniquely
-            # named function with the same scanner finding, never a pooled
-            # allowance or an ambiguous method shared by operation families.
-            matches = [
-                file.relative_to(self.root).as_posix()
-                for file in candidates
-                if file.is_file()
-                and re.search(
-                    r"\bfn\s+" + re.escape(function) + r"\b", file.read_text()
-                )
-                and matches_site is not None
-                and matches_site(file.read_text(), function)
-            ]
+            if old.exists() and self._rust_functions(old).get(function) == previous:
+                return path
+            candidates = [old] if old.exists() else []
+            if package.is_dir():
+                candidates.extend(sorted(package.rglob("*.rs")))
+            if old.exists():
+                candidates.extend(sorted(old.parent.rglob("*.rs")))
+            matches = []
+            for file in dict.fromkeys(candidates):
+                if self._rust_functions(file).get(function) == previous and (
+                    matches_site is None or matches_site(file.read_text(), function)
+                ):
+                    matches.append(file.relative_to(self.root).as_posix())
             return matches[0] if len(matches) == 1 else path
         if old.exists() or old.suffix != ".py" or not package.is_dir():
             return path

@@ -1,38 +1,18 @@
-"""Rule-based first classification of a fail-closed raise.
+"""Inventory proposals without semantic credit from names or diagnostic text.
 
-The blocker ratchet (``blocker_boundaries``) needs every error-class raise to
-belong to a family with a category.  This module proposes that category from the
-exception class, the module and the leading text of the message, so a new site
-(or a module's first review) starts from a consistent answer a reviewer can
-confirm or move.  It decides nothing by itself: ``--classify-new`` only appends
-families for sites the allowlist does not list yet, and every proposal names the
-rule that made it.
-
-The rules follow the blocker audit and the owner's principles: fail closed only
-at a security edge; reject an invalid *request* before effects; an operation that
-is busy or waiting is retried by its owner; everything else (a persisted record
-that does not parse, evidence that is unavailable, a receipt that is missing) is
-bookkeeping that should become *unknown*: observe, reconcile, continue.
-
-``python -m control.tests.blocker_classifier --summary`` prints the counts per
-category and rule; ``--classify-new`` appends the proposed families; ``--demote-unproven`` moves
-every already-retried unknown-outcome site without a proven retry loop to debt;
-``--promote-proven`` moves every debt site whose retry is proven on every call
-path to its module's ``proven-retry`` family; ``--rebalance`` does both (demote
-first), so the allowlist says exactly what the proof says.
+Only the connected all-callers retry proof can establish automatic retry credit.
+A proposal is not behavioral review or completion evidence.
 """
 
 from __future__ import annotations
 
 import ast
-import re
 import sys
 from collections import Counter, defaultdict
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from functools import cache
 
-from vonk_agent_protocol import SECURITY_REFUSAL_SUFFIXES, BlockerCategory
+from vonk_agent_protocol import BlockerCategory
 
 from .blocker_boundaries import (
     ALLOWLIST_PATH,
@@ -46,7 +26,7 @@ from .blocker_boundaries import (
     parsed_modules,
     scan_raises,
 )
-from .blocker_retries import demote_unproven, promote_proven, proven, unknown_classes
+from .blocker_retries import demote_unproven, promote_proven, proven
 
 SECURITY = BlockerCategory.SECURITY_EDGE.value
 INPUT = BlockerCategory.INPUT_VALIDATION.value
@@ -76,171 +56,6 @@ CATEGORY_REASONS = {
     ),
 }
 
-_SECURITY_CLASSES = frozenset(
-    {
-        "AuthError",
-        "BrowserAuthenticationError",
-        "BrowserAuthenticationThrottledError",
-        "EnrollmentDenied",
-        "FleetProfilePermissionDenied",
-        "HostHelperAuthorityError",
-        "RangeResponseError",
-        "RuntimeSecretError",
-        "StaleAgentAttempt",
-        "StaleAttempt",
-        "StepCAError",
-    }
-)
-#: Classes that verify content at its ingress: integrity findings fail closed,
-#: while an unreachable or unreadable source is bookkeeping.
-_INGRESS_CLASSES = frozenset(
-    {"OciImageStoreError", "RecipePackageError", "SourceBundleError"}
-)
-_INTEGRITY_TEXT = re.compile(
-    r"digest|forbidden|invalid|corrupt|damaged|collision|mismatch|unsafe|escape|"
-    r"symlink|traversal|too_(?:many|large)|unsupported|duplicate|incompatible",
-    re.IGNORECASE,
-)
-_INPUT_CLASSES = frozenset(
-    {
-        "BoundedJSONError",
-        "CatalogConflict",
-        "CatalogRevisionContractError",
-        "CatalogValidationError",
-        "ClusterMappingError",
-        "CompiledExecutionPlanError",
-        "ContractGraphError",
-        "CursorError",
-        "ExecutionPlanCompilationError",
-        "GatewayKeyConflict",
-        "HarnessCompileError",
-        "InterfaceAdapterError",
-        "InstallPlanConflict",
-        "LibraryProjectionError",
-        "LibrarySelectorAmbiguous",
-        "LiteLlmPolicyError",
-        "OperationProjectionError",
-        "PasswordPolicyError",
-        "PresenceError",
-        "RecipeExecutionContractError",
-        "RecipeRuntimeSpecError",
-        "RecipeSourcePolicyError",
-        "RecipeStartPayloadError",
-        "RequestFault",
-        "RunPlanConflict",
-        "RuntimeAdapterError",
-        "SettingsError",
-        "SourcePolicyError",
-        "TopologyError",
-        "_DuplicateJsonKey",
-        "_RequestBodyTooLarge",
-    }
-)
-#: Classes whose category neither the name nor the message shows; each was read.
-_CLASS_VERDICTS = {
-    "FleetProfileResourceRecheckUnavailable": (
-        RETRIED,
-        "subclass of the admission-effect busy handoff",
-    ),
-    "FleetProfileUnavailable": (
-        INPUT,
-        (
-            "owner decision: a load whose fleet profile becomes unavailable ends "
-            "superseded (RETRY_SUPERSEDE) so it never blocks other work; the "
-            "client loads again"
-        ),
-    ),
-    "FleetProfileReviewStale": (INPUT, "the accepted review no longer matches"),
-    "RecipeReconciliationBlocked": (
-        RETRIED,
-        "the caller projects it as a typed blocker and the plan observes again",
-    ),
-    "_RunSwitchBuildParentChanged": (
-        RETRIED,
-        "the build parent changed: the phase replans",
-    ),
-}
-_RETRIED_SUFFIXES = (
-    "Busy",
-    "InProgress",
-    "NotReady",
-    "Pending",
-    "PreflightExpired",
-    "Superseded",
-)
-_INPUT_MODULE_SUFFIXES = ("_contract", "_api")
-
-_SECURITY_TEXT = re.compile(
-    r"unauthori[sz]ed|not (?:been )?authori[sz]ed|no longer authori[sz]ed|"
-    r"authorization (?:is )?(?:invalid|revoked|missing)|forbidden|permission|"
-    r"signature|signing key|certificate|credential|secret|\btoken\b|revoked|"
-    r"tombstone|fence|replay|\bnonce\b|untrusted|trusted host|redirect|symlink|"
-    r"traversal|escapes|digest[ _-]?mismatch|identity[ _-]?mismatch|checksum|"
-    r"authentication|private key|\bcsr\b|ed25519|nas-eviction",
-    re.IGNORECASE,
-)
-_RETRIED_TEXT = re.compile(
-    r"\bbusy\b|capacity_busy|in progress|is waiting|awaiting|being reconciled|"
-    r"try again|temporar|waits for|was superseded|superseded",
-    re.IGNORECASE,
-)
-_INPUT_TEXT = re.compile(
-    r"request[ _.-]?(?:key|invalid|conflict)|key[ _](?:was[ _])?already|already used|"
-    r"reuse|not[ _](?:retryable|cancellable)|plan[ _.-]?(?:stale|blocked)|"
-    r"choice[ _]invalid|too[ _]long|"
-    r"stale[ _.-]?plan|cursor|selector|limit is|filter|parameter[s_]|"
-    r"\bmust (?:be|contain|not|use|name)\b|\brequired\b|unsupported|"
-    r"unknown (?:field|parameter|interface)|too (?:large|long|many)|"
-    r"already exists|duplicate|ambiguous",
-    re.IGNORECASE,
-)
-_DEBT_TEXT = re.compile(
-    r"persisted|\bstored\b|stored plan|state[ _.-]?invalid|inconsistent|damaged|"
-    r"corrupt|unavailable|missing|lacks|receipt|evidence|unreadable|"
-    r"uncertain|unknown|not exact|incomplete|changed",
-    re.IGNORECASE,
-)
-
-
-#: The contract's raisable base of each category, and the family category a raise
-#: of a class derived from it belongs to.  Security and invalid-request classes
-#: name their category by type.  An unknown outcome does *not*: raising one is a
-#: handoff only where a registered retry or observe loop is proven to catch and
-#: retry it (``blocker_retries``); everywhere else it is still bookkeeping debt.
-_TYPED_BASES = {
-    "SecurityRefusalError": SECURITY,
-    "InvalidRequestError": INPUT,
-    "UnknownOutcomeError": DEBT,
-}
-
-
-@cache
-def _typed_classes() -> dict[str, str]:
-    """Local classes that derive from one of the three category bases."""
-
-    bases: dict[str, set[str]] = defaultdict(set)
-    for tree in parsed_modules(CONTROL_SOURCE_ROOT).values():
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                for base in node.bases:
-                    if isinstance(base, ast.Name):
-                        bases[node.name].add(base.id)
-                    elif isinstance(base, ast.Attribute):
-                        bases[node.name].add(base.attr)
-    typed = dict(_TYPED_BASES)
-    grew = True
-    while grew:
-        grew = False
-        for name, parents in sorted(bases.items()):
-            if name in typed:
-                continue
-            for parent in sorted(parents):
-                if parent in typed:
-                    typed[name] = typed[parent]
-                    grew = True
-                    break
-    return typed
-
 
 @dataclass(frozen=True)
 class Verdict:
@@ -248,152 +63,18 @@ class Verdict:
     rule: str
 
 
-Rule = Callable[[RaiseSite], str | None]
-
-
-def _text(site: RaiseSite) -> str:
-    return f"{site.code} {site.message}"
-
-
-def _stem(site: RaiseSite) -> str:
-    return site.path.rsplit("/", 1)[-1].removesuffix(".py")
-
-
-def _security_class(site: RaiseSite) -> str | None:
-    return (
-        f"class {site.exception_class} guards a security boundary"
-        if site.exception_class in _SECURITY_CLASSES
-        else None
-    )
-
-
-def _ingress_class(site: RaiseSite) -> str | None:
-    if site.exception_class in _INGRESS_CLASSES and _INTEGRITY_TEXT.search(_text(site)):
-        return f"class {site.exception_class} verifies content at its ingress"
-    return None
-
-
-def _uncertain_class(site: RaiseSite) -> str | None:
-    return (
-        f"class {site.exception_class} is an uncertain outcome: observe, do not park"
-        if site.exception_class.endswith("Uncertain")
-        else None
-    )
-
-
-def _security_text(site: RaiseSite) -> str | None:
-    text = _text(site)
-    if any(suffix in site.code for suffix in SECURITY_REFUSAL_SUFFIXES):
-        return "code carries a security-refusal suffix of the contract"
-    if _SECURITY_TEXT.search(text):
-        return "message names an authentication, signature, secret or path-safety check"
-    return None
-
-
-def _retried_class(site: RaiseSite) -> str | None:
-    return (
-        f"class {site.exception_class} is a busy/pending/superseded handoff"
-        if site.exception_class.endswith(_RETRIED_SUFFIXES)
-        else None
-    )
-
-
-def _retried_text(site: RaiseSite) -> str | None:
-    return (
-        "message says the work is busy, waiting or superseded"
-        if _RETRIED_TEXT.search(_text(site))
-        else None
-    )
-
-
-def _input_text(site: RaiseSite) -> str | None:
-    return (
-        "message rejects the shape or identity of a request"
-        if _INPUT_TEXT.search(_text(site))
-        else None
-    )
-
-
-def _debt_text(site: RaiseSite) -> str | None:
-    return (
-        "message reports a missing, damaged or unobservable record"
-        if _DEBT_TEXT.search(_text(site))
-        else None
-    )
-
-
-def _input_class(site: RaiseSite) -> str | None:
-    if site.exception_class in _INPUT_CLASSES:
-        return f"class {site.exception_class} validates a contract or request"
-    if _stem(site).endswith(_INPUT_MODULE_SUFFIXES):
-        return "raised in a contract or API module"
-    return None
-
-
 def classify(site: RaiseSite, document: dict[str, object] | None = None) -> Verdict:
-    """The proposed category of ``site`` and the rule that chose it.
+    """Only an actual all-callers retry proof can earn automatic credit.
 
-    Order matters.  A security class is security whatever its message; a busy or
-    pending class is a handoff whatever its message.  For a class that names the
-    domain only, the message decides: security words first, then a retried
-    handoff, then a bad request.  A class that validates input stays input unless
-    its message says a *stored or missing* record is the problem, and everything
-    left is bookkeeping debt.
+    Security and caller-input edges require review of effects and ingress.
+    Names, ancestry, messages and file extensions establish none of those facts.
+    Unreviewed proposals remain inventory, never evidence of completion.
     """
-
-    if site.path.endswith(".rs"):
-        return Verdict(
-            DEBT,
-            "Rust ending has no reviewed ingress/request boundary or proven bounded retry",
-        )
-    if site.exception_class in _CLASS_VERDICTS:
-        return Verdict(*_CLASS_VERDICTS[site.exception_class])
-    typed = _typed_classes().get(site.exception_class)
-    if typed == DEBT and site.exception_class in unknown_classes():
-        if document is not None and proven(
-            document, site.path, site.exception_class, site.function
-        ):
-            return Verdict(
-                RETRIED,
-                f"class {site.exception_class} is caught and retried by a "
-                "registered retry loop",
-            )
-        return Verdict(
-            DEBT,
-            f"class {site.exception_class} is an unknown outcome with no proven "
-            "retry loop",
-        )
-    if typed is not None:
-        return Verdict(
-            typed, f"class {site.exception_class} is of the {typed} error type"
-        )
-    if (rule := _uncertain_class(site)) is not None:
-        return Verdict(DEBT, rule)
-    if (rule := _security_class(site)) is not None:
-        return Verdict(SECURITY, rule)
-    if (rule := _ingress_class(site)) is not None:
-        return Verdict(SECURITY, rule)
-    if (rule := _retried_class(site)) is not None:
-        return Verdict(RETRIED, rule)
-    if (rule := _security_text(site)) is not None:
-        return Verdict(SECURITY, rule)
-    if (rule := _retried_text(site)) is not None:
-        return Verdict(RETRIED, rule)
-    input_rule = _input_class(site)
-    if input_rule is not None:
-        if _stored_record(site):
-            return Verdict(DEBT, "validation class, but a stored record is the problem")
-        return Verdict(INPUT, input_rule)
-    if (rule := _input_text(site)) is not None:
-        return Verdict(INPUT, rule)
-    return Verdict(DEBT, _debt_text(site) or "operation bookkeeping by default")
-
-
-_STORED = re.compile(r"persisted|\bstored\b|unavailable|missing|receipt", re.IGNORECASE)
-
-
-def _stored_record(site: RaiseSite) -> bool:
-    return bool(_STORED.search(_text(site)))
+    if document is not None and proven(
+        document, site.path, site.exception_class, site.function
+    ):
+        return Verdict(RETRIED, "every caller reaches a registered observe/retry owner")
+    return Verdict(DEBT, "no caller/effect/authority/reconciliation proof supplied")
 
 
 # ------------------------------------------------------------------ families
@@ -422,11 +103,7 @@ def propose_families(
     families: list[dict[str, object]] = []
     for (path, category), counts in sorted(grouped.items()):
         stem = path.rsplit("/", 1)[-1].removesuffix(".py")
-        review = (
-            "Conservatively inventoried: "
-            if path.endswith(".rs")
-            else "Rule-classified, then reviewed: "
-        )
+        review = "Unreviewed inventory: "
         families.append(
             {
                 "family": f"{path if path.endswith('.rs') else stem}.{category}",

@@ -6,19 +6,23 @@ process exit/abort calls and failure ExitCode values. Propagation with ? is not 
 normal/byte/raw strings, character literals and test-only items are skipped;
 lifetimes remain tokens. No error name or message establishes a security edge
 or proves recovery: unreviewed sites are bookkeeping debt.
+
+Coverage is the union of Cargo targets and declared source modules, including
+literal includes and literal cfg_attr path variants. It is not rustc expansion:
+computed includes and unavailable build outputs end unknown without publishing
+a partial inventory. A six-crate root list is not proof of compiler coverage.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
-import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from vonk_agent_protocol import UnknownOutcomeError, WaitReason
-
 from .blocker_boundaries import REPO_ROOT, RaiseSite
+from .source_observation import observe
 
 RUST_CRATES = (
     "vonk-agent",
@@ -117,6 +121,26 @@ def _pairs(tokens: list[Token]) -> dict[int, int]:
     if stack:
         raise ValueError("unclosed Rust token tree")
     return pairs
+
+
+def rust_identities(source: str) -> dict[str, str]:
+    """Bind findings to complete callable content, independent of file location."""
+    tokens = tokenize(source)
+    pairs = _pairs(tokens)
+    result: dict[str, str] = {}
+    for i, token in enumerate(tokens):
+        if token.literal or token.text != "fn" or i + 1 >= len(tokens):
+            continue
+        j = i + 2
+        while j < len(tokens) and tokens[j].text not in {"{", ";"}:
+            j = pairs[j] + 1 if j in pairs else j + 1
+        if j in pairs:
+            body = [(t.text, t.literal) for t in tokens[i : pairs[j] + 1]]
+            # Repeated method names have no unique proof identity.
+            name = tokens[i + 1].text
+            digest = hashlib.sha256(repr(body).encode()).hexdigest()
+            result[name] = digest if name not in result else ""
+    return result
 
 
 def scan_rust_source(source: str, *, path: str) -> list[RaiseSite]:
@@ -247,10 +271,6 @@ def _module_files(
             if texts[i : i + 2] == ["#", "["]:
                 end = pairs[i + 1]
                 attribute = tokens[i + 2 : end]
-                if attribute and attribute[0].text == "cfg_attr":
-                    raise ValueError(
-                        "conditional module attributes require configuration evidence"
-                    )
                 attributes.append(attribute)
                 i = end + 1
                 continue
@@ -272,7 +292,17 @@ def _module_files(
                     and [token.text for token in attribute[:2]] == ["path", "="]
                     and attribute[2].literal
                 ]
+                conditional_paths = [
+                    attribute[j + 2].text
+                    for attribute in attributes
+                    if attribute and attribute[0].text == "cfg_attr"
+                    for j in range(len(attribute) - 2)
+                    if attribute[j].text == "path"
+                    and attribute[j + 1].text == "="
+                    and attribute[j + 2].literal
+                ]
                 if delimiter == ";" and not test_only:
+                    files.extend(directory / path for path in conditional_paths)
                     if overrides:
                         files.append(directory / overrides[-1])
                     else:
@@ -290,11 +320,30 @@ def _module_files(
                 attributes = []
                 continue
             if texts[i : i + 2] == ["include", "!"]:
-                raise ValueError(
-                    "included Rust source requires module membership evidence"
+                opening = i + 2
+                if opening not in pairs:
+                    raise ValueError("incomplete included Rust source")
+                argument = tokens[opening + 1 : pairs[opening]]
+                if len(argument) != 1 or not argument[0].literal:
+                    raise ValueError("computed include requires build output evidence")
+                files.append(module.parent / argument[0].text)
+                i = pairs[opening] + 1
+                attributes = []
+                continue
+            if i in pairs and texts[i] == "{":
+                test_only = any(
+                    [t.text for t in attribute]
+                    in (["test"], ["cfg", "(", "test", ")"], ["tokio", "::", "test"])
+                    for attribute in attributes
                 )
-            attributes = []
-            # Nested function/macro bodies do not declare crate module files.
+                if not test_only:
+                    visit(i + 1, pairs[i], directory)
+                i = pairs[i] + 1
+                attributes = []
+                continue
+            # Retain attributes through function signatures until their body.
+            if texts[i] == ";":
+                attributes = []
             i = pairs[i] + 1 if i in pairs else i + 1
 
     visit(0, len(tokens), base)
@@ -304,14 +353,15 @@ def _module_files(
 def _crate_entries(root: Path) -> tuple[Path, ...]:
     entries = {root / name for name in ("lib.rs", "main.rs") if (root / name).is_file()}
     manifest = root.parent / "Cargo.toml"
-    if manifest.is_file():
-        document = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        for target in [document.get("lib", {}), *document.get("bin", [])]:
-            if "path" in target:
-                entries.add(root.parent / target["path"])
-        if document.get("package", {}).get("autobins", True):
-            entries.update((root / "bin").glob("*.rs"))
-            entries.update((root / "bin").glob("*/main.rs"))
+    if not manifest.is_file():
+        raise FileNotFoundError(manifest)
+    document = tomllib.loads(manifest.read_text(encoding="utf-8"))
+    for target in [document.get("lib", {}), *document.get("bin", [])]:
+        if "path" in target:
+            entries.add(root.parent / target["path"])
+    if document.get("package", {}).get("autobins", True):
+        entries.update((root / "bin").glob("*.rs"))
+        entries.update((root / "bin").glob("*/main.rs"))
     if not entries:
         raise FileNotFoundError(root)
     return tuple(sorted(entry.resolve() for entry in entries))
@@ -344,14 +394,4 @@ def scan_rust_raises(roots: tuple[Path, ...] = RUST_ROOTS) -> list[RaiseSite]:
     carries the shared unknown outcome, with no persisted state or busy marker;
     a fresh invocation starts its own budget against the current source bytes.
     """
-    for attempt in range(2):
-        try:
-            return _scan_rust_raises_once(roots)
-        except (OSError, UnicodeError, ValueError, TypeError, AttributeError):
-            time.sleep(0.01 * (attempt + 1))
-    try:
-        return _scan_rust_raises_once(roots)
-    except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as error:
-        raise UnknownOutcomeError(
-            str(error), reason=WaitReason.OBSERVATION_UNAVAILABLE
-        ) from error
+    return observe(lambda: _scan_rust_raises_once(roots))

@@ -209,13 +209,20 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         ] {
             match fs::symlink_metadata(installation.join(name)) {
                 Ok(metadata) if trusted_receipt_metadata(&metadata) => match name {
-                    "spec.json" if self.load_spec(installation_id)? == *spec => {}
+                    "spec.json"
+                        if self
+                            .load_spec(installation_id)
+                            .is_ok_and(|stored| stored == *spec) => {}
                     "recipe-content.sha256"
-                        if self.recipe_digest(installation_id)? == recipe_content_sha256 => {}
+                        if self
+                            .recipe_digest(installation_id)
+                            .is_ok_and(|stored| stored == recipe_content_sha256) => {}
                     INSTALLATION_METADATA_FILE
-                        if read_installation_metadata(&installation)?
+                        if read_installation_metadata(&installation)
+                            .ok()
+                            .flatten()
                             .is_some_and(|receipt| receipt_matches_plan(&receipt, spec)) => {}
-                    _ => return Err(OciError::Artifact),
+                    _ => incomplete = true,
                 },
                 Ok(_) => return Err(OciError::Artifact),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => incomplete = true,

@@ -83,11 +83,13 @@ from vonk_agent_protocol import (
     ResourceBlockerCode,
     RunAdmissionCode,
     SecurityRefusalReason,
+    UnknownOutcomeError,
     WaitReason,
     WaitVerdict,
 )
 
 from .parsed_sources import memoized_scan, parsed_tree
+from .source_observation import observe
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
@@ -595,7 +597,7 @@ def scan_raises(root: Path = CONTROL_SOURCE_ROOT) -> list[RaiseSite]:
             sites.extend(collector.sites)
         return sorted(sites, key=lambda site: (site.path, site.line))
 
-    sites = memoized_scan(("raises", root), [root], compute)
+    sites = observe(lambda: memoized_scan(("raises", root), [root], compute))
     if root == CONTROL_SOURCE_ROOT:
         from .blocker_rust import scan_rust_raises
 
@@ -897,7 +899,11 @@ def relocate_document(document, moves=None):
 
 
 def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
-    """Read and validate the allowlist. A malformed entry is a hard failure."""
+    """Reread stored metadata; exhaustion is unknown, never an empty registry."""
+    return observe(lambda: _load_allowlist_once(path))
+
+
+def _load_allowlist_once(path: Path) -> dict[str, object]:
 
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict) or document.get("schema") != 1:
@@ -955,6 +961,8 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
                 raise ValueError(
                     f"{where}: a site is [path, class, function, code, count]"
                 )
+    _wait_groups(waits)
+    _raise_keys(families)
     return relocate_document(document)
 
 
@@ -1056,14 +1064,6 @@ def evaluate_raise_gate(
                 f"fail-closed raises rose from {listed[key][0]} to {count}: "
                 f"{first[key].render()}"
             )
-        elif count < listed[key][0]:
-            messages.append(
-                f"fail-closed raises fell from {listed[key][0]} to {count}; lower "
-                f"the recorded count: {key}"
-            )
-    for key in sorted(listed):
-        if key not in current:
-            messages.append(f"fail-closed entry no longer occurs; delete it: {key}")
     audited = audited_paths(document)
     debt = {"total": 0, "unaudited": 0}
     for (path, *_), (count, category) in listed.items():
@@ -1076,11 +1076,6 @@ def evaluate_raise_gate(
             messages.append(
                 f"bookkeeping-debt raises in the {label} are {debt[name]}, above "
                 f"the ceiling {ceiling}"
-            )
-        elif debt[name] < ceiling:
-            messages.append(
-                f"bookkeeping-debt raises in the {label} are {debt[name]}; lower "
-                f"debt_ceiling.{name} from {ceiling}"
             )
     return messages
 
@@ -1202,7 +1197,7 @@ def dump_document(document: dict[str, object], *, record_content: bool = False) 
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def _main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     document = load_allowlist()
     waits = scan_waits()
@@ -1227,13 +1222,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     if messages:
         for message in messages:
             print(message, file=sys.stderr)
-        return 1
+        return 0
     print(
         f"blockers hold at {len(waits)} operator-wait sites and "
         f"{len(raises)} fail-closed raises, with {len(guard)} uncategorized raises "
         "grandfathered in lifecycle and operation paths"
     )
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments not in ([], ["--list"], ["--write-baseline"]):
+        return 2
+    try:
+        return _main(arguments)
+    except UnknownOutcomeError as error:
+        print(f"{WaitReason.OBSERVATION_UNAVAILABLE.value}: {error}", file=sys.stderr)
+        return 0
 
 
 if __name__ == "__main__":

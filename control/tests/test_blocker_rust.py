@@ -2,7 +2,7 @@
 
 import pytest
 
-from .blocker_rust import scan_rust_source, tokenize
+from .blocker_rust import rust_identities, scan_rust_source, tokenize
 
 PATH = "rust/crates/vonk-agent/src/fixture.rs"
 
@@ -53,11 +53,10 @@ fn product() { Err(Denied) }
     assert [s.function for s in scan_rust_source(source, path=PATH)] == ["product"]
 
 
-def test_distinct_endings_and_paths_preserve_separate_scanner_identities() -> None:
-    sites = scan_rust_source("fn end() { Err(First); Err(Second) }", path=PATH)
-    assert [site.code for site in sites] == ["First", "Second"]
-    other = scan_rust_source("fn end() { Err(First) }", path=PATH + ".rs")
-    assert sites[0].identity != other[0].identity
+def test_behavior_identity_survives_moves_and_invalidates_changed_recovery():
+    source = "fn end() { retry(observe); Err(Missing) }"
+    assert rust_identities(source) == rust_identities("// moved\n" + source)
+    assert rust_identities(source) != rust_identities("fn end() { Err(Missing) }")
 
 
 @pytest.mark.parametrize("source", ["fn f() {", "/* unclosed", 'r##"unclosed'])
@@ -68,6 +67,7 @@ def test_malformed_scanner_input_cannot_silently_erase_inventory(source: str) ->
     except ValueError:
         pass
     assert published is None
+    assert scan_rust_source("fn fresh() { Err(Observed) }", path=PATH)
 
 
 def test_multiline_literals_preserve_source_lines() -> None:
@@ -98,22 +98,31 @@ fn observe() {
 def test_relocated_rust_ending_uses_real_package_discovery(tmp_path) -> None:
     """An unchanged function moved to a module retains its inventory identity."""
     from .blocker_boundaries import relocate_document
-    from .package_moves import PackageMoves
+    from .package_moves import PackageMoves, record_identities
 
     source = "fn end() { Err(Missing) }"
     original = tmp_path / PATH
     original.parent.mkdir(parents=True)
     original.write_text(source)
     site = scan_rust_source(source, path=PATH)[0]
+    document = record_identities(
+        {"fail_closed": [{"sites": [[*site.identity, 1]]}]}, tmp_path
+    )
     package = original.with_suffix("")
     package.mkdir()
     destination = package / "moved.rs"
     original.rename(destination)
     destination_path = destination.relative_to(tmp_path).as_posix()
-    document = {"fail_closed": [{"sites": [[*site.identity, 1]]}]}
-    moved = relocate_document(document, PackageMoves(tmp_path))
+    moved = relocate_document(
+        document, PackageMoves(tmp_path, document["content_identities"])
+    )
     derived = scan_rust_source(destination.read_text(), path=destination_path)
     assert moved["fail_closed"][0]["sites"] == [[*derived[0].identity, 1]]
+    destination.write_text("fn end() { perform_new_effect(); Err(Missing) }")
+    changed = relocate_document(
+        document, PackageMoves(tmp_path, document["content_identities"])
+    )
+    assert changed["fail_closed"][0]["sites"] == [[*site.identity, 1]]
 
 
 def test_process_failure_codes_are_endings_but_task_abort_is_not() -> None:
@@ -131,6 +140,7 @@ def test_file_changes_are_observed_on_the_next_scan(tmp_path, monkeypatch) -> No
     for crate in blocker_rust.RUST_CRATES:
         root = tmp_path / "rust" / "crates" / crate / "src"
         root.mkdir(parents=True)
+        (root.parent / "Cargo.toml").write_text('[package]\nname="fixture"\n')
         (root / "main.rs").write_text("fn end() { Err(Missing) }")
         roots.append(root)
     assert len(blocker_rust.scan_rust_raises(tuple(roots))) == len(roots)
@@ -146,6 +156,7 @@ def test_external_test_modules_are_excluded_by_cfg_not_only_filename(
     monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
     root = tmp_path / "src"
     root.mkdir()
+    (root.parent / "Cargo.toml").write_text('[package]\nname="fixture"\n')
     (root / "main.rs").write_text(
         "#[cfg(test)] mod fixture; fn product() { Err(Missing) }"
     )
@@ -179,6 +190,7 @@ def test_module_membership_overrides_names_and_resolves_visibility_and_paths(
     monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
     root = tmp_path / "src"
     root.mkdir()
+    (root.parent / "Cargo.toml").write_text('[package]\nname="fixture"\n')
     (root / "main.rs").write_text(
         "mod tests;\n"
         "pub(crate) mod test_support;\n"
@@ -209,6 +221,7 @@ def test_inline_module_resolves_external_production_child(
     monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
     root = tmp_path / "src"
     (root / "outer").mkdir(parents=True)
+    (root.parent / "Cargo.toml").write_text('[package]\nname="fixture"\n')
     (root / "main.rs").write_text("mod outer { pub mod child; }")
     (root / "outer" / "child.rs").write_text("fn child() { Err(Observed) }")
     assert [site.function for site in blocker_rust.scan_rust_raises((root,))] == [
@@ -227,6 +240,7 @@ def test_incomplete_module_observation_rereads_then_admits_fresh_scan(
     monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
     root = tmp_path / "src"
     root.mkdir()
+    (root.parent / "Cargo.toml").write_text('[package]\nname="fixture"\n')
     (root / "main.rs").write_text("mod child;")
     child = root / "child.rs"
     original_read = type(child).read_text
@@ -265,6 +279,7 @@ def test_transient_read_loss_recovers_inside_the_observation_budget(
     monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
     root = tmp_path / "src"
     root.mkdir()
+    (root.parent / "Cargo.toml").write_text('[package]\nname="fixture"\n')
     entry = root / "main.rs"
     entry.write_text("fn execute() { Err(Observed) }")
     original_read = type(entry).read_text
@@ -305,3 +320,66 @@ def test_cargo_declared_binary_and_automatic_binary_are_product_roots(
         "child",
         "automatic",
     }
+
+
+def test_manifest_loss_never_publishes_partial_combined_scan(tmp_path, monkeypatch):
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    from . import blocker_boundaries, blocker_rust
+
+    control = tmp_path / "control/src"
+    control.mkdir(parents=True)
+    root = tmp_path / "rust/crates/fixture/src"
+    root.mkdir(parents=True)
+    (root / "main.rs").write_text("fn main() { Err(Main) }")
+    (root / "special.rs").write_text("fn special() { Err(Special) }")
+    manifest = root.parent / "Cargo.toml"
+    body = '[package]\nname="fixture"\n[[bin]]\nname="special"\npath="src/special.rs"\n'
+    manifest.write_text(body)
+    monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(blocker_boundaries, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(blocker_boundaries, "CONTROL_SOURCE_ROOT", control)
+    public_rust = blocker_rust.scan_rust_raises
+    monkeypatch.setattr(blocker_rust, "scan_rust_raises", lambda: public_rust((root,)))
+    combined = lambda: blocker_boundaries.scan_raises(control)
+    expected = combined()
+    assert {site.function for site in expected} == {"main", "special"}
+    manifest.unlink()
+    published = None
+    try:
+        published = combined()
+    except UnknownOutcomeError:
+        pass
+    assert published is None
+    manifest.write_text(body)
+    assert combined() == expected
+    assert combined() == expected
+
+
+def test_configuration_attributes_includes_and_block_modules_are_observed(
+    tmp_path, monkeypatch
+):
+    from . import blocker_rust
+
+    monkeypatch.setattr(blocker_rust, "REPO_ROOT", tmp_path)
+    root = tmp_path / "src"
+    root.mkdir()
+    (root.parent / "Cargo.toml").write_text('[package]\nname="fixture"\n')
+    (root / "main.rs").write_text(
+        '#[cfg_attr(feature="logging", allow(dead_code))] fn live() { Err(Live) }\n'
+        '#[cfg_attr(feature="alternate", path="alternate.rs")] mod selected;\n'
+        'include!("included.rs");\n'
+        "fn owner() { mod inside { mod child; } }\n"
+    )
+    (root / "selected.rs").write_text("fn default_variant() { Err(Default) }")
+    (root / "alternate.rs").write_text("fn alternate() { Err(Alternate) }")
+    (root / "included.rs").write_text("fn included() { Err(Included) }")
+    (root / "inside").mkdir()
+    (root / "inside/child.rs").write_text("fn child() { Err(Child) }")
+    expected = {"live", "default_variant", "alternate", "included", "child"}
+    assert {
+        site.function for site in blocker_rust.scan_rust_raises((root,))
+    } == expected
+    assert {
+        site.function for site in blocker_rust.scan_rust_raises((root,))
+    } == expected

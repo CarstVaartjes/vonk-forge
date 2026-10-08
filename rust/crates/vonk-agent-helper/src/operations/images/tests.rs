@@ -259,3 +259,124 @@ fn runtime_image_receipt_binds_manifest_config_and_local_reference() {
             .is_err()
     );
 }
+
+#[test]
+fn damaged_image_receipt_reconciles_exact_manifest_then_admits_fresh_request() {
+    #[derive(Clone)]
+    struct ManifestRunner {
+        reply: std::sync::Arc<Mutex<Vec<u8>>>,
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl CommandRunner for ManifestRunner {
+        fn run(&self, _: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            assert_eq!(arguments[3], "{{json .RepoDigests}}");
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(CommandOutput {
+                success: true,
+                exit_code: Some(0),
+                stdout: self.reply.lock().unwrap().clone(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let roots = ManagedRoots::under(temp.path());
+    let address = "a".repeat(64);
+    let manifest = format!("sha256:{address}");
+    let config = format!("sha256:{}", "c".repeat(64));
+    let local = format!("localhost/vonk/compiled-runtime-{address}@{manifest}");
+    let runner = ManifestRunner {
+        reply: std::sync::Arc::new(Mutex::new(b"[]".to_vec())),
+        calls: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    };
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+    // An inspected config alone never blesses a missing manifest association.
+    assert!(
+        executor
+            .require_image_receipt(&address, &manifest, &manifest, &local, &config)
+            .is_err()
+    );
+    assert_eq!(runner.calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert!(!roots.runtime_image_receipts.join(&address).exists());
+    *runner.reply.lock().unwrap() =
+        serde_json::to_vec(&vec![format!("registry/runtime@{manifest}")]).unwrap();
+    executor
+        .require_image_receipt(&address, &manifest, &manifest, &local, &config)
+        .unwrap();
+    for damaged in [b"broken JSON".as_slice(), b"{}".as_slice()] {
+        fs::write(roots.runtime_image_receipts.join(&address), damaged).unwrap();
+        executor
+            .require_image_receipt(&address, &manifest, &manifest, &local, &config)
+            .unwrap();
+        let receipt: RuntimeImageReceipt =
+            serde_json::from_slice(&fs::read(roots.runtime_image_receipts.join(&address)).unwrap())
+                .unwrap();
+        assert_eq!(receipt.platform_manifest_digest, manifest);
+        assert_eq!(receipt.image_config_id, config);
+        let before = runner.calls.load(std::sync::atomic::Ordering::SeqCst);
+        executor
+            .require_image_receipt(&address, &manifest, &manifest, &local, &config)
+            .unwrap();
+        assert_eq!(
+            runner.calls.load(std::sync::atomic::Ordering::SeqCst),
+            before
+        );
+    }
+}
+
+#[test]
+fn signed_plan_receipt_repair_has_a_fresh_observation_budget_and_reuses_exact_image() {
+    let temp = tempfile::tempdir().unwrap();
+    let roots = ManagedRoots::under(temp.path());
+    let plan = compiled_plan_for_runtime_authority();
+    let image = &plan.runtime_image;
+    let local = format!(
+        "localhost/vonk/compiled-runtime-{}",
+        image.oci_layout_sha256
+    );
+    let runner = PullRunner::default();
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
+    assert!(executor.repair_signed_image_receipt(&plan).is_err());
+    assert!(
+        !roots
+            .runtime_image_receipts
+            .join(&image.oci_layout_sha256)
+            .exists()
+    );
+    assert_eq!(runner.calls.lock().unwrap().len(), 6);
+    runner
+        .images
+        .lock()
+        .unwrap()
+        .insert(local.clone(), image.local_image_config_id.clone());
+    executor.repair_signed_image_receipt(&plan).unwrap();
+    let receipt_path = roots.runtime_image_receipts.join(&image.oci_layout_sha256);
+    fs::write(&receipt_path, b"damaged receipt").unwrap();
+    executor.repair_signed_image_receipt(&plan).unwrap();
+    let receipt: RuntimeImageReceipt =
+        serde_json::from_slice(&fs::read(&receipt_path).unwrap()).unwrap();
+    assert_eq!(receipt.platform_manifest_digest, image.image_digest);
+    assert_eq!(receipt.image_config_id, image.local_image_config_id);
+    executor
+        .require_image_receipt(
+            &image.oci_layout_sha256,
+            &image.image_digest,
+            &image.image_digest,
+            &receipt.local_image_reference,
+            &image.local_image_config_id,
+        )
+        .unwrap();
+    executor.repair_signed_image_receipt(&plan).unwrap();
+    assert_eq!(
+        runner.images.lock().unwrap().get(&local),
+        Some(&image.local_image_config_id)
+    );
+    assert!(
+        runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| call[0] == "image")
+    );
+}
