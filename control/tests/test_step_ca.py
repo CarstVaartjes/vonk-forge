@@ -404,7 +404,7 @@ def test_sign_uses_fixed_policy_short_lived_one_use_authorization_and_node_signe
     assert issued.fingerprint == certificate.fingerprint(hashes.SHA256()).hex()
 
 
-@pytest.mark.parametrize("lifetime", (True, 89, 90, 2592001))
+@pytest.mark.parametrize("lifetime", (True, 89, 2592001))
 def test_rejects_invalid_configured_certificate_lifetime(
     tmp_path: Path,
     lifetime: int,
@@ -1324,7 +1324,7 @@ def test_production_ca_fault_isolated_and_repaired(
     monkeypatch.setattr(StepCertificateAuthority, "check_health", health)
     credential = settings.agent_ca_credential_path.read_bytes()
     if fault == "configuration":
-        settings.agent_ca_certificate_lifetime_seconds = 90
+        settings.agent_ca_certificate_lifetime_seconds = 89
     if fault == "credential-file":
         settings.agent_ca_credential_path.unlink()
     from typing import cast
@@ -1405,4 +1405,21 @@ def _assert_unavailable_enrollment(client, request) -> None:
     assert (
         reply.capability == ControllerCapability.CERTIFICATE_AUTHORITY
         and reply.retryable
+    )
+
+
+@pytest.mark.parametrize("lifetime", (90, 86400, 2592000))
+def test_configured_ca_lifetime_is_trusted_within_bounds(
+    tmp_path: Path,
+    lifetime: int,
+) -> None:
+    """The installed step-ca configuration owns the agent certificate lifetime.
+
+    A Controller whose CA is configured shorter than 30 days still starts and
+    signs with that lifetime; it never refuses to start over it.
+    """
+    _provider(
+        tmp_path,
+        lambda _: httpx2.Response(500),
+        certificate_lifetime_seconds=lifetime,
     )
