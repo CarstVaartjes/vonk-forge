@@ -194,8 +194,8 @@ class ModelCacheStorageUnknown(_CacheUnknown, ModelCacheStorageError):
     default_reason = WaitReason.OBSERVATION_UNAVAILABLE
 
 
-class ModelCacheRemovalOwnerInvalid(InvalidRequestError, ArtifactLifecycleError):
-    """A removal owner that does not resolve or is not valid for the removal."""
+class ModelCacheRemovalOwnerInvalid(UnknownOutcomeError, ArtifactLifecycleError):
+    """Incomplete stored owner bookkeeping; its effects remain fenced."""
 
     def __init__(
         self,
@@ -203,7 +203,7 @@ class ModelCacheRemovalOwnerInvalid(InvalidRequestError, ArtifactLifecycleError)
         detail: str,
         *,
         retryable: bool = False,
-        reason: InvalidRequestReason | None = InvalidRequestReason.NOT_FOUND,
+        reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE,
     ) -> None:
         ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
         self.typed_reason = reason

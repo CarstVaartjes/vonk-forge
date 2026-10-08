@@ -822,6 +822,7 @@ def relocate_document(document, moves=None):
 
         result = {
             **value,
+            "function": moves.scope(value["path"], value["function"]),
             "path": moves.function(value["path"], value["function"], matches_site),
         }
         if "calls" in value:
@@ -850,7 +851,7 @@ def relocate_document(document, moves=None):
                         ),
                     ),
                     exception,
-                    function,
+                    moves.scope(path, function),
                     code,
                     count,
                 ]

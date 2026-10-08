@@ -39,7 +39,7 @@ from ..strict_json import serialize_json_value
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (
     ModelCacheConflictInvalid,
-    ModelCacheConflictRefused,
+    ModelCacheConflictUnknown,
     ModelCacheDeletionFenceLost,
     ModelCacheStorageRefused,
     _ArtifactWriterBusy,
@@ -136,7 +136,7 @@ class RemovalAcceptanceMixin:
         # acquisition, then re-read it after the fences are held.
         scope = cache._model_removal_scope_for_sets(session, selected)
         if expected_scope is not None and scope != expected_scope:
-            raise ModelCacheConflictRefused(
+            raise ModelCacheConflictUnknown(
                 ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
                 "model removal scope changed before parent acceptance",
             )
@@ -179,7 +179,7 @@ class RemovalAcceptanceMixin:
                 )
             locked_scope = cache._model_removal_scope_for_sets(session, selected)
             if locked_scope != scope:
-                raise ModelCacheConflictRefused(
+                raise ModelCacheConflictUnknown(
                     ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
                     "model-set membership changed while removal ownership was reserved",
                 )
@@ -187,7 +187,7 @@ class RemovalAcceptanceMixin:
             # stops new consumers and each destructive step waits until the
             # current owners have released the set.
         except ArtifactLifecycleError as error:
-            raise ModelCacheConflictRefused(
+            raise ModelCacheConflictUnknown(
                 error.code,
                 error.detail,
                 recovery="retry" if error.retryable else None,
@@ -214,7 +214,7 @@ class RemovalAcceptanceMixin:
             if digest not in external_memberships
         )
         if delete_objects != scope.delete_objects:
-            raise ModelCacheConflictRefused(
+            raise ModelCacheConflictUnknown(
                 ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
                 "model object sharing changed while removal ownership was reserved",
             )

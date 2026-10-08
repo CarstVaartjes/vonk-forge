@@ -1,4 +1,4 @@
-"""Fail-closed reads of current model/image reference owners.
+"""Conservative reads of current model/image reference owners.
 
 These projections are used only while taking a deletion fence. They never
 become availability facts and never copy the owners into a second reference
@@ -20,7 +20,6 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     RunState,
-    SecurityRefusalReason,
     WaitReason,
     canonical_message,
 )
@@ -85,8 +84,6 @@ _ACTIVE_ARTIFACT_JOBS = job_states.words(
     LifecycleState.NEEDS_OPERATOR,
     LifecycleState.OBSERVING,
 )
-_PROFILE_PAYLOAD_BUDGET = 16 * 1024 * 1024
-MAX_ARTIFACT_OWNER_SCAN_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +257,7 @@ def model_set_objects(
             raise ArtifactReferenceUnsettled(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "model-set manifest is malformed; removal was deferred",
+                retryable=True,
             ) from error
         expected = {item.key: (item.sha256, item.path) for item in manifest.artifacts}
         observed = {
@@ -270,6 +268,7 @@ def model_set_objects(
             raise ArtifactReferenceUnsettled(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "model-set membership disagrees with its manifest; removal was deferred",
+                retryable=True,
                 reason=WaitReason.SCOPE_CHANGED,
             )
         result[set_digest] = tuple(sorted({item[0] for item in observed.values()}))
@@ -307,18 +306,14 @@ def model_set_reference_findings(
     # for that recipe; model_variant may select a subset, so protecting all
     # current variants is deliberately conservative until the operator edits
     # the profile or reviews a new exact application.
-    profile_bytes = 0
     try:
-        profile_rows = session.scalars(select(FleetProfile).order_by(FleetProfile.id))
+        profile_rows = session.scalars(
+            select(FleetProfile)
+            .order_by(FleetProfile.id)
+            .execution_options(yield_per=64)
+        )
         for profile in profile_rows:
             encoded = canonical_message(profile.assignments)
-            profile_bytes += len(encoded)
-            if profile_bytes > _PROFILE_PAYLOAD_BUDGET:
-                raise ArtifactReferenceUnverified(
-                    ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
-                    f"saved-profile reference scan exceeded {_PROFILE_PAYLOAD_BUDGET} bytes; removal was deferred",
-                    retryable=True,
-                )
             assignments = TypeAdapter(list[FleetProfileAssignmentInput]).validate_json(
                 encoded, strict=True
             )
@@ -383,29 +378,21 @@ def model_set_reference_findings(
             retryable=True,
         ) from error
 
-    owner_bytes = 0
-
     def account(value: object) -> None:
-        nonlocal owner_bytes
         try:
-            owner_bytes += len(canonical_message(value))
+            canonical_message(value)
         except (TypeError, ValueError) as error:
             raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "accepted reference JSON is malformed; removal was deferred",
                 retryable=True,
             ) from error
-        if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-            raise ArtifactReferenceUnverified(
-                ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
-                f"accepted-reference scan exceeded {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes; removal was deferred",
-                retryable=True,
-            )
 
     for application in session.scalars(
         select(FleetProfileApplication)
         .where(FleetProfileApplication.state.in_(_ACTIVE_PROFILE_APPLICATIONS))
         .order_by(FleetProfileApplication.id)
+        .execution_options(yield_per=64)
     ):
         account(application.plan)
         plan = _profile_plan(application.plan)
@@ -434,6 +421,7 @@ def model_set_reference_findings(
                 Job.state.in_(_ACTIVE_RUN_SWITCH_JOBS),
             )
             .order_by(Job.id)
+            .execution_options(yield_per=64)
         ):
             account(operation.payload)
             plan = _run_switch_plan(operation.payload)
@@ -456,6 +444,7 @@ def model_set_reference_findings(
         select(RecipeInstallation)
         .where(RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS))
         .order_by(RecipeInstallation.id)
+        .execution_options(yield_per=64)
     ):
         account(installation.plan)
         plan = _run_switch_plan({"plan": installation.plan})
@@ -480,6 +469,7 @@ def model_set_reference_findings(
         # revocation is the existing durable fence for this reference owner.
         .where(ArtifactDistributionAssignment.state.in_(DISTRIBUTION_HELD))
         .order_by(ArtifactDistributionAssignment.id)
+        .execution_options(yield_per=64)
     ):
         account(distribution.objects)
         if distribution.model_artifact_set_sha256 in selected:
@@ -560,18 +550,13 @@ def runtime_image_reference_findings(
     # Saved selectors protect authorized current-head images, but the grant
     # alone is not a reference. The profile selector plus that grant resolves
     # to the exact archive identity.
-    profile_bytes = 0
-    owner_bytes = 0
     try:
-        for profile in session.scalars(select(FleetProfile).order_by(FleetProfile.id)):
+        for profile in session.scalars(
+            select(FleetProfile)
+            .order_by(FleetProfile.id)
+            .execution_options(yield_per=64)
+        ):
             encoded = canonical_message(profile.assignments)
-            profile_bytes += len(encoded)
-            if profile_bytes > _PROFILE_PAYLOAD_BUDGET:
-                raise ArtifactReferenceUnverified(
-                    ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
-                    f"saved-profile reference scan exceeded {_PROFILE_PAYLOAD_BUDGET} bytes; removal was deferred",
-                    retryable=True,
-                )
             assignments = TypeAdapter(list[FleetProfileAssignmentInput]).validate_json(
                 encoded, strict=True
             )
@@ -639,26 +624,20 @@ def runtime_image_reference_findings(
         ) from error
 
     def account(value: object) -> None:
-        nonlocal owner_bytes
         try:
-            owner_bytes += len(canonical_message(value))
+            canonical_message(value)
         except (TypeError, ValueError) as error:
             raise ArtifactReferenceUnverified(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "accepted reference JSON is malformed; removal was deferred",
                 retryable=True,
             ) from error
-        if owner_bytes > MAX_ARTIFACT_OWNER_SCAN_BYTES:
-            raise ArtifactReferenceUnverified(
-                ArtifactLifecycleCode.REFERENCE_SCAN_LIMITED,
-                f"accepted-reference scan exceeded {MAX_ARTIFACT_OWNER_SCAN_BYTES} bytes; removal was deferred",
-                retryable=True,
-            )
 
     for application in session.scalars(
         select(FleetProfileApplication)
         .where(FleetProfileApplication.state.in_(_ACTIVE_PROFILE_APPLICATIONS))
         .order_by(FleetProfileApplication.id)
+        .execution_options(yield_per=64)
     ):
         account(application.plan)
         for preparation in _profile_plan(application.plan).preparation_decisions:
@@ -686,6 +665,7 @@ def runtime_image_reference_findings(
                 Job.state.in_(_ACTIVE_RUN_SWITCH_JOBS),
             )
             .order_by(Job.id)
+            .execution_options(yield_per=64)
         ):
             account(operation.payload)
             account(operation.result)
@@ -726,6 +706,7 @@ def runtime_image_reference_findings(
         select(RecipeInstallation)
         .where(RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS))
         .order_by(RecipeInstallation.id)
+        .execution_options(yield_per=64)
     ):
         account(installation.plan)
         archive = _run_switch_plan(
@@ -750,6 +731,7 @@ def runtime_image_reference_findings(
         # Expiry is only a serving deadline; it does not fence a stale worker.
         .where(ArtifactDistributionAssignment.state.in_(DISTRIBUTION_HELD))
         .order_by(ArtifactDistributionAssignment.id)
+        .execution_options(yield_per=64)
     ):
         if distribution.oci_archive_sha256 in selected:
             findings[distribution.oci_archive_sha256].add(
@@ -769,6 +751,7 @@ def runtime_image_reference_findings(
         select(RecipeRun)
         .where(RecipeRun.state.in_(_ACTIVE_RUNS))
         .order_by(RecipeRun.id)
+        .execution_options(yield_per=64)
     ):
         installation = session.get(RecipeInstallation, run.installation_id)
         if installation is None:
@@ -806,6 +789,7 @@ def runtime_image_reference_findings(
             Job.state.in_(_ACTIVE_ARTIFACT_JOBS),
         )
         .order_by(Job.id)
+        .execution_options(yield_per=64)
     ):
         payload = operation.payload
         if not isinstance(payload, Mapping):
@@ -858,7 +842,7 @@ def runtime_image_reference_findings(
                     ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                     "active runtime image reference intent is not owned by its current attempt; removal was deferred",
                     retryable=True,
-                    reason=SecurityRefusalReason.STALE_FENCE,
+                    reason=WaitReason.SCOPE_CHANGED,
                 )
             account(reference)
             if reference.oci_archive_sha256 in selected:
@@ -1031,7 +1015,7 @@ def _run_switch_runtime_image_intent(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
             "active RunSwitch image reference does not match its owner plan; image removal was deferred",
             retryable=True,
-            reason=SecurityRefusalReason.STALE_FENCE,
+            reason=WaitReason.SCOPE_CHANGED,
         )
     return intent
 
@@ -1043,7 +1027,6 @@ def _run_switch_kinds() -> frozenset[str]:
 
 
 __all__ = [
-    "MAX_ARTIFACT_OWNER_SCAN_BYTES",
     "ArtifactReferenceFinding",
     "model_set_objects",
     "model_set_reference_findings",

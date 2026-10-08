@@ -18,11 +18,14 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol import (
+    DistributionCode,
     LifecycleState,
     LifecycleSubject,
     OperationProgress,
+    WaitReason,
     state_adopter,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts.recipe import Scalar
@@ -1126,8 +1129,18 @@ class RunSwitchDistributionChildResult(StrictModel):
     error_code: _FailureText | None = None
 
 
+class RunSwitchDistributionEndedResult(_RunSwitchPhaseBase):
+    """A missing durable distribution child; no node effect is asserted."""
+
+    phase: Literal[ProfileChildPhase.TRANSFER]
+    subphase: Literal[ProfileChildPhase.TARGET_COPY]
+    reason: WaitReason
+    error_code: DistributionCode
+
+
 RunSwitchPhaseResult = (
-    RunSwitchContainerBuildResult
+    RunSwitchDistributionEndedResult
+    | RunSwitchContainerBuildResult
     | RunSwitchRuntimeImageResult
     | RunSwitchModelDownloadResult
     | RunSwitchModelDownloadPendingResult
