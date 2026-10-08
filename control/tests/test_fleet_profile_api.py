@@ -503,7 +503,7 @@ def test_profile_load_bound_to_a_review_refuses_a_plan_that_changed() -> None:
         headers=headers,
         json={
             "request_key": key,
-            "reviewed_effects_digest": reviewed["effects_digest"],
+            "review": {"effects_digest": reviewed["effects_digest"]},
         },
     )
 
@@ -516,7 +516,10 @@ def test_profile_load_bound_to_a_review_refuses_a_plan_that_changed() -> None:
     accepted = client.post(
         "/api/profile/1/load",
         headers=headers,
-        json={"request_key": key, "reviewed_effects_digest": current["effects_digest"]},
+        json={
+            "request_key": key,
+            "review": {"effects_digest": current["effects_digest"]},
+        },
     )
     assert accepted.status_code == 202
 

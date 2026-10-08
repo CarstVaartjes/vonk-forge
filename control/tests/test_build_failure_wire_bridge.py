@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     AgentFailureKind,
     AgentFailureResult,
     FailureCode,
+    FailureStage,
     OutcomeFailed,
     RecipeBuildRequest,
     canonical_message,
@@ -153,7 +154,7 @@ def _fresh_build_identity(sessions, node_id: str, now: datetime) -> None:
     [
         ("unavailable", AgentFailureKind.TEMPORARY_DEPENDENCY, 7),
         ("forbidden", AgentFailureKind.INVALID_AUTHORITY, None),
-        ("mismatched", AgentFailureKind.INVALID_CONTRACT, None),
+        ("mismatched", AgentFailureKind.TEMPORARY_DEPENDENCY, 5),
     ],
 )
 def test_native_source_fetch_failure_reaches_availability_owner(
@@ -198,8 +199,7 @@ def test_native_source_fetch_failure_reaches_availability_owner(
     status, body, retry_after = {
         "unavailable": (503, b"source registry unavailable", "7"),
         "forbidden": (403, b"source access denied", None),
-        # A successful status with the wrong byte count is a terminal protocol
-        # response before the probe's deliberately non-running build process.
+        # An incomplete peer transfer remains unknown; no unverified archive is used.
         "mismatched": (200, source_archive[:-1], None),
     }[response]
     certificate_root = tmp_path / "certificates"
@@ -330,6 +330,38 @@ def test_native_source_fetch_failure_reaches_availability_owner(
                     == 1
                 )
             assert service.get(parent.id).state in {"queued", "running", "partial"}
+            source_server.status = 200
+            source_server.body = source_archive
+            source_server.retry_after = None
+            repaired = _run_probe(
+                restart_probe,
+                _probe_request(
+                    "execute-build",
+                    second_claim,
+                    tmp_path / "agent-state",
+                    source_server,
+                    certs,
+                    node_id=node_id,
+                ),
+            )
+            # The native producer clears the original source boundary with the
+            # same accepted order. This probe deliberately has no build runtime;
+            # its next dependency is separate from source-transfer recovery.
+            repaired_failure = repaired.result
+            assert isinstance(repaired_failure, OutcomeFailed)
+            assert repaired_failure.evidence is not None
+            assert repaired_failure.evidence.stage != FailureStage.SOURCE_BUNDLE_FETCH
+            assert (
+                source_server.requests.count(f"/agent/source-bundles/{source_sha256}")
+                == 2
+            )
+            jobs.record_result(repaired)
+            fresh = service.start(
+                revision.id,
+                actor="operator",
+                request_id=str(uuid.uuid4()),
+            )
+            assert fresh.id and fresh.request_id != parent.request_id
             return
 
         with sessions() as session:
@@ -369,14 +401,17 @@ def test_native_source_fetch_failure_reaches_availability_owner(
         )
 
         assert observed.state == "failed"
-        # The refusal never retries on its own. An explicit operator retry
-        # is a newer request and is accepted; it dispatches nothing until
-        # the parent runs again.
-        service.retry(
-            parent.id,
+        # Denied authority never replays. A distinct newly authorized request is
+        # accepted through the normal preparation path after the peer repairs.
+        source_server.status = 200
+        source_server.body = source_archive
+        source_server.retry_after = None
+        fresh = service.start(
+            revision.id,
             actor="operator",
             request_id=str(uuid.uuid4()),
         )
+        assert fresh.id and fresh.request_id != parent.request_id
         with sessions() as session:
             assert (
                 len(

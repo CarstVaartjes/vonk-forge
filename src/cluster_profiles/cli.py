@@ -827,7 +827,16 @@ def _main(
             )
             _emit(result, args)
         else:
-            _emit(outcome.output, args)
+            output = dict(outcome.output)
+            submission = getattr(args, "submission", None)
+            if (
+                outcome.observation
+                and outcome.observation.status in {"timed_out", "interrupted"}
+                and isinstance(submission, Submission)
+            ):
+                output["submission"] = submission.document()
+                output["request_key"] = submission.request_key
+            _emit(output, args)
         if getattr(args, "profile_saved", False) and not (
             args.global_json or getattr(args, "json", False)
         ):

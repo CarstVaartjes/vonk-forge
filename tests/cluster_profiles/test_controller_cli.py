@@ -3227,7 +3227,7 @@ def test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    payload = {
+    endpoint_document = {
         "number": 3,
         "profile_id": "11111111-1111-4111-8111-111111111111",
         "application_id": "22222222-2222-4222-8222-222222222222",
@@ -3241,10 +3241,10 @@ def test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent(
     }
 
     class UnavailableEndpointClient:
-        def profile_endpoints(self, number: int, alias: str | None = None):
-            assert number == 3
-            assert alias == "qwen"
-            return type("EndpointResponse", (), {"to_dict": lambda _self: payload})()
+        def request(self, method, path, payload=None, *, query=None, **kwargs):
+            assert method == "GET" and path == "/api/profile/3/endpoints"
+            assert query == {"alias": "qwen"}
+            return endpoint_document
 
     monkeypatch.setattr(
         controller_cli.profile,
@@ -4751,8 +4751,8 @@ def test_run_binds_the_load_to_the_plan_it_showed_and_asks_again_when_it_changed
     assert status == 0, prompt.transcript
     loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
     assert loads == [
-        {"request_key": _RUN_KEY, "reviewed_effects_digest": _RUN_DIGEST},
-        {"request_key": _RUN_KEY, "reviewed_effects_digest": changed},
+        {"request_key": _RUN_KEY, "review": {"effects_digest": _RUN_DIGEST}},
+        {"request_key": _RUN_KEY, "review": {"effects_digest": changed}},
     ]
     assert prompt.transcript.count("[y/N]") == 2
 
@@ -4769,7 +4769,9 @@ def test_run_yes_forwards_the_current_owner_review_binding(capsys) -> None:
     capsys.readouterr()
     assert status == 0
     loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
-    assert loads == [{"request_key": _RUN_KEY, "reviewed_effects_digest": _RUN_DIGEST}]
+    assert loads == [
+        {"request_key": _RUN_KEY, "review": {"effects_digest": _RUN_DIGEST}}
+    ]
 
 
 def test_a_successful_run_prints_its_result_and_exits_zero(capsys) -> None:

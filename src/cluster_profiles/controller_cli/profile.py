@@ -11,12 +11,12 @@ from ..cli_outcome import (
     operation_state,
 )
 from ..control_client import (
+    ControlClientError,
     ControlMalformedResponse,
     validate_control_document,
 )
 from .common import ControllerClient, _profile_number, _quoted, _request_key
 from .confirmation import _confirm_action, _require_confirmation
-from .fleet import _overview
 from .observation import (
     _bounded_timeout,
     _poll_path,
@@ -33,16 +33,35 @@ def _profile(
 ) -> dict[str, object]:
     number = _profile_number(args)
     action = getattr(args, "profile_action", None)
-    if action is None:
-        return _overview(client, "profile", args)
-    if action == "list":
-        return client.request("GET", "/api/profile")
-    if action == "endpoint":
-        result = validate_control_document(
-            "FleetProfileEndpointsView",
-            client.profile_endpoints(number, alias=args.alias).to_dict(),
+    if action is None or action == "list":
+        return _poll_path(
+            client,
+            "/api/profile" if action == "list" else f"/api/profile/{number}",
+            {},
+            args,
+            fetch_initial=True,
+            terminal=lambda _: True,
         )
-        return result
+    if action == "endpoint":
+
+        def endpoint_view(observed: object) -> None:
+            try:
+                validate_control_document("FleetProfileEndpointsView", observed)
+            except ControlClientError:
+                raise ControlMalformedResponse(
+                    "profile endpoint projection is unreadable"
+                ) from None
+
+        return _poll_path(
+            client,
+            f"/api/profile/{number}/endpoints",
+            {},
+            args,
+            query={"alias": args.alias} if args.alias is not None else None,
+            fetch_initial=True,
+            terminal=lambda _: True,
+            validate=endpoint_view,
+        )
     if action == "progress":
         deadline = time.monotonic() + _bounded_timeout(args)
         if args.application:
@@ -131,6 +150,7 @@ def _profile(
                 terminal=lambda _: True,
                 deadline=deadline,
                 fetch_initial=True,
+                publish=False,
             )
             if current is predecessor:
                 break
@@ -234,7 +254,18 @@ def _profile(
         if args.dry_run:
             if args.yes or args.detach:
                 raise ValueError("--review cannot be combined with --yes or --detach")
-            return client.request("POST", f"/api/profile/{number}/preview")
+            return _poll_path(
+                client,
+                f"/api/profile/{number}/preview",
+                {},
+                args,
+                fetch_initial=True,
+                fetch=lambda remaining: client.request(
+                    "POST", f"/api/profile/{number}/preview", timeout_seconds=remaining
+                ),
+                terminal=lambda _: True,
+                attempts=3,
+            )
         _require_confirmation(args, "profile load")
         return _load_profile(
             args,

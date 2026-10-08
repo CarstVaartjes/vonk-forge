@@ -8,6 +8,8 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import (
+    ControlConflict,
+    ControlHTTPError,
     ControlNotFound,
     ControlUnavailable,
 )
@@ -43,6 +45,8 @@ class _Successors:
         self.calls = []
         self.timeouts = []
         self.initial_delay = 0.0
+        self.finish = False
+        self.successor_reads = 0
 
     def request(self, method, path, payload=None, *, timeout_seconds=None, **kwargs):
         assert method == "GET"  # Observation cannot cancel or submit an effect.
@@ -58,6 +62,16 @@ class _Successors:
             if self.unavailable is not None:
                 raise self.unavailable
             identity = path.rsplit("/", 1)[-1]
+        if self.finish and identity != "0":
+            self.successor_reads += 1
+            from cluster_profiles.cli_states_generated import RUNNING, SUCCEEDED
+
+            return {
+                "id": identity,
+                "request_key": "original-request",
+                "retry_of_application_id": "0",
+                "state": RUNNING if self.successor_reads == 1 else SUCCEEDED,
+            }
         return {
             "id": "mismatched" if self.mismatched and identity != "0" else identity,
             "request_key": "later-request"
@@ -125,9 +139,12 @@ def test_successor_outage_retries_within_budget_and_recovers_on_fresh_observatio
     assert result["id"] == "0"
     assert observation.status == "timed_out"
     controller.unavailable = None
-    controller.different_request = True
+    controller.finish = True
     result, observation = _observe(monkeypatch, controller)
-    assert result["id"] == "0"
+    assert result["id"] == "1"
+    assert result["request_key"] == "original-request"
+    assert result["state"] == "succeeded"
+    assert result["supersedes_chain"] == ["0"]
     assert observation.status == "complete"
 
 
@@ -267,7 +284,7 @@ def test_closed_output_ends_only_observation_and_fresh_observer_reconnects(monke
     assert controller.calls == ["/api/profile/applications/0"]
 
 
-def test_closed_submission_output_keeps_the_original_request_without_replay():
+def test_peer_broken_submission_response_reconciles_the_original_without_replay():
     from cluster_profiles.cli_states_generated import SUCCEEDED
     from tests.cluster_profiles.test_controller_cli import FakeClient, run
 
@@ -295,8 +312,8 @@ def test_closed_submission_output_keeps_the_original_request_without_replay():
         ),
         client,
     )
-    assert status != 0 and ended["result"] == {}
-    assert [call[0] for call in client.calls] == ["POST"]
+    assert status == 0 and ended["id"] == application
+    assert [call[0] for call in client.calls] == ["POST", "GET"]
     status, fresh = run(
         ("--profile", "1", "profile", "progress", "--request-key", key, "--json"),
         client,
@@ -304,6 +321,7 @@ def test_closed_submission_output_keeps_the_original_request_without_replay():
     assert status == 0 and fresh["id"] == application
     assert [call[:2] for call in client.calls] == [
         ("POST", "/api/profile/1/load"),
+        ("GET", lookup),
         ("GET", lookup),
     ]
 
@@ -364,3 +382,144 @@ def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted
     status, result = run(argv, controller)
     assert status == 0 and result == ready
     assert all(call[0] == "GET" for call in controller.calls)
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        BrokenPipeError(),
+        ControlUnavailable(503, "unknown"),
+        ControlConflict(409, "projection unavailable"),
+        ControlHTTPError(429, "observation rate limited"),
+    ],
+)
+def test_peer_loss_retries_without_publishing_a_candidate_and_fresh_observer_works(
+    monkeypatch, fault
+):
+    from cluster_profiles.cli_states_generated import SUCCEEDED
+    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+
+    clock = _Clock()
+    monkeypatch.setattr("time.monotonic", clock.monotonic)
+    monkeypatch.setattr("time.sleep", clock.sleep)
+    identity = "33333333-3333-4333-8333-333333333333"
+    path = f"/api/profile/applications/{identity}"
+    ready = {"id": identity, "state": SUCCEEDED}
+    client = FakeClient({("GET", path): [fault, ready]})
+    argv = (
+        "profile",
+        "progress",
+        "--application",
+        identity,
+        "--follow",
+        "--timeout-seconds",
+        "0.1",
+        "--interval-seconds",
+        "0.01",
+        "--json",
+    )
+    status, result = run(argv, client)
+    assert status == 0 and result == ready
+    assert len(client.calls) == 2
+    status, result = run(argv, client)
+    assert status == 0 and result == ready
+    assert all(call[0] == "GET" for call in client.calls)
+
+
+def test_successor_relationship_is_decided_before_any_watcher_publication(monkeypatch):
+    controller = _Successors(_Clock(), different_request=True)
+    monkeypatch.setattr("time.monotonic", controller.clock.monotonic)
+    monkeypatch.setattr("time.sleep", controller.clock.sleep)
+    args = cli._parser().parse_args(
+        (
+            "profile",
+            "progress",
+            "--follow",
+            "--timeout-seconds",
+            "1",
+            "--interval-seconds",
+            "0.01",
+        )
+    )
+    snapshots = []
+    args._watch_callback = lambda snapshot: snapshots.append(dict(snapshot))
+    result = _profile(args, cast(ControllerClient, controller), lambda: "fresh")
+    assert result["id"] == "0"
+    assert snapshots and all(snapshot.get("id", "0") == "0" for snapshot in snapshots)
+    assert all(
+        snapshot.get("request_key", "original-request") == "original-request"
+        for snapshot in snapshots
+    )
+    assert controller.calls[-1].endswith("/1")
+    controller.finish = True
+    controller.different_request = False
+    result, observation = _observe(monkeypatch, controller)
+    assert result["id"] == "1" and observation.status == "complete"
+
+
+def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
+    monkeypatch,
+):
+    from cluster_profiles.cli_states_generated import SUCCEEDED
+    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+
+    identity = "33333333-3333-4333-8333-333333333333"
+    path = f"/api/profile/applications/{identity}"
+    ready = {"id": identity, "state": SUCCEEDED}
+    controller = FakeClient({("GET", path): ready})
+    argv = (
+        "profile",
+        "progress",
+        "--application",
+        identity,
+        "--follow",
+        "--json",
+        "--timeout-seconds",
+    )
+    status, result = run((*argv, "0"), controller)
+    assert status == 2 and result["result"] == {}
+    observation = result["observation"]
+    assert isinstance(observation, dict)
+    assert observation["path"] == path
+    assert identity in str(observation["reconnect_command"])
+    assert controller.calls == []
+    status, result = run((*argv, "1"), controller)
+    assert status == 0 and result == ready
+    assert len(controller.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "argv,method,path,ready",
+    [
+        (("profile", "--json"), "GET", "/api/profile/1", {"id": "profile-1"}),
+        (("profile", "list", "--json"), "GET", "/api/profile", {"profiles": []}),
+        (
+            ("profile", "load", "--review", "--json"),
+            "POST",
+            "/api/profile/1/preview",
+            {"allowed": True},
+        ),
+    ],
+)
+@pytest.mark.parametrize("persistent", [False, True])
+def test_profile_read_paths_reobserve_and_a_fresh_read_is_admitted(
+    monkeypatch, argv, method, path, ready, persistent
+):
+    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+
+    clock = _Clock()
+    monkeypatch.setattr("time.monotonic", clock.monotonic)
+    monkeypatch.setattr("time.sleep", clock.sleep)
+    fault = ControlUnavailable(503, "projection unavailable")
+    client = FakeClient({(method, path): fault if persistent else [fault, ready]})
+    status, result = run(argv, client)
+    assert 2 <= len(client.calls) <= 31
+    if persistent:
+        assert status == 2
+        assert result["result"] == {}
+    else:
+        assert status == 0 and result == ready
+    client.responses[(method, path)] = ready
+    status, result = run(argv, client)
+    assert status == 0 and result == ready
+    assert all(call[:2] == (method, path) for call in client.calls)

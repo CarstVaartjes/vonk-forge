@@ -184,6 +184,7 @@ def _profile_preview_response():
         assignments=[],
         generated_at=datetime(2026, 9, 13, tzinfo=UTC),
         plan_digest="a" * 64,
+        effects_digest="a" * 64,
         profile_digest="b" * 64,
         profile_id="12345678-1234-4123-8123-123456789abc",
         profile_name="Empty profile",
@@ -1111,7 +1112,9 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
                         404 if binding == "missing" else 503,
                         {"detail": "Projection unavailable"},
                     )
-            if binding is not None:
+            if binding is None and not repair[0]:
+                preview.pop("effects_digest", None)
+            else:
                 preview["effects_digest"] = "a" * 64 if repair[0] else binding
             return _Response(200, preview)
         assert request.full_url.endswith("/load")
@@ -1128,7 +1131,7 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
         )
 
     result = load()
-    invalid = binding not in (None, "a" * 64)
+    invalid = binding != "a" * 64
     if invalid and fault_count == 3:
         assert args.observation.status == "timed_out"
         assert result == {}
@@ -1137,11 +1140,7 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
         result = load()
     assert result["id"] == application.id
     payload = json.loads(calls[-1].data)
-    assert payload == (
-        {"request_key": key}
-        if binding is None
-        else {"request_key": key, "reviewed_effects_digest": "a" * 64}
-    )
+    assert payload == ({"request_key": key, "review": {"effects_digest": "a" * 64}})
     capsys.readouterr()
 
 

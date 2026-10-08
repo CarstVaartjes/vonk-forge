@@ -270,7 +270,6 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
             superseded = service.application(identity)
             assert superseded.state == "superseded"
             assert superseded.status_reason is not None
-            assert "replaced" in superseded.status_reason
             newer_application_id = newer.id
         return result
 
@@ -300,6 +299,28 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
             check=False,
         )
 
+        original_calls = list(peer.calls)
+        assert newer_application_id is not None
+        fresh = subprocess.run(
+            [
+                str(installed_vonkctl),
+                "profile",
+                "progress",
+                "--application",
+                newer_application_id,
+                "--json",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            env=environment,
+            cwd=tmp_path,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert fresh.returncode == 0, fresh.stdout + fresh.stderr
+        assert json.loads(fresh.stdout)["id"] == newer_application_id
+
     assert completed.returncode == 2, completed.stdout + completed.stderr
     assert completed.stdout.count("\n") == 1
     assert completed.stderr == ""
@@ -308,7 +329,7 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
     assert document["state"] == "superseded"
     assert document["status_reason"] is not None
     assert newer_application_id is not None and newer_application_id != identity
-    calls = [(method, path) for method, path, _ in peer.calls]
+    calls = [(method, path) for method, path, _ in original_calls]
     assert calls[0] == ("GET", latest_path)
     assert len(calls) > 1
     # The owner may name a successor: one metadata read distinguishes a retry
@@ -323,5 +344,6 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
         original = session.get(FleetProfileApplication, identity)
         newer = session.get(FleetProfileApplication, newer_application_id)
         assert original is not None and original.state == "superseded"
-        assert original.status_reason is not None
+        assert original.superseded_by == newer_application_id
         assert newer is not None and newer.id != original.id
+        assert newer.retry_of_application_id is None

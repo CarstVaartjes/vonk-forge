@@ -236,7 +236,7 @@ impl LoopClient for TerminalHeartbeatClient {
 
     async fn heartbeat(&self, _progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         assert!(!self.panic, "heartbeat task failed unexpectedly");
-        Err(ClientError::Protocol)
+        Err(ClientError::Identity)
     }
 
     async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {

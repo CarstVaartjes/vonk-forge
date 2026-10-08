@@ -10021,23 +10021,36 @@
             "title": "Request Key",
             "type": "string"
           },
-          "reviewed_effects_digest": {
+          "review": {
             "anyOf": [
               {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
+                "$ref": "#/components/schemas/FleetProfileLoadReview"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Reviewed Effects Digest"
+            ]
           }
         },
         "required": [
           "request_key"
         ],
         "title": "FleetProfileLoadRequest",
+        "type": "object"
+      },
+      "FleetProfileLoadReview": {
+        "additionalProperties": false,
+        "properties": {
+          "effects_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Effects Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "effects_digest"
+        ],
+        "title": "FleetProfileLoadReview",
         "type": "object"
       },
       "FleetProfileNode": {
@@ -10335,16 +10348,9 @@
             "$ref": "#/components/schemas/FleetProfileEffects"
           },
           "effects_digest": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Effects Digest"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Effects Digest",
+            "type": "string"
           },
           "generated_at": {
             "format": "date-time",
@@ -10479,7 +10485,8 @@
           "reasons",
           "generated_at",
           "assessments",
-          "plan_digest"
+          "plan_digest",
+          "effects_digest"
         ],
         "title": "FleetProfilePreview",
         "type": "object"

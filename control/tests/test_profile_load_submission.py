@@ -84,6 +84,8 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
         {},
         {"plan_digest": preview["plan_digest"]},
         {**body, "dry_run": True},
+        {**body, "review": {}},
+        {**body, "review": {"effects_digest": None}},
     ):
         assert api.post(path, headers=headers, json=missing).status_code == 422
     accepted = api.post(path, headers=headers, json=body)
@@ -1013,3 +1015,166 @@ def test_superseded_child_contention_is_parked_without_holding_admission(
         assert len(accepted) == 1
         assert accepted[0].request_key == request_body["request_key"]
         assert accepted[0].progress["admission_pending"] is False
+
+
+@pytest.mark.parametrize("fault_count", [1, 3])
+def test_unreadable_review_binding_reobserves_changed_owner_plan_without_unreviewed_effect(
+    postgres_engine, tmp_path, fault_count
+):
+    from cluster_profiles.controller_cli.profile_load import (
+        _review_and_submit_profile_load,
+    )
+
+    sessions, api, _codec, headers, original = _profile_api(postgres_engine)
+    token = tmp_path / "token"
+    token.touch(mode=0o600)
+    token.write_text(headers["Authorization"].removeprefix("Bearer "))
+    calls = []
+    remaining_faults = [fault_count]
+    changed = [False]
+    shown = []
+
+    class Response(io.BytesIO):
+        def __init__(self, response, content):
+            super().__init__(content)
+            self.status = response.status_code
+            self.headers = Message()
+            for name, value in response.headers.items():
+                self.headers[name] = value
+
+        def __exit__(self, *args: object) -> None:
+            self.close()
+
+    def opener(request, *, timeout):
+        method = request.get_method()
+        path = request.full_url.removeprefix("https://forge.example.test")
+        payload = json.loads(request.data) if request.data else None
+        calls.append((method, path, payload))
+        response = api.request(
+            method, path, headers=dict(request.header_items()), content=request.data
+        )
+        content = response.content
+        if path.endswith("/preview"):
+            preview = response.json()
+            if remaining_faults[0]:
+                remaining_faults[0] -= 1
+                preview.pop("effects_digest")
+                if not changed[0]:
+                    edited = api.put(
+                        "/api/profile/1",
+                        headers=headers,
+                        json={
+                            "name": "Changed while observation was unreadable",
+                            "expected_revision": 1,
+                        },
+                    )
+                    assert edited.status_code == 200
+                    changed[0] = True
+            else:
+                shown.append(preview["effects_digest"])
+            content = json.dumps(preview).encode()
+        if path.endswith("/load"):
+            assert isinstance(payload, dict)
+            assert shown and payload["review"]["effects_digest"] == shown[-1]
+            assert payload["review"]["effects_digest"] != original["effects_digest"]
+        return Response(response, content)
+
+    client = ControlClient("https://forge.example.test", token, opener=opener)
+    args = cli._parser().parse_args(("--json", "profile", "load", "--yes", "--detach"))
+    key = str(uuid4())
+
+    def load():
+        return _review_and_submit_profile_load(
+            client, 1, args, lambda: key, question="Load?", review_when_confirmed=True
+        )
+
+    result = load()
+    if fault_count == 3:
+        assert result == {}
+        assert all(not path.endswith("/load") for _method, path, _payload in calls)
+        with sessions() as session:
+            assert not list(session.scalars(select(FleetProfileApplication)))
+        result = load()
+    assert result["request_key"] == key
+    with sessions() as session:
+        accepted = list(session.scalars(select(FleetProfileApplication)))
+        assert len(accepted) == 1 and accepted[0].id == result["id"]
+    # A distinct request is immediately admitted; the review faults created no gate.
+    fresh = api.post(
+        "/api/profile/1/load", headers=headers, json={"request_key": str(uuid4())}
+    )
+    assert fresh.status_code == 202
+    assert fresh.json()["id"] != result["id"]
+
+
+@pytest.mark.parametrize("lookup_outage", [False, True])
+@pytest.mark.parametrize("review", [False, True])
+def test_conflict_observes_original_owner_receipt_without_effect_replay(
+    postgres_engine, tmp_path, lookup_outage, review
+):
+    from cluster_profiles.controller_cli.profile_load import (
+        _review_and_submit_profile_load,
+    )
+
+    sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
+    token = tmp_path / "token"
+    token.touch(mode=0o600)
+    token.write_text(headers["Authorization"].removeprefix("Bearer "))
+    calls = []
+    outage = [lookup_outage]
+
+    class Response(io.BytesIO):
+        def __init__(self, status, content):
+            super().__init__(content)
+            self.status = status
+            self.headers = Message()
+            self.headers["Content-Type"] = "application/json"
+
+        def __exit__(self, *args: object) -> None:
+            self.close()
+
+    def opener(request, *, timeout):
+        method = request.get_method()
+        path = request.full_url.removeprefix("https://forge.example.test")
+        calls.append((method, path))
+        response = api.request(
+            method, path, headers=dict(request.header_items()), content=request.data
+        )
+        if path.endswith("/load"):
+            assert response.status_code == 202
+            # The owner's receipt is durable; the peer's status projection is stale.
+            return Response(409, b'{"detail":"Receipt observation unavailable"}')
+        if method == "GET" and outage[0]:
+            return Response(503, b'{"detail":"Receipt observation unavailable"}')
+        return Response(response.status_code, response.content)
+
+    client = ControlClient("https://forge.example.test", token, opener=opener)
+    args = cli._parser().parse_args(("--json", "profile", "load", "--yes", "--detach"))
+    key = str(uuid4())
+    result = _review_and_submit_profile_load(
+        client, 1, args, lambda: key, question="Load?", review_when_confirmed=review
+    )
+    submission_calls = ([("POST", "/api/profile/1/preview")] if review else []) + [
+        ("POST", "/api/profile/1/load")
+    ]
+    assert calls[: len(submission_calls)] == submission_calls
+    assert all(method == "GET" for method, _path in calls[len(submission_calls) :])
+    assert len(calls) <= 5
+    with sessions() as session:
+        [accepted] = list(session.scalars(select(FleetProfileApplication)))
+        assert accepted.request_key == key
+        if lookup_outage:
+            assert result == {}
+            assert args.submission.operation_id is None
+        else:
+            assert result["id"] == accepted.id
+            assert args.submission.operation_id == accepted.id
+        accepted_id = accepted.id
+    outage[0] = False
+    # A fresh observer immediately recovers the same operation, with no replay.
+    observed = client.request("GET", f"/api/profile/1/requests/{key}")
+    assert observed["id"] == accepted_id
+    fresh = api.post(
+        "/api/profile/1/load", headers=headers, json={"request_key": str(uuid4())}
+    )
+    assert fresh.status_code == 202 and fresh.json()["id"] != accepted_id

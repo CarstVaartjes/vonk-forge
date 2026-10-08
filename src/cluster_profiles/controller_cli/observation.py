@@ -17,6 +17,7 @@ from ..cli_states import (
     LEGACY_PARTIAL,
 )
 from ..control_client import (
+    ControlHTTPError,
     ControlMalformedResponse,
     ControlNotFound,
     ControlObservationUnavailable,
@@ -194,6 +195,7 @@ def _poll_path(
     fetch_initial: bool = False,
     fetch: Callable[[float], object] | None = None,
     attempts: int | None = None,
+    publish: bool = True,
 ) -> dict[str, object]:
     """Observe a bounded durable snapshot, retaining the last truthful value.
 
@@ -208,10 +210,16 @@ def _poll_path(
     callback = _watch_callback(args)
     is_terminal = terminal or (lambda observed: _state(observed) in _TERMINAL_STATES)
     current = initial
+    if fetch_initial and not publish:
+        callback = None
     if validate is not None and not fetch_initial:
         try:
             validate(current)
-        except (ControlMalformedResponse, ControlObservationUnavailable):
+        except (
+            ControlMalformedResponse,
+            ControlObservationUnavailable,
+            ControlResponseTooLarge,
+        ):
             current = {}
             fetch_initial = True
     started = time.monotonic()
@@ -231,7 +239,7 @@ def _poll_path(
     wait_before_request = not fetch_initial
     remaining_attempts = attempts
     while True:
-        if callback is not None:
+        if callback is not None and publish:
             try:
                 callback(current)
             except BrokenPipeError:
@@ -271,9 +279,14 @@ def _poll_path(
             ControlTransportError,
             OSError,
         ) as error:
-            if isinstance(error, BrokenPipeError):
-                observation.status = "interrupted"
-                return current
+            observation.error = _observation_reason(error)
+            interval = _observation_delay(error, interval, deadline - time.monotonic())
+            continue
+        except ControlHTTPError as error:
+            if error.status_code in {400, 401, 403, 422}:
+                # Owner authentication/authorization and malformed query answers
+                # remain strict. A conflicting or rate-limited read is unknown.
+                raise
             observation.error = _observation_reason(error)
             interval = _observation_delay(error, interval, deadline - time.monotonic())
             continue

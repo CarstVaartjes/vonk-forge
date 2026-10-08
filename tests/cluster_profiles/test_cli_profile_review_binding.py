@@ -8,7 +8,11 @@ import sys
 import pytest
 
 from cluster_profiles import cli, controller_cli
-from cluster_profiles.control_client import ControlConflict, ControlMalformedResponse
+from cluster_profiles.control_client import (
+    ControlConflict,
+    ControlMalformedResponse,
+    ControlNotFound,
+)
 
 KEY = "11111111-1111-4111-8111-111111111111"
 APPLICATION = "33333333-3333-4333-8333-333333333333"
@@ -63,11 +67,13 @@ class _Controller:
                 "effects": {"runs": [], "installations": [], "superseded": []},
                 "reasons": [],
             }
+        if method == "GET":
+            raise ControlNotFound(404, "Projection absent")
         assert path.endswith("/load")
         assert isinstance(payload, dict)
         if self.drift:
             self.plan = self.drift.pop(0)
-        reviewed = payload.get("reviewed_effects_digest")
+        reviewed = payload.get("review", {}).get("effects_digest")
         if reviewed is not None and reviewed != self.plan:
             raise ControlConflict(
                 409, "The profile plan changed", code="profile.review_stale"
@@ -109,7 +115,7 @@ def test_confirmed_load_names_the_effects_that_were_shown(monkeypatch, capsys):
     assert _load(monkeypatch, controller, "yes")[0] == 0
 
     assert controller.loads() == [
-        {"request_key": KEY, "reviewed_effects_digest": FIRST}
+        {"request_key": KEY, "review": {"effects_digest": FIRST}}
     ]
     capsys.readouterr()
 
@@ -123,8 +129,8 @@ def test_stale_review_shows_the_new_plan_and_asks_again(monkeypatch, capsys):
     # the second answer applies it. Nothing was accepted by the refusal, so the
     # same request identity is reused.
     assert controller.loads() == [
-        {"request_key": KEY, "reviewed_effects_digest": FIRST},
-        {"request_key": KEY, "reviewed_effects_digest": CHANGED},
+        {"request_key": KEY, "review": {"effects_digest": FIRST}},
+        {"request_key": KEY, "review": {"effects_digest": CHANGED}},
     ]
     assert controller.previews() == 2
     capsys.readouterr()
@@ -136,7 +142,7 @@ def test_declining_the_changed_plan_loads_nothing(monkeypatch, capsys):
     assert _load(monkeypatch, controller, "yes", "no")[0] == 2
 
     assert controller.loads() == [
-        {"request_key": KEY, "reviewed_effects_digest": FIRST}
+        {"request_key": KEY, "review": {"effects_digest": FIRST}}
     ]
     capsys.readouterr()
 
@@ -153,7 +159,7 @@ def test_a_plan_that_keeps_changing_is_refused_not_forced(monkeypatch, capsys):
     assert _load(monkeypatch, controller, "yes")[0] == 0
     assert controller.loads()[-1] == {
         "request_key": KEY,
-        "reviewed_effects_digest": FIRST,
+        "review": {"effects_digest": FIRST},
     }
     capsys.readouterr()
 
@@ -174,21 +180,26 @@ def test_yes_takes_the_current_plan_without_a_review(monkeypatch, capsys):
     capsys.readouterr()
 
 
-@pytest.mark.parametrize("binding", [None, FIRST])
-def test_latest_review_submits_the_owner_binding_without_a_client_gate(
+@pytest.mark.parametrize("binding", [None, "", "invalid", "A" * 64, FIRST])
+def test_missing_or_invalid_review_never_becomes_current_plan_consent(
     monkeypatch, capsys, binding
 ):
     controller = _Controller(binding)
-    assert _load(monkeypatch, controller, "yes")[0] == 0
-    expected = {"request_key": KEY}
-    if binding is not None:
-        expected["reviewed_effects_digest"] = binding
-    assert controller.loads() == [expected]
-    controller.plan = FIRST
+    status, _ = _load(monkeypatch, controller, "yes")
+    if binding == FIRST:
+        assert status == 0
+        assert controller.loads() == [
+            {"request_key": KEY, "review": {"effects_digest": FIRST}}
+        ]
+    else:
+        assert status == 2
+        assert controller.loads() == []
+        assert controller.previews() == 3
+    controller.plan = CHANGED
     assert _load(monkeypatch, controller, "yes")[0] == 0
     assert controller.loads()[-1] == {
         "request_key": KEY,
-        "reviewed_effects_digest": FIRST,
+        "review": {"effects_digest": CHANGED},
     }
     capsys.readouterr()
 
@@ -220,7 +231,7 @@ def test_unreadable_preview_is_observed_boundedly_and_fresh_load_is_admitted(
         assert status == 0
         assert "Reviewed" in transcript
         assert controller.loads() == [
-            {"request_key": KEY, "reviewed_effects_digest": FIRST}
+            {"request_key": KEY, "review": {"effects_digest": FIRST}}
         ]
     else:
         assert status == 2
@@ -244,6 +255,6 @@ def test_confirmed_run_review_preserves_the_owner_binding(monkeypatch, capsys):
         review_when_confirmed=True,
     )
     assert controller.loads() == [
-        {"request_key": KEY, "reviewed_effects_digest": FIRST}
+        {"request_key": KEY, "review": {"effects_digest": FIRST}}
     ]
     capsys.readouterr()

@@ -440,6 +440,7 @@ def test_blocked_review_is_submitted_so_the_controller_can_park_it(
 
 def test_owner_authorization_refusal_is_surfaced_after_submit_and_fresh_load_works(
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # Preview bookkeeping cannot replace the Controller's authorization edge.
     review = _review("model", "publisher/model")
@@ -463,11 +464,22 @@ def test_owner_authorization_refusal_is_surfaced_after_submit_and_fresh_load_wor
         ("POST", "/api/model/publisher%2Fmodel/remove"),
     ]
     assert client.accepted is None
+    capsys.readouterr()
     client.before_post = None
-    fresh = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
-    result = controller_cli.run_controller(fresh, client, lambda: _REQUEST_KEY)
+    fresh_key = "00000000-0000-4000-8000-000000000932"
+    assert (
+        cli.main(
+            ("--json", "model", "remove", "publisher/model", "--yes", "--detach"),
+            control_client=client,
+            request_id_factory=lambda: fresh_key,
+        )
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
     assert result == client.accepted
     assert result["operation_id"] == "model-operation-9"
+    assert result["request_key"] == fresh_key
+    assert len([call for call in client.calls if call[0] == "POST"]) == 2
 
 
 def test_same_key_replay_precedes_review_lookup(

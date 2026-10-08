@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from ..cli_outcome import (
     Submission,
 )
+from ..cli_states_generated import PROFILE_REVIEW_STALE
 from ..control_client import (
     ControlClientError,
     ControlHTTPError,
@@ -23,6 +24,11 @@ from ..control_client import (
 )
 from ..error_reporting import ErrorContext, protocol_context, transport_context
 from .common import ControllerClient
+
+
+def _accepted_submission(args: argparse.Namespace, operation_id: str) -> None:
+    args.submission.acceptance = "accepted"
+    args.submission.operation_id = operation_id
 
 
 def _known_http_refusal_status(error: ControlClientError) -> int | None:
@@ -105,8 +111,6 @@ def _submit_idempotent_request(
                 timeout_seconds=min(normal_timeout, remaining),
             )
             operation_id = (receipt_validator or validate)(result)
-        except BrokenPipeError:
-            raise
         except (ControlClientError, OSError) as error:
             context = error.context if isinstance(error, ControlClientError) else None
             if context is None:
@@ -123,8 +127,7 @@ def _submit_idempotent_request(
                 )
             submission.failures.append({"stage": stage, **context.as_dict()})
             raise
-        submission.acceptance = "accepted"
-        submission.operation_id = operation_id
+        _accepted_submission(args, operation_id)
         return result
 
     retry_error: ControlHTTPError | ControlTransportError | None = None
@@ -132,17 +135,16 @@ def _submit_idempotent_request(
     submission.acceptance = "unknown"
     try:
         return request("POST", path, "submit")
-    except BrokenPipeError:
-        end_unknown(interrupted=True)
-        return {}
     except OSError:
         may_replay = True
     except ControlClientError as error:
         status = _known_http_refusal_status(error)
-        if status is not None:
+        if status in {400, 401, 403, 422} or (
+            status == 409 and getattr(error, "code", None) == PROFILE_REVIEW_STALE
+        ):
             submission.acceptance = "refused"
             raise
-        if isinstance(
+        if status is not None or isinstance(
             error,
             (
                 ControlMalformedResponse,
@@ -205,8 +207,16 @@ def _submit_idempotent_request(
             ControlObservationUnavailable,
             ControlTransportError,
             ControlUnavailable,
+            ControlHTTPError,
             OSError,
-        ):
+        ) as error:
+            if isinstance(error, ControlHTTPError) and error.status_code in {
+                400,
+                401,
+                403,
+                422,
+            }:
+                raise
             return _poll_path(
                 client,
                 lookup,
@@ -228,17 +238,20 @@ def _submit_idempotent_request(
             time.sleep(delay)
     try:
         return request("POST", path, "replay")
-    except BrokenPipeError:
-        end_unknown(interrupted=True)
-        return {}
     except (
         ControlMalformedResponse,
         ControlResponseTooLarge,
         ControlObservationUnavailable,
         ControlTransportError,
         ControlUnavailable,
+        ControlHTTPError,
         OSError,
-    ):
+    ) as error:
+        if isinstance(error, ControlHTTPError) and (
+            error.status_code in {400, 401, 403, 422}
+            or (error.status_code == 409 and error.code == PROFILE_REVIEW_STALE)
+        ):
+            raise
         if lookup == path:
             end_unknown()
             return {}

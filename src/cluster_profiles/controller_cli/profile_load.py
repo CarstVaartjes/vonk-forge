@@ -11,25 +11,41 @@ from contextlib import redirect_stdout
 from typing import cast
 
 from ..cli_render import render_payload
+from ..cli_states_generated import PROFILE_REVIEW_STALE
 from ..control_client import (
+    ControlClientError,
     ControlConflict,
     ControlMalformedResponse,
+    validate_control_document,
 )
+from ..generated_control.models.fleet_profile_load_request import (
+    FleetProfileLoadRequest,
+)
+from ..generated_control.models.fleet_profile_load_review import FleetProfileLoadReview
 from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _confirm_action
 from .observation import _poll_path
-from .submission import _submit_idempotent_request
+from .submission import _accepted_submission, _submit_idempotent_request
 
-_REVIEW_STALE_CODE = "profile.review_stale"
+_REVIEW_STALE_CODE = PROFILE_REVIEW_STALE
 
 
 _MAX_REVIEW_ROUNDS = 3
 
 
-def _reviewed_effects_digest(preview: Mapping[str, object]) -> str | None:
+def _reviewed_effects_digest(preview: Mapping[str, object]) -> str:
     """Forward the Controller binding unchanged; admission belongs to its owner."""
     digest = preview.get("effects_digest")
-    if digest is None or isinstance(digest, str):
+    if isinstance(digest, str):
+        # This is peer metadata, validated inside the owning observation retry.
+        try:
+            validate_control_document(
+                "FleetProfileLoadReview", {"effects_digest": digest}
+            )
+        except ControlClientError:
+            raise ControlMalformedResponse(
+                "profile review binding is unreadable"
+            ) from None
         return digest
     raise ControlMalformedResponse("profile review binding is unreadable")
 
@@ -57,10 +73,8 @@ def _review_and_submit_profile_load(
         return _submit_profile_load(client, number, args, factory)
     review_attempt = 1
     while True:
-        # Re-observe the latest preview rather than gate on a held binding.
-        # A fresh readable preview may omit the optional binding; only the
-        # Controller decides whether that load is admissible. Unreadable peer
-        # replies are unknown and get bounded observation retries.
+        # Re-observe missing or unreadable bindings before asking for consent.
+        # Review consent never authorizes an unbound current-plan submission.
         def observe_preview(remaining: float) -> object:
             return client.request(
                 "POST", f"/api/profile/{number}/preview", timeout_seconds=remaining
@@ -94,7 +108,7 @@ def _review_and_submit_profile_load(
             )
         except ControlConflict as error:
             if error.code != _REVIEW_STALE_CODE or review_attempt == _MAX_REVIEW_ROUNDS:
-                raise
+                return _observe_profile_load_request(client, number, args)
         review_attempt += 1
         question = (
             "The plan changed since your review. "
@@ -161,9 +175,10 @@ def _submit_profile_load(
     key = _request_key(args, factory)
     path = f"/api/profile/{number}/load"
     lookup = f"/api/profile/{number}/requests/{key}"
-    body: dict[str, object] = {"request_key": key}
+    request = FleetProfileLoadRequest(request_key=key)
     if reviewed_effects_digest is not None:
-        body["reviewed_effects_digest"] = reviewed_effects_digest
+        request.review = FleetProfileLoadReview(effects_digest=reviewed_effects_digest)
+    body = request.to_dict()
 
     def validate(result: Mapping[str, object]) -> str:
         operation_id = result.get("id")
@@ -177,29 +192,67 @@ def _submit_profile_load(
             )
         return operation_id
 
-    return _submit_idempotent_request(
+    try:
+        return _submit_idempotent_request(
+            client,
+            args,
+            key=key,
+            path=path,
+            lookup=lookup,
+            body=body,
+            noun="profile",
+            action="load",
+            validate=validate,
+            reconnect=shlex.join(
+                [
+                    "vonkctl",
+                    "--profile",
+                    str(number),
+                    "profile",
+                    "progress",
+                    "--request-key",
+                    key,
+                    "--follow",
+                ]
+            ),
+        )
+    except ControlConflict as error:
+        if error.code == _REVIEW_STALE_CODE and reviewed_effects_digest is not None:
+            raise
+        return _observe_profile_load_request(client, number, args)
+
+
+def _observe_profile_load_request(
+    client: ControllerClient, number: int, args: argparse.Namespace
+):
+    # Observe only this request; a conflict does not license an effect replay.
+    key = args.submission.request_key
+    args.submission.acceptance = "unknown"
+
+    def same_request(observed: object) -> None:
+        if not isinstance(observed, Mapping):
+            raise ControlMalformedResponse("profile lookup is unreadable")
+        identity = observed.get("id")
+        if (
+            observed.get("request_key") != key
+            or not isinstance(identity, str)
+            or not identity
+        ):
+            raise ControlMalformedResponse("profile lookup identifies another request")
+
+    observed = _poll_path(
         client,
+        f"/api/profile/{number}/requests/{_quoted(key)}",
+        {},
         args,
-        key=key,
-        path=path,
-        lookup=lookup,
-        body=body,
-        noun="profile",
-        action="load",
-        validate=validate,
-        reconnect=shlex.join(
-            [
-                "vonkctl",
-                "--profile",
-                str(number),
-                "profile",
-                "progress",
-                "--request-key",
-                key,
-                "--follow",
-            ]
-        ),
+        fetch_initial=True,
+        attempts=_MAX_REVIEW_ROUNDS,
+        terminal=lambda _: True,
+        validate=same_request,
     )
+    if args.observation.status == "complete":
+        _accepted_submission(args, cast(str, observed["id"]))
+    return observed
 
 
 def _submit_fleet_upgrade(

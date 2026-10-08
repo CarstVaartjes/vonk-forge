@@ -44,6 +44,7 @@ class FleetProfilePreview:
             assessments (list[FleetProfileAssignmentAssessment]):
             assignments (list[FleetProfileAssignmentPreview]):
             effects (FleetProfileEffects): Identified live effects, including complete distributed membership.
+            effects_digest (str):
             generated_at (datetime.datetime):
             plan_digest (str):
             preparation_decisions (list[FleetProfilePreparationDecision]):
@@ -57,7 +58,6 @@ class FleetProfilePreview:
             scope (FleetProfileScopePreview):
             steps (list[FleetProfilePlanStep]):
             summary (FleetProfilePlanSummary):
-            effects_digest (None | str | Unset):
             preparation_steps (list[FleetProfilePlanStep] | Unset):
             preparations (list[FleetProfileAssignmentPreparation] | Unset):
             schema_version (Literal[2] | Unset):  Default: 2.
@@ -69,6 +69,7 @@ class FleetProfilePreview:
     assessments: list[FleetProfileAssignmentAssessment]
     assignments: list[FleetProfileAssignmentPreview]
     effects: FleetProfileEffects
+    effects_digest: str
     generated_at: datetime.datetime
     plan_digest: str
     preparation_decisions: list[FleetProfilePreparationDecision]
@@ -82,7 +83,6 @@ class FleetProfilePreview:
     scope: FleetProfileScopePreview
     steps: list[FleetProfilePlanStep]
     summary: FleetProfilePlanSummary
-    effects_digest: None | str | Unset = UNSET
     preparation_steps: list[FleetProfilePlanStep] | Unset = UNSET
     preparations: list[FleetProfileAssignmentPreparation] | Unset = UNSET
     schema_version: Literal[2] | Unset = 2
@@ -129,6 +129,8 @@ class FleetProfilePreview:
 
 
         effects = self.effects.to_dict()
+
+        effects_digest = self.effects_digest
 
         generated_at = self.generated_at.isoformat()
 
@@ -181,12 +183,6 @@ class FleetProfilePreview:
 
         summary = self.summary.to_dict()
 
-        effects_digest: None | str | Unset
-        if isinstance(self.effects_digest, Unset):
-            effects_digest = UNSET
-        else:
-            effects_digest = self.effects_digest
-
         preparation_steps: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.preparation_steps, Unset):
             preparation_steps = []
@@ -218,6 +214,7 @@ class FleetProfilePreview:
             "assessments": assessments,
             "assignments": assignments,
             "effects": effects,
+            "effects_digest": effects_digest,
             "generated_at": generated_at,
             "plan_digest": plan_digest,
             "preparation_decisions": preparation_decisions,
@@ -232,8 +229,6 @@ class FleetProfilePreview:
             "steps": steps,
             "summary": summary,
         })
-        if effects_digest is not UNSET:
-            field_dict["effects_digest"] = effects_digest
         if preparation_steps is not UNSET:
             field_dict["preparation_steps"] = preparation_steps
         if preparations is not UNSET:
@@ -298,6 +293,8 @@ class FleetProfilePreview:
 
 
 
+
+        effects_digest = d.pop("effects_digest")
 
         generated_at = datetime.datetime.fromisoformat(d.pop("generated_at"))
 
@@ -388,16 +385,6 @@ class FleetProfilePreview:
 
 
 
-        def _parse_effects_digest(data: object) -> None | str | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            return cast(None | str | Unset, data)
-
-        effects_digest = _parse_effects_digest(d.pop("effects_digest", UNSET))
-
-
         _preparation_steps = d.pop("preparation_steps", UNSET)
         preparation_steps: list[FleetProfilePlanStep] | Unset = UNSET
         if _preparation_steps is not UNSET:
@@ -434,6 +421,7 @@ class FleetProfilePreview:
             assessments=assessments,
             assignments=assignments,
             effects=effects,
+            effects_digest=effects_digest,
             generated_at=generated_at,
             plan_digest=plan_digest,
             preparation_decisions=preparation_decisions,
@@ -447,7 +435,6 @@ class FleetProfilePreview:
             scope=scope,
             steps=steps,
             summary=summary,
-            effects_digest=effects_digest,
             preparation_steps=preparation_steps,
             preparations=preparations,
             schema_version=schema_version,

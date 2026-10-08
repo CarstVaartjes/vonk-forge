@@ -269,6 +269,7 @@ from .fleet_profile_intended_configuration import FleetProfileIntendedConfigurat
 from .fleet_profile_intended_configuration_installation_policy import FleetProfileIntendedConfigurationInstallationPolicy
 from .fleet_profile_list import FleetProfileList
 from .fleet_profile_load_request import FleetProfileLoadRequest
+from .fleet_profile_load_review import FleetProfileLoadReview
 from .fleet_profile_node import FleetProfileNode
 from .fleet_profile_pending_effect import FleetProfilePendingEffect
 from .fleet_profile_pending_effect_kind import FleetProfilePendingEffectKind
@@ -1170,6 +1171,7 @@ __all__ = (
     "FleetProfileIntendedConfigurationInstallationPolicy",
     "FleetProfileList",
     "FleetProfileLoadRequest",
+    "FleetProfileLoadReview",
     "FleetProfileNode",
     "FleetProfilePendingEffect",
     "FleetProfilePendingEffectKind",
