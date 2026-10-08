@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 import uuid
+from dataclasses import dataclass
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -20,6 +21,7 @@ from sqlalchemy import (
     literal_column,
 )
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import DBAPIError
 
 from .exact_integer_storage import DecimalIntegerToken
 from .settings import DATABASE_WAIT_BUDGETS
@@ -455,7 +457,57 @@ def adopt_exact_integer_columns(connection: Connection) -> None:
             raise ValueError("exact integer adoption would damage SQLite foreign keys")
 
 
+@dataclass
+class _SQLiteAdoptionDeadline:
+    expires_at: float
+    interrupted: bool = False
+
+    def progress(self) -> int:
+        self.interrupted = self.interrupted or time.monotonic() >= self.expires_at
+        return int(self.interrupted)
+
+
 def reconcile_exact_integer_schema(engine: Engine) -> None:
+    """The platform retries transient SQLite contention within one deadline.
+
+    Each failed attempt rolls back and removes its progress callback before a
+    fresh checkout. Our deadline interruption, integrity and contract refusals
+    propagate; only contention or an unrelated native interrupt can retry.
+    """
+    deadline = _SQLiteAdoptionDeadline(
+        time.monotonic() + DATABASE_WAIT_BUDGETS.transaction_timeout_ms / 1000
+    )
+    for attempt in range(3):
+        try:
+            _reconcile_exact_integer_schema_once(engine, deadline)
+            return
+        except DBAPIError as error:
+            code = getattr(error.orig, "sqlite_errorcode", None)
+            remaining = deadline.expires_at - time.monotonic()
+            if (
+                deadline.interrupted
+                or remaining <= 0
+                or not isinstance(error.orig, sqlite3.OperationalError)
+                or not isinstance(code, int)
+                or code & 0xFF
+                not in {
+                    sqlite3.SQLITE_INTERRUPT,
+                    sqlite3.SQLITE_BUSY,
+                    sqlite3.SQLITE_LOCKED,
+                }
+                or attempt == 2
+            ):
+                raise
+            time.sleep(min(0.1 * (attempt + 1), remaining))
+            # Sleep/scheduling can consume the last of the budget. Preserve
+            # the original failure instead of starting an expired attempt.
+            if time.monotonic() >= deadline.expires_at:
+                raise
+
+
+def _reconcile_exact_integer_schema_once(
+    engine: Engine, deadline: _SQLiteAdoptionDeadline
+) -> None:
     """SQLite-only isolated startup entry; never nest in an active service tx.
 
     Foreign-key settings belong to this checked-out connection and are restored
@@ -482,16 +534,13 @@ def reconcile_exact_integer_schema(engine: Engine) -> None:
         try:
             connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
             connection.exec_driver_sql("PRAGMA legacy_alter_table=ON")
-            connection.exec_driver_sql(
-                f"PRAGMA busy_timeout={DATABASE_WAIT_BUDGETS.lock_timeout_ms}"
-            )
+            remaining_ms = max(0, int((deadline.expires_at - time.monotonic()) * 1000))
+            lock_timeout_ms = min(DATABASE_WAIT_BUDGETS.lock_timeout_ms, remaining_ms)
+            connection.exec_driver_sql(f"PRAGMA busy_timeout={lock_timeout_ms}")
             connection.commit()
             # An exclusive startup checkout owns this callback. The interval
             # is polling cadence; the bound comes from the transaction budget.
-            deadline = time.monotonic() + (
-                DATABASE_WAIT_BUDGETS.transaction_timeout_ms / 1000
-            )
-            driver.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+            driver.set_progress_handler(deadline.progress, 1000)
             connection.exec_driver_sql("BEGIN IMMEDIATE")
             if (
                 connection.exec_driver_sql("PRAGMA foreign_key_check").first()
@@ -501,6 +550,8 @@ def reconcile_exact_integer_schema(engine: Engine) -> None:
             adopt_exact_integer_columns(connection)
             connection.commit()
         except BaseException:
+            # An expired callback must not interrupt the rollback itself.
+            driver.set_progress_handler(None, 0)
             connection.rollback()
             raise
         finally:

@@ -160,30 +160,6 @@
     },
     {
       "path": "control/tests/test_agent_jobs.py",
-      "function": "test_parent_job_becomes_succeeded_only_after_every_operation_succeeds",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs.py",
-      "function": "test_parent_job_fails_when_all_operations_are_terminal_and_one_failed",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs.py",
-      "function": "test_parent_job_waits_when_all_operations_terminal_without_failures",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs.py",
-      "function": "test_parent_job_waits_when_all_operations_terminal_without_failures",
-      "kind": "operator-wait-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_agent_jobs.py",
       "function": "test_recipe_build_is_rejected_when_builder_runtime_changed_before_claim",
       "kind": "transient-failed-assertion",
       "count": 3
@@ -1186,18 +1162,6 @@
     },
     {
       "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_fails_the_order_but_retains_uncertain_capacity",
-      "kind": "observation-withdrawal-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_fails_the_order_but_retains_uncertain_capacity",
-      "kind": "transient-failed-assertion",
-      "count": 2
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
       "function": "test_durable_retire_refuses_a_parked_operation_whose_lease_is_live",
       "kind": "ending-without-fresh-request",
       "count": 1
@@ -1231,18 +1195,6 @@
       "function": "test_durable_retire_retains_uncertain_run_capacity",
       "kind": "ending-without-fresh-request",
       "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_retains_uncertain_run_capacity",
-      "kind": "observation-withdrawal-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_operation_api.py",
-      "function": "test_durable_retire_retains_uncertain_run_capacity",
-      "kind": "transient-failed-assertion",
-      "count": 2
     },
     {
       "path": "control/tests/test_operation_api.py",

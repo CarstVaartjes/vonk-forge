@@ -9,7 +9,29 @@
     ],
     "audited_paths": [
       "control/src/vonk_control/admission_locking.py",
-      "control/src/vonk_control/agent_jobs.py",
+      "control/src/vonk_control/agent_jobs/__init__.py",
+      "control/src/vonk_control/agent_jobs/aggregation.py",
+      "control/src/vonk_control/agent_jobs/claim.py",
+      "control/src/vonk_control/agent_jobs/claim_authority.py",
+      "control/src/vonk_control/agent_jobs/claim_notes.py",
+      "control/src/vonk_control/agent_jobs/claim_reconcile.py",
+      "control/src/vonk_control/agent_jobs/completion.py",
+      "control/src/vonk_control/agent_jobs/contracts.py",
+      "control/src/vonk_control/agent_jobs/endings.py",
+      "control/src/vonk_control/agent_jobs/evidence.py",
+      "control/src/vonk_control/agent_jobs/heartbeat.py",
+      "control/src/vonk_control/agent_jobs/identity.py",
+      "control/src/vonk_control/agent_jobs/orchestration.py",
+      "control/src/vonk_control/agent_jobs/persistence.py",
+      "control/src/vonk_control/agent_jobs/predicates.py",
+      "control/src/vonk_control/agent_jobs/reconcile.py",
+      "control/src/vonk_control/agent_jobs/results.py",
+      "control/src/vonk_control/agent_jobs/retirement.py",
+      "control/src/vonk_control/agent_jobs/retry.py",
+      "control/src/vonk_control/agent_jobs/scope.py",
+      "control/src/vonk_control/agent_jobs/service.py",
+      "control/src/vonk_control/agent_jobs/stored.py",
+      "control/src/vonk_control/agent_jobs/supersession.py",
       "control/src/vonk_control/agent_upgrades.py",
       "control/src/vonk_control/artifact_blob_store.py",
       "control/src/vonk_control/artifact_jobs.py",
@@ -72,7 +94,29 @@
       "control/src/vonk_control/topology.py"
     ],
     "guard_paths": [
-      "control/src/vonk_control/agent_jobs.py",
+      "control/src/vonk_control/agent_jobs/__init__.py",
+      "control/src/vonk_control/agent_jobs/aggregation.py",
+      "control/src/vonk_control/agent_jobs/claim.py",
+      "control/src/vonk_control/agent_jobs/claim_authority.py",
+      "control/src/vonk_control/agent_jobs/claim_notes.py",
+      "control/src/vonk_control/agent_jobs/claim_reconcile.py",
+      "control/src/vonk_control/agent_jobs/completion.py",
+      "control/src/vonk_control/agent_jobs/contracts.py",
+      "control/src/vonk_control/agent_jobs/endings.py",
+      "control/src/vonk_control/agent_jobs/evidence.py",
+      "control/src/vonk_control/agent_jobs/heartbeat.py",
+      "control/src/vonk_control/agent_jobs/identity.py",
+      "control/src/vonk_control/agent_jobs/orchestration.py",
+      "control/src/vonk_control/agent_jobs/persistence.py",
+      "control/src/vonk_control/agent_jobs/predicates.py",
+      "control/src/vonk_control/agent_jobs/reconcile.py",
+      "control/src/vonk_control/agent_jobs/results.py",
+      "control/src/vonk_control/agent_jobs/retirement.py",
+      "control/src/vonk_control/agent_jobs/retry.py",
+      "control/src/vonk_control/agent_jobs/scope.py",
+      "control/src/vonk_control/agent_jobs/service.py",
+      "control/src/vonk_control/agent_jobs/stored.py",
+      "control/src/vonk_control/agent_jobs/supersession.py",
       "control/src/vonk_control/agent_upgrades.py",
       "control/src/vonk_control/artifact_blob_store.py",
       "control/src/vonk_control/artifact_jobs.py",
@@ -119,7 +163,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 295,
+    "total": 258,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -129,30 +173,6 @@
     "grandfathered": {}
   },
   "retry_loops": [
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService._sweep_lapsed_attempts",
-      "catches": [
-        "AdmissionLockBusy"
-      ],
-      "reason": "The lapsed-attempt sweep skips a node whose admission lock is busy and the next pass retries it."
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.fail",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
-    },
-    {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "AgentJobService.succeed",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
-    },
     {
       "path": "control/src/vonk_control/agent_upgrades.py",
       "function": "AgentUpgradeService.current_package",
@@ -553,14 +573,6 @@
       "reason": "Unknown abandonment retains the plan, logs its next attempt and continues other plans; the tick re-observes the retained plan after a five second backoff."
     },
     {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "function": "_exact_service_stop_receipt_covers_start",
-      "catches": [
-        "UnknownOutcomeError"
-      ],
-      "reason": "This exact Stop observer returns False for unreadable accepted Start evidence, retaining the issued old effect. AgentJobService.assess_superseded_agent_effects_in_session returns typed UNCERTAIN_EFFECT with persisted observation due, so FleetProfileService re-observes the same journal; the AgentJobService claim gate retains the old active mutation and each next AgentClaim re-reads the healed receipt. The connected PostgreSQL pending-effect proof exercises partial and nine damaged receipts, repair, the same profile continuation and a fresh native Start claim without changing the old attempt."
-    },
-    {
       "path": "control/src/vonk_control/recipe_operations.py",
       "function": "RecipeOperationService.stop",
       "catches": [
@@ -584,6 +596,114 @@
         "UnknownOutcomeError"
       ],
       "reason": "One oldest due accepted Stop per worker pass retries its exact durable request. A deferred row retains original bytes, claims and meaningful cause and advances its next-attempt clock, releasing transactions before publication and allowing other due rows to advance."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/reconcile.py",
+      "function": "_sweep_lapsed_attempts",
+      "catches": [
+        "AdmissionLockBusy"
+      ],
+      "reason": "The lapsed-attempt sweep skips a node whose admission lock is busy and the next pass retries it."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/results.py",
+      "function": "fail",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/results.py",
+      "function": "succeed",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/evidence.py",
+      "function": "_exact_service_stop_receipt_covers_start",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "This exact Stop observer returns False for unreadable accepted Start evidence, retaining the issued old effect. AgentJobService.assess_superseded_agent_effects_in_session returns typed UNCERTAIN_EFFECT with persisted observation due, so FleetProfileService re-observes the same journal; the AgentJobService claim gate retains the old active mutation and each next AgentClaim re-reads the healed receipt. The connected PostgreSQL pending-effect proof exercises partial and nine damaged receipts, repair, the same profile continuation and a fresh native Start claim without changing the old attempt."
+    },
+    {
+      "path": "control/src/vonk_control/agent_jobs/reconcile.py",
+      "function": "_sweep_gone_targets",
+      "catches": [
+        "AdmissionLockBusy"
+      ],
+      "reason": "The bounded gone-target sweep releases its transaction on a busy admission lock; the next worker pass rechecks target authority and retries the same order."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.check_source",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.resolve",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds.py",
+      "function": "RecipeBuildService.prepare_plan",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/requests.py",
+      "function": "_start_request",
+      "catches": [
+        "RecipeImageAvailabilityUnknown"
+      ],
+      "reason": "Admission reconciles the same request on bounded exponential backoff for at most 250 milliseconds; exhaustion returns a typed failed observation with no accepted effect, locks or claims. A new request is always eligible."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/failure_projection.py",
+      "function": "_view",
+      "catches": [
+        "UnknownOutcomeError",
+        "ModelCacheError",
+        "SQLAlchemyError",
+        "OSError",
+        "ValueError"
+      ],
+      "reason": "Each read observes the exact model child anew; unavailable bookkeeping returns typed residue beside the last observed child and verified image result. The execution owner retains its canonical bounded retry path."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_completion.py",
+      "function": "_finish_recipe_removal",
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "reason": "The recurring worker pass records reference uncertainty on the canonical removal checkpoint, releases its transaction and retries after bounded lifecycle backoff; terminal effects end and dead gates are reconciled under storage locks."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/projection.py",
+      "function": "get_operator_operation",
+      "catches": [
+        "RecipeImageAvailabilityUnknown"
+      ],
+      "reason": "Each read re-observes the accepted record and projects a typed unavailable reason without refusing the read. The worker ends unreadable owners and reconciles their exact gates under storage locks."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+      "function": "reconcile_requested_removals.validate",
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "reason": "Every bounded worker pass re-observes this exact request and removal owner. Unreadable destructive intent is not executed; the removal worker retires damaged owners and the storage-fenced reaper releases their gates."
     }
   ],
   "call_edges": [
@@ -704,13 +824,13 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: Operator retire request refused because live attempts or leases still hold the work; the operator's request is the thing refused.",
       "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "a-live-attempt-still-holds-its-lease", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "another-attempt-is-already-authorised", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "another-issued-operation-is-still-active", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "its-issued-start-still-holds-an-open-launch-budget", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "its-target-scope-changed", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "job-has-no-parked-operation", 1],
-        ["control/src/vonk_control/agent_jobs.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "job-is-not-waiting-for-operator", 1]
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "a-live-attempt-still-holds-its-lease", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "another-attempt-is-already-authorised", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "another-issued-operation-is-still-active", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "its-issued-start-still-holds-an-open-launch-budget", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "its-target-scope-changed", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "job-has-no-parked-operation", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "OperatorRetirementRefused", "retire_exhausted_operations_in_session", "job-is-not-waiting-for-operator", 1]
       ]
     },
     {
@@ -1820,25 +1940,10 @@
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.persist_plan_in_session", "message", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildResolution.build_input_for_builder", "build.plan_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.capability_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_disk", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_memory", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_stale", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.network_capability_missing", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._check_source_once", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.node_unknown", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._resolve_once", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.plan_invalid", 4],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService.persist_plan_in_session", "build.runtime_changed", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_canonical_recipe_document", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 1],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_source_bundle_handle", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_validate_builder", "build.node_incompatible", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "canonical_build", "build.contract_invalid", 1]
       ]
@@ -2232,8 +2337,7 @@
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "SourceBundleStore.get", "bundle.not_found", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_generated_bundle", "bundle.read_failed", 1],
         ["control/src/vonk_control/source_bundles.py", "SourceBundleError", "_inspect_archive", "bundle.read_failed", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1],
-        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.put", "bundle.storage_unavailable", 1]
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.get", "bundle.storage_unavailable", 1]
       ]
     },
     {
@@ -2566,39 +2670,39 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class AgentConfigurationConflict is of the input-validation error type; class InvalidType is of the input-validation error type; class InvalidValue is of the input-validation error type; class MissingRecord is of the input-validation error type; class StaleAgentRequest is of the input-validation error type.",
       "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-contact-consumer-is-already-configured", 1],
-        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-job-service-has-already-started", 1],
-        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-job-service-has-already-started", 1],
-        ["control/src/vonk_control/agent_jobs.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-result-consumer-is-already-configured", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.__init__", "agent-contact-consumer-must-be-callable", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.__init__", "agent-result-consumer-must-be-callable", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.set_contact_consumer", "agent-contact-consumer-must-be-callable", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidType", "AgentJobService.set_result_consumer", "agent-result-consumer-must-be-callable", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._finish", "agent-result-does-not-match-requested-completion", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._finish", "operation-failure-evidence-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._reason", "failure-reason-is-required", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._runtime_identity", "agent-runtime-identity-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService._runtime_identity", "agent-runtime-identity-is-required", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.assess_superseded_agent_effects_in_session", "workload-observation-scope-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.claim", "node-and-certificate-are-required", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-authority-revision-must-match-its-parent", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-is-not-supported-by-the-control-plane", 2],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-node-must-be-a-parent-target", 2],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-node-must-be-active", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-parent-target-scope-changed", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "agent-operation-workload-intent-was-superseded", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "cannot-enqueue-an-agent-operation-beneath-a-terminal-parent", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.enqueue_in_session", "workload-operation-requires-a-bound-intent", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.heartbeat", "lease-must-be-positive", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.record_boundary_refusal", "agent-boundary-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "AgentJobService.request_superseded_workload_cancellation_in_session", "workload-cancellation-scope-is-invalid", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "authorize_operator_resume_in_session", "job-has-no-current-authorized-resume-action", 1],
-        ["control/src/vonk_control/agent_jobs.py", "InvalidValue", "authorize_operator_resume_in_session", "job-is-not-waiting-for-operator", 1],
-        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "AgentJobService._aggregate_parent_state", "not-found", 1],
-        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "AgentJobService.enqueue_in_session", "not-found", 3],
-        ["control/src/vonk_control/agent_jobs.py", "MissingRecord", "retire_exhausted_operations_in_session", "not-found", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentRequest", "AgentJobService.record_late_result", "agent-operation-attempt-is-not-expired", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentRequest", "AgentJobService.record_late_result", "expired-attempt-evidence-changed", 1]
+        ["control/src/vonk_control/agent_jobs/aggregation.py", "MissingRecord", "_aggregate_parent_state", "not-found", 1],
+        ["control/src/vonk_control/agent_jobs/claim_notes.py", "InvalidValue", "claim_next_operation", "node-and-certificate-are-required", 1],
+        ["control/src/vonk_control/agent_jobs/claim_notes.py", "InvalidValue", "record_boundary_refusal", "agent-boundary-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/heartbeat.py", "InvalidValue", "heartbeat", "lease-must-be-positive", 1],
+        ["control/src/vonk_control/agent_jobs/identity.py", "InvalidValue", "_reason", "failure-reason-is-required", 1],
+        ["control/src/vonk_control/agent_jobs/identity.py", "InvalidValue", "_runtime_identity", "agent-runtime-identity-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/identity.py", "InvalidValue", "_runtime_identity", "agent-runtime-identity-is-required", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-authority-revision-must-match-its-parent", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-is-not-supported-by-the-control-plane", 2],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-node-must-be-a-parent-target", 2],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-node-must-be-active", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-parent-target-scope-changed", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "agent-operation-workload-intent-was-superseded", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "cannot-enqueue-an-agent-operation-beneath-a-terminal-parent", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "InvalidValue", "enqueue_in_session", "workload-operation-requires-a-bound-intent", 1],
+        ["control/src/vonk_control/agent_jobs/orchestration.py", "MissingRecord", "enqueue_in_session", "not-found", 3],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentRequest", "record_late_result", "agent-operation-attempt-is-not-expired", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentRequest", "record_late_result", "expired-attempt-evidence-changed", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "InvalidValue", "authorize_operator_resume_in_session", "job-has-no-current-authorized-resume-action", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "InvalidValue", "authorize_operator_resume_in_session", "job-is-not-waiting-for-operator", 1],
+        ["control/src/vonk_control/agent_jobs/retirement.py", "MissingRecord", "retire_exhausted_operations_in_session", "not-found", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-contact-consumer-is-already-configured", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "AgentConfigurationConflict", "AgentJobService.set_contact_consumer", "agent-job-service-has-already-started", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-job-service-has-already-started", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "AgentConfigurationConflict", "AgentJobService.set_result_consumer", "agent-result-consumer-is-already-configured", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidType", "AgentJobService.__init__", "agent-contact-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidType", "AgentJobService.__init__", "agent-result-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidType", "AgentJobService.set_contact_consumer", "agent-contact-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidType", "AgentJobService.set_result_consumer", "agent-result-consumer-must-be-callable", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidValue", "AgentJobService._finish", "agent-result-does-not-match-requested-completion", 1],
+        ["control/src/vonk_control/agent_jobs/service.py", "InvalidValue", "AgentJobService._finish", "operation-failure-evidence-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/supersession.py", "InvalidValue", "assess_superseded_agent_effects_in_session", "workload-observation-scope-is-invalid", 1],
+        ["control/src/vonk_control/agent_jobs/supersession.py", "InvalidValue", "request_superseded_workload_cancellation_in_session", "workload-cancellation-scope-is-invalid", 1]
       ]
     },
     {
@@ -2606,13 +2710,13 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class AgentContactIdentityMismatch is of the security-edge error type; class StaleAgentFence is of the security-edge error type.",
       "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "AgentContactIdentityMismatch", "AgentJobService._consume_contact", "agent-contact-source-does-not-match-its-locked-identity", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService._active", "agent-operation-lease-certificate-or-fence-is-stale", 7],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService._fence_token", "agent-operation-lease-certificate-or-fence-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-certificate-is-no-longer-active", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-authority-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-authority-or-expired-attempt-is-stale", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentFence", "AgentJobService.record_late_result", "agent-operation-lease-certificate-or-fence-is-stale", 1]
+        ["control/src/vonk_control/agent_jobs/identity.py", "AgentContactIdentityMismatch", "_consume_contact", "agent-contact-source-does-not-match-its-locked-identity", 1],
+        ["control/src/vonk_control/agent_jobs/identity.py", "StaleAgentFence", "_active", "agent-operation-lease-certificate-or-fence-is-stale", 7],
+        ["control/src/vonk_control/agent_jobs/identity.py", "StaleAgentFence", "_fence_token", "agent-operation-lease-certificate-or-fence-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentFence", "record_late_result", "agent-certificate-is-no-longer-active", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentFence", "record_late_result", "agent-operation-authority-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentFence", "record_late_result", "agent-operation-authority-or-expired-attempt-is-stale", 1],
+        ["control/src/vonk_control/agent_jobs/results.py", "StaleAgentFence", "record_late_result", "agent-operation-lease-certificate-or-fence-is-stale", 1]
       ]
     },
     {
@@ -3154,14 +3258,6 @@
       ]
     },
     {
-      "family": "recipe_update_batches.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
-      "sites": [
-        ["control/src/vonk_control/recipe_update_batches.py", "RecipeUpdateClaimLost", "RecipeUpdateBatches._owned", "recipe_update.claim_lost", 2]
-      ]
-    },
-    {
       "family": "run_switch_operations.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
@@ -3301,16 +3397,6 @@
       "sites": [
         ["control/src/vonk_control/db.py", "_DatabaseStartupContention", "initialize_database.initialize_once", "controller-schema-owner-is-busy-startup-will-retry", 1],
         ["control/src/vonk_control/db.py", "_DatabaseStartupContention", "initialize_database.initialize_once", "controller-schema-relation-is-busy-startup-will-retry", 2]
-      ]
-    },
-    {
-      "family": "agent_jobs.proven-retry",
-      "category": "already-retried",
-      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
-      "sites": [
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService._finish", "superseded-operation-has-no-completion-authority", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-expired", 1],
-        ["control/src/vonk_control/agent_jobs.py", "StaleAgentLease", "AgentJobService.heartbeat", "superseded-cancellation-authority-is-invalid", 1]
       ]
     },
     {
@@ -3742,7 +3828,6 @@
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-absence-only-stop-no-longer-has-exact-absence-evide", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-profile-stop-owner-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-already-has-issued-work", 1],
-        ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-is-no-longer-awaiting-withdrawal", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-profile-binding-is-inconsistent", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-generation-changed", 1],
         ["control/src/vonk_control/recipe_operations.py", "RecipeStopAuthorityRefused", "RecipeOperationService._check_service_stop", "accepted-stop-runtime-payload-authority-changed", 1],
@@ -3810,52 +3895,6 @@
       ]
     },
     {
-      "family": "execution.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_current_model_child", "recipe_image.model_cache_invalid", 2]
-      ]
-    },
-    {
-      "family": "model_preparation.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_ensure_model_child", "recipe_image.model_cache_invalid", 3],
-        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_start_model_repair", "recipe_image.model_cache_invalid", 2],
-        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_start_model_repair", "recipe_image.model_cache_unavailable", 1],
-        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "_ModelQueueFailed", "_ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1]
-      ]
-    },
-    {
-      "family": "persistence.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityUnknown", "_read_removal_owner", "recipe_image.operation_invalid", 4]
-      ]
-    },
-    {
-      "family": "removal_completion.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/recipe_image_availability/removal_completion.py", "RecipeImageAvailabilityUnknown", "_finish_recipe_removal", "artifact.reference_changed", 1]
-      ]
-    },
-    {
-      "family": "requests.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it on every call path that reaches it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_lock_build_consumer", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_refresh_authority", "recipe_image.metadata_refresh_failed", 1],
-        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_start_request_once", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_start_request_once", "recipe_image.runtime_invalid", 1]
-      ]
-    },
-    {
       "family": "availability_production.proven-retry",
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
@@ -3879,13 +3918,28 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildAdmissionBusy", "RecipeBuildService.reserve_in_session", "message", 2],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.capability_missing", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_disk", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.insufficient_memory", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_missing", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.inventory_stale", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._admit_spark_build", "build.network_capability_missing", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._check_source_once", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.contract_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.node_unknown", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._prepare_plan_once", "build.source_unavailable", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_disk", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.insufficient_memory", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_missing", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.inventory_stale", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.node_unknown", 1],
         ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.plan_invalid", 5],
-        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.runtime_changed", 1]
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._reserve_in_session", "build.runtime_changed", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._resolve_once", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "build.source_unavailable", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "RecipeBuildService._verified_bundle", "message", 2],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_read_recipe_projection", "build.contract_invalid", 1],
+        ["control/src/vonk_control/recipe_builds.py", "RecipeBuildUnknown", "_source_bundle_handle", "build.source_unavailable", 1]
       ]
     },
     {
@@ -3893,6 +3947,7 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
+        ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_current_model_child", "recipe_image.model_cache_invalid", 2],
         ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_run", "message", 1],
         ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_update_model_progress", "recipe_image.model_child_cancelled", 1],
         ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_update_model_progress", "recipe_image.model_child_missing", 1],
@@ -3915,6 +3970,10 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_ensure_model_child", "recipe_image.model_cache_invalid", 3],
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_start_model_repair", "recipe_image.model_cache_invalid", 2],
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_start_model_repair", "recipe_image.model_cache_unavailable", 1],
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "_ModelQueueFailed", "_ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1],
         ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "_ModelQueueFailed", "_resume_model_child", "model-artifact-operation-could-not-be-resumed", 1]
       ]
     },
@@ -3941,6 +4000,57 @@
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_prepare_from_build", "runtime_image.receipt_invalid", 2],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "_run_json_text", "runtime_image.inspect_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation.py", "RuntimeImagePreparationUnknown", "prepare_runtime_image", "runtime_image.receipt_persistence_failed", 1]
+      ]
+    },
+    {
+      "family": "recipe_operations.service-stop-replay",
+      "category": "already-retried",
+      "reason": "A duplicate continuation observes the immutable receipt for its request key and immediately returns the committed operation. The transaction unwinds before any withdrawal effect; the replay signal is caught before admission retry.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations.py", "_ServiceStopReplay", "RecipeOperationService._check_service_stop", "message", 1]
+      ]
+    },
+    {
+      "family": "persistence.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityUnknown", "_read_removal_owner", "recipe_image.operation_invalid", 4]
+      ]
+    },
+    {
+      "family": "removal_completion.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability/removal_completion.py", "RecipeImageAvailabilityUnknown", "_finish_recipe_removal", "artifact.reference_changed", 1]
+      ]
+    },
+    {
+      "family": "requests.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_lock_build_consumer", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_refresh_authority", "recipe_image.metadata_refresh_failed", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_start_request_once", "recipe_image.build_input_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_start_request_once", "recipe_image.runtime_invalid", 1]
+      ]
+    },
+    {
+      "family": "recipe_update_batches.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_update_batches.py", "RecipeUpdateClaimLost", "RecipeUpdateBatches._owned", "recipe_update.claim_lost", 2]
+      ]
+    },
+    {
+      "family": "source_bundles.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/source_bundles.py", "SourceBundleUnknown", "SourceBundleStore.put", "bundle.storage_unavailable", 1]
       ]
     }
   ]

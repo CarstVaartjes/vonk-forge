@@ -66,7 +66,7 @@ from vonk_control.recipe_start_payloads import (
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 
-from .agent_fences import fenced_attempt, fenced_operation, park_for_operator
+from .agent_fences import fenced_attempt, fenced_operation
 from .recipe_stop_fixtures import recipe_stop_payload
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -1964,6 +1964,7 @@ def test_parent_job_becomes_succeeded_only_after_every_operation_succeeds(
     jobs.succeed(second, STOP_RESULT)
 
     assert job_state(sessions, parent_job.id).state == "succeeded"
+    _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, parent_job)
 
 
 def test_parent_job_fails_when_all_operations_are_terminal_and_one_failed(
@@ -1994,9 +1995,10 @@ def test_parent_job_fails_when_all_operations_are_terminal_and_one_failed(
     assert aggregate.status_reason is not None
     assert "sensitive" not in aggregate.status_reason
     assert len(aggregate.status_reason) <= 1024
+    _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, parent_job)
 
 
-def test_parent_job_waits_when_all_operations_terminal_without_failures(
+def test_unknown_stop_outcome_retries_without_an_operator(
     service,
 ) -> None:
     jobs, sessions, clock = service
@@ -2012,13 +2014,39 @@ def test_parent_job_waits_when_all_operations_terminal_without_failures(
 
     waiting = claim_agent(jobs, NODE_A, "serial-a")
     assert waiting is not None
-    park_for_operator(sessions, jobs, waiting, "confirm displayed fingerprint")
+    jobs.record_result(
+        AgentResult.model_validate_json(
+            canonical_message(
+                {
+                    "fence": waiting.fence,
+                    "state": aos.WIRE_UNKNOWN,
+                    "result": {"reason": "stop receipt unavailable"},
+                }
+            )
+        )
+    )
 
     succeeded = claim_agent(jobs, NODE_B, "serial-b")
     assert succeeded is not None
     jobs.succeed(succeeded, STOP_RESULT)
 
-    assert job_state(sessions, parent_job.id).state == "needs-operator"
+    assert job_state(sessions, parent_job.id).state == "queued"
+    with sessions() as session:
+        pending = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == parent_job.id,
+                AgentOperation.node_id == NODE_A,
+            )
+        )
+        retry_at = pending.next_action_at
+        assert retry_at is not None
+    clock.advance(
+        seconds=(retry_at.replace(tzinfo=UTC) - clock.now).total_seconds() + 1
+    )
+    retry = claim_agent(jobs, NODE_A, "serial-a")
+    assert retry is not None
+    jobs.succeed(retry, STOP_RESULT)
+    _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, parent_job)
 
 
 @pytest.mark.parametrize(
@@ -4028,3 +4056,232 @@ def test_cancelled_build_waits_for_platform_cleanup_as_an_observation(service) -
         ).model_dump(mode="json", exclude_none=True)
         jobs._aggregate_parent_state(session, job.id)
     assert job_state(sessions, job.id).state == "observing"
+
+
+@pytest.mark.parametrize("action", ["heartbeat", "result"])
+@pytest.mark.parametrize("requested_at", [None, "expired"])
+def test_ended_superseded_authority_releases_the_queue(service, action, requested_at):
+    """An exhausted cancellation must not raise repeatedly or retain a live claim."""
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    jobs, sessions, clock = service
+    owner = parent(sessions, clock)
+    operation = jobs.enqueue(owner.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert claim is not None
+    with sessions.begin() as session:
+        session.get(AgentNode, NODE_A).workload_intent_ordinal = 2
+        session.get(Job, owner.id).result = {
+            "cancel_requested": True,
+            **(
+                {
+                    "cancel_requested_at": (
+                        clock.now - timedelta(seconds=700)
+                    ).isoformat()
+                }
+                if requested_at
+                else {}
+            ),
+        }
+
+    def end(_):
+        if action == "heartbeat":
+            directive = jobs.heartbeat(claim, None, 30)
+            assert directive.cancel_requested
+            assert directive.deadline == clock.now
+        else:
+            jobs._finish(claim, "cancelled", result=None, reason="superseded")
+        with sessions() as session:
+            return session.get(AgentOperation, operation.id)
+
+    def fresh(_):
+        new = _enqueue_successor_mutation(jobs, sessions, clock)
+        receipt = claim_agent(jobs, NODE_A, "serial-a")
+        assert receipt is not None
+        assert fenced_operation(sessions, receipt).id == new.id
+        with sessions() as session:
+            return session.get(AgentOperation, new.id)
+
+    def assert_reason(row):
+        assert "superseded" in row.status_reason
+        assert "remote effect unobserved" in row.status_reason
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=end,
+        fresh=fresh,
+        request_key=lambda row: row.id,
+        assert_reason=assert_reason,
+    )
+
+
+@pytest.mark.parametrize("issued", [False, True])
+def test_gone_target_ends_without_retaining_queue_ownership(service, issued):
+    """A revoked target never waits for its lease or a poll that cannot arrive."""
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    jobs, sessions, clock = service
+    owner = parent(sessions, clock)
+    operation = jobs.enqueue(owner.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    if issued:
+        assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        node.state = "revoked"
+        node.revoked_at = clock.now
+
+    def end(_):
+        assert jobs.reconcile_orders()
+        with sessions() as session:
+            return session.get(AgentOperation, operation.id)
+
+    def fresh(_):
+        new = jobs.enqueue(
+            parent(sessions, clock).id,
+            NODE_B,
+            "recipe.stop",
+            COMMIT,
+            recipe_stop_payload(NODE_B, plan_digest=COMMIT),
+        )
+        receipt = claim_agent(jobs, NODE_B, "serial-b")
+        assert receipt is not None
+        assert fenced_operation(sessions, receipt).id == new.id
+        with sessions() as session:
+            return session.get(AgentOperation, new.id)
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=end,
+        fresh=fresh,
+        request_key=lambda row: row.id,
+    )
+
+
+def test_retiring_bookkeeping_preserves_a_working_route(service):
+    """An unobserved retired order is never evidence to withdraw a serving run."""
+    from vonk_control.agent_jobs import _release_retired_owner_in_session
+
+    _jobs, sessions, clock = service
+    owner = parent(sessions, clock)
+    run_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        run = RecipeRun(
+            id=run_id,
+            installation_id="installation",
+            mapping_id="mapping",
+            mapping_generation=1,
+            alias="working",
+            plan_digest=COMMIT,
+            plan={},
+            state="running",
+            route_state="published",
+            actor="operator",
+            created_at=clock.now,
+            updated_at=clock.now,
+        )
+        session.add(run)
+        stored_owner = session.get(Job, owner.id)
+        stored_owner.payload = {"owner_kind": "run", "owner_id": run_id}
+        _release_retired_owner_in_session(
+            session, stored_owner, "unobserved", clock.now
+        )
+        assert run.state == "running"
+        assert run.route_state == "published"
+        assert run.route_error is None
+
+
+def test_non_blocking_guard_still_rejects_a_live_unknown_claim(service):
+    """A reported-unknown observation is distinct from a relinquished lease."""
+    from .non_blocking import assert_no_orphaned_holds
+
+    jobs, sessions, clock = service
+    owner = parent(sessions, clock)
+    operation = jobs.enqueue(owner.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    with sessions.begin() as session:
+        row = session.get(AgentOperation, operation.id)
+        row.state = "cancelled"
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == operation.id
+            )
+        )
+        attempt.state = "observing"
+        attempt.observation_cause = "reported-unknown"
+    with (
+        sessions() as session,
+        pytest.raises(AssertionError, match="orphaned agent claim"),
+    ):
+        assert_no_orphaned_holds(session)
+
+
+def _assert_parent_ending_admit_fresh_request(jobs, sessions, clock, owner):
+    from types import SimpleNamespace
+
+    from .non_blocking import assert_ended_without_blocking
+
+    def fresh(_):
+        successor = parent(sessions, clock)
+        order = jobs.enqueue(successor.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
+        claim = claim_agent(jobs, NODE_A, "serial-a")
+        assert claim is not None
+        assert fenced_operation(sessions, claim).id == order.id
+        return job_state(sessions, successor.id)
+
+    def reason(row):
+        assert row.status_reason
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        owner,
+        end=lambda row: job_state(sessions, row.id),
+        fresh=fresh,
+        assert_reason=reason,
+    )
+
+
+def test_stored_receipt_bytes_preserve_bound_nulls_and_timestamp_spelling(service):
+    """Catches typed reserialization invalidating an accepted parent's digest."""
+    from vonk_control.agent_jobs.stored import column_message, column_value
+    from vonk_control.job_documents import RecipeStartParent
+
+    _jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    with sessions.begin() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        stored.kind = "recipe.start"
+        stored.payload = {
+            "schema_version": 1,
+            "owner_kind": "run",
+            "owner_id": str(uuid.uuid4()),
+            "plan_digest": "b" * 64,
+            "start_deadline": "2026-08-03T01:00:00+00:00",
+            "phases": None,
+        }
+    with sessions() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        accepted = canonical_message(stored.payload)
+        typed = column_value(stored, "payload")
+        assert isinstance(typed, RecipeStartParent)
+        assert canonical_message(typed) != accepted
+        assert column_message(stored, "payload") == accepted
+    from sqlalchemy import update
+    from vonk_control.lifecycle.evidence import Residue
+
+    with sessions.begin() as session:
+        session.connection().execute(
+            update(Job).where(Job.id == job.id).values(payload={"damaged": True})
+        )
+    with sessions() as session:
+        stored = session.get(Job, job.id)
+        assert stored is not None
+        assert isinstance(column_value(stored, "payload"), Residue)
+        assert column_message(stored, "payload") == b""

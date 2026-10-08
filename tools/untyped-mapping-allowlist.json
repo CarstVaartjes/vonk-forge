@@ -293,10 +293,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/agent_jobs.py",
-      "count": 4
-    },
-    {
       "path": "control/src/vonk_control/agent_upgrade_status.py",
       "count": 1
     },
