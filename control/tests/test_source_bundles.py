@@ -166,7 +166,9 @@ def test_store_rejects_expected_digest_mismatch(tmp_path) -> None:
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_postgres_source_bundle_metadata_roundtrip_and_strict_reads(postgres_engine):
+def test_postgres_source_bundle_metadata_roundtrip_and_archive_owned_reads(
+    postgres_engine,
+):
     from sqlalchemy.orm import sessionmaker
     from vonk_agent_protocol import canonical_message
     from vonk_agent_protocol.source_bundles import SourceBundleManifest
@@ -196,9 +198,7 @@ def test_postgres_source_bundle_metadata_roundtrip_and_strict_reads(postgres_eng
         stored = session.get(RecipeSourceBundle, bundle.sha256)
         assert stored is not None
         stored.manifest = {**stored.manifest, "total_bytes": None}
-    with pytest.raises(SourceBundleError) as error:
-        store.get(bundle.sha256)
-    assert error.value.code == "bundle.manifest_invalid"
+    assert store.get(bundle.sha256).manifest == first.manifest
     # A damaged stored manifest is re-derived from the archive verified at this
     # ingress, not a collision and not a recipe fault.
     assert store.put(bundle.sha256, io.BytesIO(bundle.archive)).manifest == (
@@ -251,7 +251,7 @@ def test_catalog_source_upload_unknown_recovers_exact_digest(tmp_path, monkeypat
 
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import UnknownOutcomeError
+    from vonk_agent_protocol import SecurityRefusalError, UnknownOutcomeError
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog_service import CatalogService
     from vonk_control.models import Base, RecipeSourceBundle
@@ -286,6 +286,8 @@ def test_catalog_source_upload_unknown_recovers_exact_digest(tmp_path, monkeypat
     assert caught.value.code == "bundle.storage_unavailable"
     assert stored.path.stat().st_ino == inode
     fault[0] = False
+    with pytest.raises(SecurityRefusalError):
+        catalog.store_source_bundle("f" * 64, io.BytesIO(bundle.archive), "operator")
     restored = catalog.store_source_bundle(
         bundle.sha256, io.BytesIO(bundle.archive), "operator"
     )

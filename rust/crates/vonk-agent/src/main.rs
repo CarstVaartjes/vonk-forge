@@ -279,18 +279,8 @@ async fn run_control_lane(
                 POLL_MAX_SECONDS,
             )
             .await?;
-            let controller_url = config.controller_url.clone();
-            // Resolving the NAS host may block on DNS; keep it off the reactor.
-            let evidence = tokio::task::spawn_blocking(move || {
-                vonk_agent::network::collect(
-                    Path::new("/sys/class/net"),
-                    Path::new("/proc/net/route"),
-                    Path::new("/proc/net/ipv6_route"),
-                    vonk_agent::network::nas_address(&controller_url),
-                )
-            })
-            .await
-            .unwrap_or_default();
+            let evidence =
+                vonk_agent::network::collect_optional(config.controller_url.clone()).await;
             inventory.network_interfaces = evidence.interfaces;
             inventory.nas_route_interface = evidence.nas_route_interface;
             if disk_reserve_degraded(inventory.disk_available_bytes)
