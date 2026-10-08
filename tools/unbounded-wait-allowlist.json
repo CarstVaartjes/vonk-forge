@@ -412,12 +412,6 @@
     },
     {
       "path": "rust/crates/vonk-agent/src/main.rs",
-      "function": "collect_inventory_until_ready",
-      "kind": "rust-loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "rust/crates/vonk-agent/src/main.rs",
       "function": "rotate_until_settled",
       "kind": "rust-loop-without-deadline",
       "count": 1

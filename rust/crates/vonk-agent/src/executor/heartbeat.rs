@@ -30,7 +30,9 @@ pub(super) fn phase_progress(phase: ProgressPhase) -> OperationProgress {
 /// error here until someone decides, in writing, whether it is recoverable.
 pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailure {
     match error {
-        ClientError::Transport(_) | ClientError::Retryable => HeartbeatFailure::Retryable,
+        ClientError::Transport(_) | ClientError::Retryable | ClientError::Protocol => {
+            HeartbeatFailure::Retryable
+        }
         ClientError::Controller(controller) => {
             if controller.status == 409 && controller.code == vonk_agent_protocol::generated::ControllerErrorCode::SupersededOperationCancelled.as_str() {
                 HeartbeatFailure::SupersededCancellation
@@ -44,12 +46,10 @@ pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailur
                 HeartbeatFailure::Terminal
             }
         }
-        // None of these is repaired by renewing again: the credential, TLS
-        // identity or pinned CA cannot be read; the response cannot be parsed;
-        // the result boundary is not the renewal boundary at all.
+        // Unusable authority remains terminal. Result refusals belong to a
+        // different boundary and must not be interpreted as a lease renewal.
         ClientError::CredentialRead(_)
         | ClientError::Identity
-        | ClientError::Protocol
         | ClientError::ResultSuperseded
         | ClientError::ResultRejected(_)
         | ClientError::Pin => HeartbeatFailure::Terminal,
@@ -146,7 +146,14 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
         // The accepted lease advanced, so the ordinary renewal cadence
         // applies again until the next transient failure.
         delay = schedule.interval;
-        state.apply_heartbeat(&progress, &directive)?;
+        // Authenticated response identity is an authority edge. A damaged
+        // local deadline projection is not: keep observing and renewing.
+        if directive.fence != claim.fence || directive.deadline < deadline {
+            return Err(ClientError::Protocol.into());
+        }
+        if let Err(error) = state.apply_heartbeat(&progress, &directive) {
+            eprintln!("vonk-agent: heartbeat journal projection deferred: {error}");
+        }
         lease_deadline.send_replace(directive.deadline);
         (schedule.renewed)();
         deadline = directive.deadline;

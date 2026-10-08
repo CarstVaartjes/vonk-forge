@@ -154,8 +154,10 @@ pub(super) fn host_runtime_evidence(
 pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
     use crate::host_runtime::HostRuntimeError;
     match error {
-        HostRuntimeError::Io(error) => error.kind() != std::io::ErrorKind::PermissionDenied,
-        HostRuntimeError::Controller(ClientError::Protocol) => false,
+        // Socket/file observation loss is not authenticated authority denial.
+        HostRuntimeError::Io(_) => true,
+        HostRuntimeError::Controller(ClientError::Protocol) => true,
+        HostRuntimeError::Controller(ClientError::Identity | ClientError::Pin) => false,
         HostRuntimeError::Controller(ClientError::Controller(error))
             if matches!(error.status, 401 | 403) =>
         {
@@ -169,9 +171,20 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
                     | HelperErrorCode::InstallationReconciliationStorageUnavailable
             )
         }
-        HostRuntimeError::HelperProtocol(_) => false,
+        HostRuntimeError::HelperProtocol(cause) => matches!(
+            cause.code(),
+            HelperErrorCode::CallJoinFailed
+                | HelperErrorCode::MessageFramingInvalid
+                | HelperErrorCode::RejectionMalformed
+                | HelperErrorCode::OutcomeMalformed
+                | HelperErrorCode::RequestStorageInvalid
+                | HelperErrorCode::SystemClockInvalid
+                | HelperErrorCode::InspectionOutcomeInvalid
+        ),
+        // Caller-supplied request bounds and an unbound reply still cannot
+        // authorize any effect. Observation loss never fabricates a receipt.
         HostRuntimeError::HelperProtocolBound { .. } => false,
-        HostRuntimeError::StopUncertain => false,
+        HostRuntimeError::StopUncertain => true,
     }
 }
 
@@ -334,12 +347,15 @@ pub(super) fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFail
             if controller.status == 404 {
                 AgentFailureKind::ResourcePrerequisite
             } else if controller.status == 409 {
-                AgentFailureKind::IntegrityFailure
+                AgentFailureKind::TemporaryDependency
             } else {
                 AgentFailureKind::InvalidContract
             }
         }
-        ClientError::ResultRejected(_) | ClientError::Protocol => AgentFailureKind::InvalidContract,
+        ClientError::ResultRejected(_) => AgentFailureKind::InvalidContract,
+        // No verified upload receipt was observed; this does not authorize
+        // publication of any unverified bytes. A fresh attempt can reconcile.
+        ClientError::Protocol => AgentFailureKind::TemporaryDependency,
         ClientError::ResultSuperseded => AgentFailureKind::UncertainEffect,
         _ => AgentFailureKind::IntegrityFailure,
     }

@@ -620,6 +620,15 @@ async fn terminal_heartbeat_failure_cancels_a_blocking_executor() {
             "executor continued after heartbeat failure (panic={panic})"
         );
         assert!(client.inner.results.lock().unwrap().is_empty());
+        // After identity recovery a fresh fence remains admissible; the old
+        // heartbeat task and its bookkeeping retain no execution gate.
+        let mut fresh = claim();
+        fresh.fence = Uuid::new_v4();
+        client.inner.claim.lock().unwrap().replace(fresh);
+        run_once(&client.inner, &mut state, &RejectingExecutor, None, 0, None)
+            .await
+            .unwrap();
+        assert!(state.pending_results().unwrap().is_empty());
     }
 }
 
@@ -803,6 +812,10 @@ fn heartbeat_failure_classification_is_a_closed_set() {
         classify_heartbeat_failure(&ClientError::Retryable),
         HeartbeatFailure::Retryable
     );
+    assert_eq!(
+        classify_heartbeat_failure(&ClientError::Protocol),
+        HeartbeatFailure::Retryable
+    );
     // A refused renewal: authority, fence, a lease past its allowance, or an
     // invalid claim.  None of these is repaired by sending it again.
     for status in [400, 401, 403, 404, 409, 410, 422] {
@@ -816,14 +829,143 @@ fn heartbeat_failure_classification_is_a_closed_set() {
         classify_heartbeat_failure(&refusal(409, "superseded_operation_cancelled")),
         HeartbeatFailure::SupersededCancellation
     );
-    for terminal in [
-        ClientError::Identity,
-        ClientError::Protocol,
-        ClientError::Pin,
-    ] {
+    for terminal in [ClientError::Identity, ClientError::Pin] {
         assert_eq!(
             classify_heartbeat_failure(&terminal),
             HeartbeatFailure::Terminal
         );
     }
+}
+
+#[derive(Clone)]
+struct DeferredDeliveryClient {
+    inner: RecordingClient,
+    unavailable: Arc<AtomicBool>,
+}
+
+#[async_trait]
+impl LoopClient for DeferredDeliveryClient {
+    async fn claim(
+        &self,
+        fingerprint: Option<&str>,
+        wait: u64,
+        identity: Option<&AgentRuntimeIdentity>,
+    ) -> Result<Option<AgentClaim>, ClientError> {
+        self.inner.claim(fingerprint, wait, identity).await
+    }
+    async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
+        self.inner.heartbeat(progress).await
+    }
+    async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
+        if self.unavailable.load(Ordering::SeqCst) {
+            Err(ClientError::Retryable)
+        } else {
+            self.inner.submit_result(result).await
+        }
+    }
+}
+
+#[tokio::test]
+async fn failed_old_delivery_admits_fresh_work_then_reconciles_after_fault_clear() {
+    let directory = tempdir().unwrap();
+    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
+    completed_install_result(&mut state);
+    let mut fresh = claim();
+    fresh.fence = Uuid::new_v4();
+    let client = DeferredDeliveryClient {
+        inner: RecordingClient {
+            cancel_requested: false,
+            claim: Arc::new(Mutex::new(Some(fresh))),
+            fail_heartbeat: false,
+            heartbeats: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
+        },
+        unavailable: Arc::new(AtomicBool::new(true)),
+    };
+    // Result delivery is unavailable, but the new request still executes and
+    // its exact outcome remains in custody alongside the older one.
+    assert!(
+        run_once(&client, &mut state, &RejectingExecutor, None, 0, None)
+            .await
+            .is_err()
+    );
+    assert!(client.inner.claim.lock().unwrap().is_none());
+    assert_eq!(state.pending_results().unwrap().len(), 2);
+    client.unavailable.store(false, Ordering::SeqCst);
+    let mut newer = claim();
+    newer.fence = Uuid::new_v4();
+    client.inner.claim.lock().unwrap().replace(newer);
+    run_once(&client, &mut state, &RejectingExecutor, None, 0, None)
+        .await
+        .unwrap();
+    assert!(state.pending_results().unwrap().is_empty());
+    assert_eq!(client.inner.results.lock().unwrap().len(), 3);
+}
+
+struct DamagedDeadlineExecutor {
+    path: std::path::PathBuf,
+    observed: HeartbeatGatedExecutor,
+}
+
+#[async_trait(?Send)]
+impl Executor for DamagedDeadlineExecutor {
+    async fn execute(
+        &self,
+        claim: &AgentClaim,
+        deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
+        cancellation: tokio::sync::watch::Receiver<bool>,
+    ) -> ExecutionResult {
+        let connection = rusqlite::Connection::open(&self.path).unwrap();
+        connection
+            .execute("UPDATE operations SET deadline='damaged projection'", [])
+            .unwrap();
+        self.observed.execute(claim, deadline, cancellation).await
+    }
+}
+
+#[tokio::test]
+async fn damaged_local_deadline_does_not_cancel_verified_renewal_or_fresh_claims() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let mut state = StateStore::open(&path, NODE_ID).unwrap();
+    let heartbeats = Arc::new(Mutex::new(Vec::new()));
+    let client = RecordingClient {
+        cancel_requested: false,
+        claim: Arc::new(Mutex::new(Some(claim()))),
+        fail_heartbeat: false,
+        heartbeats: heartbeats.clone(),
+        results: Arc::new(Mutex::new(Vec::new())),
+    };
+    let executor = DamagedDeadlineExecutor {
+        path,
+        observed: HeartbeatGatedExecutor {
+            heartbeats,
+            minimum: 2,
+            observed_deadline: Arc::new(Mutex::new(None)),
+        },
+    };
+    run_once_with_heartbeat_interval(
+        &client,
+        &mut state,
+        &executor,
+        RunOncePolicy {
+            preflight_fingerprint: None,
+            wait_seconds: 0,
+            runtime_identity: None,
+            heartbeat_interval: Duration::from_millis(5),
+            heartbeat_retry_interval: Duration::from_millis(1),
+            lease_renewed: crate::systemd_notify::watchdog,
+        },
+        || Ok(()),
+    )
+    .await
+    .unwrap();
+    assert!(state.pending_results().unwrap().is_empty());
+    let mut fresh = claim();
+    fresh.fence = Uuid::new_v4();
+    client.claim.lock().unwrap().replace(fresh);
+    run_once(&client, &mut state, &RejectingExecutor, None, 0, None)
+        .await
+        .unwrap();
+    assert!(state.pending_results().unwrap().is_empty());
 }

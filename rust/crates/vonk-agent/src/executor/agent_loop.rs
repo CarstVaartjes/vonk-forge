@@ -97,46 +97,68 @@ where
     F: FnOnce() -> Result<(), LoopError>,
 {
     let now = Utc::now();
-    for (operation, result) in state.unreconciled_results()? {
-        result
-            .validate_for_operation(&operation)
-            .map_err(StateError::from)?;
-        if state.result_rejection(&result, now)?.is_some() {
-            // A refused receipt stays in local custody until its bounded
-            // cool-down elapses; re-sending the same bytes cannot succeed.
-            continue;
-        }
-        match client.submit_result(&result).await {
-            Ok(()) | Err(ClientError::ResultSuperseded) => state.mark_reconciled(&result)?,
-            Err(ClientError::ResultRejected(error)) => {
-                record_result_rejection(state, &result, &error, now)?;
+    // Delivery has one request-sized budget per pass, independent of backlog.
+    // Losing an upload response retains custody; it never authorizes replayed
+    // host effects and never holds the claim lane until every receipt lands.
+    let delivery = async {
+        for (operation, result) in state.unreconciled_results()? {
+            result
+                .validate_for_operation(&operation)
+                .map_err(StateError::from)?;
+            if state.result_rejection(&result, now)?.is_some() {
+                // A refused receipt stays in local custody until its bounded
+                // cool-down elapses; re-sending the same bytes cannot succeed.
+                continue;
             }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    for (operation, result) in state.pending_results()? {
-        result
-            .validate_for_operation(&operation)
-            .map_err(StateError::from)?;
-        if state.result_rejection(&result, now)?.is_some() {
-            continue;
-        }
-        match client.submit_result(&result).await {
-            Ok(()) => state.acknowledge(&result)?,
-            // The Controller refused this attempt's outcome as no longer
-            // current.  The evidence never landed, so keep it in local custody
-            // instead of discarding it, and stop re-sending an outcome that
-            // already cannot be applied.
-            Err(ClientError::ResultSuperseded) => state.supersede(&result)?,
-            // The Controller refused these exact bytes at its ingress
-            // validation boundary.  Keep the receipt and the bounded reason,
-            // suppress the resend for a cool-down, and keep unrelated work and
-            // health alive instead of terminating the loop.
-            Err(ClientError::ResultRejected(error)) => {
-                record_result_rejection(state, &result, &error, now)?;
+            match client.submit_result(&result).await {
+                Ok(()) | Err(ClientError::ResultSuperseded) => state.mark_reconciled(&result)?,
+                Err(ClientError::ResultRejected(error)) => {
+                    record_result_rejection(state, &result, &error, now)?;
+                }
+                Err(error) if error.fatal() => return Err(error.into()),
+                Err(error) => {
+                    // Receipt delivery is independent of new claims. The next
+                    // bounded control pass offers the retained exact result again.
+                    eprintln!("vonk-agent: retained result delivery deferred: {error}");
+                    break;
+                }
             }
-            Err(error) => return Err(error.into()),
         }
+        for (operation, result) in state.pending_results()? {
+            result
+                .validate_for_operation(&operation)
+                .map_err(StateError::from)?;
+            if state.result_rejection(&result, now)?.is_some() {
+                continue;
+            }
+            match client.submit_result(&result).await {
+                Ok(()) => state.acknowledge(&result)?,
+                // The Controller refused this attempt's outcome as no longer
+                // current.  The evidence never landed, so keep it in local custody
+                // instead of discarding it, and stop re-sending an outcome that
+                // already cannot be applied.
+                Err(ClientError::ResultSuperseded) => state.supersede(&result)?,
+                // The Controller refused these exact bytes at its ingress
+                // validation boundary.  Keep the receipt and the bounded reason,
+                // suppress the resend for a cool-down, and keep unrelated work and
+                // health alive instead of terminating the loop.
+                Err(ClientError::ResultRejected(error)) => {
+                    record_result_rejection(state, &result, &error, now)?;
+                }
+                Err(error) if error.fatal() => return Err(error.into()),
+                Err(error) => {
+                    // Receipt delivery is independent of new claims. The next
+                    // bounded control pass offers the retained exact result again.
+                    eprintln!("vonk-agent: retained result delivery deferred: {error}");
+                    break;
+                }
+            }
+        }
+        Ok::<(), LoopError>(())
+    };
+    match tokio::time::timeout(crate::client::HEARTBEAT_REQUEST_TIMEOUT, delivery).await {
+        Ok(result) => result?,
+        Err(_) => eprintln!("vonk-agent: retained receipt observation budget elapsed"),
     }
     let claim = client
         .claim(

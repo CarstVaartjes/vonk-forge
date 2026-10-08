@@ -397,15 +397,16 @@ fn interrupted_quarantine_is_completed_before_the_journal_is_reopened() {
                 .join("state.sqlite.repair-pending")
                 .exists()
         );
-        assert_eq!(
-            std::fs::read(
-                directory
-                    .path()
-                    .join(format!("state.sqlite.corrupt-{id}-wal"))
-            )
-            .unwrap(),
-            b"old-wal"
-        );
+        // Interrupted and repaired files may have separate diagnostic IDs.
+        // The bytes must survive; the old WAL must never reach the new journal.
+        assert!(std::fs::read_dir(directory.path()).unwrap().any(|entry| {
+            let entry = entry.unwrap();
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("state.sqlite.corrupt-")
+                && std::fs::read(entry.path()).is_ok_and(|bytes| bytes == b"old-wal")
+        }));
     }
 }
 
@@ -425,4 +426,66 @@ fn state_diagnostic_retention_is_bounded_without_touching_other_files() {
     StateStore::open_recovered(&path, NODE_ID).unwrap();
     assert!(!old.exists());
     assert_eq!(std::fs::read(&unrelated).unwrap(), b"keep");
+}
+
+#[test]
+fn damaged_repair_intent_never_reopens_a_wal_stripped_journal() {
+    for kind in [0, 1, 2, 3] {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.sqlite");
+        let mut state = StateStore::open(&path, NODE_ID).unwrap();
+        state.begin(&claim(), Utc::now()).unwrap();
+        drop(state);
+        let marker = directory.path().join("state.sqlite.repair-pending");
+        match kind {
+            0 => std::fs::write(&marker, b"damaged").unwrap(),
+            1 => std::fs::write(&marker, [b'x'; 256]).unwrap(),
+            2 => std::fs::create_dir(&marker).unwrap(),
+            _ => std::os::unix::fs::symlink(directory.path().join("absent"), &marker).unwrap(),
+        }
+        let mut recovered = StateStore::open_recovered(&path, NODE_ID).unwrap();
+        assert!(recovered.pending_results().unwrap().is_empty());
+        assert_eq!(
+            recovered.begin(&claim(), Utc::now()).unwrap(),
+            BeginDecision::Execute
+        );
+    }
+}
+
+#[test]
+fn damaged_suppression_is_a_miss_and_preserves_receipt_and_fresh_admission() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("state.sqlite");
+    let mut state = StateStore::open(&path, NODE_ID).unwrap();
+    let original = claim();
+    state.begin(&original, Utc::now()).unwrap();
+    let result = state
+        .finish(
+            &original,
+            ExecutionResult::done(RecipeStopResult::default()),
+        )
+        .unwrap();
+    state
+        .reject_result(&result, &ControllerError::from_status(422), Utc::now())
+        .unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute("UPDATE result_rejections SET retry_due_at='unreadable'", [])
+        .unwrap();
+    assert!(
+        state
+            .result_rejection(&result, Utc::now())
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        state.pending_results().unwrap(),
+        vec![(AgentOperation::RecipeStop, result)]
+    );
+    let mut fresh = claim();
+    fresh.fence = Uuid::new_v4();
+    assert_eq!(
+        state.begin(&fresh, Utc::now()).unwrap(),
+        BeginDecision::Execute
+    );
 }

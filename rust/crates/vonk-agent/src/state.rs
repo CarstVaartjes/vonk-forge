@@ -443,8 +443,8 @@ impl StateStore {
             .query_row(
                 "SELECT http_status,code,decision,request_id,reason,observed_at,retry_due_at,rejections
                  FROM result_rejections
-                 WHERE fence=?1 AND retry_due_at > ?2",
-                params![result.fence.to_string(), now.to_rfc3339()],
+                 WHERE fence=?1",
+                [result.fence.to_string()],
                 |row| {
                     Ok((
                         row.get::<_, u16>(0)?,
@@ -458,7 +458,22 @@ impl StateStore {
                     ))
                 },
             )
-            .optional()?;
+            .optional();
+        let row = match row {
+            Ok(row) => row,
+            Err(
+                rusqlite::Error::IntegralValueOutOfRange(..)
+                | rusqlite::Error::FromSqlConversionFailure(..)
+                | rusqlite::Error::InvalidColumnType(..),
+            ) => {
+                self.connection.execute(
+                    "DELETE FROM result_rejections WHERE fence=?1",
+                    [result.fence.to_string()],
+                )?;
+                return Ok(None);
+            }
+            Err(error) => return Err(error.into()),
+        };
         let Some((
             http_status,
             code,
@@ -472,20 +487,40 @@ impl StateStore {
         else {
             return Ok(None);
         };
-        Ok(Some(ResultRejection {
-            http_status,
-            code,
-            decision,
-            request_id,
-            reason,
-            observed_at: DateTime::parse_from_rfc3339(&observed_at)
-                .map_err(|_| StateError::ResultState)?
-                .with_timezone(&Utc),
-            retry_due_at: DateTime::parse_from_rfc3339(&retry_due_at)
-                .map_err(|_| StateError::ResultState)?
-                .with_timezone(&Utc),
-            rejections,
-        }))
+        let parsed = (|| -> Result<ResultRejection, StateError> {
+            Ok(ResultRejection {
+                http_status,
+                code,
+                decision,
+                request_id,
+                reason,
+                observed_at: DateTime::parse_from_rfc3339(&observed_at)
+                    .map_err(|_| StateError::ResultState)?
+                    .with_timezone(&Utc),
+                retry_due_at: DateTime::parse_from_rfc3339(&retry_due_at)
+                    .map_err(|_| StateError::ResultState)?
+                    .with_timezone(&Utc),
+                rejections,
+            })
+        })();
+        match parsed {
+            Ok(rejection)
+                if rejection.retry_due_at > now
+                    && rejection.retry_due_at
+                        <= rejection.observed_at + chrono::Duration::seconds(900)
+                    && rejection.observed_at <= now =>
+            {
+                Ok(Some(rejection))
+            }
+            Ok(rejection) if rejection.retry_due_at <= now => Ok(None),
+            _ => {
+                self.connection.execute(
+                    "DELETE FROM result_rejections WHERE fence=?1",
+                    [result.fence.to_string()],
+                )?;
+                Ok(None)
+            }
+        }
     }
 
     /// Record one Controller ingress refusal of this exact result.
@@ -731,32 +766,32 @@ fn sync_state_directory(path: &Path) -> Result<(), StateError> {
 
 fn finish_pending_state_repair(path: &Path) -> Result<(), StateError> {
     let marker = repair_marker(path);
-    let metadata = match fs::symlink_metadata(&marker) {
-        Ok(metadata) => metadata,
+    match fs::symlink_metadata(&marker) {
+        Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
-    };
-    if !metadata.file_type().is_file() || metadata.len() > 64 {
-        return Err(std::io::Error::other("state repair intent is unsafe").into());
     }
-    let raw = fs::read_to_string(&marker)?;
-    let id: uuid::Uuid = raw.trim().parse().map_err(|_| StateError::ResultState)?;
+    // Intent is disposable, even if malformed or its old destination collides.
+    // Never reopen the remaining database: an earlier repair may have moved
+    // its WAL already. Retain all remaining entries under a fresh identity,
+    // moving the main database first and retiring the marker only after fsync.
+    // Rename does not follow symlinks or traverse an unexpected directory.
+    let id = uuid::Uuid::new_v4();
     let quarantine = path.with_file_name(format!("state.sqlite.corrupt-{id}"));
-    for suffix in ["-wal", "-shm", ""] {
+    for suffix in ["", "-wal", "-shm"] {
         let source = PathBuf::from(format!("{}{suffix}", path.display()));
         let destination = PathBuf::from(format!("{}{suffix}", quarantine.display()));
-        let metadata = match fs::symlink_metadata(&source) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+        match fs::symlink_metadata(&source) {
+            Ok(_) => fs::rename(source, destination)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
-        };
-        if !metadata.file_type().is_file() || destination.exists() {
-            return Err(std::io::Error::other("state quarantine path is unsafe").into());
         }
-        fs::rename(source, destination)?;
     }
     sync_state_directory(path)?;
-    fs::remove_file(marker)?;
+    fs::rename(
+        marker,
+        path.with_file_name(format!("state.sqlite.repair-{id}.tmp")),
+    )?;
     sync_state_directory(path)?;
     Ok(())
 }
