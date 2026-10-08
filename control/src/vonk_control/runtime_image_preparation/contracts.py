@@ -274,62 +274,21 @@ class _ReceiptDocumentRejected(UnknownOutcomeError):
     field read out of it.
     """
 
-    def __init__(self, code: str, detail: str, *, own_stale: bool = True) -> None:
+    def __init__(self, code: str, detail: str) -> None:
         self.code = code
         self.detail = detail
-        # False when the document may belong to a newer receipt contract
-        # (a higher or unknown schema version, or fields this contract does
-        # not know). Such a receipt is never deleted or overwritten here: a
-        # newer Controller in a mixed deploy may still rely on it.
-        self.own_stale = own_stale
         super().__init__(detail, reason=WaitReason.RECEIPT_MISSING)
-
-
-_RETIRED_RECEIPT_FIELDS = frozenset(
-    {"local_image_reference", "platform_manifest_digest"}
-)
-
-
-def _receipt_may_be_newer(value: object, error: BaseException | None) -> bool:
-    """Whether a rejected receipt document may come from a newer contract."""
-
-    if not isinstance(value, Mapping):
-        return False
-    version = value.get("schema_version")
-    if type(version) is not int:
-        return "schema_version" in value
-    if version > 2:
-        return True
-    if version < 2:
-        return False
-    if isinstance(error, ValidationError):
-        return any(
-            item.get("type") == "extra_forbidden"
-            and item.get("loc", ("",))[0] not in _RETIRED_RECEIPT_FIELDS
-            for item in error.errors()
-        )
-    return False
 
 
 def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
     """Read one stored receipt file under the current contract.
 
-    A denied read raises an explicit security refusal. Other unreadable files
-    raise retryable evidence uncertainty; scans can inspect independent files,
-    but cannot turn unresolved uncertainty into an absent-image verdict.
-    A document that is present but does not
-    satisfy the current contract raises ``_ReceiptDocumentRejected`` naming the
-    rule that rejected it.
+    Unavailable local metadata is retryable uncertainty. Scans skip it;
+    exact request-led preparation re-observes the verified image.
     """
 
     try:
         text = path.read_text(encoding="utf-8")
-    except PermissionError as error:
-        raise RuntimeImagePreparationRefused(
-            SecurityRefusalReason.PERMISSION_DENIED,
-            "access to the managed runtime image receipt was denied",
-            reason=SecurityRefusalReason.PERMISSION_DENIED,
-        ) from error
     except OSError as error:
         raise RuntimeImagePreparationUnknown(
             RuntimeImageCode.RECEIPT_UNAVAILABLE,
@@ -355,13 +314,11 @@ def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
         raise _ReceiptDocumentRejected(
             error.code,
             error.detail,
-            own_stale=not _receipt_may_be_newer(document, error.__cause__),
         ) from error
     except (TypeError, ValueError) as error:
         raise _ReceiptDocumentRejected(
             RuntimeImageCode.RECEIPT_UNAVAILABLE,
             "runtime image receipt identity is unavailable or malformed",
-            own_stale=not _receipt_may_be_newer(document, error),
         ) from error
 
 

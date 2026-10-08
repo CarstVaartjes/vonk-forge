@@ -10,6 +10,10 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from vonk_agent_protocol import WaitReason
+
+from .categorized_errors import UnsettledOutcome
+
 _LOGGER = logging.getLogger(__name__)
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024
 _MAX_RUNTIME_FILE_BYTES = 64 * 1024
@@ -124,7 +128,10 @@ def stage_runtime_file(
             temporary.unlink()
         except FileNotFoundError:
             pass
-        raise RuntimeSecretError("runtime secret staging failed") from error
+        raise UnsettledOutcome(
+            "runtime file staging is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
 
 
 def stage_private_key(
@@ -199,6 +206,27 @@ def stage_runtime_assets(
     source_root: Path = Path("/usr/local/share/vonk-forge/runtime-assets"),
     destination_root: Path = Path("/runtime-assets"),
 ) -> None:
+    """Re-observe public kit files within a bounded local staging attempt.
+
+    Atomic per-file replacement retains the previous file on an I/O failure.
+    No unavailable inventory is interpreted as permission to remove old files.
+    """
+    for attempt in range(3):
+        try:
+            _stage_runtime_assets_once(source_root, destination_root)
+            return
+        except (OSError, RuntimeSecretError, UnsettledOutcome) as error:
+            if attempt == 2:
+                raise UnsettledOutcome(
+                    "runtime assets staging is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
+
+
+def _stage_runtime_assets_once(
+    source_root: Path = Path("/usr/local/share/vonk-forge/runtime-assets"),
+    destination_root: Path = Path("/runtime-assets"),
+) -> None:
     """Publish this release's public runtime configs to the shared volume.
 
     Every consumer (Caddy, PostgreSQL, LiteLLM, Prometheus, Grafana, the
@@ -214,7 +242,10 @@ def stage_runtime_assets(
         if path.is_file() and not path.is_symlink()
     }
     if not shipped:
-        raise RuntimeSecretError("runtime assets are missing from the image")
+        raise UnsettledOutcome(
+            "runtime assets are unavailable in the image",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     for relative in sorted(shipped):
         stage_runtime_file(
             source_root / relative,

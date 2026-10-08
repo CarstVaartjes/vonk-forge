@@ -145,24 +145,26 @@ class OciImageStore:
             manifest = json.loads(payload)
         except FileNotFoundError:
             return None
-        except ValueError as error:
-            raise OciImageStoreError(
-                ImageStoreCode.MANIFEST_CORRUPT,
-                f"stored manifest is damaged: {error}",
-            ) from error
+        except ValueError:
+            return None
         except OSError as error:
             return StoreUnknown(
                 ImageStoreCode.MANIFEST_UNREADABLE,
                 f"stored manifest is unreadable: {error}"[:512],
             )
-        image = _stored_image(manifest_digest, manifest)
-        sizes = {
-            image.config_digest: _descriptor_size(manifest["config"]),
-            **{
-                str(layer["digest"]): _descriptor_size(layer)
-                for layer in manifest["layers"]
-            },
-        }
+        try:
+            image = _stored_image(manifest_digest, manifest)
+            sizes = {
+                image.config_digest: _descriptor_size(manifest["config"]),
+                **{
+                    str(layer["digest"]): _descriptor_size(layer)
+                    for layer in manifest["layers"]
+                },
+            }
+        except OciImageStoreError:
+            # These are stored descriptors, not submitted ingress evidence.
+            # Their damage makes this image a miss for normal exact reprepare.
+            return None
         for digest, size in sizes.items():
             try:
                 if self.blob_path(digest).stat().st_size != size:

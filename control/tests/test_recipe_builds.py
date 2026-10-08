@@ -2391,3 +2391,34 @@ def test_source_read_fault_keeps_exact_parent_and_resumes_one_build(
     assert not _retryable(denied.value)
     fault[0] = False
     restarted.close()
+
+
+def test_matching_late_success_heals_failed_build_without_new_execution(
+    tmp_path: Path,
+) -> None:
+    """A failed label must not defeat authenticated matching content completion."""
+    from vonk_agent_protocol import LifecycleState
+
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        build.state = LifecycleState.FAILED.value
+        build.error = "lost completion observation"
+    result = service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    with sessions() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        assert build.state == LifecycleState.SUCCEEDED.value
+        assert build.error is None
+        assert build.image_digest == result.image_digest
+    assert service.plan(revision.id, node_id, now=now).build_id == plan.build_id

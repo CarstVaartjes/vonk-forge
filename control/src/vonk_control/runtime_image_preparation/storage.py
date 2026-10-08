@@ -154,18 +154,9 @@ class FilesystemRuntimeImageStorage:
             try:
                 existing_receipt = _load_receipt_document(receipt_path)
             except _ReceiptDocumentRejected as rejection:
-                # Stale metadata about these exact verified blobs is replaced
-                # below. A receipt that may belong to a newer contract is left
-                # in place: this preparation retries until the deploy converges.
+                # This is derived metadata, never a competing contract owner.
+                # Current verified observation replaces any rejected shape.
                 _log_rejected_receipt(receipt_path, rejection)
-                if not rejection.own_stale:
-                    raise RuntimeImagePreparationUnknown(
-                        RuntimeImageCode.RECEIPT_CONTRACT_NEWER,
-                        "runtime image receipt was written by a newer Controller contract",
-                        retryable=True,
-                        recovery_actions=("retry",),
-                        reason=WaitReason.RECEIPT_MISSING,
-                    ) from rejection
                 existing_receipt = None
         if existing_receipt is not None and _same_image(existing_receipt, receipt):
             # The same image bytes under another build (a sibling recipe that
@@ -216,9 +207,11 @@ class FilesystemRuntimeImageStorage:
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         if image.stored_bytes != expected_bytes:
-            raise RuntimeImagePreparationRefused(
+            raise RuntimeImagePreparationUnknown(
                 RuntimeImageCode.ARCHIVE_MISMATCH,
                 "stored runtime image does not match its recorded size",
+                retryable=True,
+                reason=WaitReason.RECEIPT_MISSING,
             )
         return self.layout.blob_path(image.manifest_digest)
 
@@ -303,10 +296,7 @@ class FilesystemRuntimeImageStorage:
             or type(expected_bytes) is not int
             or not 1 <= expected_bytes <= self.maximum_bytes
         ):
-            raise RuntimeImagePreparationInvalid(
-                RuntimeImageCode.RECEIPT_INVALID,
-                "source-build image evidence is invalid",
-            )
+            return False
         image = self._stored_image(archive_sha256)
         if image is None:
             return False
@@ -413,14 +403,10 @@ class FilesystemRuntimeImageStorage:
         cannot parse is one archive's stale metadata: skip it with a bounded
         warning naming its digest instead of failing every lookup that happens
         to walk past it.  ``read_receipt`` for that exact digest stays strict.
-        Temporary read failures defer only their receipt while other verified
-        candidates remain eligible. An unreadable receipt without stored image
-        bytes cannot decide reuse and is a miss. Otherwise unresolved read
-        uncertainty reaches the caller for observation and bounded retry.
-        Access refusals remain immediate and are never treated as scan misses.
+        Temporary read failures exclude only that candidate from reuse.
+        The exact requested preparation can reconstruct it independently.
         """
 
-        deferred: RuntimeImagePreparationUnknown | None = None
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
             if archive_sha256 is not None and receipt_path.name != (
                 f"{archive_sha256}.receipt.json"
@@ -431,12 +417,6 @@ class FilesystemRuntimeImageStorage:
             except _ReceiptDocumentRejected as rejection:
                 self._discard_rejected_receipt(receipt_path, rejection)
             except RuntimeImagePreparationUnknown as error:
-                candidate_digest = receipt_path.name.removesuffix(".receipt.json")
-                if _SHA256.fullmatch(candidate_digest) is None:
-                    continue
-                if self._stored_image(candidate_digest) is None:
-                    continue
-                deferred = error
                 if self._first_report(receipt_path):
                     _LOGGER.warning(
                         "deferred runtime image receipt %s: %s; %s",
@@ -444,8 +424,6 @@ class FilesystemRuntimeImageStorage:
                         error.code,
                         error.detail,
                     )
-        if deferred is not None:
-            raise deferred
 
     def _discard_rejected_receipt(
         self, receipt_path: Path, rejection: _ReceiptDocumentRejected
@@ -459,7 +437,7 @@ class FilesystemRuntimeImageStorage:
         """
 
         archive_sha256 = receipt_path.name.removesuffix(".receipt.json")
-        if not rejection.own_stale or _SHA256.fullmatch(archive_sha256) is None:
+        if _SHA256.fullmatch(archive_sha256) is None:
             if self._first_report(receipt_path):
                 _log_rejected_receipt(receipt_path, rejection)
             return
@@ -468,9 +446,8 @@ class FilesystemRuntimeImageStorage:
                 try:
                     _load_receipt_document(receipt_path)
                     return
-                except _ReceiptDocumentRejected as current:
-                    if not current.own_stale:
-                        return
+                except _ReceiptDocumentRejected:
+                    pass
                 receipt_path.unlink(missing_ok=True)
         except (RuntimeImagePreparationError, OSError) as error:
             # Say why the stale file stays, once: the cause (a lock or file

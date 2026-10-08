@@ -6532,19 +6532,15 @@ def test_prepare_installation_keeps_a_real_blocker_terminal() -> None:
 
 
 def test_a_bounded_install_blocker_keeps_the_specific_cause() -> None:
-    """A blocker chain must not lose its innermost cause to the bound.
+    """Safe diagnostics preserve the innermost invalid-request cause."""
 
-    Blocker details compose as "outer context: inner cause", so truncating the
-    tail discards exactly the part an operator needs.  The live GLM apply
-    reported "...is unavailable: runtime image receipt iden" and stopped there,
-    so the failing rule was invisible on every surface.
-    """
+    from vonk_agent_protocol import InstallAdmissionCode
 
-    code = "install.compiled_plan_unavailable"
+    code = InstallAdmissionCode.PLAN_INVALID.value
     detail = (
         "Controller-issued compiled execution plan is unavailable. "
         "compiled execution plan for spk_2818d189042b4c77aefa7796f4befd23 "
-        "is unavailable: runtime image receipt identity is unavailable or malformed"
+        "is unavailable: submitted installation arguments are malformed"
     )
     assert len(f"{code}: {detail}") > 200
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import errno
 import os
 import stat
 from datetime import datetime, timedelta
@@ -197,12 +196,14 @@ class CheckpointsMixin:
             )
         except (FileNotFoundError, NotADirectoryError):
             return None
-        except OSError as exc:
-            if exc.errno == errno.ELOOP:
-                return None
-            raise
+        except OSError:
+            # Local availability is unconfirmed; preview remains readable and
+            # the request-led worker observes or prepares this object again.
+            return None
         try:
             metadata = os.fstat(fd)
+        except OSError:
+            return None
         finally:
             os.close(fd)
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_bytes:

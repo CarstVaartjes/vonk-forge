@@ -353,3 +353,39 @@ def test_existing_object_store_directories_stop_new_files_being_copy_on_write(
     runtime_init._disable_copy_on_write_below(root)
 
     assert sorted(marked) == ["objects", "partials", "partials/set-one"]
+
+
+@pytest.mark.parametrize("fault", ["missing-inventory", "replace-unavailable"])
+def test_public_runtime_assets_end_unknown_preserve_previous_and_allow_fresh_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+) -> None:
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+    source = tmp_path / "image"
+    source.mkdir()
+    destination = tmp_path / "volume"
+    destination.mkdir()
+    previous = destination / "config"
+    previous.write_text("verified previous")
+    replace = os.replace
+    calls = []
+
+    def unavailable(*args):
+        calls.append(args)
+        raise OSError("storage temporarily unavailable")
+
+    if fault == "replace-unavailable":
+        (source / "config").write_text("current kit")
+        monkeypatch.setattr(os, "replace", unavailable)
+    with pytest.raises(UnknownOutcomeError):
+        stage_runtime_assets(source, destination)
+    assert previous.read_text() == "verified previous"
+    assert len(calls) == (3 if fault == "replace-unavailable" else 0)
+    monkeypatch.setattr(os, "replace", replace)
+    (source / "config").write_text("current kit")
+    stage_runtime_assets(source, destination)
+    assert previous.read_text() == "current kit"
+    assert not list(destination.glob(".*.new"))

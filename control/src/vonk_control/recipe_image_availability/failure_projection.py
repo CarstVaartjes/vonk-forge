@@ -43,6 +43,7 @@ from ..recipe_image_availability_reader_contract import (
 from ..recipe_image_availability_view_contract import (
     RecipeImageAvailabilityView,
 )
+from ..runtime_image_preparation import RuntimeImagePreparationUnknown
 from ..stored_json import Residue, read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
@@ -61,6 +62,9 @@ from .contracts import (
     _retry_after,
     _retryable,
 )
+
+_RECEIPT_OBSERVATION_BUDGET = timedelta(minutes=15)
+
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
@@ -135,6 +139,12 @@ def _fail(
         )
         now = self._clock()
         now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        if isinstance(error, RuntimeImagePreparationUnknown):
+            created = operation.created_at
+            created = created if created.tzinfo else created.replace(tzinfo=UTC)
+            # Derived image evidence has a request-owned observation deadline.
+            # Restart preserves it; a fresh request receives its own budget.
+            retryable = retryable and now < created + _RECEIPT_OBSERVATION_BUDGET
         # The core decides the retry (rule 1) on its one bounded, jittered
         # clock; the error's own delay (``Retry-After``) is only the floor.
         floor = (

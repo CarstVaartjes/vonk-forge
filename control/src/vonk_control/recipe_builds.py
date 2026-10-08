@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
+    LifecycleState,
     RecipeBuildCode,
     ReservationState,
     SecurityRefusalError,
@@ -1595,12 +1596,10 @@ class RecipeBuildService:
                         RecipeBuildCode.RESULT_CONFLICT,
                         "build already has different evidence",
                     )
-            elif build.state not in {"planned", "building"}:
-                raise RecipeBuildRefused(
-                    RecipeBuildCode.STATE, "failed build cannot accept success evidence"
-                )
             else:
-                build.state = "succeeded"
+                # Current exact input and authenticated completion win over a
+                # failed observation. Caller ownership fences superseded attempts.
+                build.state = LifecycleState.SUCCEEDED.value
                 build.image_digest = image_digest
                 build.oci_layout_sha256 = oci_layout_sha256
                 build.image_bytes = image_bytes

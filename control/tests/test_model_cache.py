@@ -1079,10 +1079,14 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
 
     with monkeypatch.context() as scoped:
         scoped.setattr(os, "open", deny_model_object)
-        with pytest.raises(PermissionError, match="model object is inaccessible"):
-            service.resolve_latest_cached(
-                recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
-            )
+        unavailable = service.resolve_latest_cached(
+            recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        )
+        assert unavailable.blockers
+    restored = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert not restored.blockers
     with monkeypatch.context() as scoped:
         scoped.setattr(
             service,
@@ -1564,13 +1568,28 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
             return open_file(file, *args, **kwargs)
 
         monkeypatch.setattr(os, "open", deny_cache_object)
-        with pytest.raises(PermissionError):
-            service.download_preview(model_content_sha256=model, artifacts=[artifact])
-        return
+
     preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     expected = len(data) if stored_state == "verified" else 0
     assert preview["already_cached_bytes"] == expected
     assert preview["new_bytes"] == len(data) - expected
+    if stored_state == "unreadable":
+        admitted = service.start_download(
+            actor="test",
+            request_key=str(uuid.uuid4()),
+            plan_digest=str(preview["plan_digest"]),
+            model_content_sha256=model,
+            artifacts=[artifact],
+        )
+        assert admitted.state == LifecycleState.QUEUED
+        monkeypatch.setattr(os, "open", open_file)
+        service.run_pending()
+        assert service.get_operation(admitted.id).state == LifecycleState.SUCCEEDED
+        recovered = service.download_preview(
+            model_content_sha256=model, artifacts=[artifact]
+        )
+        assert recovered["already_cached_bytes"] == len(data)
+        assert recovered["new_bytes"] == 0
 
 
 def test_stored_bytes_without_a_receipt_are_not_admitted(cache, tmp_path: Path) -> None:
