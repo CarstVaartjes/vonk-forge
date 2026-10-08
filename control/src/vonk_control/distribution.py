@@ -378,7 +378,8 @@ class ModelCacheObjectSource:
             raise
         except Exception as error:
             raise DistributionUnknown(
-                DistributionCode.MODEL_SET_MISMATCH, "NAS cache manifest is unavailable"
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+                "NAS cache manifest is unavailable",
             ) from error
         objects = []
         receipts = []
@@ -416,7 +417,7 @@ class ModelCacheObjectSource:
                     )
             except (KeyError, TypeError, ValueError) as error:
                 raise DistributionUnknown(
-                    DistributionCode.MODEL_SET_MISMATCH,
+                    DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                     "NAS cache manifest is malformed",
                 ) from error
         return tuple(objects), tuple(receipts), paths

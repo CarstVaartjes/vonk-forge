@@ -9,7 +9,7 @@ from vonk_control.compiled_execution_plan import (
     VerifiedModelObject,
     VerifiedRuntimeImage,
 )
-from vonk_control.distribution import DistributionError, ModelCacheObjectSource
+from vonk_control.distribution import DistributionUnknown, ModelCacheObjectSource
 from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.runtime_image_preparation import RuntimeImageReceipt
 
@@ -48,11 +48,37 @@ def test_cache_exports_typed_receipts_with_exact_nested_identity(tmp_path):
 )
 def test_invalid_cache_identity_never_becomes_a_verified_receipt(tmp_path, changes):
     source, manifest = _source(tmp_path, **changes)
-    with pytest.raises(DistributionError) as caught:
+    with pytest.raises(DistributionUnknown) as caught:
         source.verified_model_objects_for_set(manifest.digest)
     assert caught.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
     assert source._receipts == {}
     assert source._paths == {}
+    assert source._manifests == {}
+    # Repair by the source must admit a fresh verification on the same adapter;
+    # failed local bookkeeping must not publish or poison cached authorization.
+    descriptor = source._service.resolve_verified_artifact_set(manifest.digest)[0]
+    descriptor.update(roles=["weights"], file_id="model", model_content_sha256="b" * 64)
+    (receipt,) = source.verified_model_objects_for_set(manifest.digest)
+    assert receipt.file_id == "model"
+
+
+@pytest.mark.parametrize("missing_provider", [True, False])
+def test_unavailable_local_manifest_allows_fresh_verification(
+    tmp_path, monkeypatch, missing_provider
+):
+    source, manifest = _source(tmp_path)
+    digest = manifest.digest
+    with monkeypatch.context() as damaged:
+        if missing_provider:
+            damaged.setattr(source._service, "manifest_for_artifact_set", None)
+        else:
+            damaged.setattr(manifest, "digest", "bad")
+        with pytest.raises(DistributionUnknown) as caught:
+            source.verified_model_objects_for_set(digest)
+        assert caught.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
+        assert source._receipts == source._paths == source._manifests == {}
+    (receipt,) = source.verified_model_objects_for_set(digest)
+    assert receipt.file_id == "model"
 
 
 def test_runtime_receipt_projection_keeps_exact_launch_identity():
