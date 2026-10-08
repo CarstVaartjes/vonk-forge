@@ -519,7 +519,7 @@
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-agent/src/recipe_builder.rs",
+      "path": "rust/crates/vonk-agent/src/recipe_builder/images.rs",
       "function": "sha256_file",
       "kind": "rust-loop-without-deadline",
       "count": 1
@@ -657,37 +657,37 @@
       "count": 3
     },
     {
-      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs",
       "function": "confirm",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "path": "rust/crates/vonk-nas-setup/src/pki.rs",
       "function": "generate_es256_jwks",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs",
       "function": "install_mode",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs",
       "function": "optional_secret",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs",
       "function": "required_with_default",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs",
       "function": "secret",
       "kind": "rust-loop-without-deadline",
       "count": 1
@@ -699,25 +699,25 @@
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "path": "rust/crates/vonk-spark-setup/src/handoff.rs",
       "function": "foreground_sudo_authentication_uses_controlling_terminal",
       "kind": "rust-wait-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "path": "rust/crates/vonk-spark-setup/src/process.rs",
       "function": "run_process",
       "kind": "rust-loop-without-deadline",
       "count": 1
     },
     {
-      "path": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "path": "rust/crates/vonk-spark-setup/src/process.rs",
       "function": "run_process",
       "kind": "rust-wait-without-deadline",
       "count": 3
     },
     {
-      "path": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "path": "rust/crates/vonk-spark-setup/src/process.rs",
       "function": "terminate_process_group",
       "kind": "rust-wait-without-deadline",
       "count": 1

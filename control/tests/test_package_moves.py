@@ -400,3 +400,35 @@ def test_rust_split_carries_only_unique_matching_findings(tmp_path: Path) -> Non
     # Two methods with the same name cannot share the old allowance.
     (package / "other.rs").write_text(target.read_text())
     assert principles.history_gate(current, document, PackageMoves(tmp_path))
+
+
+@pytest.mark.parametrize("old", ["rust/src/lib.rs", "rust/operations.rs"])
+def test_rust_facade_split_carries_findings_without_pooling_debt(tmp_path, old):
+    """A retained facade must neither mint debt nor hide a duplicate owner."""
+    facade = tmp_path / old
+    facade.parent.mkdir(parents=True)
+    package = facade.parent if facade.name == "lib.rs" else facade.with_suffix("")
+    package.mkdir(exist_ok=True)
+    facade.write_text("mod storage;\n")
+    target = package / "storage.rs"
+    target.write_text("fn collect() { loop { read(); } }")
+    entry = {
+        "path": old,
+        "function": "collect",
+        "kind": "rust-loop-without-deadline",
+        "count": 1,
+    }
+    previous = {"debt": [entry], "exceptions": []}
+    current = {
+        "debt": [{**entry, "path": target.relative_to(tmp_path).as_posix()}],
+        "exceptions": [],
+    }
+    # An unrelated sibling is not part of the facade's module tree.
+    (package / "unrelated.rs").write_text(target.read_text())
+    assert principles.history_gate(current, previous, PackageMoves(tmp_path)) == []
+    # A second registered owner cannot share the old allowance.
+    facade.write_text("mod storage;\nmod unrelated;\n")
+    assert principles.history_gate(current, previous, PackageMoves(tmp_path))
+    # A function still present at its original owner is not a move.
+    facade.write_text("mod storage;\n" + target.read_text())
+    assert principles.history_gate(current, previous, PackageMoves(tmp_path))

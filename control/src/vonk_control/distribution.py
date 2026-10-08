@@ -19,7 +19,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Lock
 from time import monotonic
-from typing import BinaryIO, Protocol
+from typing import TYPE_CHECKING, BinaryIO, Protocol, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -51,6 +51,9 @@ from .runtime_image_preparation import (
     IMAGE_CACHE_DIRECTORY,
     FilesystemRuntimeImageStorage,
 )
+
+if TYPE_CHECKING:
+    from .model_cache import ModelCacheService
 
 
 class DistributionError(ValueError):
@@ -258,9 +261,9 @@ class ModelCacheObjectSource:
     or rewrites that digest; the cache worker remains its authority.
     """
 
-    # ``_service`` stays an opaque duck-typed component: the NAS worker's
-    # verified-object service is not importable from this module.
-    _service: object
+    # The source owns verified-object availability; its type also preserves
+    # the literal-dispatch edge used by the retry proof.
+    _service: ModelCacheService
     _manifests: dict[str, tuple[DistributionObject, ...]]
     _receipts: dict[str, tuple[VerifiedModelObject, ...]]
     _paths: dict[str, tuple[str, str, object]]
@@ -291,7 +294,7 @@ class ModelCacheObjectSource:
     @classmethod
     def _from_cache_service(cls, service: object) -> ModelCacheObjectSource:
         adapter = cls.__new__(cls)
-        adapter._service = service
+        adapter._service = cast("ModelCacheService", service)
         adapter._metadata_guard = Lock()
         adapter._manifests = {}
         adapter._receipts = {}

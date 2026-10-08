@@ -392,7 +392,7 @@ fn handwritten_protocol_sources() -> Vec<(String, String)> {
 const FOREIGN_MEANINGS: [(&str, &str); 3] = [
     ("vonk-agent-helper/src/package_rollback.rs", "not-found"),
     ("vonk-agent-helper/src/main.rs", "pending"),
-    ("vonk-agent/src/recipe_builder.rs", "failed"),
+    ("vonk-agent/src/recipe_builder/cleanup.rs", "failed"),
 ];
 
 #[test]
