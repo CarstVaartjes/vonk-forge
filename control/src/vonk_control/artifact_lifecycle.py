@@ -20,7 +20,6 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
-    InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     SecurityRefusalError,
@@ -134,12 +133,11 @@ class ArtifactReferenceUnsettled(UnknownOutcomeError, ArtifactLifecycleError):
         self.typed_reason = reason
 
 
-class ArtifactReferenceUnverified(SecurityRefusalError, ArtifactLifecycleError):
-    """A destructive scan has not proven its exact deletion scope safe.
+class ArtifactReferenceUnverified(UnknownOutcomeError, ArtifactLifecycleError):
+    """An incomplete local reference observation: retain bytes and re-observe.
 
-    This is deliberately separate from admission contention. An incomplete
-    reference inventory cannot authorize unlinking managed user data. It does
-    not create a removal fence or an availability fact.
+    Accepted removal owners retry through their bounded lifecycle. An unknown
+    inventory never authorizes unlinking and never implies no references.
     """
 
     def __init__(
@@ -148,27 +146,25 @@ class ArtifactReferenceUnverified(SecurityRefusalError, ArtifactLifecycleError):
         detail: str,
         *,
         retryable: bool = True,
-        reason: SecurityRefusalReason = SecurityRefusalReason.OPERATION_INVALID_ARTIFACT,
+        reason: WaitReason = WaitReason.OBSERVATION_UNAVAILABLE,
     ) -> None:
         ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
         self.typed_reason = reason
 
 
-class ArtifactReferenceIdentityStale(InvalidRequestError, ArtifactLifecycleError):
-    """The accepted identities disagree with the current membership: the caller
-    refreshes its plan and asks again."""
+class ArtifactReferenceIdentityStale(UnknownOutcomeError, ArtifactLifecycleError):
+    """Stored membership differs from accepted content; re-observe without effects."""
 
     def __init__(
         self,
         code: str,
         detail: str,
         *,
-        retryable: bool = False,
-        reason: InvalidRequestReason = InvalidRequestReason.CONFLICT,
+        retryable: bool = True,
+        reason: WaitReason = WaitReason.SCOPE_CHANGED,
     ) -> None:
         ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
         self.typed_reason = reason
-        self.typed_field = None
 
 
 class ArtifactRemovalFenceLost(SecurityRefusalError, ArtifactLifecycleError):

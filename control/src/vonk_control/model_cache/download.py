@@ -28,7 +28,7 @@ from .artifacts import ArtifactSpec
 from .catalog_helpers import _github_release_asset_binding
 from .constants import _CHUNK_BYTES, _GITHUB_API_HOST, _PARALLEL_RANGE_WORKERS
 from .errors import (
-    ModelCacheConflictRefused,
+    ModelCacheConflictUnknown,
     ModelCacheError,
     ModelCacheResolutionError,
     ModelCacheStorageError,
@@ -280,7 +280,7 @@ class DownloadMixin:
                 allow_pending_removal=allow_pending_removal,
             )
         except ArtifactLifecycleError as error:
-            raise ModelCacheConflictRefused(
+            raise ModelCacheConflictUnknown(
                 error.code,
                 error.detail,
                 recovery="retry" if error.retryable else None,

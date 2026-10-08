@@ -14,7 +14,11 @@ from vonk_agent_protocol import (
     ModelCacheCode,
 )
 
-from ..artifact_lifecycle import ArtifactIdentity, has_pending_removal
+from ..artifact_lifecycle import (
+    ArtifactIdentity,
+    has_pending_removal,
+    lock_reference_gates,
+)
 from ..bounded_json import require_sequence
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
@@ -146,6 +150,13 @@ class DownloadAdmissionMixin:
                     return replay
                 else:
                     now = cache._clock()
+                    # Serialize metadata repair under the exact set gate before
+                    # reading derived membership. Byte verification stays in storage.
+                    lock_reference_gates(
+                        session, (ArtifactIdentity("model-set", set_digest),), now=now
+                    )
+                    cache._ensure_set(session, manifest)
+                    session.flush()
                     cache._require_model_sets_open(
                         session,
                         (set_digest,),
@@ -155,7 +166,6 @@ class DownloadAdmissionMixin:
                         ),
                         allow_pending_removal=True,
                     )
-                    cache._ensure_set(session, manifest)
                     operation = ModelCacheAdapter.new_operation(
                         request_key=request_key,
                         schema_version=SCHEMA_VERSION,
