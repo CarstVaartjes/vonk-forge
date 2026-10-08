@@ -176,7 +176,7 @@ def test_cycle_aborts_selection_before_another_request():
 
 def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatch):
     clock = [100.0]
-    monkeypatch.setattr(controller_cli.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: clock[0])
 
     class SlowPages(Pages):
         def request(self, *args, **kwargs):

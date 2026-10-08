@@ -160,7 +160,7 @@ class _FakeController:
 
     def profile_endpoints(
         self, number: int, alias: str | None = None
-    ) -> controller_cli.FleetProfileEndpointsView:
+    ) -> controller_cli.common.FleetProfileEndpointsView:
         raise AssertionError(f"unexpected endpoint lookup: {number} {alias}")
 
 
@@ -202,7 +202,9 @@ def _accept_response_contracts(monkeypatch: pytest.MonkeyPatch) -> None:
             return document
         return original(name, document)
 
-    monkeypatch.setattr(controller_cli, "validate_control_document", validate)
+    monkeypatch.setattr(
+        controller_cli.cache_removal, "validate_control_document", validate
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -218,7 +220,9 @@ def _fake_transport_reviews_are_contract_validated(
             return document
         return original(name, document)
 
-    monkeypatch.setattr(controller_cli, "validate_control_document", validate)
+    monkeypatch.setattr(
+        controller_cli.cache_removal, "validate_control_document", validate
+    )
 
 
 def test_json_review_command_is_read_only_and_returns_exact_owner_document(

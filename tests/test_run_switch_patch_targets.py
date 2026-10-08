@@ -22,6 +22,10 @@ FACADES = frozenset(
         "vonk_control.api",
         "vonk_control.fleet_projection",
         "vonk_control.agent_api",
+        "cluster_profiles.controller_cli",
+        "cluster_profiles.cli_render",
+        "cluster_profiles.control_client",
+        "cluster_profiles.qualification_fixtures",
     }
 )
 
