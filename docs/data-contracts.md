@@ -294,3 +294,5 @@ remains unchanged. Terminal history collection deletes both with their owning
 Job. PostgreSQL regressions exercise historical production, restart, exact
 native continuation, cancellation, contention, bounded missing/mismatched
 proof, and fresh same-Spark admission through the shared non-blocking helper.
+
+Run/Switch orchestration records are defined in `control/src/vonk_control/run_switch_operations/contracts.py`.

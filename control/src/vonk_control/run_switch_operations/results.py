@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 
-from .lifecycle.evidence import Residue, read_or_rebuild
-from .run_switch_contract import RunSwitchOperationResult
-from .strict_json import read_stored_document
+from ..lifecycle.evidence import Residue, read_or_rebuild
+from ..run_switch_contract import RunSwitchOperationResult
+from ..strict_json import read_stored_document
 
 
 def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:
@@ -17,6 +17,8 @@ def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:
     one operation (``_reject_invalid_operation``) while retaining the bytes.
     """
 
+    if isinstance(value, RunSwitchOperationResult | Residue):
+        return value
     if value is None:
         return None
     loaded = read_or_rebuild(

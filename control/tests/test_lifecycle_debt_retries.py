@@ -157,8 +157,10 @@ def test_node_result_retries_the_same_evidence(monkeypatch):
 
 
 def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
-    from vonk_control import run_switch_operations
-    from vonk_control.run_switch_operations import RunSwitchOperationService
+    from vonk_control.run_switch_operations import (
+        RunSwitchOperationService,
+        stop_planning,
+    )
 
     service = object.__new__(RunSwitchOperationService)
     calls = []
@@ -170,10 +172,9 @@ def test_cleanup_preview_reobserves_unknown_authority(monkeypatch):
         return "exact-cleanup"
 
     monkeypatch.setattr(
-        run_switch_operations,
+        stop_planning,
         "admission_attempts",
         lambda: iter(range(3)),
-        raising=False,
     )
     monkeypatch.setattr(service, "_preview_cleanup_once", once, raising=False)
     assert service.preview_cleanup("installation", actor="operator") == "exact-cleanup"
@@ -451,3 +452,67 @@ def test_recipe_unknown_after_commit_replays_without_duplicate_effects(
     assert len(calls) == 2 and calls[0] == calls[1]
     assert result == committed[0][0]
     assert effects() == committed[0][1]
+
+
+@pytest.mark.parametrize("refusals", [2, 3])
+def test_run_switch_cancel_reports_exhausted_contention_then_can_progress(
+    monkeypatch, refusals, tmp_path
+):
+    """A busy boundary cannot look completed or poison the next attempt."""
+    from uuid import uuid4
+
+    from vonk_agent_protocol import LifecycleState, RecipeBuildCode
+    from vonk_control.run_switch_contract import RunSwitchApplyRequest
+    from vonk_control.run_switch_operations import (
+        RunSwitchRetryLater,
+        cancellation_retry,
+    )
+
+    from .test_run_switch_lifecycle import _Harness
+    from .test_run_switch_operations import RecordingArtifactExecutor, _request
+
+    harness = _Harness(tmp_path, RecordingArtifactExecutor())
+    service = harness.service
+    original_once, original_get = service._cancel_once, service.get
+    calls = []
+    busy = RunSwitchRetryLater(
+        RecipeBuildCode.CONSUMER_BUSY, reason=WaitReason.OBSERVATION_UNAVAILABLE
+    )
+    completed = object()
+
+    def once(*args, **kwargs):
+        calls.append((args, kwargs))
+        if len(calls) <= refusals:
+            raise busy
+        return completed
+
+    monkeypatch.setattr(
+        cancellation_retry, "admission_attempts", lambda: iter(range(3))
+    )
+    monkeypatch.setattr(service, "_cancel_once", once)
+    # Reading the receipt used to hide exhausted contention; it must never
+    # replace the typed outcome of the attempted boundary.
+    monkeypatch.setattr(service, "get", lambda _: pytest.fail("contention hidden"))
+    request = {"actor": "admin", "request_key": str(uuid4()), "reason": "detach"}
+    if refusals == 3:
+        with pytest.raises(RunSwitchRetryLater) as caught:
+            service.cancel("operation", **request)
+        assert caught.value is busy
+    else:
+        assert service.cancel("operation", **request) is completed
+    assert calls == [(("operation",), request)] * 3
+    assert service.cancel("operation", **request) is completed
+
+    monkeypatch.setattr(service, "_cancel_once", original_once)
+    monkeypatch.setattr(service, "get", original_get)
+    ended = service.cancel(harness.id, **request)
+    assert ended.state == LifecycleState.CANCELLED
+    fresh = service.apply(
+        RunSwitchApplyRequest(
+            **_request(harness.sessions, harness.nodes[0]).model_dump(),
+            request_key=str(uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.operation_id != ended.operation_id
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}

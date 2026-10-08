@@ -31,7 +31,7 @@ from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperat
 from vonk_control import distribution_executor as executor_module
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
-from vonk_control.bounded_json import require_mapping, require_sequence
+from vonk_control.bounded_json import require_mapping
 from vonk_control.distribution import (
     DistributionService,
     MemoryObjectSource,
@@ -63,7 +63,7 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.operation_api import merge_operation_providers
-from vonk_control.operation_item_contract import operation_item
+from vonk_control.operation_item_contract import OperationRow, operation_item
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
     RunSwitchDistributionChildResult,
@@ -124,13 +124,14 @@ def _call_argument(call: dict[str, object], key: str) -> Mapping[str, object]:
     return require_mapping(call[key], f"cache call {key}")
 
 
-def _operation_progress(item: Mapping[str, object]) -> Mapping[str, object]:
-    return require_mapping(item["progress"], "operation progress")
+def _operation_progress(item: OperationRow) -> OperationProgress:
+    progress = operation_item(item).progress
+    assert progress is not None
+    return progress
 
 
-def _member_totals(item: object) -> tuple[object, object, object]:
-    member = require_mapping(item, "operation member")
-    return (member["member_id"], member["completed_bytes"], member["total_bytes"])
+def _member_totals(member: OperationMemberProgress) -> tuple[str, int, int | None]:
+    return (member.member_id, member.completed_bytes, member.total_bytes)
 
 
 def test_phase_receipt_rejects_explicit_cross_phase_receipt() -> None:
@@ -1574,12 +1575,9 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     ).activity_provider()
     family_item = run_provider.get_operation(run_id)
     family_progress = _operation_progress(family_item)
-    assert family_progress["completed_bytes"] == 90
+    assert family_progress.completed_bytes == 90
     expected_target_bytes = view.result.members[0].total_bytes
-    assert {
-        _member_totals(item)
-        for item in require_sequence(family_progress["members"], "operation members")
-    } == {
+    assert {_member_totals(item) for item in family_progress.members} == {
         (plan_nodes[0], expected_target_bytes, expected_target_bytes),
         (plan_nodes[1], expected_target_bytes, expected_target_bytes),
     }
@@ -1606,11 +1604,8 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         if operation_item(item).id == run_id
     )
     merged_progress = _operation_progress(merged_run)
-    assert merged_progress["completed_bytes"] == 90
-    assert {
-        _member_totals(item)
-        for item in require_sequence(merged_progress["members"], "operation members")
-    } == {
+    assert merged_progress.completed_bytes == 90
+    assert {_member_totals(item) for item in merged_progress.members} == {
         (plan_nodes[0], expected_target_bytes, expected_target_bytes),
         (plan_nodes[1], expected_target_bytes, expected_target_bytes),
     }
@@ -1654,13 +1649,10 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         )
     unknown_item = run_provider.get_operation(unknown_id)
     unknown_progress = _operation_progress(unknown_item)
-    assert unknown_progress.get("total_bytes") is None
-    assert unknown_progress["total_bytes_known"] is False
-    unknown_members = require_sequence(unknown_progress["members"], "operation members")
-    assert (
-        require_mapping(unknown_members[0], "operation member").get("total_bytes")
-        is None
-    )
+    assert unknown_progress.total_bytes is None
+    assert unknown_progress.total_bytes_known is False
+    unknown_members = unknown_progress.members
+    assert unknown_members[0].total_bytes is None
 
 
 def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:

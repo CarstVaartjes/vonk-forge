@@ -10,7 +10,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Literal, cast
+from typing import Literal, cast
 
 import httpx2
 import pytest
@@ -18,7 +18,9 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    FailureCode,
     LifecycleState,
+    RunSwitchCode,
     canonical_message,
 )
 from vonk_control.auth import CursorCodec
@@ -60,8 +62,11 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import OperationQuery
 from vonk_control.operation_blockers import PHASE_RETRY_CODE
-from vonk_control.operation_contract import OperationFailureEvidence
-from vonk_control.operation_item_contract import operation_item
+from vonk_control.operation_contract import (
+    OperationFailureEvidence,
+    OperationRecoveryAction,
+)
+from vonk_control.operation_item_contract import OperationItem, operation_item
 from vonk_control.recipe_build_cancellation import (
     lock_build_dependency,
 )
@@ -1010,10 +1015,29 @@ def test_run_switch_missing_target_is_terminal_with_clear_reason(
         assert job is not None
         job.targets = ["spk_ffffffffffffffffffffffffffffffff"]
 
-    assert service._advance(operation.operation_id) is True
-    failed = service.get(operation.operation_id)
-    assert failed.state == "failed"
-    assert "target node no longer exists" in (failed.status_reason or "")
+    from .non_blocking import assert_ended_without_blocking
+
+    def end(_operation):
+        assert service._advance(operation.operation_id) is True
+        return service.get(operation.operation_id)
+
+    def typed_reason(receipt):
+        assert _result(receipt).failure_code == RunSwitchCode.SUPERSEDED
+        assert "target node no longer exists" in (receipt.status_reason or "")
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        operation,
+        end=end,
+        fresh=lambda _world: service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(), request_key=str(uuid.uuid4())
+            ),
+            actor="admin",
+        ),
+        assert_reason=typed_reason,
+        request_key=lambda receipt: receipt.request_key,
+    )
 
 
 def test_inactive_target_waits_then_resumes_when_the_spark_returns(
@@ -2252,13 +2276,12 @@ def test_run_switch_retry_reports_its_wait_and_is_not_failed(
     assert [item.code for item in view.blockers] == ["run-switch.phase-retry"]
     assert view.blockers[0].node_ids
     assert view.next_attempt_at == view.result.observation_due_at
-    item: dict[str, Any] = dict(
-        RunSwitchOperationProvider(switch.service).get_operation(
-            switch.operation.operation_id
-        )
+    item = RunSwitchOperationProvider(switch.service).get_operation(
+        switch.operation.operation_id
     )
-    assert item["blockers"][0]["code"] == "run-switch.phase-retry"
-    assert item["next_attempt_at"] is not None
+    assert item.blockers is not None
+    assert item.blockers[0].code == PHASE_RETRY_CODE
+    assert item.next_attempt_at is not None
     assert sum("is waiting" in line for line in caplog.messages) == 1
 
     for _ in range(20):
@@ -3974,7 +3997,7 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
     start_phase = next(phase for phase in plan.phases if phase.kind == "start")
     counting = _CountingPreviewLifecycle(lifecycle)
     executor = RecipeLifecyclePhaseExecutor(
-        counting, sessions, ClusterMappingService(sessions), lifecycle._clock()
+        counting, sessions, ClusterMappingService(sessions), lifecycle._clock
     )
     with sessions.begin() as session:
         for node_id in nodes:
@@ -4129,29 +4152,23 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(
     )
     assert page.total == 1
     item = page.items[0]
-    assert isinstance(item, dict)
-    progress = item["progress"]
-    assert isinstance(progress, dict)
-    checkpoint = progress["checkpoint"]
-    assert isinstance(checkpoint, dict)
-    attempt = item["attempt"]
-    assert isinstance(attempt, int)
-    created_at = item["created_at"]
-    assert isinstance(created_at, str)
-    assert item["id"] == operation.operation_id
-    assert item["job_id"] == operation.operation_id
-    assert item["node_ids"] == list(nodes)
-    assert item["node_id"] == nodes[0]
-    assert attempt >= 1
-    assert item["supported_actions"] == ["cancel"]
-    assert progress["total_bytes_known"] is True
-    assert progress["members"][0]["member_id"] == nodes[0]
-    assert "phase_index" not in progress
-    assert checkpoint["digest"] == operation.plan_digest
-    assert datetime.fromisoformat(created_at).tzinfo == UTC
-    assert (
-        provider.get_operation(operation.operation_id)["id"] == operation.operation_id
-    )
+    assert isinstance(item, OperationItem)
+    progress = item.progress
+    assert progress is not None
+    checkpoint = progress.checkpoint
+    assert checkpoint is not None
+    assert item.created_at is not None
+    assert item.id == operation.operation_id
+    assert item.job_id == operation.operation_id
+    assert item.node_ids == list(nodes)
+    assert item.node_id == nodes[0]
+    assert item.attempt >= 1
+    assert item.supported_actions == [OperationRecoveryAction.CANCEL]
+    assert progress.total_bytes_known is True
+    assert progress.members[0].member_id == nodes[0]
+    assert checkpoint.digest == operation.plan_digest
+    assert datetime.fromisoformat(item.created_at).tzinfo == UTC
+    assert provider.get_operation(operation.operation_id).id == operation.operation_id
 
 
 def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
@@ -4330,10 +4347,10 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     assert detail.progress.total_bytes_known is False
     if failed:
         assert isinstance(detail.failure, OperationFailureEvidence)
-        # Failure evidence has a strict byte cap. This repetitive long detail
-        # is dropped instead of exceeding the public operation contract.
-        assert detail.failure.detail in {None, "failure evidence truncated"}
-        assert detail.failure.error_code == "run_switch_failed"
+        # The typed projection bounds the evidence without losing its cause.
+        assert detail.failure.detail == operation.status_reason
+        assert len(detail.failure.summary) <= 256
+        assert detail.failure.error_code == FailureCode.OPERATION_FAILED
     else:
         assert detail.failure is None
 

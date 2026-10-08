@@ -28,6 +28,7 @@ from vonk_control.models import (
     RunSwitchJournalRepair,
     RunSwitchJournalRepairPending,
 )
+from vonk_control.operation_contract import OperationRecoveryAction
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_journal_contract import (
     JournalRepairDisposition,
@@ -37,6 +38,7 @@ from vonk_control.run_switch_journal_repair import (
     journal_document,
     try_repair_zero_transfer_journal,
 )
+from vonk_control.run_switch_operations import advance as advance_owner
 from vonk_control.stored_json import write_guard_mode
 
 from .runtime_identity_support import claim_agent
@@ -103,7 +105,7 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
             0,
             0,
         )
-    original_merge = owner._merge_progress_evidence
+    original_merge = advance_owner._merge_progress_evidence
 
     def historical_merge(progress, plan, phase, evidence, now=None):
         # Isolated wrong-algorithm producer: the historical bug counted native
@@ -116,10 +118,10 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
             )
 
     with monkeypatch.context() as fault:
-        fault.setattr(owner, "_merge_progress_evidence", historical_merge)
+        fault.setattr(advance_owner, "_merge_progress_evidence", historical_merge)
         with write_guard_mode(strict=False):
             assert planner.tick()
-    assert owner._merge_progress_evidence is original_merge
+    assert advance_owner._merge_progress_evidence is original_merge
     with sessions() as session:
         row = session.get(Job, switch_id)
         assert row is not None and row.result is not None and row.state == "running"
@@ -428,7 +430,7 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
         from sqlalchemy import delete
         from vonk_control.models import AgentNode, AgentOperationAttempt
 
-        with sessions.begin() as session, write_guard_mode(strict=False):
+        with write_guard_mode(strict=False), sessions.begin() as session:
             child = session.get(Job, install_id)
             row = session.get(Job, switch_id)
             assert child is not None and row is not None
@@ -1039,7 +1041,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
             mismatched = RunSwitchJournalRepairEvidence.model_validate_json(
                 canonical_message(audit.evidence), strict=True
             ).model_copy(update={"request_key": str(uuid4())})
-    with sessions.begin() as session, write_guard_mode(strict=False):
+    with write_guard_mode(strict=False), sessions.begin() as session:
         if fault == "missing-attempt":
             session.execute(
                 delete(AgentOperationAttempt).where(
@@ -1079,7 +1081,8 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
     assert first.attempts == 1 and first.next_attempt_at > clock[0]
     assert planner.get(switch_id).next_attempt_at == first.next_attempt_at
     activity = planner.activity_provider().get_operation(switch_id)
-    assert activity["supported_actions"] == ["cancel"]
+    assert activity is not None
+    assert activity.supported_actions == [OperationRecoveryAction.CANCEL]
     # No busy loop or deadline reset at the same clock, including after restart.
     assert not planner.tick()
     if cancel:
