@@ -116,13 +116,7 @@ class RemovalExecutionMixin:
                     digest: owners
                     for digest, owners in model_set_reference_reasons(
                         session,
-                        session.scalars(
-                            select(ModelCacheSet.artifact_set_sha256).where(
-                                ModelCacheSet.artifact_set_sha256.in_(
-                                    [str(item) for item in selected_sets]
-                                )
-                            )
-                        ).all(),
+                        tuple(str(item) for item in selected_sets),
                     ).items()
                     if owners
                 }

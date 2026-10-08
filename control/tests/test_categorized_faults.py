@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
 import pytest
 from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
     InvalidRequestError,
     InvalidRequestReason,
+    LifecycleState,
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
 )
 from vonk_control import model_cache
+from vonk_control.artifact_lifecycle import ArtifactIdentity, reserve_removal
 from vonk_control.categorized_errors import (
     BookkeepingUnknown,
     InvalidType,
@@ -22,6 +29,9 @@ from vonk_control.categorized_faults import (
     StoredStateKeyMissing,
     StoredStateTypeDamaged,
 )
+
+from .test_model_cache import cache  # noqa: F401 - pytest fixture
+from .test_model_cache_lifecycle import _queue
 
 
 @pytest.mark.parametrize(
@@ -81,14 +91,43 @@ def test_model_cache_leaves_carry_their_category_base_and_keep_the_keywords() ->
     assert unknown.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
 
 
-def test_model_cache_artifact_lifecycle_leaves_accept_retryable() -> None:
-    owner = model_cache.ModelCacheRemovalOwnerInvalid(
-        "artifact.removal_owner_invalid", "x", retryable=True
-    )
-    assert isinstance(owner, InvalidRequestError)
-    assert owner.retryable is True
+def test_model_cache_artifact_lifecycle_leaves_accept_retryable(
+    cache,  # noqa: F811 - imported fixture
+    tmp_path: Path,
+) -> None:
+    """A missing stored removal owner heals without refusing a fresh download."""
+    service, sessions = cache
+    accepted, _artifact = _queue(service, tmp_path, str(uuid4()))
+    service.run_pending()
+    assert service.get_operation(accepted.id).state == LifecycleState.SUCCEEDED
+    assert accepted.artifact_set_sha256 is not None
+    with sessions.begin() as session:
+        scope = service._model_removal_scope_for_sets(
+            session, (accepted.artifact_set_sha256,)
+        )
+        reserve_removal(
+            session,
+            (ArtifactIdentity("model-set", accepted.artifact_set_sha256),),
+            owner_kind="model-cache-operation",
+            owner_id=str(uuid4()),
+            fence=str(uuid4()),
+            now=datetime.now(UTC),
+        )
+    with (
+        sessions() as session,
+        pytest.raises(model_cache.ModelCacheRemovalOwnerInvalid) as caught,
+    ):
+        service.removal_owner_findings_in_session(session, scope)
+    assert caught.value.retryable
+    assert isinstance(caught.value, UnknownOutcomeError)
+    assert caught.value.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
+    assert service.reconcile_removal_gates() == 1
+    fresh, _artifact = _queue(service, tmp_path, str(uuid4()))
+    service.run_pending()
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+
     fence = model_cache.ModelCacheDeletionFenceLost(
-        "artifact.deletion_fence_lost", "x", retryable=True
+        ArtifactLifecycleCode.DELETION_FENCE_LOST, "x", retryable=True
     )
     assert isinstance(fence, SecurityRefusalError)
     assert fence.retryable is True
