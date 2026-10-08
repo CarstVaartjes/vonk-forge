@@ -17880,6 +17880,32 @@
         "title": "ObservedAssignmentState",
         "type": "string"
       },
+      "OfflineStopIntent": {
+        "description": "Exact Stop orders retained for reconciliation after node contact returns.",
+        "properties": {
+          "code": {
+            "const": "node.offline",
+            "default": "node.offline",
+            "title": "Code",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "node_ids"
+        ],
+        "title": "OfflineStopIntent",
+        "type": "object"
+      },
       "OperationBlocker": {
         "description": "One reason an operation is waiting or blocked, with the Sparks it concerns.",
         "properties": {
@@ -19691,6 +19717,17 @@
             "const": "profile-jobrun-stop",
             "title": "Execution Mode",
             "type": "string"
+          },
+          "offline_stop_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfflineStopIntent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "owner_id": {
             "maxLength": 36,
@@ -26479,6 +26516,17 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/JobRunStopScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "offline_stop_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfflineStopIntent"
               },
               {
                 "type": "null"

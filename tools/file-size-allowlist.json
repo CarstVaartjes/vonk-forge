@@ -3,7 +3,6 @@
   "note": "Exact line counts of existing authored sources over 1500 lines. Counts may only fall; remove an entry when it reaches 1500. Generated client and wire outputs are excluded by the scanner.",
   "files": {
     "control/src/vonk_control/agent_api.py": 1933,
-    "control/src/vonk_control/agent_jobs.py": 5333,
     "control/src/vonk_control/api.py": 1763,
     "control/src/vonk_control/artifact_jobs.py": 2276,
     "control/src/vonk_control/availability_production.py": 1562,

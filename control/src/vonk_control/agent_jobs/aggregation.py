@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState
+from vonk_agent_protocol import AgentOperation, InvalidRequestReason, LifecycleState
 
 from .. import agent_operation_states, job_states
 from ..agent_upgrade_status import operator_agent_upgrade_reason
@@ -21,6 +21,7 @@ from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
+from ..offline_stops import is_deferred_stop
 from .contracts import _ABANDONABLE_OPERATIONS
 from .retry import _abandon_operation, _retry_authorized_for_current_attempt
 from .stored import column_field, column_is_document, column_value
@@ -85,6 +86,12 @@ def _aggregate_parent_state(
             .order_by(StoredOperation.created_at, StoredOperation.id)
         )
     )
+    has_deferred = any(is_deferred_stop(job, operation) for operation in operations)
+    operations = [
+        operation for operation in operations if not is_deferred_stop(job, operation)
+    ]
+    if not operations and job.kind == AgentOperation.RECIPE_STOP:
+        return
     retrying = [
         operation
         for operation in operations
@@ -116,7 +123,8 @@ def _aggregate_parent_state(
     state = verdict
     set_parent_state(job, state, None, self._clock(), keep_reason=True)
     if state == "succeeded":
-        job.status_reason = None
+        if not has_deferred:
+            job.status_reason = None
         return
     if state == "failed":
         # A failed job grants no further claims, so a sibling still parked

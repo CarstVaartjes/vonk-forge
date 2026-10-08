@@ -25,6 +25,7 @@ from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job, RecipeRun
+from ..offline_stops import pending_run_stop_nodes
 from ..recovery_policy import FailureKind
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
@@ -327,6 +328,14 @@ def assess_superseded_agent_effects_in_session(
     )
     pending = []
     for operation in candidates:
+        run_id = column_field(operation, "payload", "run_id")
+        if isinstance(run_id, str) and operation.node_id in pending_run_stop_nodes(
+            session, run_id
+        ):
+            # The exact offline Stop owns this remaining effect. Observing
+            # its old cancellation cannot hold healthy foreground work;
+            # the run's physical reservations remain charged until receipt.
+            continue
         if _exact_service_stop_receipt_covers_start(
             session, operation, current_ordinal
         ):

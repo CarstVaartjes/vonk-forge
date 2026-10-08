@@ -17,6 +17,7 @@ from typing import Literal, cast
 if TYPE_CHECKING:
   from ..models.distributed_recovery_marker import DistributedRecoveryMarker
   from ..models.job_run_stop_scope import JobRunStopScope
+  from ..models.offline_stop_intent import OfflineStopIntent
   from ..models.profile_partial_stop import ProfilePartialStop
   from ..models.service_run_stop_review import ServiceRunStopReview
   from ..models.stop_phase_operation import StopPhaseOperation
@@ -39,6 +40,7 @@ class RecipeStopParent:
             schema_version (Literal[1]):
             execution_mode (Literal['one-shot-jobs'] | None | Unset):
             job_run_stop_authorization (JobRunStopScope | None | Unset):
+            offline_stop_intent (None | OfflineStopIntent | Unset):
             phases (list[list[StopPhaseOperation]] | None | Unset):
             profile_partial_stop (None | ProfilePartialStop | Unset):
             recovery (DistributedRecoveryMarker | None | Unset):
@@ -52,6 +54,7 @@ class RecipeStopParent:
     schema_version: Literal[1]
     execution_mode: Literal['one-shot-jobs'] | None | Unset = UNSET
     job_run_stop_authorization: JobRunStopScope | None | Unset = UNSET
+    offline_stop_intent: None | OfflineStopIntent | Unset = UNSET
     phases: list[list[StopPhaseOperation]] | None | Unset = UNSET
     profile_partial_stop: None | ProfilePartialStop | Unset = UNSET
     recovery: DistributedRecoveryMarker | None | Unset = UNSET
@@ -65,6 +68,7 @@ class RecipeStopParent:
     def to_dict(self) -> dict[str, Any]:
         from ..models.distributed_recovery_marker import DistributedRecoveryMarker # noqa: PLC0415
         from ..models.job_run_stop_scope import JobRunStopScope # noqa: PLC0415
+        from ..models.offline_stop_intent import OfflineStopIntent # noqa: PLC0415
         from ..models.profile_partial_stop import ProfilePartialStop # noqa: PLC0415
         from ..models.service_run_stop_review import ServiceRunStopReview # noqa: PLC0415
         from ..models.stop_phase_operation import StopPhaseOperation # noqa: PLC0415
@@ -89,6 +93,14 @@ class RecipeStopParent:
             job_run_stop_authorization = self.job_run_stop_authorization.to_dict()
         else:
             job_run_stop_authorization = self.job_run_stop_authorization
+
+        offline_stop_intent: dict[str, Any] | None | Unset
+        if isinstance(self.offline_stop_intent, Unset):
+            offline_stop_intent = UNSET
+        elif isinstance(self.offline_stop_intent, OfflineStopIntent):
+            offline_stop_intent = self.offline_stop_intent.to_dict()
+        else:
+            offline_stop_intent = self.offline_stop_intent
 
         phases: list[list[dict[str, Any]]] | None | Unset
         if isinstance(self.phases, Unset):
@@ -151,6 +163,8 @@ class RecipeStopParent:
             field_dict["execution_mode"] = execution_mode
         if job_run_stop_authorization is not UNSET:
             field_dict["job_run_stop_authorization"] = job_run_stop_authorization
+        if offline_stop_intent is not UNSET:
+            field_dict["offline_stop_intent"] = offline_stop_intent
         if phases is not UNSET:
             field_dict["phases"] = phases
         if profile_partial_stop is not UNSET:
@@ -170,6 +184,7 @@ class RecipeStopParent:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.distributed_recovery_marker import DistributedRecoveryMarker # noqa: PLC0415
         from ..models.job_run_stop_scope import JobRunStopScope # noqa: PLC0415
+        from ..models.offline_stop_intent import OfflineStopIntent # noqa: PLC0415
         from ..models.profile_partial_stop import ProfilePartialStop # noqa: PLC0415
         from ..models.service_run_stop_review import ServiceRunStopReview # noqa: PLC0415
         from ..models.stop_phase_operation import StopPhaseOperation # noqa: PLC0415
@@ -219,6 +234,26 @@ class RecipeStopParent:
             return cast(JobRunStopScope | None | Unset, data)
 
         job_run_stop_authorization = _parse_job_run_stop_authorization(d.pop("job_run_stop_authorization", UNSET))
+
+
+        def _parse_offline_stop_intent(data: object) -> None | OfflineStopIntent | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                offline_stop_intent_type_0 = OfflineStopIntent.from_dict(data)
+
+
+
+                return offline_stop_intent_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | OfflineStopIntent | Unset, data)
+
+        offline_stop_intent = _parse_offline_stop_intent(d.pop("offline_stop_intent", UNSET))
 
 
         def _parse_phases(data: object) -> list[list[StopPhaseOperation]] | None | Unset:
@@ -328,6 +363,7 @@ class RecipeStopParent:
             schema_version=schema_version,
             execution_mode=execution_mode,
             job_run_stop_authorization=job_run_stop_authorization,
+            offline_stop_intent=offline_stop_intent,
             phases=phases,
             profile_partial_stop=profile_partial_stop,
             recovery=recovery,

@@ -25,6 +25,7 @@ from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import AgentNode, AgentOperationAttempt, Job, RecipeBuild
 from ..models import AgentOperation as StoredOperation
+from ..offline_stops import is_deferred_stop
 from ..recipe_builds import BUILD_ARTIFACT_FORMAT
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
@@ -325,7 +326,9 @@ def _claim_has_authority(
     ):
         set_parent_state(job, "queued", None, now)
         return True
-    if job.state in _TERMINAL_PARENT_STATES:
+    if job.state in _TERMINAL_PARENT_STATES and not is_deferred_stop(
+        job, current_operation
+    ):
         self._record_claim_refusal(
             session,
             operation=current_operation,

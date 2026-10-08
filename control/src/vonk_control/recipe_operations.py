@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperationMemberProgress,
     OperationProgress,
+    ProjectionCode,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
     RecipeBuildCode,
@@ -155,6 +156,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .offline_stops import deferred_stop_nodes
 from .operation_progress import (
     aggregate_progress,
     member_progress,
@@ -3233,7 +3235,7 @@ class RecipeOperationService:
 
     @staticmethod
     def _write_stop_parent(
-        job: Job, document: RecipeStopParent, *, now: datetime
+        job: Job, document: RecipeStopParent | ProfileJobRunStopJob, *, now: datetime
     ) -> None:
         job.payload = serialize_json_value(document)
         job.payload_digest = hashlib.sha256(canonical_message(job.payload)).hexdigest()
@@ -3677,6 +3679,7 @@ class RecipeOperationService:
     def reconcile_pending_service_stops(self) -> bool:
         """Give one due Stop the external publication turn for this worker pass."""
         now = self._clock()
+        offline_progressed = self.reconcile_offline_stops()
         with self._sessions() as session:
             candidates = tuple(
                 session.scalars(
@@ -3739,7 +3742,208 @@ class RecipeOperationService:
                             f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
                         )[:1024]
                         retained.updated_at = now
-        return progressed
+        return progressed or offline_progressed
+
+    def reconcile_offline_stops(self) -> bool:
+        """Detach unreachable ranks from foreground completion, retaining exact orders.
+
+        No capacity is released for an unreachable rank. Its already authorized,
+        idempotent Stop is claimable on contact, using the normal signed-plan and
+        attempt-fencing path. No request, slot or fleet queue waits for contact.
+        """
+        from .job_documents import OfflineStopIntent
+
+        now = self._clock()
+        with self._sessions() as session:
+            candidates = tuple(
+                session.execute(
+                    select(Job.id, Job.targets)
+                    .where(
+                        Job.kind == "recipe.stop",
+                        Job.state.in_(
+                            [
+                                LifecycleState.QUEUED,
+                                LifecycleState.RUNNING,
+                                LifecycleState.OBSERVING,
+                                LifecycleState.BACKOFF,
+                            ]
+                        ),
+                    )
+                    .order_by(Job.updated_at, Job.id)
+                )
+            )
+        changed = False
+        for identity, target_snapshot in candidates:
+            try:
+                with self._sessions.begin() as session:
+                    acquire_admission_keys(
+                        session,
+                        tuple(
+                            node_admission_key(node_id) for node_id in target_snapshot
+                        ),
+                        holder="offline-stop-reconciliation",
+                    )
+                    job = session.get(Job, identity, with_for_update={"nowait": True})
+                    if job is None or job.targets != target_snapshot:
+                        continue
+                    parent = _recorded_parent(job)
+                    if (
+                        not isinstance(parent, (RecipeStopParent, ProfileJobRunStopJob))
+                        or not parent.phases
+                    ):
+                        continue
+                    nodes = {
+                        node.node_id: node
+                        for node in session.scalars(
+                            select(AgentNode).where(AgentNode.node_id.in_(job.targets))
+                        )
+                    }
+                    offline = deferred_stop_nodes(job) | frozenset(
+                        node_id
+                        for node_id in job.targets
+                        if node_id in nodes
+                        and nodes[node_id].revoked_at is None
+                        and (
+                            (last_seen := nodes[node_id].last_seen_at) is None
+                            or _aware(now) - _aware(last_seen) > timedelta(seconds=150)
+                        )
+                    )
+                    if not offline:
+                        continue
+                    parent.offline_stop_intent = OfflineStopIntent(
+                        node_ids=sorted(offline)
+                    )
+                    self._write_stop_parent(job, parent, now=now)
+                    children = {
+                        child.id: child
+                        for child in session.scalars(
+                            select(AgentOperation).where(
+                                AgentOperation.parent_job_id == job.id
+                            )
+                        )
+                    }
+                    # Retain future offline phases too: completion must not lose
+                    # an exact Stop that was behind a different rank's phase.
+                    online_pending = False
+                    online_failed = False
+                    for phase in parent.phases:
+                        online = [item for item in phase if item.node_id not in offline]
+                        if not online_pending and not online_failed:
+                            for item in online:
+                                if item.operation_id not in children:
+                                    self._agent_jobs.enqueue_in_session(
+                                        session,
+                                        job.id,
+                                        item.node_id,
+                                        job.kind,
+                                        job.authority_revision,
+                                        json.loads(canonical_message(item.payload)),
+                                        operation_id=item.operation_id,
+                                    )
+                            online_pending = any(
+                                item.operation_id not in children
+                                or children[item.operation_id].state
+                                not in _TERMINAL_JOB_STATES
+                                for item in online
+                            )
+                            online_failed |= any(
+                                item.operation_id in children
+                                and children[item.operation_id].state
+                                != LifecycleState.SUCCEEDED
+                                and children[item.operation_id].state
+                                in _TERMINAL_JOB_STATES
+                                for item in online
+                            )
+                        for item in phase:
+                            if (
+                                item.node_id in offline
+                                and item.operation_id not in children
+                            ):
+                                self._agent_jobs.enqueue_in_session(
+                                    session,
+                                    job.id,
+                                    item.node_id,
+                                    job.kind,
+                                    job.authority_revision,
+                                    json.loads(canonical_message(item.payload)),
+                                    operation_id=item.operation_id,
+                                )
+                    if not online_pending:
+                        self._finish_offline_stop(
+                            session, job, now, failed=online_failed
+                        )
+                    changed = True
+            except AdmissionLockBusy:
+                continue
+            except OperationalError as error:
+                if not is_admission_contention(error):
+                    raise
+                continue
+        return changed
+
+    def _finish_offline_stop(
+        self, session: Session, job: Job, now: datetime, *, failed: bool
+    ) -> None:
+        """Complete reachable work; only exact stopped ranks release capacity."""
+        run_id = _parent_identity(job, "owner_id")
+        run = session.get(RecipeRun, run_id) if run_id is not None else None
+        if run is None:
+            return
+        nodes = tuple(session.scalars(select(RunNode).where(RunNode.run_id == run.id)))
+        orders = tuple(
+            session.scalars(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == job.id,
+                )
+            )
+        )
+        pending_nodes = {
+            order.node_id for order in orders if order.state != LifecycleState.SUCCEEDED
+        }
+        for node in nodes:
+            if node.node_id in pending_nodes and node.state == RunState.STOPPED:
+                node.state = RunState.STOPPING
+        stopped = sorted(
+            node.node_id
+            for node in nodes
+            if node.state == RunState.STOPPED and node.node_id not in pending_nodes
+        )
+        self._release_node_reservations(session, run.id, stopped, now)
+        complete = bool(nodes) and len(stopped) == len(nodes)
+        run.state = RunState.STOPPED if complete else RunState.STOPPING
+        run.stopped_at = now if complete else None
+        run.updated_at = now
+        run.route_error = (
+            None
+            if complete
+            else f"{ProjectionCode.NODE_OFFLINE}: exact Stop pending reconnect"
+        )
+        RecipeOperationAdapter().finish(
+            job, now, failed=failed, reason=run.route_error, keep=False
+        )
+        recorded = _recorded_result(job.kind, job.result, subject=job.id)
+        failed_nodes = sorted(
+            {
+                child.node_id
+                for child in session.scalars(
+                    select(AgentOperation).where(
+                        AgentOperation.parent_job_id == job.id,
+                        AgentOperation.state == LifecycleState.FAILED,
+                    )
+                )
+                if child.node_id not in deferred_stop_nodes(job)
+            }
+        )
+        job.result = RecipeOperationResult(
+            successful_nodes=sorted(set(stopped) - set(failed_nodes)),
+            failed_nodes=failed_nodes,
+            recovery_error=run.route_error if failed and not failed_nodes else None,
+            node_evidence=(recorded.node_evidence or {})
+            if isinstance(
+                recorded, (RecipeOperationResult, RecipeOperationProgressResult)
+            )
+            else {},
+        ).model_dump(mode="json", exclude_none=True)
 
     def _dispatch_stop_after_withdrawal(
         self,
@@ -5974,6 +6178,11 @@ class RecipeOperationService:
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
             )
         )
+        all_children = children
+        deferred_nodes = deferred_stop_nodes(job)
+        children = tuple(
+            child for child in children if child.node_id not in deferred_nodes
+        )
         # Nodes whose evidence was recorded as unproven (by this or an earlier
         # result of the same operation) count as failed, whatever their order said.
         recorded_for_phases = _recorded_result(job.kind, job.result, subject=job.id)
@@ -6012,7 +6221,15 @@ class RecipeOperationService:
                         child, None, job, Outcome.FAILED, now
                     )
         else:
-            stored_phases = loaded_phases
+            stored_phases = tuple(
+                group
+                for phase in loaded_phases
+                if (
+                    group := tuple(
+                        item for item in phase if item[1] not in deferred_nodes
+                    )
+                )
+            )
         if stored_phases:
             deadline_failure = _start_deadline_failure(job, now=now)
             phase_error: DistributedLifecycleError | None = None
@@ -6139,7 +6356,11 @@ class RecipeOperationService:
                 )
             ) and not job_failed:
                 completion = self._complete_jobrun_stop_in_session(
-                    session, job, children, now=now
+                    session,
+                    job,
+                    all_children,
+                    now=now,
+                    allow_pending=bool(deferred_nodes),
                 )
                 if isinstance(completion, Residue):
                     # The exact Stop receipts cannot be proven against the
@@ -6339,6 +6560,8 @@ class RecipeOperationService:
                     run.route_state = RouteState.PENDING
                     run.route_error = None
                 run.updated_at = now
+            elif job.kind == "recipe.stop" and deferred_nodes:
+                self._finish_offline_stop(session, job, now, failed=bool(failed))
             elif job.kind == "recipe.stop":
                 run = session.get(RecipeRun, owner_id)
                 assert run is not None
@@ -8035,6 +8258,7 @@ class RecipeOperationService:
         children: Sequence[AgentOperation],
         *,
         now: datetime,
+        allow_pending: bool = False,
     ) -> Residue | None:
         """Retire old JobRun identities only after every exact Stop receipt.
 
@@ -8101,7 +8325,9 @@ class RecipeOperationService:
             for child in children
         }
         if len(child_by_identity) != len(children) or any(
-            child.state != LifecycleState.SUCCEEDED for child in children
+            child.state != LifecycleState.SUCCEEDED
+            and not (allow_pending and child.node_id in deferred_stop_nodes(job))
+            for child in children
         ):
             return unproven(
                 BookkeepingReason.EVIDENCE_UNAVAILABLE,
@@ -8112,6 +8338,13 @@ class RecipeOperationService:
         ] = []
         for target in authorization.targets:
             child = child_by_identity.get((target.node_id, target.stop_payload_sha256))
+            if (
+                allow_pending
+                and target.node_id in deferred_stop_nodes(job)
+                and child is not None
+                and child.state != LifecycleState.SUCCEEDED
+            ):
+                continue
             if child is None or child.current_attempt < 1:
                 return unproven(
                     BookkeepingReason.EVIDENCE_UNAVAILABLE,
@@ -8175,19 +8408,22 @@ class RecipeOperationService:
                     "stopped JobRun source no longer matches its owner",
                 )
             proven.append((target, artifact, source_job, source_operation))
+        completed_nodes = (
+            {target.node_id for target, _artifact, _source, _operation in proven}
+            if allow_pending
+            else set(authorization.reachable_node_ids)
+        )
         reachable_nodes = tuple(
             session.scalars(
                 select(RunNode)
                 .where(
                     RunNode.run_id == authorization.run_id,
-                    RunNode.node_id.in_(authorization.reachable_node_ids),
+                    RunNode.node_id.in_(completed_nodes),
                 )
                 .with_for_update(of=RunNode)
             )
         )
-        if {node.node_id for node in reachable_nodes} != set(
-            authorization.reachable_node_ids
-        ):
+        if {node.node_id for node in reachable_nodes} != completed_nodes:
             return unproven(
                 BookkeepingReason.EVIDENCE_MISMATCH,
                 "profile JobRun Stop reachable run membership changed",

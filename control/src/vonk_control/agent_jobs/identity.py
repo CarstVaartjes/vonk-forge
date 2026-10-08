@@ -33,6 +33,7 @@ from ..models import (
     Job,
 )
 from ..models import AgentOperation as StoredOperation
+from ..offline_stops import is_deferred_stop
 from .contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     AgentContactIdentityMismatch,
@@ -92,21 +93,24 @@ def _active(
     parent = session.scalar(
         select(Job).where(Job.id == parent_job_id).with_for_update(of=Job)
     )
-    if (
-        parent is None
-        or parent.state not in {"queued", "running"}
-        or node.node_id not in column_value(parent, "targets")
-    ):
-        raise StaleAgentFence(
-            "agent operation lease, certificate, or fence is stale",
-            reason=SecurityRefusalReason.STALE_FENCE,
-        )
     operation = session.scalar(
         select(StoredOperation)
         .where(StoredOperation.id == operation_id)
         .with_for_update(of=StoredOperation)
         .execution_options(populate_existing=True)
     )
+    if (
+        parent is None
+        or (
+            parent.state not in {"queued", "running"}
+            and (operation is None or not is_deferred_stop(parent, operation))
+        )
+        or node.node_id not in column_value(parent, "targets")
+    ):
+        raise StaleAgentFence(
+            "agent operation lease, certificate, or fence is stale",
+            reason=SecurityRefusalReason.STALE_FENCE,
+        )
     if operation is None:
         raise StaleAgentFence(
             "agent operation lease, certificate, or fence is stale",

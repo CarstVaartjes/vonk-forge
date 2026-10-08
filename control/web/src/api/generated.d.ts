@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 b7038af8aeaedd40bf0c99f702bed7ab96588945455d4e22f1aeb08ebd1b74a0. Do not edit.
+// Generated from canonical OpenAPI SHA256 485155f35ce8042d2a6f0ea9cd91c0babdadeb4a9a0532cf01c64f157588a502. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -6992,6 +6992,20 @@ export interface components {
          */
         ObservedAssignmentState: "not-placed" | "placed" | "installing" | "installed" | "running" | "degraded";
         /**
+         * OfflineStopIntent
+         * @description Exact Stop orders retained for reconciliation after node contact returns.
+         */
+        OfflineStopIntent: {
+            /**
+             * Code
+             * @default node.offline
+             * @constant
+             */
+            code: "node.offline";
+            /** Node Ids */
+            node_ids: string[];
+        };
+        /**
          * OperationBlocker
          * @description One reason an operation is waiting or blocked, with the Sparks it concerns.
          */
@@ -7561,6 +7575,8 @@ export interface components {
              * @constant
              */
             execution_mode: "profile-jobrun-stop";
+            /** @default null */
+            offline_stop_intent: components["schemas"]["OfflineStopIntent"] | null;
             /** Owner Id */
             owner_id: string;
             /**
@@ -9727,6 +9743,8 @@ export interface components {
             execution_mode: "one-shot-jobs" | null;
             /** @default null */
             job_run_stop_authorization: components["schemas"]["JobRunStopScope"] | null;
+            /** @default null */
+            offline_stop_intent: components["schemas"]["OfflineStopIntent"] | null;
             /** Owner Id */
             owner_id: string;
             /**

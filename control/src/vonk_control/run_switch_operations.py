@@ -173,6 +173,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .offline_stops import pending_run_stop_nodes
 from .operation_api import (
     OperationListPage,
     OperationQuery,
@@ -1329,11 +1330,38 @@ class RecipeLifecyclePhaseExecutor:
                         RunSwitchCode.STOPPED_RUN_MEMBERSHIP_CHANGED,
                         reason=WaitReason.SCOPE_CHANGED,
                     )
-                if run.state != RunState.STOPPED or run.stopped_at is None:
+                pending_offline = pending_run_stop_nodes(session, run.id)
+                ranks = tuple(
+                    session.scalars(select(RunNode).where(RunNode.run_id == run.id))
+                )
+                reachable_complete = (
+                    run.state == RunState.STOPPING
+                    and bool(pending_offline)
+                    and not (members & expected_pools.keys() & pending_offline)
+                    and all(
+                        rank.state == RunState.STOPPED
+                        or rank.node_id in pending_offline
+                        for rank in ranks
+                    )
+                )
+                if not reachable_complete and (
+                    run.state != RunState.STOPPED or run.stopped_at is None
+                ):
                     raise RunSwitchPostStopEvidencePending(
                         f"Stop receipt for {stop.run_id} is not complete"
                     )
-                stopped_at = _aware(run.stopped_at)
+                if not (members & expected_pools.keys()):
+                    continue
+                assert run.stopped_at is not None or reachable_complete
+                stopped_at = (
+                    max(
+                        _aware(rank.updated_at)
+                        for rank in ranks
+                        if rank.state == RunState.STOPPED
+                    )
+                    if reachable_complete
+                    else _aware(run.stopped_at or now)
+                )
                 for node_id in sorted(members & expected_pools.keys()):
                     try:
                         snapshot = inventory.latest(
@@ -2196,10 +2224,19 @@ class RecipeLifecyclePhaseExecutor:
                                 for rank in missing_ranks
                             )
                         )
+                with self._sessions() as session:
+                    pending_offline = pending_run_stop_nodes(session, run_id)
                 verified = (
-                    status.state == RunState.STOPPED
+                    (
+                        status.state == RunState.STOPPED
+                        or (status.state == RunState.STOPPING and bool(pending_offline))
+                    )
                     and status.route_state == RouteState.WITHDRAWN
-                    and all(rank.state == RunState.STOPPED for rank in status.ranks)
+                    and all(
+                        rank.state == RunState.STOPPED
+                        or rank.node_id in pending_offline
+                        for rank in status.ranks
+                    )
                 )
                 waiting = (
                     status.state in STOPPABLE_RUN_STATES

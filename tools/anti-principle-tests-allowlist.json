@@ -2617,18 +2617,10 @@
     {
       "path": "control/tests/test_route_withdrawal_before_dispatch.py",
       "function": "test_accepted_stop_continues_without_client_and_never_republishes",
-      "kind": "ending-without-fresh-request",
-      "count": 1,
-      "reason": "dependency-unavailable",
-      "justification": "A lost withdrawal acknowledgement leaves the exact accepted Stop pending. With the client gone, the worker resumes the same root and issues its native phases; the run remains stopping, awaiting the actual agent receipt. This publication/dispatch boundary neither finishes physical Stop nor claims free capacity."
-    },
-    {
-      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
-      "function": "test_accepted_stop_continues_without_client_and_never_republishes",
       "kind": "observation-withdrawal-assertion",
-      "count": 5,
+      "count": 4,
       "reason": "security-edge",
-      "justification": "Withdrawal is bound to the explicit accepted exact Stop and retained root before the simulated publication process dies. The five assertions preserve that authorized withdrawal through grace expiry and same-owner worker dispatch; they do not withdraw a healthy route merely because an observation is missing or grant a new destructive scope."
+      "justification": "Withdrawal is bound to the explicit accepted exact Stop and retained root before the simulated publication process dies. The four assertions preserve that authorized withdrawal through grace expiry and same-owner worker dispatch; they do not withdraw a healthy route merely because an observation is missing or grant a new destructive scope."
     }
   ]
 }

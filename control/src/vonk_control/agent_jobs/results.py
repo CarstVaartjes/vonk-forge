@@ -27,6 +27,7 @@ from ..lifecycle import CancelRequested, LeaseLapsed, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentOperation as StoredOperation
 from ..models import AgentOperationAttempt, Job
+from ..offline_stops import is_deferred_stop
 from ..operation_contract import sanitize_failure_evidence
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
@@ -240,7 +241,9 @@ def record_late_result(
                 adapter = AgentOperationAdapter(
                     session, resume_candidates=operator_resume_candidates_in_session
                 )
-                if parent.state in _ENDED_PARENT_STATES:
+                if parent.state in _ENDED_PARENT_STATES and not is_deferred_stop(
+                    parent, operation
+                ):
                     # The job already ended, so nothing can claim or resume
                     # this order: it ends with it instead of waiting.
                     adapter.settle(

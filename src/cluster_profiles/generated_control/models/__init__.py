@@ -452,6 +452,7 @@ from .observation_transfer_error import ObservationTransferError
 from .observation_transfer_start import ObservationTransferStart
 from .observation_transfer_start_resource import ObservationTransferStartResource
 from .observed_assignment_state import ObservedAssignmentState
+from .offline_stop_intent import OfflineStopIntent
 from .operation_blocker import OperationBlocker
 from .operation_blocker_severity import OperationBlockerSeverity
 from .operation_checkpoint import OperationCheckpoint
@@ -1325,6 +1326,7 @@ __all__ = (
     "ObservationTransferStart",
     "ObservationTransferStartResource",
     "ObservedAssignmentState",
+    "OfflineStopIntent",
     "OperationBlocker",
     "OperationBlockerSeverity",
     "OperationCheckpoint",

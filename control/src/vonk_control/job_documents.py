@@ -43,7 +43,11 @@ from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
 from .mapping_parameters import EngineArgumentValue
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure
-from .profile_stop_authority import JobRunStopScope, ProfileStopOwnerBinding
+from .profile_stop_authority import (
+    JobRunStopScope,
+    OfflineStopIntent,
+    ProfileStopOwnerBinding,
+)
 from .recipe_availability_intent import RecipeAvailabilityIntent, RecipeBuildDependency
 from .recipe_build_cancellation import RecipeBuildIntent
 from .recipe_image_availability_contract import (
@@ -206,6 +210,7 @@ class ServiceRunStopReview(_Document):
 
 
 class RecipeStopParent(_RecipeParent):
+    offline_stop_intent: OfflineStopIntent | None = None
     service_stop_review: ServiceRunStopReview | None = None
     phases: list[list[StopPhaseOperation]] | None = None
     recovery: DistributedRecoveryMarker | None = None
