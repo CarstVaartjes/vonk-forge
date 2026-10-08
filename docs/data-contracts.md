@@ -233,6 +233,7 @@ module defines its own.
 | `control/src/vonk_control/recipe_image_availability_view_contract.py` | controller-contract | 2 | Typed availability and removal read projections with canonical JSON egress. |
 | `control/src/vonk_control/recipe_image_removal_contract.py` | controller-contract | 6 | The current persisted intent for one recipe cache removal request. |
 | `control/src/vonk_control/recipe_lifecycle_contract.py` | controller-contract | 9 | Typed response contracts for recipe lifecycle operations. |
+| `control/src/vonk_control/recipe_operations/contracts.py` | controller-contract | 2 | Typed recipe operation context and installation disposal receipt. |
 | `control/src/vonk_control/recipe_packages.py` | declared | 2 | Schema-2 recipe package reader for the Controller catalog sync. |
 | `control/src/vonk_control/recipe_update_contract.py` | controller-contract | 8 | One current contract for durable recipe-update intent and observation. |
 | `control/src/vonk_control/recipe_update_notice.py` | declared | 1 | One owner for "a newer revision of this recipe exists" (never restarts anything). |

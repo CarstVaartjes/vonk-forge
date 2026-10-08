@@ -174,6 +174,14 @@ is the standard for API, persisted wire, and signed/hashed contract documents.
 Do not change an optional field to required simply because a generator omitted
 it during serialization.
 
+Controller-owned recipe parents, recovery continuations and Stop authorization
+contexts use `controller_recipe_document` to store a full JSON dump, including
+all defaults and explicit nulls. Composition omits unused fields only at the
+context's top level; recursive `exclude_none=True` can erase required nullable
+fields inside a recorded compiled plan. Receipts and outbound agent payloads
+keep canonical wire encoding. Parent digest checks normalize through the typed
+stored contract, and embedded agent payload comparisons use canonical encoding.
+
 | Declared meaning | Accepted input | Canonical output |
 | --- | --- | --- |
 | Optional nullable field, default `None` | Missing or `null` | Field omitted |

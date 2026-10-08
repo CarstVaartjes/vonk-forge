@@ -5912,10 +5912,8 @@ def test_scoped_cleanup_abandons_a_never_installed_plan(tmp_path: Path) -> None:
     assert receipt.reason == "installation-not-installed"
     # A restarted phase replays the disposal, so the effect is idempotent.
     replay = lifecycle.abandon_never_installed(installation_id)
-    assert replay == {
-        "installation_id": installation_id,
-        "disposition": "abandoned",
-    }
+    assert replay.installation_id == installation_id
+    assert replay.disposition == receipt.disposition
     with sessions() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None and installation.state == "uninstalled"

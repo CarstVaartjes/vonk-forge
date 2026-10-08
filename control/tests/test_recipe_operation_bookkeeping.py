@@ -41,7 +41,10 @@ from vonk_control.models import (
     RecipeRun,
 )
 from vonk_control.recipe_builds import RecipeBuildService
-from vonk_control.recipe_lifecycle_contract import RecipeOperationProgressResult
+from vonk_control.recipe_lifecycle_contract import (
+    RecipeOperationProgressResult,
+    RecipeOperationResult,
+)
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -61,6 +64,7 @@ from vonk_control.recipe_operations import (
     new_recipe_job,
     record_build_evidence,
 )
+from vonk_control.recipe_operations import action_plans as recipe_action_plans
 from vonk_control.run_admission import RunAdmissionService
 
 from .recipe_stop_fixtures import recipe_stop_payload
@@ -286,7 +290,8 @@ def test_damaged_phases_end_a_start_through_its_recovery_error(tmp_path) -> None
 
     # The ranks are not advanced blind: the operation ends failed, naming why.
     assert result.state == "failed"
-    assert "phases are damaged" in str(_required(result.result)["recovery_error"])
+    assert isinstance(result.lifecycle_result, RecipeOperationResult)
+    assert result.lifecycle_result.recovery_error is not None
     with sessions() as session:
         run = _required(session.get(RecipeRun, start.owner_id))
         assert run.state in {"stopping", "failed"}
@@ -425,7 +430,8 @@ def test_install_evidence_that_cannot_be_proven_fails_the_rank_for_a_retry(
     )
 
     assert view.state == "failed"
-    assert _required(view.result)["failed_nodes"] == [nodes[0]]
+    assert isinstance(view.lifecycle_result, RecipeOperationResult)
+    assert view.lifecycle_result.failed_nodes == [nodes[0]]
     with sessions() as session:
         row = _required(
             session.scalar(
@@ -594,10 +600,11 @@ def test_a_profile_stop_whose_parent_is_damaged_retires_nothing_and_ends_failed(
     assert view.state == "failed"
     # The exact child receipt succeeded; the damaged parent cannot establish
     # completion of the operation as a whole, rather than a child failure.
-    result = _required(view.result)
-    assert result["failed_nodes"] == []
-    assert result["successful_nodes"] == [nodes[0]]
-    assert "damaged" in str(result["recovery_error"])
+    result = view.lifecycle_result
+    assert isinstance(result, RecipeOperationResult)
+    assert result.failed_nodes == []
+    assert result.successful_nodes == [nodes[0]]
+    assert result.recovery_error is not None
     with sessions() as session:
         stored = _required(session.get(RecipeRun, run.owner_id))
         assert stored.state == "failed"
@@ -860,7 +867,9 @@ def test_uninstall_keeps_the_model_when_the_recipe_names_none(
     expected = service.preview_uninstall(installation.owner_id)
     # The catalog document is immutable once active, so its damage is modelled at
     # the reader: the recipe names no usable model.
-    monkeypatch.setattr(recipe_operations, "_primary_model_identity", lambda _doc: None)
+    monkeypatch.setattr(
+        recipe_action_plans, "_primary_model_identity", lambda _doc: None
+    )
 
     preview = service.preview_uninstall(installation.owner_id)
 

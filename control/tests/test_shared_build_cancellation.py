@@ -8,10 +8,10 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
-from vonk_control import recipe_operations as operations_module
 from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
 from vonk_control.recipe_build_cancellation import current_build_consumers
 from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.recipe_operations import build_cancellation as operations_module
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage

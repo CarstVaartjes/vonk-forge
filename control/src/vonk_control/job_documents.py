@@ -96,6 +96,18 @@ class _Document(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
+def controller_recipe_document(document: StrictJSONModel) -> JsonValue:
+    """Persist Controller recipe state with every default and explicit null.
+
+    These mutable parents and recovery/authorization contexts are not agent
+    messages. Keep the full typed document; agent payloads and receipts use
+    their canonical wire encoder at egress.
+    """
+    return document.model_dump(
+        mode="json", exclude_none=False, exclude_unset=False, exclude_defaults=False
+    )
+
+
 # ------------------------------------------------- recipe operation parents
 
 

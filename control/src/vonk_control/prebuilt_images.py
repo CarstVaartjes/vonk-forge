@@ -58,6 +58,11 @@ from .oci_image_store import (
     OciImageStoreError,
     StoreUnknown,
 )
+from .recipe_execution_contract import (
+    RecipeExecutionContractError,
+    StoredBuildPolicyReport,
+    parse_stored_build_policy,
+)
 from .recipe_library_types import RecipeLibraryItem
 from .source_bundles import GeneratedSourceBundle
 
@@ -453,7 +458,15 @@ def prebuilt_reference(job: Job) -> str | None:
 def policy_prebuilt_reference(policy: object) -> str | None:
     """The pinned image a stored build policy says the Controller pulls."""
 
-    reference = policy.get("prebuilt_image") if isinstance(policy, Mapping) else None
+    try:
+        document = (
+            policy
+            if isinstance(policy, StoredBuildPolicyReport)
+            else parse_stored_build_policy(policy)
+        )
+    except RecipeExecutionContractError:
+        return None
+    reference = document.prebuilt_image
     if isinstance(reference, str) and _REFERENCE.fullmatch(reference):
         return reference
     return None
