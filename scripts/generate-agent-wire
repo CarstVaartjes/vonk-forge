@@ -15,6 +15,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+if __name__ == "__main__":
+    from check_environment import run_in_control
+
+    run_in_control(ROOT)
+
 
 def main() -> None:
     argparse.ArgumentParser(description=__doc__).parse_args()

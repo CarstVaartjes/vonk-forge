@@ -1,4 +1,4 @@
-#!/usr/bin/env -S uv run --project control --frozen python
+#!/usr/bin/env python3
 """Generate the admin-only OpenAPI and pinned upstream language clients.
 
 Generator provenance:
@@ -22,6 +22,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+if __name__ == "__main__":
+    from check_environment import run_in_control
+
+    run_in_control(ROOT)
 OPENAPI = ROOT / "control/openapi.json"
 PYTHON_OUTPUT = ROOT / "src/cluster_profiles/generated_control"
 TYPESCRIPT_OUTPUT = ROOT / "control/web/src/api/generated.d.ts"

@@ -16,6 +16,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+if __name__ == "__main__":
+    from check_environment import run_in_control
+
+    run_in_control(ROOT)
 sys.path[:0] = [str(ROOT / "agent_protocol/src")]
 
 CLI_WORDS = ROOT / "src/cluster_profiles/cli_states_generated.py"
