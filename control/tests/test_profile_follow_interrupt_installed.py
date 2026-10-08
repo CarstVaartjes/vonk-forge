@@ -312,7 +312,13 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
     calls = [(method, path) for method, path, _ in peer.calls]
     assert calls[0] == ("GET", latest_path)
     assert len(calls) > 1
-    assert calls[1:] == [("GET", exact_path)] * (len(calls) - 1)
+    # The owner may name a successor: one metadata read distinguishes a retry
+    # of this application from a newer intent. Never follow that newer intent.
+    successor_path = f"/api/profile/applications/{newer_application_id}"
+    assert calls[1:] == [
+        *(("GET", exact_path) for _ in calls[1:-1]),
+        ("GET", successor_path),
+    ]
     assert all(method == "GET" for method, _path, _document in peer.calls)
     with sessions() as session:
         original = session.get(FleetProfileApplication, identity)

@@ -6,6 +6,7 @@ import argparse
 import re
 import shlex
 import sys
+import time
 from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from typing import cast
@@ -26,12 +27,12 @@ _REVIEW_STALE_CODE = "profile.review_stale"
 _MAX_REVIEW_ROUNDS = 3
 
 
-def _reviewed_effects_digest(preview: Mapping[str, object]) -> str:
-    """Require the exact effects binding before asking for reviewed consent."""
+def _reviewed_effects_digest(preview: Mapping[str, object]) -> str | None:
+    """Forward the Controller binding unchanged; admission belongs to its owner."""
     digest = preview.get("effects_digest")
-    if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest):
+    if digest is None or isinstance(digest, str):
         return digest
-    raise ControlMalformedResponse("profile review has no verified effects binding")
+    raise ControlMalformedResponse("profile review binding is unreadable")
 
 
 def _review_and_submit_profile_load(
@@ -47,17 +48,29 @@ def _review_and_submit_profile_load(
 
     The Controller refuses a bound load whose plan changed since the review,
     without accepting anything. The current plan is then shown and asked about
-    again; the operator never consents to a plan they did not see. With
-    ``--yes`` nothing is reviewed or bound: the plan current at acceptance is
-    loaded. ``review_when_confirmed`` still shows that plan (``run`` does) and
-    leaves admission to the Controller at submission.
+    again; the operator never consents to a plan they did not see.
+    ``--yes`` skips the preview for a direct load. When
+    ``review_when_confirmed`` shows a preview (``run`` does), its binding is
+    still forwarded unchanged, including when confirmation was supplied.
     """
 
     if args.yes and not review_when_confirmed:
         return _submit_profile_load(client, number, args, factory)
-    for round_number in range(1, _MAX_REVIEW_ROUNDS + 1):
-        preview = client.request("POST", f"/api/profile/{number}/preview")
-        effects_digest = None if args.yes else _reviewed_effects_digest(preview)
+    review_attempt = 1
+    while True:
+        # Re-observe the latest preview rather than gate on a held binding.
+        # A fresh readable preview may omit the optional binding; only the
+        # Controller decides whether that load is admissible. Unreadable peer
+        # replies are unknown and get bounded observation retries.
+        for attempt in range(_MAX_REVIEW_ROUNDS):
+            try:
+                preview = client.request("POST", f"/api/profile/{number}/preview")
+                effects_digest = _reviewed_effects_digest(preview)
+                break
+            except ControlMalformedResponse:
+                if attempt == _MAX_REVIEW_ROUNDS - 1:
+                    raise
+                time.sleep(min(0.1 * (2**attempt), client.request_timeout_seconds))
         if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
             with redirect_stdout(sys.stderr):
                 render_payload(preview, "profile", action="preview")
@@ -71,13 +84,13 @@ def _review_and_submit_profile_load(
                 reviewed_effects_digest=effects_digest,
             )
         except ControlConflict as error:
-            if error.code != _REVIEW_STALE_CODE or round_number == _MAX_REVIEW_ROUNDS:
+            if error.code != _REVIEW_STALE_CODE or review_attempt == _MAX_REVIEW_ROUNDS:
                 raise
+        review_attempt += 1
         question = (
             "The plan changed since your review. "
             f"Load profile {number} with the current effects?"
         )
-    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def _load_profile(

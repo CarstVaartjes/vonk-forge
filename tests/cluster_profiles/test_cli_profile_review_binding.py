@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-from cluster_profiles import cli
-from cluster_profiles.control_client import ControlConflict
+from cluster_profiles import cli, controller_cli
+from cluster_profiles.control_client import ControlConflict, ControlMalformedResponse
 
 KEY = "11111111-1111-4111-8111-111111111111"
 APPLICATION = "33333333-3333-4333-8333-333333333333"
@@ -50,7 +50,7 @@ class _Controller:
             return {
                 "allowed": True,
                 "plan_digest": "c" * 64,
-                **({"effects_digest": self.plan} if self.plan else {}),
+                **({"effects_digest": self.plan} if self.plan is not None else {}),
                 "profile_name": "Reviewed",
                 "scope": {"node_ids": [], "idle_node_ids": []},
                 "summary": {},
@@ -78,6 +78,11 @@ class _Controller:
             "state": "succeeded",
             "progress": {},
         }
+
+    def profile_endpoints(
+        self, number: int, alias: str | None = None
+    ) -> controller_cli.common.FleetProfileEndpointsView:
+        pytest.fail("review submission must not look up serving endpoints")
 
     def loads(self) -> list[object]:
         return [payload for _m, path, payload in self.calls if path.endswith("/load")]
@@ -169,15 +174,75 @@ def test_yes_takes_the_current_plan_without_a_review(monkeypatch, capsys):
     capsys.readouterr()
 
 
-@pytest.mark.parametrize("invalid_digest", [None, "", "invalid", "A" * 64])
-def test_unbound_review_has_no_effect_and_a_fresh_review_can_load(
-    monkeypatch, capsys, invalid_digest
+@pytest.mark.parametrize("binding", [None, "", "invalid", "A" * 64])
+def test_latest_review_submits_the_owner_binding_without_a_client_gate(
+    monkeypatch, capsys, binding
 ):
-    controller = _Controller(invalid_digest)
-    assert _load(monkeypatch, controller, "yes")[0] == 2
-    assert controller.loads() == []
+    controller = _Controller(binding)
+    assert _load(monkeypatch, controller, "yes")[0] == 0
+    expected = {"request_key": KEY}
+    if binding is not None:
+        expected["reviewed_effects_digest"] = binding
+    assert controller.loads() == [expected]
     controller.plan = FIRST
     assert _load(monkeypatch, controller, "yes")[0] == 0
+    assert controller.loads()[-1] == {
+        "request_key": KEY,
+        "reviewed_effects_digest": FIRST,
+    }
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("unreadable_count", [1, 3])
+@pytest.mark.parametrize("unreadable_binding", [False, True])
+def test_unreadable_preview_is_observed_boundedly_and_fresh_load_is_admitted(
+    monkeypatch, capsys, unreadable_count, unreadable_binding
+):
+    controller = _Controller(FIRST)
+    request = controller.request
+    observations = 0
+
+    def observe(method, path, payload=None, **kwargs):
+        nonlocal observations
+        if path.endswith("/preview"):
+            observations += 1
+            if observations <= unreadable_count:
+                if unreadable_binding:
+                    preview = request(method, path, payload, **kwargs)
+                    preview["effects_digest"] = 42
+                    return preview
+                raise ControlMalformedResponse("unreadable peer reply")
+        return request(method, path, payload, **kwargs)
+
+    monkeypatch.setattr(controller, "request", observe)
+    status, transcript = _load(monkeypatch, controller, "yes")
+    if unreadable_count == 1:
+        assert status == 0
+        assert "Reviewed" in transcript
+        assert controller.loads() == [
+            {"request_key": KEY, "reviewed_effects_digest": FIRST}
+        ]
+    else:
+        assert status == 2
+        assert observations == 3
+        assert controller.loads() == []
+    assert _load(monkeypatch, controller, "yes")[0] == 0
+    capsys.readouterr()
+
+
+def test_confirmed_run_review_preserves_the_owner_binding(monkeypatch, capsys):
+    controller = _Controller(FIRST)
+    args = cli._parser().parse_args(
+        ("--profile", "2", "profile", "load", "--yes", "--detach")
+    )
+    controller_cli.profile_load._review_and_submit_profile_load(
+        controller,
+        2,
+        args,
+        lambda: KEY,
+        question="Load profile?",
+        review_when_confirmed=True,
+    )
     assert controller.loads() == [
         {"request_key": KEY, "reviewed_effects_digest": FIRST}
     ]

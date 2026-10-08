@@ -12,7 +12,6 @@ import pytest
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import (
-    ControlConflict,
     ControlForbidden,
     ControlMalformedResponse,
     ControlNotFound,
@@ -436,25 +435,31 @@ def test_blocked_review_is_submitted_so_the_controller_can_park_it(
     assert [method for method, _, _, _ in inspect_client.calls] == ["GET"]
 
 
-def test_security_blocker_refuses_without_prompt_or_post() -> None:
+def test_owner_authorization_refusal_is_surfaced_after_submit_and_fresh_load_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Preview bookkeeping cannot replace the Controller's authorization edge.
     review = _review("model", "publisher/model")
-    review["blockers"] = [
-        {
-            "code": "cache.owner.unauthorized",
-            "detail": "The caller may not remove this object.",
-            "retryable": False,
-            "recovery_actions": [],
-        }
-    ]
     client = _FakeController(review)
-    args = _parse("--json", "model", "remove", "publisher/model", "--yes")
 
-    with pytest.raises(ControlConflict, match="cache.owner.unauthorized"):
+    def denied() -> None:
+        raise ControlForbidden(403, "Controller denied removal")
+
+    client.before_post = denied
+    args = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
+    _accept_response_contracts(monkeypatch)
+    with pytest.raises(ControlForbidden):
         controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
-
     assert [(method, path) for method, path, _, _ in client.calls] == [
-        ("GET", "/api/model/publisher%2Fmodel/remove-review")
+        ("GET", "/api/model/publisher%2Fmodel/remove-review"),
+        ("POST", "/api/model/publisher%2Fmodel/remove"),
     ]
+    assert client.accepted is None
+    client.before_post = None
+    fresh = _parse("--json", "model", "remove", "publisher/model", "--yes", "--detach")
+    result = controller_cli.run_controller(fresh, client, lambda: _REQUEST_KEY)
+    assert result == client.accepted
+    assert result["operation_id"] == "model-operation-9"
 
 
 def test_same_key_replay_precedes_review_lookup(
