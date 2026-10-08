@@ -7,12 +7,17 @@ import argparse
 import json
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+
+if __name__ == "__main__":
+    from check_environment import run_in_control
+
+    run_in_control(ROOT)
+
 from vonk_forge_contracts.qualification_authority import (
     campaign_authority_json_schema,
     campaign_manifest_json_schema,
 )
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def rendered() -> dict[Path, str]:
@@ -33,6 +38,7 @@ def main() -> None:
     argparse.ArgumentParser(description=__doc__).parse_args()
     for output, content in rendered().items():
         output.write_text(content, encoding="utf-8")
+
 
 if __name__ == "__main__":
     main()
