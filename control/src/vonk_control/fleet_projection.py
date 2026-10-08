@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
     RunState,
 )
 from vonk_agent_protocol.inventory import NetworkInterface
+from vonk_agent_protocol.telemetry import GpuUnavailableReason
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
 from .auth import CursorError
@@ -275,8 +276,7 @@ def _run_degraded_reason(value: str | None) -> RunDegradedReason | None:
     return _RUN_DEGRADED_REASON_ADAPTER.validate_python(str(value), strict=True)
 
 
-# Extra history beyond the one-minute rule, so a slightly late sample still
-# leaves an unbroken run to measure.
+# Allow slightly late samples in the one-minute observation window.
 _LOW_CLOCK_LOOKBACK_SLACK = 30
 
 
@@ -381,6 +381,7 @@ class TelemetryPoint(StrictModel):
     gpu_memory_free_bytes: int | None = Field(
         default=None, ge=0, le=_MAX_TELEMETRY_BYTES
     )
+    gpu_unavailable_reason: GpuUnavailableReason | None = None
     gpu_temperature_c: int | None = Field(default=None, ge=0, le=150)
     cpu_frequency_avg_mhz: int | None = Field(default=None, ge=1, le=20_000)
     cpu_frequency_min_mhz: int | None = Field(default=None, ge=1, le=20_000)
@@ -562,9 +563,7 @@ class FleetNodeIdentity(StrictModel):
 
 
 def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
-    # The mTLS identity is authoritative for node ownership.  The receive
-    # timestamp is assigned by the Controller, so neither can be spoofed by a
-    # producer embedded in the report.
+    # mTLS owns node identity; the Controller owns receive time.
     return TelemetryPoint(
         id=value.id,
         node_id=value.node_id,
@@ -578,6 +577,7 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         gpu_utilization_percent=value.gpu_utilization_percent,
         gpu_memory_total_bytes=value.gpu_memory_total_bytes,
         gpu_memory_free_bytes=value.gpu_memory_free_bytes,
+        gpu_unavailable_reason=value.gpu_unavailable_reason,
         gpu_temperature_c=value.gpu_temperature_c,
         cpu_frequency_avg_mhz=value.cpu_frequency_avg_mhz,
         cpu_frequency_min_mhz=value.cpu_frequency_min_mhz,

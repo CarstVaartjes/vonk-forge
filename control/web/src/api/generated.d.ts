@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 a97ce0818c6793e04dbfb40a57ed4600d6d4bc0b837048ebf495d7f1abe5d0a1. Do not edit.
+// Generated from canonical OpenAPI SHA256 dba868092359fb5b7efdd5dcb9bc7c19bb64913fe859c10758e39efab426ec5b. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5053,6 +5053,11 @@ export interface components {
             /** Repository */
             repository: string;
         };
+        /**
+         * GpuUnavailableReason
+         * @enum {string}
+         */
+        GpuUnavailableReason: "gpu.command-failed" | "gpu.command-timeout" | "gpu.invalid-output" | "gpu.unsupported-metrics";
         /**
          * HelperErrorCode
          * @description Every code the privileged helper, or the agent speaking about it, names as an error.
@@ -12743,6 +12748,7 @@ export interface components {
             gpu_memory_total_bytes?: number | null;
             /** Gpu Temperature C */
             gpu_temperature_c?: number | null;
+            gpu_unavailable_reason?: components["schemas"]["GpuUnavailableReason"] | null;
             /** Gpu Utilization Percent */
             gpu_utilization_percent?: number | null;
             /** Id */

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, ClassVar
 
 from pydantic import Field, field_validator, model_validator
@@ -45,6 +46,13 @@ def _rfc3339_datetime(value: object) -> object:
     return parsed
 
 
+class GpuUnavailableReason(StrEnum):
+    COMMAND_FAILED = "gpu.command-failed"
+    COMMAND_TIMEOUT = "gpu.command-timeout"
+    INVALID_OUTPUT = "gpu.invalid-output"
+    UNSUPPORTED_METRICS = "gpu.unsupported-metrics"
+
+
 class TelemetryWireModel(WireModel):
     pass
 
@@ -75,6 +83,9 @@ class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
     memory_available_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     disk_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     disk_free_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    gpu_unavailable_reason: GpuUnavailableReason | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     gpu_utilization_percent: float | None = Field(ge=0, le=100, allow_inf_nan=False)
     gpu_memory_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     gpu_memory_free_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)

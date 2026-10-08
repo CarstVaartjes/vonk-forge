@@ -384,3 +384,48 @@ def test_sample_and_latest_writes_are_one_transaction(telemetry) -> None:
         assert (
             session.scalar(select(func.count()).select_from(NodeTelemetryLatest)) == 0
         )
+
+
+def test_gpu_failure_round_trips_and_next_sample_recovers(telemetry):
+    # Catches losing the typed collection reason between wire, store and fleet.
+    from vonk_agent_protocol.telemetry import GpuUnavailableReason, TelemetrySample
+    from vonk_control.fleet_projection import telemetry_point
+
+    repository, _, _, _ = telemetry
+    wire = TelemetrySample(
+        boot_id=str(BOOT_A),
+        observed_at=sample().observed_at,
+        memory_total_bytes=128_000_000_000,
+        memory_available_bytes=64_000_000_000,
+        disk_total_bytes=None,
+        disk_free_bytes=None,
+        gpu_utilization_percent=None,
+        gpu_memory_total_bytes=None,
+        gpu_memory_free_bytes=None,
+        gpu_unavailable_reason=GpuUnavailableReason.COMMAND_FAILED,
+    )
+    decoded = TelemetrySample.model_validate_json(wire.model_dump_json())
+    failed = replace(
+        sample(),
+        gpu_utilization_percent=None,
+        gpu_memory_total_bytes=None,
+        gpu_memory_free_bytes=None,
+        gpu_unavailable_reason=decoded.gpu_unavailable_reason,
+    )
+    repository.record_batch(NODE_A, (failed,))
+    point = telemetry_point(repository.latest((NODE_A,))[NODE_A])
+    assert point.gpu_unavailable_reason is GpuUnavailableReason.COMMAND_FAILED
+    assert point.gpu_utilization_percent is None
+    recovered = replace(
+        sample(sequence=2),
+        gpu_memory_total_bytes=None,
+        gpu_memory_free_bytes=None,
+        gpu_temperature_c=61,
+    )
+    repository.record_batch(NODE_A, (recovered,))
+    point = telemetry_point(repository.latest((NODE_A,))[NODE_A])
+    assert point.gpu_unavailable_reason is None
+    assert point.gpu_utilization_percent == 25.0
+    assert point.gpu_temperature_c == 61
+    assert point.gpu_memory_total_bytes is None
+    assert point.memory_total_bytes == recovered.memory_total_bytes

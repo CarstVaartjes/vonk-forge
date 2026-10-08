@@ -300,8 +300,7 @@ class AgentNode(Base):
     binary_digest: Mapped[str | None] = mapped_column(String(64))
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     contact_observation_digest: Mapped[str | None] = mapped_column(String(64))
-    # The host-runtime fingerprint the agent's last claim reported; a runtime
-    # preflight proof is current only while it matches.
+    # Preflight proof is current only while this last-claim fingerprint matches.
     preflight_fingerprint: Mapped[str | None] = mapped_column(String(64))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1705,6 +1704,7 @@ class NodeTelemetrySample(Base):
     gpu_utilization_percent: Mapped[float | None] = mapped_column(Float)
     gpu_memory_total_bytes: Mapped[int | None] = mapped_column(BigInteger)
     gpu_memory_free_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    gpu_unavailable_reason: Mapped[str | None] = mapped_column(String(64))
     gpu_temperature_c: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_avg_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_min_mhz: Mapped[int | None] = mapped_column(Integer)

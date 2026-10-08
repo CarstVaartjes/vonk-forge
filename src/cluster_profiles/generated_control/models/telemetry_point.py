@@ -8,6 +8,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.gpu_unavailable_reason import check_gpu_unavailable_reason
+from ..models.gpu_unavailable_reason import GpuUnavailableReason
 from ..types import UNSET, Unset
 from typing import cast
 import datetime
@@ -38,6 +40,7 @@ class TelemetryPoint:
             gpu_memory_free_bytes (int | None | Unset):
             gpu_memory_total_bytes (int | None | Unset):
             gpu_temperature_c (int | None | Unset):
+            gpu_unavailable_reason (GpuUnavailableReason | None | Unset):
             gpu_utilization_percent (float | None | Unset):
             memory_available_bytes (int | None | Unset):
             memory_total_bytes (int | None | Unset):
@@ -56,6 +59,7 @@ class TelemetryPoint:
     gpu_memory_free_bytes: int | None | Unset = UNSET
     gpu_memory_total_bytes: int | None | Unset = UNSET
     gpu_temperature_c: int | None | Unset = UNSET
+    gpu_unavailable_reason: GpuUnavailableReason | None | Unset = UNSET
     gpu_utilization_percent: float | None | Unset = UNSET
     memory_available_bytes: int | None | Unset = UNSET
     memory_total_bytes: int | None | Unset = UNSET
@@ -123,6 +127,14 @@ class TelemetryPoint:
         else:
             gpu_temperature_c = self.gpu_temperature_c
 
+        gpu_unavailable_reason: None | str | Unset
+        if isinstance(self.gpu_unavailable_reason, Unset):
+            gpu_unavailable_reason = UNSET
+        elif isinstance(self.gpu_unavailable_reason, str):
+            gpu_unavailable_reason = self.gpu_unavailable_reason
+        else:
+            gpu_unavailable_reason = self.gpu_unavailable_reason
+
         gpu_utilization_percent: float | None | Unset
         if isinstance(self.gpu_utilization_percent, Unset):
             gpu_utilization_percent = UNSET
@@ -167,6 +179,8 @@ class TelemetryPoint:
             field_dict["gpu_memory_total_bytes"] = gpu_memory_total_bytes
         if gpu_temperature_c is not UNSET:
             field_dict["gpu_temperature_c"] = gpu_temperature_c
+        if gpu_unavailable_reason is not UNSET:
+            field_dict["gpu_unavailable_reason"] = gpu_unavailable_reason
         if gpu_utilization_percent is not UNSET:
             field_dict["gpu_utilization_percent"] = gpu_utilization_percent
         if memory_available_bytes is not UNSET:
@@ -277,6 +291,26 @@ class TelemetryPoint:
         gpu_temperature_c = _parse_gpu_temperature_c(d.pop("gpu_temperature_c", UNSET))
 
 
+        def _parse_gpu_unavailable_reason(data: object) -> GpuUnavailableReason | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                gpu_unavailable_reason_type_0 = check_gpu_unavailable_reason(data)
+
+
+
+                return gpu_unavailable_reason_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(GpuUnavailableReason | None | Unset, data)
+
+        gpu_unavailable_reason = _parse_gpu_unavailable_reason(d.pop("gpu_unavailable_reason", UNSET))
+
+
         def _parse_gpu_utilization_percent(data: object) -> float | None | Unset:
             if data is None:
                 return data
@@ -321,6 +355,7 @@ class TelemetryPoint:
             gpu_memory_free_bytes=gpu_memory_free_bytes,
             gpu_memory_total_bytes=gpu_memory_total_bytes,
             gpu_temperature_c=gpu_temperature_c,
+            gpu_unavailable_reason=gpu_unavailable_reason,
             gpu_utilization_percent=gpu_utilization_percent,
             memory_available_bytes=memory_available_bytes,
             memory_total_bytes=memory_total_bytes,

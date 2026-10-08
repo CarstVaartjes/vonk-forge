@@ -3936,3 +3936,58 @@ def test_expired_renewal_endpoint_requires_enrolled_key_without_mtls(tmp_path, f
     assert (
         enrollment.create("spk_" + "e" * 32, "admin", 60).node_id == "spk_" + "e" * 32
     )
+
+
+def test_gpu_collection_reason_reaches_fleet_and_fresh_report_recovers(agent_system):
+    # Catches ingress accepting the reason but omitting it from stored telemetry.
+    from vonk_agent_protocol.telemetry import (
+        GpuUnavailableReason,
+        TelemetryRequest,
+        TelemetrySample,
+    )
+    from vonk_control.fleet_projection import telemetry_point
+    from vonk_control.telemetry import TelemetryRepository
+
+    client, services, _, clock = agent_system
+    failed = TelemetrySample(
+        boot_id="00000000-0000-4000-8000-000000000001",
+        observed_at=clock.now,
+        memory_total_bytes=128_000_000_000,
+        memory_available_bytes=64_000_000_000,
+        disk_total_bytes=None,
+        disk_free_bytes=None,
+        gpu_utilization_percent=None,
+        gpu_memory_total_bytes=None,
+        gpu_memory_free_bytes=None,
+        gpu_unavailable_reason=GpuUnavailableReason.COMMAND_FAILED,
+    )
+    repository = TelemetryRepository(services.sessions, clock=clock)
+    response = client.post(
+        "/agent/telemetry",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=TelemetryRequest(samples=[failed]).model_dump(mode="json"),
+    )
+    assert response.status_code == 204
+    point = telemetry_point(repository.latest((NODE_A,))[NODE_A])
+    assert point.gpu_unavailable_reason is GpuUnavailableReason.COMMAND_FAILED
+    clock.now += timedelta(seconds=1)
+    recovered = failed.model_copy(
+        update={
+            "observed_at": clock.now,
+            "gpu_unavailable_reason": None,
+            "gpu_utilization_percent": 25.0,
+            "gpu_temperature_c": 61,
+        }
+    )
+    response = client.post(
+        "/agent/telemetry",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=TelemetryRequest(samples=[recovered]).model_dump(mode="json"),
+    )
+    assert response.status_code == 204
+    point = telemetry_point(repository.latest((NODE_A,))[NODE_A])
+    assert point.gpu_unavailable_reason is None
+    assert point.gpu_utilization_percent == 25.0
+    assert point.gpu_temperature_c == 61
+    assert point.memory_total_bytes == 128_000_000_000
+    assert point.gpu_memory_total_bytes is None

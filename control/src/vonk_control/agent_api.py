@@ -151,8 +151,7 @@ from .strict_json import ControllerAPIRoute, StrictJSONModel
 from .telemetry import TelemetryRepository, TelemetrySampleInput
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-#: Response header on a disposition lookup naming a run this Controller has
-#: no record of; the agent then retires that run's local lifecycle.
+#: An unknown-run disposition header retires that local run lifecycle.
 RECIPE_RUN_DISPOSITION_HEADER = "x-vonk-recipe-run-disposition"
 RECIPE_RUN_UNOWNED = "unowned"
 # Present on a known run that is currently running: its accepted generation,
@@ -954,6 +953,7 @@ def install_agent_routes(
                         gpu_utilization_percent=sample.gpu_utilization_percent,
                         gpu_memory_total_bytes=sample.gpu_memory_total_bytes,
                         gpu_memory_free_bytes=sample.gpu_memory_free_bytes,
+                        gpu_unavailable_reason=sample.gpu_unavailable_reason,
                         gpu_temperature_c=sample.gpu_temperature_c,
                         cpu_frequency_avg_mhz=sample.cpu_frequency_avg_mhz,
                         cpu_frequency_min_mhz=sample.cpu_frequency_min_mhz,
