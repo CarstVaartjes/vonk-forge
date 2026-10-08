@@ -4,7 +4,6 @@ import httpx2
 import pytest
 from vonk_control.model_cache_ranges import (
     RangeResponseError,
-    RangeTruncatedError,
     download_ranges,
     range_partial_bytes,
 )
@@ -61,12 +60,11 @@ def test_ignored_ranges_preserve_sequential_partial(tmp_path):
         ("bytes 0-9/11", b"0123456789"),
         ("nonsense", b"0123456789"),
         ("bytes 0-9/10", b"01234567890"),
-        ("bytes 0-9/10", b"012"),
     ],
 )
 def test_rejects_incorrect_range_without_publishing(tmp_path, header, body):
     target = tmp_path / "model.part"
-    with pytest.raises((RangeResponseError, RangeTruncatedError)):
+    with pytest.raises(RangeResponseError):
         download_ranges(
             target,
             10,
@@ -80,24 +78,24 @@ def test_rejects_incorrect_range_without_publishing(tmp_path, header, body):
 
 def test_truncated_response_resumes_its_valid_prefix(tmp_path):
     target = tmp_path / "model.part"
-    with pytest.raises((RangeResponseError, RangeTruncatedError)):
-        download_ranges(
-            target,
-            10,
-            lambda start, end: response(start, end, 10, b"012"),
-            Event(),
-            lambda value: None,
-            workers=1,
-        )
-    assert range_partial_bytes(target, 10, workers=1) == 3
+    data = b"0123456789"
+    assert not download_ranges(
+        target,
+        10,
+        lambda start, end: response(start, end, 10, data[start : start + 3]),
+        Event(),
+        lambda value: None,
+        workers=1,
+    )
+    assert range_partial_bytes(target, 10, workers=1) == 9
     requested = []
 
     def resume(start, end):
         requested.append((start, end))
-        return response(start, end, 10, b"3456789")
+        return response(start, end, 10, data[start : end + 1])
 
     assert download_ranges(target, 10, resume, Event(), lambda value: None, workers=1)
-    assert requested == [(3, 9)]
+    assert requested == [(9, 9)]
     assert target.read_bytes() == b"0123456789"
 
 
@@ -150,7 +148,7 @@ def test_interruption_keeps_received_ranges_for_resume(tmp_path):
 def test_oversize_after_complete_prefix_cannot_be_reused(tmp_path):
     target = tmp_path / "model.part"
     size = 1024 * 1024
-    with pytest.raises((RangeResponseError, RangeTruncatedError)):
+    with pytest.raises(RangeResponseError):
         download_ranges(
             target,
             size,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
@@ -33,6 +34,15 @@ from .contracts import (
     OperationQuery,
 )
 from .diagnostics import _aware
+
+# Observation cursors confer no mutation authority. An otherwise standalone
+# provider still needs authenticated pagination when no application codec was
+# supplied; its process-local key expires on restart, like the observation.
+_OBSERVATION_CURSORS = CursorCodec(secrets.token_bytes(32))
+
+
+def observation_cursors() -> CursorCodec:
+    return _OBSERVATION_CURSORS
 
 
 def _operation_boundary(item: OperationItem) -> tuple[datetime, str]:
@@ -382,8 +392,6 @@ def _global_list_operations(
     now: datetime | None = None,
 ) -> OperationListPage:
     if services.operation_providers:
-        if services.cursor_codec is None:
-            raise OperationProjectionError("operation cursor projection unavailable")
         return merge_operation_providers(
             services.operation_providers,
             cursor=cursor,
@@ -391,11 +399,11 @@ def _global_list_operations(
             state=state,
             node_id=node_id,
             request_id=request_id,
-            cursors=services.cursor_codec,
+            cursors=services.cursor_codec or observation_cursors(),
             now=now,
         )
     if services.list_operations is None:
-        raise OperationProjectionError("operation projection unavailable")
+        return OperationListPage(items=(), next_cursor=None, total=0)
     return services.list_operations(cursor, limit, state, node_id, request_id)
 
 
@@ -407,7 +415,7 @@ def _global_get_operation(
             services.operation_providers, operation_id, now=now
         )
     if services.get_operation is None:
-        raise OperationProjectionError("operation projection unavailable")
+        raise KeyError(operation_id)
     return operation_item(services.get_operation(operation_id))
 
 

@@ -8,7 +8,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, HTTPException, Path, status
 from vonk_agent_protocol import OperationProgress
 
-from .auth import MUTATION_ROLES, Actor
+from .auth import MUTATION_ROLES, Actor, CursorCodec
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
 from .model_cache import (
@@ -35,6 +35,7 @@ from .operation_api import (
     OperationProvider,
     bounded_error_responses,
 )
+from .operation_api.providers import observation_cursors
 from .operation_contract import AvailabilityOperationFailure
 from .operation_item_contract import (
     OperationItem,
@@ -279,9 +280,11 @@ class ModelCacheOperationProvider:
 
     family = "model-cache"
 
-    def __init__(self, service: ModelCacheService, cursors: Any | None = None) -> None:
+    def __init__(
+        self, service: ModelCacheService, cursors: CursorCodec | None = None
+    ) -> None:
         self._service = service
-        self._cursors = cursors
+        self._cursors = cursors or observation_cursors()
 
     def list_operations(self, query: Any = None) -> Any:
         limit = int(getattr(query, "limit", 100) or 100)
@@ -336,14 +339,12 @@ class ModelCacheOperationProvider:
         if not isinstance(created_at, str) or not isinstance(operation_id, str):
             raise OperationProjectionError("operation cursor boundary is invalid")
         context = {"state": state, "node_id": node_id, "request_id": request_id}
-        if self._cursors is not None:
-            return self._cursors.encode(
-                resource="model-cache-operations",
-                order="created-at-desc/id-desc/v1",
-                context=context,
-                boundary=[created_at, operation_id],
-            )
-        raise OperationProjectionError("operation cursor projection unavailable")
+        return self._cursors.encode(
+            resource="model-cache-operations",
+            order="created-at-desc/id-desc/v1",
+            context=context,
+            boundary=[created_at, operation_id],
+        )
 
     def get_operation(self, operation_id: str) -> OperationItem:
         try:

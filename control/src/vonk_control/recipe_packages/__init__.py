@@ -17,7 +17,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 import httpx2
-from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
+from pydantic import ValidationError
 from vonk_agent_protocol import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
@@ -29,16 +29,16 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.resolver import validate_recipe_models
 
-from .catalog_revision_contract import read_prebuilt_image
-from .catalog_sync_contract import ManagedCatalogSyncProblem
-from .recipe_library_types import (
+from ..catalog_revision_contract import read_prebuilt_image
+from ..catalog_sync_contract import ManagedCatalogSyncProblem
+from ..recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibraryRelease,
     RecipeLibrarySnapshot,
     RecipePackageEntry,
 )
-from .recipe_release import (
+from ..recipe_release import (
     MAX_BUNDLE_BYTES,
     MAX_CHECKSUMS_BYTES,
     RELEASE_BUNDLE,
@@ -48,7 +48,18 @@ from .recipe_release import (
     parse_release_checksums,
     verify_release_checksums,
 )
-from .source_bundles import SourceBundleError, generate_source_bundle
+from ..source_bundles import SourceBundleError, generate_source_bundle
+from .contracts import (
+    _RELEASE_LIST,
+    _RELEASE_TAG,
+    RecipePackageRequestInvalid,
+    RecipePackageUnsettled,
+    _ReleaseResponse,
+    _select_release,
+    _snapshot_content,
+    _VerifiedRelease,
+)
+from .contracts import RecipePackageError as RecipePackageError
 
 PACKAGE_SCHEMA_VERSION = 2
 PACKAGE_MEDIA_TYPE = "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
@@ -74,66 +85,10 @@ _COPY_CHUNK = 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
-_RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _CONTRACT_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _REDIRECTS = {301, 302, 303, 307, 308}
 _ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
-
-
-class _ReleaseAsset(BaseModel):
-    model_config = ConfigDict(strict=True, extra="ignore")
-
-    name: str
-    state: str
-    # GitHub reports ``sha256:<hex>`` for uploaded assets; it lets an
-    # unchanged library bundle be recognised without downloading it.
-    digest: str | None = None
-
-
-class _ReleaseResponse(BaseModel):
-    model_config = ConfigDict(strict=True, extra="ignore")
-
-    tag_name: str
-    draft: bool
-    assets: list[_ReleaseAsset]
-
-
-_RELEASE_LIST = TypeAdapter(list[_ReleaseResponse])
-
-
-def _select_release(
-    releases: list[_ReleaseResponse], selector: str
-) -> _ReleaseResponse | None:
-    """Pick the newest published release within this Controller's contract major."""
-
-    best: tuple[tuple[int, int], _ReleaseResponse] | None = None
-    for release in releases:
-        tag = _RELEASE_TAG.fullmatch(release.tag_name)
-        if release.draft or tag is None or int(tag[1]) != CONTRACT_MAJOR:
-            continue
-        if selector != "latest" and release.tag_name != selector:
-            continue
-        key = (int(tag[2]), int(tag[3]))
-        if best is None or key > best[0]:
-            best = (key, release)
-    return None if best is None else best[1]
-
-
-@dataclass(frozen=True, slots=True)
-class _VerifiedRelease:
-    """A release whose SHA256SUMS verified against the pinned publisher."""
-
-    tag: str
-    commit: str
-    assets: frozenset[str]
-    checksums: Mapping[str, str]
-    checksums_raw: bytes
-    bundle_raw: bytes
-
-
-class RecipePackageError(RecipeLibraryError):
-    """The trusted package descriptor or package contents are invalid."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,7 +302,7 @@ class RecipePackageClient:
             persisted = self._read_persisted_snapshot()
             if persisted is not None:
                 return persisted
-            raise RecipePackageError(
+            raise RecipePackageUnsettled(
                 RecipePackageCode.UNAVAILABLE, "recipe package index is unavailable"
             ) from error
         except RecipePackageError as error:
@@ -382,7 +337,7 @@ class RecipePackageClient:
         if RELEASE_LIBRARY not in assets:
             # A release mid-update (or before its first bundle) is a transient
             # absence: the previous verified generation stays in use.
-            raise RecipePackageError(
+            raise RecipePackageUnsettled(
                 RecipePackageCode.UNAVAILABLE,
                 f"recipe release {tag} does not contain {RELEASE_LIBRARY}",
             )
@@ -405,7 +360,7 @@ class RecipePackageClient:
                     url = self._asset_redirect(response.headers.get("location", ""))
                     continue
                 if response.status_code != 200:
-                    raise RecipePackageError(
+                    raise RecipePackageUnsettled(
                         RecipePackageCode.UNAVAILABLE,
                         f"recipe release asset {RELEASE_LIBRARY} is unavailable",
                     )
@@ -575,7 +530,7 @@ class RecipePackageClient:
             self._listing_unchanged = True
             return self._listing
         if response.status_code != 200 or response.is_redirect:
-            raise RecipePackageError(
+            raise RecipePackageUnsettled(
                 RecipePackageCode.UNAVAILABLE, "recipe release is unavailable"
             )
         if len(response.content) > maximum:
@@ -595,7 +550,7 @@ class RecipePackageClient:
             ) from error
         release = _select_release(releases, self._release_selector)
         if release is None:
-            raise RecipePackageError(
+            raise RecipePackageUnsettled(
                 RecipePackageCode.UNAVAILABLE,
                 f"no published recipe library release for contract v{CONTRACT_MAJOR}",
             )
@@ -875,7 +830,7 @@ class RecipePackageClient:
         try:
             os.replace(self._candidate_path, self._snapshot_path)
         except OSError as error:
-            raise RecipePackageError(
+            raise RecipePackageUnsettled(
                 RecipePackageCode.CACHE_UNAVAILABLE,
                 "recipe package snapshot could not be committed",
             ) from error
@@ -948,8 +903,10 @@ class RecipePackageClient:
         return snapshot
 
     def prepare(self, snapshot: RecipeLibrarySnapshot) -> None:
-        if self._snapshot is None or self._snapshot.commit != snapshot.commit:
-            raise RecipePackageError(
+        if self._snapshot is None or _snapshot_content(
+            self._snapshot
+        ) != _snapshot_content(snapshot):
+            raise RecipePackageRequestInvalid(
                 RecipePackageCode.SNAPSHOT_CHANGED,
                 "package index changed during preparation",
             )
@@ -1017,7 +974,7 @@ class RecipePackageClient:
             None,
         )
         if item is None or item.content_sha256 != digest:
-            raise RecipePackageError(
+            raise RecipePackageRequestInvalid(
                 RecipePackageCode.NOT_FOUND,
                 "recipe is not in the current package index",
             )
@@ -1047,7 +1004,7 @@ class RecipePackageClient:
             # Local storage lost it: ingest the library bundle again next sync.
             self._listing_etag = None
             self._library_digest = None
-            raise RecipePackageError(
+            raise RecipePackageUnsettled(
                 RecipePackageCode.UNAVAILABLE,
                 "recipe package is not in the verified local library",
             )
@@ -1484,7 +1441,7 @@ def load_recipe_package(
     try:
         archive = path.read_bytes()
     except OSError as error:
-        raise RecipePackageError(
+        raise RecipePackageUnsettled(
             RecipePackageCode.UNAVAILABLE, "offline recipe package is unavailable"
         ) from error
     if (

@@ -22,6 +22,8 @@ from vonk_agent_protocol import (
     CatalogSyncCode,
     CatalogSyncState,
     LifecycleState,
+    SecurityRefusalError,
+    SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
@@ -72,6 +74,14 @@ class CatalogSyncError(RuntimeError):
         self.code = code
         self.detail = detail[:256]
         super().__init__(self.detail)
+
+
+class CatalogSyncRefused(SecurityRefusalError, CatalogSyncError):
+    """A source outside the configured repository cannot publish catalog effects."""
+
+    def __init__(self, code: CatalogSyncCode, detail: str) -> None:
+        CatalogSyncError.__init__(self, code, detail)
+        self.typed_reason = SecurityRefusalReason.FORBIDDEN
 
 
 class CatalogSyncUnsettled(UnknownOutcomeError, CatalogSyncError):
@@ -221,7 +231,7 @@ class ManagedRecipeCatalogSyncService:
         try:
             snapshot = self._reader.list()
             if snapshot.repository != self._repository:
-                raise CatalogSyncError(
+                raise CatalogSyncRefused(
                     CatalogSyncCode.REPOSITORY_CHANGED,
                     "recipe library repository identity changed",
                 )
@@ -239,6 +249,16 @@ class ManagedRecipeCatalogSyncService:
                 # quietly: the run that replaced it owns the catalog now.
                 if applied is not None:
                     self._finish(run.id, applied)
+        except UnknownOutcomeError as error:
+            # No verified generation was replaced. End this attempt with its
+            # typed cause and release the active slot; automatic sync or a fresh
+            # request can observe again without an operator recovery action.
+            self._fail(
+                run.id,
+                str(getattr(error, "code", CatalogSyncCode.FAILED)),
+                str(getattr(error, "detail", str(error))) or type(error).__name__,
+            )
+            return self.get(run.id)
         except Exception as error:
             # Whatever went wrong, never leave the run "running": it would
             # block every later sync until its lease expired.

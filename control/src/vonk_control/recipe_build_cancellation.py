@@ -110,8 +110,10 @@ def lock_availability_build_dependency(
 ) -> None:
     runtime = payload.get("runtime")
     if not isinstance(runtime, Mapping):
-        raise BuildConsumerError(
-            RecipeBuildCode.CONSUMER_INVALID, "availability runtime identity is invalid"
+        raise InvalidValue(
+            "availability runtime identity is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+            field="runtime",
         )
     builder = runtime.get("builder_node_id")
     digest = payload.get("build_input_sha256")
@@ -123,8 +125,10 @@ def lock_availability_build_dependency(
         or not isinstance(digest, str)
         or not isinstance(revision, str)
     ):
-        raise BuildConsumerError(
-            RecipeBuildCode.CONSUMER_INVALID, "availability build identity is invalid"
+        raise InvalidValue(
+            "availability build identity is invalid",
+            reason=InvalidRequestReason.MALFORMED,
+            field="runtime",
         )
     lock_build_dependency(
         session,
