@@ -16367,6 +16367,16 @@
             "title": "Schema Version",
             "type": "integer"
           },
+          "scope_from_content": {
+            "default": false,
+            "title": "Scope From Content",
+            "type": "boolean"
+          },
+          "scope_pending": {
+            "default": false,
+            "title": "Scope Pending",
+            "type": "boolean"
+          },
           "selected": {
             "items": {
               "pattern": "^[0-9a-f]{64}$",
@@ -22005,6 +22015,11 @@
             "const": 2,
             "title": "Schema Version",
             "type": "integer"
+          },
+          "scope_pending": {
+            "default": false,
+            "title": "Scope Pending",
+            "type": "boolean"
           }
         },
         "required": [

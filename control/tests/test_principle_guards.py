@@ -67,6 +67,16 @@ def test_violation_and_safe_counterpart(mode, bad, good):
     assert not scan_source(good, path="sample.py", mode=mode)
 
 
+def test_bounded_unknown_ending_requires_the_fresh_request_assertion():
+    failed = "def test_timeout():\n    assert op.state == 'failed'\n"
+    assert scan_source(failed, path="sample.py", mode="tests")
+    assert not scan_source(
+        failed + "    assert_ended_without_blocking(world, op, end=end, fresh=start)\n",
+        path="sample.py",
+        mode="tests",
+    )
+
+
 def test_rust_poll_loop_requires_bound_in_its_own_body():
     assert scan_rust("fn serve() { loop { sleep(delay); } }", path="agent.rs")
     assert not scan_rust(

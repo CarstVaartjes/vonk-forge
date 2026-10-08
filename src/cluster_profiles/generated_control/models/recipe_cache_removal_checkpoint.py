@@ -8,6 +8,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
 
@@ -35,6 +36,7 @@ class RecipeCacheRemovalCheckpoint:
             model_reclaimed_bytes (int):
             retry_attempts (int):
             schema_version (Literal[2]):
+            scope_pending (bool | Unset):  Default: False.
      """
 
     failure: AvailabilityOperationFailure | None
@@ -45,6 +47,7 @@ class RecipeCacheRemovalCheckpoint:
     model_reclaimed_bytes: int
     retry_attempts: int
     schema_version: Literal[2]
+    scope_pending: bool | Unset = False
 
 
 
@@ -73,6 +76,8 @@ class RecipeCacheRemovalCheckpoint:
 
         schema_version = self.schema_version
 
+        scope_pending = self.scope_pending
+
 
         field_dict: dict[str, Any] = {}
 
@@ -86,6 +91,8 @@ class RecipeCacheRemovalCheckpoint:
             "retry_attempts": retry_attempts,
             "schema_version": schema_version,
         })
+        if scope_pending is not UNSET:
+            field_dict["scope_pending"] = scope_pending
 
         return field_dict
 
@@ -135,6 +142,8 @@ class RecipeCacheRemovalCheckpoint:
         if schema_version != 2:
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
+        scope_pending = d.pop("scope_pending", UNSET)
+
         recipe_cache_removal_checkpoint = cls(
             failure=failure,
             image_index=image_index,
@@ -144,6 +153,7 @@ class RecipeCacheRemovalCheckpoint:
             model_reclaimed_bytes=model_reclaimed_bytes,
             retry_attempts=retry_attempts,
             schema_version=schema_version,
+            scope_pending=scope_pending,
         )
 
         return recipe_cache_removal_checkpoint

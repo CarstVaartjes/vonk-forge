@@ -658,6 +658,14 @@ def scan_source(
                         comparison, self.diagnostic_reports
                     )
                     and TRANSIENT.search(self.context)
+                    and not (
+                        self.receiver is not None
+                        and any(
+                            isinstance(call, ast.Call)
+                            and name(call.func) == "assert_ended_without_blocking"
+                            for call in local_nodes(self.receiver)
+                        )
+                    )
                     and not re.search(
                         r"assert[^\n]*(?:reason_code|\.code\b)", self.context
                     )
