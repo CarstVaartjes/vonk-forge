@@ -16,7 +16,6 @@ from vonk_control.ca_issuance_contract import (
 )
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.enrollment.types import (
-    EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     RenewalIssuanceUncertain,
 )
@@ -197,7 +196,7 @@ def test_unbound_enrollment_releases_claim_without_inventing_provider_authority(
         assert accepted is not None
         accepted.provider_request = None
     calls = len(transport.tokens)
-    with pytest.raises(EnrollmentDenied, match="historical"):
+    with pytest.raises(EnrollmentIssuanceUncertain):
         EnrollmentService(sessions, provider, clock=clock).submit(
             grant.token, request, evidence(request)
         )

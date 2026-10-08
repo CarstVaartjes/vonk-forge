@@ -1406,7 +1406,7 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
         assert release.wait(timeout=60)
         real_fsync(descriptor)
 
-    monkeypatch.setattr("vonk_control.agent_api.os.fsync", slow_fsync)
+    monkeypatch.setattr("vonk_control.agent_api.common.os.fsync", slow_fsync)
     headers = agent_headers(NODE_A, "serial-a") | {
         "content-type": "application/x-tar",
         "x-vonk-image-digest": "sha256:" + "d" * 64,

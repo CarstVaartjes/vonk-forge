@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import get_args
 
 import jwt
 import pytest
@@ -28,7 +29,11 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from jwt.algorithms import ECAlgorithm
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
+from vonk_agent_protocol import UnknownError
+from vonk_control.ca_issuance_contract import (
+    CertificateIssuanceBinding,
+    CertificatePendingReply,
+)
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.enrollment.types import (
     EnrollmentIssuanceUncertain,
@@ -192,10 +197,17 @@ def https_journal(tmp_path: Path):
                 if binding.request_id in pending:
                     self.reply(
                         200,
-                        {
-                            "state": "pending",
-                            "request": binding.model_dump(mode="json"),
-                        },
+                        CertificatePendingReply(
+                            state=get_args(
+                                CertificatePendingReply.model_fields["state"].annotation
+                            )[0],
+                            request=binding,
+                            reason_code=get_args(
+                                CertificatePendingReply.model_fields[
+                                    "reason_code"
+                                ].annotation
+                            )[0],
+                        ).model_dump(mode="json"),
                     )
                     return
                 if body["mode"] == "observe":
@@ -370,14 +382,16 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
                 )
             try:
                 replay = pool.submit(issue, service)
-                with pytest.raises(
-                    (
-                        EnrollmentIssuanceUncertain,
-                        RenewalInProgress,
-                        RenewalIssuanceUncertain,
-                    )
+                try:
+                    observation = replay.result(3)
+                except (
+                    EnrollmentIssuanceUncertain,
+                    RenewalInProgress,
+                    RenewalIssuanceUncertain,
                 ):
-                    replay.result(3)
+                    pass
+                else:
+                    assert isinstance(observation, UnknownError)
             finally:
                 release.set()
             with pytest.raises((EnrollmentIssuanceUncertain, RenewalIssuanceUncertain)):
@@ -386,6 +400,7 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
         adopted = issue(restarted)
         assert isinstance(adopted, IssuedCertificate)
         assert issue(restarted) == adopted
+        assert isinstance(enroll(restarted, OTHER_NODE_ID), IssuedCertificate)
         assert all(count == 1 for count in counts.values())
         with sessions() as session:
             assert (
@@ -412,6 +427,7 @@ import json, sys
 from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import UnknownError
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.step_ca import StepCertificateAuthority
 args = json.load(sys.stdin)

@@ -19,6 +19,10 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import AgentResult, UnknownError, canonical_message
+from vonk_agent_protocol.state_machines import (
+    CertificateRecordState,
+    CertificateRotationState,
+)
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
@@ -1256,9 +1260,12 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
         assert issued is not None and issued.state == "revoked"
         assert issued.revoked_at is not None
         if crash_new_revocation:
-            assert intent is not None
+            # The denied certificate owns pending revocation evidence. A
+            # concurrent reconciler may already have released the rotation.
             assert issued.ca_revoked_at is None
-            assert intent.state == "revocation-pending"
+            assert issued.state == CertificateRecordState.REVOKED
+            if intent is not None:
+                assert intent.state == CertificateRotationState.REVOCATION_PENDING
         else:
             assert issued.ca_revoked_at is not None
             assert intent is None
@@ -1276,7 +1283,9 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
             issued = session.get(AgentCertificate, "2")
             intent = session.get(AgentCertificateRotation, NODE_ID)
             assert issued is not None and issued.ca_revoked_at is not None
-            assert intent is not None and intent.state == "revoked"
+            assert intent is None
+
+    assert isinstance(enroll(revoking, node_id=OTHER_NODE_ID), IssuedCertificate)
 
 
 def test_postgres_approved_node_cannot_be_deleted_while_certificate_exists(
@@ -1336,8 +1345,10 @@ def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidenc
 
     assert not renewer.is_alive()
     assert len(results) == 1
-    if failure_mode == "success" or failure_mode == "runtime":
+    if failure_mode == "success":
         assert isinstance(results[0], EnrollmentDenied)
+    elif failure_mode == "runtime":
+        assert isinstance(results[0], RenewalIssuanceUncertain)
     else:
         assert isinstance(results[0], SystemExit)
     assert authority.revocations == ["2"]
@@ -1349,7 +1360,9 @@ def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidenc
         assert evidence.fingerprint == "fingerprint-2"
         assert evidence.generation == 2
         assert evidence.state == (
-            "revoked" if failure_mode == "success" else "revocation-pending"
+            CertificateRecordState.REVOKED
+            if failure_mode == "success"
+            else CertificateRotationState.REVOCATION_PENDING
         )
         if failure_mode == "success":
             assert evidence.ca_revoked_at is not None
@@ -1363,8 +1376,13 @@ def test_postgres_missing_node_after_completed_rotation_retains_recovery_evidenc
         assert authority.revocations == ["2", "2"]
         with sessions() as session:
             evidence = session.get(AgentIssuedCertificateRevocation, "2")
-            assert evidence is not None and evidence.state == "revoked"
+            assert (
+                evidence is not None
+                and evidence.state == CertificateRecordState.REVOKED
+            )
             assert evidence.ca_revoked_at is not None
+
+    assert isinstance(enroll(reconciling, node_id=OTHER_NODE_ID), IssuedCertificate)
 
 
 def test_postgres_separate_services_return_one_idempotent_exact_replay(
@@ -1472,7 +1490,7 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
     def submit(service: EnrollmentService, token: str, request: bytes) -> None:
         try:
             results.append(service.submit(token, request, evidence(request)))
-        except EnrollmentDenied as error:
+        except (EnrollmentDenied, EnrollmentIssuanceUncertain) as error:
             results.append(error)
 
     first_thread = threading.Thread(
@@ -1491,7 +1509,12 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
 
     assert len(authority.calls) == 1
     assert sum(isinstance(result, IssuedCertificate) for result in results) == 1
-    assert sum(isinstance(result, EnrollmentDenied) for result in results) == 1
+    # An in-flight exact provider effect remains uncertain. Once it completes,
+    # a second new-node grant cannot replace the existing authenticated node.
+    assert len(results) == 2
+    assert (
+        sum(isinstance(result, EnrollmentIssuanceUncertain) for result in results) == 1
+    )
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(AgentNode)) == 1
         assert session.scalar(select(func.count()).select_from(AgentCertificate)) == 1
@@ -1503,6 +1526,10 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
             )
             == 1
         )
+
+    with pytest.raises(EnrollmentDenied):
+        second.submit(second_grant.token, second_request, evidence(second_request))
+    assert isinstance(enroll(second, node_id=OTHER_NODE_ID), IssuedCertificate)
 
 
 def test_postgres_separate_services_never_duplicate_in_progress_renewal(

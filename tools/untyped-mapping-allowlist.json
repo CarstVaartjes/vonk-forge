@@ -289,7 +289,7 @@
       "count": 2
     },
     {
-      "path": "control/src/vonk_control/agent_api.py",
+      "path": "control/src/vonk_control/agent_api/routes.py",
       "count": 1
     },
     {
@@ -301,7 +301,7 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/api.py",
+      "path": "control/src/vonk_control/api/common.py",
       "count": 3
     },
     {
@@ -349,7 +349,7 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/distributed_recovery.py",
+      "path": "control/src/vonk_control/distributed_recovery/common.py",
       "count": 1
     },
     {
@@ -393,8 +393,20 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/library_projection.py",
-      "count": 13
+      "path": "control/src/vonk_control/library_projection/catalog.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/library_projection/common.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/library_projection/local_state.py",
+      "count": 5
+    },
+    {
+      "path": "control/src/vonk_control/library_projection/service.py",
+      "count": 4
     },
     {
       "path": "control/src/vonk_control/lifecycle/job.py",
@@ -513,8 +525,16 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "count": 26
+      "path": "control/src/vonk_control/recipe_builds/common.py",
+      "count": 22
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/planning.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/source.py",
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/recipe_execution_contract.py",
@@ -613,8 +633,12 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/unused_storage_collection.py",
-      "count": 2
+      "path": "control/src/vonk_control/unused_storage_collection/common.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection/evidence.py",
+      "count": 1
     },
     {
       "path": "control/src/vonk_control/worker.py",
@@ -940,7 +964,26 @@
       "CompiledExecutionPlan.parse": "b93f952a6e9b7326e256142b301b14923b393bd78b4a544797a5a828f074ab75",
       "CompiledExecutionPlan.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
       "validate_compiled_execution_plan": "568f66a6e817dc29a38cb768985a03614342da1922b27510da1907d5b80026f3",
-      "<module>": "42d5b436bbf6cb913e02cc5caa6e225c8594a9847a0f311cab0f4a377ff4bb70"
+      "<module>": "42d5b436bbf6cb913e02cc5caa6e225c8594a9847a0f311cab0f4a377ff4bb70",
+      "CompiledExecutionPlanError": "4bc966ada3e9560e44680c535de5d77181c3573dd36915148cab9e6bb18666f8",
+      "_Strict": "cedad6adeffe18827e88b6c311f60245a65bdd83e33746cb4116d093cbd6520f",
+      "CompiledIdentity": "3947e10c6de83201fd880eca8659fe7e9fdb6b18670875650e7f95ff584d15ec",
+      "CompiledEnvironmentEntry": "313a9f3f9aef2788595b1d479ad281b9caa9c27f7a9dca39e24c519c1ef91ec0",
+      "CompiledPlacement": "f68e0ac54e0e5eaba689e8a905527b2b4e0bfef8d443223aec7a085987f17d84",
+      "CompiledRuntime": "afc93332846f1217e28f8b9d5dab68122126f4e4fc993c37688839bfcb6b4452",
+      "CompiledArtifactMount": "d7105b2b8d93120fa41278d0c0a2d379683920fc5c648c0482961846b19259d9",
+      "CompiledModelIdentity": "df1ec431cde959c1e7ffc40ed45b407c5cacbd660094ac51ea7c9223126e03f7",
+      "CompiledArtifact": "f4ae32992c77dc22a14d267eba794875a2d5665d248c8d9022140b59044c2a76",
+      "CompiledRuntimeImage": "986087bf6d22ea347d7b14605d1185be1d58c0dd2a51c0c9c13b457490607821",
+      "CompiledSecurityMount": "38d051133566823c3955eccf7f7d1d342e13fe20630d4b9d2cc79ca993972777",
+      "CompiledSecurity": "64c65cfefa50f7b88f28c2424631c791e3202e11898f49fdec74654d83267a16",
+      "CompiledTopology": "1e9363885f9d4744b6e0bd37768bad5f9f7c4c28ac8e1bd03051f9527414468d",
+      "CompiledLifecycle": "07dfa19b7acdcf47a7004638e29c9e59e711c1f38f00d3f10e30206822670e81",
+      "CompiledEndpoint": "5a4137abb3f66108ad43567ece04489313cb6d0a8d6a41b33649b51d49c778b2",
+      "CompiledJobInputSlot": "506b36f89e47a084560006b3a42056e2f66e7cfab3005933ce4b1e24506b1e51",
+      "CompiledJobInput": "7409b226126b222a1b3ddaae2226a3b7fb7992f267dc33f55a2c48c52825fc93",
+      "CompiledJob": "1832550ad433fd8a126c93374d047a8d4654b5e5457c229fc0a521e9ab753422",
+      "CompiledExecutionPlan": "affb6d323cdffeba4274eb381676afc6e96a1dc44f276c1db331aef0c4e17166"
     },
     "agent_protocol/src/vonk_agent_protocol/contracts.py": {
       "_ascii_case_pattern": "278ee3c40526517a4e4fa9b68febd80c62f436e58fe0ce5e4615011ef3dc15e6",
@@ -989,7 +1032,22 @@
       "_add_protocol_schema_constraints": "c1579b442eeab2f54f70745d518620d460c96effcf7d0c423dc9725953a0cbd6",
       "_add_protocol_schema_constraints.constrain_extension_objects": "60b8cac8b036fcd829de157a05a957936af2b4e125db61da117d9e44dc173814",
       "validate_schema_message": "6b87d3f0d5a4fd1070ffd2c71ff7f37374f586b70e052c0f3f5e60f951bf7531",
-      "<module>": "4f4664fe2c7c51b990adb448393f81b7e7992b5349e2f1bc64873f9eba0905a6"
+      "<module>": "4f4664fe2c7c51b990adb448393f81b7e7992b5349e2f1bc64873f9eba0905a6",
+      "AgentProtocolError": "2c4ede4012856c5cc58aec76abca7e50edf5000d9a342e8ac43b2a66d1b9323c",
+      "AgentOperation": "859e57ea7234a7ccf2681295565119b9bf352527ea470c152abacc9daa2e4578",
+      "ArtifactDistributionPayload": "66762b52aa103602805197e4068c9fc617bf19d5c54d329cff4bc850fdbe485b",
+      "AgentUpgradePayload": "d5c406d18f7980793f7957f0b7fb3749720b18d88d3bd356f3e6a8e2339ead64",
+      "AgentInstallResult": "8c7608112d3fdda74587b08ddb443af3de13100aff3af06a08149a3bbfa9dc29",
+      "AgentUpgradeResult": "f84352c279b9ff7ea356a32e6a8b14d9222528cd764d0cbefec15613d1f3aa04",
+      "RecipeStartResult": "22f413f97b204c80c9ffc91e1f5931df2bc8aafcd6dea5c776bf9eb3e60344e8",
+      "ArtifactDistributionResult": "7dcb1848a81e6b24b001a2749460101b6f45eac409c4b10ed7389792d2a56bb0",
+      "AgentFailureKind": "f1b864b3e4e32d1d0aace4dfd4ea62fa371013624065f31813e7f21bcce0e21b",
+      "AgentFailureResult": "213bb3f1d0cd2aac4fd576c0cddee864b44086a199e405c88e9017c71951f164",
+      "_ProtocolEnvelopeModel": "a61ed123c0e04efefc6a6ddafe07509479501620b7789360315369c6e10754a1",
+      "AgentClaim": "85215512529932a9973729256aaf2f58359022224dbee77abbdcb47dd595a04a",
+      "AgentProgress": "fef19c6f502bbdb41154843604042e8b38c283026f2a4ff9586168922a880ed3",
+      "AgentDirective": "962d8cc4b6a7b50e0ef2213b5c923266365085d2306597e0935ca5940f6c4d7b",
+      "AgentResult": "fcc9ec7b4e0463d07c2a0542db5facb76350e9e4608cd9a82754b07d35dcf294"
     },
     "agent_protocol/src/vonk_agent_protocol/distribution.py": {
       "DistributionObject.name_is_relative": "50b4a35b6cc0ae51405edfdcd45b90f018935a903cd7644ded802fafb5b83b85",
@@ -1000,7 +1058,9 @@
       "DistributionAssignment.parse": "9c8b7c325447159277910652058bc208260a35b2d138efb5d89fd0641feb8913",
       "DistributionAssignment.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
       "DistributionAssignment.object_digests": "9f28ff7138a2c4d41d70aaa4f62e3f44618fdc00acbd52d90786b380993a738c",
-      "<module>": "3da27f9b940bfc118f6f78355dee16c391744cf71bfe2221b836f7872240cffe"
+      "<module>": "3da27f9b940bfc118f6f78355dee16c391744cf71bfe2221b836f7872240cffe",
+      "DistributionObject": "6931b7ab8d3353004a0dfe84511b89ea9bab83fc8dcbb495feb6bde09eb4bf9f",
+      "DistributionAssignment": "5c0cc63bc212cf623f5173936c19f81e1c10e644942f13756b1d16d35ce87cde"
     },
     "agent_protocol/src/vonk_agent_protocol/host_helper.py": {
       "HostRuntimeRequest.bind_runtime_inspection": "af973dfe9e30a493aaf3242d0c9305026504ffda863e1e7a272043fa14a7c725",
@@ -1016,7 +1076,20 @@
       "SignedHostHelperGrant.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
       "host_helper_grant_signing_bytes": "755dbc2cfda4d1e7f5f06e8cafe4495090b08e6c36a8773a87f450e41a556056",
       "_parse_model": "478f2674fb9ae057a7df2cea40ad0ea3a39265e8b5ad50c79868b3f2d92f4bed",
-      "<module>": "61c45bf4de485074cec785e58aac7a5eb38915c247635626e6c04533f8b40de9"
+      "<module>": "61c45bf4de485074cec785e58aac7a5eb38915c247635626e6c04533f8b40de9",
+      "RecipeReconciliationIdentity": "bd1cd1ae1b2a490dee9b71d985705da1311e35eb68c8afbfdac4d198d9f191fb",
+      "HostRuntimeRequest": "c2860b0272673638576ab1c2779448df27486980ba5b7fcb7672e6b4f1427f5b",
+      "RestartUnit": "573c8c7157d07e56557519487678a13a33d3c293026ee72400472b42e8782730",
+      "ContainerRuntimeAction": "8654ecafc1d3bb104d2694eb0af8d2951cdc88ae789e9dadfeceed5daf7daa5c",
+      "HostOperationKind": "2e2b19c986ea90dfc9e0371a43961020d19c321c36e6750d0f8c5da4f9f37dbb",
+      "_HostOperation": "b0331b758f7b15a4f4bc50569849b4c1902cca1ca30001080f9c86dfd8d3db3e",
+      "InstallVonkDebOperation": "69e940e9cd6854b0442d6bfe4f869804682498c8183c7aefe5c45a9cf8c862de",
+      "ConfirmPackageActivationOperation": "43d973cc6df195085f8e62e868e00e5eb2acc77c3c555ef60de2781c4bba09fb",
+      "ExecuteContainerRuntimeRequestOperation": "ffc466af6209cab3d60283eacb707db54494dc76aece108325978122a1150062",
+      "HostHelperGrantClaims": "1cbc71c75cd8bd85566b8e491ca361952bab81616b1030423e22fae69438331a",
+      "HostHelperSignature": "8d0330e17237b8447f72741f8cb14cebe4316fb72aaf6420b4d544db8dfa6531",
+      "SignedHostHelperGrant": "50cec8531de3029f3c68bc260287d56da983e0bc8dda2e906776c5142fa8b3bf",
+      "RecipeRunInspectionRequest": "a3627368a9c2254fa3b8eea6f45b69d8708f572f9804a968d15a51c7c81c04fb"
     },
     "agent_protocol/src/vonk_agent_protocol/optional_evidence.py": {
       "_present": "9f636e53a17ce674b6959ea13dfe899f08d56d82558888376dec9f11a2126d12",
@@ -1025,7 +1098,9 @@
       "OptionalEvidenceModel.__pydantic_init_subclass__": "16e35c8b17a57d2d173dac4dea2c5e235993c951683d55f55de3a871c3be4597",
       "_drop_invalid_optional_evidence": "3f0abfba5a074b42e97a6c0b93ee187b118d266ceff9bea0bfbb3c7b9167a1c0",
       "fail_open_on_optional_evidence": "666d8a5b26d8bd7ae764c677e76786f3aa454498fbb54f5b464af0283e747eb8",
-      "<module>": "cc4b282ae2f6cd154dcea02d5cbecbe6b3b4a702ec5d6530f7e55898f4be5bba"
+      "<module>": "cc4b282ae2f6cd154dcea02d5cbecbe6b3b4a702ec5d6530f7e55898f4be5bba",
+      "EvidenceGroup": "6859d856092ac19909108b9ca36b655d4e732041bc109df2b62d7700d2f1012a",
+      "OptionalEvidenceModel": "6cef434663e24f936a1a54b9a536a226168eab69e3367413a55499795bbf0a26"
     },
     "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py": {
       "_as_tuple": "307d97a03b6a47b7de585c504a8d498321dde09b12f9275520f7bcd1b044feb5",
@@ -1059,7 +1134,17 @@
       "RecipeJobRunResult.peak_memory_bytes": "3bb3ce54b3d94f768d9e72d951624bec9018a6713309ed02baf5ebdb7a222997",
       "RecipeJobRunResult.parse": "6b334f732589e6779b9092494566f7e5cdea7363f36cb38645385d541bb50db3",
       "RecipeJobRunResult.to_mapping": "d6123e35992c119ea66104b1e62fa946a6953524d1ef7c2400eb538db169562c",
-      "<module>": "d11175ad67fbeed824ab86f0e7d8a6cfe4a6aa81840e960d8b90f8201cb5a5b5"
+      "<module>": "d11175ad67fbeed824ab86f0e7d8a6cfe4a6aa81840e960d8b90f8201cb5a5b5",
+      "_RecipeJobModel": "46e343b57b8aed8880679185d546cfaba7ac9e2fb374adb6eb824381d4582582",
+      "RecipeJobFile": "82942dcca4632c2bb1e03999cc3670ee76087f92f08de4b1b116e7bf9b1f59ea",
+      "RecipeJobInputFile": "e57728d48c267ed7143815da5d37bd9e88cba3851758461ac473c3a44af014d8",
+      "RecipeJobOutputLimits": "01b88997e81361637b8ad58573449da466ed9766c8b9c10e27cdc3af620652c6",
+      "RecipeJobOutputMapping": "14d110a02e5361a5ffbb22b7a695a22eac07b59e47852f6d1731b3520aa32973",
+      "RecipeJobOutputManifestContent": "641758aa375b38f3b5d37418d7b8946a2fca35c705649503854b4d67c799272f",
+      "RecipeJobOutputManifest": "fb073d2db6dda34f6b6688dfd62d4e116f9ae072adfed18a167cb4fc8de8d9ca",
+      "RecipeJobEvidence": "851076764f77404146c5434af77cbcd4e1f845eb5e1ac415de0c7d72e3cee27c",
+      "RecipeJobRunRequest": "c756be62e41d6eb9afad70914e70e2548c6dae6d50f7e64c177688adb810f89d",
+      "RecipeJobRunResult": "1c7f473386e52937c75c063b0333e86cfc575e6d1d450a20d3336241bbdb71b7"
     },
     "agent_protocol/src/vonk_agent_protocol/telemetry.py": {
       "_rfc3339_datetime": "d67352e15e823caa3c6012306b66001055898eb4f8af22d5b63a2f3030f2d95d",
@@ -1068,7 +1153,11 @@
       "TelemetryRequest.ordered_unique_samples": "b56fc9d4e934f85bc86c3a9dbe325a8f7eac45416a1e88f72352e1c0fb85767d",
       "TelemetryRequest.parse": "e7d3db43890d402b9dc05d0acde18644c278235875ff929992bfb259c028aa0b",
       "TelemetryRequest.document": "39daf08f0aa9692aba48564746bd838489ef9564c8b297e9cfe5f852097acff8",
-      "<module>": "4d384061a7235283ea7c27ca6db9b448d4445167fba3d76e893d02f1f8dbbcba"
+      "<module>": "bb11c01ea232664a466f3449d739b3c9efdafe8a55c5a639dc4227c9187f39b1",
+      "GpuUnavailableReason": "a36c32cbb37fa7363c3feeb0570eab9729a0e905cc331a247f24b58c526872b3",
+      "TelemetryWireModel": "4cbdb6882b0a95d1c0aca951ed9fcb7d453519bd28b075db30b4e55bc517a32e",
+      "TelemetrySample": "e616f579fab1d721fac66d42f31bbe31bbfc9a4e8be1150f4264591f39793833",
+      "TelemetryRequest": "d25aac6a54ecb4fd6a19da4600888a9128e734021dc449c6abfd4c8fc05c2210"
     },
     "agent_protocol/src/vonk_agent_protocol/wire_model.py": {
       "_check_literal_type": "85f7d21b62db1d02cd58302f19f3edea8d9e535f8f76060180d664f7c416e84a",
@@ -1086,7 +1175,13 @@
       "OperationProgress.timestamp_has_timezone": "e120cd9a793fe854a7814a644d583c5e722f878688a93fbba4fccec5c8d05f5b",
       "OperationProgress.totals_are_explicit_and_consistent": "986338053d5582202bd501a57a91d4bcb5bbba721b82c9c2c5e74bf3e84fe6f4",
       "normalize_operation_progress": "e779e0698a3e0672fd51f5b6a6b90ce79217402e40dc0b97101efdd66965cd40",
-      "<module>": "d3d24c6f136632d24db11b2d5c2f12171569c7d62f8b1be7f0f749748d51de35"
+      "<module>": "d3d24c6f136632d24db11b2d5c2f12171569c7d62f8b1be7f0f749748d51de35",
+      "WireEnum": "60e38caec115e0f17c207411f38ae29b0cbc69b548f9b87addcf8ce181340f2e",
+      "StrictJSONModel": "c5ec06bd8c3ab45fe56aa7b997b408f28bf3294cebd15010b4ee403f6478ec7f",
+      "WireModel": "a1c5414773c15d4b6bb1482510ef8a6ab654f294952cc7bab8148ee9e23ff305",
+      "OperationCheckpoint": "08ae8653958683c2a50564c0bf11259b99b67093c8160e0615b76471a73863ee",
+      "OperationMemberProgress": "7ceb7d90e6ba69fcef1089694504f7798b39e3e388826a1f0e9d1a4eb38d3255",
+      "OperationProgress": "93b949005e0da62e56283f07ea1b5102174efe595d9805c4eee76eda17c01f55"
     },
     "control/src/vonk_control/admission_locking.py": {
       "AdmissionLockBusy.__init__": "b7771832242970e9df3f7ade3c342f6e376a70922ed8c8c55e9f334206869697",
@@ -1111,80 +1206,17 @@
       "_activity": "8b9ffa3b9be6827b34652414674d76f035a5c51fc26d4284cbdf6e09a6b42bf8",
       "_raise_if_busy": "99c5ace66d5f6db8e9f60dfa7ef75cad974df382ea4e3cf1a56a820a4cf7415b",
       "report_admission_locks": "772ebe64d029b29cdfd0569a84d8818afaefba68c84aaafa39ad925e359adc0e",
-      "<module>": "fe410163b343e2652f7393f52080b63902f952b1b62ee497d7d343361eacaa74"
+      "<module>": "fe410163b343e2652f7393f52080b63902f952b1b62ee497d7d343361eacaa74",
+      "AdmissionLockBusy": "7dd908590f5a4cab78ad0dbac617334d875f536d907912c587560639cc61024a",
+      "AdmissionLockKey": "9af805e4cd9e4cce0cb9a8495d8e7f3a34b9e0cc906fcbbc78674cf184330f99",
+      "AdmissionRowLock": "1aa05c2cee78ed1f127754eaa7bff7318eb459e90b5fa1fa589f3b9653df37a9",
+      "AdmissionLockHolder": "bee293066824a9e24afaf30f63e850df82d8e637256d86a304facd5eb89e4c21",
+      "OpenTransaction": "622c069d41cb4c8826f11f7182d72803181f970b9cbd32b5be6f404989ec0b01",
+      "AdmissionLockReport": "05b2be705f73fd6a220923c6d503c14f5c5a7b8310b1f4e0a7e3d34e858eb78e"
     },
-    "control/src/vonk_control/agent_api.py": {
-      "_log_evidence_dropped": "f29e4b35acb7907008e3d75500e2925b3bcba6969844f9af88e7e7cc947ba946",
-      "_log_evidence_warnings": "5ab77d387e76027051e35147864a66a77c9e6682fc901c60119a0b859593acf3",
-      "_strict_json_datetime": "91dfcc0b4a1e1b780f2da6df279a9894ceed934033d33cfe6dbbdd4f685c54fd",
-      "AgentApiServices": "7a417335112ce0a28c70ac6a30fb34164d18113b003c7969a1f4daee9e46ba72",
-      "EnrollmentRateLimiter": "52fe9e7b68fbe4c14b26c4388281f673747c652aa9814532ffc55ed55082a833",
-      "EnrollmentRateLimiter.__init__": "b3d557791aa0a4bbbb659728b5a75151e21a82814537c8bdef08038f0e1fd692",
-      "EnrollmentRateLimiter.admit": "2780575ed32724da9a2b3331b9edd6ea9f122627515eadfe1a95c8b0213d5558",
-      "EnrollmentGrantResponse": "4dc439605eeef593d534904748385c0e7b18e6d4a20eeeeb7d2ac2d9c38b0bd8",
-      "AgentGrantRequest": "92a4dc3c187e150d0331460ac38de2ebd2e472fddc9a265dc2b57a79f3d971d5",
-      "HostRuntimeGrantRequest": "52a1d998844af929cf4911fd227af77778f264ce9912442c3bbc5f48d57060d8",
-      "HostRuntimeGrantRequest.runtime_binding": "35a6fd72a13a41042ef26f3d4c917f9ae098146ce3dac5f24ab54ba51d62b6c8",
-      "PackageActivationGrantRequest": "f63f4d5270f26315f196e3d7ac1cd88df86c9f7d021376dcc71ba6214d5910e3",
-      "AgentUpgradeGrantRequest": "23f94b338afcbad2342856715660a1ae11e828676afc5eefb0f325b31545bf8d",
-      "HostHelperGrantResponse": "658c0694532349bf49db03a43fcc760e2aa6ad0146803792a99fd52698d016b4",
-      "_host_grant_response": "9ca7d66b603ccbe7e136b6ff100af17edd135085fa543a03ff1517015c2c651f",
-      "_wire": "f0b0320dac12d86b105d006d714986df8881c8614ba403b9d6a5cb141ad6194f",
-      "_now": "67dc007c5635ac1e8ab9e24f33e72c196795a809ce55c7ed4c5a18cffafdf419",
-      "_issued_response": "08a31e51182ef955851a3074c6128673f955a08cc15674ba8af9c91af70a999b",
-      "_json_response": "092d7c5ee5ac57997818d6ddfcb2ebf739565ef137c252ed1a48795db7309045",
-      "_require_services": "6ebe2a76b34d095a911e5ca2242360d24487b9fea40bc74d72022abca3f1cb6e",
-      "_require_enrollment": "be833ffa26a020e9931969f9fb2ce24f7351235d664372ae24c26cdeebd6f99b",
-      "_scope_identity": "12cdb2b97797816259d9d8561e94e2102f4895b188374ed7de300e93a0fcd2b1",
-      "active_agent_identity": "a3c7238532a9a49744e31217f916070677a5a402a57c6204ad44d99ce8367267",
-      "activation_agent_identity": "1696aacbd6131a191f56d3b66c85a572c6ff2b055b49df37742d86ecdb7f963f",
-      "_agent_identity_state": "45fedb32f8530bb35a043c48a02e86eec14e6d8a28554f6e50415d1c68c76041",
-      "_authenticated_identity": "40f58f270c2556ad7f34f10ffd7330ce3448874dfffd1fd6ed40ade7bc1dda60",
-      "_authenticated_activation_identity": "39ea4e02c2b9d08fb7512b572430d1c11a958b9512eaa0a651b4353a38b7ac17",
-      "_body_node_matches": "bfff9a922bb34d304830508d65a80f52ee1cb9caf0bd0273f656bec236158469",
-      "_validated_authenticated_source": "b42a3dc79b906c0946622e3ef3705e0aa99dea3fedd3c25dfcae8dae9765a1b6",
-      "_EnrollmentGrantScan": "7f809ceaf10f98e98b33751f6953b10055c3b24468bf044e81140f74b12f9a7a",
-      "_references_digest": "87af9b7445ef99e481b57efa86b99ecd13bf17bd8d280873f2064cffa77983e0",
-      "_sha256_path": "b36317e29d9ba817218deeca021dee275d8ecc37ce346a56f673830c897f8f12",
-      "RecipeImageUploadHeaders": "5485541cc1db8022b5917f719be61f8fdfa63a8ec58f2a964909b4905a1df0e9",
-      "RecipeImageUploadStatus": "bce22f41685c415c8cc8b660640c94687adb7deffecf0bd175a92ab4016dca9f",
-      "RecipeImageUploadStatus.response": "2301e49885d0f5039c6ce1dd99ac1863522556e3d412c49c6e22c4885f554dba",
-      "_prepare_recipe_image_upload": "310e40241cc4396be9fd7dec9264fa9c85abcf65071d2a2b7a97f8c985d25b33",
-      "_flush_and_sync": "6bbc447a7685d1fcf85ed2653beb07cf2d5877997f2bc605999516525254243c",
-      "_commit_recipe_image_upload": "1a440b928ae5652174433b7fea14c06c110c183e6e2e6ee3d4ba26aa24864a42",
-      "_unlink_if_present": "2a7aab7a0fc6f3441f648bb060f8500e792c7c657e6952d2d3727296585a4a4f",
-      "_owned_artifact": "40500b94ec9f65e5ea34c113a8c3b62a210bbfba1b52b139e151c97680647550",
-      "_served_from_edge": "2848f994f4197d39ee27cf6793b79a0468109bbb53594380be19c118d77e8ae2",
-      "_range": "99fc96f6b1c58449414bb6c37b6af1d1763d1f5dd5a8feff697205d3bc3e6ce6",
-      "install_agent_routes": "abf0c76bfdb81bf06efd298443e07cc4e08e15465dee7f6d8a0db6d267456caf",
-      "install_agent_routes.enrollment_bootstrap": "d1a4262eace2147871483485806ce30c95b289dc80d573eeabcb889545fdaeb4",
-      "install_agent_routes.enroll": "598348c2444d96fa169570d5d443288adc8fe53f8f2f092b22e28cad926b3fe8",
-      "install_agent_routes.claim": "f7e1b263077dfdcef35cf1f7525a14a71eff2aed1e2cc0cc1925f96e1328c339",
-      "install_agent_routes.inventory": "7dbd080d897bb42f6df3fe66606dd85364645f7282f70fb87c5a74ddc986ec94",
-      "install_agent_routes.telemetry": "91dc9e3c27097d58261036c72f4d453bd518381b9c019e30d70189221dc157b6",
-      "install_agent_routes.recipe_run_observations": "091ca5e147ed3e8fdda4568090c7664b395b66ce55cf7ba7ebedcf0958e6712c",
-      "install_agent_routes.recipe_run_disposition": "34b97af81e53d328e2e8beff8515a0a56e9eb7cbf9f5d46c714a74f062bbb692",
-      "install_agent_routes.source_bundle": "af8d74262ec3f30f120fded9172a865fea750e54ae91678982128f5851148a2d",
-      "install_agent_routes.helper_identity": "5763db4d78e939fd006e410c7c7ed2290b7b69dc9e0fac9bcbecc221c8482bef",
-      "install_agent_routes.host_runtime_service": "4e11351a91114686019906242c62b7d40464524b66c38d0983cf5f9ee3640729",
-      "install_agent_routes.host_runtime_grant": "46ec7b67c363452afb886dd27823030e15cb7ed33fa44f98b12ebae5619439ac",
-      "install_agent_routes.package_activation_grant": "dfac82dd3041c48dd97f2f65d78fbf540ea1fdf1541d9241e36ca3fd31f7bcc4",
-      "install_agent_routes.agent_upgrade_grant": "25666eb0c9792e810ad7faab6022ed30e77a52da836b7446a2afc293c15f806f",
-      "install_agent_routes.heartbeat": "4ce49ab8ccdc9c06e9671519271cf74e2d7932e5422be1b6bc5fc86c5b503566",
-      "install_agent_routes.result": "66484ead06a92cd70a06516342f20f082070d80cedc55e1db1c54104ffc0c5ea",
-      "install_agent_routes.renew_expired": "33aacb2519cdf663b8d86ee05e2c9430b75334c090c11a4d3f3f9e140b5722e9",
-      "install_agent_routes.renew": "94ad1ae3686ad3dc95b5f48f964b291fa2f7c22e74ddc40c2698dd26856c03ce",
-      "install_agent_routes.recover_renewal": "2e5d48aad740b8ba56c8ab184a59268e655372b5a5da2d0b354468dee81b1731",
-      "install_agent_routes.activate": "0c18a9fdfc3668fe403837bd2663b9041c3154869758fe5c09aed3d488e14312",
-      "install_agent_routes.image_upload_context": "df5fae0b8a4a0201b99d302b8e4b07ed7664d25cb1bd4abc0f86f5608ac64bc9",
-      "install_agent_routes.recipe_image_upload_status": "9c7b2511de16c700db78b5b0d5800f8340596d1a04931c551bcff838990dd5a1",
-      "install_agent_routes.upload_recipe_image": "f1be4c3a139e8949bec05d7618c4b6dc82d6c9ba5450d2d35b341794ad30775f",
-      "install_agent_routes.artifact": "528c2fb723b873ec50cb9cdea5690071002aa9f10aa16bddbba4386506b2329f",
-      "install_agent_routes._distribution_error": "6371d07f2d94633382c90b588ed71ae7d2638f87a443b1e4ae1052d0c25192d8",
-      "install_agent_routes.distribution_manifest": "d7cf34744378783681abcdc3f348e0a4ce864bd281f361572908402c7d1fd594",
-      "install_agent_routes.distribution_object": "2a7ab684cf47750985f890f43b414adb35202d4511a0d1a09e4c3d92728d9f84",
-      "install_agent_routes.openapi_with_enrollment_contract": "7e5225da3574f9335b8f837170069f5a760467ee4029d4b519c93fbd4468d7bd",
-      "<module>": "43edd8533ec4469c03ff5693f81b299fb7bfb3843b708eb4cc2286bdc41d7688"
+    "control/src/vonk_control/agent_api/routes.py": {
+      "install_agent_routes": "62baed3c8a75eb9413693ae8716d484f783d682e692d12856e7f58b61e2b44e1",
+      "install_agent_routes.openapi_with_enrollment_contract": "7e5225da3574f9335b8f837170069f5a760467ee4029d4b519c93fbd4468d7bd"
     },
     "control/src/vonk_control/agent_upgrade_status.py": {
       "agent_upgrade_next_action": "fb2fb87fac983409e77cc74616359c8c375c6326be2feaf81069910d84fc6fe9",
@@ -1238,14 +1270,63 @@
       "AgentUpgradeService._permanent_ineligible_reason": "c52e770f24deed9ba793367ab51b876d8dbf316125f08aa530335b11396a61ca",
       "AgentUpgradeService._ineligible_reason": "801327c48c1057995a94f5960ebd3d6e797c84b014f8b85aa02189f92fc3619e",
       "AgentUpgradeService._at_target": "1b429c2886b44eaa85cbdd0cab653cbfb80806110c2f5ea42fbbeea36a6288e2",
-      "<module>": "915b41ef5795a7ad98d1efebdd0b2406f7be6cb5fa007082fe2010c4ba6d4aac"
+      "<module>": "915b41ef5795a7ad98d1efebdd0b2406f7be6cb5fa007082fe2010c4ba6d4aac",
+      "AgentUpgradeConflict": "2a1c516fa882e25aabc16ca74daa0a1b3c9a13792da5d8b5aea0e672043afd99",
+      "AgentUpgradeInvalid": "b1b60c0c1b4450a31ee05691ac374728ed8f4753eb7bb1dbcf19e008a6083284",
+      "AgentUpgradeUnavailable": "6069f99626d7cb975e110792e6fffd2659515b6aca1aa3bd972789ff11fca571",
+      "AgentUpgradeRefused": "6068d13c61f93b1a32e8e28cf2d277d2e320d1199b4c5cd46ea5f5a92adb83a1",
+      "AgentUpgradeRetryLater": "dd4cb3364ab5174a38b2796649c3ee1fb5e9c7edb96bd93f92f6ed804d5c971a",
+      "AgentUpgradePlan": "06044ff6fc69f391b1cf03dafb2ee929500255b1bdf300d0560071ae3a6f7551",
+      "AgentUpgradeService": "7529c5c14709da98a26dbe4f5b3e6e7ae19c7b591269ec0ca2d1576bc228a00f"
+    },
+    "control/src/vonk_control/api/common.py": {
+      "_bounded_error_content": "4bb61df06146f0779b858b89aebcb3aaf6d4547e12992d6fc7161a28906809ab",
+      "_validation_detail": "745c89073fa43458db5bf9de88fde563ccdbbde6fe18abb26ed6f1e8a55e5d5e",
+      "_invalid_login_content": "fe2dc273e96b6b6080c23115696339b1b15106742cf48b833c4d4e899cb7a80a",
+      "_catalog_error_content": "7833ae66c2cb5d810ec98b61c009ea7b9136c22f8a8d649b782ed7d9efe8829b",
+      "_http_error_code": "3e1c23db474d16ec90b102e5d9b21983a9ec0db913cc44bb9a4f34b58bcfe43b",
+      "_FleetEventStreamResponse": "e09a1df929386935495285db0399ca7731119598473ce7f8991ae09fc4cac8b0",
+      "_DuplicateJsonKey": "636c783c5194c52824877818a509d7face7c82ca93b68ff620c6fffb4e23cfab",
+      "_RequestBodyTooLarge": "dc28b0a6892765ca7d77016861aba525652ec5c17ee4b084a9b23217334c8d11",
+      "_reject_duplicate_json_keys": "6f6563c25431a91bdb677e1318a213cc4f8936047798f0c15ec45b9d3799c036",
+      "_log_request_failure": "4e9a346e7a02ddde1cfeebe7b7d336235915dbc56f2c13eae3830d542271536b",
+      "_log_agent_rejection": "7ff6ce91e309c27890282d3a4186f6534491c3051a0699ac5fab6fc9170120e9",
+      "_bounded_request_body": "860603ad736eee48342c74372a154dfc337e82b14c8e836ac77ad370a3c533ff",
+      "SpaFiles": "8a44f65e1425e596bf7f2cf6f1388177dd612d2860739f571745f117b46bab7d",
+      "SpaFiles.get_response": "f96c86bdd256f136cf53d1572cd381b264e8917093e61a234d60f27420af26a9",
+      "JobQueue": "5576b326ce671cca79ba8a53e84a41810a37a40b2bfdc8fa71c59a9478f9dffd",
+      "JobQueue.enqueue": "a8b7d79abe0dd38b8050c75dc3dae85939d51459d1c81990149c819c0514971c",
+      "JobQueue.get": "e3588c3634d46238df176afa6fabb6056122e2ed0383190c2cd08bcda706a4b4",
+      "refresh_fleet_metrics": "a07d3a2bed89706b23d6b048dda4db978c12c78b3f21b25b6bc63d2aa802ad6a",
+      "<module>": "dcc6f9e8fa43f7696286e0c42b8c98ed7dd62b66b8391985d95902f19802b386"
     },
     "control/src/vonk_control/artifact_job_evidence.py": {
       "ArtifactJobResultEvidence.scope_unproven": "229087ce95edc75bfd1f87891f3dd4b0a266ec841d1011db94de92c227e38c6c",
       "ArtifactJobResultEvidence.merged": "df1aec9edd33800a8a7414113093e075491a26700a78e6bdb4fd23a2b6bc5111",
       "read_result_evidence": "dd12ed33fe3b17a250722de3233f2aa295dd837915a6a7d41ae2766e7d2c7b9d",
       "dump_result_evidence": "d7df95c519759fc1c0c3a785c45519e8a694c97d1a08cd7d0c415cd56bd7a8e9",
-      "<module>": "c37bd4622e53fde91354b99d7fa00945ec8f840cacbb99a221ffd07009469289"
+      "<module>": "c37bd4622e53fde91354b99d7fa00945ec8f840cacbb99a221ffd07009469289",
+      "ArtifactJobResultEvidence": "48fdd01e4c2cc2497c8e8d5b3ad375db187f6770c882b7fbcc6d75bfef6181e7"
+    },
+    "control/src/vonk_control/artifact_reference_scan.py": {
+      "ArtifactReferenceFinding": "3d3ab3923bbdac7355634fc7d19dce62c539bb835954ad4e57de6b7f2c80a4ab",
+      "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
+      "_reason_projection": "e0a699c0788ea845ed78a90710c66e67389da9f008120a254923cdd4efbde9f6",
+      "require_model_sets_open": "7583efc05f8747752f4263fda58846c4a79262cf301f0b72d4f2aef3e00ee5f1",
+      "model_set_objects": "b3f846270636729ad6febbaed69899eb1b6eafd11e8e2f31b900e31083f384e6",
+      "model_set_reference_findings": "7c529d61d49520df58c92c92be6b886f7b345e43d0e1ad44af0a2047c72a4614",
+      "model_set_reference_findings.account": "c5de4b2edbb2889b7ba2165ab12edcc276514a31e898805b99a220ef665425e2",
+      "model_set_reference_reasons": "8873ed7b1fc4d46fc3d0e5cf89d05bcfe552753b64a3118776d35d1212fbfd09",
+      "runtime_image_reference_findings": "d5ea92af243d87c5f52b4be9f9b1448d7f92dbc70f9e909e0c08c486a590167a",
+      "runtime_image_reference_findings.account": "c5de4b2edbb2889b7ba2165ab12edcc276514a31e898805b99a220ef665425e2",
+      "runtime_image_reference_reasons": "d6257e372269c4a0b0d0f994dc63dab9dd19628c1d80f0f08c5cfc22fb660fa0",
+      "_profile_plan": "f53cfb9815a01ceed12fd48007b24ef041141bc9abf34322a6d8c25e80dc88ac",
+      "_run_switch_plan": "f47b603ad0780c160723e72250e87b3001baebb324b13dc9a6740ec074ff873c",
+      "_stated": "8940aad2e7963e3364e059cc7bd2f16977accb8175772896cd669201a59c02b2",
+      "_approved_images": "cc6fe9d4e74ac91302ee391791b76a1ca6928aafd9e451848fa15d4025417d51",
+      "_run_switch_runtime_image_intent": "a61f991d320dc9354b0b5ab2daa7891340c3cf2a4b46786e6f9369cb6b327d30",
+      "_run_switch_kinds": "b0d724aa893828e9c1fd3c716a56044fe570bd707fb6559663461170da1919d5",
+      "<module>": "7ed3a28a64581ec153a059fe5bbc0ba862461b9ea9afea6065be98d78a9beba0"
     },
     "control/src/vonk_control/auth.py": {
       "Actor.__post_init__": "7416b74945f566364083309de63c6e853137c60acdfe105780435507e7b7e60f",
@@ -1255,8 +1336,8 @@
       "AgentSource.__post_init__": "776bc4086e43ad96652c1d1bcdf9cb39f5a3360f302ed849e5b5a22df96b918f",
       "agent_identity_from_scope": "78010facd5d439233d998b24841b01b21e2cf900a1273b7502cf09e2c0ef7b8d",
       "agent_source_from_scope": "90a7e45e8961f3a47bb4e5ee588b0069c7d4b319ce471fcbafef4b298dc34d97",
-      "TrustedProxyAgentIdentityMiddleware.__init__": "7355bb71a85ebd7208c45a129dc90ef94b6834bc6529f59592aad2a42b320160",
-      "TrustedProxyAgentIdentityMiddleware.__call__": "ac933c17f00e7c4ddb73c4cd4efdc7eb3640c35b333e30765fd9b7edd0926aa2",
+      "TrustedProxyAgentIdentityMiddleware.__init__": "f0cad234dd945910f195ae277e5f9a897fc866d1e6e63eaa005d0c4aa2b3c051",
+      "TrustedProxyAgentIdentityMiddleware.__call__": "899d7fd4f373b8cf45edc2f00afcfce82c4396e5bce5579662dce97de45be345",
       "_encode": "f8b3c2e9a4c9bfe7e4ccb760596fe82dfc5f1eae1cca123cfc634ed8c8ffcb0d",
       "_decode": "d96d0442a20147b270102adc12e30a44c68d99f5eeca046f0c74192f40142900",
       "TokenCodec.__init__": "bad4cd3c9702e39c574c9a1d96ff7cef0d49b03d1fcbab98e0fe9d9c8412d9d3",
@@ -1266,7 +1347,15 @@
       "CursorCodec.__init__": "4a47315a075fc31f7aac8912fae2976953d8c4c84ff2fb87dea88d86dd932232",
       "CursorCodec.encode": "c75f74adab5296a1f54a4f0721194bf17ed0bdfcbb5938a2620eefc65a71a5fb",
       "CursorCodec.decode": "0eb16ecaf206499fa75ea5c33fc44069ebdb54c5498b8a847f769d4de879c29a",
-      "<module>": "7d005c56b19377b12621eec2d9bf1c6c9b5bfb36b576338484b207b5dd35acba"
+      "<module>": "4f7de472ebeb5bf9753fab23010490be015ededf631e4b1508b7889887a55b84",
+      "AuthError": "a98db1c1eacac25aa6c728dacf9b94ba57f01f768a3c31a6cbc54d2ba029fa74",
+      "Actor": "93893cffb816004de808e8d57a0b1c99edeedcf210733029cf3b56822f37b6c8",
+      "AgentIdentity": "ca12b9f40d98f61abd3f357a94f399aeb635bf6892114a20ca9e25ac72cea44f",
+      "AgentSource": "5110a80ee1501a5df7bf254ffef6783300858056c29db26b68e52a71bfc9a55a",
+      "TrustedProxyAgentIdentityMiddleware": "27003979081c38bec25e5469f761897ee24f3f376174e46194c7f94e6583feb4",
+      "TokenCodec": "9131aff773b01710f6b1724c6437a9c959c5ac13a436d367ca466c2005d22f63",
+      "CursorError": "ce260de3c6f36e7122604d636faf9387c6d6bd876349fda8ef779987c66604f1",
+      "CursorCodec": "007cfa4e3a1ea27441cba53aa947c364bc1e7ec1ba7383cc0bc3f7bda44e577b"
     },
     "control/src/vonk_control/availability_production.py": {
       "AvailabilityInvalid.__init__": "47b11910078c2cbf795f8ce9571fc9a7b9be7d90e2869994926cc2fabdfa9f94",
@@ -1279,10 +1368,10 @@
       "RecipeImageAvailabilityScheduler.memory_footprint": "ecea438fab3580ff8d8135c1507b530244b3e9da76ab308d128ab1ee0d24bbd1",
       "RecipeImageAvailabilityScheduler.close": "8cb2dd356f12f2d672315021d6f84f6a83da2ee6e7c6e0692faee6ae3ae180bd",
       "RecipeImageAvailabilityProduction.close": "152fd19dec9a507fa196c3ce7d4eb8e88dddd071dc49e1a1fab7c55703db924c",
-      "build_recipe_image_availability": "7e085c5357ffa1ffcfc129a0a7a03002c3edcafd1572bd803812bae666b8852d",
+      "build_recipe_image_availability": "ff0ba6b6961a57c06ca5e329054c3a679f10d414fc6efb26bfb837d74fc565a0",
       "build_recipe_image_availability.authority": "5452ae29a468da5cf16518b864ed57a83509ec7eb8b9cf7e14da767116787930",
       "build_recipe_image_availability.recover_build": "2b0483fe84c2bd14d8da2a77ec007832cca578ca9852088a933b7dda89a37809",
-      "build_recipe_image_availability.builder": "aa08c1bccec7d68b443bde088ce4930e33140944896e99662b0c96e5f1e4aca4",
+      "build_recipe_image_availability.builder": "337b31f8c70694ef600578966e62d0b7df9a8fe288a814833f4d681415259528",
       "build_recipe_image_availability.builder.admission_guard": "6fd40226769640f8d50311ce7e2bcd0fe2256f2e357bdff74433ec9c617e0351",
       "run_availability_scheduler": "35f5e4428408ccc49623139359ca0bf9783fc52afb729708e28047eea81e1ad8",
       "_build_dependency": "1c9d5a5e4ee1298e6f85f8c9a9f42cc0870cffdc956f4d763224c7707c17962d",
@@ -1290,14 +1379,18 @@
       "_dependency_unsettled": "8d43e6dc128eaa0af449ef472f4e08ed16eb6c65652c3c265a87b11f9b308b05",
       "_prebuilt_blocker": "b21cad1de95823890c35527dfeeeb386e4b3769630a94a095f0b83d2a8391f5f",
       "_capacity_wait": "9f5386fec7cc1d7418ede6571055513b0854c2e760e18ddef4f4bdac9ccb1bb4",
-      "_planning_failure": "fc2c6ff6ac2113e99cda877c0ef04a8a7897e84ff7fda61f7a7809f056293882",
+      "_planning_failure": "fe860c9588780d25919f6ea8603ad368ca65ea317fe0ddd2abbc589cf24026ea",
       "_recorded_decision": "368f5aba159d41e689f8ae8e292709af57fb616c94206cde245ba7cb42022414",
       "_prebuilt_choice": "59674c3a71a3dcd62dbe1c2b45871556056e67694f00a52fbb501b92ebdc91b6",
       "_observe_build": "5aafbbd3d5022f7eb18237c8066f83f8d462821ca84664e4212d2b42ee7b3dea",
-      "_cached_build_receipt": "251fd2074fb92fb2abf9d32ba37da55601612e8fdfb53684b31eea24695c1e01",
+      "_cached_build_receipt": "93492ce9c637de1ed9296449ad29311fdaa875a93f59927b7f41399756d77a16",
       "_compile_consistent_runtime": "dd7790420003fcb9fa7547fddd749c86a8ae252f360d21d2bad4dc73a241d3f2",
       "_build_progress": "b346eff906d55b5eef00614c5b104922a1fdd2b1ed51f666ade6c4aa907dd8dc",
-      "<module>": "348d8a1abc3223798a8dcaae5e97fc8450af4306463514e9256cca2e359771c8"
+      "<module>": "348d8a1abc3223798a8dcaae5e97fc8450af4306463514e9256cca2e359771c8",
+      "AvailabilityInvalid": "2f0e138ed94f6fec11b4090a99e4a0c2c5826fcc96fadd84552a40d1bf17c411",
+      "AvailabilityUnsettled": "2f6b0fce2b62a4ccb4912879bc9d46b86f326970c37054878aaffb606102bf1a",
+      "RecipeImageAvailabilityScheduler": "df3d0c2a76ed354f4fac048f5436e5115b01e9d0a58bd2d82845910759e29a23",
+      "RecipeImageAvailabilityProduction": "2085291b8e28edbcc4c73bc8738336c6faf9f34e4975921267888a0c5501caee"
     },
     "control/src/vonk_control/bounded_json.py": {
       "mapping": "99e02c69df6257d40a120212ae5fadf413ac4e681d4cbefb2c16140807f0cb91",
@@ -1307,7 +1400,8 @@
       "require_mapping": "468296870be048f820b3d14ca8f09c5be59598ecbff41311ebb63a90e90ae5e5",
       "require_sequence": "c489432e8597257f798d7da754e00cad92c771ff56272e8b57d89a3bc1b767c9",
       "require_integer": "5d4e27ce4020f4dc865b8e681774b55795f8b0972bdee9d21c437a4bfcc3a2ba",
-      "<module>": "e0788bfd7bb679c1c3cf26d2c1290180ccfa76bc396d96ce79d9c3df67b123b0"
+      "<module>": "e0788bfd7bb679c1c3cf26d2c1290180ccfa76bc396d96ce79d9c3df67b123b0",
+      "BoundedJSONError": "1933eb0c8820ab0bf84cac31630035908e78766586864979b6cb2a2719515d4a"
     },
     "control/src/vonk_control/cache_removal_review.py": {
       "CacheRemovalAsset.byte_observation_is_consistent": "0cccdb5446fb1a974fd5a982f99ffa1b69b82348afb80351af179d2b355bb1d7",
@@ -1321,7 +1415,13 @@
       "cache_removal_review_digest": "44da2e1fe32bb3605d1d02532930099302a68e3e9f6b78d2c1c2a6c09e2372cf",
       "seal_cache_removal_review": "36f195507b15fd2e3b04aa00078a23a7d283a9e39cc5a9ae1711a34d1e46c2f7",
       "refusing_removal_blockers": "0d9cf376fdc48664f1b56ce13c8c31e0555f9460d0ee555233bf9a551596eb92",
-      "<module>": "1a244c756213e9123ab41bdc1921e7d158c96edc99b0ad028ad173cd4d42ce81"
+      "<module>": "1a244c756213e9123ab41bdc1921e7d158c96edc99b0ad028ad173cd4d42ce81",
+      "_CacheRemovalModel": "283ee0d8a1517e3b99b4239ee94a7f4dea1bfa6467f1ef57eb340adcd033b124",
+      "CacheRemovalAsset": "33c0e472eeb804b996c32677abb6ab29dc1c3ab75f849cec88981f97cf48c264",
+      "CacheRemovalFinding": "490d6462848da4c8b40ac9a5d8e11bd1e5c844277c5d49b581e001f2693600db",
+      "CacheRemovalBlocker": "8dce46973425f3770b3fdf40372dd747c3395975e172d846f7c91f7273a9fb99",
+      "CacheRemovalReviewContent": "301afbffb3ff3651def245ff4c1967819fb8922f97ab25c90b1c64353944ac38",
+      "CacheRemovalReview": "46ae1021f00560d0a548d1d6a6de3f7ea37ee3682296a09d4716535de7c38d9f"
     },
     "control/src/vonk_control/catalog_entities.py": {
       "CatalogError.__init__": "6ae38d33a7e6bfab7a9590933c0876f7eb8d5eeb178b0776a6a2765b44a8123f",
@@ -1331,12 +1431,12 @@
       "CatalogEntityService.refresh_build_policy": "4e941c3492241c7453d28b456048b36ddddb294696d38d5075a35d15778d029a",
       "CatalogEntityService.record_prebuilt_images": "618616aa2133e81fa98f0038e87bdb21008f5cd494ebda97e981d24d18fd9a44",
       "CatalogEntityService.create_draft": "301181a595ad93b400074bce00eef59357c6bcd3b402a6bd0ba9d33be43d629a",
-      "CatalogEntityService.revise": "8b318b551ae7254fa81f0ad80aec67c6d7716f124575c099cd87960db581eafc",
-      "CatalogEntityService.resolve": "372d6aec5a0add4ae13ac298a1ff54910d0d253e6e5b58f1976b17e64d000305",
+      "CatalogEntityService.revise": "e9cb1a7468fd309041198ef1227b342cfa8fd51f090cb57ea32af4c794cb80fb",
+      "CatalogEntityService.resolve": "073fa47d20ebea90bcdedadf035939e0eb6dfcf6af2c9493001b56be56dd2b9b",
       "CatalogEntityService.fail_candidate": "cd208aeca96d3b7ecfb986567ff113f7f5f3789480b13daa1a5bc9a007050897",
       "CatalogEntityService.get_entity": "9e41eca083a43a9553a43b6ee5d8fa367aa6332fd0b4d7585923407536a173dc",
       "CatalogEntityService.resolve_reference": "e3e139fd62bd70056d99838358cfcde97d6592468e0ea23b7c666ba48517e6da",
-      "CatalogEntityService._bind_recipe_models": "e79427692213f943dd93d23e2495ddbdbf9acc423067d973711e0a27bb1bb3b5",
+      "CatalogEntityService._bind_recipe_models": "14deed108d0af088a2a9f9872a1eb7c10a788428781200c9cd05c09b79cdb5e6",
       "_parse": "d440a816ea340d99601b28461659a4c0dae482306d96d6f6a58663d040b319eb",
       "_revision": "a173d54acfc183e636ccb0370c2051b2e9b9c694bff085f0ddcb4f73f571d314",
       "recipe_document_projection": "5a1d3f05992dbe4238fb7093306b47be419ec4eed5fca0d8a7a29f6f3f924869",
@@ -1345,9 +1445,15 @@
       "_model_artifact_files": "5d4df84e2870f547d701c698605b0c1dc95ab65bd12530cdb1200c6b1f778e0a",
       "_execution_projection": "79bf92da12878bb502ecb097602b3ab5bd590feecc30a6cdb9e215d55daa282d",
       "_digest": "dddffa40b7cc9cb190de28a2fdf01e6f87ec33c2f7ace443aa7a1d2c5b317012",
-      "_head": "a015010a6ec31745641ca09f6a98dd423db56d188ec9e932b59eb1014082398a",
+      "_head": "47482658f86d80e28f9c46ac1e7a7dea4d53e3b585371ab0c21e008094d2137e",
       "_actor": "0cb1d3b23061e03f0495168e4c59c4143671a5872bbb0d22e885cb1cfc35ccf4",
-      "<module>": "bbf73923d32e19ae7c9ef04812e6a6fce6335d5393ba68189bdbe855f4297098"
+      "<module>": "f3b4df15d03fb9fe5862ca22e488a50380780a1710c45ca113eb4ef5e22706a4",
+      "CatalogError": "4e67c6b5db648ebb886a3adf745178f9e535d14d79e500138c524a1d7b524015",
+      "CatalogConflict": "b397f9e8a78d39f2b6622715287b1e68df0bed8984d87605a536094cb302ace8",
+      "CatalogValidationError": "76eb7fe645e39bdd167cca53c146e6ac3687588c9968bb182c410360461312e1",
+      "CatalogReferenceInvalid": "a77159b3f1905dfdbdcb32f6bc94f5f153bc843a14b526eefdd3250aa8510b7f",
+      "CatalogReferenceInvalid.__init__": "ef17687ad8c8c35e165e7bd82ec1d57d90048d9479320b92a40a0d24b16b952d",
+      "CatalogEntityService": "26bdd98468ea79c778e22da4bf3acf2270ca19a45c826e1ed1244224b047d741"
     },
     "control/src/vonk_control/catalog_revision_contract.py": {
       "PrebuiltImage.digest": "bc4931d391ab5c88659df7d7e4beb3696b53ca9e509895850a7dfa8dfd86691c",
@@ -1357,12 +1463,23 @@
       "write_catalog_projection": "a30ac42553d6c625d12735f39e04e65f87b097b8815e999a7d065b09966c5d2e",
       "read_catalog_document": "91f6623b49419902593a26cf390153ecd99873bb0999cb7f9192fc4e29ebfad2",
       "read_model_set": "be4d32395a4e5b505a3b3a6c24b707446a61ed368f1962114ef2f64a54226c1e",
-      "<module>": "0bb58bdf25f3c4c7bc653ca5c1c92ece24b2a693e7d70035b5e20198c2768d53"
+      "<module>": "0bb58bdf25f3c4c7bc653ca5c1c92ece24b2a693e7d70035b5e20198c2768d53",
+      "CatalogRevisionContractError": "e8aeeb6cfccd08a44f7fe8d988d2e31991b53eed571b22417b0d7d0a7d59f282",
+      "RecipePackageHandleProjection": "2daffd856c6f6f2e88fc74fcf56026321bc4f3d395224415b840ea4247a9edf5",
+      "_CatalogRevisionProjection": "c382044a313f6c0c545acac712063a3a6ca3ad3bb81e03f474aaff7de8131e4e",
+      "PrebuiltImage": "08ea5add19530927428569abaabaa5ed325ca9c293ab01f3a04a3f4fac029937",
+      "BuildResourcesProjection": "a67cf2a88cb42c0d4e7715a656144683a6f76396a49b49d90c33f4511ee9f178",
+      "BuildSecurityProjection": "08d26a8c0932d17f0c076f2645a5d753a3133dc319835d66398d72813fefbce1",
+      "BuildModelArtifactProjection": "7e8d50612d402d5bcdd25c14ce8fb188ecd7da47c5caed3b76630a985bf0994a",
+      "ArtifactInputProjection": "7c51fbc9cb3aa4e3daf2d300ba5d54e75fee804ab6813247c2a62a56bf4e4566",
+      "ModelRevisionProjection": "876c62bcefbe8246eb35f98d57f9f1fcd7a48465221b858e577404602b139051",
+      "RecipeRevisionProjection": "2a185c67e92a06b00a9ee1a9fdb1c743a3ca80d33ea707d5979affb5f823e0dc",
+      "UnprojectedRevision": "b25568daff0efdb50ee665520cdb7f90dd8a9e3611fa995ce27709dde923b73f"
     },
     "control/src/vonk_control/catalog_service.py": {
       "_capture_import_document": "d146da92b97cd114f41bb00c3eb0645af8203419551473a7d9c5a90e2a19a3c9",
       "CatalogService.__init__": "778e955cb50d683f69019d560ef38d127ad6d0674b0c7a1580519e6d87b52d77",
-      "CatalogService.store_source_bundle": "2fdbf41ba46a999899f5ba9bfb1a55fe8e4aec7fa2913471cfd0ac1ad14e155a",
+      "CatalogService.store_source_bundle": "31b2b81b0ee49f67817c82ca9a2ae52b02a1315ab7188a1161f797cca9c9bf2f",
       "CatalogService.get_recipe": "e2b12f54ea50c22d3ca837ca588a834780a3a04e4cc573d5402e504db2f29235",
       "CatalogService.recipe_catalog_local_revisions": "4ea275b58766d34073c3d748bfded58268d071d9c4c1dc0a46f63986a230cd5f",
       "CatalogService.retract_recipes_absent_from": "8e8c733675a94359685958eea332f61d6fde5aaa79370a02e97204658e988d83",
@@ -1370,7 +1487,7 @@
       "CatalogService.refresh_build_policy": "0b32285b305b9b892cf31628bdf25a3b603b192cde9d263ff661cfe3bd3448a9",
       "CatalogService.record_prebuilt_images": "d04ef21e53f42a2ae68125112fb16e7bb77d8b7ae430e07616c2956ef3640b45",
       "CatalogService.import_recipe_library": "5d7bc15b4c934022f2aa49aae9398d9a81aa211f257d74a0ad6f0d121ca42220",
-      "CatalogService._select_imported_recipe_head": "9851878ebd8517fc9f62cef6dd5f11bcee3ae66137eed304fa6f27dc6ef18dc7",
+      "CatalogService._select_imported_recipe_head": "6eee0c77fb655e3f3bd28f3d615271ccd277f4fd77a186283419ad1e2a58091c",
       "CatalogService._upsert_canonical_document": "d8ef30c34c2ba053c795758596b007462fbbf376f8e69ed6a6510484378cdfbc",
       "CatalogService.resolve_recipe_revision": "f79135c82694f4fe31cf284a80f3bcc63a5cb0933fdf2fd395351cb5ba34e9a3",
       "_get_active_recipe": "6592e19aef43dfdac0f032f6a1df1d5a561fc3667a4c3ddd294bd7a1e83d45e9",
@@ -1381,14 +1498,20 @@
       "_release_version": "25fae76e14508224df8918aac0093b8ddfa7bafdd260d918e5ffea54818b06d8",
       "_package_handle_metadata": "a3b83fea8b2a2aacd4cccd4cfebd3724be75371b413fe8c6a42c8f8b3163a023",
       "_actor": "4cd7a803231c3ba9ae9aecc2672ff2961362f434839937c847dfc0fb3db9e990",
-      "<module>": "44814e72ceca0713cc1723b9486a08d6048f1a1ff579d6b0763d2cb7128f1a4b"
+      "<module>": "c45751d48ec3bb5cf0ebd3493a36373532fdc1fbf0622710a3f5d6c9d17ef577",
+      "_CatalogImportDocument": "2363976f91f5fdf06298b9d9a3ca9c46f2936f966d418dd2f5939bd29de22812",
+      "RecipeRevisionView": "7ba5f33be873c1621924c52b1b59e873b3a5c32f75066364e35a792cade970c7",
+      "RecipeCatalogLocalRevision": "ae49cbd59e6076b17a592ec02b5e065f68cc3bf225895e6991e9bc0c15bc1b32",
+      "SourceBundleView": "0f651524cf61fa356e9fe6f9531c138e0d08d5c6c5488bd7bf17060bdfa9e933",
+      "CatalogService": "c8a7960505b5daf9e8575cb8f1223fb5e386b6d21893b495146ce97c8fe02d18"
     },
     "control/src/vonk_control/cli_update_contract.py": {
       "cli_update_contract_schema": "3c9309daac408b81ae806e454de327427a12995bbf01edb968e9894b8801ed03",
       "summarize_cli_update_contract": "32d0e2be5363d210529ec4a3937b551b9ec64ffb2bc0f5c9c79c2c430ff174ce",
       "install_cli_update_contract_routes": "ece30da83f821682be0ed0ad32469b460231e9c494547a321a4fe50555203965",
       "install_cli_update_contract_routes.cli_update_contract": "85244be9a22e087626672496e4c9e4ac052dc7eb31866f6345ca3475742e9cf6",
-      "<module>": "7424267c832515dd7344ef575649e46774be04e38a4331a912e9fbf3d236d64f"
+      "<module>": "7424267c832515dd7344ef575649e46774be04e38a4331a912e9fbf3d236d64f",
+      "CliUpdateContract": "7424267c832515dd7344ef575649e46774be04e38a4331a912e9fbf3d236d64f"
     },
     "control/src/vonk_control/cluster_mappings.py": {
       "ClusterMappingError.__init__": "c71e9b0000c0921c1f9159940785706090523d4fbd82289a7899ccb6ea9dbc26",
@@ -1408,7 +1531,13 @@
       "_effective_parameters": "b76db5a27c8f391bb54ecb3852036a2367a260532f81e4f552e46e6d94df3056",
       "_effective_settings": "2be5520a0f13ad1af0bf277cf584bb865bf20dab864e24aa4b0bab9d98f8ea70",
       "_digest": "42923516d63fd6e8e3bb0884cc3d78a34e615dc9d407af10c3de2f727a94aecb",
-      "<module>": "c85bbedfbe6877de5661431b19f0032a6dc0c84b3800c35eab14ee2895f1a1a8"
+      "<module>": "c85bbedfbe6877de5661431b19f0032a6dc0c84b3800c35eab14ee2895f1a1a8",
+      "ClusterMappingError": "08062d0020e81af2a02dbbbafa5747bf48611d3b1a816ac84206f299d473b0f4",
+      "ClusterMappingPlacement": "2a9114d0a3c0521c5d6bd8a4f5a07fd7dbd621703d5938f710fb47772602c2af",
+      "ClusterMappingPlan": "7861a28bfdd5ad1e083eb36be16850a3cf37e16b5dfde81d006e6f0d47b7c721",
+      "ClusterMappingService": "0a19aecaf6e6828b68f0faa3181ac74f0a89592686614e97f6500834d4c832ab",
+      "MappingPlacementIdentity": "ffb7b3b4f35f87b7bb80e1c82c8dd8d0d469d643c6b2eda7c1aebefd34487b50",
+      "MappingPlanIdentity": "780586d168ca484daaf142a2651454761dcd37cf5c9c1a9938b42fdfd972fce6"
     },
     "control/src/vonk_control/compiled_artifact_contract.py": {
       "_tuple": "a1ea13f8eea69101c9581406d7e29003f87fd6be1df886ff7125bea1e0afd52c",
@@ -1440,7 +1569,19 @@
       "_input_contract": "5cc7bc7d1b86c901d95d3e64de4a6f03511ce2f4c43704c3107e69d9eb49362a",
       "_parameter": "f082033fe094a74087e466a9eb067db1c5801a464344ac5eaaab2e10e0cd2cfb",
       "compile_artifact_contract": "8c1a6a6f06e3773e745ec0803c9411c13b357edb319f8a9b888d594b7ffdb449",
-      "<module>": "718696aa84180e38ea564e98d94b9173dc3fe57b9e699835ae4a6e7200a6b260"
+      "<module>": "718696aa84180e38ea564e98d94b9173dc3fe57b9e699835ae4a6e7200a6b260",
+      "ArtifactContractModel": "907d69541a44d76423bce2e77633a5139d6d13d916ef351897a532b193a5c641",
+      "ArtifactSlotContract": "b82b7f73043445aec96e1f377d1aa261f0fa718d5ea0acd3b0950fac6f0526fd",
+      "ArtifactInputContract": "5caaf2ca13b88b16740af05ed872ab2cdf71e4059ddf9e1c3b090df59625fc14",
+      "ArtifactOutputContract": "0047e12f825f08af40b737556759c7e08424d9babaaec48f369e7c39dc724aa9",
+      "ArtifactOutputLimits": "9d985923ade9f7f350f60c314c2675ccf6069ed3690d927c7bc366bc60f2fd4f",
+      "_ArtifactParameterBase": "be2f033b8a60356e635d3296ab3b0a73f35eef8e4962f5c3681fcac07cfe82cb",
+      "StringParameter": "06e79674c70428f8ea7f393ce6079a260752791e0215102cc90b1aab2b094d00",
+      "IntegerParameter": "3b5857cf1435e083925ae26b3146456d55b85d5eefeb827ec6dab8ff7280bf78",
+      "FloatParameter": "08eee45b774a46a53b4cf7ed88f2c098bf5a231a81adcb568980219ecbc3584a",
+      "BooleanParameter": "95ae3bbbd9bf5f11954a800659dda2f0141d44b59e4a1ef83a2f9a473f2d6a04",
+      "EnumParameter": "d639aaaf1d52d229713284beb31c5f31e38f8885ac1de372a814734851fb34da",
+      "CompiledArtifactContract": "d006e4554100cdaecc1627968a6d7883dd250b33df0e862212f685feaf861d34"
     },
     "control/src/vonk_control/contract_graph.py": {
       "_declared_parameters": "8578507c7e3ff70db7df490750b0bcedae9267c9c603e868750c9df72cecbaa7",
@@ -1453,28 +1594,32 @@
       "_structure": "e36b99ad8ed3faaa41d3043e3544f950361485f29cfae5b2b20bd1f3af863893",
       "discover_contracts": "a26c96922ea445169dc4234ea34817d110ce365ad176e548305bc788a06d588e",
       "require_wire_exports": "3a9833301afdc56bfa5079ad17e3a1675beb74f673e2a0387f2580a2aaccea7d",
-      "<module>": "3237623b1400c3aff032541d10baa648053cae177658f0d2930f40446e9923d9"
+      "<module>": "3237623b1400c3aff032541d10baa648053cae177658f0d2930f40446e9923d9",
+      "ContractGraphError": "3237623b1400c3aff032541d10baa648053cae177658f0d2930f40446e9923d9"
     },
     "control/src/vonk_control/distributed_lifecycle.py": {
       "canonical_distributed_readiness": "8522400d33b61cc4e921a460ad8c34ea60c9f73f1c320078ce77ab3cafe4f1ee",
-      "<module>": "720050612891741c7c1df424686705eda45eb1b474ded4e54ed228c098341993"
+      "<module>": "720050612891741c7c1df424686705eda45eb1b474ded4e54ed228c098341993",
+      "DistributedLifecycleError": "d56f4bb27e7ac9e1594b7e2298d55ed4c272917df255e3cf7701fee2eea20fe5",
+      "DistributedRecoveryInvalid": "0c54a9ff622885c2bd145ce94d16b31fabd564e6b1e3566d66ff9ab9dedef37e",
+      "DistributedRecoveryUnsettled": "7fce375bdb30fba1ddf1e20767fe19a121301d103bc47dc0d50e3f4963ee88a0"
     },
-    "control/src/vonk_control/distributed_recovery.py": {
+    "control/src/vonk_control/distributed_recovery/common.py": {
       "_unproven": "2aed4ead507cf6c0307e3f6ae475cda8784ac63988db2e0e8b34c44a8c097593",
       "_parent": "987a4e5e850e73a13c97298aa68b432553254b51579cb8d1c5e21bfe9f32f949",
+      "_RecoveryAuthority": "4e819161aef1d8e39414cfe34f34dcf05f0fc0607d2ce871a88254d8937f1e0a",
       "_cancelled": "28afc64fd56f27125100b696a18e1eb6507d6d4d55bd92d664a6026e011dafdd",
       "_active_recipe_revision": "402d780f772421fb1c2100daa507613f18a911652f7088ca809b1c9efaebea40",
+      "_RecoveryJobQueue": "3a4a4a6475a78b69adbc64966e1dad3ef3f2ccb034fc83d5f3de1f39523f57a4",
       "_RecoveryJobQueue.enqueue_in_session": "f598b46531e57e6a96bea18696a74e0c7baf87e3bdc7b3d092f5bc8557899311",
       "_RecoveryJobQueue.notify_available": "cd9ff09c539b579bf45a04971aaf38ad7f19b267e2305547648b1f23d7b9829a",
+      "_RecoveryRoutes": "29f4b448fe143edf458bc00f1126ca463475be84d6f16c3b117029cc40c4d855",
       "_RecoveryRoutes.publication_transaction": "f740716c3a4ac88a18eef505f4cf42ecee2f0924646ab7a453afc8a67fc65e29",
       "_RecoveryRoutes.withdraw_runs": "6a1d738384884be08aa1b011393d097a30d2bebec16491003e74782a1afd9cd6",
       "_RecoveryRoutes.withdrawal_complete_in_session": "8f416cb96dfab0e7421f79975599d3f0be19c29f83742a492e2a99c079fe9106",
+      "_RecoveryRunStops": "35aba19709fb024805faeb7278942bfba2594d01a8a6c58ada255b0d0d1b26fe",
       "_RecoveryRunStops.queue_recovery_stop_in_session": "e839fbf6e01d6f1006429bbfd49a805a2ccfc779066e9792e3ab87890247347e",
-      "DistributedRecoveryCoordinator.__init__": "06ad8d0a4e3e35a7bb72794f6ed5b2c49a9e7007e9e2bd02750c46a0240a5676",
-      "DistributedRecoveryCoordinator.tick": "27be13d2a0a7847405bbb9be1c038ed7e3dd66f66a9b93c06572d16de48a733f",
-      "DistributedRecoveryCoordinator._withdraw_routes": "961714332f6331f725f691236cbb5d79ee9ee2f3aebcce321c433059fc0290ee",
-      "DistributedRecoveryCoordinator._settle_unreadable_runs": "2f24e042f772707840c3af94d2984ba71bec9d2fa3af558258fad13733e27316",
-      "DistributedRecoveryCoordinator._active_recovery": "7c20072930824c148572087df4eb89e8fd60545c26e373fc21ed210545003496",
+      "_RecoveryDependencyPending": "a4ea0e3a4d508644ca3f68f516715b30f6065f4707d9dc02775a058b2458e66a",
       "_unreadable_run_ids": "4051040dd211303fd1e92655bda31ca2b34eba98b462a0806cabe112309aa0d5",
       "_recovery_marker": "8bf002a04258456e280d3c92f25aa2f5bbcfbae41beb3b6fd081cb948c7913a1",
       "recovery_start_plan": "4bb6c7662de9582473491e7c1077f404c9f6168c0ac28b61c54c3645923fa5fc",
@@ -1488,21 +1633,10 @@
       "settle_absent_run_in_session": "7de1d42144f32564eadf86e2a4f1246af56c978df760695a9456faa3c127a5e5",
       "_advance_recovery_check": "b9bbf2c5a7ea44d2ac8a2ec39a36dd3d172d757dce7a5f00ae02cec3519cc1bf",
       "_schedule_recovery_wait": "1fbb4e9c5537085de89309415eda6e10efa36994ed4d0ac6d09727b44624fa8a",
-      "_singleton_recovery_authority": "7f33e0ccf09cec69c302f3002bf2370ee73dd5b6558be62eecbf604a1b002efc",
-      "_accepted_start_authority": "293df1fed38db5027ebce111f129739e98e49b93dccf6c1b2865d1a92b6d9147",
-      "_launch_generation": "d4e0fe33d6ff8b33daf0d8420ac2f3712bcd01b4497b24ec5f339ee9ac96c488",
-      "_validate_singleton_recovery_start_origin": "fdb7af12f2cb3e5c112af86c08ab6f6e09e92478088648204c0f1a862ea732a4",
-      "_start_binds_current_run_plan": "5d6508cf71bab753e02a27a619f402c83d86d1fb398329bfd241a1704ad69e23",
-      "_project_start_phases": "6aba82169d2a4dd13e5bcd6f06da9f3c6c900455b00d6b04d2e9f8dc3d944d45",
-      "_accepted_start_authority_payload": "c39ec056b72116e45716561ac5de39cc935462e1c680440367c631e1ab4ed02f",
-      "_accepted_start_child": "9b849eeca86d948635e52077b7bee34ab36ffe9c107037033d53feb3c1567404",
-      "_recovery_authority": "026df91f0e14cca3ee442ce3b60e092e4a99449c64339a68c5d94851583a545a",
-      "_enqueue_recovery_stop": "03b514fbcfcfbf0388a1f802019d26bf4fbea8c6c9d004fc28bd779ba66440a5",
-      "_original_start_authority": "f2eaaad5ae67019a721c804bbbef7a83f5b4a301bb55295f5d41fc4470e34959",
       "_encode_phases": "470938c54efa46f72ca99d0499cb9404994efe894546de343be2be505da6ab57",
       "_decode_phases": "3bedacc8490633f435912b3d43757949b26d83d9aff81dd6223d9b793cc51841",
       "_aware": "1877666505e1deb8c90e258421147c6548cffc9637d3dcc6172c19297f1a064f",
-      "<module>": "bb3eba1350b4c1fd90d0fe314ba93ceaf32e65a948b9948395cd76d7cb9f6bf4"
+      "<module>": "61f01894b3c702ad81f066d46335e463db87f86709a9bbb3df1c0be71558751e"
     },
     "control/src/vonk_control/distribution.py": {
       "DistributionError.__init__": "c58da4fea52607536a83acc163cbfbf81e53311ca94511e38a3290a53170791b",
@@ -1523,7 +1657,7 @@
       "ModelCacheObjectSource.open_object": "0ff87d9e6d4c77b2dc3477bce5950d54ed26c588d2cabfc6b90a08dfef1fa11e",
       "ModelCacheObjectSource.verify_runtime_image": "660757c621d6f51a2b5703fd7e95582284ac556fddcadc8b9c5ab96aca8383fe",
       "ModelCacheObjectSource.from_service": "31d55ae58c88cc6957e991b4f92c9c5ac133ad686af7045c2d64e58b6659f193",
-      "ModelCacheObjectSource._from_cache_service": "d5839f5ac978449696d90379cfb5372ae7303ebb398bc664894bc84b45beaf1e",
+      "ModelCacheObjectSource._from_cache_service": "4408efd48d335dbc349ede84ade8e4114073a271173177f5250287bec8e2c960",
       "ModelCacheObjectSource._load_manifest": "74d1af8db119dff90ee503cff98ad1659841fb60d21c0b769c59328b26dea3ee",
       "ModelCacheObjectSource._describe": "7368aeced6ba6e22ee53c959542386c7364273febcf68dc4b11f084a9480660c",
       "ModelCacheObjectSource._open_cache_object": "533c0016a85c925570021d70f7253de3ffc2c89e400b8d4f005db23136dbb8c0",
@@ -1558,7 +1692,18 @@
       "record_distributed_runtime_image": "cd13be509addbbc48fb3a6ae09f0b2681f1e8ef318ae344818ed037d1f443552",
       "build_distribution_service": "90d71fa5561622844c14f716149298ade8a3dd91eb26ce66e64ddd667684da07",
       "build_distribution_service_from_components": "cfe34867778564e9f3aa745892abd7d0cadd3713b5474b0a6617d4d6e4e5f5f7",
-      "<module>": "f80dec55b8720341d2dca75d108a9b5e80a8b6e920dc1df8934545880f0011c8"
+      "<module>": "000809e28efdc4aaab780e37d97dabfb26d9bf3569b1e2bbc2d734ac2b7b6cf1",
+      "DistributionError": "75ad18fa0293f0e4930136d8ca0273e4ca5236718f40198bbd310240c33e44f5",
+      "DistributionRefused": "3ac07d2926458ec3486e62d6bbb201fe043b8af34dc254aa36446984ed0722da",
+      "OpenedObject": "af9dbef797dbe82694ff5e721ed74ad16f4f56f2a84f4192bc0b06cd39c5ed55",
+      "ObjectSource": "2f828a7c42e8fd04e86c76fd2fb0d58d25e552f78adef7d578f4a633d72525b6",
+      "FilesystemObjectSource": "6fb779a73ba020e6733612c2dd969b8bd4d45dd355bb1d6d1a97f4cbe019a4a5",
+      "RecipeBuildObjectSource": "60ee5da1ba10c434cbd5df2d5ca414ddcf9a467acb83514036ea3a41a451317d",
+      "ModelCacheObjectSource": "acc9a85a59a3c270bcf3050adef0f7ba4992a8ff0544b57071dd52fd15894045",
+      "CompositeObjectSource": "ce50b3736e7b8aa15731518b8099b42b4fdf8048dbc3bfcb1fb5c10aada2194d",
+      "MemoryObjectSource": "ff961d7a98a857604f6be879821e9a1e1b1b8af1c90848b5838037b9400e0238",
+      "ObjectLocation": "4857e40534b2193b80fd09a5272094fbe502bf750653b2772c687e60e6606cf3",
+      "DistributionService": "a94dda76a6bc9e942247428837ae6ca46702735c098fe05740d6cd3e5f92c69f"
     },
     "control/src/vonk_control/distribution_executor.py": {
       "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
@@ -1595,7 +1740,11 @@
       "CompositeDistributionPhaseExecutor.get": "3925260150357e56c329665f7c3f87b73f48abafee316602ef5c7fb7dc5d8735",
       "CompositeDistributionPhaseExecutor._cache_state": "67285a481816574b36d780a9f44023c2ac18d9a350abb0b8ffadf8f9c98b5087",
       "CompositeDistributionPhaseExecutor._cache_result": "ddcdf2d1318a6d0e245b8f7533388a7848c2e71103af773022de376cf6d00f86",
-      "<module>": "e47108b63ec263ee2c85f3d612ed57e171d836d211d057723b7b10e529025c01"
+      "<module>": "e47108b63ec263ee2c85f3d612ed57e171d836d211d057723b7b10e529025c01",
+      "RuntimeImagePull": "ba1d5118e46bc69b4ca1e665c0c450ddf3247fdcb93a7a384635dc3bd6acc03e",
+      "_ChildView": "3705c4a008199c1d1af9844eaa7055a6cc8d1e53a39fac1f64c8d08146b67636",
+      "DurableDistributionPhaseExecutor": "8f71e61039626265304b0ca762c44451398852337a43705c04a19af458c19cef",
+      "CompositeDistributionPhaseExecutor": "00ca973c3c598a7bc67bec8df73843cd17fdb9fd5ab8ed5accd2a96dc2d907df"
     },
     "control/src/vonk_control/download_contract.py": {
       "download_responses": "1b0e1404d9ccc8cf106673074487e1b95595a6bd02128775472e73eb9d46679a",
@@ -1610,6 +1759,27 @@
       "_validate_actor": "193783e2f7958b6cbedf7fdd0fc51f4e29f4d6796f58701a1f1e12cb4a2c088e",
       "_utc": "06ddff70eb005275e44e16d52f909c679334193a17061a327a6959752e4293e8",
       "_stored_utc": "122222353094a447206fa308e8ab72dba1ed06aaa7be7e4b0deef4063fd7f72f"
+    },
+    "control/src/vonk_control/execution_plan_service.py": {
+      "compile_job_invocation": "76fda2df0e54b8c323b506e90605eb7a3477bc21137acb547180aedd4e012a24",
+      "ExecutionPlanCompilationError": "d65d7dfa62e66c0255e4321fb0ffaf7a89ed0ca6cb73f25ac8387e4a45eb0bc1",
+      "ExecutionPlanCompilationError.__init__": "06de9d125a54edc920d774cafde20df6b67d13ccf283783fde9bbb8c5f5a0c66",
+      "ExecutionPlanReceiptRefused": "a70ec6fdadfde8c0354f9ad1ba7f59824fb6d0daacc889e0fbfa0bac14301178",
+      "ExecutionPlanReceiptRefused.__init__": "00517a618d8b6327c860ffee66a8f19a65566b9d5086a0d3879b2a6d157acc94",
+      "ExecutionPlanEvidenceUnknown": "09425bcd6c9041ad9df62d2d28994ec02848d3383a6eb574d1a02a7fe6357b8d",
+      "ExecutionPlanEvidenceUnknown.__init__": "a6433f0ffdbaf267488b744934f81827b9ffc770ce5e0f5fb896430fd9085cca",
+      "ControllerExecutionPlanService": "21c91191f57f3f872b8306ee00145d6397441fdae8691e89432e812aa513e96c",
+      "ControllerExecutionPlanService.__init__": "5e573c9b09ab4b22ab7abf439c2bde9336602e2d6a71dc3939e6797998873e5f",
+      "ControllerExecutionPlanService.compile_installation": "679bd3bb10c43147f2623260269319b48e83c4d7eae0f45c4de9d0764817164a",
+      "ControllerExecutionPlanService._runtime_image": "c78d684bf34f62aeeb7e2f38033589181878b25026780994a3e4b265b1e72ac8",
+      "_runtime_image_receipt": "4c810c33f9d37e7fa4f061f4ba998dd938bed0c952dd3e5f1b0bedcb400d8d0a",
+      "_build_package": "dd5d3ea0ecb4320b88da6f1a78ce9023cc9c90eb8dd39d8fbc104c1319984f79",
+      "_image_digest": "ba7b17d355421bf5ab0cec0ba6d421404e67a38910f810da8d2702a71bdeccf7",
+      "_world_size": "5582448abe2d214f28bd8ffeded8ea9671f1150b951f583b63a22477517dae61",
+      "_PlacementTarget": "fc14f411a039c764fcae563c8d158fd7954052545d9984d53689309c6ffcdc45",
+      "_placement": "a4a8e8e255108cf25d8f0b6992ff917de706b9441ce59a03835781997f9a42a0",
+      "_bind_runtime_artifacts": "04c066288f5687c804ce309075f7c36a2edbc8d35023b138d5d42ca96204f76a",
+      "<module>": "a1a4be0a2024f64644c7716a113d511bc7c90bc949eda09fc471e05af9e85ffa"
     },
     "control/src/vonk_control/harnesses/canonical.py": {
       "_canonical_json": "146175eb2460e313b8b706ce4b207dff60b4a140ef02b8ed2bee694d79a37ae5",
@@ -1643,7 +1813,10 @@
       "HostRuntimeAuthorityService.issue_agent_upgrade_grant": "895daa59e90d82300446abafc8e0c5d00514a65bb1f960f4254ab721115c6486",
       "HostRuntimeAuthorityService.issue_package_activation_grant": "698e4c3994a2cd14948ddb40bf011b603aa3dcd48a8186b5fea0484baaf319b9",
       "HostRuntimeAuthorityService._check_attempt": "2d197ddc02e6c433367f63be3af1027ea80c57003478a9c7042358801243eb9f",
-      "<module>": "f82c515f5eae4a0e32c41b283bdc5cbc754d6c3acc37233addbf0f8bed47d9a4"
+      "<module>": "f82c515f5eae4a0e32c41b283bdc5cbc754d6c3acc37233addbf0f8bed47d9a4",
+      "HostHelperAuthorityError": "6d022d682602d48a09bcec1714b113e397d5865007ba46146e75b6607ccfd5d6",
+      "HostHelperGrantIssuer": "2c94dcdc9860333ed5115f574fd2d0de7d5448ccd3ca2adcf46124d8ec3fe901",
+      "HostRuntimeAuthorityService": "cb3033b96b3c43006c399ba129b604bc30ed9ecb9cb920fb987d17b57583e330"
     },
     "control/src/vonk_control/install_admission.py": {
       "InstallPlan.compiled_plan_by_node": "68c2399f46ace96781cb36d85c8db601361c444f1f4bec72141ad862ed284ae0",
@@ -1667,7 +1840,17 @@
       "_installation_plan_digest": "70be22ea00516eb02fe99d3e22ef078630df97bc106b757a510f7803da88f82c",
       "installation_plan_digest_from_stored_document": "85304e801df8c139ba8f9a981e17743eec3b9af07d8a3ccacc7c4f970fd95696",
       "_is_nonnegative_json_int": "98fcbed4f05b088026e6dd95bcad63b6a95774939422d7e87bd413121edcdefa",
-      "<module>": "bb5db55f5aaae93fb77fce7eb6bd714212fc74ccbc170b5bb7311fcae371749e"
+      "<module>": "bb5db55f5aaae93fb77fce7eb6bd714212fc74ccbc170b5bb7311fcae371749e",
+      "AdmissionReason": "abf72dda3e71b85394b25fe8526ff075504a30034b7c25d3e058785355daa67a",
+      "InstallNodePlan": "ecdd55a050ffa5ac4463dc15db648bbccf23f8638f7abb74e7175f92e4a4d514",
+      "InstallPlan": "6f5d64b41059adbd8463a9824fc4f460a6342d88af39f6bea93448bf8777742a",
+      "InstallPlanConflict": "95b3200667fe45ee68dd299bde43c400f2cfa285751fc99a1c8c691395a70bb3",
+      "InstallPlanStale": "e7a52fba67ac17d7ec2738c5e77766bb8c9426d5f3b5fe9d01834f33bb322c7d",
+      "InstallEvidenceChanged": "294d264d1ca527e0983a1b2c3a5233fecaa36a45ec8bade8086cd9ba86900e9c",
+      "StoredInstallIdentityDamaged": "f61a17516caeea96070838810ff99935d2939a6e2895fbfcaf56c36934c8c20a",
+      "InstallAdmissionBusy": "068b29bc80505a80985c504b2b18ab47ea808b8a4e88480276197d0f6a900c1d",
+      "InstallPreflightExpired": "eaca9e5d5c859cf308d5205ddb718c451fcda9a3b4686c8babe9809346840bf7",
+      "InstallAdmissionService": "a1b4f47a6d22fa1d0628501d2366b0ba31ad43950f33e7ab706d824b505db588"
     },
     "control/src/vonk_control/jobs.py": {
       "_aware": "e3f863dd032191f03c6bc6cdd1d84a10cbae0188f0a6e678b74883dc6aedeaa0",
@@ -1686,13 +1869,28 @@
       "JobService._finish": "90d40a3cfdd6ccb4ebd7c42dada95792a164e3bb4bdc2809d81b16f66185821a",
       "JobService.succeed": "df1126e6b697e0f3bea11560587e3f8243c4c5d31a649cbffdb8ab65963bb8af",
       "JobService.fail": "e13bba1fdbf01126f1a38c5d62b34fa15d0ec526396c164b945d119bc3227675",
-      "<module>": "a531921420bb6a42b4a3313c899bea56a588441a86e314277227a12f9d40542a"
+      "<module>": "a531921420bb6a42b4a3313c899bea56a588441a86e314277227a12f9d40542a",
+      "StaleAttempt": "4a47985573b1de2cc514bfe157541b0e0d009d8e6f6b1f3e07ce2aaf4562a4d4",
+      "AttemptFence": "1957f5fa4c0656b25819b2892cbccb7a1538092adf86c8cbea80cee45413f8d3",
+      "JobService": "95486cb178cc0ab82c259ddc9511ca2c9a1af2cb8ff0d4097bd05cb2caf33066"
     },
     "control/src/vonk_control/legal_admission.py": {
       "territorial_admission": "8a2764e7157a5913cd7b1dbfc4ba86cbef338a71d8dde1b281de612dfb985a18",
-      "<module>": "c90c4d837b1d89707f2f0ccf7e3eb9cbed180b665a56c55f5b630853532dce2f"
+      "<module>": "c90c4d837b1d89707f2f0ccf7e3eb9cbed180b665a56c55f5b630853532dce2f",
+      "TerritorialAdmissionDecision": "c90c4d837b1d89707f2f0ccf7e3eb9cbed180b665a56c55f5b630853532dce2f"
     },
-    "control/src/vonk_control/library_projection.py": {
+    "control/src/vonk_control/library_projection/catalog.py": {
+      "_library_release": "f94b3344781ca6a9a1f45f282d0562f22514d83d6a907d277f7538cff2a7eb21",
+      "_model_projection": "e50023b5b434a5db8bc087414ce91078e5264bd66e412ebe18fea69e1acb4a7e",
+      "_recipe_projection": "750702cf09ebf990be512cd592fb2daaf34b5b9c87664a1401f5d9198995eb22",
+      "_catalog_documents": "6d479d5f703060f7076aa4090f71142a57eee0877d673d4190ac64de0565bbac",
+      "_documents_for_snapshot": "26452018a5cfbfcffc54a6b52705caa13374e88e119430b49c5a816eb9ccf340",
+      "_recipe_facet_values": "3ef9b261fcd244524476d723da665301fb08705fc9b3cb17fbd48141e1e70a39",
+      "<module>": "d24fcd46f22e2f4d56a433b4d83d7be8582b9bf1e54e90b2661f5d8fb4674572"
+    },
+    "control/src/vonk_control/library_projection/common.py": {
+      "LibraryProjectionError": "c586c9263fed0aba8cbb12b54a497211285f242cf0ca48c39b7ad4fa75154b2f",
+      "LibrarySelectorAmbiguous": "fd19ebc6a9de758037db8b2d102c312a8e5d134dfd5eccad8c89ccb36677ab07",
       "LibrarySelectorAmbiguous.__init__": "9b80add580dbc1ae0468c9903bd496f8c66fe099c9a15b700c7a698568bf9d95",
       "_wire_json_bytes": "7bdebff104929439dbf4d896338c9c539ca7e3afdb756056f468f4e995dee6bb",
       "_bounded_library_page": "883045569c496de399891de500df5182f5d7e34b973be6b252cfab3ebce0a45a",
@@ -1706,37 +1904,31 @@
       "_model_identity": "1e1a5bcb65f05e2ccb2eeb37cd6768c93644d096aed4fe863cce86e32769d65b",
       "_recipe_creator": "065b648afb930560fbb89c8602638e8a32eaac3f46aaf770be8d6b720553bdcf",
       "_canonical_recipe_summary": "693e657369f51e8fcba3a875f684579ecf43a8ce97e95ab63ca04046280cc526",
+      "<module>": "b5b0ca12b38e91809c94b09fe144476c1eca0c5c30823ec81630144c02170e1d"
+    },
+    "control/src/vonk_control/library_projection/local_state.py": {
+      "_assessed": "01724bd726c888f55ab57d8cb420fbe91f13bf0bc241e60215d663a530d00c73",
+      "_local_state_snapshot": "46898f6ea1e5f1dc0ead226331640df0fbef0368227da978af4786b2385469ce",
+      "_local": "4c924e4b03b3b4142dd65bfb0687055735f7a5251371252bd0fdd8624cffeca7",
+      "_database_local_state": "013ea55f0c4fef9948044d5a2bdea2f9601ebcfa718b0ebccacb581cd659f873",
+      "_apply_image_presence": "676b1b62352167c0516828842659c0925972da8ddb152b340503f37f6b63d303",
+      "<module>": "d24fcd46f22e2f4d56a433b4d83d7be8582b9bf1e54e90b2661f5d8fb4674572"
+    },
+    "control/src/vonk_control/library_projection/service.py": {
+      "LibraryProjection": "ef90c0083af0bdbb3a35e4805979eb244d80da54ff206325b1da35cb514988c6",
       "LibraryProjection.__init__": "522b6d369c16bda6af84f680bc39ae22a9382f7867d8e8f1b8c4cf849fac79f1",
-      "LibraryProjection._assessed": "59d111efeb4a5d0bc8137a6b853b86efe4145c660cbb608e86f4907a79009680",
       "LibraryProjection.selector": "2204eebbd2660227fac8805b652dbbc6902d1731cffe6d3070c6dc651a6f7048",
-      "LibraryProjection._local_state_snapshot": "797c8a24887a53413d2f162ee76ba044a72152656cb713ea72cbf6173bb32c12",
-      "LibraryProjection._local": "c55736ac69dcbeb9d42ac463fc49c827c4d109b636d1d72960499895b7dccfc5",
       "LibraryProjection._merge_local": "53448e4cbe6295b172733ffaef5fce57becb7fa6ef5a503910055d9ab106e562",
       "LibraryProjection._cache_progress": "7fae25686144682a35a727320b00dbf64dde94ab57f528e2ed5bb5dfd91ca4b6",
-      "LibraryProjection._database_local_state": "80830dbf0398d59648ab00c081b3f4112912db04aaa0ad3edec3257f57da9c74",
-      "LibraryProjection._apply_image_presence": "fc3b9ac10ee24f547aae6af34b459a4a589fdc1babc9ccf4cfea62361d75750d",
-      "LibraryProjection._library_release": "ab314cf336f2794231220c4d4baef55e9b842ac0eb5f4bb48bfc9617e2b274be",
       "LibraryProjection._model_usage": "0471a2e6c7d40c81089ee6a4d41e5c9dd6b12748915d63d5a14eab136f31395d",
       "LibraryProjection._recipe_resources": "e88a07664678b06bb1dba782daecf048f1b021284068bd238f013913b710bcbf",
-      "LibraryProjection._model_projection": "5174057185655cdabbb08a1e9fe29c27e1d97d6b1417883431d2f228028704ed",
-      "LibraryProjection._recipe_projection": "794bd57ceff632e73fcc4d6785fae6c00fbabb6feab37d009d2fbc3270575fe8",
       "LibraryProjection._alignment_by_model": "2f3b7371a31f5a11748a769ab014bfa23983b8f86f679f966d186d828942b108",
-      "LibraryProjection._catalog_documents": "6d479d5f703060f7076aa4090f71142a57eee0877d673d4190ac64de0565bbac",
-      "LibraryProjection._documents_for_snapshot": "5dbe1e7e9c39107ce468f30dfe9f198ae5db83fbe5a260e23b8b1ea848833d6f",
       "LibraryProjection._matches_any": "3ba6342aa7196ac6e6f3eadf6ac5dabf3e118989596f9e7c0bd2d450723b61dd",
       "LibraryProjection._resolve_selector": "5db731cf6a4b501e07f70ac94dcf9cdb686d9468afc0eec735f6811e2449ec78",
       "LibraryProjection._facet_values": "622d4137be7cb6ebc7ba1ae2db41ba80677fa0c0f855b44974d63d86a17cd79e",
-      "LibraryProjection._recipe_facet_values": "e916aa49686f8fe248cd00772603eb5f8ef06eae7411cb316089a1e3fe15dacc",
-      "LibraryProjection.models": "675460dbd8a768b889e14c84492633e8fddfd153d773a469a439d34f08e8ac35",
-      "LibraryProjection.models.encode_cursor": "34896e8d6e0ff54b62dc9a277613fbabc5cd73b7281600c42ae311ca900e6bd2",
       "LibraryProjection._model_sort_key": "70a3de1090d812285d367eceed1604d29fa382fbdbc4fd108594e3fd6ad11c50",
-      "LibraryProjection.model_detail": "8e41fba0950e926d248d00306ff28c09a2ebd4f6c4a6de8c99f6cb995f3e8dc8",
-      "LibraryProjection.recipe_library": "b87acc1d37c20b5643921b1cb9b901571d23efcf532ecf2b4ced15ff87933d6d",
-      "LibraryProjection.recipe_library.encode_cursor": "5139d843710b75e07b8832673ea0a1b70fae4933e9a3aee0ec1a647dbe02d293",
       "LibraryProjection._recipe_sort_key": "83d4424a095f6aeef6c6193f84928bf00782f3c55729b874ce7840dcb7ac704e",
-      "LibraryProjection.recipe_detail": "d7890b5ef6b12747041baaf1338a5c54ba6790091de56cd7fd37f459e3677d5f",
-      "LibraryProjection.authoring_recipe_detail": "c6beab0ebed9b5145bd6889b2d51f9cdf21c1e3af773255dceb4700f462af976",
-      "<module>": "11ee906b165112486ea52b5808114c7ff9835e6700691a7969516dad460c83e0"
+      "<module>": "ef90c0083af0bdbb3a35e4805979eb244d80da54ff206325b1da35cb514988c6"
     },
     "control/src/vonk_control/lifecycle/job.py": {
       "JobAdapter.__init__": "ae6abd5efd68c6a60fd5c9f7a305a3133823f1d19b4ad2a8b43da9840f023b4e",
@@ -1760,7 +1952,8 @@
       "JobAdapter.finish": "c664f73e352d92b0af783e3a2baf6b76165f6281edb2d1443f0ef59997624c29",
       "JobAdapter.resume": "be3ffc5848ded321ab84ddfa355a75aefdb89c6dc21525701bceb47bab43faa4",
       "JobAdapter.amend_ended": "f9d87c2cbebad9450bd1687d55bcf1a1c6897d179ecf3268c6c8c85d7cbf6d8e",
-      "<module>": "b95e9f959cdd7eb11baee65c55317b0eddc8bafa9533ed3f8ae9e14775faea75"
+      "<module>": "b95e9f959cdd7eb11baee65c55317b0eddc8bafa9533ed3f8ae9e14775faea75",
+      "JobAdapter": "f67994ad4da87403ba6e61ea191ed78a8ddf053fc7cdab7ca6e8cbd97756e432"
     },
     "control/src/vonk_control/lifecycle/model_cache.py": {
       "CacheEffects.running_here": "799611a69c448d4b9e6f0647cd396a9f16147595bd625e1cb24b1322940cfa3b",
@@ -1802,7 +1995,10 @@
       "ModelCacheStore.save": "006f67f03074d886430c9ff290dada99653b9d35442c54009e878a6feb7ca861",
       "ModelCacheStore.record_residue": "f4da5360618010e44f5d176d75696738e2561b621af311bad6b132dc4c78a3cf",
       "adopt_legacy_operations": "5d0ff373511011671461e45a196a0c114597eee481f3dc582d046fbd595ecb39",
-      "<module>": "ed991a3b5be8f1bb1be5df04afcd2f1d11b7748101a1a000b10760f3a6609f3d"
+      "<module>": "ed991a3b5be8f1bb1be5df04afcd2f1d11b7748101a1a000b10760f3a6609f3d",
+      "CacheEffects": "6817ffe57ae587cdd29fab4a6e129f3e5feeaa8dd27ced8f1fffdb925ecf49f0",
+      "ModelCacheAdapter": "df26486b718e697665d4e56bfd2b97e7ed13cc129cc3ea500b1ae5d253f802ab",
+      "ModelCacheStore": "0e005bd99bcd88df20c6fd8a6a13cdac3176d7688e5aa0f1a24f0bfaef978072"
     },
     "control/src/vonk_control/lifecycle/run_switch.py": {
       "_count": "1905b83739d5e1a85877089b8ba7138f9b7a0e4122556610a720bccb80d79708",
@@ -1839,7 +2035,8 @@
       "RunSwitchAdapter.project": "c6ec7f296e92cc1fc2a4f80fe653fc78ac4c79859bbaac8899dc7ef0aa032c3c",
       "RunSwitchAdapter.heal": "444d97e4555844a02a0844454b466d1f992b18bcb3a81ed1191a730d022981ca",
       "RunSwitchAdapter.new_operation": "ee09feb386409a3265cdedb46d5b69533887dd332ecda3bd3ca3d08b36f38253",
-      "<module>": "8a68e2d078a075cd4cfa7bdad86e446c2c579ca3774f49cb2a888a269d5746bd"
+      "<module>": "8a68e2d078a075cd4cfa7bdad86e446c2c579ca3774f49cb2a888a269d5746bd",
+      "RunSwitchAdapter": "4ab816f5aa4709aaa1b8a34b350000752d551de0ec5db2594462b2bed26a34a6"
     },
     "control/src/vonk_control/lifecycle_preflight.py": {
       "LifecyclePreflightCheckpoint.pending_identity_is_complete": "134a4155ea67192aac91567a34f7e5a43fd4c07a7d4c92169816a2ee4113ff7f",
@@ -1847,7 +2044,9 @@
       "LifecyclePreflight.__init__": "e44386038f8bb322ea7be74272f9709b24d2d50d8e3e7ee105e52dc59730ca22",
       "LifecyclePreflight.ensure": "69f52a86a20cbb9ae49499f9f2a5411bc9104eb12c3812bdbc710cb2daf78de0",
       "LifecyclePreflight.ensure.retry_probe": "6cdfee4c0ea1d8c734f79da220d30721525e3155e61f02bb2d700a74b83b2e53",
-      "<module>": "12d7f591fcd8222a0fa006bf5aa4a7c702a92d7046777b6894c6361fdb0fff07"
+      "<module>": "12d7f591fcd8222a0fa006bf5aa4a7c702a92d7046777b6894c6361fdb0fff07",
+      "LifecyclePreflightCheckpoint": "bac9ee95a39c8318bfc17b0fef664e030ea133891a93cbb02645b08842bd342d",
+      "LifecyclePreflight": "79b625f5e1d04948939f30295532f09a10f37250893bf366039c583e5543dd59"
     },
     "control/src/vonk_control/model_cache/artifacts.py": {
       "ArtifactSpec.part_spec": "6d1bed5d755a9609054b5f958fc4a582c47c3138e645143c8341ac52e3026628",
@@ -1874,7 +2073,10 @@
       "_unique_artifacts": "d6cc848318812c85daa2f7136850219628b4e2ef42e24a86a8b1063ebb12ec76",
       "_composed_artifacts": "c688965f357a499ea616b16a6fcba223840601623ea8dab7d6aac3435b876853",
       "_is_hex": "adee390c73c7cbeb4c34aea5c8ec35a3e993c9dcf105106ed7803e359e6c82ff",
-      "<module>": "bb6b7978947982d22b21955f14f8412414eccde837a95a17685f387b76466fb9"
+      "<module>": "bb6b7978947982d22b21955f14f8412414eccde837a95a17685f387b76466fb9",
+      "ArtifactPart": "d56cf3094fa17ac70f4a2a3b37b11e3db9b46ecdbe253639c68172cdb139fef5",
+      "ArtifactSpec": "5d5bce35406212048bac4e9cd8bc1f9d7b599736b15ecde8a41209e35b352240",
+      "ArtifactSetManifest": "70ed6957b62fa1af1b20638f84c789ac92aa4d1a7337821983ff3e6a92d51861"
     },
     "control/src/vonk_control/model_cache/availability.py": {
       "AvailabilityMixin._require_managed_cache_coverage": "89bbf4258ab838c91715709a583ef58976a9a17f37eff5c9bb32e2ed37854582",
@@ -1884,7 +2086,8 @@
       "AvailabilityMixin.adopt_verified_set": "718ee13c796cc33e4eb88457e47ddb4af5f5c70442af71d39363569bad3e519b",
       "AvailabilityMixin.resolve_verified_artifact_set": "6608150711e993f403b5330fa60c66020e3514c642e83efc0cda48c15aaeb4a8",
       "AvailabilityMixin.read_verified_artifact": "db0bb33ad787cc3bd0ffbf56df30a211366bf2f0992ff7563e99000c4da5cef7",
-      "<module>": "7ab96bacd5d40a9d88fc1b6f9a08ac9b2176f4f4d3338a62465db67ee0a79901"
+      "<module>": "7ab96bacd5d40a9d88fc1b6f9a08ac9b2176f4f4d3338a62465db67ee0a79901",
+      "AvailabilityMixin": "bb630b55532dff37962b490543d8f31c3eeebe2280c4032f2b5b04c9af5f32d6"
     },
     "control/src/vonk_control/model_cache/download_admission.py": {
       "DownloadAdmissionMixin.start_download": "0eed79bd4c8bae7749d6b4f6d893d94f5a46e8e45345a0502a7d655e6945c9b4",
@@ -1892,7 +2095,8 @@
       "DownloadAdmissionMixin._resolve_requested_manifest": "aff5e082c0e6038ff133974d1b7a4fa170f4f1381c048d456f539e0a08779808",
       "DownloadAdmissionMixin.download_preview": "227609d9216aa7d8d1aa50d8d51a51e43164a9c4741bcb746d889f43241413ac",
       "DownloadAdmissionMixin._download_preview_for_manifest": "8f33bf91d375f72680b93c3610774005230aa981f94ffda7e0dd2f42c78dc3c9",
-      "<module>": "419d369b3ea2f30c1ab14e4dde7e9cfa67ee37c786916591b69bf78566cce7f8"
+      "<module>": "419d369b3ea2f30c1ab14e4dde7e9cfa67ee37c786916591b69bf78566cce7f8",
+      "DownloadAdmissionMixin": "42d2f0528aff6ca6602b621873ccb1364280ea01476bf742e5ffa7912fc09f16"
     },
     "control/src/vonk_control/model_cache/inventory.py": {
       "InventoryMixin.get_entry": "3ca30c093d6dd9f15e133018198e25993c78524883d5619fc7e28525e494cf6a",
@@ -1904,7 +2108,8 @@
       "InventoryMixin._recipe_references_cache": "0e9d0522d26bfc2b585b57acffe3708f8b150043b93e5f93584c48fd412dc17e",
       "InventoryMixin._profile_references_cache": "89ad4efe157e0673006e427fedf6dff291dab9dff40829488ce7d7ac28bb7e40",
       "InventoryMixin._update_flags": "3d22e059a51d5f72abcc60e1045d618b94e5f32c0753dbde6ee7184dcaed8864",
-      "<module>": "d6ef0939456fbc1ed16e736b48994e6e7f6a2ddfc9aea4d89e06e40d7a71fe94"
+      "<module>": "d6ef0939456fbc1ed16e736b48994e6e7f6a2ddfc9aea4d89e06e40d7a71fe94",
+      "InventoryMixin": "500ce12d79c5a07fe737e26f6e46c58adc650d0b42e2dbb0d1ffc6f94d18fec4"
     },
     "control/src/vonk_control/model_cache/operations.py": {
       "OperationsMixin.get_operation": "87d3aa0321c0cc44b30876436a779aa1de5bdc62e897d478b5d46df0d452ed5e",
@@ -1915,7 +2120,8 @@
       "OperationsMixin.operations_page": "c6bdbb8e28fc34e6d2c733ecf97950020a1679285dec40dfd6e1b8b1ecad1170",
       "OperationsMixin._operation_view": "bf7379021288496fcd21d0ea9d0995c3a64ecff14558753757f61072bc4776f8",
       "OperationsMixin._canonical_failure": "b792fcaf9428daac3eeaf1e974a80cd4242e2f307c71fde36ba1e8fca9b24f6e",
-      "<module>": "ae3de08f949ace803c0598bac0e61970a40f3a21c31948391cb8188c9a852efb"
+      "<module>": "ae3de08f949ace803c0598bac0e61970a40f3a21c31948391cb8188c9a852efb",
+      "OperationsMixin": "53f296d37d9b63c7e9d7ddab7d32c73a6058f388c13e189bf18aba8aa207a2d7"
     },
     "control/src/vonk_control/model_cache/repair.py": {
       "RepairMixin._payload_has_huggingface_source": "6ba0293a8b70ca4c9ec19895ead37b7ad2e02427b6a8c8edf548fa5b6b31ab67",
@@ -1930,7 +2136,8 @@
       "RepairMixin.manifest_for_artifact_set": "bdd8c06010175eb1bc06cac2a11a925159f3bd91a578c74915ed9b402ed65124",
       "RepairMixin.preparation_evidence": "6af78221e4adbdc8285fb36cb47e35fc3d6afe6b7a527f6d36c242da442d5030",
       "RepairMixin.activity_operations": "807526130e4231374aaeb21b88d0a4665a860f3c0a81f9c777b3ba237bcded09",
-      "<module>": "8fc7de7190b5869d25f44787b4691858634a8fd68670c98b57d5703084c4f1ba"
+      "<module>": "8fc7de7190b5869d25f44787b4691858634a8fd68670c98b57d5703084c4f1ba",
+      "RepairMixin": "cf007e32e6d68d88c9c2bd97a77d3cd85957d4b32b32e7696854f30789acd21c"
     },
     "control/src/vonk_control/model_cache/updates.py": {
       "UpdatesMixin._model_update_candidate": "17298d23b2a761c39a89b360121b824ec9f4bb845760a0077027501b4427863b",
@@ -1939,12 +2146,17 @@
       "UpdatesMixin._check_upstream_revision": "f1ae79a2cfa104420e04c3221d0a3246fed52e8875c8e1eddf1952c136efd47f",
       "UpdatesMixin._check_upstream_revisions": "110a90cd29d99291396d8d864c1822edddbaf2d703d5ebaeae5e99286571912a",
       "UpdatesMixin.discover_updates": "8627838bdceaab744864b9a50178b7b912ba495fac2cad555b8180a1221f3161",
-      "<module>": "c400de21f647ee7bac2f7feabf3c0d889571c59deda0ffed9285cba6f0302a75"
+      "<module>": "c400de21f647ee7bac2f7feabf3c0d889571c59deda0ffed9285cba6f0302a75",
+      "UpdatesMixin": "a6f217fc6db5942043a892c31b2ca3e9d2ac5592dd86c4c7cbeacd574d8c66dc"
     },
     "control/src/vonk_control/model_cache/views.py": {
       "StorageSummary.document": "5f745a40c4c8733c54329d4832504903348f10084e74d9cfca50ef6cc982ef5e",
       "_BackgroundTransfer.pending": "f2d27a256acf7507c117ad4f151f54c20cd688e51f5c5875b07f599d809e8b16",
-      "<module>": "e3a25ad5fdfdb1b66c1e797ccb313b4c7d97df5dfbe2c2681faf1fc9dcc84b63"
+      "<module>": "e3a25ad5fdfdb1b66c1e797ccb313b4c7d97df5dfbe2c2681faf1fc9dcc84b63",
+      "ModelCacheRemovalScope": "42bf1e2fbf57cac60388dce26bb2d1fd867bb68b4acdf574889c986e8a8997c6",
+      "StorageSummary": "b961d5d817479fd1903b1b8463f266c76e829c472c2405fcf4fea0b816ed6f89",
+      "CacheOperationView": "028803c08dbc266c61ea5142052e2254ed395842ab1071a1f448fe608d226342",
+      "_BackgroundTransfer": "c7c346221ed59a63f7195d346244f07b004506a34336595a95f6d43e54b1455f"
     },
     "control/src/vonk_control/model_cache_api.py": {
       "_model_operator_response": "a71804a26c62bc937b770acdf5731806baa4127df9f46f280bf943678797677f",
@@ -1958,15 +2170,17 @@
       "install_model_operator_routes.download": "f110a83d5be13f5bca65b96e626527ef899fd472cbaf08b48e9815127b214a87",
       "install_model_operator_routes.remove": "4ea2bb6055220b70e06cc7e840f1b92b2045f0ae02dfeff9c0dc40eba5a7dc44",
       "install_model_operator_routes.cancel_operation": "ea8636ee483d7d9668351943d9abaea72c8d31e2488338e687a869de0e49fa90",
-      "ModelCacheOperationProvider.__init__": "814f582d8574eb9c9f8d604762403f981ab651ef7b8d47d1a710f3357a932358",
+      "ModelCacheOperationProvider.__init__": "d53fd0e0daa0cc1d25ff9f0cc7f261984414fc5cfe67ef9e31341830b40630ec",
       "ModelCacheOperationProvider.list_operations": "547e2f31ef5305105b10240a2a2b20e61cc261f58c1a4926d849cc85790db43f",
-      "ModelCacheOperationProvider._next_cursor": "a3c1d25800e97ff531b0e3517a15d29b876341dc6f4e3aa96a75fa642d20f3aa",
+      "ModelCacheOperationProvider._next_cursor": "1b53b816ae279bd95a4eb080b31b38a2fb4825ca42078e6177b748ab7f08ead7",
       "ModelCacheOperationProvider.get_operation": "6f41ab65e52adfdb9162739faf075298e3ec242b8fd44c6dd42300cad9c1b2af",
       "ModelCacheOperationProvider._summary": "3b81ea90ae9172673ddd118d4604d714bd98ff22b3ac182b0faab4f32387fc56",
       "ModelCacheOperationProvider._progress": "5f8019106fd1fb64ddc2d03c7180c0834e32c731ce9b8d89371f8f4c18d6ae75",
       "model_cache_operation_provider": "7d3452c6c89b65a0e32207964e01d7bbfcc7eecbe8d7dd5e8e940b7dea478b00",
       "register_model_cache_operation_provider": "5977cdfff7b887e0ef9c4421676a2cf2b59b89946e48d31bd452cfb0e646ef47",
-      "<module>": "aa464280a5d2d443092583c3ce38495f05710978d11383a18c7a5e162ebc9cce"
+      "<module>": "73a59f561daa43983bcbb100309ef70cffa1c43049a157c03d694a261dc29818",
+      "ModelCacheCursorProjectionError": "d9db80fa90e1f06d8845dc0ec7b76abce9debc95bc50898d7fc6f4985e9f4bab",
+      "ModelCacheOperationProvider": "4d77723d58c2ebac4efacaf6f5dbc0c58a079c88c8930a486af33cec42346865"
     },
     "control/src/vonk_control/model_cache_progress.py": {
       "progress_document": "fb65a1a6fc397c932ec9598c0cc0eddfee61d69ed1cf04cfe581d92f0ca22542",
@@ -2053,13 +2267,13 @@
     },
     "control/src/vonk_control/models/telemetry.py": {
       "NodeInventorySnapshot": "bf67ce55f24a3b8f64bc71d8c9fa91a963330df2fbec2ae3fadc7705e2a13215",
-      "NodeTelemetrySample": "a014cff5633cb3a92bcf51e00b363e5312ada5542e277bab766e883fa861d6a2",
+      "NodeTelemetrySample": "34fde413f6e6f7c6ddc96f9b67ee64071773fff57f4911cf00ee8065fe7bc44b",
       "NodeTelemetryLatest": "b2765fcb121b3b74a5359461b7bbd53d4dd34d13025679294567049764f02e85",
       "FleetEventCursor": "278a7d0d37dd61c267b28345f0a4662cab8cb88ed8164c369dcc0b09c7499fa1",
       "_seed_fleet_event_cursor": "6e61b2d03be40c87e87bd3d51cc11fbd077a5e3cc54a531c1ad8552f88b3be15",
       "FleetStreamEvent": "6e965bb63f6080382a825b4f3e6bf9e392dc141bfde0ea08dc37589aa59f1074",
       "NodeArtifact": "4fa629b224d29b3785c5ec448319a3717e7ab69b93ef44ce02f726844ee24609",
-      "<module>": "5348b7dc3512b43e114f248cbb6132ae257b4511cd7b9bba25ed7de6485baec3"
+      "<module>": "49befa6fa6f78196a45187aebded7fba1c3b8390475df673924c47f1386517da"
     },
     "control/src/vonk_control/observation_transfer.py": {
       "ObservationTransferChunk.canonical_base64": "0d4fcc16f73ce44c58b3750de149e3e59ec72db96806af866ef495f18394f78f",
@@ -2068,7 +2282,13 @@
       "observation_response.records": "f41e040dc23e2273024a1234c3e684e61a89ef6806a05d4fbe60959bd09c5c9d",
       "observation_response.records.fragment": "b632b6db33321a7e2ff819245dfdb681ceb37d6d15f5437534b068aba3584d10",
       "observation_openapi": "71ff281dc3d95e2860c80cd849cb935335baad174760f1368c993d3edf1ff6f1",
-      "<module>": "67b24f3c859bf888f41c1eef7f0b6c5714a9de644f7e009846b66aca35d8f33c"
+      "<module>": "67b24f3c859bf888f41c1eef7f0b6c5714a9de644f7e009846b66aca35d8f33c",
+      "ObservationTransferStart": "58e206a7cab0b3bd013c40949813a4b84f75c5c83adcc754ef10563bd59cd027",
+      "ObservationTransferChunk": "6417e648fea3624e067f5d7d2b797ca715fe08e51a402ea069c9dcd25f305a8c",
+      "ObservationTransferComplete": "cc53ad73d393148df696f13bea6e512ec2b83c75bdc8cafb0a2bbf756dc78a3b",
+      "ObservationTransferError": "4b717565ea28641a05224245ad5a78608f8d625e724e85f1f0f387b8f66fbf83",
+      "ObservationTransferRecord": "303d4d5f2db23e0e7edadd108c84430004cc436c0361ab030da680464df20566",
+      "ObservationTransferResponse": "4b4ba64476b13f383583f2e340c08194a0a85944f85d07bcc4c79e09f6ea8381"
     },
     "control/src/vonk_control/openapi_numbers.py": {
       "_restore_numeric_keywords": "0bea4cf3521b4f595040481b44c1684abac3e5e46299e40e1ca2c49c385d9816",
@@ -2082,7 +2302,8 @@
       "bound_blockers": "21aeb7e8893ca3c95157241b6cfd0f5f19556ab3903200bfb64bb68891e1da5b",
       "read_blockers": "858fb3aeb9825c627306038b1542db7983c59306c7baf0b661a65c5851786921",
       "dump_blockers": "79df7564c7bfba3723c3143669e73ba796b11eefb3351026c76b7a4ac40b75ab",
-      "<module>": "4c06e53f63e1aca980f23831bbe8d289d2fd2a883bd4cf7d03f9bb61c35547eb"
+      "<module>": "4c06e53f63e1aca980f23831bbe8d289d2fd2a883bd4cf7d03f9bb61c35547eb",
+      "OperationBlocker": "807b41adab43cccae74b3833a4515539611672583247184545d7348681db6732"
     },
     "control/src/vonk_control/operation_contract.py": {
       "AvailabilityOperationFailure.parse_recovery_actions": "b9793726ae46919d5fb37a2d772a1d68040f25cde41cbf9dbc4371ee491b920f",
@@ -2092,7 +2313,14 @@
       "sanitize_failure_evidence.clean": "eba434a6a3dd93571bcf213abaa7b9d95e614030eb55cb9a0cfac332c8304869",
       "recovery_for_operation": "4606c98d1e1c169ce66ff17a409482eda4df40e4164a340860b05edc4899b596",
       "recovery_for_state": "5ef36d25628bb007a049c0bb4cb8616c19777f87695d3b37e283ca1a659e6c16",
-      "<module>": "e329d4642feecf72d2025ca5ef581007f69ce22b70e26a906fecd0ec85422f91"
+      "<module>": "e329d4642feecf72d2025ca5ef581007f69ce22b70e26a906fecd0ec85422f91",
+      "OperationPhase": "7e2de6c087d54a7344df2de93c0fe29fa819604c7c9876a5e7c36fadbaefef2a",
+      "OperationRecoveryAction": "21c81ae216da51fe6c62f08c49916b8da43dc0b228f471f66fb735ad8d4d4e17",
+      "OperationFailureEvidence": "a886487b8b8cb1070df8accea7be753068533c2ff8d6e259bab2127a4ad9bd89",
+      "AvailabilityRecoveryAction": "0098154d28c7a06d0dae580f1823ba4f14330d6fd09523b768d384cd3aa742f8",
+      "AvailabilityOperationFailure": "ac63a5568156fee7b9a7715644423a609b048d923fcc7aac2bcb2ebb5224036d",
+      "OperationEvidenceDownload": "3d0b2feaacd33046d729b2705995ee00e12cdaac54e7b501a3935190c6caf22d",
+      "OperationRecovery": "4742a89ddace8de59b3a000b4ddc3211aca5c0f2a89c1e5a4556b2c5f7690dbe"
     },
     "control/src/vonk_control/operation_item_contract.py": {
       "OperationResultFacts._tolerate_damaged_parts": "b5ceae82db62c40997d9a80a0a1d59d5333d2915ad7b6b462796bfee84c65bea",
@@ -2107,23 +2335,28 @@
       "OperationItem.with_evidence_download": "550ed1f048064e9948ea6ebd071f1d1ebf2ab4072a6da58ce4ce3ea5ccb3a516",
       "agent_receipt_for": "9f9bd83232d8b2035018071ce9ec88fb3597ff6a5a8380c0e717cbe285d4b0ff",
       "operation_item": "1da5ed0830c051dead320978ae46553d0eceeab3685979068a3f712a1f56bd77",
-      "<module>": "e12ec10fd6c118343788a3c90e6a400ff31e7c3bc9572e1945fff177141a59be"
+      "<module>": "e12ec10fd6c118343788a3c90e6a400ff31e7c3bc9572e1945fff177141a59be",
+      "OperationOwnerReference": "d130479f4aa9a76ed3bc965abb957c083ce601213c127eecbdd96e4e164d4f3b",
+      "OperationResultFacts": "10607be7b1679ab6a494282b522f6512ac2e2104e221a58c7e3a8c28950a10e0",
+      "OperationItem": "3d3bde9730650cc4058b13363c68c4ac1d174dde143df52e0eb477345fc571d3"
     },
     "control/src/vonk_control/prebuilt_images.py": {
+      "PrebuiltDecision": "d1429d424ba8b6b772ac20212881c02e69966d10cd623ca14f2161b6e07cd08a",
       "PrebuiltDecision.used": "541ea1bda9032677b6c660aef258029739b4b248636d3cc5788f95d2471243f7",
       "PrebuiltDecision.__str__": "9c77ca629033c8a065a0fd2ef604892135060c11097d4dd67570c689f3c3fa1c",
       "executable_build_key": "a3f7ec678c9df399f5b2fe91b871153f2bc3ba385561f6299a9420d15a93cc34",
       "package_build_intent": "0499ec1649ea492f1498aadd402b1d1bc8f85c7c08017f1814ec5ff59fc5005f",
       "_scalar": "22e88adbd8d8219918071462442c5074bf1db952a4a4fd8923c983e76c29ca0c",
       "podman_build_arguments": "b7cb5cef8d57cf68cf001a65a5abce2bea15e99ab0cae8083170ce9c8baf5423",
-      "write_library_image_plan": "b5211ee00ce58ec41eeeb2dc77fd13222e5e9b3bee4557a26fefe0b13449cab1",
+      "write_library_image_plan": "3cfd8391e3ab49affea16d0fb9cbf2b21fa0d83b6bcacf7b5f3c96fb4055bb61",
       "_library_recipe": "4bc95571723440c32e6c405d7d723ec592bddbaaaf11871283675610ea062927",
-      "_require_source_policy": "1fdf965d865d2706e98e28acea289aa4dcf607551fe58ed90da90ac68c725dcf",
+      "_require_source_policy": "fca4f199c13dd0e704774ac5680607e636abce1c881f10f64641187b805c07ea",
       "_reason": "8df9a7dc5b43bb303288f34b0728f349b46f646813df45a17058c78dff853c80",
-      "library_source_policy_failures": "a194b88c88d64521f7c451debae89c420502eeea74c7211b08e8afa373d09153",
+      "library_source_policy_failures": "d182f053d2ac321f083a9ea3f4b823ae5bded54bfd382b4a78fd4e1a0d3f4e36",
       "_bundle_relative": "201650b23267d0d5dc7f0f2c8f775e882627d7e54e3a3a570a6ad6b2b4a8e745",
       "prebuilt_reference": "0e6c3e0f3ecabb00245a0c17c9662c8570c017d724fcd1dafd2447e41d27566f",
-      "policy_prebuilt_reference": "d80a3ff32340a7163db4c9fe34a60ac981e9ae50e4ab771cf0196f639497c878",
+      "policy_prebuilt_reference": "8c60a37c2beeb7a6e4f5e713f49a77db905b3a78b5dbc2a82fb4d21dbff97b9c",
+      "PrebuiltImageImporter": "db96c3c83515cbf29826dcb003354fde98852efb316a0e927d718c57ad51a5fb",
       "PrebuiltImageImporter.__init__": "a02f59bd439f98df005a87c2ab9f41c760fa3c41fe6aa93dd5e84ae068c5a501",
       "PrebuiltImageImporter.close": "9b2b387b1331a01c8674603b64939526af56271a00a63f4e5b5646db742c3109",
       "PrebuiltImageImporter.tick": "7bd97362e92cc0bf9b93c594f4c8b28783584a2040c9f1b76e740ab3972f9a12",
@@ -2145,18 +2378,27 @@
       "JobRunStopScope.targets_are_exact": "0be7fe4d14d337fb2eaf8f9ca8c9aad39f7e4e89f908e1eff7eed4a9ded8948e",
       "ProfileJobRunStopJob.flattened_phase_items": "6631f82a9766966d578c0ccc323ab5175fd5cf8ab40df38d843d3e45a003adf0",
       "ProfileJobRunStopJob.model_validate_parent": "b6c3e2685247145a885ae0142ed44ddaed54f3bedf9b73390049c546d33ec9f7",
-      "validate_profile_stop_owner": "786fad52c3d6bfc2bf63688fe1ccbf8f13f36dc9d443106a8865ff6f5ae49cb1",
-      "validate_jobrun_stop_source": "b49666547bbb3e4c9a4636b5f0f8473a6fb8730131079e574e26dffacccd6f6d",
-      "validate_run_jobrun_stop_target": "0940af9e29bef663a510cd8dd44f998836064f39916ddf9724a9156331f02223",
-      "validate_profile_jobrun_stop_target": "d43d78ec8de5180a6a77dd7483bccd6acde6d4413183e09de0f288c72419ec7b",
-      "<module>": "bb50c0924e40d77231841ad92606aa8d5d0d20b2ee4cba154044917b6e306072"
+      "validate_profile_stop_owner": "170bfd103111eca65a14aa48a6cb3ab24630ba64195b490af096f60f698e3b70",
+      "validate_jobrun_stop_source": "c075a2f806a6f80a55d798e3c5717cf2ffec3d8f9efabee22f82031768fd5af4",
+      "validate_run_jobrun_stop_target": "e46acb19c9fe0495b08ccbf8c4b7415362b66188da18d856a81c75c9a12efcbb",
+      "validate_profile_jobrun_stop_target": "aa5e0ab9d673f0d8aa801bc3c1507479feed60f1be89dad10658984baaf95536",
+      "<module>": "bb50c0924e40d77231841ad92606aa8d5d0d20b2ee4cba154044917b6e306072",
+      "OfflineStopIntent": "54dd716553bfde47a2ab10ae0e8f5dd63a7e65638758fdf77902db3b0fc30f1d",
+      "ProfileJobRunStopTarget": "98b73e1af8aa59a82a63572dd4eac386fe7d4e928c047198065cf2954420ab33",
+      "RunStopScope": "4c160872aa06ffb0f7bce4b40b16e5aef9e8826568a0b407d4c4c81c97467f4b",
+      "JobRunStopScope": "bd9dab0190194c503bcaef786cc6c9d9d626a71ad6613fcb4799feb61be42d26",
+      "ProfileStopOwnerBinding": "9dafab6734f1417b734d9155a43457a657fd95780528407c32c75c49c183a0e5",
+      "ProfileJobRunStopAuthorization": "c5ec3a18e31d4fb9242166240ab07fdf21140fbe804bb17895ca154efc1a68bc",
+      "ProfileJobRunStopPhaseItem": "ddad113a9cf6c9bca095f92867228a8a2b8747a72b32ae88f41f35159c97b5a6",
+      "ProfileJobRunStopJob": "377506ebf7b07ad25d621bf0c101140912e9db37dfbc10a442cce38dbb5769e4",
+      "ProfileStopAuthorityError": "54281e804938ff182b7dcbd12770c2446c27c7348b49d46a3694688a4fcc10c1"
     },
     "control/src/vonk_control/recipe_build_cancellation.py": {
       "read_build_intent": "480357c88fbf34a71eb6992c49a57ca069fd19aacf2a698ee1585c0a5692d4b3",
       "BuildConsumerError.__init__": "d7157289e94a2c088e69b12c48683b32f1e94706d1fee214d42f3632e29ae930",
       "needs_container_build": "438fe7e4b1f470dbec2ff17fd667b35ced5740f439770906f20f5677f4634b1d",
       "lock_run_switch_build_dependency": "a6f0f058b4a88433d393d734c8a753fb6a8b303fef3c68d9f9f98a446f94a3c1",
-      "lock_availability_build_dependency": "cf89d52f9e5918f29502c5b7296624537ab62e000068760f58b711ceb0a3a134",
+      "lock_availability_build_dependency": "f76fd0ea0212001f723d29cc66a26c489ee2da088553cec5bce0cd49fb0106b2",
       "_profile_build_dependencies": "6d8b7aac411426268109c618dc39ee11ef5b1b03b490d469e12f21372f704feb",
       "lock_profile_build_dependencies": "3da8d6fbeecf2a924d7c8e7ea98249df9ec70d5da2677d1601a182844140ee43",
       "lock_build_dependency": "e6d5c63c04d24c97cbb049c1d8982834dc1da1daf686fb221c52ae657bbb230a",
@@ -2166,9 +2408,11 @@
       "_availability_consumer": "d75079fe7eb2016f3a02b70139b279510d0e51e3ababe0fbc1fbd5f615116078",
       "build_cancellation": "0f575dca6853e6c29f649e3d78df95bc6c49fc5f0421da4e40f7aa02362dbf45",
       "request_build_cancellation": "ce6ab9e43dec22fdb0aaa017801591033b2e26aa51c0296b093fbe4b7380a429",
-      "<module>": "565873573688fbfa972d58ce8043f570ea9caa429a1ba28c55f618d2fd155750"
+      "<module>": "565873573688fbfa972d58ce8043f570ea9caa429a1ba28c55f618d2fd155750",
+      "RecipeBuildIntent": "19adb4e85441315ab224e75af651c98e22de699faa6a3b4d1965a4c3a48f9e66",
+      "BuildConsumerError": "77e67984d6c230fa6272df1a58dc1c22a5f84a2a3b561785439b08f4622c530d"
     },
-    "control/src/vonk_control/recipe_builds.py": {
+    "control/src/vonk_control/recipe_builds/common.py": {
       "derive_build_input_identity": "a838512d59d3626ef8273c1fff389dd870c5bfced5fae871b691979a438efada",
       "_resolved_adapter": "2f15430702fcf65c05ca2d816211d408a1764be915cb9a8f1eec2b57fcb7bef7",
       "_build_effective_settings": "99b54dccb0485e57d3041581a1c9778fdec6065303993aa2ced6ccc58e397aa5",
@@ -2183,39 +2427,26 @@
       "inspect_package_source_policy": "956b1cff1d056a3dcb537faf05f1a8c7d6531a1ccd930dd9437cf2442fb15b01",
       "_build_disk_envelope": "69036c413ce694cb477ba9c45e21c63b684cf4d2bc1b75fd78ff04529b48fff1",
       "_build_disk_reserve": "2a0c0468528b32ed788e81bd6bcf07316990c2f24c503490536485bd0f6dfdf6",
+      "RecipeBuildError": "623ea2fdfa2c1d80c9f02fa94109271e1863e173f34f07c4397db6fbd3ccc580",
       "RecipeBuildError.__init__": "3fc69271001b4ea25d07c8f7013ffb9b85e643eb74ebb229333c803cbef059ba",
+      "RecipeBuildRefused": "d6abe043398fbbcee6578906b4321827bc8774dcd553fcc2ba9083497c32ed25",
       "RecipeBuildRefused.__init__": "0af59a03d29772dc7c6429a77ba385aba93beee028053034b3b2f5b645b0cbd3",
+      "RecipeBuildInvalid": "67f20c84a9af15faed5c357c993f498633f7cae02fcae28df989cc5a18be9ad4",
       "RecipeBuildInvalid.__init__": "fb0ab9996d39e1fefc6abe1749e3bb7019af27005c610eda122f8bf48a01a136",
+      "RecipeBuildUnknown": "8a7360272c08b5706dea544ff8201553cc53375688f7c1ca318ab56fca10a8d6",
       "RecipeBuildUnknown.__init__": "c04aac78235e2466bf55d776a4a17b4f42ccb57fe43048ed091f4ce7fe9a0bb9",
+      "RecipeSourcePolicyError": "8fce225ff1a8160d57782c349836e7f8e768a47fe447d7e2d9efd102bf4342ce",
       "RecipeSourcePolicyError.__init__": "8d9327ff7afc2ea389ff3c64714aa743c31eb2902800e8e43445a49a33ee704c",
+      "RecipeBuildAdmissionBusy": "bd63d0204bba24f612ab17b367d08543af026ee24a0144b9c76072f7da3d6b1c",
       "RecipeBuildAdmissionBusy.__init__": "90bd65f856fb7024ef68dfa245139c15fb0a63999c0844d7ac7e2569765ebb63",
       "_read_recipe_projection": "5cb0a98d09e66f56835a8ee5ce30d18dfc6a89e51449dfbebac30eeb0fc6c67f",
+      "RecipeBuildPlan": "66c1bc554f12ebb628c1029f9659e5f70da052f6c132de8f33d2ea31ebdd9e19",
+      "RecipeBuildResolution": "336145f35ddda03d4a774d710f9c5d3eb3fbbc4852fb9266a1cc21897826b0e4",
       "RecipeBuildResolution.cached": "f842f76c6f6223e59507167e1279a416eb244f9996988b63c606ace0ec2dff55",
-      "RecipeBuildResolution.build_input_for_builder": "c6f0d9db1baa213dcd7b124b58bece74ca3ef3dabd17fa075f47ad6402f4b3c3",
+      "RecipeBuildResolution.build_input_for_builder": "131cf7af1d9e5af74ed760ccb21d62cc400a66675e3717705cf60d98cca5a6ed",
+      "SourceBundleRederiver": "20471c78b2e909ebcda97c08137ea77710f01543bc89abc918ca8b3718feab69",
       "SourceBundleRederiver.__call__": "d59b4c65acb0925b66894f7cdf8cccc6c7b55b2e47398a9bdab825358fb475db",
       "rederive_source_bundle_from_closure": "cda69a2cff296f0ea098bd73a23c41e9841e752380fd7a33d935cb9ee995e1ec",
-      "RecipeBuildService.__init__": "7e3be94c4565501ac4c82a926d2e13ae03159f2a7f9ce38ed623fca10728fbd1",
-      "RecipeBuildService.bind_storage_demands": "2f2c792b05cb8b59dc724b2320a9f332aa385269a7d6ec9978ee43426038bc59",
-      "RecipeBuildService._stored_archive_present": "868a8143694003f27dfe5683523a0f0be991dc493964eb94c9274a5096ad7d40",
-      "RecipeBuildService._succeeded_build_available": "4dd1344abe882a9171ffccf8f3bbf7174f9c3ff8b23d7bb114006d3e2d47806c",
-      "RecipeBuildService._verified_bundle": "55c1381d061a56ef96ea4d9cc47b402b44fc9f259f989c8a15893e7d106ce06d",
-      "RecipeBuildService._verified_bundle.read": "61ceba5d8a26f354011914e99e319603e5a9dad0b1837baaca20f05a97bca2d8",
-      "RecipeBuildService._verified_bundle.damaged": "52ec268c64835651309ac62c8599489e11e7e935268fa469b5ca12b81d8e38a1",
-      "RecipeBuildService._heal_source_bundle": "2e5a724e0fdda788e308cbe9074060d909e42d6438c5e65478128ad81abc74af",
-      "RecipeBuildService.check_source": "89b6b41462967836a9049369545b4b355ec969954bc7c8e2f35c9ce0b808e721",
-      "RecipeBuildService._check_source_once": "01c92eeb67021eb159f65c70bdc4181018d9833df182b3cd7b47733d99bce6ad",
-      "RecipeBuildService.resolve": "066f234775c57f296bd0b0ae91cc6659b982a5ebf8960707696b6f9993acbbc4",
-      "RecipeBuildService._resolve_once": "be6f155ee85ffb5105414c5dfae1754e851cfa752ccf1eaf2647fac18d347b16",
-      "RecipeBuildService._admit_spark_build": "5771a928c4bb1f68948bf5a7764df6b78ab22509fc0531859d4c24f83db97558",
-      "RecipeBuildService._usable_prebuilt": "ff52fa747cfb401344c0658fe4033ec5347f53d8ca4ff5ac4f742bb05a5142eb",
-      "RecipeBuildService.prepare_plan": "e2a77ac9eff76c68cae58dee90ca4dd0a59828ac77d82e95f59ed489df12b7e5",
-      "RecipeBuildService._prepare_plan_once": "e30c2e59501773e4532d8fdec6a173e64bd0b63ba8a9b017ef783754e941896a",
-      "RecipeBuildService.plan": "55cb64393025fd98a4962ec9b8301cd9e73e60232bbc199cfeee3b9e042ad4d6",
-      "RecipeBuildService.reusable_build_id": "b46c72fad4a5b361a4d97f5f291866eef1ae5505376252b57d13c373309c1fab",
-      "RecipeBuildService.persist_plan_in_session": "de4ed0a27c555aef35c003f53126b678d684a9d5f0cf4368db74a7eab5ed2230",
-      "RecipeBuildService.record_success": "4bdadbe2d81ac0957b3ffa276ec5c4d81b8a182dd8915e7dca83b4bc3b381753",
-      "RecipeBuildService.reserve_in_session": "0f2c217ed5842d546c434d09edca0fe1d64acae88767030daadab945abf0a64a",
-      "RecipeBuildService._reserve_in_session": "b47df6bad2199b71160317ab0a1c63702f2079fdab5d0e0dbb9e54c2ecba21bb",
       "_validate_builder": "802a3f78fede4fa9bf6236be1da8d356c76f7fd4264f3ad5e92a6628ea6a2d01",
       "_public_build_network": "3a1416761dc1234017818821db8fe6dc267462c545e76e6eedaf908c2e62f909",
       "_declared_image_bytes": "fca54e6ee2b60667e01f28c4f34d3d91257644c0a8bf0327b900cd52aa95a04c",
@@ -2224,7 +2455,27 @@
       "_has_build_receipt": "a24bd7e531123889316c0bdeb20bf3c89c6ab944b4bb7e9f40185be889dc44bd",
       "_reopen_build_attempt": "40a27eacecc9e3837ff642c0c46659092456f974f8fc2e8f285ce608336d3c4d",
       "_digest": "6073c487755ee8fff97be9c815bfb4b393de66792aa9e00a7c279356ccc2cee4",
-      "<module>": "6d2dddab285bff67083ea4a7dd159de2733aa2c0d9f69815acc2be06ab70c310"
+      "<module>": "71f6cdc7963e612e8a328cd62b44992ff79a58a37fcfcdd1980e143ad9b93052"
+    },
+    "control/src/vonk_control/recipe_builds/planning.py": {
+      "_admit_spark_build": "19d8081764c4ca5332aae443e6e89ca85907cde879c249fe48f9bfeebef68a06",
+      "_usable_prebuilt": "25d6d985c60b7871f3b666e64d38227e9e409874fae5dd5ef7633bc7cfa7d00e",
+      "prepare_plan": "2d015085b4930e7c414af05d7be47d3832eef73079915faa694afe9cbccd9d83",
+      "_prepare_plan_once": "c254a7d6fc8cde17ce670ad2f8e6249263dc028032dc4d3ba4f366c318a4323a",
+      "plan": "0199120b2d8176dd583f6ecbd08ac34d5bdeb771d9fdec50e94399211b9d3952",
+      "reusable_build_id": "be1c6ec511d013f22f5c8f9365d25b3cf740edf89d59b62002b589874749b7a2",
+      "<module>": "30cc5da7c01fa5cfd907c57747cbe9f2f51253a2bcc830c7dde3a22766d2c42f"
+    },
+    "control/src/vonk_control/recipe_builds/source.py": {
+      "_verified_bundle": "b51c3d6b70b4f44545ac513da2f89c6962341c316f927a34b011234372911cbc",
+      "_verified_bundle.read": "40f048227f1be5097a4b102c86ba7b20b4b14b7108ae286c868c7b6552c25421",
+      "_verified_bundle.damaged": "52ec268c64835651309ac62c8599489e11e7e935268fa469b5ca12b81d8e38a1",
+      "_heal_source_bundle": "ca824d9008ebc619d238c84d3ddeefde61b7f0d3e1f677477ec7d31505e47e3a",
+      "check_source": "f43de21cf216d30fdda5b2dcdc6defdce8804cedf00561f3cf8a0c0c85ac44fa",
+      "_check_source_once": "6c569ce0e5f24b8afc11c4e3d60072d3a360abe0df575d0da5ca6444f9848e12",
+      "resolve": "692095ec13f274ab05623e24dc97bd4ca13dca524ba1ec46a879f48d9042f002",
+      "_resolve_once": "19e8dc612ca5cb45569eb69275b5c1885336a8ba7db458a36de3cb18a46829c7",
+      "<module>": "30cc5da7c01fa5cfd907c57747cbe9f2f51253a2bcc830c7dde3a22766d2c42f"
     },
     "control/src/vonk_control/recipe_execution_contract.py": {
       "RecipeExecutionContractError.__init__": "da4f86129107958663ce2754468e9afd0fd49464d36dff1ed2db4998ed04d23a",
@@ -2246,18 +2497,35 @@
       "build_policy_document": "7f695390444d31510c61941273ecd6e4401d3e48f364711743644d8db5dbd244",
       "parse_stored_run_endpoint": "7bb97615b06d1e9a72e974675bea20c2fe58552a34a5695563a77f8835a66356",
       "run_endpoint_document": "50ce0581e113e24bb754263e420134eabf12fc6aaf830a83eaf26b151ca3742b",
-      "<module>": "bf0d2f2a234cb7cd1fa4a42211c96dcad31660f6b95d4e32e4a55c46ab589bb4"
+      "<module>": "bf0d2f2a234cb7cd1fa4a42211c96dcad31660f6b95d4e32e4a55c46ab589bb4",
+      "RecipeExecutionContractError": "59fffda416e276184030789390a73f4ca827eff0943c8a2f9104563c3a18129e",
+      "_PersistedModel": "e5d35d10d9a9b0e4124c593a1025aa577224d51ebbede36de6a613beb51fcbde",
+      "StoredAdmissionReason": "7c24d9978570ea9d67a8b32572eb7af5cd1fec150619fae006bd37cbf88a0302",
+      "StoredInstallNodePlan": "db581cb207fb8a9d0d06e3d5a6ea085bd2394e19625381b0c68e87ce79d9a9b0",
+      "StoredInstallationPlan": "bef444aa0222addbf45481bd96a183e3090c2b80bf7d96765fbb72c94e6e8849",
+      "StoredRunNodePlan": "d360e42c7a3968551c00e747d87d6ad10663c9eea2b427d0b2410a12bb45a45f",
+      "StoredRunPlan": "ba638ee91fe1081c0e1bdbb1743cefbb7693d77190c4a96a16bba5df6071e551",
+      "StoredRunEndpoint": "6f6ebcc3bcafd39b83e8cc9ed90294c574498eaeba831aae93ce1a223935e561",
+      "StoredPolicyFinding": "a99078b141adbcbd19d644f8ab570d7721e12dcbe4ab8a57e240e721a8223fe8",
+      "StoredPrebuiltDecision": "0da635b2e5c660ceea6508ab577677f4abda7e8ca83c3f341142da93b096b1d4",
+      "StoredBuildPolicyReport": "e54cfd8b88cb638046c0362e38488c363cff9fef484b92f0d59a2435d2874abd"
     },
     "control/src/vonk_control/recipe_library_types.py": {
       "RecipeLibraryError.__init__": "0408c73804e73234c009d8657a2c059325d402b509333d12f047fda4de65cd78",
-      "<module>": "ca3cbd025964afea6065044c6f3ea76c6130dedd6b825fa1d56631542ee963ee"
+      "<module>": "ca3cbd025964afea6065044c6f3ea76c6130dedd6b825fa1d56631542ee963ee",
+      "RecipeLibraryError": "7f57d6c760082e0b20754ee80f617d9900b0ce49fdab8e561b2abf0bda7ac237",
+      "RecipeLibrarySourceFile": "a056a12ac98923663d46aa32fc88fb2bc906ac8ee1d82c0dafcd4f90171b397d",
+      "RecipeLibrarySourceContext": "6025525c07bf42a7e23c7b00612da4c8af29cd005e5fa098b930e9d5212ff6ca",
+      "RecipeLibraryRelease": "3320098a3f8a3698574a73c09d0ef4a9d1eb0ea9726a003807917205c3b6283d",
+      "RecipeLibraryItem": "415a1c62352be3691ac8a51d82550c7f1e4f88f8a181a16c7a072822990f20e5",
+      "RecipePackageEntry": "ad62c976674c710c1023c48d1a3166a153366c19c73a0ed15b5f696ea2b25983",
+      "RecipeLibrarySnapshot": "bc86c9a9c9cff4701e7d377deacb7da0ff5e82494eccc5e7d2a85880fbde46dd"
     },
     "control/src/vonk_control/recipe_operation_phases.py": {
       "decode_stored_phases": "091823c6a00a05c3a6e1df3de8a7d30e3110678baed13f429a91ef0e77ff31b3",
       "<module>": "0e3e44ddd9271d546db21141168524b8639ecaed7034e706dc0f5cc149cac2a2"
     },
     "control/src/vonk_control/recipe_packages/__init__.py": {
-      "_select_release": "b005492cd677be9ca46434128b6b01c29accbefe49e764597cf214fb4c8ce5f6",
       "RecipePackageHandle.recipe_identity": "d85ca395b109aed44948b5a11635e4016d5907be34018b5dd028296dc98266f3",
       "RecipePackageHandle.model_identities": "2e0740dd7138848b2da1ec33440dfd9972ae4c9f760bdc8e33024f0ede8c9f44",
       "_sha256": "2b5505cbbd3ed21d6ee3e193095558422545ce41f0f1494b49ba4187254832a0",
@@ -2266,23 +2534,23 @@
       "_validate_package_paths": "8f7db6ac4f85cd62e8cb6864e358672ce4ab9b4e0237ce8e9836104740969b8d",
       "RecipePackageClient.__init__": "f27f96108fe99a029ec419c228ea0558d73613498d75e9e1d255aeeb4d99e9e7",
       "RecipePackageClient.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
-      "RecipePackageClient.list": "53a68950cd98e3cf7c553c15db6c009f42c7a27271b6f3d42fdfb00569a17094",
-      "RecipePackageClient._fetch_release": "87502b76222644a1226e2c9e8eb1684f64f5710ab0dc943955712df6113b0814",
-      "RecipePackageClient._download_library": "9326b13df09aa6d31a342417f841c632e36fd54e0c67dc4f9383c5da4c1b4d9d",
+      "RecipePackageClient.list": "e71f6b02d8453a5294137893fa7b9d3a275354a1c6fb44a6901158fbc5585873",
+      "RecipePackageClient._fetch_release": "2960dd4d914650b657301c6d3b38c1416a390dd56cc365f864657e8eb52adcbe",
+      "RecipePackageClient._download_library": "56ed449a4fba5fa9d4373ed2b67c709713c582ad6a7d3de659dcf181f91615dc",
       "RecipePackageClient._asset_redirect": "13c00f5a42bfe4a89f9a30d23ef0ddc84dfd59edca1ed2e3e70144b1d5b4f2f6",
       "RecipePackageClient._ingest_library": "e7da13db50ecaf672c6969e397c70e9134a18de274cce8aa70f902ff03f51fd4",
       "RecipePackageClient._store_package": "ac690cf3c62f7413839aad395258a356b400493be4c6314a450de5f27840fd0b",
       "RecipePackageClient._package_path": "dcd668217db6fdcc332fbb25a2c876931b5714d11503b740637d36debfdd0483",
-      "RecipePackageClient._resolve_release": "23135fedf73fa1e8b8a59952b98d8a2e234aa97c5b48e61a2c26c68c708419cc",
+      "RecipePackageClient._resolve_release": "0b963dfaeda1b04916482541d68d27898b91e52d91b929d8eae911a9e031b81a",
       "RecipePackageClient._parse_index": "8702b5019ce2b56ff05716cb3ed66a7939441e59d83b17d412aab0115dc54df8",
       "RecipePackageClient._persist_index": "667a32116586312a6ca46262a6606ce5bf9814613125f7676e739c8f78f3185c",
-      "RecipePackageClient._promote_candidate": "d4130a9d6a2373c0dad9127a90b3be15771daa67732805f2e7ecb3f0d840ff89",
+      "RecipePackageClient._promote_candidate": "a35ab47d035a372e05ec9c06a2037c3efeff7cc8c4bb9083c1cd44276c30d31f",
       "RecipePackageClient._persisted_library_digest": "b639f6a0f0131c13f31076ecb6e283a691c75b21bd056232aaac46eaa0d7bbd0",
       "RecipePackageClient._read_persisted_snapshot": "10219fff0f23db7dc5a9541e5d8d15710e479c846fd5770f6ce1787edab6a03e",
-      "RecipePackageClient.prepare": "798eb4cd5e551f4616e8c0b2738eb678227717379c10fcfda877c538199685c4",
+      "RecipePackageClient.prepare": "b8348a01620571ead6a236c274433cf9e775987f023250a4aec5724b2fae0c04",
       "RecipePackageClient._same_package": "47a6b4fd0acf369762cf3c47a7d444d8714aa91694a6e2ac085fb89a46bb52ea",
-      "RecipePackageClient.fetch": "cfce1a5101435882294f3a00f992112acbdfa5cee5bd49f6059dc348a0b769d7",
-      "RecipePackageClient._cached_package": "37000b780476d7cb4e0123bff2edbbd2ca9d4b7abf06a693ddfa51f49bba8465",
+      "RecipePackageClient.fetch": "cbb38bede4623b4ce3decdd18b7ce3dd18c2454f41746aadb068ba0b6b6e112d",
+      "RecipePackageClient._cached_package": "5c0abdd6bacf20b49ec75e07784e8aa1d9afdcba670ce8fd9025c6e914ecfbff",
       "RecipePackageClient._decode_package": "9898699322d88ebb2b7e88759b6d456f285323d9f06afd2cc504d09cd5656934",
       "RecipePackageClient._materialize_closure": "d61c916d30483148536b4c922ccb00653830278d8d37a3de9d3875b1ccdd4aab",
       "_library_release": "3a43e7958d13da2e807bc940608d0db05c57a5740d9f18f0cd5f283c8f71c91f",
@@ -2292,8 +2560,10 @@
       "_bind_release": "201421dcc16c19285eb6e3cbb0e108f0f3c6688f4c24b57dbec17aa4b380edce",
       "_asset_label": "7c643c948edd86de4faf5285b7d7c2234c4aef2ea1a9d7d325ac2af2cefde723",
       "_persisted_release": "286c9a23d9a17925e3dfeee1ab459705115f992f7d217c9acf3336d9d2fcae6c",
-      "load_recipe_package": "b49d6ba904b6eeb5f39161fad9e769f858b4e48407d83df3d630bd97ae86f7ad",
-      "<module>": "4c9d167716fe6137597ba5407260de75ac78d63cd19f182f87b02a5cc3aed9b2"
+      "load_recipe_package": "3a2b510e079d9d6022aa853d6395d37a8428f70965517e609134ff263ceb6dfc",
+      "<module>": "b3427e5d711d3f184d20a9ab63a29f8daa95be6020c4a1d9b63a7b6713de61da",
+      "RecipePackageHandle": "ca3233fb75f05a7781e8ac992a1d7a008649f0003281f5b478dc653b6e4fb4e3",
+      "RecipePackageClient": "e946aa930ea98cc5f625df68c1f3b71d2e50ce9e00eef2cdda9aa17bc509c6a9"
     },
     "control/src/vonk_control/recipe_progress.py": {
       "_parse_recipe_parent": "3d28ead6a5929198dd726d06d798c629ca564995d8c7db3e61fbb5e81163fef6",
@@ -2326,7 +2596,8 @@
       "_source_commit": "4a97eb77d3da7b0814cb573a14db62f1014cc502a4c70118eb9e06b481996537",
       "verify_release_checksums": "89ebcfddfc322e5d91eba6a595753416e0f2c09a17c0d8f7f9d4373a8aecd9c9",
       "parse_release_checksums": "1cf10d2cfd912e0ceadbd0ad0108d8c2064f5f4bbee63a45a61415fb765ba68e",
-      "<module>": "93bfce343bd80e97ee1c26b2ad6def92feda931dc036bca3eb88e70377bcc4f3"
+      "<module>": "93bfce343bd80e97ee1c26b2ad6def92feda931dc036bca3eb88e70377bcc4f3",
+      "RecipeReleaseError": "da3e16dc84b38265a8a546d32e1eed2afc02b998186be675a55461f30e653cfb"
     },
     "control/src/vonk_control/recipe_runtime_specs.py": {
       "split_option_choices": "acf2449b09ef7dab05b64ea34f5c0d234897160489b7b54fdc4fa6eca0f70b61",
@@ -2340,13 +2611,17 @@
       "_compiled_arguments": "c69448d0c8968bf6a3a44ab513473da526b9845e6aafcca373e23080ee4585e0",
       "ResolvedRecipe.models": "fd049cd5ccfdeff1e009ff39ad8acfb792ef10640640f3c99a6f77ada33014b5",
       "resolve_recipe_entities": "150ba2c07567796e91cd8e5369df2f9a6a0c1129959f30846a7b7b18c5691d62",
-      "<module>": "8f0476baa36b88a5712e1c0200016020168bc08c9febd493a743c42315587cfe"
+      "<module>": "8f0476baa36b88a5712e1c0200016020168bc08c9febd493a743c42315587cfe",
+      "RecipeRuntimeSpecError": "72a7fa8080a1f8b1a23b8d7e8bade92d2d4b6ef607d174c55e84f6f60550fafe",
+      "ResolvedRecipe": "69d9a2c80e54141ea2f6a56354c0fd38a46a46872fdb460efabcb7ef59d2bd64"
     },
     "control/src/vonk_control/recipe_start_payloads.py": {
       "validate_distributed_start_timeout_seconds": "89a074bbc3e81519e9eb1ff7d7cc5027eea0460fcd171da084a67f130d581f94",
       "build_recipe_start_payload": "315512cfd34f38e3a7f10fcee14881e3c64125a09286e905db4123e2a3d532ba",
       "_bind_compiled_execution_plan": "fe5e31d8578dc54b5506feda4466a095bae0b887ac7d7fcc5dd3f3668b39b36b",
-      "<module>": "f98c8bea0dc91ce58f660d961e6b2f526eeafa924e45567a0d752bcc8d334ee9"
+      "<module>": "f98c8bea0dc91ce58f660d961e6b2f526eeafa924e45567a0d752bcc8d334ee9",
+      "RecipeStartPayloadError": "a22538d8edd39a38b79fbb4bb72291b3177eef0a2c08f6e754beb2933864a6de",
+      "RecipeStartPlacement": "1c899b344030d6cf5052227499ec34de00ddd84e65300d33548a1527d30e585e"
     },
     "control/src/vonk_control/recipe_stop_payloads.py": {
       "StopPayloadRefused.__init__": "0b3d3334eb64034366962a1ab22aa341633abfbf1127d3cc7a59397a76dbbf22",
@@ -2355,20 +2630,27 @@
       "stop_payload_from_start": "8da9e099cda0965c0ed846c0e4002e84fc8f63b2720f4bd739f8e44cc23575fb",
       "stop_payload_from_job_run": "7acfc55a9847f274f2269d66a40ba49b82d857ba684de034fa0bac815de81f20",
       "durable_run_stop_payloads": "5cd89a1660a6d28eaedbc1b46f23a14147f3fa8ffe5ad09121388ec38a4ca44a",
-      "<module>": "ffa359fe45107dae878d69ce1e102d4c081c5c69373913ba6d4eadb21bf60233"
+      "<module>": "ffa359fe45107dae878d69ce1e102d4c081c5c69373913ba6d4eadb21bf60233",
+      "RecipeStopAuthorityError": "a239300faf4ed81a05f018a889cc4be1c4d6b063a2d1597c1df18b53b071d03b",
+      "StopPayloadRefused": "cf86db237e75c7eb762016ba2537ac80859cb61605836eee985b6d867340af8b",
+      "StopPayloadInvalid": "ce1fcd29e84e3cb1248b6d2c8f0265e4252f3c35c4d3b39ce1ab5a2dd2a46b48",
+      "StopPayloadUnknown": "2743a165983cb54dcf73ebbf48323e6df4b98a7568949794b7ec67834ecbc98a"
     },
     "control/src/vonk_control/recipe_update_notice.py": {
       "newest_active_revisions": "8635b6d00afde6cf10ecfc82450f6c365c2df20ff4d17cb1e90eef87ac9f79de",
       "_release": "4e4550d3ff3b5a2c1730c03646dbe2754f54cec8c90fa9867ac67105615a1db1",
       "recipe_update_notice": "f5cca9bebc287021812e19859c187f5c19022aebbce555d39dce1e930aaa906f",
-      "<module>": "fff765149a4341e99e73a90e7b106e705c5e9b04dc02febe90a49a32027547b8"
+      "<module>": "fff765149a4341e99e73a90e7b106e705c5e9b04dc02febe90a49a32027547b8",
+      "RecipeUpdateNotice": "7d4fc83e73e169b45e05258ee3255f80f5496e567a2c1b698374b808b40bc499"
     },
     "control/src/vonk_control/recovery_policy.py": {
       "classify": "5a6d9cd621c966ae67aa8723facd16c21a30b3e03fa93f350417c982be4cfc93",
       "kind_for_agent_error": "062ced7554f099f35b2b91e2bef5edbc43338c5386bd72600bb4b48329b6bbc1",
       "kind_for_failure_fields": "c0300e569d5d385b4704f58f99577857cc72c69ac78b785ed519690e85961c69",
       "RecoveryPolicy.next_attempt": "2e195b4fa27a2454b6c22ae6007202d2e8552c865e13a5fd827d0bcc918d9e9b",
-      "<module>": "5a12a0f5e7bc0852c1234974c6b0742e9ac24493d2b13c752037f19345bcd487"
+      "<module>": "5a12a0f5e7bc0852c1234974c6b0742e9ac24493d2b13c752037f19345bcd487",
+      "RecoveryDecision": "7985c27145209e30d5296a6fc51ac9402f2b4f4f25744a1ff95f210669ebc145",
+      "RecoveryPolicy": "5f5d4aef64e962a1f6f5fe8f95137bda6bf2f20b792604e718798e8485a3a727"
     },
     "control/src/vonk_control/resource_planning.py": {
       "installation_disk_requirement": "43bf8bb500a77d17a022964b5be32f3b88a8fb28a7bec0e6b7d5f83b54b81a1f",
@@ -2397,7 +2679,23 @@
       "_canonical": "e97b075a78f5e6f6265abcc039bf09c723cb7ba2f2fcbe6f507bd0bd450fd8ac",
       "_digest": "6f79d88c391b15db9caf0e02c7707e8d7aa84273dfa0cf9711854a684766adf1",
       "_is_digest": "252163f00296a1778a2e47c74ebe0bc53ba13573a837e9bc767d4271d531c472",
-      "<module>": "da2e47e2af9e89772482ebd88b05e30b84df0046108ffcc9bfc565ff72d1b155"
+      "<module>": "da2e47e2af9e89772482ebd88b05e30b84df0046108ffcc9bfc565ff72d1b155",
+      "ResourceReason": "34a88c6dfbbbfae391aeab3eb56a01a3da70b45d11b8a6f0f7cd12d38e31b734",
+      "InstallationDiskRequirement": "2b8885c662adfbde71b1c02140822c1aaa8ae7a21d29f974fda9f6e8ab85a3ac",
+      "ParallelismSettings": "56092944d2c7d61b31b261fd49a50f1115108ae919202dfe206c142bbee84f32",
+      "EffectiveResourceSettings": "a416484c5481605b1420a840b6e6e6945e3f15bc92faf88b72381c82e7c520e6",
+      "SettingsResolution": "5795f589eda3a8dc1b34e581d91a4f61cb50fdbc121335501b802b5f821fba0f",
+      "ResourceEvidence": "f28af0e2f11c7e588b1b53daf4479f2e2d1f77fc1e2cce8c79fdf678cf8db1d4",
+      "ResourceDemand": "38199319f1d827fa4be0ea8706ae44fa98981030e8729f701bbc8b0ccd0311cf",
+      "UnknownRunMemoryResidual": "c8ddcb6805c77fe2152d0ad8d9328b99a75face7c30940fa49fae5e9cb91bc6b",
+      "MemoryReservationTotals": "135243a32a9c4aac3c28d5a832e5f4d17ff8dd0509f4838fa562e013eb2fc116",
+      "MemoryRequirement": "177e58c7fa0889519822f397618f2e1c684dd24193dadc64703fecd55ebf400b",
+      "CapacitySnapshot": "0c406143dfb0e5acc427c5e5f20024b3a29501fa092e080a224d31f8cc60ddeb",
+      "PlannedStopRelease": "717cb1bc658eebebb44d9e1d2dc0b51be55b83d1c72db79034100d4f1ae07f18",
+      "NodeCapacityPlan": "c1515b96c256087d37a293b1d5fac8a2b48cf522f233b0b34550da9b3db7a8c1",
+      "CapacityPlan": "ac874b68a695d430e6db178fdaaf1a463d27a54f101535cd6c79e8754c9d5f94",
+      "ResourcePreflightPlan": "f63089ff3d31c9f4f2aea7bebaeeb80134e0a9c75fdff59cca92b7da78b02507",
+      "PreparationDecision": "3fe634d4841b4421bf34b7cf93a0aeff0c1e8eaac0eff603cf0c0f16c70aadc6"
     },
     "control/src/vonk_control/run_admission.py": {
       "RunPortDemand.__post_init__": "07ce25a83d45ed17266e09ea3622c3345e4578ab19b4477d567bc6abd0370d53",
@@ -2423,10 +2721,85 @@
       "RunAdmissionService._accept_run_locked_in_session": "edbe7963a9a9e0737b338c6416a8d4118b5467f7afa9b0a7292c51bd91e17350",
       "_planned_port_demand": "0ab7b6fd29513642bf4ca8fd3c1a44a79147601968cfe69b04419e1248447e77",
       "_node_document": "64e918d94381c8384dcd7a4991aec2fd6080fed077ddafb97529837a04907d2a",
-      "<module>": "47f9775202d1ac4d4885565a48242ecbc6ed4fd9ea6e76d34636a9f80d6810e2"
+      "<module>": "47f9775202d1ac4d4885565a48242ecbc6ed4fd9ea6e76d34636a9f80d6810e2",
+      "RunPortDemand": "794d4e599d1cd19ea518bdb4d9f7ae9c445031fd1f9a8d0f30e88975aa578f5c",
+      "RunPlanConflict": "c40344f4254e31c46fb99f253e0d0a6460e92f13f5b0490ae915a8698fa4b25f",
+      "RunPlanInvalid": "226a9425d6143481e478b9fb3cf026b18b3515f14dc7ad9c391fbe58bfea9305",
+      "RunAdmissionBusy": "fd396a61e752b757bee8b48fb0b7fc81b2b95fb6bb000d85229769c3e39ce94e",
+      "RunNodePlan": "155a80484c2f0d6d2f41381cb917de351e24e6cdd9db949627f4eb99e8b101c7",
+      "RunPlan": "3613e03a55051fe81b5b97401b689cd514e4cb9f4e4d39b8e0af04dd9ae74c38",
+      "RunAdmissionService": "f12d87a95420556514b82e316a5e429593c8ae7f9b0f5cf919557191fa01ffe1"
     },
     "control/src/vonk_control/runtime.py": {
       "production_handlers": "7d98263518f0d369260071e24ba70460a52b730f151c68eb96fe2fc2652d181d"
+    },
+    "control/src/vonk_control/runtime_image_preparation/contracts.py": {
+      "RuntimeImagePreparationError": "1ee6fc3714198983dad3a498157af9e97d572cd5dcc406fbb2b3f011ad688707",
+      "RuntimeImagePreparationError.__init__": "30125364d3c106246e9646b1344c8c4216b3ef019a2f0526b77a0d0a26d52075",
+      "RuntimeImagePreparationRefused": "6652d4c5de951a10e19dd7e6cbcd11bb510ed45b359fb7f31ec27abea263a2af",
+      "RuntimeImagePreparationRefused.__init__": "673ade916ef30fb92e50d7be9f74595a7982596786efda105060558de4ed6c86",
+      "RuntimeImagePreparationInvalid": "9d54d9d2f6747e10eb0086bcd66a7277a55b2c8639685d43b7bb24be8b18bbc8",
+      "RuntimeImagePreparationInvalid.__init__": "82a21b8ef2f694611215c69c6a077086d7ac4d1eb5546bd295377d96f0babd32",
+      "RuntimeImagePreparationUnknown": "538d3fed882e410e9829b6bc3841eb4d4d159b9cba331c775a602f6c0a39ce4b",
+      "RuntimeImagePreparationUnknown.__init__": "ae98e3461e5a66cac3f104db52df308a18bd5ad92b5bd6ff63ad299ed593b5f6",
+      "PulledImageEvidence": "a8a953a74e104e9a49436ddc2738249b5e9d35f4cc152a96340d43ea18a56ed4",
+      "OCIImageTransport": "d4dfd45cb9efd5f8f8f2862f8123ad217cbd967b7659688da387ed8e2092675e",
+      "OCIImageTransport.inspect_archive": "b6d10b5dd391119d322152a755d696840d0a162d7802ceed24521c748d7062af",
+      "RuntimeImageReceipt": "ef560dabcf79438643af6fd747d7e35285c8f51d75cf7b1d414f2a99bfa3e741",
+      "RuntimeImageReceipt.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
+      "RuntimeImageReferenceIntent": "bb11eb339f7c064b86fd5cb6dc494b30ca3477626c7c67a66febf9fd29173698",
+      "RuntimeImageReferenceIntent.belongs_to": "f92870f2984f3c41971e531ffc0ddeaad736581b62df1f155ff3e846319e248f",
+      "read_runtime_image_reference_intent": "c66e6419faa1be2e59bea07860b0986c55a3a8cb8dce9198cb5b3ac1669cfa4b",
+      "_parse_runtime_image_receipt": "72fef457373c54bf91d8a74f2d83f6d1a173d9377b6641f4d1055697bb8c456c",
+      "_ReceiptDocumentRejected": "ec5a764ba955d21be3d2477eb4e6a0dce5627542dbea3e75eeb7c4511c764c08",
+      "_ReceiptDocumentRejected.__init__": "0e11e142278fa9c05b0dcea2d1367893003c134307be1657f0312a7933f286fc",
+      "_receipt_may_be_newer": "8b1a1d17c06e0a81523dc19cd6152812dfba4e422fecbea81a50af2970e7b476",
+      "_load_receipt_document": "a7ee72f62c0965a5bb65d7234a9a4c5a264fccea2ead01f63a1bdd56a129d557",
+      "_log_rejected_receipt": "4bf59bc24d0ab5ef2efdcf3c6f71a68788ee4ffd8d8f8adcf7a54565951bed25",
+      "RuntimeImageStorage": "d38a76b72adfd644be5571f4eddd82ba5c5ca6f8a128b974af74c1fd3445992a",
+      "RuntimeImageStorage.read_receipt": "02a9b03ffe87bf3b17c47929ae3b49457b597099db453875ca603d808c574607",
+      "RuntimeImageStorage.publication_lock": "cb707a85b3dcf5f3a3cb1c511f8e976536252fe88473b16cd592302f6298c506",
+      "RuntimeImageStorage.commit": "49221ac996c26fd47f4878827006b6285ed7688f2a3f71335a5e65866516a386",
+      "RuntimeImageStorage.existing_archive": "bf997c1cdd959fdab0f111968affa18ec742bbb972fb758fc6a51eda4cc4afac",
+      "RuntimeImageStorage.published_archive_bytes": "0879ebd9d97a7f5f0c7c134c2fe6888998d1c8123170d0521a74c306553ef7f1",
+      "RuntimeImageStorage.remove_published": "bfc669c49f77f66e1320b95063e21c3b765dbd0c0e11f388382044d4a7f5f687",
+      "RuntimeImageStorage.find_verified": "9046e59bb33fda441ddb050ae7e3e42800c63bd654415f64f72bbaa7e577ffc3",
+      "RuntimeImageStorage.find_build": "c63795aa72cad32ded3b58b5b1941c4a3fe9d4ba76d2b2aca0c7b3f570d1f0e9",
+      "_same_image": "4c58c5d9c45636e6aedf88f03391f3dee53e112360b54737ae3dbdee4c4b881c",
+      "_with_provenance": "13c6f328fc101d85bfb5f43f203a325573e649ed608fb7b3913857c065a4b18a",
+      "_runtime_interface_label": "0c0927c33618775355fd92d2294b55434be479c325215a099cfe707a477af2f7",
+      "_wire_architecture": "f3eda1a380617cc13855f69dfdc009e61652f647ce2c633b1452684d1d414b88",
+      "_atomic_json_replace": "44daa0ae0f73f598076f2b06f95c9a35f4a51f9e7f44daf2a13a1b4014dbb007",
+      "_unlink_quietly": "5b0e3bfdb5c144fbab744dfc3ffa3237c7b2378df0acc2bb787a4eda2ca34ae2",
+      "<module>": "fe27b9d9d10e8f7485431f569d29578cd391f1ed82d22e24d2b4acf916df1ac2"
+    },
+    "control/src/vonk_control/runtime_image_preparation/preparation.py": {
+      "prepare_runtime_image": "7c20094084d6ea074bfddb303f56461420a777dacab2586aeadc003f9efd90ad",
+      "RuntimeImagePreparer": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091",
+      "RuntimeImagePreparer.__call__": "623028fdbb49b6b503f2532e8f2e419319ddc2739bbe76696970715c2b0c37b6",
+      "make_runtime_image_receipt_preparer": "bc1d8554ffcf68ac821bfe4bbd9b56f30f0c80701410ab2819840ca590de01be",
+      "make_runtime_image_receipt_preparer.prepare": "7b191902d061461aac674f0d4aa83c9dc606285e39c38f7ebd86aab96e8768b6",
+      "stored_runtime_image_resolver": "c4f53d9e5a45523576d1d177604c5b27a46fbfa430e7e967883ec378132d4efb",
+      "stored_runtime_image_resolver.resolve": "52066d4797e30226c7bc9e0b2cff3f07903dcc2f1d0f3f3f362ef31ac733797f",
+      "_prepare_from_build": "24a45debdef4c76612d837b224dcecfe1a939310261baf127e17358ee319b6fb",
+      "_canonical_recipe": "eac35d6ea02ac912c3d946431c1fa95f9486ef67906e0fd39d778585e983c53e",
+      "runtime_image_expectations": "db199f316850896cbf30e3f78630f64703d20db85b81d418d677042b5a6513db",
+      "_receipt_runtime_identity": "d75295c3f0786d6e263d43c5bbf0579758df172b6c3b141daf66ba1f9d88360d",
+      "_recipe_digest": "777c7fa0aa1ec9c00093ee6e26c87333b3c303df9b1f2a496415117a00ab0697",
+      "_object_mapping": "0e6a072414e4e091d7e20135e909ea5ba4d95a9f607d57df9763601d92a33518",
+      "_string": "d4a2b392f73c2478f23d739dd10fadc00bd718ec9605871f0b63a146763b0a27",
+      "_timestamp": "76ae5ce281add20e8f0b89d98dc62b77dc824748e3f98bfe4b34863ab8cb6962",
+      "<module>": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091"
+    },
+    "control/src/vonk_control/runtime_image_preparation/transport.py": {
+      "OciLayoutImageTransport": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c",
+      "OciLayoutImageTransport.inspect_archive": "09d010ebf2e8e99ff6178772bfdf333dbee861ccaf2dd88e64e7514f631dd0c2",
+      "_validate_evidence": "457b4f87e33c4f8f70e3a6907ee8a3197d981aed8492eb7948aae880c4640288",
+      "_run_json_text": "e047d16dbb0f871b9f8ca95678ad4061f07a670ad6125965132bdf7f5c8c76a4",
+      "_observed_architecture": "ac93f0957b1ab0670f15638c4bb90c71e8b00fddd0641104f42bc43af934f3de",
+      "_observed_runtime_interface": "581e3d2ead65986b26f2d5c96343a5c563495167deda7602d35af4fafbd2de9e",
+      "_config_digest": "e3c74f85165381d5b0647d420aabe8dfe02cc54550fd8c531c9d2195ccd4522b",
+      "<module>": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c"
     },
     "control/src/vonk_control/runtime_preflight.py": {
       "request_digest": "e51b083e70edf88f9fa5291730e46e7563a6a4dadc3ba74e79cd0a44c417ff54",
@@ -2435,7 +2808,8 @@
       "_finding_detail": "4f0eb76b9c2e5c1c39aa634c43027d7e6062ee157bc718bb06812280919dedde",
       "admission_blockers": "b437e1c81edb0b066924e2af95c0221176b25038da393b90376179fa90203988",
       "latest_result": "083b142bdff57192d20a42746d516a9c7e445805799b8cf614b8fe52e99313f6",
-      "<module>": "524c851712ec6c5b63e8c1360e01c36516b3c75a147fd8b2088dbd3be290992c"
+      "<module>": "524c851712ec6c5b63e8c1360e01c36516b3c75a147fd8b2088dbd3be290992c",
+      "RuntimePreflightBlocker": "524c851712ec6c5b63e8c1360e01c36516b3c75a147fd8b2088dbd3be290992c"
     },
     "control/src/vonk_control/runtime_spec_contract.py": {
       "SpecRuntime.document": "eb0730417c6ee57176e33a17fef26666f9ca83a978472319a023c089429d6f0e",
@@ -2443,7 +2817,25 @@
       "RuntimeSpec.compile_identity_sha256": "ca2f0b1a20a47156ddc17da5c22d108d4e23d576067fbe4011351262dead4aa6",
       "RuntimeSpec.launch_identity_sha256": "e4ea04b70bcbce2ab107741869e17ad3a25f08ab11c246d0b03a6d1bf2099881",
       "_digest": "a47b60e7cf5395b5d615e65d1c6debd202f27a89734377f026ce41105673ae16",
-      "<module>": "bf61330cbfce7953f2eec706439650dda5824d08f05f1e2548b5c2d1aa980a72"
+      "<module>": "bf61330cbfce7953f2eec706439650dda5824d08f05f1e2548b5c2d1aa980a72",
+      "_SpecModel": "b530072c66af67343b2eebf538f9ca7e33cf6a79e35ee6725a275dd05ad400c9",
+      "SpecModelIdentity": "e694db8b892c0899140d90dd239f773f4e2c354864fe975c34f0129eacf67089",
+      "SpecModelMount": "5dc6be5fdc0f73e650dcb038b357d33eed1a041adfb91d90d3689c4b277eea10",
+      "SpecArtifact": "8fd756657f4254ad8f301e9d6ae8384bc03b92bb69446463d2833f28e63c6fca",
+      "SpecModelDependency": "bfcb8fc2c38ee66c6f80ec4eccea346b9499cd9ea1cca468963aef6c20a8f21a",
+      "SpecIdentity": "d3772ba3501c0f69fb9962b9ea6522641b6adaef22ac351622e3ef40b871af0b",
+      "SpecTelemetry": "bbdedae26668036ceeb86c812f06f858713302c19a0cb7d2aed02bb153a24b83",
+      "SpecArgument": "b8022ef910836c141946d4a591c64ccd69cc4e7dd80cddf4da7efb03868f6c67",
+      "SpecEnvironmentEntry": "d0cb1c8d19e547289db11c7f438b60cc32c1e4c70958f87fcea4794daa533401",
+      "SpecWritablePath": "dc9e94582df27e5d4a4517fdb4d25d5d3f97a28544cadb2c8feb33d4d0259fbb",
+      "SpecPlacementEnvironment": "cca6d5ce95ca2311d4435e45ee9a268d78e8528f7cf64a3faa9ef4edcf5be964",
+      "SpecRuntime": "3a49d9651a74b41e9eabdcabc811c39d549057a1c9d8574b14ba10a998c882ff",
+      "SpecSecurity": "3099a84475e28e7cf8a174950b8c18a64a1dc736d87fb3eadf0128b51d594dff",
+      "SpecLifecycle": "47c084aff1536ec6c1916f5f981c8bff14e3a4d484457842fb51e3410eca9b23",
+      "SpecTopology": "3fad38182bfc5807e18be675322c1d8f89c63d849171ffbd6380c69047014a6d",
+      "SpecEndpoint": "7a180cffd838177a7726b0dba9b570ad8a275362e81ac41716158fdac5f08c1e",
+      "SpecJob": "30b1e6ce02027ed18957276dd99ffcecaa1252b69a99beadbd18fa1e2e53f384",
+      "RuntimeSpec": "c484ff85743c2dc87221ff710640854c15d0d0119696586f04b65ce2d09286f1"
     },
     "control/src/vonk_control/runtime_writable_paths.py": {
       "writable_paths": "e022a37e6d5dfe8dd0b87af4f6c2fc02a9c763aa97bb8d37d0c78fe5209ff005",
@@ -2463,7 +2855,10 @@
       "document": "73520196b41acadc4e0f76070ddaa91cd608b4198d80b52646abdfc06f91aabe",
       "_compile_error": "7eeb06b234c576c9beb16297581005d5702890d35fa089021ac991187952ee80",
       "_environment_defaults": "21b1bc9006064a63d092800016441cf12d31724ff8cc5569e7b9074e95875104",
-      "<module>": "bd34347757e9edbef7f0fc615628eafe1e97d21257202ba0608fefd6a83ab9f7"
+      "<module>": "bd34347757e9edbef7f0fc615628eafe1e97d21257202ba0608fefd6a83ab9f7",
+      "RuntimeWritablePath": "5e8b10f3c3ac9352c4335ce638233bbfcb231e688d4bcaea56ca1bedc7a9ecda",
+      "EngineTelemetryContract": "28e1d86cb5889d49867935c65a86980bb8cf395b85d56443d49a3b111d054a72",
+      "RuntimeRequirement": "6090bc9dcd459170e15b208c9352dd2e0726c79bdcd1ceb0d29c1fc5ea033279"
     },
     "control/src/vonk_control/serializers.py": {
       "_ordered": "eed22f9c6be46c0048e5ab66427c1588d4e9d99426f110638cc200349005f839",
@@ -2483,7 +2878,10 @@
       "_inspect_compose": "7162402c0cd8531f6b77df27c624d79d5b41103b101b8fa4ebd7934fbd0385fe",
       "_inspect_compose_volumes": "5ec7b07c55702f877da8f7582c0777810ff5812438e6de88c35fb84b5da50476",
       "_finding": "f10b97732fac686bcbd973cebe47ae3d29918183f6f0fe06fee6d4d34ea998e6",
-      "<module>": "1c561f0383d9cc6cdbdabce9521d46ac4367d369b08b610c14be003ffa1c8ac1"
+      "<module>": "1c561f0383d9cc6cdbdabce9521d46ac4367d369b08b610c14be003ffa1c8ac1",
+      "SourcePolicyFinding": "c59487c747a511ec1504ea634237fade4e21d1440e125d6b408ef03c3a3c56fd",
+      "SourcePolicyReport": "d55c0ed7b6afb7faae50c9b66f1b212684d33520713cab7aee8e80abb4c2bf71",
+      "SourcePolicyError": "7be09e9e6e78b6ddc15d61d2317eba2f732eb0d4ebbfec8dd0a4bda6561efafe"
     },
     "control/src/vonk_control/stored_json.py": {
       "ExternalPassthrough.__post_init__": "ac1195ea4516aae010bd676b5ecd2b4d0c9252559504db335baa796a1ab69fc8",
@@ -2519,7 +2917,10 @@
       "contract_models": "6cd6dc453877a4d153d84224a04dfc8bd9a8b54c696242b4aec7ce072a5fbef2",
       "contract_models.collect": "91f99d0e6789437ee61c6139c5a0d63ce456a193c688e33629a92bbdb8af6cef",
       "column_violations": "8c14571e2b764df9d37727bf53690aa2b136aa57fe0226f439b81f9427b81027",
-      "<module>": "201197950f095a3414d5f82601bedc1fa60f9d1296857c4f77a2e502a00ca753"
+      "<module>": "201197950f095a3414d5f82601bedc1fa60f9d1296857c4f77a2e502a00ca753",
+      "ExternalPassthrough": "cced794a559de8bf50cf3827b5efb303a9b8edb65797e222c836184320d0f227",
+      "JsonColumn": "0ea5c9d56ec11bba0dcd642878673ea2bca16fbd3b90d58d15c09c7e2dbd35a7",
+      "ContractJSON": "661601e3da888d9a51788406db7b01b1096e0b6fb5c9b5c4f710e4f5824aaef2"
     },
     "control/src/vonk_control/strict_json.py": {
       "_serialized_field_name": "151bb9bbaf2c39c68e75ee889a325d0fdca084f5e1bc21e865d8e49cf08cfe71",
@@ -2537,7 +2938,10 @@
       "read_stored_document": "074934ee66d2c06722ceff26ae0cb49428b892a4b021a7e05577bdb91b4bac44",
       "read_stored_model": "a324c807e9534031932a991b7c63b3b246034044013c4e15e6132b8c7907dc20",
       "read_stored_model.validate": "b3df94519f48a3c5be0500dbef7c4b3e0d807d4b1280d4297d11ba574c1df129",
-      "<module>": "da9f651b40821543c97a32b816c13b95e532ef9deaab4fdab1f9188a17733a59"
+      "<module>": "da9f651b40821543c97a32b816c13b95e532ef9deaab4fdab1f9188a17733a59",
+      "StrictJSONModel": "1ed531d73ee0d74695e6a3bd847bae2f41fe646d632c89be0a7132d42d5bf942",
+      "StrictModel": "a0de887ce9c84e1f371170aab12d18e9bc2dbd6a762c312d447d57a5dee289c4",
+      "ControllerAPIRoute": "b776f03bcf774d56011cbf8b1296d6e6123b2ab2454d39e6e0133693509a0d40"
     },
     "control/src/vonk_control/telemetry.py": {
       "_finite_number": "0e220ad93d8abd8476fbfe9e581a01e773b0a4caa75949208cba504ef5cadd9b",
@@ -2549,7 +2953,7 @@
       "_canonical_sample": "08ddbbec6d1e365ed997121eb9b03e74b81b890684dea177e98a1b7975540baa",
       "_row_values": "3c047dcefcba083ba198702a104ef780d69820a314236bfbb0540987198a5bf3",
       "_same_sample": "8d4e156dbc683f6273f8747f5f1841770b4f2a54df873ad09bbf15d4fb7fbb6f",
-      "_view": "a82a8def8130465f07fcf0d90b9fe6370790bbb70f89c445c07caa9ccb192cfd",
+      "_view": "27bb6b93ca39f6420edd676cd97d0236923965e936f94a43c00ad88a05f29ec8",
       "_read_view": "6f36b0ee2cfcd63533d6beae2fe8a9ba6ced95dbff324569f197eabcfe0e22e9",
       "TelemetryRepository.__init__": "001959eb9a9b33f78615e0318a70afb396b7e80ee8dac98a93fde729488642b4",
       "TelemetryRepository.record_batch": "d79a2d7c8b31db097940974a35999fbd62c7457b030733f120e9215e8815a6a5",
@@ -2559,71 +2963,77 @@
       "TelemetryRepository.by_ids": "0988611f1fc2e0513729f328b06d5fd02fde4463d9cbb682ac983a496f8218e1",
       "cpu_clock_is_low": "489208e88ca27aefbd99bd9915970c2e2c2f60d696401343f3c365d8a1945600",
       "sustained_low_cpu_clock": "9c698121d26b70000cb04bf735c5ca4a0f97a15df53ee00a0f9d1569feac1696",
-      "<module>": "6d72a87ed3f11ab623700004e2f69f9454fad67421e25762cf8a928a1a9fe059"
+      "<module>": "6ef9895a74049c3417c9c48fb6a3f71e9c6e86ed1b7d21e1002ad5c73ba54a61",
+      "TelemetrySampleInput": "93a8ce6b6ce80340eb1c16cd7bba0d5cdc16b030215c37f6a7d249e02db8bcdf",
+      "TelemetrySampleView": "6cfb54d5e6433629bb630bab59d6c89fc53e13433b2c973aac6b8e0a47caac86",
+      "TelemetryRepository": "593546a20693bdb164aa1d83145081fb0fa5f5d3533326deef55e2e7f34aff32"
     },
     "control/src/vonk_control/topology.py": {
-      "TopologyError.__init__": "c71e9b0000c0921c1f9159940785706090523d4fbd82289a7899ccb6ea9dbc26",
+      "TopologyError.__init__": "911a08899e511152c5aa4b1dcb8376f11e60d4c701458bc02e6a60ce27dd7fc4",
       "validate_topology": "be0ba79f84786f298d61c7e878648469b23a1bacf8c912d38d795fcbd9af5e8f",
       "_fabric_capability": "ac4b543a38a960dea22a7c4347db68d81690152124c29ee3b3cc37fe6cd54c59",
-      "<module>": "36005af7d759d62897af6508bf066ad1c44a05f0bb529a5ee55c296e6e31b1e3"
+      "<module>": "73865f4a7e7c3e74974c61f2c993668d83860708ed00174b5ae5d7d72a13bfe3",
+      "TopologyError": "62130096a12099e7c8ec2509fcdfbed6cd9f55d25b1366dde5d446a721239b61",
+      "Placement": "455b5a284cd8f0d06b43f6c1baf59644c4e61f4991a9302c83b47ec2c1b105b5"
     },
-    "control/src/vonk_control/unused_storage_collection.py": {
+    "control/src/vonk_control/unused_storage_collection/common.py": {
+      "_Kept": "54bd9c1d23a6df7348c457984cf65646c08a283ddde5d0a9f6ab5bd3cf41e36f",
+      "UnusedModelRemoval": "6e9cf6bdbc1265bfe1841d7a7dda317cd5162af84eaebbdf94aa1c69a3df15b2",
       "UnusedModelRemoval.accept_unused_removal": "fb5e5ae95d82c156741324008ab9203667816bafb86bef8fae128b47e509956c",
       "UnusedModelRemoval.accept_unused_set_removal": "848da7f185247b49bc4509647b7f52ef17695440ecb8127c2d43a0c16cf21f0c",
       "UnusedModelRemoval.unused_set_bytes": "dfbb7d5c366d90a4c8a30f26e0ed9f8aaed5298aed01c4eaedb0f652a7c5c12c",
+      "InstallationRemoval": "e0e49a38e98529b3e3652902b8703b9923bbb9c93b09368bdcde1c3c750930c1",
       "InstallationRemoval.preview_uninstall": "0bd1872f0165955e96d5823ba4bc6ea74360a8180b1a34797520cedeb45bb9c8",
       "InstallationRemoval.uninstall": "731c0d6de1b806844d520747923301ae06000786b2dd764eeeed19f702c5ac7c",
+      "ImageBlobReclaimer": "60663ebc8999440753536ae24d7c5535ea84e72fe721e4769be09ba44da5981f",
       "ImageBlobReclaimer.collect": "674e79f2263ea03dcc3af80a1d36dfd69613970b5d02e1a3a3b870558972f18f",
+      "Swept": "438063607c5f1e29f1497db107e7195f8a6db6121044e0efe45b0f624185e2f1",
       "_kept_sentence": "ed107bf68dd453769ac84377ad0ca050c6aa33d8062039b7c4241c786ee9530b",
+      "EvictionCapacity": "abaa93ca7d09ada20d8ed03b0a0f9857e59605a03e22765859c55b23a499a6f5",
       "EvictionCapacity.plan": "f74cc5df25907cee8f6e2dc5791c68d82d4281d5ca5c279c90656c129a5a2491",
       "_eviction_order": "5dc496194c581b71b87b0899aa14af551df7890faf9cca6c45126782a7b4a5db",
       "_freeable_in_order": "947e54fd46e97c2cd369222938444a232f6028debe82ddf5420b98663daa4d5f",
       "_model_objects": "36af47c135b82577e48511aa4e2c64d0c2bac4f12d0674f8fb7332feb5021f76",
       "_eviction_sentence": "ccccf2fcd0074b5193b8c8979975c5156d290ee6df128504ee249d122699ed16",
-      "spark_eviction_capacity": "aa3815873ef59c5bbc9c6c0a696061dc84933377bc9abcc04e901752e3bf6508",
+      "spark_eviction_capacity": "3619f1b08ccade231a4eafd6e3b51ed932c23cae6d4445cbaeed0829e92edbe4",
       "_waits_for_storage": "557af0f3fda5ef61ac5cf153e151be3556ed75273f5adfed6a99158dae9dadd7",
-      "_Evidence.read": "d36cd9de6a11afa70f1c64702d4ea661e24f7b71342620c5ba16411cf06acea0",
-      "_Outcome.line": "a6f8a3367763dbcc73230ec367a46d2fd676109f9d4c205fe09d6eb9ba1810bd",
       "_disk_usage": "26f7ded8bfcf127505f960660eeda9992dff57c6160b6f1956920f765bacf764",
-      "UnusedStorageCollector.__init__": "2e033e6dbba016409a7782eb658eaa3eadd00d3d2476bdb2a036589a6a6c0c25",
-      "UnusedStorageCollector.memory_footprint": "e0fc0662c295ec4bb9a6d63b6a1c5e6e62506699bdd68f843f5a714ba53e7cef",
-      "UnusedStorageCollector.tick": "f096ecb3f339d8e124b8a3a73ef036d80d4376a02be685080ffca601f62376e0",
-      "UnusedStorageCollector.collect": "6fbc1bb60992cb2f668b03f16bdc41af356bd2cc5495caba6ea4e0fa944a24ee",
-      "UnusedStorageCollector.relief_for_spark": "9db822cebdf8852c130fdebee0ecd5716b839d62099f73c11a6b2526c70f0664",
-      "UnusedStorageCollector._pressures": "ec0d4432b685eb8f893b01aed45d4449cc629c5e558f49ce875b98e319841888",
-      "UnusedStorageCollector._pressure": "104f7e487990f8effda54dd35d5cc48a815b7ac0f89b4e82a6ca1dfb43a41a57",
-      "UnusedStorageCollector._nas_filesystems": "e054867066650ac6bd76babd6e7c5fea2fe8c062f759eb78b3066351d2f240a8",
-      "UnusedStorageCollector._relieve": "3aa1afb489b9745d6608856b78ebb35145f9a4ae3a2fb29af43eb6c50d8567d4",
-      "UnusedStorageCollector._check_round": "d59173e6994715b069b686606f6528d2a3568129f381aed328381e50e95a1381",
-      "UnusedStorageCollector._remove": "375fef98b088b4445b7e567c1222620dfbd22a3ae9a7d5eff98fa7ad6f6a8284",
-      "UnusedStorageCollector._reclaim_blobs": "0258c24e00fedf91eb5e3a81d7c7767bc202a4c810b732b6dfb0bff2bb5d7c1b",
-      "UnusedStorageCollector._spark_items": "634e3d86abf65235c4c6278870bbcbe9e9bcff4e0fbd00006269f676d523ad84",
-      "UnusedStorageCollector._uninstall": "1bf83b9127c6b291d772a7d6441b7dd58fedab25fe343862e5e6abb39e0e1c02",
-      "UnusedStorageCollector._uninstall.still_unused": "527e404cd12368ebc1b288467483e5b92bae3d0ee3b2b1051eefcbd3ffa0b080",
-      "UnusedStorageCollector._nas_items": "61837eabf4ba37ec0b6896ffe5233ebc3185716f47fb8db4f2b0ca54ae120798",
-      "UnusedStorageCollector._image_items": "c4b56861e0ccbe5d66f71e5ae9128f1e300ec0d32eec2d5c6014985f79ce397d",
-      "UnusedStorageCollector._damaged_manifest_bytes": "8c7acd8421331fba3519105b4cd9264d9b0abb62dab9bf8159b7213cedba5ec6",
-      "UnusedStorageCollector._remove_receipt": "5fd1a1fe26ded51b2e293f6f944f5dffbc87074e3f4fb024903df38df8528a37",
-      "UnusedStorageCollector._model_items": "272418b7e3d023a308a9965982fd75dceb463a195af84977a34f0c37a1baa7c3",
-      "UnusedStorageCollector._remove_model_set": "dbfd0128a74d18ca8b5be1d317229f906150c500042483b334bb1a07fbfcc486",
-      "UnusedStorageCollector._remove_model_set.verify": "4bc846a0ab7eee901418cc67c5776efe94a23bf0bc0e276b1a0576408967b0e6",
-      "UnusedStorageCollector._remove_model": "d12431268939613b0bdc38ade766f5645b5be73b0af5abc29dfa6c5ec53bba9e",
-      "UnusedStorageCollector._remove_model.verify": "cd9789c5a3a376bd62e2d4bca13228ab93a678a3057636cdb55ab17ac18033c0",
-      "_installation_kept": "2d23b668ba78e13975586f52d31a1abc630f276d1f848910c4c1e4ebfe9c15b3",
-      "_points_at": "b0a401e1b7525aae26ad8ade34286ab10eb44b8b24d8e146048cde7b3329f5b0",
-      "_installation_pointing": "1f1e7c5401ad175d1ca34a5f0b4d1b298007e9610fd96afb7080d87d45e95d1c",
-      "_installation_last_used": "2cbbf0a3f9bdbc45af8e6f80d4931b14904dae60291c89baaba933edf87e9136",
-      "_applied_revision_ids": "aa30d91fc729e48bf4e3cc5e00a587fed6f06f89025054dd726ad85a002c7080",
-      "_model_kept": "88ed6262ed01a89b2e33976832795ead22263d83c5019eec6ba9c4c62bd3709d",
-      "_image_kept": "a2066f66c4249c2af03657d8370480ab84dc69916d96028bee231aa61b63a108",
-      "_latest_snapshots": "c7a0f69fb8a83cda0b8923302cd85c711afc9b05c6155251b6fdd7f6eed0ff7a",
-      "_spark_settling": "5d3e2d2b6b95233e51b589835ab8605d1a3e41cffb68f4137b8ebc9045a0d97b",
-      "_model_removal_in_flight": "e94dea1a120b883f57e3f1bf8795f5effb37ef07dafc46aae237400d8fe69c69",
-      "_profile_pointers": "440a502f4a325eef3bd683528990c027bc75d7f2c23787d466746960a7c2a9cb",
-      "_mtime": "0ac538a9601eea7e2aa1b65d6a6389af0531b2b530c43645a325cf10bd3ba8fd",
-      "_code": "b2486f5b86056b3c8a7c0a3ff171cb365d4ed20612e26ed3e0d2d3b59950d92d",
-      "_utc": "9e25fc48452b46805ba4b789f09e9695d425d77d1755508846d9b824a8533ec0",
-      "<module>": "4abfb63eead1f79648fb903b62a17248e4294771e989916efca180edfe494aef"
+      "<module>": "fbef583bf497f146754551f23fc1c9fe4975199517549cfc24b3210341aee0f5"
+    },
+    "control/src/vonk_control/unused_storage_collection/evidence.py": {
+      "_Evidence": "1cc5a0490b823cad83454d458cc6c92fe4fd511bb963783839a502be0a13d8f7",
+      "_Evidence.read": "d36cd9de6a11afa70f1c64702d4ea661e24f7b71342620c5ba16411cf06acea0",
+      "_Pressure": "8094d87d57145313abdc93ab93793418298a86c0b538e312d5e098a384b6b184",
+      "_Item": "d6525348f15641d0f02a28f950d77dfa2d5812fa12fb2e7216155ad6336f6014",
+      "_Outcome": "ac8ef4596c5c3f1520746c45d42a9bde59a2d1222a1dd7343d9e16fdb6a8702f",
+      "_Outcome.line": "a6f8a3367763dbcc73230ec367a46d2fd676109f9d4c205fe09d6eb9ba1810bd",
+      "_Round": "44edce9e12566d5719d110721364f092b7adda3e851687d2a8d16053d1040efd",
+      "<module>": "0200c46f43345d1736b769a1cdddc5e0b2542e97ca693283c7ff503596af22cd"
+    },
+    "control/src/vonk_control/worker.py": {
+      "WorkerWatchdog": "aec15900ed344989299e9fc74f3b13ab5f636eeae3f51750aed774356dfef950",
+      "WorkerWatchdog.__init__": "637ed8d7ec3a6a559df39c814c5de3b0ef421bc2696cd2bc66ba837f871373b8",
+      "WorkerWatchdog.beat": "7f01b6080dba4d00b93796719c48f04e3a630058ee178cbd5c6970ecf2e98d6b",
+      "WorkerWatchdog.stalled": "71d5c4bba45b02767bf934aec482d7fa9b4e89414255ecde6a3347e064ef0a03",
+      "current_worker_instance_id": "881324cd1b006a8d763eded0aad65a0ef37a4ecf44521b33f91a802c258fb8f5",
+      "WorkerHeartbeatRecorder": "d321445ab19c91054518a99643cb041e032d3b0512680ea28e0f7ca4e544066e",
+      "WorkerHeartbeatRecorder.__init__": "da38faa499c085ebae4d13f89ef89657d02caf28ba8f6b13e24d0c211554f926",
+      "WorkerHeartbeatRecorder._register_process_start": "55b1f5bf3615b176cc3d436ec210d5588992f8a149e8b44d3433826898f31cb0",
+      "WorkerHeartbeatRecorder.completed_loop": "55416446e05ceba704aa748402a4407cd9a7150853d65eb8ab33b2330b183b2b",
+      "HandlerRequest": "91d66d00998f0de70c95d04565e3215add206cde04991e9c2acd605fe7795404",
+      "HandlerRequest.__getitem__": "834711e5b3551eab2efae5db014a2ea93e59ca4eb4999f755e3688d2a9141a66",
+      "HandlerRequest.__iter__": "9e38b6016e944bd23480eb1ba63d4ba6d722329301e96245c2a2d153ece5f288",
+      "HandlerRequest.__len__": "ff9889616933e5bc7518b3667629ea9a18199ac6cc34fe317ee582a72d973284",
+      "Worker": "b8b191e2946b749dbaf7d502ab89d175387af5a9ebd493c86d3a9df7a3e122ec",
+      "Worker.__init__": "4b67401e62ab77b31985a5d6180db60d995871229b7d5e315d6bc7ebd8143f10",
+      "Worker.close": "e961dca5524d04a90f2526c930177097ec8c42478883eeddb79ffbfdc4047206",
+      "Worker.memory_footprint": "800ba0ae6e4475a40671df3ce5f717af3b5f8278ecd474f1adb8042710f468b3",
+      "Worker.run_once": "b4426c335ee70343cee4c7a08fc306c52f753914744331c03acb6245cff26b85",
+      "Worker._run_housekeeping": "d3abdc85a33cd1c7ddfea9e53af042fbe5ae8c8633d16dfea8b1e5995282e6cc",
+      "Worker._run_model_cache": "71b5e55a99203d0981a8ab4b9f9cd931551506c0005e26fe1758be0fb3d3c5f3",
+      "Worker._run_generic": "2dd47b9bd5040ae1a719b5aa39aca6b9390d39fcda8273fd5fd0bc7f5dacc12d",
+      "assemble_production_worker": "9a2fb6fe2de2f24b9bc18c008a0a937c8942af8b0345fb8c674555a7995cfe47",
+      "<module>": "42cf5201dff1769a075ccdb2fee521f8af1c4d064df0e5bd2e5c95ce7b58a3c3"
     },
     "scripts/dev_agent_wire_linux.py": {
       "workflow_job": "85197e66f0166681ee8bbe745e172176c531f5fd35a8157dfc82932c02a2f1f7",
@@ -2645,14 +3055,17 @@
       "parse_arguments": "b7b2f6909e3630b7bf72952843c42b04cbf041c2f84a05393c60814acd7ff329",
       "main": "323f4dde5b990bdca3558941b3b8cb3fa037037f6d9f29d9fe152172a5409db2",
       "run": "647fec5c138abe347131c5fb1dd543810d3effa04b961a67b199b0e5fb3d7074",
-      "<module>": "3386186a5b67bcb982baec649fddcc93ce6f5616a03343c9a6fe828f0b522b9e"
+      "<module>": "3386186a5b67bcb982baec649fddcc93ce6f5616a03343c9a6fe828f0b522b9e",
+      "LaneError": "d50dd5dac2f58b93a076fc2d9af24f1806068d757f6e9ec78f7a7cbf9b4695c5"
     },
     "scripts/development_slice_client.py": {
       "validate_base_url": "28112cc0fe0ea6c28ffd3424313419f088b6ab3d04c7cf59703c972e959eacc4",
       "Client.__init__": "93dca0b4e94f421926a701848342fc129ac9ac04cabe3e0f8209fab66277160c",
       "Client.request": "7a31588f3680ccdc0b59adb64c1cc29bffef6b37567d2a5624e02198025a192c",
       "require_object": "a476630cd4cee0f767b8f62b1e721fc05a45071c3c3d53d96e4e08311499be5c",
-      "<module>": "de729f1f289b8561ba5e24b17e61319f74cba9f7465078c8fb0da26381b61b02"
+      "<module>": "de729f1f289b8561ba5e24b17e61319f74cba9f7465078c8fb0da26381b61b02",
+      "SliceError": "3c62aae091da8a686fde1ab59455cc197542b5792f24db26f20c93b002cc9d26",
+      "Client": "a5642a2d0af57f224acec5998c9c031dbc428f72a546957cc0c2a870fcd4bb58"
     },
     "scripts/spark_lifecycle_contract.py": {
       "_object": "02ba464eeb82b0f0676600986023f94417b3b9b3e567a8088d03216c404efc50",
@@ -2670,7 +3083,8 @@
       "_validate_canary": "225302ee76f9988359529086f6c8989b26ae776db1a7f0ced8b2c3e2b432e4ae",
       "_validate_arm64": "140dae553e12930161bb6a60fec32b4367a1b7d189982816ef8993fff780e2e2",
       "validate_lifecycle": "267c10f3ab0a70e80e3b2b8b68ff18a958dd91dc9bf1c526cddd577457027040",
-      "<module>": "e8f6935859855dae4434c3e0512317a0af9247bb8087a97f3dffde4c98252e10"
+      "<module>": "e8f6935859855dae4434c3e0512317a0af9247bb8087a97f3dffde4c98252e10",
+      "ContractError": "4893eb8174737f38f8dbaf33edc83599572c88dd19d7411e62d50c97f97b0df3"
     },
     "scripts/validate_fabric.py": {
       "parse_nccl": "427762405794060107fa42c4f21e348175bb88a3a4fd26a7182949aaa36e9b7d",
@@ -2704,7 +3118,14 @@
       "run_preflights": "b801129bdd4f7a9bfdd53d036ea0cba472ec5320b7342c82e2e36f3fa9c4715c",
       "validate_expected_nodes": "45d5b6a26b4a99f28a7e12a022c0d5fa75046050bde24dccd490839f4cfaa7ed",
       "main": "d431107bc0a215f361d94f9576dba9eb956f1b7d5902abc8fc33c87372d33bfb",
-      "<module>": "ba56e1e901571062acec3f6bf06333ee20b846361d0dfd6d8188e11c37216b0f"
+      "<module>": "ba56e1e901571062acec3f6bf06333ee20b846361d0dfd6d8188e11c37216b0f",
+      "GateError": "b7e446b80901d42eb7f90ad1a38534ec70e529309075cc4a13c53259f50c01d7",
+      "NCCLResult": "546a4bfc36c380989092f713107468a339e0b6f89c8c792fa1eed4dc1d1848ab",
+      "RDMAResult": "f077dab5d51b545fde145c4eefb5b69d90a7022978e793f6ed5d2632441df264",
+      "RDMALatencyResult": "12e62b7ccbdde7a12b61d68a45ea387b57acead1236808c886583770fafe23e2",
+      "Rail": "fe7b044ff7feb12ac6950f9145bc6a2ca3f727a2eee0a0aa40695049527bccf9",
+      "Host": "28d5153cf58b7601f35666a89b6ad0b4c0a4a99be47133cfedfdce20143b1443",
+      "Runner": "bb3cd856e708ba9e10a9cd292be84f87d552109428fab072c5b371ae7047b6b4"
     },
     "src/cluster_profiles/build_identity.py": {
       "current_build": "db7519aafd9ce830afdf47525756fb8026c8b77876e66fbb0e4fe54acba7614e"
@@ -2722,13 +3143,16 @@
       "_control_error": "b8773e16ac7a5bd483c89b76167b34aea98b28a808cbc076ad779a7c97af4ded",
       "_plain_language_error": "d27ff2e7040b99cfa823a9c7100b1c74277941f0e8f4a7c845e75e275e94581e",
       "_plain_language_document": "ccf01b4b0e84e52463b672dd24a5344d381d3f4162174ce33473ea9c55da2f79",
-      "_emit": "38b2cb8efaf9fede647e06fe1f6a83b9e5220a88b1ca63c2de126af741354279",
+      "_emit": "ce8150df56633206d4eda9bb106635a7f03b66ebb4c8a5a54d0f1d63c6116b3f",
       "_json_text": "629e9fd37ced98d4daa54a1c3ed067928e90a9479b8c5cbd6d1ecf0b6ca7f731",
       "_bare_group": "129af4eff383a724eb038c80ef1ef6413e974ef3f955e7b91200c6a50a05fc06",
       "main": "a2ea82cfd1d1dfd4f166ecfbfbdf528f7eaa7b433e7bee51d6b17f924ec35106",
       "_report_usage_error": "57d086f5e67c9eb6aabfa055b560b549617f7dfb7cc6fcfbb2a6e3ae25ee9152",
       "_main": "694f688cd142370c904ff62fdac3d4db1c9a3317a87bd8e6411911fac6d0f199",
-      "<module>": "3bd5914276d46d1050c86976d0578b24677ac0d07b0b99c6fac7bde16bd580ad"
+      "<module>": "3bd5914276d46d1050c86976d0578b24677ac0d07b0b99c6fac7bde16bd580ad",
+      "_UsageError": "d9cbd976db8a48330801c7c503eb517d2a716fccd24e51a6a310b29d3d057185",
+      "_Subcommands": "1475acb397b3eb129b9be8acbde67f3c68d63847c6420ac2fa733e606cf88e8a",
+      "_CliParser": "72b3822d24362f152dfef5dfebdcca90f719559a0b275049e76338bb70220d6f"
     },
     "src/cluster_profiles/cli_artifact_jobs.py": {
       "ArtifactJobClient.request_timeout_seconds": "d2151d77796e97a822bb5fbd5dfc1c58af8f8b0d287e46f0e5734b02041f7cef",
@@ -2764,7 +3188,8 @@
       "_uuid_argument": "e33a5d2df2adc1a91a19ef293b9075c485c7087247adfbf0edb7bf4866a8d6d6",
       "_stable_request_key": "7a28c06cde2583055391ef4010f7a3799f4d8ea9d8823cd8fd8ed8662be2be1a",
       "_may_have_completed": "3bd4241e0cf14d5d36776adf3f20e3b3f93e4eb79dad107677ebc6e107ec2ad8",
-      "<module>": "db407463a8a0d113b52c10bf200069f3df5c45b014bac3e9c0eebad767e8d923"
+      "<module>": "db407463a8a0d113b52c10bf200069f3df5c45b014bac3e9c0eebad767e8d923",
+      "ArtifactJobClient": "9c88787c969ac38682e31b945d68cbe380c1c3215403d622f8e63593841b3e94"
     },
     "src/cluster_profiles/cli_files.py": {
       "PrivateOutput.__init__": "58d395f9ee4ce17e0244890d3713e5673ca048697d89d50e47eaaa58786d79aa",
@@ -2777,7 +3202,8 @@
       "read_json_document.unique_members": "9611c7715e1ebf2ad93567b6da9b1d7ca64f1322a7a71fbe96e08b49feb8e341",
       "read_json_document.reject_constant": "e70e90548999b7d12f5a95f87912e089e0fd57faa161575768490f9c5cb5f499",
       "write_private_document": "b246747788e008b5c4a98ba60c2fd1e7c11da28208a96e64ab0d510409afc2d4",
-      "<module>": "1895d24ddb726b50de6d82a0139ef2ed7d54d384ded6e6a487db3c731a6af9f2"
+      "<module>": "1895d24ddb726b50de6d82a0139ef2ed7d54d384ded6e6a487db3c731a6af9f2",
+      "PrivateOutput": "1895d24ddb726b50de6d82a0139ef2ed7d54d384ded6e6a487db3c731a6af9f2"
     },
     "src/cluster_profiles/cli_outcome.py": {
       "Submission.document": "4f2171c5086bcd0b68ed58765310aea18889107ccc8ef66ce57a69feb6dd50e3",
@@ -2787,7 +3213,11 @@
       "CommandOutcome.from_command": "45db51a3ce7745c48164d52b738220aaf134a007b0a1d2176c998fe492fad6a0",
       "CommandOutcome.output": "1c027624751e4acf4f71606b9454fdf09ac3d0ae038fee2305e1a1ea9073c877",
       "CommandOutcome.exit_code": "35953186b10f3ee8ee19d95dbd47bfff8cbf642e7c16841d88786c11ab8a9de8",
-      "<module>": "086f99c311efd05257fadd5f3669a48002ae5aee4f10d96254d6ceb7dbd9a746"
+      "<module>": "086f99c311efd05257fadd5f3669a48002ae5aee4f10d96254d6ceb7dbd9a746",
+      "EnrollmentDeliveryError": "4fb7f6b3850e8e5b63153dd74e461616500cf3892b434e21d60a97d156bdc571",
+      "Submission": "ce2a4b134a341a8336137370863a3fc37a9d4f5e5cd868fdbd224e34d1fafe81",
+      "Observation": "6c080bfadac2f3978776ddd53f625e498e043675a24a9577df6f943dc8fd00da",
+      "CommandOutcome": "f621975e5bcd5022995fbaf0bf9cb8ecffa8f233df5b5511aea5e96c3bc5ccd1"
     },
     "src/cluster_profiles/cli_render/activity.py": {
       "_age": "3f6a1b71e2a8566496eafaa4f93901dba62fb4df9eaec45dbcb52b4f73e80af1",
@@ -2890,8 +3320,8 @@
       "_NoRedirect.redirect_request": "a1ac9cad20584fd4e6d29a39e9140686f49b153d1c67f9d4e8c9cee8799a9949",
       "_download": "d8844ffa6355de3df5fef728eb95890b86e62350bbaaf9db3f3b785b00ef4931",
       "_verify": "426826c374dc1fdf2ccd2ced0bfd8c06528dc0d0494595919a68abcf4d5674e7",
-      "_validate_release": "7bf31e5ea073bfffdb7184fa07f8623bdac6b2dd7d2c5381f9422bbca8f6df21",
-      "_signed_release": "c50898ccec90e7ac80f329d75eabe3e53dce30b2b03dbbd3bea4c833e0604731",
+      "_validate_release": "367f5fe603cba6bb0286a90e6e95bd35793c695b36520440d31c2de64ac9509b",
+      "_signed_release": "257498a3e564789ec61e621baa3506d5cd7f31a755a4bc72f0c48e483cf3e22e",
       "run_update": "37aef325494d05a2e45cc6aa2bddc5a72021e7d46ff6f399831c1a3caaf6c164",
       "_notice_context": "47fb2665d2aed0c6316fac89a4e7910cf528160b92a1402967ca0a0294c98b5e",
       "_notice_record": "3a67b3ab5a054b93a09a2bb443b94ccf15d9974f2321b52527ed31d128546eb0",
@@ -2904,7 +3334,9 @@
       "background_notice_check": "54215e3242ae801bb0fee237cd3c018a15f346a9b3ff563c49354ea3faae1aad",
       "_notice_timeout": "d389abaf9d6080c267a24e2e0bd3aee6770a6b45fd7d8b4232e5802f241b53f8",
       "_background_main": "da0f15ba3d62efa8b61fce83e4f07becaeddb94152c976a28813b27dfbfc6113",
-      "<module>": "47700860cd4ec9b536f326cdfa81acbfc7e124840f81ac7a39fd669d9bb43e72"
+      "<module>": "47700860cd4ec9b536f326cdfa81acbfc7e124840f81ac7a39fd669d9bb43e72",
+      "CliUpdateError": "46d4f49bec4db7488f0bc483b98064fabe703f3439df21a1c2ac8a4d25238d61",
+      "_NoRedirect": "48f7a1ab6c5f618d86c22cc63567a73f6e4ebe18da4b76f8d64f794f33527f61"
     },
     "src/cluster_profiles/control_client/client.py": {
       "ControlClient": "b5c7e42f9eaf3aeb90c9ae0cf0bb4be61d3ef212bdeb87baafe138a1a07c6884",
@@ -3116,7 +3548,8 @@
       "transport_context": "e98199edb85ece1c5db529a3211f7c9bfb6a5ba7ac74ef26a3a797841a11abaf",
       "local_io_context": "3c57031d85f7b35a61341b2a70db44aa3664a60c59e233a90e22c274d76f82aa",
       "protocol_context": "6bb7c1cd768616838f048b3313d4a01257f484130b380c5f45bf60b4b013874c",
-      "<module>": "31684b3764bcbd78f15d2b75f20290852de0c72289c7dcd1656c67cc46151501"
+      "<module>": "31684b3764bcbd78f15d2b75f20290852de0c72289c7dcd1656c67cc46151501",
+      "ErrorContext": "adfac37c6a73b8e9efad1f52348fd4127831e7163c54d725bb8665198fbeecfa"
     },
     "src/cluster_profiles/fleet_qualification.py": {
       "_canonical": "211061861edd0e0e841b77edcee01b8c7a3fb8ebfbe432e3f7bedb6a473ec6cd",
@@ -3132,7 +3565,10 @@
       "_assert_service_response": "7d315ee0f247acec79e8eefb376a4087722cd385a5bd6ed77ec16186cdeef9da",
       "ServiceSmokeAdapter.__init__": "43b9170e25594214f7b4f9f54309be6a76ff99c237b62c8c8e8eab45202438a4",
       "ServiceSmokeAdapter.run": "a49a79c0c0e3aa07da4b1852dfedf22e8e9aeb9d0d27bdcef213e0133ba5fa43",
-      "<module>": "bcf2385c4c1f89491181182a04f0bf3ae75e455a3a99abd593766cc325a4f847"
+      "<module>": "bcf2385c4c1f89491181182a04f0bf3ae75e455a3a99abd593766cc325a4f847",
+      "QualificationError": "9141b1e61953e77294daef37000ad181ea94b353894ff2da1d03368f1271eb8f",
+      "ArtifactJobSmokeAdapter": "f8f33e85ab03f1ee01c50270a11419bb6568289ea70287aa1177b3c352fb101c",
+      "ServiceSmokeAdapter": "054ab6ef4ee27aa8221ab4ab8d25c38dbabb10ec6e2a16479e70abd1336cd895"
     },
     "src/cluster_profiles/fleet_qualification_campaign_cli.py": {
       "_validator": "9c7b0ca0b00bd3eeb9c43de1fb2fb16b3e61a44ba739916f2944217cdad23b03",
@@ -3172,7 +3608,13 @@
       "_notify": "7713b6dcd08e7d684160c7e2008294ad44852af084ab8e617e0eaf942f543336",
       "run": "fed35e5fd92b08e8f540a881c5b059070375493ef979bbcc4810aa9ed8984c2c",
       "main": "1944067588a9a7df52dcc201b53f5c9c203d8b3491b6a4f711dcb236ea2397d3",
-      "<module>": "8d38d011903f8731bba64078783c484edfc4afb04ed1e487e52b1bfb7b84047e"
+      "<module>": "8d38d011903f8731bba64078783c484edfc4afb04ed1e487e52b1bfb7b84047e",
+      "RecoveryRef": "1e871631d5996f60c6b40d1ef371e0199979a1359b014c95b051499f652c5a1f",
+      "Row": "ed80d3ff1aa4d12fcc78378ebd423592631338cb370c3dd1c7c209a792ceeb1a",
+      "Batch": "79518b417418e3182c4aef9e6d9018048ca7defbc653a2353c1b5f9a36bd284f",
+      "Campaign": "cb7db2db14b9e2c6db8f5c16532ee23b0eb3f957938e059c1db4a7ce0b5bb120",
+      "Lane": "4dd44ecfc13ed8f15246e10a95b048af3d1f774fee414972077f79dc5021aafd",
+      "ResultsLog": "92ec2c10db340bbc484c59cb4cffdb99c087708e732a6d15e6907f97e6a62b35"
     },
     "src/cluster_profiles/glb_validation.py": {
       "normalize_glb_json_padding": "124cdf7ac40e9a23ca2fe3b384488f4e0d6829b1a68bb4f7a2e284ab9f891b0b",
@@ -3202,7 +3644,8 @@
       "_triangle_primitive": "2249d25062aec58d907b64b015d237ce837a53393f90d5458ae61a142caf6ef6",
       "validate_mesh_glb_bytes": "6af95e0842276182227882eb2eb7dacec2eee51a6ee37322200cd511f7133bc0",
       "validate_mesh_glb": "3bc5853410c8bffe7021e1158d715eb7d4c54340f1b9442c4195927b38fdbd11",
-      "<module>": "0352a53df9f01265a48fa74f685ba9cabab2ae19f686ac7ff3a4cbfa4bc822ca"
+      "<module>": "0352a53df9f01265a48fa74f685ba9cabab2ae19f686ac7ff3a4cbfa4bc822ca",
+      "Accessor": "ca26286f3defa4f5a556795816e9ab86db90d0987d4213be6b11b2e7b2570c78"
     },
     "src/cluster_profiles/observation_transfer_reader.py": {
       "ObservationStream.read": "e82646b127ee8ee647e3bdd3d311f49277e58fe52fa0d45bb6c4966a95b482f9",
@@ -3210,7 +3653,10 @@
       "_unique_members": "d202b3699ca969ee713b211405a021983e889d7e745bdddab18af051663987d8",
       "check_observation_deadline": "6432dd9db4433571d58aaeef4d7cfcf06acb451b4b491ef97ee9264bce419182",
       "receive_observation": "5039d9627c2fd52ccde172632e6438a21e018043b6d8c2f6a5de2c6ec501f829",
-      "<module>": "0be5bc60272de5cd492a28a1d3e239f73258adec41bcf34b7c27754b0d8d3414"
+      "<module>": "0be5bc60272de5cd492a28a1d3e239f73258adec41bcf34b7c27754b0d8d3414",
+      "ObservationStream": "194a09918b61a6409ac0f16062374173c598cef21d1e1d0432c365f063d1678b",
+      "ObservationTransferInvalid": "45b21c8a70efff9aff66b923c9dc6899b5affe20143b5c2929f7e96f05fead19",
+      "ObservationTransferUnavailable": "f63f7041259f27a452d4c5113c5a261eb218a78bf04dcdc987a0583b35d2e256"
     },
     "src/cluster_profiles/qualification_fixtures/assertions.py": {
       "_parse_assertion": "56c13dd965480315571806387afaaef1c75207d585e94aca5777c1054f090406"
@@ -3294,187 +3740,9 @@
       "evaluate_job_result": "89e0c75d700d9884b6e0d621a396a22d2337a7b8b12e5d1231b0f877f34f75a0",
       "execute_http_check": "b0008cc70f07db2b425d7bcedb8ce5604e36c3ad62e1c2701b9f8a831e3f1b69",
       "execute_http_check.read_bounded": "123f71e3bbd439e890cbefa5b119d191e71e309ddaba1954662c94db912fe6c8",
-      "<module>": "1b725250dde0e805bbd31886adcfef39f003cb10d38e2dcddecfe6e06c48406c"
-    },
-    "control/src/vonk_control/api.py": {
-      "_bounded_error_content": "b316ea52ec7e6fbc28d5e5ce8f99bb546fdfa920d740fd309c5c0d86c01b579c",
-      "_validation_detail": "745c89073fa43458db5bf9de88fde563ccdbbde6fe18abb26ed6f1e8a55e5d5e",
-      "_invalid_login_content": "8cf9b0c37c552731c07273e9c4d5b4ccdbc8ca34ed404669fed3d0be72ed0f89",
-      "_catalog_error_content": "7833ae66c2cb5d810ec98b61c009ea7b9136c22f8a8d649b782ed7d9efe8829b",
-      "_http_error_code": "3e1c23db474d16ec90b102e5d9b21983a9ec0db913cc44bb9a4f34b58bcfe43b",
-      "_FleetEventStreamResponse": "e09a1df929386935495285db0399ca7731119598473ce7f8991ae09fc4cac8b0",
-      "_DuplicateJsonKey": "636c783c5194c52824877818a509d7face7c82ca93b68ff620c6fffb4e23cfab",
-      "_RequestBodyTooLarge": "dc28b0a6892765ca7d77016861aba525652ec5c17ee4b084a9b23217334c8d11",
-      "_reject_duplicate_json_keys": "6f6563c25431a91bdb677e1318a213cc4f8936047798f0c15ec45b9d3799c036",
-      "_log_request_failure": "e009783878e5b77610aa06aac7851095200409871ed0e36114269f2af4bfead3",
-      "_log_agent_rejection": "e5b55f4050190ba8919ec8f9fa8712770f69c2f5cdc4123934a255c991fe469c",
-      "_bounded_request_body": "860603ad736eee48342c74372a154dfc337e82b14c8e836ac77ad370a3c533ff",
-      "SpaFiles": "8a44f65e1425e596bf7f2cf6f1388177dd612d2860739f571745f117b46bab7d",
-      "SpaFiles.get_response": "f96c86bdd256f136cf53d1572cd381b264e8917093e61a234d60f27420af26a9",
-      "JobQueue": "5576b326ce671cca79ba8a53e84a41810a37a40b2bfdc8fa71c59a9478f9dffd",
-      "JobQueue.enqueue": "a8b7d79abe0dd38b8050c75dc3dae85939d51459d1c81990149c819c0514971c",
-      "JobQueue.get": "e3588c3634d46238df176afa6fabb6056122e2ed0383190c2cd08bcda706a4b4",
-      "refresh_fleet_metrics": "a07d3a2bed89706b23d6b048dda4db978c12c78b3f21b25b6bc63d2aa802ad6a",
-      "create_app": "546facbc68e166f9e7a6dbc072a22a8f20d930a1f4bd0c725d019a0477ca93da",
-      "create_app.canonical_agent_http_error": "653fc6baafa5688c50361f374667ceedab6f0edb35f200d418bc58282c6097c5",
-      "create_app.canonical_agent_validation_error": "690a4bc610fcb3492536a9a4634bce03da1a939ea5b3084b6c1f0de24701b42d",
-      "create_app.telemetry_request_boundary": "4ad757859f145d52d4710b622a1da76bed1bd1f7ffd1ffe7986efafb79e1d0ba",
-      "create_app.request_boundary": "dea0683672054081e08434f4d3057df9732017415a05a162d4f086f9dda3fcf6",
-      "create_app.actor": "5488b053a5e1eebf48dab66b7f73d4ca2cda976497e605bbd3e806ab22910196",
-      "create_app.require_mutation_role": "aa8e90f8ef2e82a18730ef9d5a194c84a8efd23551a0546f7a56a19c173b45c5",
-      "create_app.platform_observation": "84f8724197ddc097cd942356b3d23604f69a1655f77656d7982af4582add7734",
-      "create_app.healthz": "a8ab9ad9addacd3baecdd415f5f74704ba0d9f5eeda083a8725fc061290c5360",
-      "create_app.readyz": "284927f67077b87531be5e11f8ae017e9a147f1639d1b2f63925a3dc08c688b3",
-      "create_app.platform_metrics": "012e93e35ccdb0b943679f26b627032ae351abdf0dbb2f53900c8b7463f89971",
-      "create_app.fleet_event_stream": "43d71b7a25aaab33528874a5632c5e5922b21b08371252b573cee60ee5977128",
-      "create_app.activity_detail": "8412f0f9369c7524c04523790e998674cc7d3770e6116372c3b70db0ebcedec7",
-      "create_app.operations_view": "43b82b31bc52f0215d3fc7332ff823479f55dbbb5f2475ac5394bb93fe56cd98",
-      "create_app.operation_view": "4ec8e93665d6efa5fb7f3e559ac901eea65b63e2d78548f1c8983a231217b13b",
-      "create_app.job_view": "754d9f4c9f68c4126defc8680f2bdbd2e5c05a5459c4b2efc9c40b039222bbcc",
-      "create_app.resume_job": "7f58e9155e4110534855ce1e7074124b65d339c0621845b27eca7d9063063bd5",
-      "_close_model_cache": "9eca711a4633a9cd077f803b4fe7d91ab554e4c0baed874694524a381d7fb36f",
-      "production_app": "1c5260449fbd58511a6493f506b0d26422a3fabe268fdce6a33a85b6f8327041",
-      "production_app.clock": "3c87c7fecd6efb5bf9a23b9256ee2cf26c0be1d7b831864e8bc856c1538e0dba",
-      "production_app.build_cache": "948c3e7d9b1ac2a7754013491fbc75a505a55c2afc4f73e7e2c4a3ef35628054",
-      "production_app.build_artifact_jobs": "4c060fb9071db6525f6b00b04f34bbdf69feb911acdf0127aead9c8c0832cc48",
-      "production_app.consume_agent_result": "7a81b5bc855cd0ef6226f12d62d761eeef766e27f855376c92026e359d2a50f5",
-      "production_app.refresh_metrics": "6010a6955dfb9d83961b17c53ca8835afb64b6db803a02f1499d0ef482828bcf",
-      "production_app.lifespan": "ab66612f1805f1cc6dac4ba6c5251c445698c50fd9c3a41919b9024f333b5f54",
-      "<module>": "a805a829801ad698869050c894b358a12641ef6296305c69b74a7b697b9b7cde"
-    },
-    "control/src/vonk_control/artifact_reference_scan.py": {
-      "ArtifactReferenceFinding": "3d3ab3923bbdac7355634fc7d19dce62c539bb835954ad4e57de6b7f2c80a4ab",
-      "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
-      "_reason_projection": "e0a699c0788ea845ed78a90710c66e67389da9f008120a254923cdd4efbde9f6",
-      "require_model_sets_open": "e5213082fba248642c9b6ff7955f1900e54e5417746976052c4b7252c7c3ec06",
-      "model_set_objects": "b3f846270636729ad6febbaed69899eb1b6eafd11e8e2f31b900e31083f384e6",
-      "model_set_reference_findings": "2b36ecc43b37935876294fd1c9013e150d7e4c4325dfc2a84b3b624405b94c84",
-      "model_set_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
-      "model_set_reference_reasons": "8873ed7b1fc4d46fc3d0e5cf89d05bcfe552753b64a3118776d35d1212fbfd09",
-      "runtime_image_reference_findings": "adcf56d41c236640e378d01f09a17a40332e019cc1e3786c84257cbc998b80e5",
-      "runtime_image_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
-      "runtime_image_reference_reasons": "d6257e372269c4a0b0d0f994dc63dab9dd19628c1d80f0f08c5cfc22fb660fa0",
-      "_profile_plan": "32f8a20e21bc91a775d0161a568917af8eef9eabf8d590afdeb6802ecd0d023d",
-      "_run_switch_plan": "33d5925118d8e75da1c7b727b45cf82b8a242084900614a40462a25e80c1efc7",
-      "_stated": "8940aad2e7963e3364e059cc7bd2f16977accb8175772896cd669201a59c02b2",
-      "_approved_images": "cc6fe9d4e74ac91302ee391791b76a1ca6928aafd9e451848fa15d4025417d51",
-      "_run_switch_runtime_image_intent": "f87d5d52872d21040b3d97b26bdb585f29585f479124443b858af0aa7a031650",
-      "_run_switch_kinds": "b0d724aa893828e9c1fd3c716a56044fe570bd707fb6559663461170da1919d5",
-      "<module>": "7ed3a28a64581ec153a059fe5bbc0ba862461b9ea9afea6065be98d78a9beba0"
-    },
-    "control/src/vonk_control/execution_plan_service.py": {
-      "compile_job_invocation": "76fda2df0e54b8c323b506e90605eb7a3477bc21137acb547180aedd4e012a24",
-      "ExecutionPlanCompilationError": "d65d7dfa62e66c0255e4321fb0ffaf7a89ed0ca6cb73f25ac8387e4a45eb0bc1",
-      "ExecutionPlanCompilationError.__init__": "06de9d125a54edc920d774cafde20df6b67d13ccf283783fde9bbb8c5f5a0c66",
-      "ExecutionPlanReceiptRefused": "a70ec6fdadfde8c0354f9ad1ba7f59824fb6d0daacc889e0fbfa0bac14301178",
-      "ExecutionPlanReceiptRefused.__init__": "00517a618d8b6327c860ffee66a8f19a65566b9d5086a0d3879b2a6d157acc94",
-      "ExecutionPlanEvidenceUnknown": "09425bcd6c9041ad9df62d2d28994ec02848d3383a6eb574d1a02a7fe6357b8d",
-      "ExecutionPlanEvidenceUnknown.__init__": "a6433f0ffdbaf267488b744934f81827b9ffc770ce5e0f5fb896430fd9085cca",
-      "ControllerExecutionPlanService": "26ffe98a4efff4dd5bd9284e9f2c4616a33c99969c66ce6fe49f12e2ed05028d",
-      "ControllerExecutionPlanService.__init__": "5e573c9b09ab4b22ab7abf439c2bde9336602e2d6a71dc3939e6797998873e5f",
-      "ControllerExecutionPlanService.compile_installation": "be0e9536250d91d9bcfbef169adf17956c595788d168e6b3b9a048704c8fd0c7",
-      "ControllerExecutionPlanService._runtime_image": "c78d684bf34f62aeeb7e2f38033589181878b25026780994a3e4b265b1e72ac8",
-      "_runtime_image_receipt": "4c810c33f9d37e7fa4f061f4ba998dd938bed0c952dd3e5f1b0bedcb400d8d0a",
-      "_build_package": "dd5d3ea0ecb4320b88da6f1a78ce9023cc9c90eb8dd39d8fbc104c1319984f79",
-      "_image_digest": "ba7b17d355421bf5ab0cec0ba6d421404e67a38910f810da8d2702a71bdeccf7",
-      "_world_size": "5582448abe2d214f28bd8ffeded8ea9671f1150b951f583b63a22477517dae61",
-      "_PlacementTarget": "fc14f411a039c764fcae563c8d158fd7954052545d9984d53689309c6ffcdc45",
-      "_placement": "a4a8e8e255108cf25d8f0b6992ff917de706b9441ce59a03835781997f9a42a0",
-      "_bind_runtime_artifacts": "04c066288f5687c804ce309075f7c36a2edbc8d35023b138d5d42ca96204f76a",
-      "<module>": "9a093883f7e920837be03e5c8720b5561f71f7f3ba12716c6a6ffcbe3adcf5e1"
-    },
-    "control/src/vonk_control/runtime_image_preparation/contracts.py": {
-      "RuntimeImagePreparationError": "1ee6fc3714198983dad3a498157af9e97d572cd5dcc406fbb2b3f011ad688707",
-      "RuntimeImagePreparationError.__init__": "30125364d3c106246e9646b1344c8c4216b3ef019a2f0526b77a0d0a26d52075",
-      "RuntimeImagePreparationRefused": "6652d4c5de951a10e19dd7e6cbcd11bb510ed45b359fb7f31ec27abea263a2af",
-      "RuntimeImagePreparationRefused.__init__": "673ade916ef30fb92e50d7be9f74595a7982596786efda105060558de4ed6c86",
-      "RuntimeImagePreparationInvalid": "9d54d9d2f6747e10eb0086bcd66a7277a55b2c8639685d43b7bb24be8b18bbc8",
-      "RuntimeImagePreparationInvalid.__init__": "82a21b8ef2f694611215c69c6a077086d7ac4d1eb5546bd295377d96f0babd32",
-      "RuntimeImagePreparationUnknown": "fb9d3589c3e19ee5375e0f958b1c90276873779e177f37098b2d7325cc17b786",
-      "RuntimeImagePreparationUnknown.__init__": "1de399a418724fb0099b06b25ef68460b9668d2f85eddd73816ef625c9458184",
-      "PulledImageEvidence": "a8a953a74e104e9a49436ddc2738249b5e9d35f4cc152a96340d43ea18a56ed4",
-      "OCIImageTransport": "d4dfd45cb9efd5f8f8f2862f8123ad217cbd967b7659688da387ed8e2092675e",
-      "OCIImageTransport.inspect_archive": "b6d10b5dd391119d322152a755d696840d0a162d7802ceed24521c748d7062af",
-      "RuntimeImageReceipt": "ef560dabcf79438643af6fd747d7e35285c8f51d75cf7b1d414f2a99bfa3e741",
-      "RuntimeImageReceipt.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
-      "RuntimeImageReferenceIntent": "bb11eb339f7c064b86fd5cb6dc494b30ca3477626c7c67a66febf9fd29173698",
-      "RuntimeImageReferenceIntent.belongs_to": "f92870f2984f3c41971e531ffc0ddeaad736581b62df1f155ff3e846319e248f",
-      "read_runtime_image_reference_intent": "c66e6419faa1be2e59bea07860b0986c55a3a8cb8dce9198cb5b3ac1669cfa4b",
-      "_parse_runtime_image_receipt": "72fef457373c54bf91d8a74f2d83f6d1a173d9377b6641f4d1055697bb8c456c",
-      "_ReceiptDocumentRejected": "ec5a764ba955d21be3d2477eb4e6a0dce5627542dbea3e75eeb7c4511c764c08",
-      "_ReceiptDocumentRejected.__init__": "0e11e142278fa9c05b0dcea2d1367893003c134307be1657f0312a7933f286fc",
-      "_receipt_may_be_newer": "8b1a1d17c06e0a81523dc19cd6152812dfba4e422fecbea81a50af2970e7b476",
-      "_load_receipt_document": "b31b5a60ad814d4d7b924e1b3da7dcfa38bfa32603b30b2f846315616b2b9a57",
-      "_log_rejected_receipt": "4bf59bc24d0ab5ef2efdcf3c6f71a68788ee4ffd8d8f8adcf7a54565951bed25",
-      "RuntimeImageStorage": "d38a76b72adfd644be5571f4eddd82ba5c5ca6f8a128b974af74c1fd3445992a",
-      "RuntimeImageStorage.read_receipt": "02a9b03ffe87bf3b17c47929ae3b49457b597099db453875ca603d808c574607",
-      "RuntimeImageStorage.publication_lock": "cb707a85b3dcf5f3a3cb1c511f8e976536252fe88473b16cd592302f6298c506",
-      "RuntimeImageStorage.commit": "49221ac996c26fd47f4878827006b6285ed7688f2a3f71335a5e65866516a386",
-      "RuntimeImageStorage.existing_archive": "bf997c1cdd959fdab0f111968affa18ec742bbb972fb758fc6a51eda4cc4afac",
-      "RuntimeImageStorage.published_archive_bytes": "0879ebd9d97a7f5f0c7c134c2fe6888998d1c8123170d0521a74c306553ef7f1",
-      "RuntimeImageStorage.remove_published": "bfc669c49f77f66e1320b95063e21c3b765dbd0c0e11f388382044d4a7f5f687",
-      "RuntimeImageStorage.find_verified": "9046e59bb33fda441ddb050ae7e3e42800c63bd654415f64f72bbaa7e577ffc3",
-      "RuntimeImageStorage.find_build": "c63795aa72cad32ded3b58b5b1941c4a3fe9d4ba76d2b2aca0c7b3f570d1f0e9",
-      "_same_image": "4c58c5d9c45636e6aedf88f03391f3dee53e112360b54737ae3dbdee4c4b881c",
-      "_with_provenance": "13c6f328fc101d85bfb5f43f203a325573e649ed608fb7b3913857c065a4b18a",
-      "_runtime_interface_label": "0c0927c33618775355fd92d2294b55434be479c325215a099cfe707a477af2f7",
-      "_wire_architecture": "f3eda1a380617cc13855f69dfdc009e61652f647ce2c633b1452684d1d414b88",
-      "_atomic_json_replace": "44daa0ae0f73f598076f2b06f95c9a35f4a51f9e7f44daf2a13a1b4014dbb007",
-      "_unlink_quietly": "5b0e3bfdb5c144fbab744dfc3ffa3237c7b2378df0acc2bb787a4eda2ca34ae2",
-      "<module>": "9681f6367f010dc966201fe68e89b832d094f9f2cebb47ad6f5429041f1ffe00"
-    },
-    "control/src/vonk_control/runtime_image_preparation/preparation.py": {
-      "prepare_runtime_image": "7c20094084d6ea074bfddb303f56461420a777dacab2586aeadc003f9efd90ad",
-      "RuntimeImagePreparer": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091",
-      "RuntimeImagePreparer.__call__": "623028fdbb49b6b503f2532e8f2e419319ddc2739bbe76696970715c2b0c37b6",
-      "make_runtime_image_receipt_preparer": "bc1d8554ffcf68ac821bfe4bbd9b56f30f0c80701410ab2819840ca590de01be",
-      "make_runtime_image_receipt_preparer.prepare": "7b191902d061461aac674f0d4aa83c9dc606285e39c38f7ebd86aab96e8768b6",
-      "stored_runtime_image_resolver": "c4f53d9e5a45523576d1d177604c5b27a46fbfa430e7e967883ec378132d4efb",
-      "stored_runtime_image_resolver.resolve": "52066d4797e30226c7bc9e0b2cff3f07903dcc2f1d0f3f3f362ef31ac733797f",
-      "_prepare_from_build": "24a45debdef4c76612d837b224dcecfe1a939310261baf127e17358ee319b6fb",
-      "_canonical_recipe": "eac35d6ea02ac912c3d946431c1fa95f9486ef67906e0fd39d778585e983c53e",
-      "runtime_image_expectations": "db199f316850896cbf30e3f78630f64703d20db85b81d418d677042b5a6513db",
-      "_receipt_runtime_identity": "d75295c3f0786d6e263d43c5bbf0579758df172b6c3b141daf66ba1f9d88360d",
-      "_recipe_digest": "777c7fa0aa1ec9c00093ee6e26c87333b3c303df9b1f2a496415117a00ab0697",
-      "_object_mapping": "0e6a072414e4e091d7e20135e909ea5ba4d95a9f607d57df9763601d92a33518",
-      "_string": "d4a2b392f73c2478f23d739dd10fadc00bd718ec9605871f0b63a146763b0a27",
-      "_timestamp": "76ae5ce281add20e8f0b89d98dc62b77dc824748e3f98bfe4b34863ab8cb6962",
-      "<module>": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091"
-    },
-    "control/src/vonk_control/runtime_image_preparation/transport.py": {
-      "OciLayoutImageTransport": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c",
-      "OciLayoutImageTransport.inspect_archive": "09d010ebf2e8e99ff6178772bfdf333dbee861ccaf2dd88e64e7514f631dd0c2",
-      "_validate_evidence": "457b4f87e33c4f8f70e3a6907ee8a3197d981aed8492eb7948aae880c4640288",
-      "_run_json_text": "e047d16dbb0f871b9f8ca95678ad4061f07a670ad6125965132bdf7f5c8c76a4",
-      "_observed_architecture": "ac93f0957b1ab0670f15638c4bb90c71e8b00fddd0641104f42bc43af934f3de",
-      "_observed_runtime_interface": "581e3d2ead65986b26f2d5c96343a5c563495167deda7602d35af4fafbd2de9e",
-      "_config_digest": "e3c74f85165381d5b0647d420aabe8dfe02cc54550fd8c531c9d2195ccd4522b",
-      "<module>": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c"
-    },
-    "control/src/vonk_control/worker.py": {
-      "WorkerWatchdog": "aec15900ed344989299e9fc74f3b13ab5f636eeae3f51750aed774356dfef950",
-      "WorkerWatchdog.__init__": "637ed8d7ec3a6a559df39c814c5de3b0ef421bc2696cd2bc66ba837f871373b8",
-      "WorkerWatchdog.beat": "7f01b6080dba4d00b93796719c48f04e3a630058ee178cbd5c6970ecf2e98d6b",
-      "WorkerWatchdog.stalled": "71d5c4bba45b02767bf934aec482d7fa9b4e89414255ecde6a3347e064ef0a03",
-      "current_worker_instance_id": "881324cd1b006a8d763eded0aad65a0ef37a4ecf44521b33f91a802c258fb8f5",
-      "WorkerHeartbeatRecorder": "d321445ab19c91054518a99643cb041e032d3b0512680ea28e0f7ca4e544066e",
-      "WorkerHeartbeatRecorder.__init__": "da38faa499c085ebae4d13f89ef89657d02caf28ba8f6b13e24d0c211554f926",
-      "WorkerHeartbeatRecorder._register_process_start": "55b1f5bf3615b176cc3d436ec210d5588992f8a149e8b44d3433826898f31cb0",
-      "WorkerHeartbeatRecorder.completed_loop": "55416446e05ceba704aa748402a4407cd9a7150853d65eb8ab33b2330b183b2b",
-      "HandlerRequest": "91d66d00998f0de70c95d04565e3215add206cde04991e9c2acd605fe7795404",
-      "HandlerRequest.__getitem__": "834711e5b3551eab2efae5db014a2ea93e59ca4eb4999f755e3688d2a9141a66",
-      "HandlerRequest.__iter__": "9e38b6016e944bd23480eb1ba63d4ba6d722329301e96245c2a2d153ece5f288",
-      "HandlerRequest.__len__": "ff9889616933e5bc7518b3667629ea9a18199ac6cc34fe317ee582a72d973284",
-      "Worker": "b8b191e2946b749dbaf7d502ab89d175387af5a9ebd493c86d3a9df7a3e122ec",
-      "Worker.__init__": "4b67401e62ab77b31985a5d6180db60d995871229b7d5e315d6bc7ebd8143f10",
-      "Worker.close": "e961dca5524d04a90f2526c930177097ec8c42478883eeddb79ffbfdc4047206",
-      "Worker.memory_footprint": "800ba0ae6e4475a40671df3ce5f717af3b5f8278ecd474f1adb8042710f468b3",
-      "Worker.run_once": "b4426c335ee70343cee4c7a08fc306c52f753914744331c03acb6245cff26b85",
-      "Worker._run_housekeeping": "d3abdc85a33cd1c7ddfea9e53af042fbe5ae8c8633d16dfea8b1e5995282e6cc",
-      "Worker._run_model_cache": "71b5e55a99203d0981a8ab4b9f9cd931551506c0005e26fe1758be0fb3d3c5f3",
-      "Worker._run_generic": "2dd47b9bd5040ae1a719b5aa39aca6b9390d39fcda8273fd5fd0bc7f5dacc12d",
-      "assemble_production_worker": "9a2fb6fe2de2f24b9bc18c008a0a937c8942af8b0345fb8c674555a7995cfe47",
-      "<module>": "56618f4e31799f36d4b7df9453b1183b262f1ef85d0767d6dba66e09a11ead17"
+      "<module>": "1b725250dde0e805bbd31886adcfef39f003cb10d38e2dcddecfe6e06c48406c",
+      "ServingExecutionError": "f14c23047b4bd9b5bd9525500dab3b1b89ff4f9672087bec4340590c983f7e4b",
+      "HttpObservation": "f11ee69c73c25e82e623cbfd953eb60523d9c3abb9912761a98120579e1cc2c2"
     }
   }
 }

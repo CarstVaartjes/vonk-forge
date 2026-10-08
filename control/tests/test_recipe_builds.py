@@ -1128,7 +1128,14 @@ def test_build_identity_changes_when_archive_format_changes(
 
     first = service.plan(revision.id, node_id, now=now)
     monkeypatch.setattr(
-        recipe_builds_module, "BUILD_ARTIFACT_FORMAT", "future-archive-v2"
+        "vonk_control.recipe_builds.planning.BUILD_ARTIFACT_FORMAT", "future-archive-v2"
+    )
+    monkeypatch.setattr(
+        "vonk_control.recipe_builds.source.BUILD_ARTIFACT_FORMAT", "future-archive-v2"
+    )
+    monkeypatch.setattr(
+        "vonk_control.recipe_builds.persistence.BUILD_ARTIFACT_FORMAT",
+        "future-archive-v2",
     )
     second = service.plan(revision.id, node_id, now=now)
 

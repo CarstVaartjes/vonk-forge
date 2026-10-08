@@ -1070,7 +1070,7 @@ _SMALL_WIRE_BUDGET = 64 * 1024
 
 @pytest.fixture
 def small_wire_budget(monkeypatch: pytest.MonkeyPatch) -> int:
-    from vonk_control import library_projection
+    from vonk_control.library_projection import common as library_projection
 
     monkeypatch.setattr(
         library_projection, "MAX_CONTROL_DOCUMENT_BYTES", _SMALL_WIRE_BUDGET
@@ -1260,7 +1260,7 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
         assert exact_wire_bytes <= MAX_CONTROL_DOCUMENT_BYTES
 
         monkeypatch.setattr(
-            "vonk_control.library_projection.MAX_CONTROL_DOCUMENT_BYTES",
+            "vonk_control.library_projection.common.MAX_CONTROL_DOCUMENT_BYTES",
             exact_wire_bytes,
         )
         exactly_fitting = client.get("/api/recipe/library", params={})
@@ -1271,7 +1271,7 @@ def test_library_item_at_one_byte_over_wire_budget_is_refused(
         # An envelope-bracket undercount of two bytes would incorrectly accept
         # and return a response larger than this configured budget.
         monkeypatch.setattr(
-            "vonk_control.library_projection.MAX_CONTROL_DOCUMENT_BYTES",
+            "vonk_control.library_projection.common.MAX_CONTROL_DOCUMENT_BYTES",
             exact_wire_bytes - 1,
         )
         over_budget = client.get("/api/recipe/library", params={})

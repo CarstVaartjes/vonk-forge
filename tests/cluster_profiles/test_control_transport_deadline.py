@@ -684,3 +684,42 @@ def test_sigint_during_executor_shutdown_finishes_cleanup(monkeypatch):
     assert signal.getsignal(signal.SIGINT) == signal.default_int_handler
     with asyncio.Runner() as runner:
         assert runner.run(asyncio.sleep(0, result=42)) == 42
+
+
+def test_interrupt_before_runner_adopts_read_closes_coroutines(monkeypatch):
+    """A signal before task creation cannot leak read or deadline coroutines."""
+    import inspect
+
+    from cluster_profiles.control_transport import HTTPSResponse
+
+    response = object.__new__(HTTPSResponse)
+    response._deadline = 1
+    response._interrupted = False
+    captured = []
+
+    class InterruptedRunner:
+        def run(self, work):
+            captured.append(work)
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(response, "_runner", InterruptedRunner(), raising=False)
+
+    async def read():
+        return b"result"
+
+    work = read()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            response._run(work)
+        assert all(
+            inspect.getcoroutinestate(item) == inspect.CORO_CLOSED
+            for item in [work, *captured]
+        )
+        # A fresh attempt owns a fresh runner and is immediately usable.
+        with asyncio.Runner() as runner:
+            response._runner = runner
+            response._deadline = runner.get_loop().time() + 1
+            assert response._run(read()) == b"result"
+    finally:
+        for item in [work, *captured]:
+            item.close()
