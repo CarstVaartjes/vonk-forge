@@ -393,16 +393,23 @@ def test_controller_parent_writers_use_the_owned_encoder():
                     and isinstance(value, ast.Name)
                     and value.id == "job_document"
                 ), (path.name, ast.unparse(value))
+
     # Parent integrity checks normalize the typed stored contract, just as the
     # writer does; full storage contains nulls absent from canonical egress.
+    def module_files(name: str) -> list[Path]:
+        # A module split into a package stays in scope file by file.
+        single = root / f"{name}.py"
+        return [single] if single.exists() else sorted((root / name).rglob("*.py"))
+
     paths = list(package.glob("*.py")) + [
-        root / name
+        path
         for name in (
-            "distributed_recovery.py",
-            "host_runtime_plan_authority.py",
-            "offline_stops.py",
-            "profile_stop_authority.py",
+            "distributed_recovery",
+            "host_runtime_plan_authority",
+            "offline_stops",
+            "profile_stop_authority",
         )
+        for path in module_files(name)
     ]
     parent_names = {"parent", "job", "stop_parent", "source_job", "start", "stop"}
     for path in paths:
