@@ -431,7 +431,9 @@ def _allow_minimal_reconciliation_plan(monkeypatch) -> None:
             return value
         return original(contract, value)
 
-    monkeypatch.setattr(controller_cli, "validate_control_document", validate)
+    monkeypatch.setattr(
+        controller_cli.installation, "validate_control_document", validate
+    )
 
 
 def test_recipe_installation_reconcile_review_uses_typed_preview_route(
@@ -574,7 +576,9 @@ def test_recipe_installation_reconcile_bounds_request_lookup_under_submission_de
             )
 
     ticks = iter((100.0, 120.0, 135.0))
-    monkeypatch.setattr(controller_cli.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(
+        controller_cli.observation.time, "monotonic", lambda: next(ticks)
+    )
     client = BoundedClient()
 
     status, result = run(
@@ -1689,8 +1693,8 @@ def test_fleet_remove_resolves_and_confirms_stable_node_before_post(
 
     input_stream = TTYInput("yes\n")
     error_stream = TTYOutput()
-    monkeypatch.setattr(controller_cli.sys, "stdin", input_stream)
-    monkeypatch.setattr(controller_cli.sys, "stderr", error_stream)
+    monkeypatch.setattr(controller_cli.confirmation.sys, "stdin", input_stream)
+    monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", error_stream)
     monkeypatch.setattr(cli, "begin_interactive_update_check", lambda: None)
 
     status = cli.main(
@@ -3121,7 +3125,7 @@ def test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent(
             return type("EndpointResponse", (), {"to_dict": lambda _self: payload})()
 
     monkeypatch.setattr(
-        controller_cli,
+        controller_cli.profile,
         "validate_control_document",
         lambda _name, value: value,
     )
@@ -4080,7 +4084,7 @@ def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
         controller_cli._resolve_run_recipe(
             cast(controller_cli.ControllerClient, client),
             requested,
-            deadline=controller_cli.time.monotonic() + 30,
+            deadline=controller_cli.observation.time.monotonic() + 30,
         )
         == expected
     )
