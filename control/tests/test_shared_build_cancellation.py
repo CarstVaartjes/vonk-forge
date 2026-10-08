@@ -7,10 +7,12 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control import recipe_operations as operations_module
 from vonk_control.models import CatalogDocumentRevision, Job, RecipeBuild
 from vonk_control.recipe_build_cancellation import current_build_consumers
 from vonk_control.recipe_operations import RecipeOperationService
+from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
@@ -201,20 +203,29 @@ def test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes
         assert _snapshot(sessions, child_id) == child_before
         assert _active_claims(sessions, selected.build_id) == claims
         assert parent.operation_id in current_build_consumers(blocker, locked_build)
-    # No operator resubmission: the ordinary worker completes detachment once
-    # the boundary is free, and a fresh independent producer is still admitted.
+    # The ordinary worker completes detachment once the boundary is free.
+    # A fresh Run/Switch request reuses the still-live shared producer through
+    # its dependency claim; an independent build would replace that intent.
     assert planner._advance(parent.operation_id)
     assert planner.get(parent.operation_id).state == "cancelled"
     assert _active_claims(sessions, selected.build_id) == claims
     lifecycle = planner._lifecycle
     assert lifecycle is not None
-    fresh = lifecycle.build(
-        selected,
-        build_input_sha256=selected.build_input_sha256,
+    fresh = planner.apply(
+        RunSwitchApplyRequest(
+            **_request.model_dump(exclude={"request_key"}), request_key=str(uuid4())
+        ),
         actor="admin",
-        request_id=str(uuid4()),
     )
-    assert fresh.state in {"queued", "running"}
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+    assert fresh.operation_id != parent.operation_id
+    assert planner._advance(fresh.operation_id)
+    with sessions() as session:
+        build = session.get(RecipeBuild, selected.build_id)
+        assert build is not None
+        consumers = current_build_consumers(session, build)
+        assert parent.operation_id not in consumers
+        assert fresh.operation_id in consumers
 
 
 @pytest.mark.parametrize("issued", [False, True])

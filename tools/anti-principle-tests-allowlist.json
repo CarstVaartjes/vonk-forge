@@ -2164,12 +2164,6 @@
     },
     {
       "path": "control/tests/test_shared_build_cancellation.py",
-      "function": "test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes",
-      "kind": "ending-without-fresh-request",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_shared_build_cancellation.py",
       "function": "test_shared_build_survives_one_detachment_then_stops_after_last_consumer",
       "kind": "ending-without-fresh-request",
       "count": 1

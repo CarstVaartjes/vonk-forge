@@ -454,3 +454,16 @@ def test_failure_report_is_evidence_not_a_terminal_operation(subject):
         ),
     ):
         assert scan_source(changed, path="test_diagnostics.py", mode="tests")
+
+
+@pytest.mark.parametrize(
+    "count,keep_original,rejected",
+    [(1, False, False), (2, False, True), (1, True, True)],
+)
+def test_history_relocations_conserve_debt(count, keep_original, rejected):
+    """Catch package moves buying new debt or keeping the old allowance too."""
+    entry = {"path": "old.py", "function": "bounded_scan", "kind": "wait", "count": 1}
+    previous = {"debt": [entry], "exceptions": []}
+    moved = {**entry, "path": "package/scan.py", "count": count}
+    current = {"debt": [moved, *([entry] if keep_original else [])], "exceptions": []}
+    assert bool(history_gate(current, previous)) is rejected
