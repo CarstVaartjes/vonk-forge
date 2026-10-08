@@ -52,6 +52,7 @@ from vonk_agent_protocol import (
     RunAdmissionCode,
     RunState,
     RunSwitchCode,
+    RuntimePreflightCode,
     SecurityRefusalError,
     SecurityRefusalReason,
     UninstallPlanCode,
@@ -346,6 +347,7 @@ from .run_switch_progress import (
 from .run_switch_progress import (
     _progress_view as _progress_view,  # noqa: PLC0414 -- shared helper export
 )
+from .run_switch_results import _stored_result
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImagePreparationRefused,
@@ -8061,9 +8063,10 @@ class RunSwitchOperationService:
                     plan, phase, actor=actor, request_key=request_key, progress=progress
                 )
             except (RuntimeError, ValueError, KeyError) as error:
+                code = error_code(error) or RuntimePreflightCode.RECEIPT_INVALID
                 fail(
-                    str(error),
-                    failure_code=error_code(error),
+                    f"{code}: {type(error).__name__}: {error}",
+                    failure_code=code,
                     replan=True,
                     definite=getattr(error, "definite", False),
                 )
@@ -8109,6 +8112,11 @@ class RunSwitchOperationService:
                             now,
                         )
                     job.result = _persisted_result(current)
+                    job.status_reason = (
+                        f"{checkpoint.last_failure_code}: {checkpoint.last_failure_detail}"
+                        if checkpoint.last_failure_code
+                        else None
+                    )
                     job.updated_at = now
                 if checkpoint.pending_job_id or checkpoint.next_check_at is not None:
                     return True
@@ -9736,29 +9744,6 @@ def _progress_phase(value: object) -> RunSwitchPhaseKind | None:
     return value if value in _PHASES else None
 
 
-def _stored_result(value: object) -> RunSwitchOperationResult | Residue | None:
-    """Parse stored JSON strictly, including nested datetime and tuple fields.
-
-    A damaged stored result is a :class:`Residue` (typed unknown), never an
-    exception: a reader shows what it can, and the advancing tick retires the
-    one operation (``_reject_invalid_operation``) while retaining the bytes.
-    """
-
-    if value is None:
-        return None
-    loaded = read_or_rebuild(
-        kind="run-switch.result",
-        subject="stored-result",
-        read=lambda: read_stored_document(
-            lambda document: RunSwitchOperationResult.model_validate_json(
-                json.dumps(document), strict=True
-            ),
-            value,
-        ),
-    )
-    return loaded
-
-
 def _parse_persisted_result(value: object) -> RunSwitchOperationResult | None:
     result = _stored_result(value)
     return None if isinstance(result, Residue) else result
@@ -9851,7 +9836,10 @@ def _wait_blockers(
 
 def _persisted_result(value: RunSwitchOperationResult) -> dict[str, object]:
     """The single canonical result serializer at the ORM boundary."""
-    return value.model_dump(mode="json", exclude_unset=True)
+    # In-place mutations of default collections do not enter model_fields_set,
+    # so persist every field's value (explicit None included): readers index
+    # keys such as ``observation_due_at`` directly.
+    return value.model_dump(mode="json")
 
 
 _PHASE_RESULT_ADAPTER = TypeAdapter(RunSwitchPhaseResult)
