@@ -59,11 +59,8 @@ from .run_switch_contract import (
     RunSwitchTargetTransferResult,
     RunSwitchVerifyResult,
 )
-from .run_switch_operations import (
-    PhaseExecution,
-    _persist_run_switch_runtime_image_reference,
-    effective_build_receipt,
-)
+from .run_switch_operations import PhaseExecution, effective_build_receipt
+from .run_switch_operations.publish import _persist_run_switch_runtime_image_reference
 from .runtime_image_preparation import (
     RuntimeImagePreparationError,
     RuntimeImageReceipt,

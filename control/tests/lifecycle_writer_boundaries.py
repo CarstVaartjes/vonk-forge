@@ -43,6 +43,13 @@ AGENT_JOB_MODULES = tuple(
     for path in (REPO_ROOT / "control/src/vonk_control/agent_jobs").glob("*.py")
 )
 
+RUN_SWITCH_MODULES = tuple(
+    path.relative_to(REPO_ROOT).as_posix()
+    for path in (REPO_ROOT / "control/src/vonk_control/run_switch_operations").glob(
+        "*.py"
+    )
+)
+
 LIFECYCLE_MODELS = frozenset(subject.value for subject in LifecycleSubject)
 ATTRIBUTE = StateWriteKind.ATTRIBUTE.value
 DICT_ITEM = StateWriteKind.DICT_ITEM.value
@@ -93,7 +100,7 @@ DICT_STATE_OWNERS = frozenset(
         "control/src/vonk_control/model_cache/updates.py",
         "control/src/vonk_control/model_cache/views.py",
         "control/src/vonk_control/recipe_operations.py",
-        "control/src/vonk_control/run_switch_operations.py",
+        *RUN_SWITCH_MODULES,
     }
 )
 #: Variables the resolver cannot type (they come out of a mapping lookup or a
@@ -228,9 +235,7 @@ NON_LIFECYCLE_STATE_VARIABLES: dict[str, frozenset[str]] = {
             "started_node",
         }
     ),
-    "control/src/vonk_control/run_switch_operations.py": frozenset(
-        {"failed_node", "self"}
-    ),
+    **{path: frozenset({"self"}) for path in RUN_SWITCH_MODULES},
 }
 _STATE_HELPERS = frozenset({"_set_application_state"})
 _STATE_HELPER_MODEL = "FleetProfileApplication"

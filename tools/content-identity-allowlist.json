@@ -835,105 +835,105 @@
       "reason": "Signed plan self-consistency: a cleanup authority must name the same revision as the plan whose effect it cleans up."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RecipeLifecyclePhaseExecutor._bound_installation",
+      "path": "control/src/vonk_control/run_switch_operations/executor_verification.py",
+      "function": "ExecutorVerificationMixin._bound_installation",
       "kind": "provenance_comparison",
       "expression": "installation.recipe_revision_id != plan.recipe_revision_id",
       "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RecipeLifecyclePhaseExecutor._execute_container_build",
+      "path": "control/src/vonk_control/run_switch_operations/executor_preflight.py",
+      "function": "ExecutorPreflightMixin._execute_container_build",
       "kind": "provenance_comparison",
       "expression": "expected_build_id != build_id",
       "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RecipeLifecyclePhaseExecutor._execute_container_build",
+      "path": "control/src/vonk_control/run_switch_operations/executor_preflight.py",
+      "function": "ExecutorPreflightMixin._execute_container_build",
       "kind": "provenance_comparison",
       "expression": "parsed_plan.build_id != build_id",
       "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RecipeLifecyclePhaseExecutor._execute_container_build",
+      "path": "control/src/vonk_control/run_switch_operations/executor_preflight.py",
+      "function": "ExecutorPreflightMixin._execute_container_build",
       "kind": "provenance_comparison",
       "expression": "parsed_plan.recipe_revision_id != revision_id",
       "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RecipeLifecyclePhaseExecutor._execute_container_build",
+      "path": "control/src/vonk_control/run_switch_operations/executor_preflight.py",
+      "function": "ExecutorPreflightMixin._execute_container_build",
       "kind": "provenance_comparison",
       "expression": "persisted.recipe_revision_id != revision_id",
       "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._latest_build",
+      "path": "control/src/vonk_control/run_switch_operations/resolution.py",
+      "function": "ResolutionMixin._latest_build",
       "kind": "provenance_comparison",
       "expression": "RecipeBuild.recipe_revision_id == revision_id",
       "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._matching_build",
+      "path": "control/src/vonk_control/run_switch_operations/resolution.py",
+      "function": "ResolutionMixin._matching_build",
       "kind": "provenance_comparison",
       "expression": "RecipeBuild.recipe_revision_id == revision_id",
       "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._matching_installation",
+      "path": "control/src/vonk_control/run_switch_operations/resolution.py",
+      "function": "ResolutionMixin._matching_installation",
       "kind": "provenance_comparison",
       "expression": "RecipeInstallation.recipe_revision_id == revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._preview_run",
+      "path": "control/src/vonk_control/run_switch_operations/run_planning.py",
+      "function": "RunPlanningMixin._preview_run",
       "kind": "provenance_comparison",
       "expression": "installation.recipe_build_id == build_candidate.id == expected_image.build_id",
       "reason": "Operator-reviewed image of a profile load (the _require_profile_runtime_image edge): the accepted image's reviewed build is compared with the build the preview selected, and a restored installation must be the one the review named; a change asks for a new review."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._preview_run",
+      "path": "control/src/vonk_control/run_switch_operations/run_planning.py",
+      "function": "RunPlanningMixin._preview_run",
       "kind": "provenance_comparison",
       "expression": "recipe_build_id != expected_image.build_id",
       "reason": "Operator-reviewed image of a profile load (the _require_profile_runtime_image edge): the accepted image's reviewed build is compared with the build the preview selected, and a restored installation must be the one the review named; a change asks for a new review."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._resolve_mapping",
+      "path": "control/src/vonk_control/run_switch_operations/resolution.py",
+      "function": "ResolutionMixin._resolve_mapping",
       "kind": "provenance_comparison",
       "expression": "ClusterMapping.recipe_revision_id == revision.id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
-      "function": "RunSwitchOperationService._select_build",
+      "path": "control/src/vonk_control/run_switch_operations/build_selection.py",
+      "function": "BuildSelectionMixin._select_build",
       "kind": "provenance_comparison",
       "expression": "selected.recipe_revision_id == revision.id",
       "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
+      "path": "control/src/vonk_control/run_switch_operations/artifact_validation.py",
       "function": "_validate_artifact_execution",
       "kind": "provenance_comparison",
       "expression": "evidence.verified_build_id != plan.recipe_build_id",
       "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
+      "path": "control/src/vonk_control/run_switch_operations/artifact_validation.py",
       "function": "_validate_artifact_execution",
       "kind": "provenance_comparison",
       "expression": "verification.verified_build_id != plan.recipe_build_id",
       "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
     },
     {
-      "path": "control/src/vonk_control/run_switch_operations.py",
+      "path": "control/src/vonk_control/run_switch_operations/image_receipts.py",
       "function": "effective_build_receipt",
       "kind": "provenance_comparison",
       "expression": "result.build_id != expected_build_id",
