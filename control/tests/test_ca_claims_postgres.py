@@ -29,13 +29,14 @@ from jwt.algorithms import ECAlgorithm
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
-from vonk_control.enrollment import (
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.enrollment.types import (
     EnrollmentIssuanceUncertain,
-    EnrollmentService,
     RenewalInProgress,
     RenewalIssuanceUncertain,
 )
 from vonk_control.models import AgentCertificate, AgentEnrollment, Base
+from vonk_control.pki import IssuedCertificate
 from vonk_control.step_ca import StepCertificateAuthority
 
 from .test_enrollment import OTHER_NODE_ID, csr, evidence
@@ -272,7 +273,9 @@ def prepare(postgres_engine, provider):
 def enroll(service, node_id):
     request = csr(node_id)
     grant = service.create(node_id, "admin", 600)
-    return service.submit(grant.token, request, evidence(request, node_id=node_id))
+    issued = service.submit(grant.token, request, evidence(request, node_id=node_id))
+    assert isinstance(issued, IssuedCertificate)
+    return issued
 
 
 @pytest.mark.parametrize("purpose", ("enrollment", "rotation"))
@@ -318,13 +321,16 @@ def test_slow_https_node_does_not_hold_an_unrelated_postgres_claim(
                 )
             try:
                 independent = pool.submit(issue, OTHER_NODE_ID).result(timeout=3)
+                assert isinstance(independent, IssuedCertificate)
                 assert independent.node_id == OTHER_NODE_ID
                 assert not blocked.done()
                 with sessions() as session:
                     assert session.get(AgentCertificate, independent.serial) is not None
             finally:
                 release.set()
-            assert blocked.result(5).node_id == NODE_ID
+            issued = blocked.result(5)
+            assert isinstance(issued, IssuedCertificate)
+            assert issued.node_id == NODE_ID
         assert all(count == 1 for count in counts.values())
 
 
@@ -378,6 +384,7 @@ def test_postgres_concurrent_exact_binding_and_lost_https_response_adopt_same_le
                 blocked.result(5)
         restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
         adopted = issue(restarted)
+        assert isinstance(adopted, IssuedCertificate)
         assert issue(restarted) == adopted
         assert all(count == 1 for count in counts.values())
         with sessions() as session:
@@ -405,7 +412,7 @@ import json, sys
 from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.enrollment import EnrollmentService
+from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.step_ca import StepCertificateAuthority
 args = json.load(sys.stdin)
 provider = StepCertificateAuthority(**args["provider"])
@@ -482,6 +489,7 @@ def test_postgres_controller_process_death_adopts_the_committed_https_leaf(
             assert committed.wait(5)
             restarted = EnrollmentService(sessions, provider, clock=lambda: NOW)
             adopted = restarted.submit(grant.token, request, evidence(request))
+            assert isinstance(adopted, IssuedCertificate)
             assert adopted.serial == accepted.serial
             assert restarted.submit(grant.token, request, evidence(request)) == adopted
             assert counts == {accepted.request_id: 1}

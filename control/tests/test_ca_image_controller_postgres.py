@@ -28,9 +28,9 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
-from vonk_control.enrollment import (
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.enrollment.types import (
     EnrollmentIssuanceUncertain,
-    EnrollmentService,
     RenewalIssuanceUncertain,
 )
 from vonk_control.models import (
@@ -39,6 +39,7 @@ from vonk_control.models import (
     AgentEnrollment,
     Base,
 )
+from vonk_control.pki import IssuedCertificate
 from vonk_control.step_ca import StepCAError, StepCertificateAuthority
 
 from .test_enrollment import NODE_ID, csr, evidence
@@ -302,6 +303,7 @@ def _run_child(payload):
             result = {"uncertain": True, **attempted}
         else:
             assert not payload["fail_sql"]
+            assert isinstance(issued, IssuedCertificate)
             result = {
                 "uncertain": False,
                 "certificate_pem": issued.certificate_pem.decode(),
@@ -333,6 +335,7 @@ def test_actual_ca_postgres_commit_failure_dual_restart_adopts_exact_der(
             source = service.submit(
                 source_grant.token, source_csr, evidence(source_csr)
             )
+            assert isinstance(source, IssuedCertificate)
         request = csr()
         grant = (
             service.create(NODE_ID, "admin", 600) if purpose == "enrollment" else None

@@ -112,6 +112,9 @@ from .catalog_sync_state import CatalogSyncState
 from .certificate_code import CertificateCode
 from .certificate_issuance_binding import CertificateIssuanceBinding
 from .certificate_issuance_binding_purpose import CertificateIssuanceBindingPurpose
+from .certificate_issuance_purpose import CertificateIssuancePurpose
+from .certificate_record_state import CertificateRecordState
+from .certificate_rotation_state import CertificateRotationState
 from .certificate_state import CertificateState
 from .cli_token_download import CliTokenDownload
 from .cli_update_contract import CliUpdateContract
@@ -176,7 +179,9 @@ from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInst
 from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_grant_state import EnrollmentGrantState
 from .enrollment_grant_status import EnrollmentGrantStatus
-from .enrollment_grant_status_purpose import EnrollmentGrantStatusPurpose
+from .enrollment_profile_state import EnrollmentProfileState
+from .enrollment_purpose import EnrollmentPurpose
+from .enrollment_record_state import EnrollmentRecordState
 from .enum_parameter import EnumParameter
 from .error_catalog import ErrorCatalog
 from .error_category import ErrorCategory
@@ -451,6 +456,7 @@ from .node_connection import NodeConnection
 from .node_connection_agent_state import NodeConnectionAgentState
 from .node_connection_online_state import NodeConnectionOnlineState
 from .node_distribution_assignment import NodeDistributionAssignment
+from .node_identity_state import NodeIdentityState
 from .node_offline_reason import NodeOfflineReason
 from .node_profile_change import NodeProfileChange
 from .node_profile_payload import NodeProfilePayload
@@ -1012,6 +1018,9 @@ __all__ = (
     "CertificateCode",
     "CertificateIssuanceBinding",
     "CertificateIssuanceBindingPurpose",
+    "CertificateIssuancePurpose",
+    "CertificateRecordState",
+    "CertificateRotationState",
     "CertificateState",
     "CliTokenDownload",
     "CliUpdateContract",
@@ -1076,7 +1085,9 @@ __all__ = (
     "EnrollmentGrantResponsePurpose",
     "EnrollmentGrantState",
     "EnrollmentGrantStatus",
-    "EnrollmentGrantStatusPurpose",
+    "EnrollmentProfileState",
+    "EnrollmentPurpose",
+    "EnrollmentRecordState",
     "EnumParameter",
     "ErrorCatalog",
     "ErrorCategory",
@@ -1351,6 +1362,7 @@ __all__ = (
     "NodeConnectionAgentState",
     "NodeConnectionOnlineState",
     "NodeDistributionAssignment",
+    "NodeIdentityState",
     "NodeOfflineReason",
     "NodeProfileChange",
     "NodeProfilePayload",

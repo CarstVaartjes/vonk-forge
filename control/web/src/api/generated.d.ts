@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 0cb5c8a8c3bfc730e0b8650ccc9da6bb0baef1b4228f4a1bcd319e43d9210770. Do not edit.
+// Generated from canonical OpenAPI SHA256 8aabb92c65eff852838db81ea28d7e92258cbc71490dc09207eaf62555962e28. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -2672,6 +2672,21 @@ export interface components {
             source_serial: string | null;
         };
         /**
+         * CertificateIssuancePurpose
+         * @enum {string}
+         */
+        CertificateIssuancePurpose: "enrollment" | "rotation";
+        /**
+         * CertificateRecordState
+         * @enum {string}
+         */
+        CertificateRecordState: "active" | "staged" | "revoked";
+        /**
+         * CertificateRotationState
+         * @enum {string}
+         */
+        CertificateRotationState: "issuing" | "manual-recovery" | "revocation-pending" | "revoked";
+        /**
          * CertificateState
          * @description The standing of a node's client certificate, as the fleet projection shows it.
          * @enum {string}
@@ -3317,15 +3332,26 @@ export interface components {
             id: string;
             /** Node Id */
             node_id: string | null;
-            /**
-             * Purpose
-             * @enum {string}
-             */
-            purpose: "new-node" | "re-enroll";
+            purpose: components["schemas"]["EnrollmentPurpose"];
             /** Revoked At */
             revoked_at: string | null;
             state: components["schemas"]["EnrollmentGrantState"];
         };
+        /**
+         * EnrollmentProfileState
+         * @enum {string}
+         */
+        EnrollmentProfileState: "ready";
+        /**
+         * EnrollmentPurpose
+         * @enum {string}
+         */
+        EnrollmentPurpose: "new-node" | "re-enroll";
+        /**
+         * EnrollmentRecordState
+         * @enum {string}
+         */
+        EnrollmentRecordState: "issuing" | "certificate_issued";
         /** EnumParameter */
         EnumParameter: {
             /** Allowed Values */
@@ -5828,12 +5854,18 @@ export interface components {
             asset_availability: components["schemas"]["AssetAvailability"];
             blocker_category: components["schemas"]["BlockerCategory"];
             catalog_sync_state: components["schemas"]["CatalogSyncState"];
+            certificate_issuance_purpose: components["schemas"]["CertificateIssuancePurpose"];
+            certificate_record_state: components["schemas"]["CertificateRecordState"];
+            certificate_rotation_state: components["schemas"]["CertificateRotationState"];
             certificate_state: components["schemas"]["CertificateState"];
             desired_assignment_state: components["schemas"]["DesiredAssignmentState"];
             distribution_assignment_state: components["schemas"]["DistributionAssignmentState"];
             effect: components["schemas"]["LifecycleEffect"];
             endpoint_state: components["schemas"]["EndpointState"];
             enrollment_grant_state: components["schemas"]["EnrollmentGrantState"];
+            enrollment_profile_state: components["schemas"]["EnrollmentProfileState"];
+            enrollment_purpose: components["schemas"]["EnrollmentPurpose"];
+            enrollment_record_state: components["schemas"]["EnrollmentRecordState"];
             error_category: components["schemas"]["ErrorCategory"];
             event_kind: components["schemas"]["LifecycleEventKind"];
             failure_code: components["schemas"]["FailureCode"];
@@ -5847,6 +5879,7 @@ export interface components {
             migration_step: components["schemas"]["MigrationStep"];
             model_cache_operator_status: components["schemas"]["ModelCacheOperatorStatus"];
             model_file_state: components["schemas"]["ModelFileState"];
+            node_identity_state: components["schemas"]["NodeIdentityState"];
             observation_cause: components["schemas"]["ObservationCause"];
             observed_assignment_state: components["schemas"]["ObservedAssignmentState"];
             oci_failure_category: components["schemas"]["OciFailureCategory"];
@@ -6942,6 +6975,11 @@ export interface components {
             /** Plan Digest */
             plan_digest: string;
         };
+        /**
+         * NodeIdentityState
+         * @enum {string}
+         */
+        NodeIdentityState: "active" | "retired";
         /**
          * NodeOfflineReason
          * @description Why a node is shown offline in the fleet projection.

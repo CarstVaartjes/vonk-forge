@@ -10,8 +10,8 @@ from ..types import UNSET, Unset
 
 from ..models.enrollment_grant_state import check_enrollment_grant_state
 from ..models.enrollment_grant_state import EnrollmentGrantState
-from ..models.enrollment_grant_status_purpose import check_enrollment_grant_status_purpose
-from ..models.enrollment_grant_status_purpose import EnrollmentGrantStatusPurpose
+from ..models.enrollment_purpose import check_enrollment_purpose
+from ..models.enrollment_purpose import EnrollmentPurpose
 from typing import cast
 import datetime
 
@@ -33,7 +33,7 @@ class EnrollmentGrantStatus:
             expires_at (datetime.datetime):
             id (str):
             node_id (None | str):
-            purpose (EnrollmentGrantStatusPurpose):
+            purpose (EnrollmentPurpose):
             revoked_at (datetime.datetime | None):
             state (EnrollmentGrantState): The standing of an enrollment grant.
      """
@@ -43,7 +43,7 @@ class EnrollmentGrantStatus:
     expires_at: datetime.datetime
     id: str
     node_id: None | str
-    purpose: EnrollmentGrantStatusPurpose
+    purpose: EnrollmentPurpose
     revoked_at: datetime.datetime | None
     state: EnrollmentGrantState
 
@@ -140,7 +140,7 @@ class EnrollmentGrantStatus:
         node_id = _parse_node_id(d.pop("node_id"))
 
 
-        purpose = check_enrollment_grant_status_purpose(d.pop("purpose"))
+        purpose = check_enrollment_purpose(d.pop("purpose"))
 
 
 

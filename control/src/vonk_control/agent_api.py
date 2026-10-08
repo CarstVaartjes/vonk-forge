@@ -50,6 +50,7 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
     SignedHostHelperGrant,
     SourceBundleCode,
+    UnknownError,
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
@@ -83,13 +84,10 @@ from .download_contract import download_responses, upload_request_body
 from .enrollment import (
     CertificateResponseCapacityRefused,
     EnrollmentDenied,
-    EnrollmentIssuanceUncertain,
     EnrollmentService,
     ExpiredRenewalGraceExhausted,
-    RenewalConflictRevocationUncertain,
-    RenewalInProgress,
-    RenewalIssuanceUncertain,
 )
+from .enrollment.responses import certificate_post, unknown_response
 from .enrollment_body import (
     _bounded_enrollment_body as _bounded_enrollment_body,  # noqa: PLC0414 -- shared helper export
 )
@@ -761,7 +759,9 @@ def install_agent_routes(
             )
         )
 
-    @agent.post("/enroll", response_model=IssuedCertificateResponse)
+    enrollment_post = certificate_post(agent)
+
+    @enrollment_post("/enroll")
     @raw_json_body(EnrollmentSubmitRequest)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
@@ -831,11 +831,11 @@ def install_agent_routes(
                 {"detail": {"reason_code": error.reason_code, "message": str(error)}},
                 status_code=422,
             )
-        except EnrollmentIssuanceUncertain as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=403, detail=str(error)) from None
+        if isinstance(outcome, UnknownError):
+            return unknown_response(outcome)
         return _json_response(_issued_response(outcome))
 
     @agent.post(
@@ -1446,7 +1446,7 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @agent.post("/renew/expired", response_model=IssuedCertificateResponse)
+    @enrollment_post("/renew/expired")
     @raw_json_body(ExpiredRenewRequest)
     async def renew_expired(request: Request) -> Response:
         required = _require_services(services)
@@ -1470,12 +1470,6 @@ def install_agent_routes(
                 {"detail": {"reason_code": error.reason_code, "message": str(error)}},
                 status_code=422,
             )
-        except (
-            RenewalInProgress,
-            RenewalIssuanceUncertain,
-            RenewalConflictRevocationUncertain,
-        ) as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
             code = (
                 error.reason_code
@@ -1488,9 +1482,11 @@ def install_agent_routes(
             )
             response.headers["X-Vonk-Error-Code"] = code
             return response
+        if isinstance(issued, UnknownError):
+            return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
-    @agent.post("/renew", response_model=IssuedCertificateResponse)
+    @enrollment_post("/renew")
     def renew(body: RenewRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -1509,13 +1505,13 @@ def install_agent_routes(
                 {"detail": {"reason_code": error.reason_code, "message": str(error)}},
                 status_code=422,
             )
-        except (RenewalInProgress, RenewalIssuanceUncertain) as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
+        if isinstance(issued, UnknownError):
+            return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
-    @agent.post("/renew/recover", response_model=IssuedCertificateResponse)
+    @enrollment_post("/renew/recover")
     def recover_renewal(body: RenewRequest, request: Request) -> Response:
         """Recover a staged certificate that was created for another CSR.
 
@@ -1540,10 +1536,10 @@ def install_agent_routes(
                 {"detail": {"reason_code": error.reason_code, "message": str(error)}},
                 status_code=422,
             )
-        except (RenewalInProgress, RenewalIssuanceUncertain) as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
         except (EnrollmentDenied, ValueError) as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
+        if isinstance(issued, UnknownError):
+            return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
     @agent.post("/renew/activate", status_code=status.HTTP_204_NO_CONTENT)

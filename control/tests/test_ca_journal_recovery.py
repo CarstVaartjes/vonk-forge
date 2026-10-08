@@ -6,17 +6,17 @@ from pathlib import Path
 import httpx2
 import jwt
 import pytest
+import vonk_control.enrollment.issuance as issuance_module
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_control import enrollment as enrollment_module
 from vonk_control.ca_issuance_contract import (
     CertificateIssuanceBinding,
     CertificateIssuedReply,
 )
-from vonk_control.enrollment import (
+from vonk_control.enrollment.service import EnrollmentService
+from vonk_control.enrollment.types import (
     EnrollmentIssuanceUncertain,
-    EnrollmentService,
     RenewalIssuanceUncertain,
 )
 from vonk_control.models import (
@@ -25,6 +25,7 @@ from vonk_control.models import (
     AgentEnrollment,
     Base,
 )
+from vonk_control.pki import IssuedCertificate
 from vonk_control.step_ca import StepCAError
 
 from .test_enrollment import csr, evidence
@@ -105,6 +106,7 @@ def test_lost_enrollment_response_restarts_and_observes_identical_certificate(tm
         assert accepted.state == "issuing"
     restarted = EnrollmentService(sessions, provider, clock=clock)
     issued = restarted.submit(grant.token, request, evidence(request))
+    assert isinstance(issued, IssuedCertificate)
     replay = restarted.submit(grant.token, request, evidence(request))
     assert issued == replay
     assert issued.serial == binding.serial
@@ -120,19 +122,20 @@ def test_enrollment_sql_persistence_failure_adopts_provider_result_after_restart
     service = EnrollmentService(sessions, provider, clock=clock)
     request = csr()
     grant = service.create(NODE_ID, "admin", 600)
-    persist = enrollment_module._persist_issued_enrollment
+    persist = issuance_module._persist_issued_enrollment
 
     def fail(*args, **kwargs):
         raise IntegrityError(
             "injected controller commit failure", None, RuntimeError("lost SQL result")
         )
 
-    monkeypatch.setattr(enrollment_module, "_persist_issued_enrollment", fail)
+    monkeypatch.setattr(issuance_module, "_persist_issued_enrollment", fail)
     with pytest.raises(EnrollmentIssuanceUncertain):
         service.submit(grant.token, request, evidence(request))
-    monkeypatch.setattr(enrollment_module, "_persist_issued_enrollment", persist)
+    monkeypatch.setattr(issuance_module, "_persist_issued_enrollment", persist)
     restarted = EnrollmentService(sessions, provider, clock=clock)
     issued = restarted.submit(grant.token, request, evidence(request))
+    assert isinstance(issued, IssuedCertificate)
     stored = CertificateIssuedReply.model_validate_json(transport.path.read_bytes())
     assert issued.certificate_pem.decode() == stored.crt
     assert transport.issue_calls == 1
@@ -146,6 +149,7 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
     first_csr = csr()
     grant = service.create(NODE_ID, "admin", 600)
     source = service.submit(grant.token, first_csr, evidence(first_csr))
+    assert isinstance(source, IssuedCertificate)
     # Independent exact requests have independent journal entries.
     transport.path = tmp_path / "rotation.json"
     rotation_csr = csr()
@@ -166,6 +170,7 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
         binding = CertificateIssuanceBinding.model_validate(accepted.provider_request)
     restarted = EnrollmentService(sessions, provider, clock=clock)
     issued = restarted.renew(NODE_ID, source.serial, rotation_csr)
+    assert isinstance(issued, IssuedCertificate)
     assert issued.serial == binding.serial
     assert issued.generation == 2
     assert transport.issue_calls == 2

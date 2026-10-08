@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 0cb5c8a8c3bfc730e0b8650ccc9da6bb0baef1b4228f4a1bcd319e43d9210770. Do not edit.
+// Generated from canonical OpenAPI SHA256 8aabb92c65eff852838db81ea28d7e92258cbc71490dc09207eaf62555962e28. Do not edit.
 export interface NormalizationShape {
   type?: string | string[];
   preserveIntegerFloat?: boolean;
@@ -1077,6 +1077,9 @@ export const componentCertificateCode: Validator;
 export const componentCertificateIssuanceBinding: Validator;
 export const normalize975: Validator;
 export const normalize976: Validator;
+export const componentCertificateIssuancePurpose: Validator;
+export const componentCertificateRecordState: Validator;
+export const componentCertificateRotationState: Validator;
 export const componentCertificateState: Validator;
 export const componentCliTokenDownload: Validator;
 export const componentCliUpdateContract: Validator;
@@ -1186,6 +1189,9 @@ export const normalize1039: Validator;
 export const normalize1040: Validator;
 export const normalize1041: Validator;
 export const normalize1042: Validator;
+export const componentEnrollmentProfileState: Validator;
+export const componentEnrollmentPurpose: Validator;
+export const componentEnrollmentRecordState: Validator;
 export const componentEnumParameter: Validator;
 export const normalize1043: Validator;
 export const normalize1044: Validator;
@@ -1962,6 +1968,7 @@ export const normalize1615: Validator;
 export const normalize1616: Validator;
 export const normalize1617: Validator;
 export const componentNodeDistributionAssignment: Validator;
+export const componentNodeIdentityState: Validator;
 export const componentNodeOfflineReason: Validator;
 export const componentNodeProfileChange: Validator;
 export const componentNodeProfilePayload: Validator;

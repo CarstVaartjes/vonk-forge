@@ -4450,6 +4450,33 @@
         "title": "CertificateIssuanceBinding",
         "type": "object"
       },
+      "CertificateIssuancePurpose": {
+        "enum": [
+          "enrollment",
+          "rotation"
+        ],
+        "title": "CertificateIssuancePurpose",
+        "type": "string"
+      },
+      "CertificateRecordState": {
+        "enum": [
+          "active",
+          "staged",
+          "revoked"
+        ],
+        "title": "CertificateRecordState",
+        "type": "string"
+      },
+      "CertificateRotationState": {
+        "enum": [
+          "issuing",
+          "manual-recovery",
+          "revocation-pending",
+          "revoked"
+        ],
+        "title": "CertificateRotationState",
+        "type": "string"
+      },
       "CertificateState": {
         "description": "The standing of a node's client certificate, as the fleet projection shows it.",
         "enum": [
@@ -6301,12 +6328,7 @@
             "title": "Node Id"
           },
           "purpose": {
-            "enum": [
-              "new-node",
-              "re-enroll"
-            ],
-            "title": "Purpose",
-            "type": "string"
+            "$ref": "#/components/schemas/EnrollmentPurpose"
           },
           "revoked_at": {
             "anyOf": [
@@ -6336,6 +6358,29 @@
         ],
         "title": "EnrollmentGrantStatus",
         "type": "object"
+      },
+      "EnrollmentProfileState": {
+        "enum": [
+          "ready"
+        ],
+        "title": "EnrollmentProfileState",
+        "type": "string"
+      },
+      "EnrollmentPurpose": {
+        "enum": [
+          "new-node",
+          "re-enroll"
+        ],
+        "title": "EnrollmentPurpose",
+        "type": "string"
+      },
+      "EnrollmentRecordState": {
+        "enum": [
+          "issuing",
+          "certificate_issued"
+        ],
+        "title": "EnrollmentRecordState",
+        "type": "string"
       },
       "EnumParameter": {
         "additionalProperties": false,
@@ -14398,6 +14443,15 @@
           "catalog_sync_state": {
             "$ref": "#/components/schemas/CatalogSyncState"
           },
+          "certificate_issuance_purpose": {
+            "$ref": "#/components/schemas/CertificateIssuancePurpose"
+          },
+          "certificate_record_state": {
+            "$ref": "#/components/schemas/CertificateRecordState"
+          },
+          "certificate_rotation_state": {
+            "$ref": "#/components/schemas/CertificateRotationState"
+          },
           "certificate_state": {
             "$ref": "#/components/schemas/CertificateState"
           },
@@ -14415,6 +14469,15 @@
           },
           "enrollment_grant_state": {
             "$ref": "#/components/schemas/EnrollmentGrantState"
+          },
+          "enrollment_profile_state": {
+            "$ref": "#/components/schemas/EnrollmentProfileState"
+          },
+          "enrollment_purpose": {
+            "$ref": "#/components/schemas/EnrollmentPurpose"
+          },
+          "enrollment_record_state": {
+            "$ref": "#/components/schemas/EnrollmentRecordState"
           },
           "error_category": {
             "$ref": "#/components/schemas/ErrorCategory"
@@ -14454,6 +14517,9 @@
           },
           "model_file_state": {
             "$ref": "#/components/schemas/ModelFileState"
+          },
+          "node_identity_state": {
+            "$ref": "#/components/schemas/NodeIdentityState"
           },
           "observation_cause": {
             "$ref": "#/components/schemas/ObservationCause"
@@ -14618,6 +14684,13 @@
           "route_publication_state",
           "certificate_state",
           "enrollment_grant_state",
+          "enrollment_record_state",
+          "enrollment_profile_state",
+          "certificate_rotation_state",
+          "certificate_record_state",
+          "node_identity_state",
+          "enrollment_purpose",
+          "certificate_issuance_purpose",
           "model_file_state",
           "catalog_sync_state",
           "reservation_state",
@@ -17809,6 +17882,14 @@
         ],
         "title": "NodeDistributionAssignment",
         "type": "object"
+      },
+      "NodeIdentityState": {
+        "enum": [
+          "active",
+          "retired"
+        ],
+        "title": "NodeIdentityState",
+        "type": "string"
       },
       "NodeOfflineReason": {
         "description": "Why a node is shown offline in the fleet projection.",

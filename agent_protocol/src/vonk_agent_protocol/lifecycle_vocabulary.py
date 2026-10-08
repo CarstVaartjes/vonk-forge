@@ -47,16 +47,23 @@ from .agent_words import (
 from .state_machines import (
     AssetAvailability,
     CatalogSyncState,
+    CertificateIssuancePurpose,
+    CertificateRecordState,
+    CertificateRotationState,
     CertificateState,
     DesiredAssignmentState,
     DistributionAssignmentState,
     EndpointState,
     EnrollmentGrantState,
+    EnrollmentProfileState,
+    EnrollmentPurpose,
+    EnrollmentRecordState,
     GatewayRouteState,
     InstallationNodeState,
     InstallationState,
     ModelCacheOperatorStatus,
     ModelFileState,
+    NodeIdentityState,
     ObservedAssignmentState,
     PlacementInstallState,
     PlacementLoadState,
@@ -836,6 +843,13 @@ class LifecycleVocabulary(WireModel):
     route_publication_state: RoutePublicationState
     certificate_state: CertificateState
     enrollment_grant_state: EnrollmentGrantState
+    enrollment_record_state: EnrollmentRecordState
+    enrollment_profile_state: EnrollmentProfileState
+    certificate_rotation_state: CertificateRotationState
+    certificate_record_state: CertificateRecordState
+    node_identity_state: NodeIdentityState
+    enrollment_purpose: EnrollmentPurpose
+    certificate_issuance_purpose: CertificateIssuancePurpose
     model_file_state: ModelFileState
     catalog_sync_state: CatalogSyncState
     reservation_state: ReservationState

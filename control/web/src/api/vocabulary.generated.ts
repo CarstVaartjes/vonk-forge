@@ -517,6 +517,50 @@ export const EnrollmentGrantState = {
 } as const;
 export type EnrollmentGrantState = (typeof EnrollmentGrantState)[keyof typeof EnrollmentGrantState];
 
+export const EnrollmentRecordState = {
+  ISSUING: "issuing",
+  CERTIFICATE_ISSUED: "certificate_issued",
+} as const;
+export type EnrollmentRecordState = (typeof EnrollmentRecordState)[keyof typeof EnrollmentRecordState];
+
+export const EnrollmentProfileState = {
+  READY: "ready",
+} as const;
+export type EnrollmentProfileState = (typeof EnrollmentProfileState)[keyof typeof EnrollmentProfileState];
+
+export const CertificateRotationState = {
+  ISSUING: "issuing",
+  MANUAL_RECOVERY: "manual-recovery",
+  REVOCATION_PENDING: "revocation-pending",
+  REVOKED: "revoked",
+} as const;
+export type CertificateRotationState = (typeof CertificateRotationState)[keyof typeof CertificateRotationState];
+
+export const CertificateRecordState = {
+  ACTIVE: "active",
+  STAGED: "staged",
+  REVOKED: "revoked",
+} as const;
+export type CertificateRecordState = (typeof CertificateRecordState)[keyof typeof CertificateRecordState];
+
+export const NodeIdentityState = {
+  ACTIVE: "active",
+  RETIRED: "retired",
+} as const;
+export type NodeIdentityState = (typeof NodeIdentityState)[keyof typeof NodeIdentityState];
+
+export const EnrollmentPurpose = {
+  NEW_NODE: "new-node",
+  RE_ENROLL: "re-enroll",
+} as const;
+export type EnrollmentPurpose = (typeof EnrollmentPurpose)[keyof typeof EnrollmentPurpose];
+
+export const CertificateIssuancePurpose = {
+  ENROLLMENT: "enrollment",
+  ROTATION: "rotation",
+} as const;
+export type CertificateIssuancePurpose = (typeof CertificateIssuancePurpose)[keyof typeof CertificateIssuancePurpose];
+
 export const ModelFileState = {
   PARTIAL: "partial",
   VERIFIED: "verified",
