@@ -226,3 +226,18 @@ def test_observe_in_session_rolls_back_with_the_callers_transaction(
 
     with sessions() as check:
         assert check.get(AgentPresence, NODE_ID) is None
+
+
+def test_missing_presence_is_unknown_and_next_authenticated_contact_repairs_it(
+    presence_system,
+) -> None:
+    """Catches refusing a missing record or retaining a gate after that read."""
+    from vonk_agent_protocol import UnknownError, WaitReason
+
+    _, service, source, _ = presence_system
+    missing = service.latest(NODE_ID, maximum_age_seconds=60)
+    assert isinstance(missing, UnknownError)
+    assert missing.reason is WaitReason.OBSERVATION_UNAVAILABLE
+    recorded = service.observe(source)
+    observed = service.latest(NODE_ID, maximum_age_seconds=60)
+    assert observed == recorded

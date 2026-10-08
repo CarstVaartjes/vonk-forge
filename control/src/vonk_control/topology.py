@@ -5,15 +5,22 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from vonk_agent_protocol import TopologyCode
+from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason, TopologyCode
 
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 
 
-class TopologyError(ValueError):
-    def __init__(self, code: str, detail: str) -> None:
+class TopologyError(InvalidRequestError, ValueError):
+    def __init__(self, code: TopologyCode, detail: str) -> None:
         self.code = code
-        super().__init__(detail)
+        super().__init__(
+            detail,
+            reason=(
+                InvalidRequestReason.MALFORMED
+                if code is TopologyCode.INVALID
+                else InvalidRequestReason.UNSUPPORTED
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)

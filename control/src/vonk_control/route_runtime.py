@@ -19,6 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
+from vonk_agent_protocol import (
+    ErrorCategory,
+    SecurityRefusalError,
+    UnknownError,
+    WaitReason,
+)
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
     ActivationManifest,
@@ -46,6 +52,10 @@ class RouteRuntimeError(RuntimeError):
     """A route bundle could not be safely staged, activated, or inspected."""
 
 
+def _unknown(reason: WaitReason) -> UnknownError:
+    return UnknownError(category=ErrorCategory.UNKNOWN, reason=reason)
+
+
 def _sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -56,14 +66,16 @@ def _aware(value: datetime, label: str) -> datetime:
     return value.astimezone(UTC)
 
 
-def _parse_time(value: object, label: str) -> datetime:
+def _parse_time(value: object, label: str) -> datetime | None:
     if not isinstance(value, str):
-        raise RouteRuntimeError(f"activation {label} is invalid")
+        return None
     try:
         parsed = datetime.fromisoformat(value)
-    except ValueError as error:
-        raise RouteRuntimeError(f"activation {label} is invalid") from error
-    return _aware(parsed, f"activation {label}")
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(UTC)
 
 
 @dataclass(frozen=True)
@@ -118,16 +130,14 @@ class FileSupervisorAcknowledger:
         self._monotonic = monotonic
         self._sleep = sleep
 
-    def __call__(self, marker: ActivationMarker) -> None:
+    def __call__(self, marker: ActivationMarker) -> UnknownError | None:
         deadline = self._monotonic() + self._timeout_seconds
         while True:
             now = _aware(self._clock(), "supervisor acknowledgement clock")
             if self._matches(marker, now=now):
                 return
             if self._monotonic() >= deadline:
-                raise RouteRuntimeError(
-                    "live LiteLLM supervisor acknowledgement timed out"
-                )
+                return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
             self._sleep(self._poll_seconds)
 
     def _matches(self, marker: ActivationMarker, *, now: datetime) -> bool:
@@ -159,7 +169,11 @@ class FileSupervisorAcknowledger:
             )
         except RouteRuntimeError:
             return False
-        return acknowledged <= now and now - acknowledged <= self._maximum_age
+        return (
+            acknowledged is not None
+            and acknowledged <= now
+            and now - acknowledged <= self._maximum_age
+        )
 
 
 class AtomicRouteBundlePublisher:
@@ -171,7 +185,8 @@ class AtomicRouteBundlePublisher:
         *,
         validate_routes: Callable[[bytes], bool] | None = None,
         validate_litellm: Callable[[bytes], bool] | None = None,
-        await_supervisor_ack: Callable[[ActivationMarker], None] | None = None,
+        await_supervisor_ack: Callable[[ActivationMarker], UnknownError | None]
+        | None = None,
     ) -> None:
         if root.is_symlink():
             raise RouteRuntimeError("route runtime root must not be a symlink")
@@ -188,17 +203,15 @@ class AtomicRouteBundlePublisher:
         self._validate_litellm = validate_litellm or self._valid_litellm
         self._await_supervisor_ack = await_supervisor_ack
 
-    def _require_supervisor_ack(self, marker: ActivationMarker) -> None:
+    def _require_supervisor_ack(self, marker: ActivationMarker) -> UnknownError | None:
         if self._await_supervisor_ack is None:
             return
         try:
-            self._await_supervisor_ack(marker)
-        except RouteRuntimeError:
+            return self._await_supervisor_ack(marker)
+        except (RouteRuntimeError, SecurityRefusalError):
             raise
-        except Exception as error:
-            raise RouteRuntimeError(
-                "live LiteLLM supervisor acknowledgement is unavailable"
-            ) from error
+        except Exception:  # noqa: BLE001 - unavailable acknowledgement has no authority
+            return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
 
     @staticmethod
     def _valid_routes(content: bytes) -> bool:
@@ -242,31 +255,38 @@ class AtomicRouteBundlePublisher:
         publication.
         """
 
+        if (self._root / ".publication.lock").is_symlink():
+            raise RouteRuntimeError("route publication lock must not be a symlink")
         try:
             descriptor = os.open(
                 self._root / ".publication.lock",
                 os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
                 0o600,
             )
-        except OSError as error:
-            raise RouteRuntimeError("route publication lock is unavailable") from error
+        except OSError:
+            yield _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
+            return
         try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise RouteRuntimeError("route publication lock is unsafe")
-            self._claim_publication_lock(descriptor)
+            uncertainty = self._claim_publication_lock(descriptor)
         except RouteRuntimeError:
             os.close(descriptor)
             raise
-        except Exception as error:
+        except OSError:
             os.close(descriptor)
-            raise RouteRuntimeError("route publication lock is unavailable") from error
+            yield _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
+            return
         try:
-            yield
+            yield uncertainty
         finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
+            try:
+                if uncertainty is None:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
 
-    def _claim_publication_lock(self, descriptor: int) -> None:
+    def _claim_publication_lock(self, descriptor: int) -> UnknownError | None:
         """Acquire the publication lock nonblockingly inside a bounded budget."""
 
         deadline = time.monotonic() + _PUBLICATION_LOCK_BUDGET_SECONDS
@@ -276,9 +296,7 @@ class AtomicRouteBundlePublisher:
                 return
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    raise RouteRuntimeError(
-                        "route publication lock is held by another publisher"
-                    ) from None
+                    return _unknown(WaitReason.LEASE_LAPSED)
                 time.sleep(_PUBLICATION_LOCK_RETRY_SECONDS)
 
     def _activate(
@@ -291,7 +309,7 @@ class AtomicRouteBundlePublisher:
         evidence_set_digest: str,
         routes: bytes,
         litellm: bytes,
-    ) -> ActivationMarker:
+    ) -> ActivationMarker | UnknownError:
         if self._validate_routes(routes) is not True:
             raise RouteRuntimeError("route validation rejected the staged bundle")
         if self._validate_litellm(litellm) is not True:
@@ -318,10 +336,8 @@ class AtomicRouteBundlePublisher:
             self._stage(directory, "manifest.json", manifest)
         except RouteRuntimeError:
             raise
-        except Exception as error:
-            raise RouteRuntimeError(
-                "route bundle apply failed; previous activation retained"
-            ) from error
+        except OSError:
+            return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
         marker = ActivationMarker(
             **manifest_document.model_dump(),
             directory=directory_name,
@@ -333,10 +349,12 @@ class AtomicRouteBundlePublisher:
                 marker.canonical_bytes(),
                 mode=0o640,
             )
-        except Exception as error:
-            raise RouteRuntimeError(
-                "route bundle activation failed; previous activation retained"
-            ) from error
+        except RouteRuntimeError:
+            raise
+        except OSError:
+            # Replacement may already have completed before directory fsync failed.
+            # The next publication observes the exact marker before replacing it.
+            return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
         return marker
 
     @staticmethod
@@ -382,13 +400,13 @@ class AtomicRouteBundlePublisher:
             return
         self._atomic_write(target, content, mode=0o640)
 
-    def inspect(self, *, expected: ActivationMarker | None = None) -> ActivationMarker:
+    def inspect(
+        self, *, expected: ActivationMarker | None = None
+    ) -> ActivationMarker | UnknownError:
         marker = self._read_marker(optional=False, verify_files=True)
         assert marker is not None
-        if expected is not None and marker != expected:
-            raise RouteRuntimeError(
-                "active route marker does not match expected publication"
-            )
+        # A stale expectation is observation evidence, never a reason to refuse
+        # the current checksum-verified route or withdraw its working activation.
         return marker
 
     def _read_marker(
@@ -396,7 +414,7 @@ class AtomicRouteBundlePublisher:
         *,
         optional: bool,
         verify_files: bool,
-    ) -> ActivationMarker | None:
+    ) -> ActivationMarker | UnknownError | None:
         bundle = _read_active_route_bundle(
             self._root,
             generations=self._generations,
@@ -404,7 +422,11 @@ class AtomicRouteBundlePublisher:
             verify_files=verify_files,
             validate_documents=False,
         )
-        return None if bundle is None else bundle.marker
+        return (
+            bundle
+            if isinstance(bundle, UnknownError)
+            else (None if bundle is None else bundle.marker)
+        )
 
     @staticmethod
     def _validate_marker(marker: ActivationMarker) -> None:
@@ -414,14 +436,14 @@ class AtomicRouteBundlePublisher:
             )
 
 
-def verify_active_route_bundle(root: Path) -> VerifiedRouteBundle:
+def verify_active_route_bundle(root: Path) -> VerifiedRouteBundle | UnknownError:
     """Read and authenticate the complete active bundle without mutating it."""
 
     if root.is_symlink() or not root.is_dir():
-        raise RouteRuntimeError("route runtime root is unavailable")
+        return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
     generations = root / "generations"
     if generations.is_symlink() or not generations.is_dir():
-        raise RouteRuntimeError("route generation root is unavailable")
+        return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
     bundle = _read_active_route_bundle(
         root,
         generations=generations,
@@ -440,19 +462,21 @@ def _read_active_route_bundle(
     optional: bool,
     verify_files: bool,
     validate_documents: bool,
-) -> VerifiedRouteBundle | None:
+) -> VerifiedRouteBundle | UnknownError | None:
     active = root / "activation.json"
     if not active.exists():
         if optional:
             return None
-        raise RouteRuntimeError("no route bundle is active")
+        return _unknown(WaitReason.RECEIPT_MISSING)
     if active.is_symlink() or not active.is_file():
         raise RouteRuntimeError("route activation marker is unsafe")
     try:
         marker_content = active.read_bytes()
         raw: Any = json.loads(marker_content)
-    except (OSError, json.JSONDecodeError) as error:
-        raise RouteRuntimeError("route activation marker is unreadable") from error
+    except OSError:
+        return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
+    except json.JSONDecodeError as error:
+        raise RouteRuntimeError("route activation marker is invalid JSON") from error
     try:
         marker = read_stored_model(ActivationMarker, raw)
     except ValidationError as error:
@@ -466,7 +490,7 @@ def _read_active_route_bundle(
     if verify_files:
         directory = generations / marker.directory
         if directory.is_symlink() or not directory.is_dir():
-            raise RouteRuntimeError("active route generation is unavailable")
+            return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
         manifest_document = marker.manifest_document()
         expected_files = {
             "manifest.json": (
@@ -482,10 +506,8 @@ def _read_active_route_bundle(
                 raise RouteRuntimeError("active route generation file is unsafe")
             try:
                 content = target.read_bytes()
-            except OSError as error:
-                raise RouteRuntimeError(
-                    "active route generation file is unreadable"
-                ) from error
+            except OSError:
+                return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
             if _sha256(content) != digest or (exact is not None and content != exact):
                 raise RouteRuntimeError("active route generation checksum mismatch")
             if validate_documents and name in {"routes.json", "litellm.json"}:
