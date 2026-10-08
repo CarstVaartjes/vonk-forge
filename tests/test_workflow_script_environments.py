@@ -9,11 +9,26 @@ script whose module-level imports need a project package must go through ``uv ru
 
 from __future__ import annotations
 
+import argparse
 import ast
+import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
+import yaml
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.installer_release import (
+    InstallerCandidateArtifacts,
+    InstallerCandidateBootstraps,
+    InstallerCandidateRelease,
+    InstallerPackageArtifact,
+    InstallerReleaseImages,
+    InstallerReleaseObject,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
@@ -108,3 +123,150 @@ runpy.run_path(script, run_name="__main__")
         assert result.returncode == 73, f"{script.name}: {result.stderr}"
         checked.append(script.name)
     assert "generate-agent-wire" in checked
+
+
+@pytest.mark.parametrize("different_build", [False, True])
+def test_native_renewal_helper_uses_candidate_content_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, different_build: bool
+) -> None:
+    """Catches rebuilding identity from current provenance when a package is reused.
+
+    Execute the workflow's identity exports and manifest producer, then exercise
+    the real canary gate up to its first effect. No git, compiler or host services.
+    """
+    from tests.acceptance.test_spark_lifecycle import LifecycleError, SparkLifecycle
+
+    package = InstallerPackageArtifact(
+        path="agent.deb",
+        sha256="a" * 64,
+        size=1,
+        architecture="linux-arm64",
+        host_signature="b" * 128,
+        package_version="0.1.1~dev.3939+gbe7bee8b1377",
+        target_binary_digest="c" * 64,
+        target_build_digest="sha256:" + "d" * 64,
+    )
+    artifact = InstallerReleaseObject(path="object", sha256="a" * 64, size=1)
+    release = InstallerCandidateRelease(
+        channel="dev",
+        generation="e" * 64,
+        schema_version=2,
+        source_sha="f" * 40,
+        version="0.2.0~dev.4000+gf3ad9aa00000",
+        images=InstallerReleaseImages(
+            **{
+                role: f"ghcr.io/vonk/{role}:dev@sha256:{'a' * 64}"
+                for role in InstallerReleaseImages.model_fields
+            }
+        ),
+        artifacts=InstallerCandidateArtifacts.model_validate(
+            {
+                field.alias or name: package
+                if name == "agent_package_linux_arm64"
+                else artifact
+                for name, field in InstallerCandidateArtifacts.model_fields.items()
+            }
+        ),
+        bootstraps=InstallerCandidateBootstraps(spark=artifact, nas=artifact),
+    )
+    release_path = (
+        tmp_path
+        / "spark-publication/installer-publication/objects/artifacts/dev/releases"
+        / release.generation
+        / "release.json"
+    )
+    release_path.parent.mkdir(parents=True)
+    release_path.write_text(release.model_dump_json(by_alias=True))
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/installer-publication.yml").read_text()
+    )
+    step = next(
+        step
+        for step in workflow["jobs"]["spark-acceptance"]["steps"]
+        if step.get("name") == "Build exact-source native renewal scheduling peer"
+    )
+    script = step["run"]
+    # The reviewed checkout checks are outside this hermetic boundary. Start
+    # after the epoch lookup and stop before compilation, preserving all exports.
+    exports = script.split('epoch=$(git show -s --format=%ct "$SOURCE_SHA")\n', 1)[
+        1
+    ].split("cargo build", 1)[0]
+    exports = exports.replace(
+        "uv run --project control --frozen python", shlex.quote(sys.executable)
+    )
+    environment = {
+        **os.environ,
+        "RUNNER_TEMP": str(tmp_path),
+        "SOURCE_SHA": release.source_sha,
+        "VERSION": release.version,
+        "CHANNEL": release.channel,
+        "GENERATION": release.generation,
+    }
+    result = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            "epoch=0\n"
+            + exports
+            + 'printf "%s\n%s\n" "$VONK_AGENT_BUILD_DIGEST" "$VONK_AGENT_SEMANTIC_VERSION"',
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    build_digest, semantic_version = result.stdout.splitlines()
+    assert build_digest == package.target_build_digest
+    assert semantic_version == "0.1.1"
+    helper_root = tmp_path / "spark-renewal-helper"
+    helper_root.mkdir()
+    helper = helper_root / "acceptance_certificate_renewal"
+    helper.write_bytes(b"hermetic native helper")
+    provenance = script.split("<<'PYPROVENANCE'\n", 1)[1].split("\nPYPROVENANCE", 1)[0]
+    subprocess.run(
+        [sys.executable, "-c", provenance],
+        cwd=ROOT,
+        env={**environment, "VONK_AGENT_BUILD_DIGEST": build_digest},
+        check=True,
+        capture_output=True,
+        timeout=10,
+    )
+    identity = AgentRuntimeIdentity(
+        architecture="linux-arm64",
+        semantic_version=semantic_version,
+        build_digest="sha256:" + "9" * 64 if different_build else build_digest,
+        binary_digest=package.target_binary_digest,
+    )
+    run = SparkLifecycle.__new__(SparkLifecycle)
+    monkeypatch.setattr(
+        run,
+        "_required_environment",
+        lambda name: {
+            "VONK_ACCEPTANCE_RENEWAL_HELPER": str(helper),
+            "VONK_ACCEPTANCE_RENEWAL_HELPER_MANIFEST": str(
+                helper_root / "manifest.json"
+            ),
+        }[name],
+    )
+    run.arguments = argparse.Namespace(source_sha=release.source_sha)
+    monkeypatch.setattr(run, "_self_test", lambda: identity.model_dump(mode="json"))
+
+    class FirstEffect(Exception):
+        pass
+
+    def first_effect(*args, **kwargs):
+        raise FirstEffect
+
+    monkeypatch.setattr(run, "_run_command", first_effect)
+    if different_build:
+        with pytest.raises(
+            LifecycleError, match="native renewal helper candidate build changed"
+        ):
+            run._exercise_native_renewal()
+    else:
+        with pytest.raises(FirstEffect):
+            run._exercise_native_renewal()
