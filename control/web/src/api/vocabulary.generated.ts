@@ -352,6 +352,9 @@ export const SecurityRefusalReason = {
 export type SecurityRefusalReason = (typeof SecurityRefusalReason)[keyof typeof SecurityRefusalReason];
 
 export const FailureCode = {
+  HOOK_VM_BUSY: "hook.vm_busy",
+  HOOK_VM_PROCESS_KILLED: "hook.vm_process_killed",
+  HOOK_VM_TIMEOUT: "hook.vm_timeout",
   WORKLOAD_HOST_MEMORY_EXHAUSTED: "workload.host_memory_exhausted",
   OPERATION_FAILED: "operation_failed",
   OPERATION_CANCELLED: "operation_cancelled",
