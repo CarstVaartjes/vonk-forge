@@ -48,6 +48,15 @@ def _site(
     [
         (_site("EnrollmentDenied", "node identity already exists"), SECURITY),
         (_site("StaleAgentAttempt", "fence is stale"), SECURITY),
+        (_site("StaleAgentFence", "lease expired"), SECURITY),
+        # A lapsed lease is bookkeeping even when its diagnostic mentions
+        # authority or integrity. Only an authenticated fence refusal is security.
+        (
+            _site("StaleAgentLease", "certificate or fence observation unavailable"),
+            DEBT,
+        ),
+        (_site("RecipeRetryLater", "stored digest mismatch"), DEBT),
+        (_site("RecipeStopAuthorityRefused", "stored authority unavailable"), SECURITY),
         (_site("SourceBundleError", "bundle.digest_mismatch"), SECURITY),
         (_site("RecipeBuildError", "build.signature_invalid"), SECURITY),
         # An unknown-outcome class is a handoff only where a registered loop is
