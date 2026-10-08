@@ -1545,7 +1545,6 @@ impl AgentHttpClient {
 
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
         let mut request = inventory.to_request(chrono::Utc::now().into());
-        clamp_inventory_request(&mut request);
         for warning in clamp_inventory_request(&mut request) {
             eprintln!("vonk-agent: inventory evidence dropped: {warning}");
         }
@@ -2092,50 +2091,8 @@ fn clamp_inventory_request(request: &mut InventoryRequest) -> Vec<AgentEvidenceC
         request.fabric_address = None;
         request.fabric_bandwidth_mbps = None;
     }
-    clamp_network_evidence(request, &mut warnings);
+    crate::network::clamp_network_evidence(request, &mut warnings);
     warnings
-}
-
-/// Keep the consistent part of the NIC evidence; see `clamp_inventory_request`.
-fn clamp_network_evidence(request: &mut InventoryRequest, warnings: &mut Vec<AgentEvidenceCode>) {
-    const MAX_INTERFACES: usize = 16;
-    if let Some(interfaces) = request.network_interfaces.as_mut() {
-        let reported = interfaces.len();
-        let mut seen = std::collections::BTreeSet::new();
-        interfaces.retain_mut(|interface| {
-            if !vonk_agent_protocol::valid_interface_name(&interface.name)
-                || !seen.insert(interface.name.clone())
-            {
-                return false;
-            }
-            if interface
-                .link_speed_mbps
-                .is_some_and(|speed| !(1..=1_000_000).contains(&speed))
-            {
-                interface.link_speed_mbps = None;
-            }
-            true
-        });
-        if interfaces.len() > MAX_INTERFACES {
-            // Keep the interface the NAS route uses when the list must be bounded.
-            let route = request.nas_route_interface.clone();
-            interfaces.sort_by_key(|interface| Some(&interface.name) != route.as_ref());
-            interfaces.truncate(MAX_INTERFACES);
-        }
-        if interfaces.len() != reported {
-            warnings.push(AgentEvidenceCode::AgentEvidenceInventoryNetworkInterfaceDropped);
-        }
-    }
-    let route_reported = request.nas_route_interface.as_deref().is_none_or(|route| {
-        request
-            .network_interfaces
-            .as_deref()
-            .is_some_and(|interfaces| interfaces.iter().any(|value| value.name == route))
-    });
-    if !route_reported {
-        request.nas_route_interface = None;
-        warnings.push(AgentEvidenceCode::AgentEvidenceInventoryNasRouteDropped);
-    }
 }
 
 fn valid_error_token(value: &str) -> bool {
@@ -2554,6 +2511,24 @@ mod tests {
         // The mandatory capacity evidence is untouched.
         assert_eq!(request.disk_free_bytes, 50);
         assert_eq!(request.container_runtime_version, "podman 5");
+    }
+
+    #[test]
+    fn wholly_invalid_network_evidence_is_unknown_and_a_fresh_report_is_valid() {
+        use vonk_agent_protocol::generated::AgentEvidenceCode;
+        let mut request = valid_inventory();
+        request.network_interfaces = Some(vec![interface("bad name", None)]);
+        request.nas_route_interface = Some("bad name".to_owned());
+        let warnings = clamp_inventory_request(&mut request);
+        assert!(warnings.contains(&AgentEvidenceCode::AgentEvidenceInventoryNetworkDropped));
+        assert_eq!(request.network_interfaces, None);
+        assert_eq!(request.nas_route_interface, None);
+        request.validate().unwrap();
+        let mut fresh = valid_inventory();
+        fresh.network_interfaces = Some(vec![interface("enP7s7", Some(1000))]);
+        fresh.nas_route_interface = Some("enP7s7".to_owned());
+        assert!(clamp_inventory_request(&mut fresh).is_empty());
+        fresh.validate().unwrap();
     }
 
     #[test]
