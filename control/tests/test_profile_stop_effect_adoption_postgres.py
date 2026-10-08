@@ -397,6 +397,22 @@ def test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt
         if native.next_action_at is not None:
             clock[0] = max(clock[0], native.next_action_at)
     assert adopted_stop is not None
+    # The old observer's budget has elapsed while the adopted exact effect is
+    # still unresolved. Polling before a fresh receipt must preserve that same
+    # Stop, not retire it and make the later receipt impossible to consume.
+    overdue_core = _service(sessions, clock[0], lifecycle, RecordingArtifactExecutor())
+    overdue_core.tick()
+    overdue_adapter = RunSwitchFleetProfileAdapter(sessions, overdue_core)
+    overdue_adapter.advance(original.id)
+    overdue = _stored(sessions, original.id)
+    assert any(
+        item.queue_index == stop_index and item.operation_id == stop_id
+        for item in overdue.pending_children
+    )
+    with sessions() as session:
+        stop = session.get(Job, stop_id)
+        assert stop is not None
+        assert stop.state in {LifecycleState.RUNNING, LifecycleState.OBSERVING}
     fresh, fresh_stop, _fresh_grant = _issue_exact_stop_grant(
         sessions,
         node_id=nodes[0],

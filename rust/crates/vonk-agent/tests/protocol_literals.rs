@@ -392,7 +392,7 @@ fn handwritten_protocol_sources() -> Vec<(String, String)> {
 const FOREIGN_MEANINGS: [(&str, &str); 3] = [
     ("vonk-agent-helper/src/package_rollback.rs", "not-found"),
     ("vonk-agent-helper/src/main.rs", "pending"),
-    ("vonk-agent/src/recipe_builder.rs", "failed"),
+    ("vonk-agent/src/recipe_builder/cleanup.rs", "failed"),
 ];
 
 #[test]
@@ -552,5 +552,36 @@ fn split_operation_modules_use_generated_operation_words() {
     assert!(
         offenders.is_empty(),
         "use AgentOperation for operation family words: {offenders:?}"
+    );
+}
+
+#[test]
+fn split_client_and_oci_modules_use_generated_diagnostic_words() {
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../vonk-agent-protocol/schema/wire.json")).unwrap();
+    let mut words = BTreeSet::new();
+    for name in [
+        "AgentClientDecision",
+        "AgentDiagnosticOperation",
+        "AgentTransportKind",
+        "OciFailureCategory",
+        "RecipeRunDispositionValue",
+    ] {
+        for word in schema["$defs"][name]["enum"].as_array().unwrap() {
+            words.insert(word.as_str().unwrap().to_owned());
+        }
+    }
+    let offenders: Vec<_> = sources()
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("src/client/") || name.starts_with("src/oci/"))
+        .flat_map(|(name, code)| {
+            vocabulary_literals(&code, &words)
+                .into_iter()
+                .map(move |word| format!("{name}: {word}"))
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "use the generated diagnostic enums: {offenders:?}"
     );
 }

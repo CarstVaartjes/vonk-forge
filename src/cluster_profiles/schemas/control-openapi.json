@@ -81,6 +81,27 @@
         "title": "AdmissionCode",
         "type": "string"
       },
+      "AgentClientDecision": {
+        "description": "The client's bounded observation decision after a request outcome.",
+        "enum": [
+          "retry",
+          "record",
+          "exit",
+          "defer"
+        ],
+        "title": "AgentClientDecision",
+        "type": "string"
+      },
+      "AgentDiagnosticOperation": {
+        "description": "Stable diagnostic origins for client requests and local preparation.",
+        "enum": [
+          "controller.request",
+          "workload.preload_memory",
+          "model.materialization_copy_fallback"
+        ],
+        "title": "AgentDiagnosticOperation",
+        "type": "string"
+      },
       "AgentEvidenceCode": {
         "description": "Optional agent evidence that was dropped so the mandatory report is kept.\n\nAn agent report carries a mandatory core (identity, lease, capacity, outcome)\nand optional evidence (NICs, the NAS route, fabric details, readings,\nprogress, diagnostics). Invalid optional evidence is never a reason to refuse\nthe core: the evidence is dropped and one of these words names what was lost,\non the agent that dropped it and on the Controller that received it.",
         "enum": [
@@ -483,6 +504,18 @@
           "observing"
         ],
         "title": "AgentResultState",
+        "type": "string"
+      },
+      "AgentTransportKind": {
+        "description": "Safe transport classifications; unknown never invents a network cause.",
+        "enum": [
+          "timeout",
+          "connect",
+          "body",
+          "protocol",
+          "unknown"
+        ],
+        "title": "AgentTransportKind",
         "type": "string"
       },
       "AgentUpgradeDiagnosticsResponse": {
@@ -14341,8 +14374,17 @@
         "additionalProperties": false,
         "description": "Carrier that publishes every vocabulary enum into the wire schema.\n\nThe model is never sent: it exists so the schema exporter, the Rust\ngenerator and the OpenAPI/TypeScript generators emit each closed word set\nfrom this one module.",
         "properties": {
+          "agent_client_decision": {
+            "$ref": "#/components/schemas/AgentClientDecision"
+          },
+          "agent_diagnostic_operation": {
+            "$ref": "#/components/schemas/AgentDiagnosticOperation"
+          },
           "agent_result_state": {
             "$ref": "#/components/schemas/AgentResultState"
+          },
+          "agent_transport_kind": {
+            "$ref": "#/components/schemas/AgentTransportKind"
           },
           "artifact_preparation": {
             "$ref": "#/components/schemas/ArtifactPreparation"
@@ -14419,6 +14461,9 @@
           "observed_assignment_state": {
             "$ref": "#/components/schemas/ObservedAssignmentState"
           },
+          "oci_failure_category": {
+            "$ref": "#/components/schemas/OciFailureCategory"
+          },
           "operator_action": {
             "$ref": "#/components/schemas/OperatorActionName"
           },
@@ -14479,6 +14524,9 @@
           "progress_phase": {
             "$ref": "#/components/schemas/ProgressPhase"
           },
+          "recipe_run_disposition": {
+            "$ref": "#/components/schemas/RecipeRunDispositionValue"
+          },
           "reservation_state": {
             "$ref": "#/components/schemas/ReservationState"
           },
@@ -14520,6 +14568,11 @@
           }
         },
         "required": [
+          "recipe_run_disposition",
+          "agent_client_decision",
+          "agent_transport_kind",
+          "oci_failure_category",
+          "agent_diagnostic_operation",
           "profile_installation_policy",
           "profile_child_phase",
           "profile_reported_phase",
@@ -18084,6 +18137,24 @@
           "degraded"
         ],
         "title": "ObservedAssignmentState",
+        "type": "string"
+      },
+      "OciFailureCategory": {
+        "description": "Secret-free OCI failure context preserved across the helper boundary.",
+        "enum": [
+          "storage-permission-denied",
+          "storage-not-found",
+          "process",
+          "workload",
+          "runtime",
+          "image-digest",
+          "artifact",
+          "storage",
+          "metadata",
+          "capacity",
+          "reconciliation-busy"
+        ],
+        "title": "OciFailureCategory",
         "type": "string"
       },
       "OfflineStopIntent": {
@@ -26359,6 +26430,14 @@
         ],
         "title": "RecipeRunChange",
         "type": "object"
+      },
+      "RecipeRunDispositionValue": {
+        "description": "The header verdict for a run the Controller never owned.",
+        "enum": [
+          "unowned"
+        ],
+        "title": "RecipeRunDispositionValue",
+        "type": "string"
       },
       "RecipeRunPayload": {
         "additionalProperties": false,

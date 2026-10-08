@@ -20,6 +20,7 @@ that no longer occurs fails as stale.
 | Data class | Source model | Rust | TypeScript | Python consumers |
 | --- | --- | --- | --- | --- |
 | Controller to Spark messages (claims, directives, results, progress, inventory, telemetry, enrollment, recipe jobs and builds, host-helper grants) | `agent_protocol/src/vonk_agent_protocol/*.py` | `vonk-agent-protocol` `generated.rs`, from `schema/wire.json` (`scripts/generate-agent-wire`) | none | Controller (the models themselves) |
+| Agent client decisions, transport classifications and OCI diagnostic vocabulary | `agent_words.py`, published by `LifecycleVocabulary` | `generated.rs` | vocabulary generator | diagnostic consumers |
 | Compiled launch plan | `compiled_execution_plan.py` in `agent_protocol` | `generated.rs` | none | Controller, tests |
 | Files the Spark agent and helper persist (identity pointers, readiness receipt, reconciliation checkpoints and receipts, installation metadata, run lifecycle, runtime image receipts, generation fence, package rollback transaction) | `agent_protocol/.../agent_state.py` | `generated.rs` (`AgentGenerationPointer`, `AgentReadinessReceipt`, `RunLifecycleRecord`, `HostRuntimeImageReceipt`, ...) | none | none yet; the models document the files |
 | Installer documents (NAS install template, Spark site ports, Spark setup apply frame) | `agent_protocol/.../installer_setup.py` | `generated.rs` (`NasInstallTemplate`, `SitePorts`, `SparkApplyEnvelope`, ...) | none | `scripts/build-nas-compose-bundle` validates its payload with the model; the Controller reads `site-ports.json` through `SitePorts` |
@@ -61,28 +62,28 @@ of the 50 hand-written serde types of the baseline are generated now.
 | `rust/crates/vonk-agent/src/base_images.rs` | `Manifest` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
 | `rust/crates/vonk-agent/src/base_images.rs` | `OciLayout` | external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content |
 | `rust/crates/vonk-agent/src/config.rs` | `AgentConfig` | operator-editable site TOML that must ignore keys a newer or older release dropped; the generated readers are JSON-only and reject unknown keys, so the file is not a wire document |
-| `rust/crates/vonk-agent/src/oci.rs` | `RuntimePolicy` | external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here |
-| `rust/crates/vonk-agent/src/oci.rs` | `RuntimePolicyLabel` | external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `PrivateJwk` | external format: RFC 7517 JSON Web Key as step-ca consumes it |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `PublicJwk` | external format: RFC 7517 JSON Web Key as step-ca consumes it |
-| `rust/crates/vonk-spark-setup/src/lib.rs` | `WrittenConfig` | TOML agent configuration written by this setup program and read back for validation; TOML is not a generated JSON wire document, and the agent's tolerant reader of the same file is allowlisted for the same reason |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaAuthority` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaAuthorityIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaClaims` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaConfig` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaConfigIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaDatabase` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaLogger` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaOptions` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaProvisioner` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaProvisionerIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaRevocationList` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-nas-setup/src/lib.rs` | `StepCaX509Options` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
-| `rust/crates/vonk-spark-setup/src/lib.rs` | `AddressInfo` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
-| `rust/crates/vonk-spark-setup/src/lib.rs` | `InterfaceEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
-| `rust/crates/vonk-spark-setup/src/lib.rs` | `NeighbourEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
-| `rust/crates/vonk-spark-setup/src/lib.rs` | `RdmaLink` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
-| `rust/crates/vonk-spark-setup/src/lib.rs` | `RouteEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-agent/src/oci/mod.rs` | `RuntimePolicy` | external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here |
+| `rust/crates/vonk-agent/src/oci/mod.rs` | `RuntimePolicyLabel` | external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `PrivateJwk` | external format: RFC 7517 JSON Web Key as step-ca consumes it |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `PublicJwk` | external format: RFC 7517 JSON Web Key as step-ca consumes it |
+| `rust/crates/vonk-spark-setup/src/config_files.rs` | `WrittenConfig` | TOML agent configuration written by this setup program and read back for validation; TOML is not a generated JSON wire document, and the agent's tolerant reader of the same file is allowlisted for the same reason |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaAuthority` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaAuthorityIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaClaims` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaConfig` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaConfigIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaDatabase` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaLogger` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaOptions` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaProvisioner` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaProvisionerIdentity` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaRevocationList` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-nas-setup/src/pki.rs` | `StepCaX509Options` | step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/firewall.rs` | `AddressInfo` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/firewall.rs` | `InterfaceEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/firewall.rs` | `NeighbourEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/firewall.rs` | `RdmaLink` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
+| `rust/crates/vonk-spark-setup/src/firewall.rs` | `RouteEntry` | iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract |
 
 ## TypeScript shapes that stay hand-written
 

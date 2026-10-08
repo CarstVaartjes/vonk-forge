@@ -230,6 +230,27 @@
       "title": "AgentClaim",
       "type": "object"
     },
+    "AgentClientDecision": {
+      "description": "The client's bounded observation decision after a request outcome.",
+      "enum": [
+        "retry",
+        "record",
+        "exit",
+        "defer"
+      ],
+      "title": "AgentClientDecision",
+      "type": "string"
+    },
+    "AgentDiagnosticOperation": {
+      "description": "Stable diagnostic origins for client requests and local preparation.",
+      "enum": [
+        "controller.request",
+        "workload.preload_memory",
+        "model.materialization_copy_fallback"
+      ],
+      "title": "AgentDiagnosticOperation",
+      "type": "string"
+    },
     "AgentDirective": {
       "additionalProperties": false,
       "description": "Authenticated heartbeat response for deadline renewal and cancellation.",
@@ -834,6 +855,18 @@
       ],
       "title": "AgentRuntimeIdentity",
       "type": "object"
+    },
+    "AgentTransportKind": {
+      "description": "Safe transport classifications; unknown never invents a network cause.",
+      "enum": [
+        "timeout",
+        "connect",
+        "body",
+        "protocol",
+        "unknown"
+      ],
+      "title": "AgentTransportKind",
+      "type": "string"
     },
     "AgentUpgradeGrantRequest": {
       "additionalProperties": false,
@@ -4919,8 +4952,17 @@
       "additionalProperties": false,
       "description": "Carrier that publishes every vocabulary enum into the wire schema.\n\nThe model is never sent: it exists so the schema exporter, the Rust\ngenerator and the OpenAPI/TypeScript generators emit each closed word set\nfrom this one module.",
       "properties": {
+        "agent_client_decision": {
+          "$ref": "#/$defs/AgentClientDecision"
+        },
+        "agent_diagnostic_operation": {
+          "$ref": "#/$defs/AgentDiagnosticOperation"
+        },
         "agent_result_state": {
           "$ref": "#/$defs/AgentResultState"
+        },
+        "agent_transport_kind": {
+          "$ref": "#/$defs/AgentTransportKind"
         },
         "artifact_preparation": {
           "$ref": "#/$defs/ArtifactPreparation"
@@ -4997,6 +5039,9 @@
         "observed_assignment_state": {
           "$ref": "#/$defs/ObservedAssignmentState"
         },
+        "oci_failure_category": {
+          "$ref": "#/$defs/OciFailureCategory"
+        },
         "operator_action": {
           "$ref": "#/$defs/OperatorActionName"
         },
@@ -5057,6 +5102,9 @@
         "progress_phase": {
           "$ref": "#/$defs/ProgressPhase"
         },
+        "recipe_run_disposition": {
+          "$ref": "#/$defs/RecipeRunDispositionValue"
+        },
         "reservation_state": {
           "$ref": "#/$defs/ReservationState"
         },
@@ -5098,6 +5146,11 @@
         }
       },
       "required": [
+        "recipe_run_disposition",
+        "agent_client_decision",
+        "agent_transport_kind",
+        "oci_failure_category",
+        "agent_diagnostic_operation",
         "profile_installation_policy",
         "profile_child_phase",
         "profile_reported_phase",
@@ -5892,6 +5945,24 @@
         "degraded"
       ],
       "title": "ObservedAssignmentState",
+      "type": "string"
+    },
+    "OciFailureCategory": {
+      "description": "Secret-free OCI failure context preserved across the helper boundary.",
+      "enum": [
+        "storage-permission-denied",
+        "storage-not-found",
+        "process",
+        "workload",
+        "runtime",
+        "image-digest",
+        "artifact",
+        "storage",
+        "metadata",
+        "capacity",
+        "reconciliation-busy"
+      ],
+      "title": "OciFailureCategory",
       "type": "string"
     },
     "OperationCheckpoint": {
@@ -8700,6 +8771,14 @@
       ],
       "title": "RecipeReconciliationIdentity",
       "type": "object"
+    },
+    "RecipeRunDispositionValue": {
+      "description": "The header verdict for a run the Controller never owned.",
+      "enum": [
+        "unowned"
+      ],
+      "title": "RecipeRunDispositionValue",
+      "type": "string"
     },
     "RecipeRunInspectionRequest": {
       "additionalProperties": false,

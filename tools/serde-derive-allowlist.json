@@ -73,112 +73,112 @@
       "reason": "operator-editable site TOML that must ignore keys a newer or older release dropped; the generated readers are JSON-only and reject unknown keys, so the file is not a wire document"
     },
     {
-      "file": "rust/crates/vonk-agent/src/oci.rs",
+      "file": "rust/crates/vonk-agent/src/oci/mod.rs",
       "type": "RuntimePolicy",
       "reason": "external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here"
     },
     {
-      "file": "rust/crates/vonk-agent/src/oci.rs",
+      "file": "rust/crates/vonk-agent/src/oci/mod.rs",
       "type": "RuntimePolicyLabel",
       "reason": "external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "PrivateJwk",
       "reason": "external format: RFC 7517 JSON Web Key as step-ca consumes it"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "PublicJwk",
       "reason": "external format: RFC 7517 JSON Web Key as step-ca consumes it"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaAuthority",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaAuthorityIdentity",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaClaims",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaConfig",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaConfigIdentity",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaDatabase",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaLogger",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaOptions",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaProvisioner",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaProvisionerIdentity",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaRevocationList",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-nas-setup/src/lib.rs",
+      "file": "rust/crates/vonk-nas-setup/src/pki.rs",
       "type": "StepCaX509Options",
       "reason": "step-ca's own ca.json document: a third-party tool's file layout the NAS setup reads and rewrites, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
       "type": "AddressInfo",
       "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
       "type": "InterfaceEntry",
       "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
       "type": "NeighbourEntry",
       "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
       "type": "RdmaLink",
       "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
       "type": "RouteEntry",
       "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract"
     },
     {
-      "file": "rust/crates/vonk-spark-setup/src/lib.rs",
+      "file": "rust/crates/vonk-spark-setup/src/config_files.rs",
       "type": "WrittenConfig",
       "reason": "TOML agent configuration written by this setup program and read back for validation; TOML is not a generated JSON wire document, and the agent's tolerant reader of the same file is allowlisted for the same reason"
     }

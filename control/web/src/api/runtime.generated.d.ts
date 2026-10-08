@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 dba868092359fb5b7efdd5dcb9bc7c19bb64913fe859c10758e39efab426ec5b. Do not edit.
+// Generated from canonical OpenAPI SHA256 0cb5c8a8c3bfc730e0b8650ccc9da6bb0baef1b4228f4a1bcd319e43d9210770. Do not edit.
 export interface NormalizationShape {
   type?: string | string[];
   preserveIntegerFloat?: boolean;
@@ -714,6 +714,8 @@ export const normalize700: Validator;
 export const normalize701: Validator;
 export const componentActivationMarker: Validator;
 export const componentAdmissionCode: Validator;
+export const componentAgentClientDecision: Validator;
+export const componentAgentDiagnosticOperation: Validator;
 export const componentAgentEvidenceCode: Validator;
 export const componentAgentFailureKind: Validator;
 export const componentAgentFailureResult: Validator;
@@ -755,6 +757,7 @@ export const componentAgentOperationChange: Validator;
 export const componentAgentOperationPayload: Validator;
 export const componentAgentPackageSource: Validator;
 export const componentAgentResultState: Validator;
+export const componentAgentTransportKind: Validator;
 export const componentAgentUpgradeDiagnosticsResponse: Validator;
 export const normalize734: Validator;
 export const normalize735: Validator;
@@ -1978,6 +1981,7 @@ export const normalize1624: Validator;
 export const normalize1625: Validator;
 export const componentObservationTransferStart: Validator;
 export const componentObservedAssignmentState: Validator;
+export const componentOciFailureCategory: Validator;
 export const componentOfflineStopIntent: Validator;
 export const componentOperationBlocker: Validator;
 export const componentOperationCheckpoint: Validator;
@@ -2522,6 +2526,7 @@ export const normalize2007: Validator;
 export const normalize2008: Validator;
 export const componentRecipeRoleResources: Validator;
 export const componentRecipeRunChange: Validator;
+export const componentRecipeRunDispositionValue: Validator;
 export const componentRecipeRunPayload: Validator;
 export const componentRecipeRuntime: Validator;
 export const componentRecipeRuntimeArgument: Validator;

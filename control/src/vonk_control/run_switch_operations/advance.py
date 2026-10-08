@@ -75,6 +75,7 @@ from .identity_helpers import _string_or_none
 from .image_receipts import _build_receipt_in_session, _plan_target_node_ids
 from .observation_helpers import (
     _established_start_effect,
+    _established_stop_effect,
     _EstablishedEffect,
     _start_still_progressing,
 )
@@ -122,7 +123,7 @@ class AdvanceMixin:
         # A busy boundary leaves only the durable intent and releases all locks;
         # the worker's bounded polling retries it without a Stop of shared work.
         with service._sessions() as session:
-            snapshot = session.get(Job, operation_id)
+            snapshot = session.get(Job, operation_id, with_for_update=True)
             plan = _stored_job_plan(snapshot) if snapshot is not None else None
             progress = (
                 _read_progress(read_row_column(snapshot, "result"))
@@ -130,6 +131,18 @@ class AdvanceMixin:
                 else None
             )
             cancellation = progress.cancellation if progress is not None else None
+            if (
+                snapshot is not None
+                and snapshot.state in _LIVE_STATES
+                and plan is not None
+                and progress is not None
+                and not _progress_damaged(read_row_column(snapshot, "result"))
+                and service._settle_stop_observation(
+                    session, snapshot, plan, progress, now
+                )
+            ):
+                session.commit()
+                return True
             detach_build = (
                 snapshot is not None
                 and snapshot.state in _LIVE_STATES
@@ -537,6 +550,8 @@ class AdvanceMixin:
                 or child.state != LifecycleState.SUCCEEDED.value
             ):
                 established = _established_start_effect(
+                    service._lifecycle, plan.phases[phase_index], child
+                ) or _established_stop_effect(
                     service._lifecycle, plan.phases[phase_index], child
                 )
                 if established is not None:
