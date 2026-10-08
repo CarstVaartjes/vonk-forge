@@ -5151,7 +5151,7 @@
       "_encoded": "8c3fb7da620071ca14b69dd3b695af8541b512ac51556d00a1c1428d13efb710",
       "_binding_digest": "6b2980efe127a3282e3f1637f3c32b09306034ddef8a0fbb7af03dabffaf3428",
       "_now": "67dc007c5635ac1e8ab9e24f33e72c196795a809ce55c7ed4c5a18cffafdf419",
-      "RecipeUpdateBatches": "7522e2e463050cbaf374f04f8e3d19ce251bab89830f2be5b6b54ebc910378f8",
+      "RecipeUpdateBatches": "3432d4ae5b70f1d2d9f6f15cc0674ae889095343f0f282e651fdabd392f20220",
       "RecipeUpdateBatches.__init__": "0a72a965672908fc1c53c4c83839537f6e174f930bdcfdfd3ea449c847cfb31b",
       "RecipeUpdateBatches._document": "eb50deb789c1a88e94f6f292c5eeb0cf33338239bbc7b7376aa11d46ec230fcf",
       "RecipeUpdateBatches._authorize": "81d5477ad15940d412c0e5fc05a04d80e370cc892cf3600a040d33c586f71f68",
@@ -5171,11 +5171,11 @@
       "RecipeUpdateBatches._activity_list": "d7effd680fffee83df020f809ef77bb46fa66e8ee2c8ec6bd2ced1cca5364dfb",
       "RecipeUpdateBatches.claim": "fd7b63b4935192a63e3878a3fd9b18c40f9f8157bf2f8e1a84ae18150319a72c",
       "RecipeUpdateBatches._owned": "213f58edcb79fc21b4f4921c23f49a3eae52363c651f18d2440d56d35f365805",
-      "RecipeUpdateBatches.authorize_child": "7dc6a24aae2fb9488e741690cfd8b1a258a3ac40a551a697d23c0dcdcf890bcc",
+      "RecipeUpdateBatches.authorize_child": "658fe87fc48f9cf2708bbb7fa292bfacfd323e0d170c32e3d7dfa336aaf474ef",
       "RecipeUpdateBatches._intent": "e90d07449a48f237877d3c57470d87e592ec6b72139a192328c64bb888a4c56c",
       "RecipeUpdateBatches.run": "e80878cbdccb9f0fa62c1bd919b3d103c5f398a28a5b8d22197c961ccaff0586",
-      "RecipeUpdateBatches._run_once": "b294b2aee1dd1abc0548e58c56e12e523f3dda5e20699a997bd0632be9d1fb22",
-      "<module>": "45c4d863e0f163c5af6cc7b5a5439f69ad067c610b5e3291163e4686eabb02e0"
+      "RecipeUpdateBatches._run_once": "1b5d4a7d0da86a32a450661b1ab031c421edbff08346cbc52d8d23e43fa06c00",
+      "<module>": "d2aa2bac8ad45d83f9db964cc74bdb9137bec7f83821abcf40e0d2f693c33a0d"
     },
     "control/src/vonk_control/route_runtime.py": {
       "RouteRuntimeError": "88943347befbcc323de64878dcd4b2457e43ffbdef84b1bb2fea6afe0b90b2e5",
@@ -5276,11 +5276,11 @@
       "_activity_result": "92c659a8687b7ec2a99b65d53107381f812e066557cea482fef6d8591f1a6d77"
     },
     "control/src/vonk_control/run_switch_operations/advance.py": {
-      "AdvanceMixin": "374cf89603b429566163fc47800c63b94befb6d83f845bc2a3b1731167e10042",
-      "AdvanceMixin._advance": "8ec61868fe48db8ed2509e3cc2224d5e81a6bbc249eb5223f05aa90b73eebdab",
+      "AdvanceMixin": "db54d353ff5dadc93e6ad2cbca19a1469b8a558565c6c20d94c2b5df22b4eb94",
+      "AdvanceMixin._advance": "7b844205f0fe71a2497c04ac14189ab799455ab3ddb2be983f478c9c8a67180f",
       "AdvanceMixin._advance.checkpoint_job": "4768cbca5c2b679bda8c5f89cbd49af35a3e82f2e5c086474890a514ba8b50ee",
       "AdvanceMixin._advance.fail": "c25baf10f1f6245ecd3d6356a0a01ff92b2bba30530d2c924ab992310c0f57ba",
-      "<module>": "a03c15baaf650fe91c0b60d6881d7252b22b266c57c90aae8bc7c1bbd97edfb9"
+      "<module>": "5b8a0b0fbe4a6de44c99e57329e4d055930440cdf63278973fb6293a87f7b0cf"
     },
     "control/src/vonk_control/run_switch_operations/artifact_inspection.py": {
       "DatabaseRunSwitchArtifactInspector": "1d7e5cb890a68d6b5a42b6465cddb032e62188ed5f78d46ee7346452e8d8ed45",
@@ -5327,15 +5327,15 @@
       "<module>": "187d53f90ec1e8391222d2fdd01b82c14b81b5f4a17d7d7473c927cee5fa1cee"
     },
     "control/src/vonk_control/run_switch_operations/endings.py": {
-      "EndingsMixin": "634e0d470aec138c0c88b9c68d94466f475944539f0300200839605c96895970",
+      "EndingsMixin": "81adfb227960d6073c348c00ae374092a57500f505868b6f71268bb6d62a3fd4",
       "EndingsMixin._settle_stop_observation": "04dbd9a49d584e31905da65a22f7102a8afe77ba395bb044f96453883ad0a8a9",
-      "EndingsMixin._settle_checkpoint_observation": "f0e0a2aefbf1c43201c035caa7a93299b5ecbf9ebcae71b977949fdae5b8c9f9",
+      "EndingsMixin._settle_checkpoint_observation": "95c12908abda06793eeaf0cef6ab25a3d6651e1afa3196e2f35d957af051b96b",
       "EndingsMixin._get_child_operation": "c861efc9302bc9b5380925ef9580a3d62991eaff938b315919d0cc5bd6181f0f",
-      "EndingsMixin._fail": "fdbdd7e8c01f59ef3a10bc851324c30750888b7b2d30a311aa40e82b74cce468",
-      "EndingsMixin._settle_invalid_receipt": "2157cdc783595dbc83babbe670eb60dda70362ef0f0111c7a96127945d1e1d51",
-      "EndingsMixin._schedule_checkpoint_retry": "cf3a2343121975db801d308de822e2461828f8c3c97f64a6a8317bb5c4499f24",
+      "EndingsMixin._fail": "68aeca2bfbdead1852f768baf7b75676a03c91236abeae019acc09df5fb966c3",
+      "EndingsMixin._settle_invalid_receipt": "5dd0f2fad2bab74d538bd609feac6615612c8a58f1d2430edd3aacbd6202bd21",
+      "EndingsMixin._schedule_checkpoint_retry": "b0c5f4008ed821b36f8cab8e6742ccdc06e132a77cc21b8cba8bdd8b6c7111cc",
       "EndingsMixin._mark_failed": "7de0f8b9781bc0b44e28ad044b7111ec53da35e1eac4a1d590d8780e9059b1cc",
-      "<module>": "d73a65e05762774f507c1dd09f3d4f1a8f3549ac084cbb31bc542d56e733df74"
+      "<module>": "e6d50dfafb06720fa42f6ed69ea8987e83927fcc10ca39595341a1c24b768698"
     },
     "control/src/vonk_control/run_switch_operations/endings_helpers.py": {
       "_reject_invalid_operation": "5509131ef88abf14a9f748e78aae0e34ca6140923c5a0d7bed6f6e9941a12c0b"
@@ -5410,7 +5410,7 @@
       "_planned_transfer_bytes": "09cf4aa75f6cfed1cb0268b1833d096d65e0548518d0f128fb9f5cb954ce64b3",
       "_plan_target_node_ids": "1f7b6079e00286679d8f2b451f5a10737139cae316ff6f8cebb59a2e2179eadf",
       "_planned_transfer_parts": "5922015152980c318995a3d1cb2edd5e3aea99313d6d91a74825584e23ea46fa",
-      "effective_build_receipt": "59abeab66f9456d7a91835c50d3e8cda666e2b956b5d2d6c50486d404c2b2e9c",
+      "effective_build_receipt": "6c1308545952dbbc3175cc8a1089fe2805e4a56e27cab13d7d9aa42582ac885b",
       "_require_profile_runtime_image": "4fc66a2e268c1d3947c310a964dfcfe8f49d24ff1c4728f82fdf64bac1922c73",
       "_build_receipt_in_session": "7f0091897371a66745bb002c798dcee5eba9ac0def79fd94284af8162dee5360"
     },
@@ -5465,9 +5465,9 @@
       "<module>": "7ac04cdda77ef8bfec8afcf1476e5638bf4410caf237f7a18719476c1727d9da"
     },
     "control/src/vonk_control/run_switch_operations/phase_dispatch.py": {
-      "PhaseDispatchMixin": "38cac6a16f384014d05ca6ada9bf7a9ab81cde70861f3e5d5c4fe8a412f8a51f",
-      "PhaseDispatchMixin._execute_checkpoint": "047062866c821a5f09cca1e1118ec2409ff5a42a5d9563f36c900bf3f553b29c",
-      "<module>": "b72253438f4bc75d617db94037da0bb28be4deeb467c0a5c0a428c91909ff81b"
+      "PhaseDispatchMixin": "5c48a91571a1ce694aa178fdda06987d3078109bc332131dfe23c6a1805e2131",
+      "PhaseDispatchMixin._execute_checkpoint": "df9be23fe5cbad85dde65c6479d9396ab078c3386fca1d81956488a3ba2faffd",
+      "<module>": "273d77c771af60ac3f63736789ee2c4c13a9097bd2af3c091d5d9340e34e1f54"
     },
     "control/src/vonk_control/run_switch_operations/phase_planning.py": {
       "PhasePlanningMixin": "d1593b795b91af02774a09fc73f727db50c41644a39e0216487bd28a9d578df3",
@@ -5528,7 +5528,7 @@
       "<module>": "e40b3d0a889543392fdd99246a9637551a2f26b7bc29a8946a638d7d560c008e"
     },
     "control/src/vonk_control/run_switch_operations/publish.py": {
-      "_persist_run_switch_runtime_image_reference": "42d648a23ef519edcd0041929fa09e58c6b975708dec34a2dab3b6a8ecf8b14b"
+      "_persist_run_switch_runtime_image_reference": "577a09c5bb468007e854293c4632bd873c27fd23c1fd89ebdaf51087bf616957"
     },
     "control/src/vonk_control/run_switch_operations/reservation.py": {
       "ReservationMixin": "41df05506e7261376d0fd1e28fc455932465fd07cd1b51b23b50fb9a04478a55",
@@ -7949,7 +7949,6 @@
         ["control/src/vonk_control/recipe_update_batches.py", "MissingRecord", "RecipeUpdateBatches.get", "message", 1],
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches._matching", "recipe_update.request_key_reused", 2],
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches._reserve_document_budget", "recipe_update.scope_invalid", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches.authorize_child", "recipe_update.operation_invalid", 1],
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityInvalid", "RecipeUpdateBatches.start", "recipe_update.scope_invalid", 1]
       ]
     },
@@ -7983,16 +7982,6 @@
         ["control/src/vonk_control/run_switch_operations/service.py", "MissingRecord", "RunSwitchOperationService.inspect_candidate", "message", 1],
         ["control/src/vonk_control/run_switch_operations/stop_planning.py", "MissingRecord", "StopPlanningMixin.preview_stop", "message", 1],
         ["control/src/vonk_control/run_switch_operations/executor.py", "MissingRecord", "RecipeLifecyclePhaseExecutor.get", "message", 1]
-      ]
-    },
-    {
-      "family": "run_switch_operations.security-edge",
-      "category": "security-edge",
-      "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard.",
-      "sites": [
-        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityMismatch", "_persist_run_switch_runtime_image_reference", "runtime-image-differs-from-the-approved", 1],
-        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityMismatch", "_persist_run_switch_runtime_image_reference", "runtime-image-is-not-the-approved-build-result", 1],
-        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityMismatch", "_persist_run_switch_runtime_image_reference", "runtime-image-receipt-differs-from-the-approved-build", 1]
       ]
     },
     {
@@ -8166,7 +8155,6 @@
         ["control/src/vonk_control/run_switch_operations/publish.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "artifact.reference_busy", 2],
         ["control/src/vonk_control/run_switch_operations/publish.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "message", 1],
         ["control/src/vonk_control/run_switch_operations/ownership.py", "_RunSwitchBuildParentChanged", "_lock_current_build_parent", "run-switch.container-build-parent-changed", 1],
-        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "approved-recipe-build-is-no-longer-available", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "persisted-runswitch-plan-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-image-reference-changed-during-publication", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-plan-changed-before-image-publication", 1],
@@ -8175,9 +8163,7 @@
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "stored-runswitch-image-reference-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "verified-runtime-image-receipt-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-operation-no-longer-owns-image-publication", 1],
-        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-no-longer-has-a-workload-claim", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-phase-was-cancelled-or-superseded", 1],
-        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-progress-no-longer-owns-image-publication", 2],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageOwnerChanged", "_persist_run_switch_runtime_image_reference", "runswitch-spark-scope-or-workload-claim-changed", 1],
         ["control/src/vonk_control/run_switch_operations/result_helpers.py", "RunSwitchRetryLater", "_bound_workload_intent", "run-switch-workload-intent-is-unbound", 1]
       ]
@@ -9254,7 +9240,7 @@
       "reason": "The existing owner catches these unknown outcomes in its bounded retry path.",
       "sites": [
         ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityUnknown", "RecipeUpdateBatches._run_once", "recipe_update.observation_invalid", 1],
-        ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityUnknown", "RecipeUpdateBatches.authorize_child", "recipe_update.observation_invalid", 1]
+        ["control/src/vonk_control/recipe_update_batches.py", "RecipeImageAvailabilityUnknown", "RecipeUpdateBatches.authorize_child", "recipe_update.observation_invalid", 2]
       ]
     },
     {
@@ -9387,6 +9373,18 @@
       "sites": [
         ["control/src/vonk_control/run_switch_operations/image_receipts.py", "RunSwitchRetryLater", "_require_profile_runtime_image", "profile.runtime-image-changed", 1],
         ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runtime-image-observation-differs-from-the-accepted-fleet-pr", 1]
+      ]
+    },
+    {
+      "family": "g1290.managed-publication-observation",
+      "category": "already-retried",
+      "reason": "Managed publication no longer rejects local projections or requires producer rows. The phase owner re-observes accepted content through checkpoint retry and immutable request expiry, retaining effect identity.",
+      "sites": [
+        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-phase-workload-claim-observation-is-unavailable", 1],
+        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-target-observation-is-unavailable", 1],
+        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-progress-no-longer-owns-image-publication", 1],
+        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runswitch-workload-claim-observation-is-unavailable", 1],
+        ["control/src/vonk_control/run_switch_operations/publish.py", "_RuntimeImageIdentityUnknown", "_persist_run_switch_runtime_image_reference", "runtime-image-differs-from-the-approved", 1]
       ]
     }
   ]

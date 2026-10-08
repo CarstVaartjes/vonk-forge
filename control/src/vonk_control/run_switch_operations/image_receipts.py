@@ -162,9 +162,7 @@ def effective_build_receipt(
             expected_input,
         }:
             continue
-        return result.model_copy(
-            update={"build_id": expected_build_id, "build_input_sha256": expected_input}
-        )
+        return result
     return None
 
 

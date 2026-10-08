@@ -7,10 +7,12 @@ import json
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfilePreview
 from vonk_control.fleet_profiles import (
     FleetProfileService,
@@ -111,6 +113,19 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
         sessions, clock=lifecycle._clock, run_switch_operations=adapter._run_switch
     )
     restarted.tick()
+    # A stale content observation does not certify changed accepted bytes.
+    # Let the existing child observer consume its immutable budget, across a
+    # reconstructed parent service, before asserting its ending.
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+
+    end_time = NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+    adapter._run_switch._clock = lambda: end_time
+    restarted._clock = lambda: end_time
+    for _ in range(3):
+        adapter._run_switch.tick()
+        restarted.tick()
 
     with sessions() as session:
         applications = list(session.scalars(select(FleetProfileApplication)))
@@ -118,13 +133,7 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
         blocked = next(
             (row for row in applications if row.id != first.id), applications[0]
         )
-        assert blocked.state == "failed"
-        if after_retry_admission:
-            assert "profile.runtime-image-changed" in (blocked.status_reason or "")
-            assert "review and load" in (blocked.status_reason or "")
-        else:
-            assert "profile.recovery_artifact_changed" in (blocked.status_reason or "")
-            assert "explicit new load" in (blocked.status_reason or "")
+        assert blocked.state == LifecycleState.FAILED
         assert (
             len(
                 list(
@@ -141,6 +150,23 @@ def test_rebuilt_image_cannot_replace_persisted_profile_identity(
             node = session.get(AgentNode, node_id)
             assert node is not None
             assert node.workload_intent_ordinal == original_ordinals[node_id]
+    reviewed = restarted.preview(_profile.id)
+    assert reviewed.allowed
+    from .non_blocking import assert_ended_without_blocking
+
+    def cause(receipt):
+        assert receipt.result is not None
+
+    _, fresh = assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        restarted.application(blocked.id),
+        end=lambda operation: restarted.application(operation.id),
+        fresh=lambda _world: restarted.apply(
+            _profile.id, request_key=_uuid(931), actor="admin"
+        ),
+        assert_reason=cause,
+    )
+    assert fresh.id != blocked.id
 
 
 @pytest.mark.parametrize("supersede", [False, True])

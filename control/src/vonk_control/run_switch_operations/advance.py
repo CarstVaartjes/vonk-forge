@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
 )
@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from .. import job_states
 from ..admission_locking import (
@@ -64,7 +65,12 @@ from ..run_switch_progress import (
 )
 from ..stored_json import read_row_column
 from .artifact_validation import _validate_artifact_execution
-from .constants import _OBSERVING, _OPERATION_KINDS, _TERMINAL_STATES
+from .constants import (
+    _FINAL_VERIFICATION_MAX_SECONDS,
+    _OBSERVING,
+    _OPERATION_KINDS,
+    _TERMINAL_STATES,
+)
 from .endings_helpers import _reject_invalid_operation
 from .errors import (
     RunSwitchOperationConflict,
@@ -210,12 +216,8 @@ class AdvanceMixin:
                 session.commit()
                 return True
             if intent_status == "missing-target":
-                service._mark_failed(
-                    job,
-                    "run-switch target node no longer exists; accepted intent is superseded",
-                    now=now,
-                    progress=progress,
-                    failure_code=RunSwitchCode.SUPERSEDED,
+                service._schedule_checkpoint_retry(
+                    job, progress, RunSwitchCode.TARGET_NOT_ACTIVE, now
                 )
                 session.commit()
                 return True
@@ -227,13 +229,16 @@ class AdvanceMixin:
                     and now < _aware(pending_due)
                 ):
                     return False
+                progress.observation_deadline_at = _aware(job.created_at) + timedelta(
+                    seconds=_FINAL_VERIFICATION_MAX_SECONDS
+                )
                 _ADAPTER.retry(
                     job,
                     progress,
                     RunSwitchCode.TARGET_NOT_ACTIVE,
                     now,
                     visible=_OBSERVING,
-                    record_reason=False,
+                    record_reason=True,
                     describe=lambda due: (
                         "Waiting for a target Spark to return to active state; "
                         f"next check at {due.isoformat()}"
@@ -476,6 +481,9 @@ class AdvanceMixin:
                             job.updated_at = now
                             return True
                         return False
+                    progress.observation_deadline_at = _aware(
+                        job.created_at
+                    ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
                     retry_due_at = (
                         child.retry_due_at
                         if isinstance(child, RecipeOperationView)
@@ -487,6 +495,11 @@ class AdvanceMixin:
                         progress.observation_due_at = _aware(retry_due_at)
                     else:
                         progress.observation_due_at = None
+                    if progress.observation_due_at is not None:
+                        progress.observation_due_at = min(
+                            progress.observation_due_at,
+                            progress.observation_deadline_at,
+                        )
                     child_reason = child_progress.status_reason
                     status_reason = (
                         child_reason[:512] if isinstance(child_reason, str) else None
@@ -591,13 +604,16 @@ class AdvanceMixin:
                             _child_progress_payload(child).status_reason
                             or "Lifecycle effect is uncertain; exact child remains pending"
                         )[:400]
+                        progress.observation_deadline_at = _aware(
+                            job.created_at
+                        ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
                         _ADAPTER.retry(
                             job,
                             progress,
                             child_reason,
                             now,
                             visible=_OBSERVING,
-                            record_reason=False,
+                            record_reason=True,
                             describe=lambda due: (
                                 f"{child_reason}; next exact observation at "
                                 f"{due.isoformat()}"
@@ -613,7 +629,14 @@ class AdvanceMixin:
                     if isinstance(detail, str) and detail:
                         reason += ": " + detail[:384]
                     kind = _child_failure_kind(child)
-                    if classify(kind) is RecoveryDecision.RETRY:
+                    if classify(kind) is RecoveryDecision.RETRY and plan.phases[
+                        phase_index
+                    ].kind not in {
+                        ProfileChildPhase.CLEANUP,
+                        ProfileChildPhase.STOP,
+                        ProfileChildPhase.UNINSTALL,
+                        ProfileChildPhase.START,
+                    }:
                         with service._sessions.begin() as session:
                             job = checkpoint_job(session)
                             if job is None:
@@ -693,10 +716,14 @@ class AdvanceMixin:
                             for receipt in child_receipts
                         )
                     except RunSwitchOperationConflict as error:
-                        # A receipt that does not validate is an unknown, not a
-                        # failure: the idempotent child is issued again under a
-                        # new identity and its fresh receipt is validated.
-                        service._settle_invalid_receipt(job, error, now, reissue=True)
+                        # Reconnect to the same effect. Receipt damage cannot
+                        # authorize another destructive execution identity.
+                        service._settle_invalid_receipt(
+                            job,
+                            error,
+                            now,
+                            reissue=phase.kind != ProfileChildPhase.CLEANUP,
+                        )
                         return True
                     progress.phase_results = results
                 if phase.subphase == "container-build":
@@ -727,10 +754,14 @@ class AdvanceMixin:
                             expected_image=expected_image,
                         )
                     except RunSwitchOperationConflict as error:
-                        # A receipt that does not validate is an unknown, not a
-                        # failure: the idempotent child is issued again under a
-                        # new identity and its fresh receipt is validated.
-                        service._settle_invalid_receipt(job, error, now, reissue=True)
+                        # Reconnect to the same effect. Receipt damage cannot
+                        # authorize another destructive execution identity.
+                        service._settle_invalid_receipt(
+                            job,
+                            error,
+                            now,
+                            reissue=phase.kind != ProfileChildPhase.CLEANUP,
+                        )
                         return True
                 if (
                     child_receipts is None
@@ -743,10 +774,14 @@ class AdvanceMixin:
                     try:
                         receipt = _phase_result(child_result, phase=phase)
                     except RunSwitchOperationConflict as error:
-                        # A receipt that does not validate is an unknown, not a
-                        # failure: the idempotent child is issued again under a
-                        # new identity and its fresh receipt is validated.
-                        service._settle_invalid_receipt(job, error, now, reissue=True)
+                        # Reconnect to the same effect. Receipt damage cannot
+                        # authorize another destructive execution identity.
+                        service._settle_invalid_receipt(
+                            job,
+                            error,
+                            now,
+                            reissue=phase.kind != ProfileChildPhase.CLEANUP,
+                        )
                         return True
                     progress.phase_results = [
                         *progress.phase_results,

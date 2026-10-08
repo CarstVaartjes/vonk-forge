@@ -47,6 +47,7 @@ from .test_run_switch_operations import (
         "transfer-bytes",
         "nas-eviction",
         "unplanned-cleanup",
+        "cleanup-response-loss",
         "verify-image",
         "prepare-image",
         "verify-archive",
@@ -70,7 +71,13 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
     class FaultyObservation(RecordingArtifactExecutor):
         damaged = True
 
+        def __init__(self):
+            super().__init__()
+            self.cleanup_requests: list[str] = []
+
         def execute(self, plan, phase, **kwargs):
+            if phase.kind == ProfileChildPhase.CLEANUP:
+                self.cleanup_requests.append(kwargs["request_key"])
             if self.damaged and phase.kind == (
                 ProfileChildPhase.TRANSFER
                 if fault == "transfer-bytes"
@@ -79,6 +86,8 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
                 else ProfileChildPhase.CLEANUP
             ):
                 self.calls.append(phase.kind)
+                if fault == "cleanup-response-loss":
+                    raise RuntimeError("cleanup response unavailable")
                 if fault == "transfer-bytes":
                     receipt = RunSwitchTargetTransferEvidenceResult(
                         phase=ProfileChildPhase.TRANSFER.value,
@@ -207,6 +216,17 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
     assert not service.tick()
     assert len(executor.calls) == calls
     service = restart()
+    if fault == "cleanup-response-loss":
+        # A post-dispatch exception reconnects with the accepted cleanup key,
+        # including across a restart; it cannot restart the plan or generation.
+        now[0] = due
+        assert service.tick()
+        held = service.get(operation.operation_id)
+        assert held.result is not None and held.result.observation_due_at is not None
+        due = held.result.observation_due_at
+        assert len(executor.cleanup_requests) >= 2
+        assert len(set(executor.cleanup_requests)) == 1
+        calls = len(executor.calls)
     if repair:
         executor.damaged = False
         now[0] = due

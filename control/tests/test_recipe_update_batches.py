@@ -1345,7 +1345,19 @@ def test_invalid_child_observation_repairs_then_has_a_bounded_end_and_fresh_admi
     assert admitted.id != broken.id and admitted.state == LifecycleState.QUEUED
 
 
-@pytest.mark.parametrize("missing_field", ["code", "detail"])
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "code",
+        "detail",
+        "request",
+        "recipe_content_sha256",
+        "id",
+        "state",
+        "peer-error",
+        "peer-invalid",
+    ],
+)
 @pytest.mark.parametrize("repair", [False, True])
 def test_unreadable_child_failure_reobserves_exact_request_across_restart(
     update_env, monkeypatch, missing_field, repair
@@ -1366,19 +1378,43 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
         code=RecipeUpdateCode.OBSERVATION_INVALID,
         detail="child evidence unavailable",
     ).model_dump(mode="json")
-    del failure[missing_field]
+    if missing_field in {"code", "detail"}:
+        del failure[missing_field]
     damaged = observed.model_copy(
         update={
             "state": LifecycleState.FAILED.value,
             "failure_evidence": AvailabilityOperationFailure.model_construct(**failure),
         }
     )
+    if missing_field in {"request", "recipe_content_sha256", "id", "state"}:
+        delattr(damaged, missing_field)
+
+    def unreadable(*_args, **_kwargs):
+        from vonk_control.recipe_image_availability import (
+            RecipeImageAvailabilityError,
+            RecipeImageAvailabilityInvalid,
+        )
+
+        if missing_field == "peer-error":
+            raise RecipeImageAvailabilityError(
+                RecipeUpdateCode.OBSERVATION_INVALID,
+                "peer bookkeeping is unreadable",
+                retryable=False,
+            )
+        if missing_field == "peer-invalid":
+            raise RecipeImageAvailabilityInvalid(
+                RecipeUpdateCode.OBSERVATION_INVALID,
+                "peer bookkeeping is unreadable",
+                retryable=False,
+            )
+        return damaged
+
     with sessions() as session:
         identities = set(session.scalars(select(Job.id)))
 
     # A new service reads the same persisted parent and exact child request.
     service = fresh()
-    monkeypatch.setattr(service, "get_operator_request", lambda *_a, **_k: damaged)
+    monkeypatch.setattr(service, "get_operator_request", unreadable)
     now[0] += timedelta(seconds=2) if repair else CANCEL_BUDGET - timedelta(seconds=1)
     service.run_update_claim(service.claim_update(owner="worker"))
     waiting = service.get_operator_operation(parent.id)
@@ -1397,7 +1433,7 @@ def test_unreadable_child_failure_reobserves_exact_request_across_restart(
         assert repaired.operation_id == child.operation_id
         assert repaired.retry_at is None and repaired.failure is None
     else:
-        monkeypatch.setattr(service, "get_operator_request", lambda *_a, **_k: damaged)
+        monkeypatch.setattr(service, "get_operator_request", unreadable)
         now[0] += CANCEL_BUDGET
         service.run_update_claim(service.claim_update(owner="worker"))
         ended = service.get_operator_operation(parent.id)

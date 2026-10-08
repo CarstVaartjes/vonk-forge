@@ -1040,8 +1040,10 @@ def test_run_switch_missing_target_is_terminal_with_clear_reason(
     )
 
 
+@pytest.mark.parametrize("repair", [False, True])
 def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     tmp_path: Path,
+    repair: bool,
 ) -> None:
     """A Spark that goes inactive parks the switch; its return resumes it."""
 
@@ -1070,7 +1072,8 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.state = "failed"
+        active_state = node.state
+        node.state = LifecycleState.FAILED
 
     assert service._advance(operation.operation_id) is True
     waiting = service.get(operation.operation_id)
@@ -1080,11 +1083,53 @@ def test_inactive_target_waits_then_resumes_when_the_spark_returns(
     due = waiting.result.observation_due_at
     # Nothing happens before the backoff is due.
     assert service._advance(operation.operation_id) is False
+    if not repair:
+        from vonk_control.run_switch_operations.constants import (
+            _FINAL_VERIFICATION_MAX_SECONDS,
+        )
+
+        # Restart the observer with the target still unavailable. No child
+        # effect or node recovery is fabricated when its fixed budget ends.
+        service = _service(
+            sessions,
+            NOW,
+            lifecycle,
+            RecordingArtifactExecutor(),
+            artifacts=CompleteArtifactInspector(),
+        )
+        service._clock = lambda: now[0]
+        now[0] = NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+        assert service.tick()
+        ended = service.get(operation.operation_id)
+        with sessions.begin() as session:
+            node = session.get(AgentNode, nodes[0])
+            assert node is not None
+            node.state = active_state
+        from .non_blocking import assert_ended_without_blocking
+
+        def cause(receipt):
+            assert _result(receipt).observation_deadline_at is not None
+
+        _, fresh = assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            operation,
+            end=lambda _operation: ended,
+            fresh=lambda _world: service.apply(
+                RunSwitchApplyRequest(
+                    **request.model_dump(), request_key=str(uuid.uuid4())
+                ),
+                actor="admin",
+            ),
+            assert_reason=cause,
+            request_key=lambda receipt: receipt.request_key,
+        )
+        assert fresh.operation_id != operation.operation_id
+        return
 
     with sessions.begin() as session:
         node = session.get(AgentNode, nodes[0])
         assert node is not None
-        node.state = "active"
+        node.state = active_state
     now[0] = due + timedelta(seconds=1)
     assert service._advance(operation.operation_id) is True
     resumed = service.get(operation.operation_id)
@@ -2338,9 +2383,11 @@ def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
-        request = _run_switch_payload(
-            session.get(Job, operation.operation_id)
-        ).intent.request
+        from vonk_control.job_documents import RunSwitchRunIntent
+
+        payload = _run_switch_payload(session.get(Job, operation.operation_id))
+        assert payload is not None and isinstance(payload.intent, RunSwitchRunIntent)
+        request = payload.intent.request
 
     def end(_operation):
         for _ in range(60):

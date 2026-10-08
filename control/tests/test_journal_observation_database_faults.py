@@ -89,7 +89,15 @@ def test_database_observation_failure_ends_and_accepts_fresh(
         )
 
     def cause(receipt):
-        assert receipt.result.failure_code is not None
+        # Damaged progress stays unreadable; the end is carried by the
+        # independent operation projection and immutable repair evidence.
+        assert receipt.blockers
+        with sessions() as session:
+            from vonk_control.models import RunSwitchJournalRepair
+
+            assert (
+                session.query(RunSwitchJournalRepair).filter_by(job_id=switch).count()
+            )
 
     _, admitted = assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),

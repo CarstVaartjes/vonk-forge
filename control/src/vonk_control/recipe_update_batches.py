@@ -829,10 +829,10 @@ class RecipeUpdateBatches:
             (item for item in document.children if item.request_key == request_id), None
         )
         if job.actor != actor or child is None or intent != self._intent(child):
-            raise RecipeImageAvailabilityInvalid(
-                RecipeUpdateCode.OPERATION_INVALID,
-                "child admission does not match the accepted update scope",
-                retryable=False,
+            raise RecipeImageAvailabilityUnknown(
+                RecipeUpdateCode.OBSERVATION_INVALID,
+                "accepted child scope observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         revision = session.get(CatalogDocumentRevision, child.recipe_revision_id)
         if (
@@ -867,7 +867,6 @@ class RecipeUpdateBatches:
         from .recipe_image_availability import (
             RecipeImageAvailabilityError,
             RecipeImageAvailabilityView,
-            _retryable,
         )
 
         with self.sessions.begin() as session:
@@ -898,9 +897,16 @@ class RecipeUpdateBatches:
                         request_id=child.request_key,
                         update_claim=claim,
                     )
+                # Validate the whole peer response before reading any field.
+                # Even a model instance may have been constructed unchecked.
+                if not isinstance(observed, RecipeImageAvailabilityView):
+                    raise TypeError("child observation is unreadable")
+                observed = RecipeImageAvailabilityView.model_validate_json(
+                    canonical_message(observed.model_dump(mode="json", by_alias=True)),
+                    strict=True,
+                )
                 if (
-                    not isinstance(observed, RecipeImageAvailabilityView)
-                    or observed.request != self._intent(child)
+                    observed.request != self._intent(child)
                     or observed.recipe_content_sha256 != child.recipe_content_sha256
                 ):
                     raise RecipeImageAvailabilityUnknown(
@@ -908,14 +914,6 @@ class RecipeUpdateBatches:
                         "child receipt does not establish the accepted content and request",
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
-                # Revalidate the entire peer projection before adopting any
-                # child identity or terminal state. A model instance can contain
-                # unchecked nested data (for example after model_copy); required
-                # failure fields must never be defaulted or indexed unchecked.
-                observed = RecipeImageAvailabilityView.model_validate_json(
-                    canonical_message(observed.model_dump(mode="json", by_alias=True)),
-                    strict=True,
-                )
                 failure = observed.failure_evidence
                 candidate = child.model_copy(
                     update={
@@ -941,10 +939,13 @@ class RecipeUpdateBatches:
                 RecipeImageAvailabilityUnknown,
                 RecipeImageAvailabilityError,
             ) as error:
+                # Accepted-scope peer errors are observations unless the peer
+                # reports a refusal at its actual authority/ingress boundary.
+                # A non-retryable bookkeeping projection is still re-read.
                 retryable = (
-                    isinstance(error, RecipeImageAvailabilityUnknown)
-                    or _retryable(error)
-                ) and now < observation_deadline
+                    not isinstance(error, RecipeImageAvailabilityRefused)
+                    and now < observation_deadline
+                )
                 child.failure = RecipeUpdateFailure(
                     code=error.code,
                     detail=str(redact_text(error.detail))[:512],
@@ -966,7 +967,7 @@ class RecipeUpdateBatches:
                     if retryable
                     else None
                 )
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, AttributeError):
                 # Observation never becomes a failed security decision. This
                 # observer has the same bounded reconciliation window as cleanup;
                 # issued children retain their own executor fences and lifecycle.

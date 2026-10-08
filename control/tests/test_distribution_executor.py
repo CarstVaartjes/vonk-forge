@@ -555,7 +555,8 @@ def test_build_verify_handoff_reuses_content_from_another_producer() -> None:
         clock=lambda: datetime.now(UTC),
     )
     result = _receipt_json(executor._verify_evidence(plan, progress, (node_id,), ()))
-    assert result["verified_build_id"] == build_id
+    assert result["verified_image_digest"] == image_digest
+    assert result["verified_oci_layout_sha256"] == layout_digest
     _validate_artifact_execution(plan, _phase(kind="verify"), result)
 
     # Persist a preparation receipt from a different producer, then feed it
@@ -609,7 +610,8 @@ def test_build_verify_handoff_reuses_content_from_another_producer() -> None:
     )
     assert isinstance(cached.result, RunSwitchVerifyResult)
     assert cached.result.skipped is True
-    assert cached.result.verified_build_id == build_id
+    assert cached.result.verified_image_digest == image_digest
+    assert cached.result.verified_oci_layout_sha256 == layout_digest
     _validate_artifact_execution(plan, _phase(kind="verify"), cached.result)
 
 
@@ -1420,6 +1422,11 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             workload_intent_ordinal=1, phase_results=[foreign_image]
         ).model_dump_json()
     )
+    # Managed content remains available after complete producer-history loss.
+    with services.sessions.begin() as session:
+        producer = session.get(RecipeBuild, build_id)
+        assert producer is not None
+        session.delete(producer)
     copy_child = executor.execute(
         plan,
         copy_phase,

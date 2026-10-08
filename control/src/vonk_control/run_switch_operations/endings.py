@@ -98,7 +98,12 @@ class EndingsMixin:
         corrupt receipts, re-planning or a worker restart. Ending observation
         neither Stops a child nor withdraws a serving route.
         """
-        if progress.cancellation is not None or progress.retry_reason is None:
+        if (
+            progress.cancellation is not None
+            or progress.profile_application_id is not None
+            and (plan := _stored_job_plan(job)) is not None
+            and plan.action == ProfileSwitchChildKind.STOP
+        ):
             return False
         deadline = _aware(job.created_at) + timedelta(
             seconds=_FINAL_VERIFICATION_MAX_SECONDS
@@ -147,17 +152,11 @@ class EndingsMixin:
         clear_child: bool = False,
         definite: bool = False,
     ) -> None:
-        """A phase could not be settled.
+        """Observe uncertain children under their original identity and budget.
 
-        Only a real security refusal (``is_security_failure``) is a definite end.
-        Everything else (a receipt that does not validate, a verification that
-        cannot be observed, a missing child, a wiring gap) is an unknown: the same
-        idempotent phase is entered again at the core's bounded backoff, so the
-        observation ends at the immutable request deadline without certifying
-        cleanup or withdrawing an independently owned serving route. The caller
-        no longer chooses; the classifier does (``failure_classification``).
-        ``definite`` is only for an owner that typed its own verdict (the image
-        preparation's non-retryable errors: an invalid archive or identity).
+        Cancellation keeps its native owner. A denied grant or rejected ingress
+        ends immediately; otherwise this observer retries without replacing an
+        attached child or declaring its physical effects absent.
         """
         service = typing_cast("RunSwitchOperationService", self)
 
@@ -198,7 +197,6 @@ class EndingsMixin:
                 not definite
                 and not is_security_failure(failure_code)
                 and checkpoint is not None
-                and (checkpoint[2] is None or clear_child)
             ):
                 # Re-enter the current phase with the same accepted intent and
                 # deterministic child identity. The executor reconciles any
@@ -212,11 +210,12 @@ class EndingsMixin:
                 # of replanning (and forgetting its attempts) forever.
                 progress.force_replan = (
                     replan
+                    and checkpoint[2] is None
                     and progress.retry_reason != reason[:512]
                     and "start" not in progress.completed_phases
                     and progress.phase != "start"
                 )
-                if clear_child:
+                if clear_child and checkpoint[2] is None:
                     progress.child_operation_id = None
                 service._schedule_checkpoint_retry(job, progress, reason, now)
                 return
@@ -232,16 +231,7 @@ class EndingsMixin:
     def _settle_invalid_receipt(
         job: Job, error: RunSwitchOperationConflict, now: datetime, *, reissue: bool
     ) -> None:
-        """A receipt did not validate inside the checkpoint transaction (rule 5).
-
-        Its effect is unknown, so the phase is entered again at the core's backoff:
-        an idempotent child is issued again under a new identity (``reissue``), a
-        receipt read from the Controller's own records is simply observed again.
-        A reviewed destructive-effect or digest guard ends immediately; other
-        unknowns end when the immutable observation deadline expires.
-        The progress is re-read, so nothing half-merged from the invalid receipt is
-        kept.
-        """
+        """Observe the original effect when its post-effect receipt is unreadable."""
 
         code = error_code(error)
         progress = _read_progress(read_row_column(job, "result"))
@@ -250,12 +240,13 @@ class EndingsMixin:
                 job, str(error), now=now, progress=progress, failure_code=code
             )
             return
+        # Cleanup callers never reissue: only the native owner can reconcile
+        # an uncertain destructive effect under its original identity.
         if reissue:
             progress.child_operation_id = None
             progress.phase_retry_generation = (
                 require_integer(
-                    progress.phase_retry_generation or 0,
-                    "phase retry generation",
+                    progress.phase_retry_generation or 0, "phase retry generation"
                 )
                 + 1
             )
@@ -269,6 +260,18 @@ class EndingsMixin:
         deadline = _aware(job.created_at) + timedelta(
             seconds=_FINAL_VERIFICATION_MAX_SECONDS
         )
+        plan = _stored_job_plan(job)
+        reusable_stop = (
+            progress.profile_application_id is not None
+            and plan is not None
+            and plan.action == ProfileSwitchChildKind.STOP
+        )
+        # The profile's native Stop owner outlives each assignment observer.
+        if reusable_stop:
+            _ADAPTER.retry(job, progress, reason, now)
+            job.result = _persisted_result(progress)
+            job.updated_at = now
+            return
         progress.observation_deadline_at = deadline
         if now >= deadline:
             EndingsMixin._mark_failed(

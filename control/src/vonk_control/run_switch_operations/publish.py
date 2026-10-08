@@ -47,12 +47,11 @@ from ..strict_json import (
 )
 from .errors import (
     RunSwitchOperationConflict,
-    _RuntimeImageIdentityMismatch,
     _RuntimeImageIdentityUnknown,
     _RuntimeImageOwnerChanged,
 )
 from .identity_helpers import _stated_bytes, _string_or_none
-from .image_receipts import _build_receipt_in_session, _require_profile_runtime_image
+from .image_receipts import _require_profile_runtime_image
 from .ownership import _lock_phase_owner
 from .planning_helpers import _now, _run_switch_payload, _stored_job_plan
 from .result_helpers import (
@@ -96,8 +95,8 @@ def _persist_run_switch_runtime_image_reference(
     try:
         ordinal = _bound_workload_intent(progress)
     except RunSwitchOperationConflict as error:
-        raise _RuntimeImageOwnerChanged(
-            "RunSwitch phase no longer has a workload claim"
+        raise _RuntimeImageIdentityUnknown(
+            "RunSwitch phase workload claim observation is unavailable"
         ) from error
     profile_application_id = _string_or_none(progress.profile_application_id)
     target_nodes = tuple(sorted(node.node_id for node in plan.spark_group.nodes))
@@ -137,17 +136,21 @@ def _persist_run_switch_runtime_image_reference(
             state = getattr(error.orig, "sqlstate", None) or getattr(
                 error.orig, "pgcode", None
             )
-            if state in {"55P03", "40P01", "40001"}:
-                raise RuntimeImagePreparationUnknown(
-                    ArtifactLifecycleCode.REFERENCE_BUSY,
-                    "RunSwitch target ownership is changing; image publication will retry",
-                    retryable=True,
-                ) from error
-            raise
+            if state == "42501" or (isinstance(state, str) and state.startswith("28")):
+                raise
+            raise RuntimeImagePreparationUnknown(
+                ArtifactLifecycleCode.REFERENCE_BUSY,
+                "RunSwitch target ownership is changing; image publication will retry",
+                retryable=True,
+            ) from error
         if len(nodes) != len(target_nodes) or any(
-            node.state != "active"
-            or node.revoked_at is not None
-            or node.workload_intent_ordinal != ordinal
+            node.state != "active" and node.revoked_at is None for node in nodes
+        ):
+            raise _RuntimeImageIdentityUnknown(
+                "RunSwitch target observation is unavailable"
+            )
+        if any(
+            node.revoked_at is not None or node.workload_intent_ordinal != ordinal
             for node in nodes
         ):
             raise _RuntimeImageOwnerChanged(
@@ -171,13 +174,13 @@ def _persist_run_switch_runtime_image_reference(
             state = getattr(error.orig, "sqlstate", None) or getattr(
                 error.orig, "pgcode", None
             )
-            if state in {"55P03", "40P01", "40001"}:
-                raise RuntimeImagePreparationUnknown(
-                    ArtifactLifecycleCode.REFERENCE_BUSY,
-                    "RunSwitch operation ownership is changing; image publication will retry",
-                    retryable=True,
-                ) from error
-            raise
+            if state == "42501" or (isinstance(state, str) and state.startswith("28")):
+                raise
+            raise RuntimeImagePreparationUnknown(
+                ArtifactLifecycleCode.REFERENCE_BUSY,
+                "RunSwitch operation ownership is changing; image publication will retry",
+                retryable=True,
+            ) from error
         if (
             job is None
             or job.kind != "recipe.run-switch.v2"
@@ -205,15 +208,15 @@ def _persist_run_switch_runtime_image_reference(
             )
 
         if _progress_damaged(read_row_column(job, "result")):
-            raise _RuntimeImageOwnerChanged(
+            raise _RuntimeImageIdentityUnknown(
                 "RunSwitch progress no longer owns image publication"
             )
         try:
             current = _read_progress(read_row_column(job, "result"))
             current_ordinal = _bound_workload_intent(current)
         except RunSwitchOperationConflict as error:
-            raise _RuntimeImageOwnerChanged(
-                "RunSwitch progress no longer owns image publication"
+            raise _RuntimeImageIdentityUnknown(
+                "RunSwitch workload claim observation is unavailable"
             ) from error
         if (
             current_ordinal != ordinal
@@ -261,29 +264,10 @@ def _persist_run_switch_runtime_image_reference(
         ):
             differing = differing_image_fields(approved, parsed_receipt)
             if differing:
-                raise _RuntimeImageIdentityMismatch(
+                raise _RuntimeImageIdentityUnknown(
                     f"runtime image differs from the approved {label}: "
                     + ", ".join(differing)
                 )
-
-        if (
-            plan.recipe_build_id or plan.build.build_id
-        ) is None or plan.recipe_revision_id is None:
-            raise _RuntimeImageIdentityMismatch(
-                "runtime image is not the approved build result"
-            )
-        try:
-            build = _build_receipt_in_session(session, plan)
-        except RunSwitchOperationConflict as error:
-            raise _RuntimeImageIdentityUnknown(
-                "approved recipe build is no longer available"
-            ) from error
-        differing = differing_image_fields(build, parsed_receipt)
-        if differing:
-            raise _RuntimeImageIdentityMismatch(
-                "runtime image receipt differs from the approved build: "
-                + ", ".join(differing)
-            )
 
         if profile_application_id is not None:
             try:
