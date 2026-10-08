@@ -34,6 +34,7 @@ from ..model_cache import (
 )
 from ..models import (
     ArtifactLifecycleGate,
+    CatalogDocumentRevision,
     Job,
     ModelCacheOperation,
 )
@@ -203,13 +204,17 @@ def observe_recipe_removal(
         ):
             return False
         pinned = self._read_removal_owner(operation)
+        revision = session.get(
+            CatalogDocumentRevision, pinned.plan.intent.recipe_revision_id
+        )
+        if revision is None:
+            return False
+        content_selector = revision.content_digest
     selector = pinned.plan.intent.selector
     actor = pinned.plan.intent.actor
     request_id = pinned.plan.intent.request_key
     with_model = pinned.plan.intent.with_model
-    observed_review = self.review_removal(
-        pinned.plan.intent.recipe_revision_id, with_model=with_model
-    )
+    observed_review = self.review_removal(content_selector, with_model=with_model)
     blockers = refusing_removal_blockers(observed_review)
     if blockers:
         first = blockers[0]
@@ -219,7 +224,7 @@ def observe_recipe_removal(
     try:
         with self._sessions.begin() as session:
             selection = self._recipe_removal_selection_in_session(
-                session, pinned.plan.intent.recipe_revision_id, with_model=with_model
+                session, content_selector, with_model=with_model
             )
             revision_id = selection.revision_id
             image_archives = selection.image_archives
@@ -270,7 +275,7 @@ def observe_recipe_removal(
                 current_blockers,
             ) = self._recipe_removal_impact_in_session(
                 session,
-                pinned.plan.intent.recipe_revision_id,
+                content_selector,
                 with_model=with_model,
                 own_assignments=assignments,
             )

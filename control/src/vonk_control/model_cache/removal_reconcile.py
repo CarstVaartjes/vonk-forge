@@ -128,7 +128,8 @@ class RemovalReconcileMixin:
                 for digest in session.scalars(
                     select(ModelCacheOperation.artifact_set_sha256)
                     .where(
-                        ModelCacheOperation.kind.in_(("download", "repair")),
+                        ModelCacheOperation.kind.in_(get_args(ModelCacheOperationKind)),
+                        ModelCacheOperation.kind != operation.kind,
                         ModelCacheOperation.created_at <= operation.created_at,
                         ModelCacheOperation.payload["manifest"][
                             "model_content_sha256"
@@ -145,8 +146,6 @@ class RemovalReconcileMixin:
                         session.rollback()
                         return False
                     recovered_sets.add(digest)
-                if not recovered_sets:
-                    return False
                 checkpoint = checkpoint.model_copy(
                     update={"selected": sorted(recovered_sets)}
                 )
@@ -164,7 +163,8 @@ class RemovalReconcileMixin:
                     select(ModelCacheOperation)
                     .where(
                         ModelCacheOperation.artifact_set_sha256 == digest,
-                        ModelCacheOperation.kind.in_(("download", "repair")),
+                        ModelCacheOperation.kind.in_(get_args(ModelCacheOperationKind)),
+                        ModelCacheOperation.kind != operation.kind,
                     )
                     .order_by(ModelCacheOperation.created_at.desc())
                     .execution_options(stream_results=True)

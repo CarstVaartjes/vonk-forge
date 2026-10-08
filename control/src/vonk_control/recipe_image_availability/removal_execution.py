@@ -269,7 +269,8 @@ def _advance_recipe_removal(
     if owner.checkpoint.scope_pending:
         changed = self._observe_recipe_removal(operation_id)
         if changed:
-            return True
+            # Reload the committed scope before entering the byte-effect step.
+            return self._advance_recipe_removal(operation_id)
         return self._record_recipe_removal_failure(
             operation_id,
             code=RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE,

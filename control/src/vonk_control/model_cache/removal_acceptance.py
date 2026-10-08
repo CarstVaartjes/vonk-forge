@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
+from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
+    ModelCacheCode,
+)
 
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -34,12 +37,12 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import cache_progress, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..operation_contract import AvailabilityRecoveryAction
 from ..strict_json import serialize_json_value
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
-    ModelCacheDeletionFenceLost,
     ModelCacheStorageRefused,
     _ArtifactWriterBusy,
 )
@@ -181,7 +184,7 @@ class RemovalAcceptanceMixin:
             try:
                 if gates_reserved:
                     if not removal_fences_match(session, assignments, now=now):
-                        raise ModelCacheDeletionFenceLost(
+                        raise ModelCacheConflictUnknown(
                             ArtifactLifecycleCode.DELETION_FENCE_LOST,
                             "parent did not reserve every model identity for this child",
                         )
@@ -207,7 +210,9 @@ class RemovalAcceptanceMixin:
                 raise ModelCacheConflictUnknown(
                     error.code,
                     error.detail,
-                    recovery="retry" if error.retryable else None,
+                    recovery=AvailabilityRecoveryAction.RETRY
+                    if error.retryable
+                    else None,
                 ) from error
             if verify is not None:
                 # An unattended removal re-proves the sets unused with every gate

@@ -3737,6 +3737,7 @@ def test_model_removal_retires_persisted_intent_drift_before_effects(
             selector="recipe-child",
             selected_sets=[downloaded.artifact_set_sha256],
         )
+    assert service._observe_model_removal_scope(accepted.id)
     with sessions.begin() as session:
         row = session.get(ModelCacheOperation, accepted.id)
         assert row is not None

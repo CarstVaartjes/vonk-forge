@@ -300,6 +300,7 @@ def test_model_removal_process_death_after_unlink_reuses_pending_byte_checkpoint
         slug="removal-process-death",
         data=data,
     )
+    assert service._observe_model_removal_scope(accepted.id)
     initial = _removal_payload(sessions, accepted.id)
     assert len(initial.delete_objects) == 1
     receipt_path = service._receipt_path(initial.delete_objects[0])

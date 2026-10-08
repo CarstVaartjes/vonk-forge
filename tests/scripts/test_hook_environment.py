@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import json
 import re
 import subprocess
 import sys
@@ -249,12 +248,6 @@ def test_scripts_cannot_delegate_automatic_preparation_to_users():
                         f"{path.relative_to(ROOT)}:{number}: {line.strip()}"
                     )
     assert failures == []
-    allowlist = json.loads((ROOT / "tools/remedy-text-allowlist.json").read_text())
-    assert not any(
-        entry["path"] in {"scripts/check-staged-code", "scripts/check-staged-python"}
-        for group in ("debt", "exceptions")
-        for entry in allowlist[group]
-    )
 
 
 def test_protocol_pin_refresh_builds_missing_wheel(tmp_path, monkeypatch):

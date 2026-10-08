@@ -154,7 +154,11 @@ class RemovalExecutionMixin:
             )
             return False
         if pending_scope:
-            return cache._observe_model_removal_scope(operation_id)
+            if not cache._observe_model_removal_scope(operation_id):
+                return False
+            # The scope and fences are committed before any byte effect.
+            # Continue once, through the same executor, with the resolved scope.
+            return cache._advance_model_removal_step(operation_id, now=now)
         if in_use:
             first_digest = min(in_use)
             cache._defer_model_removal(
@@ -261,7 +265,7 @@ class RemovalExecutionMixin:
                     for item in delete_objects
                 ),
             )
-            if not lock_removal_fences(
+            if identities and not lock_removal_fences(
                 session,
                 identities,
                 owner_kind="model-cache-operation",
