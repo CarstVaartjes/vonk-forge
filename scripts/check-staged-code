@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import platform
 import re
 import shlex
@@ -39,15 +40,23 @@ def vm_cargo_command(command: list[str], remaining: float) -> list[str]:
     # VM timeout bounds contention AND cargo, even if the host disconnects.
     # The inherited lock descriptor covers cargo descendants until they exit.
     grace = min(5.0, remaining / 2)
+    target_key = hashlib.sha256(os.fsencode(ROOT)).hexdigest()[:16]
+    cleanup_budget = min(2.0, remaining / 10)
+    preparation = (
+        f"timeout --kill-after={cleanup_budget / 2:.3f}s {cleanup_budget:.3f}s "
+        f"python3 scripts/vm-cargo-cache {shlex.quote(str(ROOT))} "
+        '"$HOME/target-vonk-ci" >/dev/null 2>&1 || true; '
+        f"exec {shlex.join(command)}"
+    )
     script = (
         f"cd {shlex.quote(str(ROOT))} && "
-        'export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/target-vonk-ci-infra}" && '
+        f'export CARGO_TARGET_DIR="$HOME/target-vonk-ci/{target_key}" && '
         "export CARGO_BUILD_JOBS=2 && "
         f"exec timeout --signal=TERM --kill-after={grace:.3f}s "
         f"{remaining - grace:.3f}s "
         f"flock --wait {min(VM_LOCK_WAIT_SECONDS, remaining):.3f} "
         f"--conflict-exit-code {VM_BUSY_EXIT} {shlex.quote(VM_CARGO_LOCK)} "
-        f"{shlex.join(command)}"
+        f"bash -c {shlex.quote(preparation)}"
     )
     return ["orb", "-m", "vonk-ci", "bash", "-lc", script]
 
