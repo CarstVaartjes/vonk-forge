@@ -4,10 +4,12 @@ import errno
 import hashlib
 import json
 import os
+import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx2
 import pytest
@@ -65,6 +67,8 @@ from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspecto
 from vonk_control.worker import Worker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 from vonk_forge_contracts.model import ModelReference
+
+from .non_blocking import assert_ended_without_blocking
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
@@ -453,6 +457,13 @@ def test_model_removal_applies_to_current_storage_after_an_old_review(
             for row in session.scalars(select(ArtifactLifecycleGate))
         )
 
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        accepted,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _admit_fresh_download(service, "a" * 64, artifact),
+    )
+
 
 def test_model_removal_review_reports_exact_live_deletion_owner(cache, tmp_path):
     service, _sessions = cache
@@ -480,6 +491,13 @@ def test_model_removal_review_reports_exact_live_deletion_owner(cache, tmp_path)
     )
     assert any(
         item.code == "artifact.deletion_in_progress" for item in blocked.blockers
+    )
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=_sessions),
+        accepted,
+        end=lambda receipt: _finish_cache_removal(service, receipt),
+        fresh=lambda _world: _admit_fresh_download(service, "a" * 64, artifact),
     )
 
 
@@ -1464,7 +1482,6 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
     primary = _artifact(tmp_path, b"shared payload", model_content_sha256=model)
     alias = dict(
         primary,
-        artifact_id="weights-alias",
         id="weights-alias",
         path="weights-alias.bin",
         roles=["auxiliary"],
@@ -3379,6 +3396,13 @@ def test_cancel_queued_download_is_durable_and_idempotent(cache, tmp_path):
     finally:
         restarted.close()
 
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cancelled,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _admit_fresh_download(service, "a" * 64, artifact),
+    )
+
 
 def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
     cache, tmp_path
@@ -3565,6 +3589,13 @@ def test_remove_model_supersedes_an_older_download_of_the_same_set(
     # The object shared with model B is retained.
     assert service._object_path(artifact["sha256"]).is_file()
 
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        removal,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _admit_fresh_download(service, digest_a, artifact),
+    )
+
 
 def test_model_removal_waits_for_in_use_sets_then_completes(
     cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -3589,7 +3620,10 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
             for digest in digests
         }
 
-    monkeypatch.setattr(model_cache_module, "model_set_reference_reasons", reasons)
+    monkeypatch.setattr(
+        "vonk_control.model_cache.removal_execution.model_set_reference_reasons",
+        reasons,
+    )
     removal = service.remove_model_selector(
         model, actor="operator", request_key="00000000-0000-4000-8000-000000001041"
     )
@@ -3614,6 +3648,17 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
     assert service.get_operation(removal.id).state == "succeeded"
     with sessions() as session:
         assert session.get(ModelCacheSet, set_digest) is None
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        removal,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _admit_fresh_download(
+            service,
+            model,
+            _artifact(tmp_path, b"in use weights", model_content_sha256=model),
+        ),
+    )
 
 
 def test_model_removal_child_replay_and_visible_writer_wait(cache, tmp_path: Path):
@@ -3806,6 +3851,15 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
         )
     assert reused.value.code == "model_cache.request_key_reused"
 
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        accepted,
+        end=lambda receipt: _finish_cache_removal(service, receipt),
+        fresh=lambda _world: service.download_model_selector(
+            digest_a, actor="operator", request_key=str(uuid.uuid4())
+        ),
+    )
+
 
 @pytest.mark.parametrize("range_supported", [True, False])
 def test_model_cache_parallel_ranges_publish_or_fall_back(
@@ -3813,11 +3867,11 @@ def test_model_cache_parallel_ranges_publish_or_fall_back(
 ):
     import threading
 
-    import vonk_control.model_cache as module
-
     _existing, sessions = cache
     payload = bytes(range(256)) * 256
-    monkeypatch.setattr(module, "_PARALLEL_RANGE_MIN_BYTES", 1)
+    monkeypatch.setattr(
+        "vonk_control.model_cache.constants._PARALLEL_RANGE_MIN_BYTES", 1
+    )
     barrier = threading.Barrier(4)
     requests = []
 
@@ -4095,8 +4149,8 @@ def test_prior_server_errors_do_not_count_as_missing_source_observations(
             model_content_sha256="b" * 64,
             request_key="00000000-0000-4000-8000-000000000949",
         )
-        for _ in range(5):
-            service.run_pending()
+        service.run_pending()  # bounded request attempts consume the remaining 500s
+        # The first 404 counts once, regardless of earlier 500 responses.
         waiting = service.get_operation(operation.id)
         assert waiting.state == "queued"
         assert waiting.failure is not None
@@ -4244,3 +4298,25 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
     finally:
         service.close()
         client.close()
+
+
+def _admit_fresh_download(service, model_digest, artifact):
+    preview = service.download_preview(
+        model_content_sha256=model_digest, artifacts=[artifact]
+    )
+    return service.start_download(
+        actor="test",
+        request_key=str(uuid.uuid4()),
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=model_digest,
+        artifacts=[artifact],
+    )
+
+
+def _finish_cache_removal(service, receipt):
+    for _attempt in range(10):
+        observed = service.get_operation(receipt.id)
+        if observed.state == "succeeded":
+            return observed
+        service.advance_removals(limit=10)
+    return service.get_operation(receipt.id)

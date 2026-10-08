@@ -666,8 +666,8 @@ def test_update_preserves_installed_tool_for_unknown_or_mixed_complete_workers(
     assert result["compatibility"] == "controller-contract-unavailable-or-different"
 
 
-def _require_signed_update_proof_lane() -> None:
-    if os.environ.get("VONK_SIGNED_UPDATE_PROOF") != "1":
+def _require_signed_update_lane() -> None:
+    if os.environ.get("VONK_SIGNED_UPDATE_LANE_ENABLED") != "1":
         pytest.skip("run the designated hosted signed CLI update proof lane")
 
 
@@ -675,7 +675,7 @@ def _prepare_signed_update_tool(
     tmp_path_factory: pytest.TempPathFactory, *, prior_root: Path | None = None
 ):
     """Build and install once; no test resolves dependencies over the network."""
-    _require_signed_update_proof_lane()
+    _require_signed_update_lane()
     cache = Path(os.environ["VONK_SIGNED_UPDATE_CACHE"])
     assert cache.is_dir() and any(cache.iterdir()), "locked resolver cache is absent"
     interpreters = Path(os.environ["UV_PYTHON_INSTALL_DIR"])
@@ -779,7 +779,7 @@ def signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
 
 @pytest.fixture(scope="module")
 def transition_signed_update_tool(tmp_path_factory: pytest.TempPathFactory):
-    _require_signed_update_proof_lane()
+    _require_signed_update_lane()
     prior = Path(os.environ["VONK_PRIOR_STABLE_CLI_ROOT"]).resolve()
     return _prepare_signed_update_tool(tmp_path_factory, prior_root=prior)
 

@@ -135,48 +135,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService._append_part",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService._check_upstream_revisions",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService._download_sequential",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService._fill_background_slots",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService._sample_transfer",
-      "kind": "wait-without-timeout",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService._sample_transfer.sample",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService.tick",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/model_cache_ranges.py",
       "function": "download_ranges",
       "kind": "loop-without-deadline",

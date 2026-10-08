@@ -56,10 +56,10 @@ def _worker_process(engine) -> str:
     """
     instance = uuid4().hex + uuid4().hex
     environment = os.environ.copy()
-    environment["VONK_PROOF_DATABASE_URL"] = engine.url.render_as_string(
+    environment["VONK_TEST_OBSERVATION_DATABASE_URL"] = engine.url.render_as_string(
         hide_password=False
     )
-    environment["VONK_PROOF_INSTANCE"] = instance
+    environment["VONK_TEST_OBSERVATION_INSTANCE"] = instance
     subprocess.run(
         [
             sys.executable,
@@ -70,10 +70,10 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import sessionmaker
 from vonk_control.db import build_engine
 from vonk_control.worker import WorkerHeartbeatRecorder
-engine = build_engine(os.environ['VONK_PROOF_DATABASE_URL'], component='observation-worker-proof')
+engine = build_engine(os.environ['VONK_TEST_OBSERVATION_DATABASE_URL'], component='observation-worker-proof')
 try:
     recorder = WorkerHeartbeatRecorder(sessionmaker(engine, expire_on_commit=False),
-        process_instance_id=os.environ['VONK_PROOF_INSTANCE'], clock=lambda: datetime.now(UTC))
+        process_instance_id=os.environ['VONK_TEST_OBSERVATION_INSTANCE'], clock=lambda: datetime.now(UTC))
     recorder.completed_loop()
 finally:
     engine.dispose()

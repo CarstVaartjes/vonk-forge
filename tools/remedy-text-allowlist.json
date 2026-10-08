@@ -63,18 +63,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "ModelCacheService._open_http_response",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/model_cache.py",
-      "function": "_retry_after_seconds",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/recipe_builds.py",
       "function": "RecipeBuildService.plan",
       "kind": "imperative-remedy",

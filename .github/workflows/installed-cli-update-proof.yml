@@ -53,7 +53,7 @@ jobs:
       - name: Exercise actual installed updater and reject corrupted bytes
         shell: bash
         env:
-          VONK_SIGNED_UPDATE_PROOF: '1'
+          VONK_SIGNED_UPDATE_LANE_ENABLED: '1'
           VONK_SIGNED_UPDATE_CACHE: ${{ runner.temp }}/signed-update-cache
         run: |
           set -euo pipefail

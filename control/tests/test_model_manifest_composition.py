@@ -12,7 +12,6 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_control import model_cache as model_cache_module
 from vonk_control.artifact_reference_scan import model_set_objects
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
@@ -166,7 +165,9 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     # Reproduce the former producer's collision, without replacing any reader,
     # storage, worker, or downstream receipt consumer.
     with monkeypatch.context() as old_producer:
-        old_producer.setattr(model_cache_module, "_composed_artifacts", tuple)
+        old_producer.setattr(
+            "vonk_control.model_cache.resolution._composed_artifacts", tuple
+        )
         service.run_pending(limit=1)
     waiting = service.get(parent.id)
     assert waiting.state == "queued"
