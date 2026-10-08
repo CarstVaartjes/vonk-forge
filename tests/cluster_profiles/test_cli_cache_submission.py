@@ -164,7 +164,7 @@ def test_recovery_deadline_is_shared_across_all_three_network_calls(
             elapsed += (3.5, 2.5 if exhausted else 2, 0)[len(timeouts) - 1]
             return super().request(*args, **kwargs)
 
-    monkeypatch.setattr(controller_cli.time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: elapsed)
     client = DelayedClient(
         {
             ("POST", "/api/model/chosen/download"): [
@@ -192,8 +192,8 @@ def test_server_retry_delay_consumes_the_existing_submission_budget(monkeypatch,
         slept.append(seconds)
         elapsed += seconds
 
-    monkeypatch.setattr(controller_cli.time, "monotonic", lambda: elapsed)
-    monkeypatch.setattr(controller_cli.time, "sleep", sleep)
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(controller_cli.observation.time, "sleep", sleep)
     client = SubmissionClient(
         {
             ("POST", "/api/model/chosen/download"): [
@@ -219,8 +219,8 @@ def test_observation_does_not_shorten_a_server_delay_to_poll_early(monkeypatch):
         nonlocal elapsed
         elapsed += seconds
 
-    monkeypatch.setattr(controller_cli.time, "monotonic", lambda: elapsed)
-    monkeypatch.setattr(controller_cli.time, "sleep", sleep)
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(controller_cli.observation.time, "sleep", sleep)
     identity = {"operation_id": "original", "state": "running"}
     client = SubmissionClient(
         {
@@ -252,7 +252,7 @@ def test_observation_does_not_shorten_a_server_delay_to_poll_early(monkeypatch):
 def test_recipe_observer_keeps_terminal_residue_until_the_same_snapshot_repairs(
     monkeypatch,
 ):
-    monkeypatch.setattr(controller_cli.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(controller_cli.observation.time, "sleep", lambda seconds: None)
     healthy = receipt("recipe") | {"state": "succeeded", "residue": None}
     damaged = healthy | {
         "progress": None,
@@ -350,7 +350,7 @@ def test_lost_server_error_body_preserves_its_retry_delay(
     def unexpected_sleep(seconds):
         raise AssertionError("server delay exceeds the whole submission budget")
 
-    monkeypatch.setattr(controller_cli.time, "sleep", unexpected_sleep)
+    monkeypatch.setattr(controller_cli.observation.time, "sleep", unexpected_sleep)
     control = ControlClient("https://forge.example.test", token, opener=opener)
     assert (
         cli.main(
@@ -375,7 +375,7 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
             return super().flush()
 
     output = Stderr()
-    monkeypatch.setattr(controller_cli.sys, "stderr", output)
+    monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", output)
 
     class InterruptedClient(SubmissionClient):
         def request(self, *args, **kwargs):
@@ -397,7 +397,7 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
     assert not capsys.readouterr().out
 
     # JSON emits no preamble and still records uncertainty on interruption.
-    monkeypatch.setattr(controller_cli.sys, "stderr", StringIO())
+    monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", StringIO())
     client = SubmissionClient(
         {("POST", "/api/model/chosen/download"): KeyboardInterrupt()}
     )

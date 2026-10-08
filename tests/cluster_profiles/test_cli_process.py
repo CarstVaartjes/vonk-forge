@@ -273,9 +273,9 @@ def test_poll_deadline_bounds_sleep_and_retains_reconnect_identity(monkeypatch, 
     from cluster_profiles import controller_cli
 
     now = [0.0]
-    monkeypatch.setattr(controller_cli.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(controller_cli.observation.time, "monotonic", lambda: now[0])
     monkeypatch.setattr(
-        controller_cli.time,
+        controller_cli.observation.time,
         "sleep",
         lambda seconds: now.__setitem__(0, now[0] + seconds),
     )

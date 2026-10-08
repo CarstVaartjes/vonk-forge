@@ -20,10 +20,6 @@
     "control/web/src/pages/library.css": 3366,
     "rust/crates/vonk-agent/src/host_runtime.rs": 2089,
     "scripts/install-release-publication": 2176,
-    "scripts/verify-agent-deb": 1836,
-    "src/cluster_profiles/cli_render.py": 2062,
-    "src/cluster_profiles/control_client.py": 1823,
-    "src/cluster_profiles/controller_cli.py": 4259,
-    "src/cluster_profiles/qualification_fixtures.py": 2262
+    "scripts/verify-agent-deb": 1836
   }
 }
