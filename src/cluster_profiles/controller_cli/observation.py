@@ -18,6 +18,7 @@ from ..cli_states import (
 )
 from ..control_client import (
     ControlMalformedResponse,
+    ControlNotFound,
     ControlTransportError,
     ControlUnavailable,
 )
@@ -55,6 +56,13 @@ def _watch_callback(args: argparse.Namespace) -> _WatchCallback | None:
 
 def _bounded_timeout(args: argparse.Namespace) -> float:
     return _timeout_seconds(str(getattr(args, "timeout_seconds", 30)))
+
+
+def _remaining_observation_timeout(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ControlTransportError("observation deadline reached")
+    return remaining
 
 
 def _bounded_interval(args: argparse.Namespace) -> float:
@@ -162,21 +170,23 @@ def _poll_path(
     query: Mapping[str, object] | None = None,
     terminal: Callable[[Mapping[str, object]], bool] | None = None,
     validate: Callable[[Mapping[str, object]], None] | None = None,
+    deadline: float | None = None,
+    fetch_initial: bool = False,
 ) -> dict[str, object]:
     """Observe a bounded durable snapshot, retaining the last truthful value.
 
     A temporary loss of the Controller must not discard the observation.  The
-    last confirmed snapshot stays authoritative and polling continues to the
-    bounded deadline, reporting why it was reconnecting.  Authorization,
-    contract and not-found answers stay immediate errors: retrying them would
-    only delay the operator's decision.  The durable operation's own outcome is
+    last confirmed snapshot remains evidence and polling continues to the
+    bounded deadline, including a temporarily missing durable projection.
+    Authorization and malformed response errors remain immediate errors.
+    The durable operation's own outcome is
     never rewritten by an observation failure.
     """
 
     callback = _watch_callback(args)
     is_terminal = terminal or (lambda observed: _state(observed) in _TERMINAL_STATES)
     current = initial
-    if validate is not None:
+    if validate is not None and not fetch_initial:
         validate(current)
     started = time.monotonic()
     timeout = _bounded_timeout(args)
@@ -190,18 +200,21 @@ def _poll_path(
         datetime.now(UTC),
     )
     args.observation = observation
-    deadline = started + timeout
+    deadline = started + timeout if deadline is None else deadline
     interval = _bounded_interval(args)
+    wait_before_request = not fetch_initial
     while True:
         if callback is not None:
             callback(current)
-        if is_terminal(current):
+        if not fetch_initial and is_terminal(current):
             observation.status = "complete"
             return current
         if time.monotonic() >= deadline:
             observation.status = "timed_out"
             return current
-        time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        if wait_before_request:
+            time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        wait_before_request = True
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             observation.status = "timed_out"
@@ -212,12 +225,18 @@ def _poll_path(
             )
             if validate is not None:
                 validate(current)
-        except (ControlUnavailable, ControlTransportError, OSError) as error:
+        except (
+            ControlNotFound,
+            ControlUnavailable,
+            ControlTransportError,
+            OSError,
+        ) as error:
             if isinstance(error, BrokenPipeError):
                 raise
             observation.error = _observation_reason(error)
             interval = _observation_delay(error, interval, deadline - time.monotonic())
             continue
+        fetch_initial = False
         observation.update(current)
         interval = _bounded_interval(args)
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import sys
 
+import pytest
+
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlConflict
 
@@ -137,11 +139,17 @@ def test_declining_the_changed_plan_loads_nothing(monkeypatch, capsys):
 def test_a_plan_that_keeps_changing_is_refused_not_forced(monkeypatch, capsys):
     controller = _Controller(FIRST, drift=(CHANGED, CHANGED_AGAIN, "e" * 64, "f" * 64))
 
-    status, transcript = _load(monkeypatch, controller, "yes", "yes", "yes", "yes")
+    status, _transcript = _load(monkeypatch, controller, "yes", "yes", "yes", "yes")
 
     assert status == 2
     assert len(controller.loads()) == 3
-    assert "plan changed" in transcript
+    controller.drift.clear()
+    controller.plan = FIRST
+    assert _load(monkeypatch, controller, "yes")[0] == 0
+    assert controller.loads()[-1] == {
+        "request_key": KEY,
+        "reviewed_effects_digest": FIRST,
+    }
     capsys.readouterr()
 
 
@@ -161,12 +169,16 @@ def test_yes_takes_the_current_plan_without_a_review(monkeypatch, capsys):
     capsys.readouterr()
 
 
-def test_a_controller_without_effects_digests_loads_the_current_plan(
-    monkeypatch, capsys
+@pytest.mark.parametrize("invalid_digest", [None, "", "invalid", "A" * 64])
+def test_unbound_review_has_no_effect_and_a_fresh_review_can_load(
+    monkeypatch, capsys, invalid_digest
 ):
-    controller = _Controller(None)
-
+    controller = _Controller(invalid_digest)
+    assert _load(monkeypatch, controller, "yes")[0] == 2
+    assert controller.loads() == []
+    controller.plan = FIRST
     assert _load(monkeypatch, controller, "yes")[0] == 0
-
-    assert controller.loads() == [{"request_key": KEY}]
+    assert controller.loads() == [
+        {"request_key": KEY, "reviewed_effects_digest": FIRST}
+    ]
     capsys.readouterr()

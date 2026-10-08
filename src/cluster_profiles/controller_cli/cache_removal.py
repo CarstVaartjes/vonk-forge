@@ -17,7 +17,6 @@ from ..cli_outcome import (
 from ..cli_render import render_payload
 from ..control_client import (
     ControlClientError,
-    ControlConflict,
     ControlMalformedResponse,
     ControlNotFound,
     validate_control_document,
@@ -142,34 +141,6 @@ def _cache_removal_review(
     return review
 
 
-_SECURITY_BLOCKER_MARKERS = (
-    "authentication_required",
-    "unauthorized",
-    "forbidden",
-    "enrollment_denied",
-    "revoked",
-    "identity_invalid",
-    "identity_mismatch",
-)
-
-
-def _security_blocker_codes(blockers: object) -> list[str]:
-    """Return blocker codes that are real security denials, not bookkeeping.
-
-    Every other blocker is submitted anyway: the Controller parks the latest
-    request until it can run, or refuses it with its own typed answer.
-    """
-    codes: list[str] = []
-    if isinstance(blockers, list):
-        for item in blockers:
-            code = item.get("code") if isinstance(item, Mapping) else None
-            if isinstance(code, str) and any(
-                marker in code for marker in _SECURITY_BLOCKER_MARKERS
-            ):
-                codes.append(code)
-    return codes
-
-
 def _confirm_removal(
     client: ControllerClient,
     noun: str,
@@ -183,12 +154,6 @@ def _confirm_removal(
         raise ValueError(f"{noun} remove requires --yes in noninteractive mode")
 
     review = _cache_removal_review(client, noun, selector, with_model=with_model)
-    security = _security_blocker_codes(review["blockers"])
-    if security:
-        raise ControlConflict(
-            409,
-            f"{noun} removal is refused by the Controller: {', '.join(security)}.",
-        )
     if not args.yes:
         with redirect_stdout(sys.stderr):
             render_payload(review, noun, action="preview")

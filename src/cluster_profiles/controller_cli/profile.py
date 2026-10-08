@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import shlex
+import time
 from collections.abc import Callable, Mapping
 
 from ..cli_outcome import (
@@ -16,7 +17,11 @@ from ..control_client import (
 from .common import ControllerClient, _profile_number, _quoted, _request_key
 from .confirmation import _confirm_action, _require_confirmation
 from .fleet import _overview
-from .observation import _poll_path
+from .observation import (
+    _bounded_timeout,
+    _poll_path,
+    _remaining_observation_timeout,
+)
 from .profile_authoring import _profile_authoring
 from .profile_load import _load_profile
 from .submission import _submit_idempotent_request
@@ -53,11 +58,20 @@ def _profile(
             raise ValueError(f"endpoint alias is not part of profile {number}")
         return result
     if action == "progress":
+        deadline = time.monotonic() + _bounded_timeout(args)
         if args.application:
             path = f"/api/profile/applications/{args.application}"
             selected_profile_id: str | None = None
             if getattr(args, "profile_number", None) is not None:
-                selected_profile = client.request("GET", f"/api/profile/{number}")
+                selected_profile = client.request(
+                    "GET",
+                    f"/api/profile/{number}",
+                    timeout_seconds=(
+                        _remaining_observation_timeout(deadline)
+                        if args.follow
+                        else None
+                    ),
+                )
                 selected_profile_id_value = selected_profile.get("id")
                 if (
                     not isinstance(selected_profile_id_value, str)
@@ -73,7 +87,13 @@ def _profile(
         else:
             path = f"/api/profile/{number}/progress"
             selected_profile_id = None
-        result = client.request("GET", path)
+        result = client.request(
+            "GET",
+            path,
+            timeout_seconds=(
+                _remaining_observation_timeout(deadline) if args.follow else None
+            ),
+        )
         application_id = result.get("id")
         if not isinstance(application_id, str) or not application_id:
             raise ControlMalformedResponse(
@@ -98,12 +118,11 @@ def _profile(
                 )
         if not args.follow:
             return result
-        # An application the Controller replaced (its own automatic retry, or a
-        # later intent) ends ``superseded``: follow ``superseded_by`` to the
-        # application that continues the work instead of reporting an end.
+        # Follow the owner's explicit predecessor/successor relationship.
+        # A replacement by a later intent ends this observation instead.
         chain: list[str] = []
         current = result
-        while True:
+        while time.monotonic() < deadline:
             observed_id = str(current["id"])
             path = f"/api/profile/applications/{_quoted(observed_id)}"
 
@@ -115,23 +134,55 @@ def _profile(
                         "profile progress observation changed application identity"
                     )
 
-            current = _poll_path(client, path, current, args, validate=same_application)
+            current = _poll_path(
+                client,
+                path,
+                current,
+                args,
+                validate=same_application,
+                deadline=deadline,
+            )
             successor = current.get("superseded_by")
             if (
                 operation_state(current) != "superseded"
-                # Only the Controller's own retry continues the same work; a
-                # later intent another request accepted is reported as ended.
-                or current.get("reason_code") != "superseded-by-retry"
                 or not isinstance(successor, str)
                 or not successor
-                or successor in chain
+                or successor in {*chain, observed_id}
                 or getattr(getattr(args, "observation", None), "status", "complete")
                 != "complete"
             ):
                 break
+            predecessor = current
+            predecessor_observation = args.observation
+
+            current = _poll_path(
+                client,
+                f"/api/profile/applications/{_quoted(successor)}",
+                predecessor,
+                args,
+                validate=lambda observed, expected=successor: same_application(
+                    observed, expected
+                ),
+                terminal=lambda _: True,
+                deadline=deadline,
+                fetch_initial=True,
+            )
+            if current is predecessor:
+                break
+            if current.get("retry_of_application_id") != observed_id:
+                # A later authorized intent does not continue this request.
+                current = predecessor
+                args.observation = predecessor_observation
+                break
             chain.append(observed_id)
-            current = client.request(
-                "GET", f"/api/profile/applications/{_quoted(successor)}"
+        else:
+            current = _poll_path(
+                client,
+                f"/api/profile/applications/{_quoted(str(current['id']))}",
+                current,
+                args,
+                terminal=lambda _: False,
+                deadline=deadline,
             )
         if chain:
             current = {**current, "supersedes_chain": chain}

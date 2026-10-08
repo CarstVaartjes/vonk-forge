@@ -849,12 +849,6 @@
       "count": 1
     },
     {
-      "path": "src/cluster_profiles/controller_cli/profile.py",
-      "function": "_profile",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "src/cluster_profiles/controller_cli/profile_options.py",
       "function": "_prompt_option",
       "kind": "loop-without-deadline",
@@ -1148,9 +1142,6 @@
       "_RecordingTransport.__init__": "9c6074f62d69663a802ec11c73059501fc2dfca5c584107596ba27af7d233ea7",
       "_RecordingTransport.handle_request": "61833404395185ac94e1029a2e69e69c9980103a816bb4f09fbd7cf67ebb81c8",
       "<module>": "57780ffd8d73e6112683b79de12648d0a3d119267fd19ae675df5a976c3406bd"
-    },
-    "src/cluster_profiles/controller_cli/profile.py": {
-      "_profile": "37cbe2ff20d03efe0754217d296ccb4f525d4f8bc7dc05eba0e562fd55c68a1b"
     },
     "src/cluster_profiles/controller_cli/profile_options.py": {
       "_configure_option_target": "b3759c4531a4dffc82f3991248dfe30b23879ec8ca67fe4f128fb7efd8261fac",

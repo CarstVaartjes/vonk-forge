@@ -2559,16 +2559,20 @@ def test_follow_adopts_the_successor_of_a_superseded_application() -> None:
     second = "44444444-4444-4444-8444-444444444444"
     client = FakeClient(
         {
-            ("GET", "/api/profile/1/progress"): {"id": first, "state": "running"},
+            ("GET", "/api/profile/1/progress"): {
+                "id": first,
+                "request_key": "same-request",
+                "state": "running",
+            },
             ("GET", f"/api/profile/applications/{first}"): {
                 "id": first,
                 "state": "superseded",
                 "superseded_by": second,
-                "reason_code": "superseded-by-retry",
+                "request_key": "same-request",
             },
             ("GET", f"/api/profile/applications/{second}"): [
-                {"id": second, "state": "running"},
-                {"id": second, "state": "succeeded"},
+                {"id": second, "retry_of_application_id": first, "state": "running"},
+                {"id": second, "retry_of_application_id": first, "state": "succeeded"},
             ],
         }
     )
@@ -2696,7 +2700,7 @@ def test_accepted_load_with_lost_response_is_reconciled_by_request_key() -> None
     assert [call[0] for call in client.calls] == ["POST", "GET"]
 
 
-def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> None:
+def test_accepted_load_recovers_after_missing_observation() -> None:
     key = "11111111-1111-4111-8111-111111111111"
     operation = "33333333-3333-4333-8333-333333333333"
     client = FakeClient(
@@ -2707,7 +2711,10 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
             (
                 "GET",
                 f"/api/profile/applications/{operation}",
-            ): ControlNotFound(404, "application observation is unavailable"),
+            ): [
+                ControlNotFound(404, "application observation is unavailable"),
+                {"id": operation, "state": "succeeded"},
+            ],
         }
     )
 
@@ -2729,20 +2736,12 @@ def test_accepted_load_keeps_reconciliation_after_observation_not_found() -> Non
         client,
     )
 
-    assert status == 2
-    submission = payload.get("submission")
-    assert isinstance(submission, dict)
-    assert submission["acceptance"] == "accepted"
-    reconcile = payload.get("reconcile")
-    assert isinstance(reconcile, dict)
-    assert reconcile == {
-        "operation": (
-            f"vonkctl --profile 1 profile progress --request-key {key} --follow"
-        ),
-        "request_key": key,
-    }
+    assert status == 0
+    assert payload["id"] == operation
+    assert payload["state"] == "succeeded"
     assert [call[:2] for call in client.calls] == [
         ("POST", "/api/profile/1/load"),
+        ("GET", f"/api/profile/applications/{operation}"),
         ("GET", f"/api/profile/applications/{operation}"),
     ]
 
@@ -4200,16 +4199,6 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
     args = cli._parser().parse_args(
         ["--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes", "--json"]
     )
-    if reason_code == "profile.node_revoked":
-        # A real security denial still stops before any load is submitted.
-        with pytest.raises(ControlConflict, match="profile.node_revoked"):
-            controller_cli.run_controller(
-                args,
-                cast(controller_cli.ControllerClient, RunClient()),
-                lambda: "11111111-1111-4111-8111-111111111111",
-            )
-        assert "/api/profile/1/load" not in paths
-        return
     result = controller_cli.run_controller(
         args,
         cast(controller_cli.ControllerClient, RunClient()),

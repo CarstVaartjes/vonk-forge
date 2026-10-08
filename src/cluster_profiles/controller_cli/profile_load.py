@@ -15,7 +15,6 @@ from ..control_client import (
     ControlConflict,
     ControlMalformedResponse,
 )
-from .cache_removal import _security_blocker_codes
 from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _confirm_action
 from .observation import _poll_path
@@ -27,16 +26,12 @@ _REVIEW_STALE_CODE = "profile.review_stale"
 _MAX_REVIEW_ROUNDS = 3
 
 
-def _reviewed_effects_digest(preview: Mapping[str, object]) -> str | None:
-    """The reviewed effects a load binds to; absent from an older Controller.
-
-    Without it the load takes the plan current at acceptance, as `--yes` does.
-    """
-
+def _reviewed_effects_digest(preview: Mapping[str, object]) -> str:
+    """Require the exact effects binding before asking for reviewed consent."""
     digest = preview.get("effects_digest")
     if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest):
         return digest
-    return None
+    raise ControlMalformedResponse("profile review has no verified effects binding")
 
 
 def _review_and_submit_profile_load(
@@ -55,19 +50,14 @@ def _review_and_submit_profile_load(
     again; the operator never consents to a plan they did not see. With
     ``--yes`` nothing is reviewed or bound: the plan current at acceptance is
     loaded. ``review_when_confirmed`` still shows that plan (``run`` does) and
-    refuses on a security denial before asking.
+    leaves admission to the Controller at submission.
     """
 
     if args.yes and not review_when_confirmed:
         return _submit_profile_load(client, number, args, factory)
     for round_number in range(1, _MAX_REVIEW_ROUNDS + 1):
         preview = client.request("POST", f"/api/profile/{number}/preview")
-        security = _security_blocker_codes(preview.get("reasons"))
-        if security and review_when_confirmed:
-            raise ControlConflict(
-                409,
-                f"profile load is refused by the Controller: {', '.join(security)}",
-            )
+        effects_digest = None if args.yes else _reviewed_effects_digest(preview)
         if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
             with redirect_stdout(sys.stderr):
                 render_payload(preview, "profile", action="preview")
@@ -78,9 +68,7 @@ def _review_and_submit_profile_load(
                 number,
                 args,
                 factory,
-                reviewed_effects_digest=(
-                    None if args.yes else _reviewed_effects_digest(preview)
-                ),
+                reviewed_effects_digest=effects_digest,
             )
         except ControlConflict as error:
             if error.code != _REVIEW_STALE_CODE or round_number == _MAX_REVIEW_ROUNDS:
