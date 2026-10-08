@@ -8,7 +8,7 @@
     "agent_protocol/src/vonk_agent_protocol/contracts.py": 6,
     "agent_protocol/src/vonk_agent_protocol/runtime_preflight.py": 1,
     "agent_protocol/src/vonk_agent_protocol/wire_model.py": 1,
-    "control/src/vonk_control/agent_api.py": 6,
+    "control/src/vonk_control/agent_api.py": 5,
     "control/src/vonk_control/agent_jobs.py": 73,
     "control/src/vonk_control/agent_operation_facts.py": 2,
     "control/src/vonk_control/agent_upgrades.py": 18,

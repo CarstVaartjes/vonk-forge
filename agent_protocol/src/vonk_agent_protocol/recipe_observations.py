@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import Field, field_validator, model_validator
 
 from .contracts import AgentProtocolError, canonical_message
+from .failure_evidence import FailureDiagnostics
 from .host_helper import Uuid4Text
 from .wire_model import MAX_RUN_GENERATION, WireModel
 
@@ -31,6 +32,7 @@ class RecipeRunObservationWire(WireModel):
     process_running: bool = Field(strict=True)
     # Only the endpoint owner probes readiness; every other rank sends null.
     endpoint_ready: bool | None = Field(strict=True)
+    failure_diagnostics: FailureDiagnostics | None = None
 
 
 class RecipeRunObservationsWire(WireModel):

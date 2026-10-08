@@ -242,6 +242,7 @@ export const SecurityRefusalReason = {
 export type SecurityRefusalReason = (typeof SecurityRefusalReason)[keyof typeof SecurityRefusalReason];
 
 export const FailureCode = {
+  WORKLOAD_HOST_MEMORY_EXHAUSTED: "workload.host_memory_exhausted",
   OPERATION_FAILED: "operation_failed",
   OPERATION_CANCELLED: "operation_cancelled",
   AGENT_UPGRADE_FAILED: "agent_upgrade_failed",

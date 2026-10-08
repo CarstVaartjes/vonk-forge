@@ -47,3 +47,33 @@ On failure, the harness reports the concise run-switch failure, recent phase
 identities, Controller log tail, and separately bounded agent and helper
 journals. Successful artifact receipt history cannot consume the entire failure
 message. Known acceptance credentials are redacted before excerpts are bounded.
+
+## GB10 host memory safety
+
+The privileged Spark agent helper samples host MemAvailable and memory PSI every
+250 ms independently of workload commands. It follows only new kernel journal
+records. An NVIDIA `NVRM: Out of memory [NV_ERR_NO_MEMORY]` allocation failure,
+`full avg10 > 30%` sustained for three seconds, or MemAvailable below 256 MiB
+sustained for three seconds triggers a safety stop. Low MemFree alone never
+triggers it. Policy constants live in `host_memory_guard_policy.rs`; the evidence
+is the 2026-10-07 spark-3542 freeze and the 2026-10-08 GB10 OOM research.
+
+The helper verifies the exact agent-managed container identity, SIGKILLs its
+own process group when that group can be proved to belong to the container,
+then sends container KILL and stop with bounded command deadlines. Unconfirmed
+stops are reconciled and retried; no cancellation fence or admission ban is
+created. Kit arguments, including `gpu-memory-utilization`, stay unchanged.
+This is precursor protection; a driver already wedged cannot be rescued by a
+software guard.
+
+Before launch, the agent reports MemAvailable against declared peak plus a
+1 GiB informational margin. It never refuses a launch on that estimate.
+Safety stops carry `workload.host_memory_exhausted`, exit cause
+`host_memory_exhausted`, pressure/available-memory measurements, and observation
+time through exit diagnostics and background observations. The Controller
+retains these diagnostics and exposes them through durable Fleet events.
+Local records under `/var/lib/vonk-forge/host-memory-evidence/` are keyed by
+immutable container ID so a new attempt cannot inherit an old failure.
+Kernel-follow failures are logged and retried every two seconds; the `/proc`
+checks continue independently. Physical qualification must verify that the
+packaged helper can follow the kernel journal and stop a managed canary.

@@ -681,6 +681,7 @@ SECURITY_REFUSAL_SUFFIXES: tuple[str, ...] = (
 class FailureCode(WireEnum):
     """Closed codes of a definite failed outcome reported by the agent."""
 
+    WORKLOAD_HOST_MEMORY_EXHAUSTED = "workload.host_memory_exhausted"
     OPERATION_FAILED = "operation_failed"
     OPERATION_CANCELLED = "operation_cancelled"
     AGENT_UPGRADE_FAILED = "agent_upgrade_failed"

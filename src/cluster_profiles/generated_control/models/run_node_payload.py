@@ -12,6 +12,8 @@ from ..types import UNSET, Unset
 from typing import cast
 from typing import Literal, cast
 
+if TYPE_CHECKING:
+  from ..models.failure_diagnostics import FailureDiagnostics
 
 
 
@@ -33,6 +35,7 @@ class RunNodePayload:
             role (str):
             run_id (str):
             state (str):
+            failure_diagnostics (FailureDiagnostics | None | Unset):
             observed_memory_bytes (int | None | Unset):
      """
 
@@ -44,6 +47,7 @@ class RunNodePayload:
     role: str
     run_id: str
     state: str
+    failure_diagnostics: FailureDiagnostics | None | Unset = UNSET
     observed_memory_bytes: int | None | Unset = UNSET
 
 
@@ -51,6 +55,7 @@ class RunNodePayload:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.failure_diagnostics import FailureDiagnostics # noqa: PLC0415
         entity_id = self.entity_id
 
         entity_kind = self.entity_kind
@@ -66,6 +71,14 @@ class RunNodePayload:
         run_id = self.run_id
 
         state = self.state
+
+        failure_diagnostics: dict[str, Any] | None | Unset
+        if isinstance(self.failure_diagnostics, Unset):
+            failure_diagnostics = UNSET
+        elif isinstance(self.failure_diagnostics, FailureDiagnostics):
+            failure_diagnostics = self.failure_diagnostics.to_dict()
+        else:
+            failure_diagnostics = self.failure_diagnostics
 
         observed_memory_bytes: int | None | Unset
         if isinstance(self.observed_memory_bytes, Unset):
@@ -86,6 +99,8 @@ class RunNodePayload:
             "run_id": run_id,
             "state": state,
         })
+        if failure_diagnostics is not UNSET:
+            field_dict["failure_diagnostics"] = failure_diagnostics
         if observed_memory_bytes is not UNSET:
             field_dict["observed_memory_bytes"] = observed_memory_bytes
 
@@ -95,6 +110,7 @@ class RunNodePayload:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.failure_diagnostics import FailureDiagnostics # noqa: PLC0415
         d = dict(src_dict)
         entity_id = d.pop("entity_id")
 
@@ -113,6 +129,26 @@ class RunNodePayload:
         run_id = d.pop("run_id")
 
         state = d.pop("state")
+
+        def _parse_failure_diagnostics(data: object) -> FailureDiagnostics | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                failure_diagnostics_type_0 = FailureDiagnostics.from_dict(data)
+
+
+
+                return failure_diagnostics_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(FailureDiagnostics | None | Unset, data)
+
+        failure_diagnostics = _parse_failure_diagnostics(d.pop("failure_diagnostics", UNSET))
+
 
         def _parse_observed_memory_bytes(data: object) -> int | None | Unset:
             if data is None:
@@ -133,6 +169,7 @@ class RunNodePayload:
             role=role,
             run_id=run_id,
             state=state,
+            failure_diagnostics=failure_diagnostics,
             observed_memory_bytes=observed_memory_bytes,
         )
 

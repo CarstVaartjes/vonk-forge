@@ -11,6 +11,7 @@ from typing import Any, ClassVar
 from sqlalchemy import event, func, insert, select, true, update
 from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from .auth import CursorError
 from .fleet_event_contract import (
@@ -408,7 +409,7 @@ class FleetEventRecorder:
         RecipeInstallation: ("state",),
         InstallationNode: ("state", "installed_bytes"),
         RecipeRun: ("state", "route_state"),
-        RunNode: ("state", "observed_memory_bytes"),
+        RunNode: ("state", "observed_memory_bytes", "observation_failure_diagnostics"),
         Job: ("state",),
         AgentOperation: ("state", "current_attempt"),
     }
@@ -567,6 +568,13 @@ class FleetEventRecorder:
                 state=value.state,
                 reserved_memory_bytes=value.reserved_memory_bytes,
                 observed_memory_bytes=value.observed_memory_bytes,
+                failure_diagnostics=(
+                    FailureDiagnostics.model_validate_json(
+                        json.dumps(value.observation_failure_diagnostics)
+                    )
+                    if value.observation_failure_diagnostics
+                    else None
+                ),
             )
             return FleetEventDraft(
                 "recipe-state", value.node_id, entity_kind, value.id, payload

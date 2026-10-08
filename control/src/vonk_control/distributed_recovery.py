@@ -370,6 +370,7 @@ class DistributedRecoveryCoordinator:
                         for node in run_nodes:
                             node.observed_run_generation = None
                             node.observation_process_running = None
+                            node.observation_failure_diagnostics = None
                             node.observation_observed_at = None
                             node.observation_endpoint_ready = None
                         try:
@@ -424,6 +425,7 @@ class DistributedRecoveryCoordinator:
                         run.plan = run_plan_document(run_plan)
                         run_nodes[0].observed_run_generation = None
                         run_nodes[0].observation_process_running = None
+                        run_nodes[0].observation_failure_diagnostics = None
                         run_nodes[0].observation_observed_at = None
                         run_nodes[0].observation_endpoint_ready = None
                     if singleton:

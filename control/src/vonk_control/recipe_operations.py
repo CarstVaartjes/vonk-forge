@@ -5805,6 +5805,7 @@ class RecipeOperationService:
                     ):
                         started_node.observed_run_generation = None
                         started_node.observation_process_running = None
+                        started_node.observation_failure_diagnostics = None
                         started_node.observation_observed_at = None
                         started_node.observation_endpoint_ready = None
         elif job.kind == "recipe.reconcile":
@@ -10223,6 +10224,7 @@ def prepare_exact_recipe_run_observation_nodes(
                 node.state = _RANK_FAILED
                 node.observed_run_generation = None
                 node.observation_process_running = None
+                node.observation_failure_diagnostics = None
                 node.observation_observed_at = None
                 node.observation_endpoint_ready = None
                 node.updated_at = observed_at

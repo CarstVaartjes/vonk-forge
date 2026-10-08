@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, model_validator
 from vonk_agent_protocol.contracts import canonical_message
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from .integer_domains import MAX_DATABASE_INTEGER
 from .strict_json import StrictJSONModel
@@ -74,6 +75,7 @@ class RunNodePayload(_FleetEventModel):
     state: Annotated[str, Field(min_length=1)]
     reserved_memory_bytes: int = Field(strict=True, ge=0)
     observed_memory_bytes: int | None = Field(default=None, strict=True, ge=0)
+    failure_diagnostics: FailureDiagnostics | None = None
 
 
 class JobPayload(_FleetEventModel):
