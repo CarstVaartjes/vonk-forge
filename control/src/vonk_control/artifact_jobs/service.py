@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RunState,
+    WaitReason,
     recipe_job_manifest_sha256,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
@@ -27,7 +28,7 @@ from ..compiled_artifact_contract import ParameterScalar
 from ..execution_plan_service import compile_job_invocation
 from ..lifecycle import CancelRequested, Effect
 from ..lifecycle.artifact_job import ArtifactJobAdapter
-from ..lifecycle.evidence import Damaged
+from ..lifecycle.evidence import Damaged, Residue
 from ..models import (
     ArtifactJob,
     ArtifactJobBlob,
@@ -48,6 +49,7 @@ from .contracts import (
     ArtifactJobInvalid,
     ArtifactJobStorageCapabilities,
     ArtifactJobTransportCapabilities,
+    ArtifactJobUnavailableError,
     ArtifactJobView,
     StorageReconciliation,
     _active_recipe_revision,
@@ -289,8 +291,9 @@ class ArtifactJobService(OutputService):
             else None
         )
         if resolved is None:
-            raise ArtifactJobInvalid(
-                "recipe revision is unavailable", reason=InvalidRequestReason.NOT_FOUND
+            raise ArtifactJobUnavailableError(
+                "recipe revision evidence is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         _revision, recipe = resolved
         if _recipe_interface(recipe) != interface or interface == "openai":
@@ -306,8 +309,8 @@ class ArtifactJobService(OutputService):
         try:
             contract = _compile_contract(recipe, interface)
             if isinstance(contract, Damaged):
-                raise ArtifactJobInvalid(
-                    contract.note, reason=InvalidRequestReason.UNSUPPORTED
+                raise ArtifactJobUnavailableError(
+                    contract.note, reason=WaitReason.OBSERVATION_UNAVAILABLE
                 )
             contract_digest = contract.sha256()
             parameters_copy = _effective_parameters(
@@ -320,6 +323,8 @@ class ArtifactJobService(OutputService):
                     reason=InvalidRequestReason.LIMIT_EXCEEDED,
                 )
             _validate_inputs_against_contract(contract, parsed_inputs)
+        except ArtifactJobUnavailableError:
+            raise
         except ArtifactJobError:
             if existing is not None:
                 raise ArtifactJobInvalid(
@@ -330,11 +335,16 @@ class ArtifactJobService(OutputService):
         effective_limits = limits.to_mapping()
         contract_mapping = contract.to_mapping()
         if existing is not None:
+            existing_contract = self._stored_contract(session, existing)
+            if isinstance(existing_contract, Residue):
+                raise ArtifactJobUnavailableError(
+                    "artifact contract evidence is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             if (
                 existing.parameters != parameters_copy
                 or existing.output_limits != effective_limits
-                or existing.compiled_contract != contract_mapping
-                or existing.contract_sha256 != contract_digest
+                or existing_contract.sha256() != contract_digest
             ):
                 raise ArtifactJobInvalid(
                     "request key was already used differently",

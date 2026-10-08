@@ -3209,7 +3209,7 @@
       "test_gc_cannot_delete_old_dedup_blob_during_database_attachment": "9bad17e56e428fa7e5e5b2ca67e06cbd5278c212aca8671c6564c6973f490f16",
       "test_gc_cannot_delete_old_dedup_blob_during_database_attachment.paused_attach": "17d875a1d1c6b535e0f321640bc05ca675b409be54dbefbf3091100f6d07a12a",
       "test_gc_cannot_delete_old_dedup_blob_during_database_attachment.observed_fence": "db4fd609520c0ff85bac8770f879420975371284c59e778d91c968f11c661e26",
-      "test_artifact_input_manifest_round_trip_rejects_corrupt_stored_record": "9a44dd5fe7eb5aff1ef57edc48e66da5384a2ff2cdedf9ec09f236ea8f72fd75",
+      "test_artifact_input_manifest_damage_is_readable_and_fresh_work_is_admitted": "16af609eef267bec2b27fcb207482ead182b20bb35352d4e9ee302b87617fecf",
       "test_artifact_input_manifest_is_rebuilt_from_the_uploaded_inputs": "e1205d043f0b09dd53e2b36c2a2290cc6d144aec0f811a99c68b1465069c4068",
       "test_artifact_cancel_completes_over_corrupt_evidence": "848adaf88f8affb132ff6ad99f21229c938d4e7d03047d2c22cdd7cd5ebd144c",
       "test_artifact_cancel_preserves_declared_evidence_and_meaningful_values": "a13041e1ef314400527c646e44056bab022ad8184b56a634eac21728afc09053",

@@ -173,7 +173,7 @@ class DownloadMixin:
                 actual_bytes=received,
                 state=ModelFileState.PARTIAL,
             )
-            raise ModelCacheStorageRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.SOURCE_TRUNCATED,
                 "source ended before the immutable artifact size",
                 recovery="resume",

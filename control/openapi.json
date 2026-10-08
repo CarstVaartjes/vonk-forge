@@ -1294,7 +1294,14 @@
             "title": "Cancel Requested At"
           },
           "compiled_contract": {
-            "$ref": "#/components/schemas/CompiledArtifactContract"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompiledArtifactContract"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "contract_sha256": {
             "pattern": "^[0-9a-f]{64}$",
@@ -1312,11 +1319,18 @@
             "type": "string"
           },
           "input_declarations": {
-            "items": {
-              "$ref": "#/components/schemas/ArtifactFileDeclaration"
-            },
-            "title": "Input Declarations",
-            "type": "array"
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ArtifactFileDeclaration"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Declarations"
           },
           "input_files": {
             "items": {

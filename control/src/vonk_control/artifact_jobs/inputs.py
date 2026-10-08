@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterable
 
-from vonk_agent_protocol import InvalidRequestReason
+from vonk_agent_protocol import InvalidRequestReason, WaitReason
 
 from .. import artifact_job_states as ajs
 from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
@@ -15,6 +15,7 @@ from ..models import ArtifactJob, ArtifactJobFile
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
     ArtifactJobInvalid,
+    ArtifactJobUnavailableError,
     ArtifactJobView,
     _translate_blob_error,
 )
@@ -168,9 +169,9 @@ class ArtifactJobService(StorageService):
             uploaded = self._files_in_session(session, job_id, "input")
             observed = self._input_files(uploaded, manifest)
             if isinstance(manifest, Residue) or list(manifest.files) != observed:
-                raise ArtifactJobInvalid(
-                    "artifact job inputs are incomplete",
-                    reason=InvalidRequestReason.INCOMPLETE,
+                raise ArtifactJobUnavailableError(
+                    "artifact input evidence is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             ArtifactJobAdapter.mark_ready(job, now)
             return self._view_in_session(session, job)

@@ -479,7 +479,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 108,
+    "total": 113,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -1741,15 +1741,15 @@
       "ArtifactOutputFile": "48a867d145b0e365b17670608c6874a46bfbf9f55600c2a7ab704801635465de",
       "OutputLimits": "d639fd6d432679ec4a5935562bbd9c79f479b79cb4399119a94d6a152d06f55a",
       "_read_input_manifest": "5a71c0f9737263825cf8f8ada699db4545a49c1fe67dc9756e96f96c5f45c1b8",
-      "ArtifactJobResponse": "4e24e8ad5048da3e9100026590f6a593911f851e5698cbdf6d005687c5bf43cd",
-      "ArtifactJobResponse.response_is_consistent": "c986844b6b8dc377616a8ca4e508a9d8eba84bd104a09c354fb40dd7f26f8eca",
+      "ArtifactJobResponse": "8bc35df5671e3d5601a8d9cf9ca65b03aae801607a96529eb23934682e9582b9",
+      "ArtifactJobResponse.response_is_consistent": "e8366959ca28989b850c557cc02a2add9c9438ddcf37abd84e828d068a15fec1",
       "ArtifactJobListResponse": "28a6ab07d065753b99458c76358d2a004f7de9e0163d9ba3464f37ead7efec3e",
       "ArtifactJobTransportCapabilities": "830819165c011db66de8d2347b07ad914abea8555a804c65f0b9783605591022",
       "ArtifactJobStorageCapabilities": "57235454955b87235200dc44190bf7c3aeb2a7f1b70c6b2b8c3fbe0590b85e4b",
       "StorageReconciliation": "6933a3ab8ff0b93588426e6592013ef76a8394dab22be208f9a07ee81a81f6a3",
       "ArtifactJobCapabilitiesResponse": "e08d9cfd98e278f8aee665ec1bd8d0da1bcdadf0f44a59b83427db1719ba5ec4",
       "_JobLaunch": "baa56094697afdaed299a67d2b36902e07f13f4c66609e88c1413378fc5e58cd",
-      "ArtifactJobView": "20ec2b52e30cbea08587a8cdb8a79d4b3046681cdb7b36fdc40d9e9dfd05b3b5",
+      "ArtifactJobView": "e9bab5b5e5a51d17def3a6e0c72a7759c020b6b3d324a98b841999b94f1bd13c",
       "_record_unservable_run": "9d77befc33dafdaa0be423f17009a28f15731d835dfa0dab59aed5fd97508fec",
       "_recipe_interface": "2d5b0b993d4ddaef582916fa02a94b0f0b229d831499c9a7aa4f332b285f1b7b",
       "_finite_parameter_number": "11db35dc4abdac26f741620317b47dc882252e9f28a35b77bacb396db09fa5c9",
@@ -1762,44 +1762,45 @@
       "_canonical_declared_parameters": "7031abc0419cc713f83168aa6b7a0235b4d985197a3db08e50505c2d515bddbe",
       "_artifact_submission_in_session": "21d3aa8ff4f3143cdfcf756855307b79753a9b723ceb648507e4957a22996440",
       "_artifact_submission_in_session.read": "b286c8e014b4d89566abf3302923930508d29f73ed99c1c3e606a2c85e79db27",
-      "<module>": "41f172cd4c06f561be55882975be54905776ef9985fb23cc3d8174ea722d50e2"
+      "<module>": "eac02e80bc438b0d356564250f10a129d53e9bda118ad5283c97bde06bc2009b"
     },
     "control/src/vonk_control/artifact_jobs/inputs.py": {
-      "ArtifactJobService": "b9bf4c290ba1fe75183a08bb9422203d6d25ff9df2ab1c06675a252457c7c00f",
+      "ArtifactJobService": "58715dec3ed1f690dcb8b369aa732780f169fdb19da90ab6bad0008b4f8aac1b",
       "ArtifactJobService.put_input": "37e83ed0992a2068f3bb47e45b69a9eb13793842bb847b67de56971c9941558a",
       "ArtifactJobService.put_input_stream": "d932eafcfd0e22a6ebc0e4e4a84459c159d46f3dfc30d73ef1cc71a413a198ea",
       "ArtifactJobService.input_upload_size": "58ad7aedb8c9b4eb3ba336ba65bce73dbe0b76b0793c0e3ff6285ec6d3ea9704",
       "ArtifactJobService._attach_input": "a4b9fe1ba35362d5e80694b6864fb0bf63a0fc12ac8dada07c7fb2902ac5ad8f",
-      "ArtifactJobService.finalize": "94ff1671101fc41bb4e574d857b01231b95d7a0d0494c35d0fdc5d3fb71ad503",
-      "<module>": "b9bf4c290ba1fe75183a08bb9422203d6d25ff9df2ab1c06675a252457c7c00f"
+      "ArtifactJobService.finalize": "6684f580a89a81362d29203cf5a094bc3b85f2b6e4f779861b0881af541a89ec",
+      "<module>": "58715dec3ed1f690dcb8b369aa732780f169fdb19da90ab6bad0008b4f8aac1b"
     },
     "control/src/vonk_control/artifact_jobs/outputs.py": {
-      "ArtifactJobService": "0dfe7c12bf93107c93bc4b1cd4c647c7a283476ae9b416fd8b1e31970da2ecd8",
+      "ArtifactJobService": "69afb90e7fd558de0eccb6c684b99a7d21d2a5a4925356e33cce8e4dc236faa8",
       "ArtifactJobService.input_blob": "3533921a9c0a3c1ae8c7be13058fb31877e3b879402b35d599dd3af547535818",
-      "ArtifactJobService.put_output": "6f874a6ca7159d77e7e33b3f984755ad0919d7bbd5b481092f77ce43ba538ca9",
+      "ArtifactJobService.put_output": "16d0051c7b75499c77ef7afaead188e2038900ca1f342ef6444224720ccc2770",
       "ArtifactJobService.put_output_stream": "86fa0501ba7ed0d99c06d897f713177c4cb4af731e13f26efcbb0cc88575bc6a",
-      "ArtifactJobService._validate_output_upload": "ead9dd41fca9190d7d38d3f7c25f578af31cdd566ee65fbafed98342c8fc3909",
-      "ArtifactJobService._attach_output": "10ef6d96208c2659a94e4c46a37b11f0a96dbbc365bdf3cbba7069b36334992a",
+      "ArtifactJobService._validate_output_upload": "ed18062a160e4854f905111db8ed6b989ca4d39a2afc1502b349f496f74625cf",
+      "ArtifactJobService._attach_output": "fb3cd79e19607533857d033d5e3dbc1b1ead47584b5c2a3ce0e86ea87d77b270",
       "ArtifactJobService.result_blob": "088365fcf8e7c2ab1f3e50d4851dca2d3cf37fed65487b5fb1f2ec4e9a02ae0c",
-      "ArtifactJobService.consume_agent_result": "9b4076eda6d271851d02dd38f54c1c3f94ec8510c7e85029a6e5ee936431d050",
-      "<module>": "0dfe7c12bf93107c93bc4b1cd4c647c7a283476ae9b416fd8b1e31970da2ecd8"
+      "ArtifactJobService._end_unverified_result": "384f86e49e3df6d6fe51da16d38c6b8e58d8300bea913d3e11a7194f7a228ae1",
+      "ArtifactJobService.consume_agent_result": "603506f6b17dd32d8d00dc86113a118b43e43bc12ab87573e27864caa3d2b2dd",
+      "<module>": "69afb90e7fd558de0eccb6c684b99a7d21d2a5a4925356e33cce8e4dc236faa8"
     },
     "control/src/vonk_control/artifact_jobs/service.py": {
-      "ArtifactJobService": "cb8500693677af1baacd5d66273bc30d1d2c9bf796ea3fe28e6fa526a09c45e4",
+      "ArtifactJobService": "ea415fc2b106c7068968c9b1f03b237dde5dd76344865bea6b73c82ce8eaf670",
       "ArtifactJobService.reconcile_storage": "4483ad163fa85bff9d0e6fa275e790cb9a410b4d3b6595c002897a25410a2681",
       "ArtifactJobService._reconcile_storage_fenced": "86f568a4865455a0f394619dcc0f4354764b824416d011aca96f55892d76affa",
       "ArtifactJobService.create": "7aa3387e1b239e4d5aa72f66a059e5079563a17b1cbdc781b6c44f9411ae3f5d",
-      "ArtifactJobService._create_in_session": "71ca1bc78f875e054bb00699bfafb2f4381bc1d35cf5abe67d1b4e9951af754c",
+      "ArtifactJobService._create_in_session": "53b76e5da8b68b3a282b4cbef831844b137cdb05613d9c32e36bc80f3c386457",
       "ArtifactJobService.capabilities": "95508cb294f804f5b92f8fc6c66aaf00f31a299f99452eb0852a5906fbe612c9",
       "ArtifactJobService.submit": "39fce50f985dde93afd9c7cb73f51492ece202be8a7744f55aab7897ebd60195",
       "ArtifactJobService.get": "978b7ab5cff845ceeb1ca7c1c1d64e2345fc40e4fdcaa6f13a1805f790288325",
       "ArtifactJobService.get_by_request_id": "3149eb334ee9355d8908000906840353148a28a311c1a1ada0d421617f6f0a93",
       "ArtifactJobService.list_for_run": "654bfea0a331dad844e517d29be24af45a64ecf90251354867cd7aabf45c6b52",
       "ArtifactJobService.cancel": "a16f336c0e1f00dc9d4988d79a1390524d9999c6ce3f4833d8e768509f5e6b21",
-      "<module>": "cb8500693677af1baacd5d66273bc30d1d2c9bf796ea3fe28e6fa526a09c45e4"
+      "<module>": "ea415fc2b106c7068968c9b1f03b237dde5dd76344865bea6b73c82ce8eaf670"
     },
     "control/src/vonk_control/artifact_jobs/storage.py": {
-      "ArtifactJobService": "114289a699c9a8d966ac0e11dc4353d82e9daeced8266160ac741e24b9a72ae5",
+      "ArtifactJobService": "bbe257da5786dfaa6e98b098c89942711de5da6b31e79ec6b51516feb43e4363",
       "ArtifactJobService.__init__": "0c2dd8eb9d47b393dff5b5bd53ddb09b902f477cca3e2541996928043a5869ae",
       "ArtifactJobService._reject_result": "d5a3e0ab84848b3abb2012f21b0b28f726249dbbf59a226275dcc5b29333d375",
       "ArtifactJobService._authorized_agent_job": "d2c195fca89858b4300b7c84e6d593471a5f723038d812190f8ddf08c50cbf1c",
@@ -1809,16 +1810,16 @@
       "ArtifactJobService._job_node_in_session.mapped_endpoints": "e9ca899d932752cd08230d1ceee1aa2898280f6cf3a2869b45050cc22135c17e",
       "ArtifactJobService._put_blob_in_session": "8f797a25be97d3ef81296e1a899854d9c074563f7e99e6f9755d71e6c2298fb6",
       "ArtifactJobService._file_in_session": "e483d9c522a5f430a68d5e7417f1c41e73a736ec6a95238b7742b1ba61ffbc74",
-      "ArtifactJobService._stored_input_manifest": "7888ce8637cd57f15c8317a5621d9272ce83a736f9b84f7e80377945953157b8",
-      "ArtifactJobService._stored_input_manifest.rebuild": "b7cfb422214974a90f873e5bfb6d06cebba298d5eff4cf957cd6229a161d3cd7",
+      "ArtifactJobService._stored_input_manifest": "7293b3877f07388269ccc3b73493d5cd1b581985612b1b5cff48eee0808a2379",
+      "ArtifactJobService._stored_input_manifest.rebuild": "e8d02a186568bd48adce14cbc708d53c71f61f41ee1c4886ea6d34ce11baabfd",
       "ArtifactJobService._input_declaration": "cc63c18cb7351a29629d51ad5d35025dbadf0004e2c517ad11ace893d3c8aeeb",
       "ArtifactJobService._files_in_session": "0acead166bdde32baf6ce4b248135f702cc7d4e6cfebe4d0a85d2cfdf80a4ec7",
       "ArtifactJobService._input_files": "08d166b107d9e53b6a371c7e8e210b897ace89f08ac72796017290e2b995f617",
       "ArtifactJobService._output_file": "b12b1dc9a199f6012755ec0377340239268d417015736e9b84378b97b979a782",
       "ArtifactJobService._stored_contract": "4e6ac3c7f849549a2789bbe3d16f452cba6fca4c752c5a238e04f2acdbfc674c",
       "ArtifactJobService._stored_contract.rebuild": "389fbc87e226b4aff640331bd7d4ea9aa3c8c4f5890000aa2d3cfc295310aa1f",
-      "ArtifactJobService._view_in_session": "df2c9c0485b0c58274250dfab49c9f393897d1a5a4f5508109a57a18103c6b57",
-      "<module>": "114289a699c9a8d966ac0e11dc4353d82e9daeced8266160ac741e24b9a72ae5"
+      "ArtifactJobService._view_in_session": "95d69deaa3f73e5e1cab9a13e33e79836623357847e18213480ca58f207b8196",
+      "<module>": "bbe257da5786dfaa6e98b098c89942711de5da6b31e79ec6b51516feb43e4363"
     },
     "control/src/vonk_control/artifact_lifecycle.py": {
       "ArtifactIdentity": "acd11051f9ebd4b3570f4ec88b6c8c1eef3d9ef2b590c1bc3e8ff8ec218cabca",
@@ -3501,17 +3502,17 @@
       "<module>": "015127e77b7397ab124e5e23c6c6b5e22ad4474c18f9cdf09629ea6bcaa60143"
     },
     "control/src/vonk_control/model_cache/download.py": {
-      "DownloadMixin": "3ff925b0df57a0f9250386ddd6594c72ea9ccfa03c281e7c14fb3eb7402cc620",
+      "DownloadMixin": "e5c35873f351b81539cd55eabefeab96ca3c003176e8b9347ea6e2a8f20ebb9b",
       "DownloadMixin._require_transfer_running": "d3693dca5163956729db3e68661a35d6ae095c2558ca57cf8b6daafd0999a246",
       "DownloadMixin._stream_gate": "d8d592951cc4b693bbcb5c693f36eb908cb8e57c4cd620f8b373ee1fc0a6afc1",
-      "DownloadMixin._download_sequential": "b5cf1beaa60a8b3d799dc488da3efeaceec7865728c9b01aa21e89256bf7bb76",
+      "DownloadMixin._download_sequential": "1ac12d902790b6831bbbd8c00449070e926760c964d5d151c834351a5183ecdb",
       "DownloadMixin._complete_download": "be491fc7d3c3bcb3309daba7b145c528c0cd65281899f14cf07d9ce3fda9e3bf",
       "DownloadMixin._publication_allowed": "99d0c006addc8a52a5d1925adbac6c083a2528d0462f8844bda888c05fa7a621",
       "DownloadMixin._require_model_sets_open": "17690f34140c4e2043d9fc9c2c280c8feff3287329b4b576b64ec0dbf2919bca",
       "DownloadMixin._validate_http_download": "773f47e5e15c277b46dbe7e9ea0f7827aae23c78c1f5042b6a2037b22c3a924a",
       "DownloadMixin._download_parallel_ranges": "7bb754973522c0b64643c84fa922d674f4a7a328b6a1c0585af68bcfaf8e4f83",
       "DownloadMixin._open_source": "fc2f99dd8aaac4a53a9d1c8a4998fe0be13a3ca400d08d9d7aeb3d2fec2f84b2",
-      "<module>": "a7bcdd92bec8e8e761c07ddfda7320157a72795a5ec9d75b2759df4e651ed72e"
+      "<module>": "b05de6acfd43cac1fcdbbad42aacfcdf7f1e74f6ad62c5e73ffd6e47ae670866"
     },
     "control/src/vonk_control/model_cache/download_admission.py": {
       "DownloadAdmissionMixin": "42d2f0528aff6ca6602b621873ccb1364280ea01476bf742e5ffa7912fc09f16",
@@ -3566,19 +3567,19 @@
       "<module>": "b9324815b9454dfb52db5a2f1faa7e2272ae3f99f4e384ca4cc69e78e6ae1b59"
     },
     "control/src/vonk_control/model_cache/github.py": {
-      "GithubMixin": "7f20f8380e23d5f0f78fed30bcc0669a9dac42ad630cefe620e5e8a56ce7ffc9",
+      "GithubMixin": "49ff8f50aedf13b7a24be44a15c17878828c61c5d33e469e4e01b8326225a3b4",
       "GithubMixin._send_anonymous_github_request": "24fb36d199da130a01985ed29b55d1bb93f2fd6066787c87e6306ff9b5ed4b51",
       "GithubMixin._validate_github_release_asset": "22ca4d7130c005307c0531a7eef07f0f243247b8564e1c8f49ebbbd51f532240",
-      "GithubMixin._raise_github_http_status": "1bd2355e3cb59415f0c6bfbe07d4f99e02ee87ec4b5a7f4da05a5da31ff36c00",
+      "GithubMixin._raise_github_http_status": "d9043cf5ff2476fbea9a09faabfef4638d6ffd0d62a5f116b391d4ecf8bf0770",
       "GithubMixin._github_error_reports_secondary_rate_limit": "20cd2383d0fb22d8518d3b10dbbd7429dc3bfce0315620e3eea9d708f944a201",
       "GithubMixin._open_github_release_asset": "c1dfd9dfdd0c89e5be217a2b1478d11aaec68a1b91fa3bfbf7d1cd834dae17d3",
       "GithubMixin._open_github_release_asset_once": "43e929582ce3c0d11b2b34850cf83fad9f781d3ca5cffd9911cfc3185b220d24",
-      "<module>": "c2c82d6b069b4ba0cd6c4eabf2388adf86809e319ce96b3fd6fcad0959d8d425"
+      "<module>": "d341eeed4fcd908aecc36f6bd4c029c0e2c718ed095cda6f910b7f809439b248"
     },
     "control/src/vonk_control/model_cache/http.py": {
-      "HttpMixin": "d5209ca1f85f11e65d3284cd5ef980b44f90cc096def1a2aef47b9208aa98398",
+      "HttpMixin": "44587493c1a3b30ff8c20b7d23e1e8a48d4764d8769969b125abb25f75bdec76",
       "HttpMixin._open_http_response": "a717a60275be92251ee5a712db48c086fe8c79a446c9ef24b349bde9378e8fe3",
-      "HttpMixin._open_http_response_once": "15de11c1456dc21b62af6534901920cb9778c5eaf3a7d0ff3fb859a03ed097c0",
+      "HttpMixin._open_http_response_once": "ef274315181ea2c49fc7aca359605b0827785e79a5ac605de2171f26d4880d62",
       "HttpMixin._huggingface_credential_fingerprint": "adad095deae238b24da869e215057bf6f998926bb3e117076178e088b73a8074",
       "HttpMixin._resume_after_credential_change": "0401141bd7ad3e556f0960a9d5bca09c68ce1631980a739ddfbdf9a68ec20aa4",
       "HttpMixin._load_huggingface_token": "8847c6f355cb0d67ecd6ceae9551e8c1df138c008e7aab253324baedfd90e788",
@@ -3587,7 +3588,7 @@
       "HttpMixin._manifest_coverage_complete": "bca683a7983a26f3ed6da063c619dbf00799bead50b9b7edf5a3b83488a6b600",
       "HttpMixin._publish_object": "f666dafc8c968740f6a6ef21df31de713e099e6916fed198c298f56358fd0b5a",
       "HttpMixin._place_object": "47e6db003522060f395c4ca50f9aaf6346e56787b2df1aaac1600ae824a5bd0c",
-      "<module>": "2794290150c78f71672daad26adea303c8479112b0f77eaf9fd8a4a2e8216054"
+      "<module>": "6674111f31eb205ff943c4ac353ac4d239da98930bf454b7ac8db8cc37cfdaa4"
     },
     "control/src/vonk_control/model_cache/inventory.py": {
       "InventoryMixin": "500ce12d79c5a07fe737e26f6e46c58adc650d0b42e2dbb0d1ffc6f94d18fec4",
@@ -3760,10 +3761,10 @@
       "_fsync_directory": "a1788d4760fefe9f9067af239f8d9841309d80553e431a3e8343e0b04c4d4ee9"
     },
     "control/src/vonk_control/model_cache/split_transfer.py": {
-      "SplitTransferMixin": "08a4de562aa39269d6a8c7290d93bb71b7357907c59b00b25f548ea8e5bf04d3",
-      "SplitTransferMixin._download_split": "1748de964b1cbba35df712cecdc442554eb4024d37b1f774eb8e7b0ce9681017",
-      "SplitTransferMixin._rehash_prefix": "a9fbd5fa9ce800a1533f2e71e5f64f3e80fdc92c2a43f757a9637389bdc5a88d",
-      "SplitTransferMixin._append_part": "0fa3f32122b5d9d14109dda0ffd95ae8dceaa8c527c630fbe8adeead00646b02",
+      "SplitTransferMixin": "c9339d8c7de91fb577e6e68aa353f6ed1f6d70a056472ba18d7456cd1d497068",
+      "SplitTransferMixin._download_split": "454700f5c0108dd3c9488d80b5953233c70d5c96585bc6bfd7b180b49220c0fb",
+      "SplitTransferMixin._rehash_prefix": "ab9728737d0b085bed2ca200a6a51e0cb5891da4198ded7fa38949f1c7834508",
+      "SplitTransferMixin._append_part": "b782cdf12d67881a8f4ec3e964e967b578dbd4cad922a7a47d71b3393cda000c",
       "SplitTransferMixin.memory_footprint": "7bb6e5ffb7b0d5eff91e5ff98b4b1dee0eb1839b275c17658a21bd102f65a01d",
       "SplitTransferMixin._transfer_stop": "627e7b3bba37366d47a6231d902eb0a894bb16cba023e7588165b91491f8bb4d",
       "SplitTransferMixin._operation_cancellation_pending": "70f017c5b688799b7e0d971e980c2164f76332ff7dc4443a635f84aa67a7180a",
@@ -3773,7 +3774,7 @@
       "SplitTransferMixin._sample_transfer.observe": "76ca8162fd20a799614d5d32e93d5e0b5909c5b173ed66246f79300265d2e295",
       "SplitTransferMixin._partial_owner": "0ad0e72fdd699b245a69b7c49771ae86d63cdc97db5a8c268a5de8ead818394a",
       "SplitTransferMixin._download_artifact": "d3f45c182b8fad43289d36fcc3c8a8d50c7fc36dd9e269c9dd7a3fad6e14c149",
-      "<module>": "a54c79059264447fb655cb5b8914170efc0f6597d4825a4857fbbbcaa6718339"
+      "<module>": "271f8ab1fd769ee33640411f84f4046b73b966c6a3cbf5b2436b08f9afc5ca77"
     },
     "control/src/vonk_control/model_cache/storage.py": {
       "StorageMixin": "47d93c060d0310bca350b5e667fb6a19d4d9825266995d9282a80cdb3549edb2",
@@ -3856,11 +3857,11 @@
       "RangeResponseError": "a6b015d3820f2ed675c0fb99dad9a949a4e55288033c65d54ee3ec003e0f3928",
       "RangeTruncatedError": "13de0769170c2653a28eb6dbe68a632b0176ca5d6a436394b88c9eca04766b05",
       "_RangeIgnored": "c0d49b54ae195f13c3ac777e92fc9d50fff68ef937157a70ed08bda49889bd51",
-      "_reject_symlink": "d9f630bdd805c8f67a895460080764e9a4dca69c7635bb58c2a31279764be767",
+      "_reset_symlink": "5633d1c55cc047222df25b5e8dd9e7129cbbacbeafa741e59f3a07d35b6e6c29",
       "_segments": "a9383302d91166bdb163364f371a5e83a0b57a51a2c65954643f10670f51cc0b",
-      "range_partial_bytes": "6e7cc5e2699d995bb52ad72b5c53b77808381b7b6270cb2c11773252777ac144",
+      "range_partial_bytes": "b04b2b29e4d6b97869e3471dcc832125e0f40168ea6bca090c57457e97f831c2",
       "cleanup_ranges": "9824796effb5ef36326cfef6e84f8b6258b0bbb1e7ca3deb62404edf73a97238",
-      "download_ranges": "379dbff947cfb7fb1241bf11aa4c4660803fabff5fb1de404d237452ec4b6925",
+      "download_ranges": "1b30938bbf6d14f4f279d7663da586e8d81165f9d7246204c0d1b7c27cf0e146",
       "download_ranges.interrupted": "ce26bf1f36d820bd162c9785271fb553d6467824e1ff66fff48074899ea09d84",
       "download_ranges.transfer": "e952c7dafa9d649d2284ec29ab8e70258c804d695fd8b8ee6984bc5c81da2b79",
       "download_ranges._transfer_body": "7c978719692e530fa1f830fd13c8f17767ba5719e10b951633f6fc8a750f84d9",
@@ -6081,9 +6082,7 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Agent authorization and content-addressed input/output integrity of one-shot artifact jobs.",
       "sites": [
-        ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobTransferClosedError", "ArtifactJobService._attach_output", "artifact-job-transfer-is-closed", 1],
-        ["control/src/vonk_control/artifact_jobs/storage.py", "ArtifactJobTransferClosedError", "ArtifactJobService._authorized_agent_job", "artifact-job-transfer-is-closed", 1],
-        ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobTransferClosedError", "ArtifactJobService._validate_output_upload", "artifact-job-transfer-is-closed", 1]
+        ["control/src/vonk_control/artifact_jobs/storage.py", "ArtifactJobTransferClosedError", "ArtifactJobService._authorized_agent_job", "artifact-job-transfer-is-closed", 1]
       ]
     },
     {
@@ -6098,7 +6097,6 @@
         ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageRefused", "DownloadMixin._complete_download", "model_cache.digest_mismatch", 1],
         ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageRefused", "DownloadMixin._download_parallel_ranges", "model_cache.redirect_forbidden", 1],
         ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageRefused", "DownloadMixin._download_sequential", "model_cache.source_size_mismatch", 1],
-        ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageRefused", "DownloadMixin._download_sequential", "model_cache.source_truncated", 1],
         ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageRefused", "DownloadMixin._open_source", "model_cache.range_invalid", 1],
         ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageRefused", "DownloadMixin._open_source", "model_cache.redirect_forbidden", 1],
         ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageRefused", "DownloadMixin._open_source", "model_cache.source_size_mismatch", 1],
@@ -6106,8 +6104,6 @@
         ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageRefused", "DownloadMixin._validate_http_download", "model_cache.source_untrusted", 2],
         ["control/src/vonk_control/model_cache/download_admission.py", "ModelCacheConflictRefused", "DownloadAdmissionMixin.start_download", "model_cache.plan_invalid", 1],
         ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageRefused", "GithubMixin._open_github_release_asset_once", "model_cache.redirect_forbidden", 3],
-        ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageRefused", "GithubMixin._raise_github_http_status", "model_cache.rate_limited", 1],
-        ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageRefused", "GithubMixin._raise_github_http_status", "model_cache.redirect_forbidden", 1],
         ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageRefused", "GithubMixin._raise_github_http_status", "model_cache.source_access_denied", 1],
         ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageRefused", "GithubMixin._validate_github_release_asset", "model_cache.release_asset_identity_conflict", 3],
         ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageRefused", "GithubMixin._validate_github_release_asset", "model_cache.release_metadata_invalid", 4],
@@ -6115,7 +6111,6 @@
         ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageRefused", "HttpMixin._load_huggingface_token", "model_cache.credentials_invalid", 3],
         ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageRefused", "HttpMixin._open_http_response_once", "model_cache.credentials_denied", 1],
         ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageRefused", "HttpMixin._open_http_response_once", "model_cache.credentials_missing", 1],
-        ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageRefused", "HttpMixin._open_http_response_once", "model_cache.rate_limited", 2],
         ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageRefused", "HttpMixin._open_http_response_once", "model_cache.redirect_forbidden", 3],
         ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageRefused", "HttpMixin._publish_object", "model_cache.digest_mismatch", 1],
         ["control/src/vonk_control/model_cache/removal_acceptance.py", "ModelCacheConflictRefused", "RemovalAcceptanceMixin._accept_model_removal", "artifact.reference_identity_mismatch", 3],
@@ -6130,10 +6125,7 @@
         ["control/src/vonk_control/model_cache/resolution.py", "ModelCacheStorageRefused", "ResolutionMixin.resolve_latest_cached.model_set_available", "model_cache.manifest_identity_mismatch", 1],
         ["control/src/vonk_control/model_cache/retry.py", "ModelCacheConflictRefused", "RetryMixin.check_access_and_resume", "model_cache.identity_mismatch", 1],
         ["control/src/vonk_control/model_cache/split_transfer.py", "ModelCacheStorageRefused", "SplitTransferMixin._append_part", "model_cache.digest_mismatch", 1],
-        ["control/src/vonk_control/model_cache/split_transfer.py", "ModelCacheStorageRefused", "SplitTransferMixin._append_part", "model_cache.source_size_mismatch", 1],
-        ["control/src/vonk_control/model_cache/split_transfer.py", "ModelCacheStorageRefused", "SplitTransferMixin._append_part", "model_cache.source_truncated", 1],
         ["control/src/vonk_control/model_cache/split_transfer.py", "ModelCacheStorageRefused", "SplitTransferMixin._download_split", "model_cache.digest_mismatch", 1],
-        ["control/src/vonk_control/model_cache/split_transfer.py", "ModelCacheStorageRefused", "SplitTransferMixin._rehash_prefix", "model_cache.source_truncated", 1],
         ["control/src/vonk_control/model_cache/transfer.py", "ModelCacheConflictRefused", "TransferMixin._ensure_set", "model_cache.identity_conflict", 1]
       ]
     },
@@ -6918,9 +6910,6 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class RangeResponseError guards a security boundary.",
       "sites": [
-        ["control/src/vonk_control/model_cache_ranges.py", "RangeResponseError", "_reject_symlink", "range-cache-path-must-not-be-a-symlink", 1],
-        ["control/src/vonk_control/model_cache_ranges.py", "RangeResponseError", "download_ranges", "contiguous-partial-changed-while-seeding-ranges", 1],
-        ["control/src/vonk_control/model_cache_ranges.py", "RangeResponseError", "download_ranges", "range-partial-has-unexpected-length", 1],
         ["control/src/vonk_control/model_cache_ranges.py", "RangeResponseError", "download_ranges._transfer_body", "range-response-exceeds-requested-bytes", 1],
         ["control/src/vonk_control/model_cache_ranges.py", "RangeResponseError", "download_ranges._transfer_body", "range-response-must-use-identity-content-encoding", 1],
         ["control/src/vonk_control/model_cache_ranges.py", "RangeResponseError", "download_ranges._transfer_body", "response-content-range-does-not-match-requested-bytes", 1]
@@ -7807,13 +7796,10 @@
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "artifact-output-changed", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "artifact-output-file-count-exceeds-the-limit", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "artifact-output-media-type-is-not-allowed", 1],
-        ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobInvalid", "ArtifactJobService._attach_output", "stored-artifact-output-does-not-match-declaration", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "artifact-job-interface-does-not-match-the-run", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "artifact-job-timeout-exceeds-the-recipe-contract", 1],
-        ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "recipe-revision-is-unavailable", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "recipe-run-is-not-accepting-jobs", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "request-key-was-already-used-differently", 4],
-        ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService._create_in_session", "unsupported", 1],
         ["control/src/vonk_control/artifact_jobs/storage.py", "ArtifactJobInvalid", "ArtifactJobService._job_node_in_session", "artifact-job-endpoint-owner-is-not-running", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobInvalid", "ArtifactJobService._validate_output_upload", "artifact-output-bytes-exceed-the-limit", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobInvalid", "ArtifactJobService._validate_output_upload", "artifact-output-file-count-exceeds-the-limit", 1],
@@ -7827,7 +7813,6 @@
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-request-key-collision", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService.create", "artifact-job-timeout-is-invalid", 2],
         ["control/src/vonk_control/artifact_jobs/inputs.py", "ArtifactJobInvalid", "ArtifactJobService.finalize", "artifact-job-cannot-be-finalized", 1],
-        ["control/src/vonk_control/artifact_jobs/inputs.py", "ArtifactJobInvalid", "ArtifactJobService.finalize", "artifact-job-inputs-are-incomplete", 1],
         ["control/src/vonk_control/artifact_jobs/inputs.py", "ArtifactJobInvalid", "ArtifactJobService.input_upload_size", "artifact-input-does-not-match-its-declaration", 1],
         ["control/src/vonk_control/artifact_jobs/inputs.py", "ArtifactJobInvalid", "ArtifactJobService.input_upload_size", "artifact-job-inputs-are-immutable", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobInvalid", "ArtifactJobService.list_for_run", "artifact-job-list-limit-is-invalid", 1],
@@ -7853,12 +7838,9 @@
         ["control/src/vonk_control/artifact_jobs/contracts.py", "ArtifactJobInvalid", "_validate_outputs_against_contract", "artifact-output", 3],
         ["control/src/vonk_control/artifact_jobs/contracts.py", "ArtifactJobInvalid", "_validate_outputs_against_contract", "artifact-output-bytes-exceed-the-recipe-contract", 1],
         ["control/src/vonk_control/artifact_jobs/contracts.py", "ArtifactJobInvalid", "_validate_outputs_against_contract", "artifact-output-slot", 2],
-        ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-job-contract-is-unreadable", 1],
-        ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-result-does-not-match-uploaded-outputs", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-result-exceeds-output-limits", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-result-media-type-is-not-allowed", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "artifact-result-state-and-exit-code-disagree", 1],
-        ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "cancelled-artifact-result-cannot-retain-uploaded-outputs", 1],
         ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactResultInvalid", "ArtifactJobService.consume_agent_result", "waiting-artifact-result-identity-or-output-is-invalid", 1],
         ["control/src/vonk_control/artifact_jobs/contracts.py", "InvalidValue", "ArtifactJobResponse.response_is_consistent", "a-waiting-artifact-job-must-advertise-its-stop-action", 1],
         ["control/src/vonk_control/artifact_jobs/contracts.py", "InvalidValue", "ArtifactJobResponse.response_is_consistent", "artifact-submission-operation-and-request-identity-must-be-p", 1],
@@ -7870,7 +7852,6 @@
         ["control/src/vonk_control/artifact_jobs/service.py", "InvalidValue", "ArtifactJobService.reconcile_storage", "artifact-reconciliation-batch-limit-is-invalid", 1],
         ["control/src/vonk_control/artifact_jobs/inputs.py", "MissingRecord", "ArtifactJobService._attach_input", "not-found", 1],
         ["control/src/vonk_control/artifact_jobs/storage.py", "MissingRecord", "ArtifactJobService._authorized_agent_job", "not-found", 1],
-        ["control/src/vonk_control/artifact_jobs/storage.py", "MissingRecord", "ArtifactJobService._view_in_session", "not-found", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "MissingRecord", "ArtifactJobService.cancel", "not-found", 1],
         ["control/src/vonk_control/artifact_jobs/inputs.py", "MissingRecord", "ArtifactJobService.finalize", "not-found", 1],
         ["control/src/vonk_control/artifact_jobs/service.py", "MissingRecord", "ArtifactJobService.get", "not-found", 1],
@@ -9423,6 +9404,73 @@
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class RecipePackageUnsettled is an unknown outcome with no proven retry loop.",
       "sites": [
         ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageUnsettled", "RecipePackageClient._download_library", "recipe_package.unavailable", 1]
+      ]
+    },
+    {
+      "family": "inputs.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ArtifactJobUnavailableError is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/artifact_jobs/inputs.py", "ArtifactJobUnavailableError", "ArtifactJobService.finalize", "artifact-input-evidence-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "outputs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Unavailable local evidence is re-derived once, then ends as a typed unknown without attaching or reserving work. Fresh requests are admitted and re-observe the content. Counted honestly as bookkeeping debt because not every API caller has a registered automatic retry path.",
+      "sites": [
+        ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobUnavailableError", "ArtifactJobService._attach_output", "artifact-contract-evidence-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs/outputs.py", "ArtifactJobUnavailableError", "ArtifactJobService._validate_output_upload", "artifact-contract-evidence-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "service.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Unavailable local evidence is re-derived once, then ends as a typed unknown without attaching or reserving work. Fresh requests are admitted and re-observe the content. Counted honestly as bookkeeping debt because not every API caller has a registered automatic retry path.",
+      "sites": [
+        ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobUnavailableError", "ArtifactJobService._create_in_session", "observation-unavailable", 1]
+      ]
+    },
+    {
+      "family": "download.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ModelCacheStorageUnknown is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/model_cache/download.py", "ModelCacheStorageUnknown", "DownloadMixin._download_sequential", "model_cache.source_truncated", 1]
+      ]
+    },
+    {
+      "family": "github.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ModelCacheStorageUnknown is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/model_cache/github.py", "ModelCacheStorageUnknown", "GithubMixin._raise_github_http_status", "model_cache.rate_limited", 1]
+      ]
+    },
+    {
+      "family": "http.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ModelCacheStorageUnknown is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageUnknown", "HttpMixin._open_http_response_once", "model_cache.rate_limited", 2]
+      ]
+    },
+    {
+      "family": "split_transfer.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class ModelCacheStorageUnknown is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/model_cache/split_transfer.py", "ModelCacheStorageUnknown", "SplitTransferMixin._append_part", "model_cache.source_size_mismatch", 1],
+        ["control/src/vonk_control/model_cache/split_transfer.py", "ModelCacheStorageUnknown", "SplitTransferMixin._append_part", "model_cache.source_truncated", 1]
+      ]
+    },
+    {
+      "family": "service.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Unavailable local evidence is re-derived once, then ends as a typed unknown without attaching or reserving work. Fresh requests are admitted and re-observe the content. Counted honestly as bookkeeping debt because not every API caller has a registered automatic retry path.",
+      "sites": [
+        ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobUnavailableError", "ArtifactJobService._create_in_session", "artifact-contract-evidence-is-unavailable", 1],
+        ["control/src/vonk_control/artifact_jobs/service.py", "ArtifactJobUnavailableError", "ArtifactJobService._create_in_session", "recipe-revision-evidence-is-unavailable", 1]
       ]
     }
   ]
