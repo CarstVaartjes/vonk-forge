@@ -16,8 +16,10 @@ from ..control_client import (
     ControlHTTPError,
     ControlMalformedResponse,
     ControlNotFound,
+    ControlObservationUnavailable,
     ControlResponseTooLarge,
     ControlTransportError,
+    ControlUnavailable,
 )
 from ..error_reporting import ErrorContext, protocol_context, transport_context
 from .common import ControllerClient
@@ -53,10 +55,27 @@ def _submit_idempotent_request(
     submission = Submission(key, path, lookup, 3 * normal_timeout, action=action)
     args.submission = submission
     deadline = time.monotonic() + submission.timeout_seconds
-    if not (args.global_json or getattr(args, "json", False)):
-        print(
-            f"Request key: {key}\nReconnect: {reconnect}", file=sys.stderr, flush=True
+
+    def end_unknown(*, interrupted: bool = False) -> None:
+        from .observation import _poll_path
+
+        _poll_path(
+            client, lookup, {}, args, deadline=time.monotonic(), fetch_initial=True
         )
+        args.observation.reconnect_command = reconnect
+        if interrupted:
+            args.observation.status = "interrupted"
+
+    if not (args.global_json or getattr(args, "json", False)):
+        try:
+            print(
+                f"Request key: {key}\nReconnect: {reconnect}",
+                file=sys.stderr,
+                flush=True,
+            )
+        except BrokenPipeError:
+            end_unknown(interrupted=True)
+            return {}
 
     def request(
         method: str,
@@ -109,22 +128,28 @@ def _submit_idempotent_request(
         return result
 
     retry_error: ControlHTTPError | ControlTransportError | None = None
-    submission_error: ControlClientError | None = None
     retry_not_before = 0.0
     submission.acceptance = "unknown"
     try:
         return request("POST", path, "submit")
     except BrokenPipeError:
-        raise
+        end_unknown(interrupted=True)
+        return {}
     except OSError:
         may_replay = True
     except ControlClientError as error:
-        submission_error = error
         status = _known_http_refusal_status(error)
         if status is not None:
             submission.acceptance = "refused"
             raise
-        if isinstance(error, (ControlMalformedResponse, ControlResponseTooLarge)):
+        if isinstance(
+            error,
+            (
+                ControlMalformedResponse,
+                ControlResponseTooLarge,
+                ControlObservationUnavailable,
+            ),
+        ):
             # Diagnose by read only. An invalid receipt never licenses a replay.
             may_replay = False
         elif isinstance(error, ControlTransportError) or (
@@ -149,22 +174,82 @@ def _submit_idempotent_request(
 
     if lookup == path:
         if not may_replay:
-            if submission_error is not None:
-                raise submission_error
-            raise ControlMalformedResponse(f"{action} receipt could not be confirmed")
+            end_unknown()
+            return {}
     else:
+        from .observation import _poll_path
+
+        def reconcile(_remaining: float) -> object:
+            return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
+
         try:
             return request("GET", lookup, "lookup", receipt_validator=lookup_validate)
         except ControlNotFound:
-            if not may_replay:
-                raise
+            if may_replay:
+                pass
+            else:
+                return _poll_path(
+                    client,
+                    lookup,
+                    {},
+                    args,
+                    deadline=deadline,
+                    fetch_initial=True,
+                    fetch=reconcile,
+                    attempts=3,
+                    terminal=lambda _: True,
+                )
+        except (
+            ControlMalformedResponse,
+            ControlResponseTooLarge,
+            ControlObservationUnavailable,
+            ControlTransportError,
+            ControlUnavailable,
+            OSError,
+        ):
+            return _poll_path(
+                client,
+                lookup,
+                {},
+                args,
+                deadline=deadline,
+                fetch_initial=True,
+                fetch=reconcile,
+                attempts=3,
+                terminal=lambda _: True,
+            )
     if retry_error is not None:
         now = time.monotonic()
         delay = max(0.0, retry_not_before - now)
         if delay >= deadline - now:
-            raise retry_error
+            end_unknown()
+            return {}
         if delay:
             time.sleep(delay)
-    # A separate lookup's errors propagate with the original key and both safe
-    # failure contexts. Neither a failed lookup nor a second lost POST loops.
-    return request("POST", path, "replay")
+    try:
+        return request("POST", path, "replay")
+    except BrokenPipeError:
+        end_unknown(interrupted=True)
+        return {}
+    except (
+        ControlMalformedResponse,
+        ControlResponseTooLarge,
+        ControlObservationUnavailable,
+        ControlTransportError,
+        ControlUnavailable,
+        OSError,
+    ):
+        if lookup == path:
+            end_unknown()
+            return {}
+        return _poll_path(
+            client,
+            lookup,
+            {},
+            args,
+            deadline=deadline,
+            fetch_initial=True,
+            fetch=reconcile,
+            attempts=3,
+            terminal=lambda _: True,
+        )

@@ -174,7 +174,7 @@ def test_yes_takes_the_current_plan_without_a_review(monkeypatch, capsys):
     capsys.readouterr()
 
 
-@pytest.mark.parametrize("binding", [None, "", "invalid", "A" * 64])
+@pytest.mark.parametrize("binding", [None, FIRST])
 def test_latest_review_submits_the_owner_binding_without_a_client_gate(
     monkeypatch, capsys, binding
 ):

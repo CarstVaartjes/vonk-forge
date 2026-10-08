@@ -6,7 +6,6 @@ import argparse
 import re
 import shlex
 import sys
-import time
 from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from typing import cast
@@ -62,15 +61,25 @@ def _review_and_submit_profile_load(
         # A fresh readable preview may omit the optional binding; only the
         # Controller decides whether that load is admissible. Unreadable peer
         # replies are unknown and get bounded observation retries.
-        for attempt in range(_MAX_REVIEW_ROUNDS):
-            try:
-                preview = client.request("POST", f"/api/profile/{number}/preview")
-                effects_digest = _reviewed_effects_digest(preview)
-                break
-            except ControlMalformedResponse:
-                if attempt == _MAX_REVIEW_ROUNDS - 1:
-                    raise
-                time.sleep(min(0.1 * (2**attempt), client.request_timeout_seconds))
+        def observe_preview(remaining: float) -> object:
+            return client.request(
+                "POST", f"/api/profile/{number}/preview", timeout_seconds=remaining
+            )
+
+        preview = _poll_path(
+            client,
+            f"/api/profile/{number}/preview",
+            {},
+            args,
+            fetch_initial=True,
+            fetch=observe_preview,
+            attempts=_MAX_REVIEW_ROUNDS,
+            terminal=lambda _: True,
+            validate=_reviewed_effects_digest,
+        )
+        if args.observation.status != "complete":
+            return preview
+        effects_digest = _reviewed_effects_digest(preview)
         if not (getattr(args, "global_json", False) or getattr(args, "json", False)):
             with redirect_stdout(sys.stderr):
                 render_payload(preview, "profile", action="preview")
@@ -117,13 +126,14 @@ def _load_profile(
         question=question,
         review_when_confirmed=review_when_confirmed,
     )
+    if getattr(getattr(args, "observation", None), "status", None) in {
+        "timed_out",
+        "interrupted",
+    }:
+        return result
     if getattr(args, "detach", False):
         return result
-    application_id = result.get("id")
-    if not isinstance(application_id, str) or not application_id:
-        raise ControlMalformedResponse(
-            "profile load has no durable application identity"
-        )
+    application_id = cast(str, result["id"])
 
     def same_application(observed: Mapping[str, object]) -> None:
         if observed.get("id") != application_id:

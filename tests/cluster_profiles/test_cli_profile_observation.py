@@ -8,7 +8,6 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import (
-    ControlMalformedResponse,
     ControlNotFound,
     ControlUnavailable,
 )
@@ -35,12 +34,12 @@ class _Successors:
         *,
         different_request: bool = False,
         unavailable: ControlUnavailable | ControlNotFound | None = None,
-        forged: bool = False,
+        mismatched: bool = False,
     ):
         self.clock = clock
         self.different_request = different_request
         self.unavailable = unavailable
-        self.forged = forged
+        self.mismatched = mismatched
         self.calls = []
         self.timeouts = []
         self.initial_delay = 0.0
@@ -60,7 +59,7 @@ class _Successors:
                 raise self.unavailable
             identity = path.rsplit("/", 1)[-1]
         return {
-            "id": "forged" if self.forged and identity != "0" else identity,
+            "id": "mismatched" if self.mismatched and identity != "0" else identity,
             "request_key": "later-request"
             if self.different_request and identity != "0"
             else "original-request",
@@ -132,14 +131,40 @@ def test_successor_outage_retries_within_budget_and_recovers_on_fresh_observatio
     assert observation.status == "complete"
 
 
-def test_forged_successor_identity_is_never_adopted(monkeypatch):
-    controller = _Successors(_Clock(), forged=True)
-    with pytest.raises(ControlMalformedResponse):
-        _observe(monkeypatch, controller)
-    controller.forged = False
-    controller.different_request = True
+@pytest.mark.parametrize("repair", [True, False])
+def test_wrong_successor_is_discarded_and_original_continuation_recovers(
+    monkeypatch, repair
+):
+    controller = _Successors(_Clock(), mismatched=True)
+    request = controller.request
+    observations = 0
+
+    def observe(*args, **kwargs):
+        nonlocal observations
+        candidate = request(*args, **kwargs)
+        if candidate["id"] == "mismatched":
+            observations += 1
+            if repair:
+                controller.mismatched = False
+        return candidate
+
+    monkeypatch.setattr(controller, "request", observe)
+    result, observation = _observe(monkeypatch, controller)
+    assert result["id"] != "mismatched"
+    assert result["request_key"] == "original-request"
+    assert controller.clock.now <= 1
+    assert observations >= 1
+    if repair:
+        assert result["id"] != "0"
+        chain = result["supersedes_chain"]
+        assert isinstance(chain, list) and chain[0] == "0"
+    else:
+        assert result["id"] == "0"
+    assert observation.status == "timed_out"
+    controller.mismatched = False
     result, _ = _observe(monkeypatch, controller)
-    assert result["id"] == "0"
+    assert result["id"] != "mismatched"
+    assert result["request_key"] == "original-request"
 
 
 @pytest.mark.parametrize("code", ["cache.identity_mismatch", "cache.revoked_record"])
@@ -201,3 +226,141 @@ def test_owner_authorization_denial_does_not_replay_and_a_new_request_is_admitte
     status, result = run(argv, client)
     assert status == 0
     assert result["operation_id"] == receipt["operation_id"]
+
+
+def test_closed_output_ends_only_observation_and_fresh_observer_reconnects(monkeypatch):
+    from cluster_profiles.controller_cli.observation import _poll_path
+
+    controller = _Successors(_Clock())
+    monkeypatch.setattr("time.monotonic", controller.clock.monotonic)
+    monkeypatch.setattr("time.sleep", controller.clock.sleep)
+    args = cli._parser().parse_args(
+        ("profile", "progress", "--follow", "--timeout-seconds", "1")
+    )
+
+    def closed(_snapshot):
+        raise BrokenPipeError()
+
+    args._watch_callback = closed
+    initial = {"id": "0", "request_key": "original-request", "state": "running"}
+    result = _poll_path(
+        cast(ControllerClient, controller),
+        "/api/profile/applications/0",
+        cast(dict[str, object], initial),
+        args,
+    )
+    assert result == initial
+    assert args.observation.status == "interrupted"
+    assert args.observation.reconnect_command
+    assert controller.calls == []
+    args._watch_callback = None
+    result = _poll_path(
+        cast(ControllerClient, controller),
+        "/api/profile/applications/0",
+        cast(dict[str, object], initial),
+        args,
+        terminal=lambda _: True,
+        fetch_initial=True,
+    )
+    assert result["id"] == "0" and result["request_key"] == "original-request"
+    assert args.observation.status == "complete"
+    assert controller.calls == ["/api/profile/applications/0"]
+
+
+def test_closed_submission_output_keeps_the_original_request_without_replay():
+    from cluster_profiles.cli_states_generated import SUCCEEDED
+    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+
+    key = "11111111-1111-4111-8111-111111111111"
+    application = "22222222-2222-4222-8222-222222222222"
+    receipt = {"id": application, "request_key": key, "state": SUCCEEDED}
+    lookup = f"/api/profile/1/requests/{key}"
+    client = FakeClient(
+        {
+            ("POST", "/api/profile/1/load"): BrokenPipeError(),
+            ("GET", lookup): receipt,
+        }
+    )
+    status, ended = run(
+        (
+            "--profile",
+            "1",
+            "profile",
+            "load",
+            "--yes",
+            "--detach",
+            "--json",
+            "--request-key",
+            key,
+        ),
+        client,
+    )
+    assert status != 0 and ended["result"] == {}
+    assert [call[0] for call in client.calls] == ["POST"]
+    status, fresh = run(
+        ("--profile", "1", "profile", "progress", "--request-key", key, "--json"),
+        client,
+    )
+    assert status == 0 and fresh["id"] == application
+    assert [call[:2] for call in client.calls] == [
+        ("POST", "/api/profile/1/load"),
+        ("GET", lookup),
+    ]
+
+
+@pytest.mark.parametrize("repair", [True, False])
+@pytest.mark.parametrize("fault", ["identity", "request", "missing", "unavailable"])
+def test_initial_request_lookup_recovers_or_ends_then_fresh_observer_is_admitted(
+    monkeypatch, repair, fault
+):
+    from vonk_agent_protocol.reason_codes import ProjectionCode
+
+    from cluster_profiles.cli_states_generated import SUCCEEDED
+    from cluster_profiles.control_client import ControlObservationUnavailable
+    from tests.cluster_profiles.test_controller_cli import FakeClient, run
+
+    key = "11111111-1111-4111-8111-111111111111"
+    application = "33333333-3333-4333-8333-333333333333"
+    path = f"/api/profile/1/requests/{key}"
+    ready = {"id": application, "request_key": key, "state": SUCCEEDED}
+    unknown = {
+        "identity": {},
+        "request": ready | {"request_key": "22222222-2222-4222-8222-222222222222"},
+        "missing": ControlNotFound(404, "Projection absent"),
+        "unavailable": ControlObservationUnavailable(
+            ProjectionCode.OBSERVATION_TRANSFER_UNAVAILABLE.value,
+            "Projection unavailable",
+        ),
+    }[fault]
+    controller = FakeClient({("GET", path): [unknown, ready] if repair else unknown})
+    clock = _Clock()
+    monkeypatch.setattr("time.monotonic", clock.monotonic)
+    monkeypatch.setattr("time.sleep", clock.sleep)
+    argv = (
+        "--profile",
+        "1",
+        "profile",
+        "progress",
+        "--request-key",
+        key,
+        "--follow",
+        "--timeout-seconds",
+        "0.1",
+        "--interval-seconds",
+        "0.01",
+        "--json",
+    )
+    status, result = run(argv, controller)
+    if repair:
+        assert status == 0 and result == ready
+    else:
+        assert status == 2 and result["result"] == {}
+        observation = result["observation"]
+        assert isinstance(observation, dict)
+        assert observation["path"] == path
+        assert key in str(observation["reconnect_command"])
+    assert clock.now <= 0.1
+    controller.responses[("GET", path)] = ready
+    status, result = run(argv, controller)
+    assert status == 0 and result == ready
+    assert all(call[0] == "GET" for call in controller.calls)

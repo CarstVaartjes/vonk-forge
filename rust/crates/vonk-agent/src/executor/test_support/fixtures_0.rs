@@ -253,6 +253,8 @@ impl LoopClient for TerminalHeartbeatClient {
 pub(in crate::executor) struct LeaseLapseClient {
     pub(in crate::executor) inner: RecordingClient,
     pub(in crate::executor) lapsed_after: DateTime<Utc>,
+    pub(in crate::executor) unreadable: bool,
+    pub(in crate::executor) reply_status: Option<u16>,
     pub(in crate::executor) accepted_at: Arc<Mutex<Vec<DateTime<Utc>>>>,
 }
 
@@ -272,7 +274,19 @@ impl LoopClient for LeaseLapseClient {
     async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         self.inner.heartbeats.lock().unwrap().push(progress.clone());
         if Utc::now() < self.lapsed_after {
-            return Err(ClientError::Retryable);
+            if let Some(status) = self.reply_status {
+                return Err(ClientError::Controller(Box::new(
+                    ControllerError::from_status(status),
+                )));
+            }
+            if self.unreadable {
+                return Err(ClientError::Protocol);
+            }
+            return Ok(AgentDirective {
+                cancel_requested: true,
+                deadline: (Utc::now() + ChronoDuration::seconds(30)).fixed_offset(),
+                fence: Uuid::new_v4(),
+            });
         }
         self.accepted_at.lock().unwrap().push(Utc::now());
         Ok(AgentDirective {

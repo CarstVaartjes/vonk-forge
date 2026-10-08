@@ -20,7 +20,6 @@ from .fleet import _overview
 from .observation import (
     _bounded_timeout,
     _poll_path,
-    _remaining_observation_timeout,
 )
 from .profile_authoring import _profile_authoring
 from .profile_load import _load_profile
@@ -43,79 +42,45 @@ def _profile(
             "FleetProfileEndpointsView",
             client.profile_endpoints(number, alias=args.alias).to_dict(),
         )
-        assignments = result.get("assignments")
-        if (
-            args.alias is not None
-            and result.get("projection_issue") is None
-            and (
-                not isinstance(assignments, list)
-                or not any(
-                    isinstance(item, dict) and item.get("alias") == args.alias
-                    for item in assignments
-                )
-            )
-        ):
-            raise ValueError(f"endpoint alias is not part of profile {number}")
         return result
     if action == "progress":
         deadline = time.monotonic() + _bounded_timeout(args)
         if args.application:
             path = f"/api/profile/applications/{args.application}"
-            selected_profile_id: str | None = None
-            if getattr(args, "profile_number", None) is not None:
-                selected_profile = client.request(
-                    "GET",
-                    f"/api/profile/{number}",
-                    timeout_seconds=(
-                        _remaining_observation_timeout(deadline)
-                        if args.follow
-                        else None
-                    ),
-                )
-                selected_profile_id_value = selected_profile.get("id")
-                if (
-                    not isinstance(selected_profile_id_value, str)
-                    or not selected_profile_id_value
-                ):
-                    raise ControlMalformedResponse(
-                        "selected profile response has no canonical identity"
-                    )
-                selected_profile_id = selected_profile_id_value
         elif args.request_key:
             path = f"/api/profile/{number}/requests/{args.request_key}"
-            selected_profile_id = None
         else:
             path = f"/api/profile/{number}/progress"
-            selected_profile_id = None
-        result = client.request(
-            "GET",
-            path,
-            timeout_seconds=(
-                _remaining_observation_timeout(deadline) if args.follow else None
-            ),
-        )
-        application_id = result.get("id")
-        if not isinstance(application_id, str) or not application_id:
-            raise ControlMalformedResponse(
-                "profile progress response has no durable application identity"
-            )
-        if args.application and application_id != args.application:
-            raise ControlMalformedResponse(
-                "profile application response identifies another application"
-            )
-        if selected_profile_id is not None:
-            application_profile_id = result.get("profile_id")
-            if (
-                not isinstance(application_profile_id, str)
-                or not application_profile_id
-            ):
+
+        def initial_identity(observed: object) -> None:
+            if not isinstance(observed, Mapping):
+                raise ControlMalformedResponse("profile progress is unreadable")
+            identity = observed.get("id")
+            if not isinstance(identity, str) or not identity:
                 raise ControlMalformedResponse(
-                    "profile application response has no canonical profile identity"
+                    "profile progress identity is unreadable"
                 )
-            if application_profile_id != selected_profile_id:
-                raise ValueError(
-                    f"profile application does not belong to selected profile {number}"
+            if args.application and identity != args.application:
+                raise ControlMalformedResponse(
+                    "profile progress identifies another application"
                 )
+            if args.request_key and observed.get("request_key") != args.request_key:
+                raise ControlMalformedResponse(
+                    "profile progress identifies another request"
+                )
+
+        result = _poll_path(
+            client,
+            path,
+            {},
+            args,
+            validate=initial_identity,
+            terminal=lambda _: True,
+            deadline=deadline,
+            fetch_initial=True,
+        )
+        if args.observation.status != "complete":
+            return result
         if not args.follow:
             return result
         # Follow the owner's explicit predecessor/successor relationship.
@@ -248,7 +213,9 @@ def _profile(
                 ]
             ),
         )
-        if args.detach:
+        if args.detach or getattr(
+            getattr(args, "observation", None), "status", None
+        ) in {"timed_out", "interrupted"}:
             return result
 
         def validate_observed_cancellation(

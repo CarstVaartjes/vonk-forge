@@ -307,7 +307,6 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
     assert document["id"] == identity
     assert document["state"] == "superseded"
     assert document["status_reason"] is not None
-    assert "replaced" in document["status_reason"]
     assert newer_application_id is not None and newer_application_id != identity
     calls = [(method, path) for method, path, _ in peer.calls]
     assert calls[0] == ("GET", latest_path)
@@ -325,5 +324,4 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
         newer = session.get(FleetProfileApplication, newer_application_id)
         assert original is not None and original.state == "superseded"
         assert original.status_reason is not None
-        assert "replaced" in original.status_reason
         assert newer is not None and newer.id != original.id

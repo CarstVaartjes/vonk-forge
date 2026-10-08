@@ -821,11 +821,7 @@ def _main(
             and not (args.global_json or getattr(args, "json", False))
         ):
             print(
-                (
-                    "Observation deadline reached; latest snapshot follows."
-                    if getattr(args, "watch", False)
-                    else "Observation deadline reached; accepted work continues."
-                )
+                "Observation deadline reached."
                 + f"\nReconnect: {outcome.observation.reconnect_command}",
                 file=sys.stderr,
             )

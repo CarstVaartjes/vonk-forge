@@ -30,29 +30,27 @@ pub(super) fn phase_progress(phase: ProgressPhase) -> OperationProgress {
 /// error here until someone decides, in writing, whether it is recoverable.
 pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailure {
     match error {
-        ClientError::Transport(_) | ClientError::Retryable => HeartbeatFailure::Retryable,
+        ClientError::Transport(_)
+        | ClientError::Retryable
+        | ClientError::Protocol
+        | ClientError::ResultSuperseded
+        | ClientError::ResultRejected(_) => HeartbeatFailure::Retryable,
         ClientError::Controller(controller) => {
             if controller.status == 409 && controller.code == vonk_agent_protocol::generated::ControllerErrorCode::SupersededOperationCancelled.as_str() {
                 HeartbeatFailure::SupersededCancellation
-            } else if controller.retryable() {
-                HeartbeatFailure::Retryable
-            } else {
-                // A refused renewal: revoked authority, a fence another attempt
-                // has taken over, a lease lapsed past its renewal allowance, or
-                // an invalid claim.  Sending the same renewal again cannot
-                // repair any of them.
+            } else if matches!(controller.status, 401 | 403) {
                 HeartbeatFailure::Terminal
+            } else {
+                // Missing or inconsistent renewal evidence is unknown. Re-observe
+                // the same fence within the execution budget, without stopping work.
+                HeartbeatFailure::Retryable
             }
         }
         // None of these is repaired by renewing again: the credential, TLS
-        // identity or pinned CA cannot be read; the response cannot be parsed;
-        // the result boundary is not the renewal boundary at all.
-        ClientError::CredentialRead(_)
-        | ClientError::Identity
-        | ClientError::Protocol
-        | ClientError::ResultSuperseded
-        | ClientError::ResultRejected(_)
-        | ClientError::Pin => HeartbeatFailure::Terminal,
+        // identity or pinned CA cannot be read.
+        ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin => {
+            HeartbeatFailure::Terminal
+        }
     }
 }
 
@@ -146,7 +144,15 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
         // The accepted lease advanced, so the ordinary renewal cadence
         // applies again until the next transient failure.
         delay = schedule.interval;
-        state.apply_heartbeat(&progress, &directive)?;
+        if let Err(error) = state.apply_heartbeat(&progress, &directive) {
+            // A mismatched or unstored projection cannot renew the accepted
+            // lease or cancel the executor. Observe this exact fence again.
+            if renewal_budget_end.is_some_and(|end| Utc::now() >= end.with_timezone(&Utc)) {
+                return Err(error.into());
+            }
+            delay = schedule.interval.max(HEARTBEAT_RETRY_FLOOR);
+            continue;
+        }
         lease_deadline.send_replace(directive.deadline);
         (schedule.renewed)();
         deadline = directive.deadline;
