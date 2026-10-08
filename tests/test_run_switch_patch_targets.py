@@ -9,7 +9,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 FACADES = frozenset(
-    {"vonk_control.run_switch_operations", "vonk_control.recipe_operations"}
+    {
+        "vonk_control.run_switch_operations",
+        "vonk_control.recipe_operations",
+        "vonk_control.operation_api",
+        "vonk_control.artifact_jobs",
+        "vonk_control.models",
+    }
 )
 
 
@@ -284,4 +290,12 @@ def test_fault_seed_guard_covers_transaction_commit() -> None:
     }
     assert not failures, (
         f"Keep the fault-seeding guard active through commit: {failures}"
+    )
+
+
+@pytest.mark.parametrize("facade", sorted(FACADES))
+def test_each_facade_rejects_binding_replacement(facade: str) -> None:
+    assert facade_patch_lines(f'monkeypatch.setattr("{facade}.helper", fake)')
+    assert not facade_patch_lines(
+        f'monkeypatch.setattr("{facade}.service.helper", fake)'
     )

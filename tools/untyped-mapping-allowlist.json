@@ -305,10 +305,6 @@
       "count": 3
     },
     {
-      "path": "control/src/vonk_control/artifact_jobs.py",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/artifact_reference_scan.py",
       "count": 1
     },
@@ -461,12 +457,40 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
-      "count": 31
+      "path": "control/src/vonk_control/models/cache.py",
+      "count": 6
     },
     {
-      "path": "control/src/vonk_control/operation_api.py",
+      "path": "control/src/vonk_control/models/catalog.py",
+      "count": 3
+    },
+    {
+      "path": "control/src/vonk_control/models/execution.py",
       "count": 8
+    },
+    {
+      "path": "control/src/vonk_control/models/fleet.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/models/jobs.py",
+      "count": 2
+    },
+    {
+      "path": "control/src/vonk_control/models/mapping.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models/operations.py",
+      "count": 4
+    },
+    {
+      "path": "control/src/vonk_control/models/routes.py",
+      "count": 1
+    },
+    {
+      "path": "control/src/vonk_control/models/telemetry.py",
+      "count": 2
     },
     {
       "path": "control/src/vonk_control/operation_blockers.py",
@@ -1011,6 +1035,10 @@
       "install_agent_routes.openapi_with_enrollment_contract": "7e5225da3574f9335b8f837170069f5a760467ee4029d4b519c93fbd4468d7bd",
       "<module>": "63cb3b868c9f15240710cf13231c56553aeb66934b211181b17cd31f439779bf"
     },
+    "control/src/vonk_control/agent_services.py": {
+      "build_agent_services": "55fbbaa9a0512e959fe18a87f757fbba99caed7a7fa9257226a8490c668a1fa0",
+      "build_agent_services.observe_contact": "008b522ecb49e2e1b496469a6be4d9a9e8842a5f483fbdb503ad33355895f00c"
+    },
     "control/src/vonk_control/agent_upgrade_status.py": {
       "agent_upgrade_next_action": "fb2fb87fac983409e77cc74616359c8c375c6326be2feaf81069910d84fc6fe9",
       "operator_agent_upgrade_reason": "4e197eb4929d55291d30d3fe54e2a10005cf7fac1e63b230ae2568fccb0b4508",
@@ -1110,65 +1138,6 @@
       "read_result_evidence": "dd12ed33fe3b17a250722de3233f2aa295dd837915a6a7d41ae2766e7d2c7b9d",
       "dump_result_evidence": "d7df95c519759fc1c0c3a785c45519e8a694c97d1a08cd7d0c415cd56bd7a8e9",
       "<module>": "c37bd4622e53fde91354b99d7fa00945ec8f840cacbb99a221ffd07009469289"
-    },
-    "control/src/vonk_control/artifact_jobs.py": {
-      "_translate_blob_error": "81113a9ead0ace584c49157191e880e3088cd6bbb0fd7cdfda9bf0f4bb9affb7",
-      "_active_recipe_revision": "402d780f772421fb1c2100daa507613f18a911652f7088ca809b1c9efaebea40",
-      "_read_input_manifest": "5a71c0f9737263825cf8f8ada699db4545a49c1fe67dc9756e96f96c5f45c1b8",
-      "ArtifactJobResponse.response_is_consistent": "c986844b6b8dc377616a8ca4e508a9d8eba84bd104a09c354fb40dd7f26f8eca",
-      "_record_unservable_run": "9d77befc33dafdaa0be423f17009a28f15731d835dfa0dab59aed5fd97508fec",
-      "_recipe_interface": "2d5b0b993d4ddaef582916fa02a94b0f0b229d831499c9a7aa4f332b285f1b7b",
-      "_finite_parameter_number": "11db35dc4abdac26f741620317b47dc882252e9f28a35b77bacb396db09fa5c9",
-      "_compile_contract": "611ffab001480929012c53316450116c3d9e49912f8da5ea6760e708fd2e2526",
-      "_output_mappings": "6008dda32264f67864ac79ef6232c5f96c5df554ec453a880df38c22a2f74b77",
-      "_effective_output_limits": "6e186b9c284845bf4503fd52b767365d11afcc5ec875b7e0ef39353849e06dbc",
-      "_validate_inputs_against_contract": "3e2778837dbd836075f74bd64c47e764dcfe8371371ed664ab8bd6e9b9bbfb0b",
-      "_validate_outputs_against_contract": "de2a5caac65acb7575fe4b6ae610c76c5bbdaead4a6931e4ab252f1dd440c961",
-      "_effective_parameters": "d61ff64c3466430ba18ecf9bec92b7d996392236fa4448b33b0e8e3dad7e9232",
-      "_canonical_declared_parameters": "7031abc0419cc713f83168aa6b7a0235b4d985197a3db08e50505c2d515bddbe",
-      "_artifact_submission_in_session": "0011443e5009d88edeae10c6c573d74688fd97aed7c0171b278644cc79465b79",
-      "_artifact_submission_in_session.read": "aff846b4b9a13e14b14e7a86780fb0668bdebd7aab3c332ffa778d768cad97cc",
-      "ArtifactJobService.__init__": "0c2dd8eb9d47b393dff5b5bd53ddb09b902f477cca3e2541996928043a5869ae",
-      "ArtifactJobService.reconcile_storage": "4483ad163fa85bff9d0e6fa275e790cb9a410b4d3b6595c002897a25410a2681",
-      "ArtifactJobService._reconcile_storage_fenced": "86f568a4865455a0f394619dcc0f4354764b824416d011aca96f55892d76affa",
-      "ArtifactJobService.create": "7aa3387e1b239e4d5aa72f66a059e5079563a17b1cbdc781b6c44f9411ae3f5d",
-      "ArtifactJobService._create_in_session": "71ca1bc78f875e054bb00699bfafb2f4381bc1d35cf5abe67d1b4e9951af754c",
-      "ArtifactJobService.capabilities": "95508cb294f804f5b92f8fc6c66aaf00f31a299f99452eb0852a5906fbe612c9",
-      "ArtifactJobService.put_input": "37e83ed0992a2068f3bb47e45b69a9eb13793842bb847b67de56971c9941558a",
-      "ArtifactJobService.put_input_stream": "d932eafcfd0e22a6ebc0e4e4a84459c159d46f3dfc30d73ef1cc71a413a198ea",
-      "ArtifactJobService.input_upload_size": "58ad7aedb8c9b4eb3ba336ba65bce73dbe0b76b0793c0e3ff6285ec6d3ea9704",
-      "ArtifactJobService._attach_input": "a4b9fe1ba35362d5e80694b6864fb0bf63a0fc12ac8dada07c7fb2902ac5ad8f",
-      "ArtifactJobService.finalize": "94ff1671101fc41bb4e574d857b01231b95d7a0d0494c35d0fdc5d3fb71ad503",
-      "ArtifactJobService.submit": "3829a0db0e42d6182be27134a744d910c3ec743e6bceda5db4bd755b4a311832",
-      "ArtifactJobService.get": "978b7ab5cff845ceeb1ca7c1c1d64e2345fc40e4fdcaa6f13a1805f790288325",
-      "ArtifactJobService.get_by_request_id": "3149eb334ee9355d8908000906840353148a28a311c1a1ada0d421617f6f0a93",
-      "ArtifactJobService.list_for_run": "654bfea0a331dad844e517d29be24af45a64ecf90251354867cd7aabf45c6b52",
-      "ArtifactJobService.cancel": "a16f336c0e1f00dc9d4988d79a1390524d9999c6ce3f4833d8e768509f5e6b21",
-      "ArtifactJobService.input_blob": "3533921a9c0a3c1ae8c7be13058fb31877e3b879402b35d599dd3af547535818",
-      "ArtifactJobService.put_output": "6f874a6ca7159d77e7e33b3f984755ad0919d7bbd5b481092f77ce43ba538ca9",
-      "ArtifactJobService.put_output_stream": "86fa0501ba7ed0d99c06d897f713177c4cb4af731e13f26efcbb0cc88575bc6a",
-      "ArtifactJobService._validate_output_upload": "ead9dd41fca9190d7d38d3f7c25f578af31cdd566ee65fbafed98342c8fc3909",
-      "ArtifactJobService._attach_output": "10ef6d96208c2659a94e4c46a37b11f0a96dbbc365bdf3cbba7069b36334992a",
-      "ArtifactJobService.result_blob": "088365fcf8e7c2ab1f3e50d4851dca2d3cf37fed65487b5fb1f2ec4e9a02ae0c",
-      "ArtifactJobService.consume_agent_result": "9b4076eda6d271851d02dd38f54c1c3f94ec8510c7e85029a6e5ee936431d050",
-      "ArtifactJobService._reject_result": "d5a3e0ab84848b3abb2012f21b0b28f726249dbbf59a226275dcc5b29333d375",
-      "ArtifactJobService._authorized_agent_job": "d2c195fca89858b4300b7c84e6d593471a5f723038d812190f8ddf08c50cbf1c",
-      "ArtifactJobService._job_launch": "8166baa662e031e28c25d3c0de4772e3868ae3a57dd5cc7ab55061feb663b823",
-      "ArtifactJobService._job_node_in_session": "533d0038840a6f804dad421cda6e15a9b299aac0ce7869db4af91e204cb113fa",
-      "ArtifactJobService._job_node_in_session.planned_endpoints": "01f65fe8c8912dbcfeffc4044a17d12a695bf271ab57db95e5f2681c432a0374",
-      "ArtifactJobService._job_node_in_session.mapped_endpoints": "e9ca899d932752cd08230d1ceee1aa2898280f6cf3a2869b45050cc22135c17e",
-      "ArtifactJobService._put_blob_in_session": "8f797a25be97d3ef81296e1a899854d9c074563f7e99e6f9755d71e6c2298fb6",
-      "ArtifactJobService._file_in_session": "e483d9c522a5f430a68d5e7417f1c41e73a736ec6a95238b7742b1ba61ffbc74",
-      "ArtifactJobService._stored_input_manifest": "7888ce8637cd57f15c8317a5621d9272ce83a736f9b84f7e80377945953157b8",
-      "ArtifactJobService._stored_input_manifest.rebuild": "b7cfb422214974a90f873e5bfb6d06cebba298d5eff4cf957cd6229a161d3cd7",
-      "ArtifactJobService._input_declaration": "cc63c18cb7351a29629d51ad5d35025dbadf0004e2c517ad11ace893d3c8aeeb",
-      "ArtifactJobService._files_in_session": "0acead166bdde32baf6ce4b248135f702cc7d4e6cfebe4d0a85d2cfdf80a4ec7",
-      "ArtifactJobService._input_files": "08d166b107d9e53b6a371c7e8e210b897ace89f08ac72796017290e2b995f617",
-      "ArtifactJobService._output_file": "b12b1dc9a199f6012755ec0377340239268d417015736e9b84378b97b979a782",
-      "ArtifactJobService._stored_contract": "4e6ac3c7f849549a2789bbe3d16f452cba6fca4c752c5a238e04f2acdbfc674c",
-      "ArtifactJobService._stored_contract.rebuild": "389fbc87e226b4aff640331bd7d4ea9aa3c8c4f5890000aa2d3cfc295310aa1f",
-      "ArtifactJobService._view_in_session": "df2c9c0485b0c58274250dfab49c9f393897d1a5a4f5508109a57a18103c6b57",
-      "<module>": "5934e54eeac81b5975ce92e14b2d7322b53ca215b0473ac622bf08496adef20b"
     },
     "control/src/vonk_control/artifact_reference_scan.py": {
       "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
@@ -1974,14 +1943,88 @@
       "project_cache_progress": "81c9c566691338fd759790554a5f4e92858c833ba00333c9280013812a226cad",
       "<module>": "8387c8c5bce2fac33b9723a5c98fc97ce8d19814b3dde9cf3f24ce0f275e4876"
     },
-    "control/src/vonk_control/models.py": {
+    "control/src/vonk_control/models/cache.py": {
+      "ModelCacheSet": "4151ca5c10557e7602a835643ce45d302ef0fdfb5fcb517238b08f08fdd0e807",
+      "ModelCacheSetArtifact": "1215b4d0f4c31f2781defd182158d0ef610862752e2bf93d66d06fc5173d8d3b",
+      "ModelCacheOperation": "4abbcef1d4132b8db371ea8f9705169454ec06d4507b9b58e8a8302bb0c665d3",
+      "ArtifactLifecycleGate": "ed0a937c1fa45141e12054966807ddfd300e94cd0d4c37b5f3c0789a7f0db7a3",
+      "RecipeLibrarySyncRun": "a5e34e6cf3101b6bd0f6945c1dfab80dd0205daeb3ca1a979268bc82a6d29da2",
+      "RecipeBuild": "718612d0018b4d201d07ff369c54ddfb4482d72e51593102ea7f3298e6368009",
+      "<module>": "9c0ccec7a1695061b766428c763bfed59acdbe504eea2a598c924dcbd1d4da3b"
+    },
+    "control/src/vonk_control/models/catalog.py": {
+      "RecipeSourceBundle": "535a2b5310942b16bbdba61c0989aa18f5e2493402ed5d6c1c6bcdd138d7ea5d",
+      "SourceBundleArchive": "ac696daf922a247c48a0e05e364ee3e24daed233800d2c5511f6dee398f6d9d5",
+      "CatalogDocument": "721f0582b0614e23aeeee53954b22e698566ccf3a1f9fc81c457531eddc27487",
+      "CatalogDocumentRevision": "4613460e0b91868b717f257867432d179cbd975ffad255360f772d50eb5f8f83",
       "CatalogDocumentRevision.entity_id": "e396417081c9895df85da3831c4a3afd7cbec7e0f2f849818cf60d186d9bde60",
+      "CatalogDocumentHead": "2089159f99e5a6cdae1f17f2bf267a8c99280484a9ad98ddba377f15a2554ccc",
+      "CatalogRecipeModelReference": "33a8a971e11095cab92388c7ada8d66971ba501f8abd1f50d2e094a31526dc81",
       "_catalog_document_revision_is_immutable": "de7269214ff15c37917db1e0bfa59f4a197b7f1d30534e3a8456653be2abbb18",
       "_active_catalog_document_revision_cannot_be_deleted": "c5f65980174d63c8d4e1b45790ea2488d89f0e7cfdc58c152005629aa104b990",
       "_active_catalog_document_json_is_immutable": "9f9ac1014a25934f8c7b637142d0f5cd5a4fcf69d5815e2bd2b4821246016351",
+      "<module>": "648d99e8f06eef6bc546b9902f17302a7108c5d308069bfeac363d1ad1bad9b3"
+    },
+    "control/src/vonk_control/models/execution.py": {
+      "RecipeInstallation": "d9733b27ea1c5e18551225cfa3bd88825cb5e01f901c85d572aa39dee73c531a",
+      "InstallationNode": "a0daa524b0dd83a83c9732e3b8508beb956714d46d63366b8f1c316cb631803e",
+      "RecipeRun": "ee4848150083491e949bac0542bd577d830d677c0e4ff62075a5554d26ea8e47",
+      "RunNode": "ddc5b151cc8ed94a18e96bbe415a93122cb4e061fb4fdb93287a4ef7936d0eb9",
+      "ArtifactJobBlob": "b42c99ee804a003960cefc87cec2fc0ef0446d752317120207f74476e18f1105",
+      "ArtifactJob": "c8fb90b118f82bf5b50a09885883e6d83b407086d53c2c2355f10ad51f3e8e2b",
+      "ArtifactJobFile": "5168c67a8991e42c2a9138d95935a17da116fac5c7027d047d1a59ba8cc08f74",
+      "ResourceReservation": "509a10006dcedc44b3dc1320b41ff2743ac9e8416c61172130ed2d683d53e54f",
+      "<module>": "c4fbf311a2a3ab4db1bad87e8140a0681237838f076e12ff7a4b222b9fc22303"
+    },
+    "control/src/vonk_control/models/fleet.py": {
+      "User": "287e50524267a13985bc9a348e9a7646d8b583e5bd3f4bf00c1f3e938d56d815",
+      "LoginSession": "2c8ae8d45e8fb94444f7e32c2cf94e318e03bc1f055da21553a6daa1b048a8b7",
+      "AgentNode": "8414c20ee4c3c125d828d95f1877f4438c28ad17db0369e8af841a82ffe67703",
+      "AgentNodeProfile": "9f2a508db4925a854b3d0e9ad3966ede3bdb0191b5e910b99da22e8380565c10",
+      "FleetProfile": "2701640107ea10bef7d3ae8b0a640994416c23114fc2f3c958a7f54d90717cca",
+      "FleetProfileApplication": "1601bd4af6fe10bc13e85288589085d44c7e41bd8d5b4dd13fda9689089a0ca8",
+      "FleetProfileSelection": "ddbef9351b377fdbd007892a2f582b5b7da0f006896ed8763c79b33c1fbabe1e",
+      "AgentCertificate": "a3c179383c2628b699786f6abeb844111ee4de2402292d85860cb30d12099181",
+      "AgentPresence": "35035af9fb6c96784682ec2ca0df8c0174af5e86567f4a208c156031387ea85e",
+      "AgentCertificateRotation": "8c3ee37098b993f9a3c68f28756c89fe59c6a54d4ae431bb25269923042b7ed2",
+      "AgentIssuedCertificateRevocation": "108f32b90d0a800b24c29dd70f793318b08ab8b1ffe7973f0ca55d33fc899fbb",
+      "AgentEnrollmentGrant": "a242be07beafbb0fea85be24994ddad6162f0f54bacd7c542a35224e7411b8b5",
+      "AgentEnrollment": "4d72b67902a228c1dbb618b526b082ba5d3d5de207d2cae83d50714a731dde0d",
+      "<module>": "422f766b3c868083eaf2a3bd30b0dce29601fec1ccb1c878b99f46acedf40c2e"
+    },
+    "control/src/vonk_control/models/jobs.py": {
+      "Job": "3ddaaadfc9bae1c92a583f49ffd1fed56328e31a8b15ef0b39e5456cc44acd73",
+      "JobAttempt": "ea8156a0e760172bf670e0745a783b829fce05ad471a5f712e07e2f563b3d339",
+      "ControlProcessHeartbeat": "6b576945e3945d34b73f0001acd5ee9d64ea3b7db4202e9ce7e567c88aecb613",
+      "<module>": "a38ca3c8007de5ab9283d69cbb85747f12eefe115a4f7401f0c713affa95929f"
+    },
+    "control/src/vonk_control/models/mapping.py": {
+      "ClusterMapping": "231924913e5d7a51906fb156de28f640f2ecb2a4f8d73d5d9d7e9d1a31359826",
+      "ClusterMappingNode": "61c8b05c0aa8123444fa4b2ea864b870c0bdb56988fcefd8a20b437f329ab371",
       "_reject_ready_mapping_node_mutation": "6d8a8608773fd4c737053b636dcb5ab219db391d7bdee9f2a42d148e55f55149",
+      "<module>": "3d14bea5c18c0946270efcf0a2c5530d4993b63106002fe16448bf60dbda188c"
+    },
+    "control/src/vonk_control/models/operations.py": {
+      "AgentOperation": "9aeb4f63b0f00ac0a7e1557936e456229920a2aad7fed1d4b78bee2fdfd4d58c",
+      "ArtifactDistributionAssignment": "154b7ea75fcf016d52ba0dd17c435143bffd129d7c382d2a26dbea1f2ad70d65",
+      "AgentOperationAttempt": "510d1724e6ac2297a4e6c65f1a59f7d0466f152508ca1254faedb67ea7b089d9",
+      "<module>": "6598e477de600d0a283307c359855aea247c26eaf9996bd673139795e7c61a96"
+    },
+    "control/src/vonk_control/models/routes.py": {
+      "RecipeRouteAuthority": "6ea9a07a7f6e8ae513ce4aa03b714b97a05cdd43f73eb76e35215033736d7a58",
+      "RoutePublication": "7bc2778afd54f6be379f22324ecd02f725503bd878c85dcada9dc04d3e5000cc",
+      "RoutePublicationOwner": "90dee9390a72302d27bd02c9813181a7647f7a68c392ab3ddf9a914b94425098",
+      "<module>": "879703b65bd949fed3ecdc9ddd258401842fd4f9e4e5fa50c0584f807fa22e10"
+    },
+    "control/src/vonk_control/models/telemetry.py": {
+      "NodeInventorySnapshot": "bf67ce55f24a3b8f64bc71d8c9fa91a963330df2fbec2ae3fadc7705e2a13215",
+      "NodeTelemetrySample": "a014cff5633cb3a92bcf51e00b363e5312ada5542e277bab766e883fa861d6a2",
+      "NodeTelemetryLatest": "b2765fcb121b3b74a5359461b7bbd53d4dd34d13025679294567049764f02e85",
+      "FleetEventCursor": "278a7d0d37dd61c267b28345f0a4662cab8cb88ed8164c369dcc0b09c7499fa1",
       "_seed_fleet_event_cursor": "6e61b2d03be40c87e87bd3d51cc11fbd077a5e3cc54a531c1ad8552f88b3be15",
-      "<module>": "f2951bdceb0accb894477742836a72afd0d0fd507143a19c755220d00527e829"
+      "FleetStreamEvent": "6e965bb63f6080382a825b4f3e6bf9e392dc141bfde0ea08dc37589aa59f1074",
+      "NodeArtifact": "4fa629b224d29b3785c5ec448319a3717e7ab69b93ef44ce02f726844ee24609",
+      "<module>": "5348b7dc3512b43e114f248cbb6132ae257b4511cd7b9bba25ed7de6485baec3"
     },
     "control/src/vonk_control/observation_transfer.py": {
       "ObservationTransferChunk.canonical_base64": "0d4fcc16f73ce44c58b3750de149e3e59ec72db96806af866ef495f18394f78f",
@@ -1998,77 +2041,6 @@
       "install_canonical_openapi.openapi": "1b00533261265cb2bc65d63b36c7fdd2f6eae1663555cafd7d9a600ec9a40b77",
       "canonical_openapi": "481095d8e9be4a41a6e40e6cf43c170ef5edcfd29f82cbb72badbf07f67ee3ff",
       "<module>": "644f838ac2570992abf4e10ee6ff737eb4ddc27044d19a704e6f4d9fedb91024"
-    },
-    "control/src/vonk_control/operation_api.py": {
-      "_stored_activation_marker": "e97cff50fdc53edf75f01310bdb86c451069912a4273a9af28e8a28f8d03013d",
-      "bounded_error_responses": "21e47afbcc7b97b1094315aef4a0e462beb5cde94f7680429e7a34878fad6c9e",
-      "JobOperationResponse._serialize_without_unset_evidence": "d41c5c8580a47391e18543beb07664cd5812007afbb606acb15373b9416e9901",
-      "OperationDetailResponse._serialize_without_unset_evidence": "f7611a18c0f49639381349821d83af4262b6907af2ff2ea0aec82d4eb539ff29",
-      "OperationProviderProtocol.family": "7a576e1db17c4e5b624156fd450288f146c55875121341ed846e55a6870564d1",
-      "OperationProviderProtocol.list_operations": "a53fd89cd5db2bcef1bed9d7e119f5552ee4394e77febf3960c34d2c570cd61c",
-      "OperationProviderProtocol.get_operation": "2d2eff2981032e2fbbf97ce81617889ed6eb63f30450db8a0c12052dbb499cec",
-      "OperationProviderProtocol.represented_job_kinds": "579bc56e3cad0c2a4725de5e36eeb417386b0b14a63a950dac6b4de0338e096d",
-      "_operation_boundary": "740c0904332ec64e159f66fad0218b301a2f19a562ee16ad8ade515e093392cc",
-      "merge_operation_providers": "d6988453771dc15ece606ca81feabfed8503088c13a7bfadf7770bc76ee0d1cc",
-      "get_operation_from_providers": "483b54f885d3af91e52e71fcf267c0fa358af074d06fc2b7172b566f9ae308c7",
-      "_activity_keyset_filter": "a2b70c2acaf139b82e85ebf7c1a8f3b4abc25d1429f40a52be60070d9f0156b7",
-      "_activity_node_ids": "302fa6f2cebc833dd0ba15d2de1dd8db0576d3fad3177e54dbe3f2c400d6e6dd",
-      "_activity_owner_request_id": "71058d373ef9ccdc4083d7d4b281857cf9ab05e5435b6330bcdb7e3664bae291",
-      "_StandaloneJobActivityProjection.__init__": "8dd271c5ce85db776a448b4ff103b4eeeb009f0285d10b4ed6ce8e2179641edb",
-      "_StandaloneJobActivityProjection._base_filters": "92afc414877d3bdbc4c8f09b7bf650ecb02be9cc989cc5b7fba622cc14165687",
-      "_StandaloneJobActivityProjection.list_operations": "df34b3ad4d312b7349f5ccfe3c0ed567fd01ee5128a252521ebf9956ed9ecb78",
-      "_StandaloneJobActivityProjection.get_operation": "dbca75761c4989932670878f36542dce5d2c44f034ca1a8b7a0fb513514a8a23",
-      "_StandaloneJobActivityProjection._is_standalone": "780feaf902f879a173c66c9a412ab7f34e42532e904f842db1b1fe94efa4f866",
-      "_StandaloneJobActivityProjection._item": "8fecb886c993bd518401bfc16102903fd3b69871e39ba1176deaaa5d9b23fa4b",
-      "_StandaloneJobActivityProjection._unreadable_item": "0cb583a9ccd23d04a2462edb44af0d6ddc3b81aeb75543749589b27c83db02f8",
-      "_global_list_operations": "9f6a639a7b27c7c0cab19c12f05adb550756b79c6b0e9548a64e644c3d156588",
-      "_global_get_operation": "514e040c9b46ff7982a738c69efea5ce09918c5b4c734b1474437467cf5d0e63",
-      "_required_text": "66c3d0666a9f196359d47dc58befcebb2e4dafaf771f730da37389141e42c97a",
-      "_optional_text": "e75392893321c3013f216eede8efd92d931daba4fe69f67efbc613b8331f22a7",
-      "_required_bool": "0803f185522b774fdf9081656ab42355aa12efd5ec347ba26625fc0fa23d9601",
-      "_required_node_ids": "eb5f9b692ddeab51859a19a5081c01e44d55f5911dff7d684259ce22baebc53f",
-      "_result_uncertain": "e1486b6239510d339f73b1ec90099d5f8a7cd707c9d0fcb68fea8527dcbfc12f",
-      "_job_operation_response": "d26f618df08093a5b1f605700ebbd8acc2c5af883a87602e320ddbcf52ef2ae5",
-      "job_response": "854dedab9eaaa78cd5788584ccf2431418d96dc1cd7269492cfb5cb8ad7e93a5",
-      "_encode_offset": "185e0212635040843f71789ebb0b35e31b7d2c76c7b54786edb38d64e1ccf532",
-      "decode_offset": "552c95aba0d195e0be7bb67a30ff97f968fec02f6d0dff7d72b217d8b766267a",
-      "_progress_projection": "d31d1bfbd2dff2d353d82c8f5a423839a6515388ac6b1b7ec1bc0ef5ac32f7aa",
-      "_failure_projection": "6ba75abf530e38617ed9a97718165544191165e0a05bac910cd158b7c6997d18",
-      "_item_failure": "80a666db5f90bdad83f71eab74688860c425aaa7247fd403a7b4efaaa1e8cb4a",
-      "_text_or_none": "d8ba9de64a95ad94756bec6089f1e8cc4ccd39bb8244973e89a5edd2cb2b3da6",
-      "_advertised_actions": "205161e9bb74cfa67535226998d60fe197bb626f04ef922c6a5d7ab78c4d6be1",
-      "_operation_item": "a897433c3608ad55667049f66d8c49e2a5419075d7692f65910740e6d7929d89",
-      "operation_detail_response": "0e50dd5ac3dfad8170c84dc670d9a5441badc285a7e1c33928045989d0b742eb",
-      "_response_bytes": "12ad6cdbe76682625229884ffe5afe765157b0b55661ced64c68d63b0c4b8344",
-      "_OperationResponseTooLarge.__init__": "1e1e1acaf25df9e361895fc79c7bf020a76f3603447d1c3171ce04db3566f4f5",
-      "bounded_operation_detail": "08cf61dcf8880851b9fc2be347bdec7157b5482f8a9d72175ba4f2af2025e6a3",
-      "bounded_operations_response": "552023df9906c47dec7fc92bf15dc82f55bc10b813fa4378e4b6863dd862994a",
-      "bounded_operations_response.continuation": "dc5ffac3b68926985a66e89c5de73dc8304fff08b3fcce8fb76af14ba6c3c724",
-      "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",
-      "_agent_upgrade_diagnostics": "bc3c9249b6f9b44a0711185c20072f7d951d0fa704685101c5d8f6b99eaeaa75",
-      "_DurableOperationProjection.__init__": "979450dd2a4d5d6b2756afa0a491748f8a989b52d36d8390c79eeeb385484d2e",
-      "_DurableOperationProjection._publication_snapshot": "0d0bad6ffbf8c411d72abfa4049822ffd88e2a031b2293e140802c5ce13ccccf",
-      "_DurableOperationProjection._verified_routes": "631bcd6d7fee12fc1d7e367cc6df682addfc1739539dd785dbc6c63638e0610e",
-      "_DurableOperationProjection._endpoint_payload": "3bf74d1f8f0c7d609938b9b5d867cd0e258fa656cb1725b4df57bacc7256e222",
-      "_DurableOperationProjection._route_run_id": "c3cf09f88eaf01ee87d724019392e8d2b1d07f9c856663e1c30d8e49507397d1",
-      "_DurableOperationProjection.profile_endpoint": "ccf57c33da098a2a5bb8ad53e9cc2a5854a50a2334f95ed869e1308543fb655c",
-      "_DurableOperationProjection.agents": "0659fe3decfda0918e74358886ff7632465e76a33ed0900b05e219f8343a31c1",
-      "_DurableOperationProjection.job_operations": "e7c271ccd6e5ffbc54282d0aaff81ba6bb33c3a293154d162f22254d5d6c477f",
-      "_DurableOperationProjection.list_operations": "0a69ccf2be802b0a322a81c984efa4e620b616149b51a759fbee463c98793e7e",
-      "_DurableOperationProjection.list_operation_provider": "7e08eb8f407691969f8a757ec563137ff41a84d8af79e3e86a075fbb6f80ff22",
-      "_DurableOperationProjection.get_operation": "964b5f3d0dc89cf0358465e2248c8fe930ab490c97fa4746643b0227da9521f5",
-      "_DurableOperationProjection._activity_item": "bc284a00ebd9ec73b57899da6c47a5eb48669672cd456f2c16de7fd0de5c11bc",
-      "_DurableOperationProjection._activity_actions": "bd5afffa3a1ffcd0fb8f8e00b2a2301e4f80f5cd09747d13e27930f8c58e8e54",
-      "_DurableOperationProjection.resume_job": "167aed5e3a9783886d101410f10e5bd23345c0c955264e4af55e5bb6be70131d",
-      "_DurableOperationProjection.retire_job": "4dafb6eb907c212b0b86d0cba9c0166b0965432ae1e783e16272bb4e1944b0ad",
-      "durable_operation_services": "469ca94e471e1f143cc7047935b04fb4c9b4daa561470beb045eac056c83a127",
-      "durable_operation_services.resume_job": "3395559588ebc9e31ba19de88ccfa38db4df8d6801eac1be9e971e1d21c5b507",
-      "durable_operation_services.retire_job": "7556cdebe075aed48f065bced9ea2ede954b03dd776583a5428a1788469fd749",
-      "admin_openapi_schema": "3dde49f53dbe2ba0e70757387b79b8d8e971b70ec99068afda4eec452f5407ac",
-      "admin_openapi_schema.collect": "696d1dbda1c6c02ef8e6d79e379d34c82c51cd6bf990b1bb4804a172690c9f1c",
-      "_contract_component_schemas": "cad503da2919e41796e666b1785e59b1b8c9ba797d0bcde831bd470f9e92c345",
-      "_stored_component_schemas": "83e847b86798cb8f08cd0ae736abd25f20b1ee4c6b6804f3445df529f3d51e82",
-      "<module>": "e38e99d4cebd18454cb2364011a177634d1033dbe5a698544d3bdedec3ca1e6b"
     },
     "control/src/vonk_control/operation_blockers.py": {
       "make_blocker": "541ad291bd73e6a36ebf2f645a7a9b1479fff31df0e4c2bf713ae1702e9e27df",
@@ -3320,10 +3292,6 @@
       "execute_http_check": "b0008cc70f07db2b425d7bcedb8ce5604e36c3ad62e1c2701b9f8a831e3f1b69",
       "execute_http_check.read_bounded": "123f71e3bbd439e890cbefa5b119d191e71e309ddaba1954662c94db912fe6c8",
       "<module>": "1b725250dde0e805bbd31886adcfef39f003cb10d38e2dcddecfe6e06c48406c"
-    },
-    "control/src/vonk_control/agent_services.py": {
-      "build_agent_services": "55fbbaa9a0512e959fe18a87f757fbba99caed7a7fa9257226a8490c668a1fa0",
-      "build_agent_services.observe_contact": "008b522ecb49e2e1b496469a6be4d9a9e8842a5f483fbdb503ad33355895f00c"
     }
   }
 }

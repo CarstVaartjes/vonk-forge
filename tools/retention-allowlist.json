@@ -3,125 +3,198 @@
   "inventory_note": "Initial T1 syntax inventory; all findings are unaudited debt, not approved behavior. Lower counts as owning tracks repair them. New exceptions require a fixed reason and justification.",
   "debt": [
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "AgentCertificate",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "AgentEnrollment",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "AgentEnrollmentGrant",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "AgentIssuedCertificateRevocation",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "AgentNode",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "AgentNodeProfile",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "AgentPresence",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/execution.py",
       "function": "ArtifactJob",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/execution.py",
       "function": "ArtifactJobBlob",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/cache.py",
       "function": "ArtifactLifecycleGate",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/catalog.py",
       "function": "CatalogDocument",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/catalog.py",
       "function": "CatalogDocumentHead",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/jobs.py",
       "function": "ControlProcessHeartbeat",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/telemetry.py",
       "function": "FleetEventCursor",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "FleetProfile",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "FleetProfileSelection",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/telemetry.py",
       "function": "NodeTelemetryLatest",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/routes.py",
       "function": "RecipeRouteAuthority",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/routes.py",
       "function": "RoutePublicationOwner",
       "kind": "table-without-delete-path",
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/models.py",
+      "path": "control/src/vonk_control/models/fleet.py",
       "function": "User",
       "kind": "table-without-delete-path",
       "count": 1
     }
   ],
-  "exceptions": []
+  "exceptions": [],
+  "content_identities": {
+    "control/src/vonk_control/models/cache.py": {
+      "ModelCacheSet": "4151ca5c10557e7602a835643ce45d302ef0fdfb5fcb517238b08f08fdd0e807",
+      "ModelCacheSetArtifact": "1215b4d0f4c31f2781defd182158d0ef610862752e2bf93d66d06fc5173d8d3b",
+      "ModelCacheOperation": "4abbcef1d4132b8db371ea8f9705169454ec06d4507b9b58e8a8302bb0c665d3",
+      "ArtifactLifecycleGate": "ed0a937c1fa45141e12054966807ddfd300e94cd0d4c37b5f3c0789a7f0db7a3",
+      "RecipeLibrarySyncRun": "a5e34e6cf3101b6bd0f6945c1dfab80dd0205daeb3ca1a979268bc82a6d29da2",
+      "RecipeBuild": "718612d0018b4d201d07ff369c54ddfb4482d72e51593102ea7f3298e6368009",
+      "<module>": "9c0ccec7a1695061b766428c763bfed59acdbe504eea2a598c924dcbd1d4da3b"
+    },
+    "control/src/vonk_control/models/catalog.py": {
+      "RecipeSourceBundle": "535a2b5310942b16bbdba61c0989aa18f5e2493402ed5d6c1c6bcdd138d7ea5d",
+      "SourceBundleArchive": "ac696daf922a247c48a0e05e364ee3e24daed233800d2c5511f6dee398f6d9d5",
+      "CatalogDocument": "721f0582b0614e23aeeee53954b22e698566ccf3a1f9fc81c457531eddc27487",
+      "CatalogDocumentRevision": "4613460e0b91868b717f257867432d179cbd975ffad255360f772d50eb5f8f83",
+      "CatalogDocumentRevision.entity_id": "e396417081c9895df85da3831c4a3afd7cbec7e0f2f849818cf60d186d9bde60",
+      "CatalogDocumentHead": "2089159f99e5a6cdae1f17f2bf267a8c99280484a9ad98ddba377f15a2554ccc",
+      "CatalogRecipeModelReference": "33a8a971e11095cab92388c7ada8d66971ba501f8abd1f50d2e094a31526dc81",
+      "_catalog_document_revision_is_immutable": "de7269214ff15c37917db1e0bfa59f4a197b7f1d30534e3a8456653be2abbb18",
+      "_active_catalog_document_revision_cannot_be_deleted": "c5f65980174d63c8d4e1b45790ea2488d89f0e7cfdc58c152005629aa104b990",
+      "_active_catalog_document_json_is_immutable": "9f9ac1014a25934f8c7b637142d0f5cd5a4fcf69d5815e2bd2b4821246016351",
+      "<module>": "648d99e8f06eef6bc546b9902f17302a7108c5d308069bfeac363d1ad1bad9b3"
+    },
+    "control/src/vonk_control/models/execution.py": {
+      "RecipeInstallation": "d9733b27ea1c5e18551225cfa3bd88825cb5e01f901c85d572aa39dee73c531a",
+      "InstallationNode": "a0daa524b0dd83a83c9732e3b8508beb956714d46d63366b8f1c316cb631803e",
+      "RecipeRun": "ee4848150083491e949bac0542bd577d830d677c0e4ff62075a5554d26ea8e47",
+      "RunNode": "ddc5b151cc8ed94a18e96bbe415a93122cb4e061fb4fdb93287a4ef7936d0eb9",
+      "ArtifactJobBlob": "b42c99ee804a003960cefc87cec2fc0ef0446d752317120207f74476e18f1105",
+      "ArtifactJob": "c8fb90b118f82bf5b50a09885883e6d83b407086d53c2c2355f10ad51f3e8e2b",
+      "ArtifactJobFile": "5168c67a8991e42c2a9138d95935a17da116fac5c7027d047d1a59ba8cc08f74",
+      "ResourceReservation": "509a10006dcedc44b3dc1320b41ff2743ac9e8416c61172130ed2d683d53e54f",
+      "<module>": "c4fbf311a2a3ab4db1bad87e8140a0681237838f076e12ff7a4b222b9fc22303"
+    },
+    "control/src/vonk_control/models/fleet.py": {
+      "User": "287e50524267a13985bc9a348e9a7646d8b583e5bd3f4bf00c1f3e938d56d815",
+      "LoginSession": "2c8ae8d45e8fb94444f7e32c2cf94e318e03bc1f055da21553a6daa1b048a8b7",
+      "AgentNode": "8414c20ee4c3c125d828d95f1877f4438c28ad17db0369e8af841a82ffe67703",
+      "AgentNodeProfile": "9f2a508db4925a854b3d0e9ad3966ede3bdb0191b5e910b99da22e8380565c10",
+      "FleetProfile": "2701640107ea10bef7d3ae8b0a640994416c23114fc2f3c958a7f54d90717cca",
+      "FleetProfileApplication": "1601bd4af6fe10bc13e85288589085d44c7e41bd8d5b4dd13fda9689089a0ca8",
+      "FleetProfileSelection": "ddbef9351b377fdbd007892a2f582b5b7da0f006896ed8763c79b33c1fbabe1e",
+      "AgentCertificate": "a3c179383c2628b699786f6abeb844111ee4de2402292d85860cb30d12099181",
+      "AgentPresence": "35035af9fb6c96784682ec2ca0df8c0174af5e86567f4a208c156031387ea85e",
+      "AgentCertificateRotation": "8c3ee37098b993f9a3c68f28756c89fe59c6a54d4ae431bb25269923042b7ed2",
+      "AgentIssuedCertificateRevocation": "108f32b90d0a800b24c29dd70f793318b08ab8b1ffe7973f0ca55d33fc899fbb",
+      "AgentEnrollmentGrant": "a242be07beafbb0fea85be24994ddad6162f0f54bacd7c542a35224e7411b8b5",
+      "AgentEnrollment": "4d72b67902a228c1dbb618b526b082ba5d3d5de207d2cae83d50714a731dde0d",
+      "<module>": "422f766b3c868083eaf2a3bd30b0dce29601fec1ccb1c878b99f46acedf40c2e"
+    },
+    "control/src/vonk_control/models/jobs.py": {
+      "Job": "3ddaaadfc9bae1c92a583f49ffd1fed56328e31a8b15ef0b39e5456cc44acd73",
+      "JobAttempt": "ea8156a0e760172bf670e0745a783b829fce05ad471a5f712e07e2f563b3d339",
+      "ControlProcessHeartbeat": "6b576945e3945d34b73f0001acd5ee9d64ea3b7db4202e9ce7e567c88aecb613",
+      "<module>": "a38ca3c8007de5ab9283d69cbb85747f12eefe115a4f7401f0c713affa95929f"
+    },
+    "control/src/vonk_control/models/routes.py": {
+      "RecipeRouteAuthority": "6ea9a07a7f6e8ae513ce4aa03b714b97a05cdd43f73eb76e35215033736d7a58",
+      "RoutePublication": "7bc2778afd54f6be379f22324ecd02f725503bd878c85dcada9dc04d3e5000cc",
+      "RoutePublicationOwner": "90dee9390a72302d27bd02c9813181a7647f7a68c392ab3ddf9a914b94425098",
+      "<module>": "879703b65bd949fed3ecdc9ddd258401842fd4f9e4e5fa50c0584f807fa22e10"
+    },
+    "control/src/vonk_control/models/telemetry.py": {
+      "NodeInventorySnapshot": "bf67ce55f24a3b8f64bc71d8c9fa91a963330df2fbec2ae3fadc7705e2a13215",
+      "NodeTelemetrySample": "a014cff5633cb3a92bcf51e00b363e5312ada5542e277bab766e883fa861d6a2",
+      "NodeTelemetryLatest": "b2765fcb121b3b74a5359461b7bbd53d4dd34d13025679294567049764f02e85",
+      "FleetEventCursor": "278a7d0d37dd61c267b28345f0a4662cab8cb88ed8164c369dcc0b09c7499fa1",
+      "_seed_fleet_event_cursor": "6e61b2d03be40c87e87bd3d51cc11fbd077a5e3cc54a531c1ad8552f88b3be15",
+      "FleetStreamEvent": "6e965bb63f6080382a825b4f3e6bf9e392dc141bfde0ea08dc37589aa59f1074",
+      "NodeArtifact": "4fa629b224d29b3785c5ec448319a3717e7ab69b93ef44ce02f726844ee24609",
+      "<module>": "5348b7dc3512b43e114f248cbb6132ae257b4511cd7b9bba25ed7de6485baec3"
+    }
+  }
 }

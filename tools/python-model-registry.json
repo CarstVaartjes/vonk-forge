@@ -146,7 +146,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/artifact_jobs.py",
+      "module": "control/src/vonk_control/artifact_jobs/contracts.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -291,7 +291,7 @@
       "reason": "Canonical immutable observation transport records; original Fleet and platform models retain domain ownership."
     },
     {
-      "module": "control/src/vonk_control/operation_api.py",
+      "module": "control/src/vonk_control/operation_api/contracts.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },

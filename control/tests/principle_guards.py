@@ -998,6 +998,10 @@ def relocate(document: dict, moves=None) -> dict:
                                     else []
                                 )
                                 if entry["path"].endswith(".rs")
+                                else scan_retention(
+                                    [(entry["path"], ast.parse(source))]
+                                )
+                                if mode == "retention"
                                 else scan_source(source, path=entry["path"], mode=mode)
                             )
                         ),

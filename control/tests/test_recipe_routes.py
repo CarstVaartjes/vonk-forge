@@ -1316,9 +1316,9 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert wrong_owner_endpoint.assignments[0].state == "withdrawn"
     assert wrong_owner_endpoint.assignments[0].endpoint is None
 
-    from vonk_control import operation_api
+    from vonk_control.operation_api import durable as operation_projection
 
-    verify_bundle = operation_api.verify_active_route_bundle
+    verify_bundle = operation_projection.verify_active_route_bundle
     renewed_during_verification = False
     replacement_generation = None
 
@@ -1340,7 +1340,9 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     # Checking membership or published state alone would return stale evidence.
     with monkeypatch.context() as patch:
         patch.setattr(
-            operation_api, "verify_active_route_bundle", renew_after_bundle_verification
+            operation_projection,
+            "verify_active_route_bundle",
+            renew_after_bundle_verification,
         )
         racing = projection.profile_endpoint(3, "qwen", GATEWAY)
         assert racing.assignments is not None
@@ -1367,7 +1369,7 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
 
     with monkeypatch.context() as patch:
         patch.setattr(
-            operation_api,
+            operation_projection,
             "verify_active_route_bundle",
             withdraw_after_bundle_verification,
         )
