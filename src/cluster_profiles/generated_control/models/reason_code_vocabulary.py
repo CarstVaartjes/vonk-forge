@@ -30,6 +30,8 @@ from ..models.distribution_code import check_distribution_code
 from ..models.distribution_code import DistributionCode
 from ..models.helper_error_code import check_helper_error_code
 from ..models.helper_error_code import HelperErrorCode
+from ..models.helper_operation_code import check_helper_operation_code
+from ..models.helper_operation_code import HelperOperationCode
 from ..models.image_store_code import check_image_store_code
 from ..models.image_store_code import ImageStoreCode
 from ..models.install_admission_code import check_install_admission_code
@@ -141,6 +143,8 @@ class ReasonCodeVocabulary:
                 through the enum, so a word outside it is a malformed rejection, never a code
                 the agent invents or forwards.  ``runtime_helper_*`` is the spelling of an
                 agent-side cause in failure evidence.
+            helper_operation_code (HelperOperationCode): Stable diagnostic codes returned by the privileged operation
+                executor.
             image_store_code (ImageStoreCode): Refusals and damage found by the Controller OCI image store.
             install_admission_code (InstallAdmissionCode): Why an installation is not admitted (or is waiting) on a Spark.
             install_degraded_reason (InstallDegradedReason): Why an installation is shown partial in the fleet projection.
@@ -193,6 +197,7 @@ class ReasonCodeVocabulary:
     controller_error_code: ControllerErrorCode
     distribution_code: DistributionCode
     helper_error_code: HelperErrorCode
+    helper_operation_code: HelperOperationCode
     image_store_code: ImageStoreCode
     install_admission_code: InstallAdmissionCode
     install_degraded_reason: InstallDegradedReason
@@ -253,6 +258,8 @@ class ReasonCodeVocabulary:
         distribution_code: str = self.distribution_code
 
         helper_error_code: str = self.helper_error_code
+
+        helper_operation_code: str = self.helper_operation_code
 
         image_store_code: str = self.image_store_code
 
@@ -335,6 +342,7 @@ class ReasonCodeVocabulary:
             "controller_error_code": controller_error_code,
             "distribution_code": distribution_code,
             "helper_error_code": helper_error_code,
+            "helper_operation_code": helper_operation_code,
             "image_store_code": image_store_code,
             "install_admission_code": install_admission_code,
             "install_degraded_reason": install_degraded_reason,
@@ -428,6 +436,11 @@ class ReasonCodeVocabulary:
 
 
         helper_error_code = check_helper_error_code(d.pop("helper_error_code"))
+
+
+
+
+        helper_operation_code = check_helper_operation_code(d.pop("helper_operation_code"))
 
 
 
@@ -609,6 +622,7 @@ class ReasonCodeVocabulary:
             controller_error_code=controller_error_code,
             distribution_code=distribution_code,
             helper_error_code=helper_error_code,
+            helper_operation_code=helper_operation_code,
             image_store_code=image_store_code,
             install_admission_code=install_admission_code,
             install_degraded_reason=install_degraded_reason,

@@ -63,12 +63,6 @@
       "count": 2
     },
     {
-      "path": "rust/crates/vonk-agent/src/executor.rs",
-      "function": "run_heartbeats",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
       "path": "rust/crates/vonk-nas-setup/src/main.rs",
       "function": "<module>",
       "kind": "imperative-remedy",

@@ -177,6 +177,7 @@ class ControllerErrorCode(WireEnum):
     NOT_FOUND = "controller.not_found"
     RATE_LIMITED = "controller.rate_limited"
     REQUEST_TOO_LARGE = "controller.request_too_large"
+    SUPERSEDED_OPERATION_CANCELLED = "superseded_operation_cancelled"
     TIMEOUT = "controller.timeout"
     UNAVAILABLE = "controller.unavailable"
 
@@ -193,6 +194,40 @@ class DistributionCode(WireEnum):
     RUNTIME_IMAGE_MISMATCH = "distribution.runtime_image_mismatch"
     UNASSIGNED = "distribution.unassigned"
     WRONG_NODE = "distribution.wrong_node"
+
+
+class HelperOperationCode(WireEnum):
+    """Stable diagnostic codes returned by the privileged operation executor."""
+
+    ARTIFACT_INVALID = "helper.artifact_invalid"
+    COMMAND_FAILED = "helper.command_failed"
+    INSTALLATION_RECONCILIATION_BUSY = "helper.installation_reconciliation_busy"
+    INSTALLATION_RECONCILIATION_STORAGE_UNAVAILABLE = (
+        "helper.installation_reconciliation_storage_unavailable"
+    )
+    IO_FAILED = "helper.io_failed"
+    OPERATION_INVALID = "helper.operation_invalid"
+    PACKAGE_INSTALL_FAILED = "helper.package_install_failed"
+    PACKAGE_METADATA_INVALID = "helper.package_metadata_invalid"
+    PACKAGE_PREFLIGHT_FAILED = "helper.package_preflight_failed"
+    RUNTIME_ENDPOINT_FIREWALL_REJECTED = "helper.runtime_endpoint_firewall_rejected"
+    RUNTIME_FABRIC_FIREWALL_REJECTED = "helper.runtime_fabric_firewall_rejected"
+    RUNTIME_FABRIC_UNAVAILABLE = "helper.runtime_fabric_unavailable"
+    RUNTIME_IMAGE_IDENTITY_INVALID = "helper.runtime_image_identity_invalid"
+    RUNTIME_IMAGE_INSPECT_FAILED = "helper.runtime_image_inspect_failed"
+    RUNTIME_IMAGE_LOAD_FAILED = "helper.runtime_image_load_failed"
+    RUNTIME_IMAGE_RECEIPT_FAILED = "helper.runtime_image_receipt_failed"
+    RUNTIME_INVOCATION_LIMIT_EXCEEDED = "helper.runtime_invocation_limit_exceeded"
+    RUNTIME_INVOCATION_LIMITS_UNAVAILABLE = (
+        "helper.runtime_invocation_limits_unavailable"
+    )
+    RUNTIME_INVOCATION_STRING_LIMIT_EXCEEDED = (
+        "helper.runtime_invocation_string_limit_exceeded"
+    )
+    RUNTIME_PROCESS_EXITED = "helper.runtime_process_exited"
+    RUNTIME_RUN_MISSING = "helper.runtime_run_missing"
+    STOP_UNCERTAIN = "helper.stop_uncertain"
+    UNSAFE_PATH = "helper.unsafe_path"
 
 
 class HelperErrorCode(WireEnum):
@@ -1374,6 +1409,7 @@ REASON_CODE_ENUMS: tuple[type[WireEnum], ...] = (
     ControllerErrorCode,
     DistributionCode,
     HelperErrorCode,
+    HelperOperationCode,
     ImageStoreCode,
     InstallAdmissionCode,
     InstallDegradedReason,
@@ -1550,6 +1586,7 @@ class ReasonCodeVocabulary(WireModel):
     cluster_mapping_code: ClusterMappingCode
     controller_error_code: ControllerErrorCode
     distribution_code: DistributionCode
+    helper_operation_code: HelperOperationCode
     helper_error_code: HelperErrorCode
     image_store_code: ImageStoreCode
     install_admission_code: InstallAdmissionCode
@@ -1601,6 +1638,7 @@ __all__ = [
     "ControllerErrorCode",
     "DistributionCode",
     "HelperErrorCode",
+    "HelperOperationCode",
     "ImageStoreCode",
     "InstallAdmissionCode",
     "InstallDegradedReason",

@@ -1966,7 +1966,6 @@ pub struct ConfirmPackageActivationOperation {
     pub type_: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-#[allow(clippy::enum_variant_names)]
 pub enum ControllerErrorCode {
     #[serde(rename = "controller.conflict")]
     ControllerConflict,
@@ -1986,6 +1985,8 @@ pub enum ControllerErrorCode {
     ControllerRateLimited,
     #[serde(rename = "controller.request_too_large")]
     ControllerRequestTooLarge,
+    #[serde(rename = "superseded_operation_cancelled")]
+    SupersededOperationCancelled,
     #[serde(rename = "controller.timeout")]
     ControllerTimeout,
     #[serde(rename = "controller.unavailable")]
@@ -2007,6 +2008,7 @@ impl ::std::fmt::Display for ControllerErrorCode {
             Self::ControllerNotFound => f.write_str("controller.not_found"),
             Self::ControllerRateLimited => f.write_str("controller.rate_limited"),
             Self::ControllerRequestTooLarge => f.write_str("controller.request_too_large"),
+            Self::SupersededOperationCancelled => f.write_str("superseded_operation_cancelled"),
             Self::ControllerTimeout => f.write_str("controller.timeout"),
             Self::ControllerUnavailable => f.write_str("controller.unavailable"),
         }
@@ -2025,6 +2027,7 @@ impl ::std::str::FromStr for ControllerErrorCode {
             "controller.not_found" => Ok(Self::ControllerNotFound),
             "controller.rate_limited" => Ok(Self::ControllerRateLimited),
             "controller.request_too_large" => Ok(Self::ControllerRequestTooLarge),
+            "superseded_operation_cancelled" => Ok(Self::SupersededOperationCancelled),
             "controller.timeout" => Ok(Self::ControllerTimeout),
             "controller.unavailable" => Ok(Self::ControllerUnavailable),
             _ => Err("invalid value".into()),
@@ -3513,6 +3516,166 @@ impl ::std::convert::TryFrom<&str> for HelperErrorCode {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for HelperErrorCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum HelperOperationCode {
+    #[serde(rename = "helper.artifact_invalid")]
+    HelperArtifactInvalid,
+    #[serde(rename = "helper.command_failed")]
+    HelperCommandFailed,
+    #[serde(rename = "helper.installation_reconciliation_busy")]
+    HelperInstallationReconciliationBusy,
+    #[serde(rename = "helper.installation_reconciliation_storage_unavailable")]
+    HelperInstallationReconciliationStorageUnavailable,
+    #[serde(rename = "helper.io_failed")]
+    HelperIoFailed,
+    #[serde(rename = "helper.operation_invalid")]
+    HelperOperationInvalid,
+    #[serde(rename = "helper.package_install_failed")]
+    HelperPackageInstallFailed,
+    #[serde(rename = "helper.package_metadata_invalid")]
+    HelperPackageMetadataInvalid,
+    #[serde(rename = "helper.package_preflight_failed")]
+    HelperPackagePreflightFailed,
+    #[serde(rename = "helper.runtime_endpoint_firewall_rejected")]
+    HelperRuntimeEndpointFirewallRejected,
+    #[serde(rename = "helper.runtime_fabric_firewall_rejected")]
+    HelperRuntimeFabricFirewallRejected,
+    #[serde(rename = "helper.runtime_fabric_unavailable")]
+    HelperRuntimeFabricUnavailable,
+    #[serde(rename = "helper.runtime_image_identity_invalid")]
+    HelperRuntimeImageIdentityInvalid,
+    #[serde(rename = "helper.runtime_image_inspect_failed")]
+    HelperRuntimeImageInspectFailed,
+    #[serde(rename = "helper.runtime_image_load_failed")]
+    HelperRuntimeImageLoadFailed,
+    #[serde(rename = "helper.runtime_image_receipt_failed")]
+    HelperRuntimeImageReceiptFailed,
+    #[serde(rename = "helper.runtime_invocation_limit_exceeded")]
+    HelperRuntimeInvocationLimitExceeded,
+    #[serde(rename = "helper.runtime_invocation_limits_unavailable")]
+    HelperRuntimeInvocationLimitsUnavailable,
+    #[serde(rename = "helper.runtime_invocation_string_limit_exceeded")]
+    HelperRuntimeInvocationStringLimitExceeded,
+    #[serde(rename = "helper.runtime_process_exited")]
+    HelperRuntimeProcessExited,
+    #[serde(rename = "helper.runtime_run_missing")]
+    HelperRuntimeRunMissing,
+    #[serde(rename = "helper.stop_uncertain")]
+    HelperStopUncertain,
+    #[serde(rename = "helper.unsafe_path")]
+    HelperUnsafePath,
+}
+impl ::std::fmt::Display for HelperOperationCode {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::HelperArtifactInvalid => f.write_str("helper.artifact_invalid"),
+            Self::HelperCommandFailed => f.write_str("helper.command_failed"),
+            Self::HelperInstallationReconciliationBusy => {
+                f.write_str("helper.installation_reconciliation_busy")
+            }
+            Self::HelperInstallationReconciliationStorageUnavailable => {
+                f.write_str("helper.installation_reconciliation_storage_unavailable")
+            }
+            Self::HelperIoFailed => f.write_str("helper.io_failed"),
+            Self::HelperOperationInvalid => f.write_str("helper.operation_invalid"),
+            Self::HelperPackageInstallFailed => f.write_str("helper.package_install_failed"),
+            Self::HelperPackageMetadataInvalid => f.write_str("helper.package_metadata_invalid"),
+            Self::HelperPackagePreflightFailed => f.write_str("helper.package_preflight_failed"),
+            Self::HelperRuntimeEndpointFirewallRejected => {
+                f.write_str("helper.runtime_endpoint_firewall_rejected")
+            }
+            Self::HelperRuntimeFabricFirewallRejected => {
+                f.write_str("helper.runtime_fabric_firewall_rejected")
+            }
+            Self::HelperRuntimeFabricUnavailable => {
+                f.write_str("helper.runtime_fabric_unavailable")
+            }
+            Self::HelperRuntimeImageIdentityInvalid => {
+                f.write_str("helper.runtime_image_identity_invalid")
+            }
+            Self::HelperRuntimeImageInspectFailed => {
+                f.write_str("helper.runtime_image_inspect_failed")
+            }
+            Self::HelperRuntimeImageLoadFailed => f.write_str("helper.runtime_image_load_failed"),
+            Self::HelperRuntimeImageReceiptFailed => {
+                f.write_str("helper.runtime_image_receipt_failed")
+            }
+            Self::HelperRuntimeInvocationLimitExceeded => {
+                f.write_str("helper.runtime_invocation_limit_exceeded")
+            }
+            Self::HelperRuntimeInvocationLimitsUnavailable => {
+                f.write_str("helper.runtime_invocation_limits_unavailable")
+            }
+            Self::HelperRuntimeInvocationStringLimitExceeded => {
+                f.write_str("helper.runtime_invocation_string_limit_exceeded")
+            }
+            Self::HelperRuntimeProcessExited => f.write_str("helper.runtime_process_exited"),
+            Self::HelperRuntimeRunMissing => f.write_str("helper.runtime_run_missing"),
+            Self::HelperStopUncertain => f.write_str("helper.stop_uncertain"),
+            Self::HelperUnsafePath => f.write_str("helper.unsafe_path"),
+        }
+    }
+}
+impl ::std::str::FromStr for HelperOperationCode {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "helper.artifact_invalid" => Ok(Self::HelperArtifactInvalid),
+            "helper.command_failed" => Ok(Self::HelperCommandFailed),
+            "helper.installation_reconciliation_busy" => {
+                Ok(Self::HelperInstallationReconciliationBusy)
+            }
+            "helper.installation_reconciliation_storage_unavailable" => {
+                Ok(Self::HelperInstallationReconciliationStorageUnavailable)
+            }
+            "helper.io_failed" => Ok(Self::HelperIoFailed),
+            "helper.operation_invalid" => Ok(Self::HelperOperationInvalid),
+            "helper.package_install_failed" => Ok(Self::HelperPackageInstallFailed),
+            "helper.package_metadata_invalid" => Ok(Self::HelperPackageMetadataInvalid),
+            "helper.package_preflight_failed" => Ok(Self::HelperPackagePreflightFailed),
+            "helper.runtime_endpoint_firewall_rejected" => {
+                Ok(Self::HelperRuntimeEndpointFirewallRejected)
+            }
+            "helper.runtime_fabric_firewall_rejected" => {
+                Ok(Self::HelperRuntimeFabricFirewallRejected)
+            }
+            "helper.runtime_fabric_unavailable" => Ok(Self::HelperRuntimeFabricUnavailable),
+            "helper.runtime_image_identity_invalid" => Ok(Self::HelperRuntimeImageIdentityInvalid),
+            "helper.runtime_image_inspect_failed" => Ok(Self::HelperRuntimeImageInspectFailed),
+            "helper.runtime_image_load_failed" => Ok(Self::HelperRuntimeImageLoadFailed),
+            "helper.runtime_image_receipt_failed" => Ok(Self::HelperRuntimeImageReceiptFailed),
+            "helper.runtime_invocation_limit_exceeded" => {
+                Ok(Self::HelperRuntimeInvocationLimitExceeded)
+            }
+            "helper.runtime_invocation_limits_unavailable" => {
+                Ok(Self::HelperRuntimeInvocationLimitsUnavailable)
+            }
+            "helper.runtime_invocation_string_limit_exceeded" => {
+                Ok(Self::HelperRuntimeInvocationStringLimitExceeded)
+            }
+            "helper.runtime_process_exited" => Ok(Self::HelperRuntimeProcessExited),
+            "helper.runtime_run_missing" => Ok(Self::HelperRuntimeRunMissing),
+            "helper.stop_uncertain" => Ok(Self::HelperStopUncertain),
+            "helper.unsafe_path" => Ok(Self::HelperUnsafePath),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for HelperOperationCode {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for HelperOperationCode {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -8310,6 +8473,7 @@ pub struct ReasonCodeVocabulary {
     pub controller_error_code: ControllerErrorCode,
     pub distribution_code: DistributionCode,
     pub helper_error_code: HelperErrorCode,
+    pub helper_operation_code: HelperOperationCode,
     pub image_store_code: ImageStoreCode,
     pub install_admission_code: InstallAdmissionCode,
     pub install_degraded_reason: InstallDegradedReason,
@@ -17301,6 +17465,7 @@ impl ControllerErrorCode {
             Self::ControllerNotFound => "controller.not_found",
             Self::ControllerRateLimited => "controller.rate_limited",
             Self::ControllerRequestTooLarge => "controller.request_too_large",
+            Self::SupersededOperationCancelled => "superseded_operation_cancelled",
             Self::ControllerTimeout => "controller.timeout",
             Self::ControllerUnavailable => "controller.unavailable",
         }
@@ -17338,7 +17503,6 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
             PartialEq,
             PartialOrd,
         )]
-        #[allow(clippy::enum_variant_names)]
         enum Raw {
             #[serde(rename = "controller.conflict")]
             ControllerConflict,
@@ -17358,6 +17522,8 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
             ControllerRateLimited,
             #[serde(rename = "controller.request_too_large")]
             ControllerRequestTooLarge,
+            #[serde(rename = "superseded_operation_cancelled")]
+            SupersededOperationCancelled,
             #[serde(rename = "controller.timeout")]
             ControllerTimeout,
             #[serde(rename = "controller.unavailable")]
@@ -17375,6 +17541,7 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
             Raw::ControllerNotFound => Self::ControllerNotFound,
             Raw::ControllerRateLimited => Self::ControllerRateLimited,
             Raw::ControllerRequestTooLarge => Self::ControllerRequestTooLarge,
+            Raw::SupersededOperationCancelled => Self::SupersededOperationCancelled,
             Raw::ControllerTimeout => Self::ControllerTimeout,
             Raw::ControllerUnavailable => Self::ControllerUnavailable,
         })
@@ -19022,6 +19189,163 @@ impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
             Raw::RuntimeProcessExited => Self::RuntimeProcessExited,
             Raw::RuntimeRunMissing => Self::RuntimeRunMissing,
             Raw::SystemClockInvalid => Self::SystemClockInvalid,
+        })
+    }
+}
+impl HelperOperationCode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::HelperArtifactInvalid => "helper.artifact_invalid",
+            Self::HelperCommandFailed => "helper.command_failed",
+            Self::HelperInstallationReconciliationBusy => "helper.installation_reconciliation_busy",
+            Self::HelperInstallationReconciliationStorageUnavailable => {
+                "helper.installation_reconciliation_storage_unavailable"
+            }
+            Self::HelperIoFailed => "helper.io_failed",
+            Self::HelperOperationInvalid => "helper.operation_invalid",
+            Self::HelperPackageInstallFailed => "helper.package_install_failed",
+            Self::HelperPackageMetadataInvalid => "helper.package_metadata_invalid",
+            Self::HelperPackagePreflightFailed => "helper.package_preflight_failed",
+            Self::HelperRuntimeEndpointFirewallRejected => {
+                "helper.runtime_endpoint_firewall_rejected"
+            }
+            Self::HelperRuntimeFabricFirewallRejected => "helper.runtime_fabric_firewall_rejected",
+            Self::HelperRuntimeFabricUnavailable => "helper.runtime_fabric_unavailable",
+            Self::HelperRuntimeImageIdentityInvalid => "helper.runtime_image_identity_invalid",
+            Self::HelperRuntimeImageInspectFailed => "helper.runtime_image_inspect_failed",
+            Self::HelperRuntimeImageLoadFailed => "helper.runtime_image_load_failed",
+            Self::HelperRuntimeImageReceiptFailed => "helper.runtime_image_receipt_failed",
+            Self::HelperRuntimeInvocationLimitExceeded => {
+                "helper.runtime_invocation_limit_exceeded"
+            }
+            Self::HelperRuntimeInvocationLimitsUnavailable => {
+                "helper.runtime_invocation_limits_unavailable"
+            }
+            Self::HelperRuntimeInvocationStringLimitExceeded => {
+                "helper.runtime_invocation_string_limit_exceeded"
+            }
+            Self::HelperRuntimeProcessExited => "helper.runtime_process_exited",
+            Self::HelperRuntimeRunMissing => "helper.runtime_run_missing",
+            Self::HelperStopUncertain => "helper.stop_uncertain",
+            Self::HelperUnsafePath => "helper.unsafe_path",
+        }
+    }
+}
+impl ::std::ops::Deref for HelperOperationCode {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for HelperOperationCode {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for HelperOperationCode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HelperOperationCode {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("HelperOperationCode"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "helper.artifact_invalid")]
+            HelperArtifactInvalid,
+            #[serde(rename = "helper.command_failed")]
+            HelperCommandFailed,
+            #[serde(rename = "helper.installation_reconciliation_busy")]
+            HelperInstallationReconciliationBusy,
+            #[serde(rename = "helper.installation_reconciliation_storage_unavailable")]
+            HelperInstallationReconciliationStorageUnavailable,
+            #[serde(rename = "helper.io_failed")]
+            HelperIoFailed,
+            #[serde(rename = "helper.operation_invalid")]
+            HelperOperationInvalid,
+            #[serde(rename = "helper.package_install_failed")]
+            HelperPackageInstallFailed,
+            #[serde(rename = "helper.package_metadata_invalid")]
+            HelperPackageMetadataInvalid,
+            #[serde(rename = "helper.package_preflight_failed")]
+            HelperPackagePreflightFailed,
+            #[serde(rename = "helper.runtime_endpoint_firewall_rejected")]
+            HelperRuntimeEndpointFirewallRejected,
+            #[serde(rename = "helper.runtime_fabric_firewall_rejected")]
+            HelperRuntimeFabricFirewallRejected,
+            #[serde(rename = "helper.runtime_fabric_unavailable")]
+            HelperRuntimeFabricUnavailable,
+            #[serde(rename = "helper.runtime_image_identity_invalid")]
+            HelperRuntimeImageIdentityInvalid,
+            #[serde(rename = "helper.runtime_image_inspect_failed")]
+            HelperRuntimeImageInspectFailed,
+            #[serde(rename = "helper.runtime_image_load_failed")]
+            HelperRuntimeImageLoadFailed,
+            #[serde(rename = "helper.runtime_image_receipt_failed")]
+            HelperRuntimeImageReceiptFailed,
+            #[serde(rename = "helper.runtime_invocation_limit_exceeded")]
+            HelperRuntimeInvocationLimitExceeded,
+            #[serde(rename = "helper.runtime_invocation_limits_unavailable")]
+            HelperRuntimeInvocationLimitsUnavailable,
+            #[serde(rename = "helper.runtime_invocation_string_limit_exceeded")]
+            HelperRuntimeInvocationStringLimitExceeded,
+            #[serde(rename = "helper.runtime_process_exited")]
+            HelperRuntimeProcessExited,
+            #[serde(rename = "helper.runtime_run_missing")]
+            HelperRuntimeRunMissing,
+            #[serde(rename = "helper.stop_uncertain")]
+            HelperStopUncertain,
+            #[serde(rename = "helper.unsafe_path")]
+            HelperUnsafePath,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::HelperArtifactInvalid => Self::HelperArtifactInvalid,
+            Raw::HelperCommandFailed => Self::HelperCommandFailed,
+            Raw::HelperInstallationReconciliationBusy => Self::HelperInstallationReconciliationBusy,
+            Raw::HelperInstallationReconciliationStorageUnavailable => {
+                Self::HelperInstallationReconciliationStorageUnavailable
+            }
+            Raw::HelperIoFailed => Self::HelperIoFailed,
+            Raw::HelperOperationInvalid => Self::HelperOperationInvalid,
+            Raw::HelperPackageInstallFailed => Self::HelperPackageInstallFailed,
+            Raw::HelperPackageMetadataInvalid => Self::HelperPackageMetadataInvalid,
+            Raw::HelperPackagePreflightFailed => Self::HelperPackagePreflightFailed,
+            Raw::HelperRuntimeEndpointFirewallRejected => {
+                Self::HelperRuntimeEndpointFirewallRejected
+            }
+            Raw::HelperRuntimeFabricFirewallRejected => Self::HelperRuntimeFabricFirewallRejected,
+            Raw::HelperRuntimeFabricUnavailable => Self::HelperRuntimeFabricUnavailable,
+            Raw::HelperRuntimeImageIdentityInvalid => Self::HelperRuntimeImageIdentityInvalid,
+            Raw::HelperRuntimeImageInspectFailed => Self::HelperRuntimeImageInspectFailed,
+            Raw::HelperRuntimeImageLoadFailed => Self::HelperRuntimeImageLoadFailed,
+            Raw::HelperRuntimeImageReceiptFailed => Self::HelperRuntimeImageReceiptFailed,
+            Raw::HelperRuntimeInvocationLimitExceeded => Self::HelperRuntimeInvocationLimitExceeded,
+            Raw::HelperRuntimeInvocationLimitsUnavailable => {
+                Self::HelperRuntimeInvocationLimitsUnavailable
+            }
+            Raw::HelperRuntimeInvocationStringLimitExceeded => {
+                Self::HelperRuntimeInvocationStringLimitExceeded
+            }
+            Raw::HelperRuntimeProcessExited => Self::HelperRuntimeProcessExited,
+            Raw::HelperRuntimeRunMissing => Self::HelperRuntimeRunMissing,
+            Raw::HelperStopUncertain => Self::HelperStopUncertain,
+            Raw::HelperUnsafePath => Self::HelperUnsafePath,
         })
     }
 }
@@ -25079,6 +25403,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             pub controller_error_code: ControllerErrorCode,
             pub distribution_code: DistributionCode,
             pub helper_error_code: HelperErrorCode,
+            pub helper_operation_code: HelperOperationCode,
             pub image_store_code: ImageStoreCode,
             pub install_admission_code: InstallAdmissionCode,
             pub install_degraded_reason: InstallDegradedReason,
@@ -25127,6 +25452,7 @@ impl<'de> ::serde::Deserialize<'de> for ReasonCodeVocabulary {
             controller_error_code: raw.controller_error_code,
             distribution_code: raw.distribution_code,
             helper_error_code: raw.helper_error_code,
+            helper_operation_code: raw.helper_operation_code,
             image_store_code: raw.image_store_code,
             install_admission_code: raw.install_admission_code,
             install_degraded_reason: raw.install_degraded_reason,

@@ -54,7 +54,7 @@ def test_only_lifecycle_raise_and_allowlist_files_need_a_report() -> None:
     module = _module()
     assert module.is_covered("tools/blocker-allowlist.json")
     assert module.is_covered("control/src/vonk_control/lifecycle/job.py")
-    assert module.is_covered("rust/crates/vonk-agent/src/executor.rs")
+    assert module.is_covered("rust/crates/vonk-agent/src/executor/mod.rs")
     assert not module.is_covered("control/src/vonk_control/api.py")
     assert not module.is_covered("docs/runbooks/vonkctl.md")
 

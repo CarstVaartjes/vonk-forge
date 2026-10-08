@@ -110,10 +110,13 @@ fn vocabulary() -> BTreeSet<String> {
 /// The module's code without its test modules, comments and doc comments.
 ///
 /// Every `#[cfg(test)]` item is removed, wherever it stands: a file can carry a
-/// small test module early and production code after it (the helper's
-/// `operations.rs` does), and cutting at the first one would leave the rest of the
-/// file unguarded.
+/// small test module early and production code after it. Cutting at the first
+/// one would leave the rest of the file unguarded.
 fn production_code(source: &str) -> String {
+    // A file-level cfg applies to every item, including out-of-line fixtures.
+    if source.lines().map(str::trim).find(|line| !line.is_empty()) == Some("#![cfg(test)]") {
+        return String::new();
+    }
     let lines: Vec<&str> = source.lines().map(strip_comment).collect();
     let mut kept = Vec::new();
     let mut index = 0;
@@ -462,6 +465,10 @@ fn a_runtime_preflight_finding_is_built_in_one_place_from_the_contract_enum() {
 #[test]
 fn the_guard_finds_what_it_forbids() {
     let vocabulary = vocabulary();
+    assert!(
+        production_code("#![cfg(test)]\nfn fixture() { let _ = serde_json::json!({}); }")
+            .is_empty()
+    );
     let seeded = r#"
 #[cfg(test)]
 mod early_tests {
@@ -516,5 +523,34 @@ mod tests {
     assert_eq!(
         vocabulary_literals(seeded, &vocabulary),
         ["preflight_finding.available", "operation_io"]
+    );
+}
+
+#[test]
+fn split_operation_modules_use_generated_operation_words() {
+    let schema: serde_json::Value =
+        serde_json::from_str(include_str!("../../vonk-agent-protocol/schema/wire.json")).unwrap();
+    let operations: BTreeSet<String> = schema["$defs"]["AgentOperation"]["enum"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap().to_owned())
+        .collect();
+    let offenders: Vec<_> = sources()
+        .into_iter()
+        .chain(handwritten_protocol_sources())
+        .filter(|(name, _)| {
+            name.starts_with("src/executor/")
+                || name.starts_with("vonk-agent-helper/src/operations/")
+        })
+        .flat_map(|(name, source)| {
+            vocabulary_literals(&source, &operations)
+                .into_iter()
+                .map(move |word| format!("{name}: {word}"))
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "use AgentOperation for operation family words: {offenders:?}"
     );
 }

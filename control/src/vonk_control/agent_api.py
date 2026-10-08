@@ -65,6 +65,7 @@ from vonk_agent_protocol.host_helper import (
     RecipeReconciliationIdentity,
 )
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
+from vonk_agent_protocol.reason_codes import ControllerErrorCode as Code
 from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from .agent_jobs import CLAIM_LEASE_SECONDS, AgentJobService, StaleAgentAttempt
@@ -157,10 +158,7 @@ RECIPE_RUN_UNOWNED = "unowned"
 # Present on a known run that is currently running: its accepted generation,
 # so an agent that cannot read its own metadata can still report the run.
 RECIPE_RUN_GENERATION_HEADER = "x-vonk-recipe-run-generation"
-_UUID4_TEXT = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
-    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
+_UUID4_TEXT = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _CANONICAL_UUID = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z"
 )
@@ -1391,7 +1389,9 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=409,
                     detail="superseded operation was cancelled",
-                    headers={"x-vonk-error-code": "superseded_operation_cancelled"},
+                    headers={
+                        "x-vonk-error-code": Code.SUPERSEDED_OPERATION_CANCELLED.value
+                    },
                 ) from None
             required.operations.record_boundary_refusal(
                 str(message.fence),

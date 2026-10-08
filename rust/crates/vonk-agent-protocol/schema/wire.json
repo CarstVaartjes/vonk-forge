@@ -2035,6 +2035,7 @@
         "controller.not_found",
         "controller.rate_limited",
         "controller.request_too_large",
+        "superseded_operation_cancelled",
         "controller.timeout",
         "controller.unavailable"
       ],
@@ -2990,6 +2991,36 @@
         "system_clock_invalid"
       ],
       "title": "HelperErrorCode",
+      "type": "string"
+    },
+    "HelperOperationCode": {
+      "description": "Stable diagnostic codes returned by the privileged operation executor.",
+      "enum": [
+        "helper.artifact_invalid",
+        "helper.command_failed",
+        "helper.installation_reconciliation_busy",
+        "helper.installation_reconciliation_storage_unavailable",
+        "helper.io_failed",
+        "helper.operation_invalid",
+        "helper.package_install_failed",
+        "helper.package_metadata_invalid",
+        "helper.package_preflight_failed",
+        "helper.runtime_endpoint_firewall_rejected",
+        "helper.runtime_fabric_firewall_rejected",
+        "helper.runtime_fabric_unavailable",
+        "helper.runtime_image_identity_invalid",
+        "helper.runtime_image_inspect_failed",
+        "helper.runtime_image_load_failed",
+        "helper.runtime_image_receipt_failed",
+        "helper.runtime_invocation_limit_exceeded",
+        "helper.runtime_invocation_limits_unavailable",
+        "helper.runtime_invocation_string_limit_exceeded",
+        "helper.runtime_process_exited",
+        "helper.runtime_run_missing",
+        "helper.stop_uncertain",
+        "helper.unsafe_path"
+      ],
+      "title": "HelperOperationCode",
       "type": "string"
     },
     "HostArchiveIdentity": {
@@ -7099,6 +7130,9 @@
         "helper_error_code": {
           "$ref": "#/$defs/HelperErrorCode"
         },
+        "helper_operation_code": {
+          "$ref": "#/$defs/HelperOperationCode"
+        },
         "image_store_code": {
           "$ref": "#/$defs/ImageStoreCode"
         },
@@ -7210,6 +7244,7 @@
         "cluster_mapping_code",
         "controller_error_code",
         "distribution_code",
+        "helper_operation_code",
         "helper_error_code",
         "image_store_code",
         "install_admission_code",

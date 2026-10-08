@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import re
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -122,8 +123,20 @@ class PackageMoves:
     ) -> str:
         old = self.root / path
         package = old.with_suffix("")
-        if old.exists() or old.suffix != ".py" or not package.is_dir():
+        if old.exists() or old.suffix not in {".py", ".rs"} or not package.is_dir():
             return path
+        if old.suffix == ".rs":
+            # Rust inventories predate body snapshots. Carry only a uniquely
+            # named function with the same scanner finding, never a pooled
+            # allowance or an ambiguous method shared by operation families.
+            matches = [
+                file.relative_to(self.root).as_posix()
+                for file in sorted(package.rglob("*.rs"))
+                if re.search(r"\bfn\s+" + re.escape(function) + r"\b", file.read_text())
+                and matches_site is not None
+                and matches_site(file.read_text(), function)
+            ]
+            return matches[0] if len(matches) == 1 else path
         previous = self.recorded.get(path, {})
         digest = previous.get(function)
         matches = []
