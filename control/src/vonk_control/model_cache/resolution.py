@@ -46,7 +46,6 @@ from .errors import (
     ModelCacheNotFoundInvalid,
     ModelCacheResolutionInvalid,
     ModelCacheResolutionRefused,
-    ModelCacheStorageRefused,
 )
 from .source_helpers import _model_selector
 
@@ -531,10 +530,7 @@ class ResolutionMixin:
                 if manifest is None:
                     return False  # unknown: this set is skipped, not a blocker
                 if manifest.digest != row.artifact_set_sha256:
-                    raise ModelCacheStorageRefused(
-                        ModelCacheCode.MANIFEST_IDENTITY_MISMATCH,
-                        "cached artifact manifest does not match its stored identity",
-                    )
+                    return False  # damaged derived metadata is a cache miss
                 required = set(_unique_artifacts(manifest.artifacts))
                 return required <= cache._managed_cached_objects(manifest)
 
