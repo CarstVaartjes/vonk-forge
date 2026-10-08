@@ -43,7 +43,22 @@
       "control/src/vonk_control/profile_stop_authority.py",
       "control/src/vonk_control/recipe_build_cancellation.py",
       "control/src/vonk_control/recipe_builds.py",
-      "control/src/vonk_control/recipe_image_availability.py",
+      "control/src/vonk_control/recipe_image_availability/contracts.py",
+      "control/src/vonk_control/recipe_image_availability/service.py",
+      "control/src/vonk_control/recipe_image_availability/persistence.py",
+      "control/src/vonk_control/recipe_image_availability/removal_review.py",
+      "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+      "control/src/vonk_control/recipe_image_availability/removal_execution.py",
+      "control/src/vonk_control/recipe_image_availability/removal_completion.py",
+      "control/src/vonk_control/recipe_image_availability/cancellation.py",
+      "control/src/vonk_control/recipe_image_availability/cancellation_reconcile.py",
+      "control/src/vonk_control/recipe_image_availability/requests.py",
+      "control/src/vonk_control/recipe_image_availability/model_preparation.py",
+      "control/src/vonk_control/recipe_image_availability/projection.py",
+      "control/src/vonk_control/recipe_image_availability/scheduling.py",
+      "control/src/vonk_control/recipe_image_availability/execution.py",
+      "control/src/vonk_control/recipe_image_availability/image_preparation.py",
+      "control/src/vonk_control/recipe_image_availability/failure_projection.py",
       "control/src/vonk_control/recipe_operation_phases.py",
       "control/src/vonk_control/recipe_operation_worker.py",
       "control/src/vonk_control/recipe_operations.py",
@@ -58,7 +73,7 @@
   "max_debt": 0,
   "debt_ceiling": {
     "total": 59,
-    "unaudited": 222,
+    "unaudited": 201,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
   "categorized_raises": {
@@ -239,8 +254,8 @@
       "reason": "The recurring worker tick and run_pending pass re-inventory accepted waiting requests after disposable cursor wrap; a busy exact storage lock retains the accepted receipt and the old removal fence, and the next pass retries the same canonical intent."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._advance_recipe_image_removal",
+      "path": "control/src/vonk_control/recipe_image_availability/removal_execution.py",
+      "function": "_advance_recipe_image_removal",
       "catches": [
         "RuntimeImagePreparationError",
         "RecipeImageAvailabilityError"
@@ -248,16 +263,16 @@
       "reason": "A removal step that meets unconfirmed evidence (a changed reference, a published length that differs) records the failure on the removal checkpoint with a five second retry floor and leaves the image in place; the next pass retries the same step when it is due."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._build_child_cancellation_pending",
+      "path": "control/src/vonk_control/recipe_image_availability/cancellation.py",
+      "function": "_build_child_cancellation_pending",
       "catches": [
         "BuildConsumerError"
       ],
       "reason": "Unknown ownership of an issued build keeps the cancellation pending (the predicate answers True); reconcile_cancellations asks again on every pass until the ownership is known, and the build is never released on unknown ownership."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService._run",
+      "path": "control/src/vonk_control/recipe_image_availability/execution.py",
+      "function": "_run",
       "catches": [
         "_AvailabilityClaimLost",
         "UnknownOutcomeError"
@@ -265,8 +280,8 @@
       "reason": "A claim lost to a newer attempt or a cancel returns without writing; an unknown outcome is recorded by _fail and the lifecycle core schedules the next attempt on its bounded backoff, so the claim loop runs the operation again."
     },
     {
-      "path": "control/src/vonk_control/recipe_image_availability.py",
-      "function": "RecipeImageAvailabilityService.advance_removals",
+      "path": "control/src/vonk_control/recipe_image_availability/removal_execution.py",
+      "function": "advance_removals",
       "catches": [
         "RecipeImageAvailabilityError"
       ],
@@ -522,6 +537,50 @@
         "UnknownOutcomeError"
       ],
       "reason": "One oldest due accepted Stop per worker pass retries its exact durable request. A deferred row retains original bytes, claims and meaningful cause and advances its next-attempt clock, releasing transactions before publication and allowing other due rows to advance."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/requests.py",
+      "function": "_start_request",
+      "catches": [
+        "RecipeImageAvailabilityUnknown"
+      ],
+      "reason": "Admission reconciles the same request on bounded exponential backoff for at most 250 milliseconds; exhaustion returns a typed failed observation with no accepted effect, locks or claims. A new request is always eligible."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/failure_projection.py",
+      "function": "_view",
+      "catches": [
+        "UnknownOutcomeError",
+        "ModelCacheError",
+        "SQLAlchemyError",
+        "OSError",
+        "ValueError"
+      ],
+      "reason": "Each read observes the exact model child anew; unavailable bookkeeping returns typed residue beside the last observed child and verified image result. The execution owner retains its canonical bounded retry path."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_completion.py",
+      "function": "_finish_recipe_removal",
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "reason": "The recurring worker pass records reference uncertainty on the canonical removal checkpoint, releases its transaction and retries after bounded lifecycle backoff; terminal effects end and dead gates are reconciled under storage locks."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/projection.py",
+      "function": "get_operator_operation",
+      "catches": [
+        "RecipeImageAvailabilityUnknown"
+      ],
+      "reason": "Each read re-observes the accepted record and projects a typed unavailable reason without refusing the read. The worker ends unreadable owners and reconciles their exact gates under storage locks."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+      "function": "reconcile_requested_removals.validate",
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "reason": "Every bounded worker pass re-observes this exact request and removal owner. Unreadable destructive intent is not executed; the removal worker retires damaged owners and the storage-fenced reaper releases their gates."
     },
     {
       "path": "control/src/vonk_control/recipe_builds.py",
@@ -1863,57 +1922,38 @@
       ]
     },
     {
-      "family": "recipe_image_availability.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: message reports a missing, damaged or unobservable record; operation bookkeeping by default.",
-      "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._current_model_child", "recipe_image.model_cache_invalid", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._ensure_model_child", "recipe_image.model_cache_invalid", 3],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._finish_recipe_removal", "artifact.reference_changed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._lock_build_consumer", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._read_removal_owner", "recipe_image.operation_invalid", 4],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._refresh_authority", "recipe_image.metadata_refresh_failed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_model_repair", "recipe_image.model_cache_invalid", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_model_repair", "recipe_image.model_cache_unavailable", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_request", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._start_request", "recipe_image.runtime_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._image_reference_intent_for_claim", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1]
-      ]
-    },
-    {
       "family": "recipe_image_availability.input-validation",
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.__init__", "availability-claim-lease-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.__init__", "availability-parallelism-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService._read_removal_owner", "stored-recipe-removal-owner-exceeds-the-scan-byte-budget", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.advance_removals", "recipe-removal-batch-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.claim_pending", "availability-claim-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.list_page", "availability-list-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.reconcile_cancellations", "cancellation-reconciliation-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.resume_operations", "availability-operation-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "RecipeImageAvailabilityService.run_pending", "availability-worker-batch-limit-is-invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "InvalidValue", "_canonical_cancellation_id", "noncanonical-uuid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.cancel", "message", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.get", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.get_operator_operation", "message", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.get_operator_request", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "MissingRecord", "RecipeImageAvailabilityService.retry", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._matching_request", "recipe_image.request_key_reused", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._recipe_removal_selection_in_session", "recipe_image.selector_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._replay_removal", "recipe_image.request_key_reused", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._request_cancellation", "recipe_image.cancel_request_key_reused", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._request_cancellation", "recipe_image.not_cancellable", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._resolve_recipe_selector", "recipe_image.selector_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._resolve_recipe_selector_in_session", "recipe_image.selector_ambiguous", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._resolve_recipe_selector_in_session", "recipe_image.selector_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.cancel", "recipe_image.not_cancellable", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.remove_selector", "recipe_image.selector_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.retry", "recipe_image.not_retryable", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.review_removal", "recipe_image.removal_choice_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.review_removal", "recipe_image.selector_invalid", 1]
+        ["control/src/vonk_control/recipe_image_availability/service.py", "InvalidValue", "RecipeImageAvailabilityService.__init__", "availability-claim-lease-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/service.py", "InvalidValue", "RecipeImageAvailabilityService.__init__", "availability-parallelism-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "InvalidValue", "_read_removal_owner", "stored-recipe-removal-owner-exceeds-the-scan-byte-budget", 1],
+        ["control/src/vonk_control/recipe_image_availability/removal_execution.py", "InvalidValue", "advance_removals", "recipe-removal-batch-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/scheduling.py", "InvalidValue", "claim_pending", "availability-claim-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/projection.py", "InvalidValue", "list_page", "availability-list-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "InvalidValue", "reconcile_cancellations", "cancellation-reconciliation-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/scheduling.py", "InvalidValue", "resume_operations", "availability-operation-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/scheduling.py", "InvalidValue", "run_pending", "availability-worker-batch-limit-is-invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/contracts.py", "InvalidValue", "_canonical_cancellation_id", "noncanonical-uuid", 1],
+        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "MissingRecord", "cancel", "message", 2],
+        ["control/src/vonk_control/recipe_image_availability/projection.py", "MissingRecord", "get", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/projection.py", "MissingRecord", "get_operator_operation", "message", 2],
+        ["control/src/vonk_control/recipe_image_availability/projection.py", "MissingRecord", "get_operator_request", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/projection.py", "MissingRecord", "retry", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/projection.py", "RecipeImageAvailabilityInvalid", "_matching_request", "recipe_image.request_key_reused", 2],
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityInvalid", "_recipe_removal_selection_in_session", "recipe_image.selector_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityInvalid", "_replay_removal", "recipe_image.request_key_reused", 2],
+        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "RecipeImageAvailabilityInvalid", "_request_cancellation", "recipe_image.cancel_request_key_reused", 2],
+        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "RecipeImageAvailabilityInvalid", "_request_cancellation", "recipe_image.not_cancellable", 2],
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityInvalid", "_resolve_recipe_selector", "recipe_image.selector_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityInvalid", "_resolve_recipe_selector_in_session", "recipe_image.selector_ambiguous", 1],
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityInvalid", "_resolve_recipe_selector_in_session", "recipe_image.selector_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "RecipeImageAvailabilityInvalid", "cancel", "recipe_image.not_cancellable", 1],
+        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityInvalid", "remove_selector", "recipe_image.selector_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/projection.py", "RecipeImageAvailabilityInvalid", "retry", "recipe_image.not_retryable", 1],
+        ["control/src/vonk_control/recipe_image_availability/removal_review.py", "RecipeImageAvailabilityInvalid", "review_removal", "recipe_image.removal_choice_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/removal_review.py", "RecipeImageAvailabilityInvalid", "review_removal", "recipe_image.selector_invalid", 1]
       ]
     },
     {
@@ -2453,9 +2493,9 @@
       "category": "already-retried",
       "reason": "Control flow, not a refusal: the availability execution claim was lost to a newer attempt or a cancel. _run catches it and returns without writing, and the new claim owner (or the cancel reconcile) carries the operation on, so the raise is the handoff itself.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._persist_receipt", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._run", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_AvailabilityClaimLost", "RecipeImageAvailabilityService._update_model_progress", "message", 2]
+        ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "_AvailabilityClaimLost", "_persist_receipt", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/execution.py", "_AvailabilityClaimLost", "_run", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/execution.py", "_AvailabilityClaimLost", "_update_model_progress", "message", 2]
       ]
     },
     {
@@ -2463,12 +2503,12 @@
       "category": "security-edge",
       "reason": "Destructive-effect guard: a recipe cache removal and the references that compete with it are decided on one exact, reviewed scope. A review that cannot be sealed on consistent evidence, a reference scan that is unavailable (an unavailable scan does not prove an object unused), a changed scope at acceptance (reject changed effects instead of broadening consent) and an artifact reserved for removal all refuse here; the refusal names its retry or inspect action.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService._model_removal_assets", "model_cache.review_invalid", 4],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.remove_selector", "message", 4],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.remove_selector", "model_cache.removal_scope_changed", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityRefused", "RecipeImageAvailabilityService.review_removal", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationRefused", "RecipeImageAvailabilityService._persist_provisional_image_reference", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationRefused", "RecipeImageAvailabilityService._persist_receipt", "message", 1]
+        ["control/src/vonk_control/recipe_image_availability/removal_review.py", "RecipeImageAvailabilityRefused", "_model_removal_assets", "model_cache.review_invalid", 4],
+        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityRefused", "remove_selector", "message", 4],
+        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityRefused", "remove_selector", "model_cache.removal_scope_changed", 2],
+        ["control/src/vonk_control/recipe_image_availability/removal_review.py", "RecipeImageAvailabilityRefused", "review_removal", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RuntimeImagePreparationRefused", "_persist_provisional_image_reference", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RuntimeImagePreparationRefused", "_persist_receipt", "message", 1]
       ]
     },
     {
@@ -2476,15 +2516,15 @@
       "category": "input-validation",
       "reason": "Rejects the shape or identity of a request before any effect: a cancellation id or reason, a digest, an action combination, a recipe revision that the request names but that is not active, a submitted identity that differs from the authoritative one, a removal plan larger than the owner document may hold. The caller fixes the request and asks again.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._request_cancellation", "recipe_image.cancellation_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._start_request", "recipe_image.identity_conflict", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._start_request", "recipe_image.recipe_unavailable", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._start_request", "recipe_update.operation_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.remove_selector", "recipe_image.removal_scope_limited", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.start", "recipe_image.action_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService.start", "recipe_image.recipe_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "_canonical_cancellation_id", "recipe_image.cancellation_invalid", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "_digest", "recipe_image.identity_invalid", 1]
+        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "RecipeImageAvailabilityInvalid", "_request_cancellation", "recipe_image.cancellation_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityInvalid", "remove_selector", "recipe_image.removal_scope_limited", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityInvalid", "start", "recipe_image.action_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityInvalid", "start", "recipe_image.recipe_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/contracts.py", "RecipeImageAvailabilityInvalid", "_canonical_cancellation_id", "recipe_image.cancellation_invalid", 2],
+        ["control/src/vonk_control/recipe_image_availability/contracts.py", "RecipeImageAvailabilityInvalid", "_digest", "recipe_image.identity_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityInvalid", "_start_request_once", "recipe_image.identity_conflict", 2],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityInvalid", "_start_request_once", "recipe_image.recipe_unavailable", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityInvalid", "_start_request_once", "recipe_update.operation_invalid", 1]
       ]
     },
     {
@@ -2492,10 +2532,10 @@
       "category": "input-validation",
       "reason": "The request needs a collaborator this service was not wired with (the recipe metadata authority, the build executor, the ModelCache for a with-model removal): a configuration fault of the process, refused at the boundary that owns the request before any effect.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._model_removal_assets", "model_cache.unavailable", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_unavailable", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._recipe_removal_selection_in_session", "model_cache.unavailable", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "RecipeImageAvailabilityService._start_request", "recipe_image.metadata_refresh_unavailable", 1]
+        ["control/src/vonk_control/recipe_image_availability/removal_review.py", "RecipeImageAvailabilityInvalid", "_model_removal_assets", "model_cache.unavailable", 1],
+        ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RecipeImageAvailabilityInvalid", "_prepare_claimed_image", "recipe_image.build_unavailable", 1],
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityInvalid", "_recipe_removal_selection_in_session", "model_cache.unavailable", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityInvalid", "_start_request_once", "recipe_image.metadata_refresh_unavailable", 1]
       ]
     },
     {
@@ -2503,7 +2543,7 @@
       "category": "input-validation",
       "reason": "Validates the recipe document the metadata authority returned at request admission, before the operation is accepted. A stored copy never reaches this check damaged: the worker rebuilds it from the catalog revision under the digest the operation was accepted with (RecipeImageAvailabilityService._stored_recipe).",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityInvalid", "_canonical_recipe", "recipe_image.recipe_invalid", 2]
+        ["control/src/vonk_control/recipe_image_availability/contracts.py", "RecipeImageAvailabilityInvalid", "_canonical_recipe", "recipe_image.recipe_invalid", 2]
       ]
     },
     {
@@ -3166,14 +3206,6 @@
       ]
     },
     {
-      "family": "recipe_update_batches.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/recipe_update_batches.py", "RecipeUpdateClaimLost", "RecipeUpdateBatches._owned", "recipe_update.claim_lost", 2]
-      ]
-    },
-    {
       "family": "run_switch_operations.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
@@ -3254,16 +3286,16 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._checkpoint_recipe_image_removal", "artifact.reference_changed", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_input_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._prepare_claimed_image", "recipe_image.build_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._run", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_cancelled", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService._update_model_progress", "recipe_image.model_child_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.cancel", "recipe_image.cancel_busy", 2],
-        ["control/src/vonk_control/recipe_image_availability.py", "RecipeImageAvailabilityUnknown", "RecipeImageAvailabilityService.remove_selector", "recipe_image.operation_missing", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "RuntimeImagePreparationUnknown", "RecipeImageAvailabilityService._advance_recipe_image_removal", "runtime_image.archive_mismatch", 1],
-        ["control/src/vonk_control/recipe_image_availability.py", "_ModelQueueFailed", "RecipeImageAvailabilityService._resume_model_child", "model-artifact-operation-could-not-be-resumed", 1]
+        ["control/src/vonk_control/recipe_image_availability/removal_execution.py", "RecipeImageAvailabilityUnknown", "_checkpoint_recipe_image_removal", "artifact.reference_changed", 1],
+        ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RecipeImageAvailabilityUnknown", "_prepare_claimed_image", "recipe_image.build_input_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RecipeImageAvailabilityUnknown", "_prepare_claimed_image", "recipe_image.build_invalid", 1],
+        ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_run", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_update_model_progress", "recipe_image.model_child_cancelled", 1],
+        ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_update_model_progress", "recipe_image.model_child_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "RecipeImageAvailabilityUnknown", "cancel", "recipe_image.cancel_busy", 2],
+        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityUnknown", "remove_selector", "recipe_image.operation_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability/removal_execution.py", "RuntimeImagePreparationUnknown", "_advance_recipe_image_removal", "runtime_image.archive_mismatch", 1],
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "_ModelQueueFailed", "_resume_model_child", "model-artifact-operation-could-not-be-resumed", 1]
       ]
     },
     {
@@ -3842,6 +3874,60 @@
       "sites": [
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "RunStopScope.membership_is_exact", "stop-run-membership-is-ambiguous", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "BookkeepingUnknown", "JobRunStopScope.targets_are_exact", "profile-jobrun-stop-authorization-is-ambiguous", 1]
+      ]
+    },
+    {
+      "family": "execution.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability/execution.py", "RecipeImageAvailabilityUnknown", "_current_model_child", "recipe_image.model_cache_invalid", 2]
+      ]
+    },
+    {
+      "family": "model_preparation.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_ensure_model_child", "recipe_image.model_cache_invalid", 3],
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_start_model_repair", "recipe_image.model_cache_invalid", 2],
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "RecipeImageAvailabilityUnknown", "_start_model_repair", "recipe_image.model_cache_unavailable", 1],
+        ["control/src/vonk_control/recipe_image_availability/model_preparation.py", "_ModelQueueFailed", "_ensure_model_child", "exact-model-artifact-preparation-could-not-be-queued", 1]
+      ]
+    },
+    {
+      "family": "persistence.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityUnknown", "_read_removal_owner", "recipe_image.operation_invalid", 4]
+      ]
+    },
+    {
+      "family": "removal_completion.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability/removal_completion.py", "RecipeImageAvailabilityUnknown", "_finish_recipe_removal", "artifact.reference_changed", 1]
+      ]
+    },
+    {
+      "family": "requests.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_lock_build_consumer", "message", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_refresh_authority", "recipe_image.metadata_refresh_failed", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_start_request_once", "recipe_image.build_input_missing", 1],
+        ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityUnknown", "_start_request_once", "recipe_image.runtime_invalid", 1]
+      ]
+    },
+    {
+      "family": "recipe_update_batches.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/recipe_update_batches.py", "RecipeUpdateClaimLost", "RecipeUpdateBatches._owned", "recipe_update.claim_lost", 2]
       ]
     },
     {

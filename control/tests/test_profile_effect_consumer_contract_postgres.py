@@ -127,15 +127,6 @@ def installed_vonkctl(tmp_path_factory):
         check=False,
     )
     assert isolated.returncode == 0, isolated.stderr
-    provenance = {
-        "platform_source_sha": source,
-        "recipes_source_sha": RECIPES_SHA,
-        "wheel_sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
-        "bundled_openapi_sha256": hashlib.sha256(bundled).hexdigest(),
-    }
-    output = Path(os.environ["VONK_EFFECT_PROOF_OUTPUT"])
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     return venv / "bin/vonkctl"
 
 
@@ -415,17 +406,4 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         )
         assert any(
             method == "GET" and endpoint == path for method, endpoint, _ in peer.calls
-        )
-        output = Path(os.environ["VONK_EFFECT_PROOF_OUTPUT"])
-        (output / "handoff.json").write_text(
-            json.dumps(
-                {
-                    "pending": pending_document,
-                    "review": review,
-                    "selected": selected_document,
-                    "completed": completed_document,
-                },
-                indent=2,
-            )
-            + "\n"
         )

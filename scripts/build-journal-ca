@@ -25,6 +25,13 @@ events = [json.loads(line) for line in pathlib.Path(sys.argv[1]).read_text().spl
 passed = [event["Test"] for event in events if event.get("Action") == "pass" and "Test" in event]
 if not passed:
     raise SystemExit("CA connected proof did not execute any tests")
+assert not any(event.get("Action") in {"skip", "fail"} for event in events), "skipped or failed CA cases"
+expected = {
+    "TestJournalProcessDeathBeforeAndAfterCommit",
+    "TestAuthorityHTTPStorageFaultAndLostHTTPRecoverWithoutNewIdentity",
+    "TestJournalConcurrentEpochRejectsOldCommitAndOldResponse",
+}
+assert expected <= set(passed), "missing named CA recovery cases"
 print("CA executed proofs: " + ", ".join(passed))
 PY
     ;;
