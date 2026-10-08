@@ -475,7 +475,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 172,
+    "total": 153,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -1630,7 +1630,7 @@
       "ArtifactBlobBusy": "b2e51e686597ed80cb49ba9d63eec897745a38214ab5701e68d35eb7d6a8c239",
       "StoredArtifactBlob": "c3dd407239760e2c3f822ef5b836837e52a6e00dab5b5725d3c5386a7534353c",
       "_BlobReservation": "c2f7e58ec788df00c75919976d911c2a10e8371b9de1a12a34bad7b1cba47a61",
-      "ArtifactBlobStore": "421abdb5ad7426c72a97fa074819c6a8485bcd58cf9eccbe438b188c81bc7af6",
+      "ArtifactBlobStore": "3a5ba1a3bab8fbde6222e5e3d27b9c6479be3abfb6ab4fc18c256a27943212ef",
       "ArtifactBlobStore.__init__": "7536a16e56ed2f9b083924540b5f1913c927b56d79c3e636ce31d69e78317f4a",
       "ArtifactBlobStore.max_stored_bytes": "f4d38c663d06c61f1c114849bdb072aea4adc016e48d29217e376a3fde32a8fd",
       "ArtifactBlobStore.usage": "63363af7241f68fe43bd7bfec33a0d79d730e1b5ead7420690e56358b1d1b76b",
@@ -1642,7 +1642,7 @@
       "ArtifactBlobStore.iter_file": "1b2c8bf3b2774fdaa747b2943189cd85f20f5b9681c64e6dbf4926e4b1f12ddf",
       "ArtifactBlobStore.delete": "488cba8dd2ee3547df76e42216fa54b7b86faaebe51cdf81ff7c9467746d2470",
       "ArtifactBlobStore.reconcile": "30c22f56639c6ab19d2b7ddd139898101902347bee8fcc0effbde70567ccbd12",
-      "ArtifactBlobStore._reference_lock": "03ad70824af1bf8228b7f0f21839c99644c7ae88aca7235c2a13a07fdfad4d85",
+      "ArtifactBlobStore._reference_lock": "4f79428241af9370bc8d203c0a9196e57e4f6dd1b5ce535ca21e4d02be35ac7a",
       "ArtifactBlobStore._claim_reference_lock": "878127098f7560bd81b9ca8e7216b9b02496bac359cb852b3a063d11151bf4a1",
       "ArtifactBlobStore._commit": "d1bcc9cb404f634bebede689949cf9122e0b7987b84e16cb9dc441d721466e61",
       "ArtifactBlobStore._intact": "009849ba9a43c81f31cd856c84392057f6ff3f8fff9d757284d3050ea46087a4",
@@ -1658,7 +1658,7 @@
       "ArtifactBlobStore._quota_lock._Lock.__enter__": "a2d67b9f3d67d914e4771b7c437d466f4711f9f0cf73c41e45c9d2a683a778e2",
       "ArtifactBlobStore._quota_lock._Lock.__exit__": "85b91c994f69938caefe5ea257ce9ba409bed0f5ddfe3734f2607ca96c466ae2",
       "ArtifactBlobStore._digest": "062738892c9ae2fc1e209a0ea87e325d7a14c27abab52a6d187c6c7a52759487",
-      "<module>": "7e782da30ca520190d3085e48f7074f35c062a5f1662f45b0d537a722250dac2"
+      "<module>": "741667d6e5a79fc05460c5b54c17edbc4e6b15ff6af62a6d44ba4b399fb9424f"
     },
     "control/src/vonk_control/artifact_jobs/__init__.py": {
       "<module>": "c917b75f126ca987a3f8369c905ae2337fa69c6dfc68b07db671be1027256e41"
@@ -1768,6 +1768,8 @@
       "ArtifactLifecycleError.__init__": "a8d98a30f241e6764ada3a7a5dfdcc86c82468a48be769a84052b27c87142199",
       "ArtifactReferenceUnsettled": "f517659badd4349ae4be9f54d5940ed6a848764e88a1bdf90ed7a8207e29838f",
       "ArtifactReferenceUnsettled.__init__": "417924a764ee6979e8d9ddad051b41b757f53215fdb282410affc67f69627127",
+      "ArtifactReferenceUnverified": "99557f0a1d61873a5abdab5f98f8496e4c4283b50246671b175cc064f3306186",
+      "ArtifactReferenceUnverified.__init__": "de32211293638889c226182b027bfdb16ab71e29071fc4c7d939c2e389661d33",
       "ArtifactReferenceIdentityStale": "0eef47dfd83b73cf0fa9811ddeda641e9aacd5e97db644aa99c3485337f5b4b9",
       "ArtifactReferenceIdentityStale.__init__": "f6c5cf2ce1c44a6ee1b9bdff93edfa37dc7423a0c41bf49b6a4c1d78c9215ef8",
       "ArtifactRemovalFenceLost": "db11f70c4f9f5ec4f6d42398c93dd6286002eac1bcc7c339f38cb4c3dfe7a9f7",
@@ -1785,25 +1787,25 @@
       "supersede_removal_nowait": "3e4151bcef2b062fb6311d05efdf4b7574064c7b6558a98147e3a1d59982aeac",
       "release_dead_removal_nowait": "b4de564ddfafb93a4c816d1591a4218768de52826f80d8d79eacf1cd1680985e",
       "clear_removal": "3f7dc3023a9910b837ec68775a726acb1e3e498e881fb8f1ab23e559ea45c0f5",
-      "<module>": "54640dcf9d23803e2a5189221252e4354a898857c2f9f9635cdc46578c2d5229"
+      "<module>": "acd7fede95527da4371392bee3e1aa133e24917141aa6a0df43b2dfa324e1a32"
     },
     "control/src/vonk_control/artifact_reference_scan.py": {
       "ArtifactReferenceFinding": "3d3ab3923bbdac7355634fc7d19dce62c539bb835954ad4e57de6b7f2c80a4ab",
       "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
       "_reason_projection": "e0a699c0788ea845ed78a90710c66e67389da9f008120a254923cdd4efbde9f6",
-      "require_model_sets_open": "e5213082fba248642c9b6ff7955f1900e54e5417746976052c4b7252c7c3ec06",
+      "require_model_sets_open": "7583efc05f8747752f4263fda58846c4a79262cf301f0b72d4f2aef3e00ee5f1",
       "model_set_objects": "b3f846270636729ad6febbaed69899eb1b6eafd11e8e2f31b900e31083f384e6",
-      "model_set_reference_findings": "2b36ecc43b37935876294fd1c9013e150d7e4c4325dfc2a84b3b624405b94c84",
-      "model_set_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
+      "model_set_reference_findings": "7c529d61d49520df58c92c92be6b886f7b345e43d0e1ad44af0a2047c72a4614",
+      "model_set_reference_findings.account": "c5de4b2edbb2889b7ba2165ab12edcc276514a31e898805b99a220ef665425e2",
       "model_set_reference_reasons": "8873ed7b1fc4d46fc3d0e5cf89d05bcfe552753b64a3118776d35d1212fbfd09",
-      "runtime_image_reference_findings": "adcf56d41c236640e378d01f09a17a40332e019cc1e3786c84257cbc998b80e5",
-      "runtime_image_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
+      "runtime_image_reference_findings": "d5ea92af243d87c5f52b4be9f9b1448d7f92dbc70f9e909e0c08c486a590167a",
+      "runtime_image_reference_findings.account": "c5de4b2edbb2889b7ba2165ab12edcc276514a31e898805b99a220ef665425e2",
       "runtime_image_reference_reasons": "d6257e372269c4a0b0d0f994dc63dab9dd19628c1d80f0f08c5cfc22fb660fa0",
-      "_profile_plan": "32f8a20e21bc91a775d0161a568917af8eef9eabf8d590afdeb6802ecd0d023d",
-      "_run_switch_plan": "33d5925118d8e75da1c7b727b45cf82b8a242084900614a40462a25e80c1efc7",
+      "_profile_plan": "f53cfb9815a01ceed12fd48007b24ef041141bc9abf34322a6d8c25e80dc88ac",
+      "_run_switch_plan": "f47b603ad0780c160723e72250e87b3001baebb324b13dc9a6740ec074ff873c",
       "_stated": "8940aad2e7963e3364e059cc7bd2f16977accb8175772896cd669201a59c02b2",
       "_approved_images": "cc6fe9d4e74ac91302ee391791b76a1ca6928aafd9e451848fa15d4025417d51",
-      "_run_switch_runtime_image_intent": "f87d5d52872d21040b3d97b26bdb585f29585f479124443b858af0aa7a031650",
+      "_run_switch_runtime_image_intent": "a61f991d320dc9354b0b5ab2daa7891340c3cf2a4b46786e6f9369cb6b327d30",
       "_run_switch_kinds": "b0d724aa893828e9c1fd3c716a56044fe570bd707fb6559663461170da1919d5",
       "<module>": "7ed3a28a64581ec153a059fe5bbc0ba862461b9ea9afea6065be98d78a9beba0"
     },
@@ -8258,19 +8260,8 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_profile_plan", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_run_switch_plan", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "_run_switch_runtime_image_intent", "artifact.reference_scan_failed", 2],
         ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_objects", "artifact.reference_scan_failed", 3],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings", "artifact.reference_scan_failed", 3],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings.account", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "model_set_reference_findings.account", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "require_model_sets_open", "artifact.deletion_in_progress", 2],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings", "artifact.reference_scan_failed", 6],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings", "artifact.reference_scan_limited", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings.account", "artifact.reference_scan_failed", 1],
-        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "runtime_image_reference_findings.account", "artifact.reference_scan_limited", 1]
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnsettled", "require_model_sets_open", "artifact.deletion_in_progress", 2]
       ]
     },
     {
@@ -9335,6 +9326,24 @@
         ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._claim_run_publication_once", "recipe-run-is-not-ready-for-publication", 1],
         ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._execute_once", "route-publication-was-superseded", 2],
         ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteSuperseded", "RecipeRouteService._record_completion", "route-publication-was-superseded", 1]
+      ]
+    },
+    {
+      "family": "artifact_reference_scan.destructive-scope-security",
+      "category": "security-edge",
+      "reason": "Deletion-only owner scans prove that exact managed bytes have no saved or active reference before destructive unlinking. Unreadable, oversized, absent or mismatched evidence cannot authorize deleting user data. These checks create no removal gate, claim or reservation. Admission contention and membership bookkeeping remain unknown outcomes in their original debt families.",
+      "sites": [
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "_profile_plan", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "_run_switch_plan", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "_run_switch_runtime_image_intent", "artifact.reference_scan_failed", 2],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "model_set_reference_findings", "artifact.reference_scan_failed", 3],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "model_set_reference_findings", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "model_set_reference_findings.account", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "model_set_reference_findings.account", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "runtime_image_reference_findings", "artifact.reference_scan_failed", 6],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "runtime_image_reference_findings", "artifact.reference_scan_limited", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "runtime_image_reference_findings.account", "artifact.reference_scan_failed", 1],
+        ["control/src/vonk_control/artifact_reference_scan.py", "ArtifactReferenceUnverified", "runtime_image_reference_findings.account", "artifact.reference_scan_limited", 1]
       ]
     }
   ]
