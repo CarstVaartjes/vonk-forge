@@ -22,6 +22,7 @@ from ..recipe_lifecycle_contract import (
     RecipeLifecycleResult,
 )
 from ..recovery_policy import FailureKind
+from ..strict_json import serialize_json_value
 
 
 class AgentJobQueue(Protocol):
@@ -59,7 +60,7 @@ class RecipeOperationView:
         return (
             None
             if self.lifecycle_result is None
-            else self.lifecycle_result.model_dump(mode="json")
+            else serialize_json_value(self.lifecycle_result)
         )
 
 

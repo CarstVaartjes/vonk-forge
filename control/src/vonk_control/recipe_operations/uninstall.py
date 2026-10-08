@@ -122,10 +122,12 @@ class UninstallMixin:
                 payloads = tuple(
                     (
                         target.node_id,
-                        RecipeReconcilePayload(
-                            installation_id=authority.installation_id,
-                            plan_digest=authority.original_plan_digest,
-                        ).model_dump(mode="json"),
+                        serialize_json_value(
+                            RecipeReconcilePayload(
+                                installation_id=authority.installation_id,
+                                plan_digest=authority.original_plan_digest,
+                            )
+                        ),
                     )
                     for target in pending_targets
                 )

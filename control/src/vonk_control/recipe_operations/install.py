@@ -35,6 +35,7 @@ from ..install_admission import (
 from ..models import (
     RecipeInstallation,
 )
+from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid
 from .interfaces import RecipeOperationView
 
@@ -141,9 +142,9 @@ class InstallMixin:
                             "installation_id": installation_id,
                             "plan_digest": plan.plan_digest,
                             "expected_bytes": node.required_bytes,
-                            "compiled_execution_plan": compiled_plans[
-                                node.node_id
-                            ].model_dump(mode="json"),
+                            "compiled_execution_plan": serialize_json_value(
+                                compiled_plans[node.node_id]
+                            ),
                         },
                     )
                     for node in plan.nodes

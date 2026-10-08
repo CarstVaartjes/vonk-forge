@@ -24,6 +24,10 @@ from .errors import RecipeRequestInvalid
 def _validated_result(kind: str, value: object) -> RecipeLifecycleResult:
     """Validate a lifecycle result this call composes, before it is persisted.
 
+    Results are receipts shared with agent output and API consumers: encode
+    them with ``serialize_json_value``, even when stored in ``Job.result``.
+    Full dumps are reserved for mutable Controller-owned parent/context state.
+
     Only documents the caller has just built come through here; a stored result
     is read with :func:`_recorded_result`, which never raises.
     """

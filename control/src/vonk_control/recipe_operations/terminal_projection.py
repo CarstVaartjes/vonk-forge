@@ -213,27 +213,35 @@ class TerminalProjectionMixin:
             final_result = RecipeOperationResult(
                 successful_nodes=successful, failed_nodes=failed, node_evidence={}
             )
-        job.result = _validated_result(job.kind, final_result).model_dump(mode="json")
+        job.result = serialize_json_value(_validated_result(job.kind, final_result))
         if recovery_error is not None:
-            job.result = _validated_result(
-                job.kind,
-                {
-                    **_recorded_result_document(
-                        job.kind, read_row_column(job, "result"), subject=job.id
-                    ).model_dump(mode="json"),
-                    "recovery_error": (str(recovery_error) or "unproven")[:512],
-                },
-            ).model_dump(mode="json")
+            job.result = serialize_json_value(
+                _validated_result(
+                    job.kind,
+                    {
+                        **serialize_json_value(
+                            _recorded_result_document(
+                                job.kind, read_row_column(job, "result"), subject=job.id
+                            )
+                        ),
+                        "recovery_error": (str(recovery_error) or "unproven")[:512],
+                    },
+                )
+            )
         elif reconciliation_error is not None:
-            job.result = _validated_result(
-                job.kind,
-                {
-                    **_recorded_result_document(
-                        job.kind, read_row_column(job, "result"), subject=job.id
-                    ).model_dump(mode="json"),
-                    "recovery_error": reconciliation_error,
-                },
-            ).model_dump(mode="json")
+            job.result = serialize_json_value(
+                _validated_result(
+                    job.kind,
+                    {
+                        **serialize_json_value(
+                            _recorded_result_document(
+                                job.kind, read_row_column(job, "result"), subject=job.id
+                            )
+                        ),
+                        "recovery_error": reconciliation_error,
+                    },
+                )
+            )
         if job.kind == WireAgentOperation.RECIPE_BUILD.value:
             # Cancelled attempts returned before terminal aggregation.
             service._release(session, "recipe-build", owner_id, now)

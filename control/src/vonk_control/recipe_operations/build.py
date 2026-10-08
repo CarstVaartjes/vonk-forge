@@ -225,11 +225,13 @@ class BuildMixin:
                     session, build.id, build.build_input_sha256
                 )
                 receipt = (
-                    _recorded_result_document(
-                        WireAgentOperation.RECIPE_BUILD.value,
-                        read_row_column(succeeded, "result"),
-                        subject=succeeded.id,
-                    ).model_dump(mode="json")
+                    serialize_json_value(
+                        _recorded_result_document(
+                            WireAgentOperation.RECIPE_BUILD.value,
+                            read_row_column(succeeded, "result"),
+                            subject=succeeded.id,
+                        )
+                    )
                     if succeeded is not None
                     else None
                 )

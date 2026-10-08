@@ -45,6 +45,7 @@ from ..recipe_routes import (
     RecipeRouteError,
 )
 from ..stored_json import read_row_column
+from ..strict_json import serialize_json_value
 from .errors import RecipeOperationConflict
 from .intent import _intent_is_current, _job_workload_intent
 from .results import _recorded_result_document, _validated_result
@@ -172,20 +173,24 @@ class RetirementMixin:
                         )
                     )[:1024]
                     if completed:
-                        stored.result = _validated_result(
-                            stored.kind,
-                            {
-                                **(
-                                    _recorded_result_document(
-                                        stored.kind,
-                                        read_row_column(stored, "result"),
-                                        subject=stored.id,
-                                    ).model_dump(mode="json")
-                                    or {}
-                                ),
-                                "recovery": "retry creates a new operation",
-                            },
-                        ).model_dump(mode="json")
+                        stored.result = serialize_json_value(
+                            _validated_result(
+                                stored.kind,
+                                {
+                                    **(
+                                        serialize_json_value(
+                                            _recorded_result_document(
+                                                stored.kind,
+                                                read_row_column(stored, "result"),
+                                                subject=stored.id,
+                                            )
+                                        )
+                                        or {}
+                                    ),
+                                    "recovery": "retry creates a new operation",
+                                },
+                            )
+                        )
                     stored.updated_at = now
         return progressed
 

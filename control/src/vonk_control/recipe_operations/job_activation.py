@@ -50,6 +50,7 @@ from ..run_admission import (
     require_same_execution as require_same_run_execution,
 )
 from ..stored_json import read_row_column
+from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
@@ -206,9 +207,9 @@ class JobActivationMixin:
                 targets=targets,
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
-                result=_validated_result(
-                    "recipe.job.activate.v1", {"activated": True}
-                ).model_dump(mode="json"),
+                result=serialize_json_value(
+                    _validated_result("recipe.job.activate.v1", {"activated": True})
+                ),
                 created_at=now,
                 updated_at=now,
             )

@@ -54,6 +54,7 @@ from ..recipe_progress import (
     _recorded_parent as _recorded_parent,  # noqa: PLC0414 -- shared helper export
 )
 from ..stored_json import read_row_column
+from ..strict_json import serialize_json_value
 from .intent import _bound_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES
 from .observation_helpers import _aware
@@ -327,13 +328,15 @@ class OfflineStopMixin:
                 if child.node_id not in deferred_stop_nodes(job)
             }
         )
-        job.result = RecipeOperationResult(
-            successful_nodes=sorted(set(stopped) - set(failed_nodes)),
-            failed_nodes=failed_nodes,
-            recovery_error=run.route_error if failed and not failed_nodes else None,
-            node_evidence=(recorded.node_evidence or {})
-            if isinstance(
-                recorded, (RecipeOperationResult, RecipeOperationProgressResult)
+        job.result = serialize_json_value(
+            RecipeOperationResult(
+                successful_nodes=sorted(set(stopped) - set(failed_nodes)),
+                failed_nodes=failed_nodes,
+                recovery_error=run.route_error if failed and not failed_nodes else None,
+                node_evidence=(recorded.node_evidence or {})
+                if isinstance(
+                    recorded, (RecipeOperationResult, RecipeOperationProgressResult)
+                )
+                else {},
             )
-            else {},
-        ).model_dump(mode="json")
+        )

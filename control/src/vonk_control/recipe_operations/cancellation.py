@@ -46,6 +46,7 @@ from ..recipe_progress import (
     _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
 from ..stored_json import read_row_column
+from ..strict_json import serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
 from .errors import RecipeOperationConflict, RecipeRequestInvalid
 from .intent import _cancel_reason
@@ -216,45 +217,53 @@ class CancellationMixin:
                 )
                 for child in children
             ):
-                job.result = _validated_result(
-                    job.kind,
-                    {
-                        **(
-                            json.loads(canonical_message(previous))
-                            if previous is not None
-                            else {}
-                        ),
-                        "cancel_requested": True,
-                        "cancel_request_id": request_id,
-                        "cancel_actor": actor,
-                        "cancel_requested_at": _aware(now).isoformat(),
-                        "reason": cancellation_reason,
-                    },
-                ).model_dump(mode="json")
+                job.result = serialize_json_value(
+                    _validated_result(
+                        job.kind,
+                        {
+                            **(
+                                json.loads(canonical_message(previous))
+                                if previous is not None
+                                else {}
+                            ),
+                            "cancel_requested": True,
+                            "cancel_request_id": request_id,
+                            "cancel_actor": actor,
+                            "cancel_requested_at": _aware(now).isoformat(),
+                            "reason": cancellation_reason,
+                        },
+                    )
+                )
                 job.status_reason = cancellation_reason
                 job.updated_at = now
                 return service._view(job)
             RecipeOperationAdapter().cancelled(
                 job, now, reason=cancellation_reason, keep=False
             )
-            job.result = _validated_result(
-                job.kind,
-                {
-                    **(
-                        _recorded_result_document(
-                            job.kind, read_row_column(job, "result"), subject=job.id
-                        ).model_dump(mode="json")
-                        or {}
-                    ),
-                    LifecycleState.CANCELLED.value: True,
-                    "cancel_requested": True,
-                    "cancel_request_id": request_id,
-                    "cancel_actor": actor,
-                    "cancel_requested_at": _aware(now).isoformat(),
-                    "reason": cancellation_reason,
-                    "recovery": "retry creates a new operation",
-                },
-            ).model_dump(mode="json")
+            job.result = serialize_json_value(
+                _validated_result(
+                    job.kind,
+                    {
+                        **(
+                            serialize_json_value(
+                                _recorded_result_document(
+                                    job.kind,
+                                    read_row_column(job, "result"),
+                                    subject=job.id,
+                                )
+                            )
+                            or {}
+                        ),
+                        LifecycleState.CANCELLED.value: True,
+                        "cancel_requested": True,
+                        "cancel_request_id": request_id,
+                        "cancel_actor": actor,
+                        "cancel_requested_at": _aware(now).isoformat(),
+                        "reason": cancellation_reason,
+                        "recovery": "retry creates a new operation",
+                    },
+                )
+            )
             job.updated_at = now
         return service.get(operation_id)
 

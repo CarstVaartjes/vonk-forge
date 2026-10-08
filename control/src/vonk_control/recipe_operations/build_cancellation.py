@@ -51,6 +51,7 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
+from ..strict_json import serialize_json_value
 from .errors import RecipeBuildOwnershipBusy, RecipeRequestInvalid
 from .observation_helpers import _aware
 
@@ -171,9 +172,11 @@ class BuildCancellationMixin:
                     now=_aware(now),
                 )
                 RecipeOperationAdapter().cancelled(job, now)
-                job.result = cancellation.model_copy(
-                    update={LifecycleState.CANCELLED.value: True}
-                ).model_dump(mode="json")
+                job.result = serialize_json_value(
+                    cancellation.model_copy(
+                        update={LifecycleState.CANCELLED.value: True}
+                    )
+                )
                 return True
             if build_cancellation(job) is None:
                 if only_if_unneeded and read_build_intent(job).kind == "independent":
@@ -201,9 +204,9 @@ class BuildCancellationMixin:
             build.error = cancellation.reason
             build.updated_at = now
             RecipeOperationAdapter().cancelled(job, now)
-            job.result = cancellation.model_copy(
-                update={LifecycleState.CANCELLED.value: True}
-            ).model_dump(mode="json")
+            job.result = serialize_json_value(
+                cancellation.model_copy(update={LifecycleState.CANCELLED.value: True})
+            )
             return True
 
     def _cancel_current_build_locked(
@@ -327,9 +330,11 @@ class BuildCancellationMixin:
                     child, None, job, Outcome.CANCELLED, now
                 )
                 RecipeOperationAdapter().cancelled(job, now)
-                job.result = cancellation.model_copy(
-                    update={LifecycleState.CANCELLED.value: True}
-                ).model_dump(mode="json")
+                job.result = serialize_json_value(
+                    cancellation.model_copy(
+                        update={LifecycleState.CANCELLED.value: True}
+                    )
+                )
                 service._release_cancelled_build(session, build.id, now)
                 return True
             cleanup_key = str(
@@ -348,7 +353,7 @@ class BuildCancellationMixin:
                 plan_digest=build.build_input_sha256,
                 actor=actor,
                 request_id=cleanup_key,
-                node_payloads=((node_id, payload.model_dump(mode="json")),),
+                node_payloads=((node_id, serialize_json_value(payload)),),
                 authority_digest=build.build_input_sha256,
                 now=now,
                 job_context={

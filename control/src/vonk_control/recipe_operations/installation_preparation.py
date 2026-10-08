@@ -49,6 +49,7 @@ from ..recipe_progress import (
     _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
 from ..stored_json import read_row_column
+from ..strict_json import serialize_json_value
 from .constants import _bounded_blocker_reason
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView
@@ -410,9 +411,9 @@ class InstallationPreparationMixin:
                             "installation_id": installation_id,
                             "plan_digest": installation.plan_digest,
                             "expected_bytes": node.required_bytes,
-                            "compiled_execution_plan": raw_plans[
-                                node.node_id
-                            ].model_dump(mode="json"),
+                            "compiled_execution_plan": serialize_json_value(
+                                raw_plans[node.node_id]
+                            ),
                         },
                     )
                     for node in nodes

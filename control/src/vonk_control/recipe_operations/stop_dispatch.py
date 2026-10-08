@@ -256,18 +256,20 @@ class StopDispatchMixin:
             targets=sorted(node.node_id for node in nodes),
             payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
             payload=serialize_json_value(payload),
-            result=_validated_result(
-                WireAgentOperation.RECIPE_STOP.value, {RunState.STOPPED.value: True}
-            ).model_dump(mode="json"),
+            result=serialize_json_value(
+                _validated_result(
+                    WireAgentOperation.RECIPE_STOP.value, {RunState.STOPPED.value: True}
+                )
+            ),
             created_at=now,
             updated_at=now,
         )
         if accepted_parent is not None:
             RecipeOperationAdapter().finish(accepted_parent, now, failed=False)
             accepted_parent.status_reason = None
-            accepted_parent.result = _validated_result(
-                job.kind, read_row_column(job, "result")
-            ).model_dump(mode="json")
+            accepted_parent.result = serialize_json_value(
+                _validated_result(job.kind, read_row_column(job, "result"))
+            )
             accepted_parent.payload = serialize_json_value(
                 service._service_stop_document(job)
             )

@@ -72,7 +72,7 @@ from ..recipe_progress import (
     _parse_recipe_parent as _parse_recipe_parent,  # noqa: PLC0414 -- shared helper export
 )
 from ..stored_json import read_row_column
-from ..strict_json import read_stored_model
+from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
 from .errors import RecipeRequestInvalid
 from .interfaces import _TERMINAL_JOB_STATES, RecipeOperationView
@@ -428,9 +428,9 @@ class ResultConsumptionMixin:
             original, None, original_job, Outcome.CANCELLED, now
         )
         RecipeOperationAdapter().cancelled(original_job, now)
-        original_job.result = cancellation.model_copy(
-            update={LifecycleState.CANCELLED.value: True}
-        ).model_dump(mode="json")
+        original_job.result = serialize_json_value(
+            cancellation.model_copy(update={LifecycleState.CANCELLED.value: True})
+        )
         original_job.updated_at = now
         service._release_cancelled_build(session, owner_id, now)
         return None

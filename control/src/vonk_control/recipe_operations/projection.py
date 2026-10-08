@@ -81,7 +81,7 @@ from ..recipe_progress import (
     _stored_phases as _stored_phases,  # noqa: PLC0414 -- shared helper export
 )
 from ..stored_json import read_row_column
-from ..strict_json import read_stored_model
+from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _INITIAL_OBSERVATION_GRACE_SECONDS
 from .interfaces import _TERMINAL_JOB_STATES
 from .observation_helpers import _PhaseGroups, _start_endpoint, record_build_evidence
@@ -505,17 +505,19 @@ class ProjectionMixin:
             )
         else:
             node_evidence[node_id] = observed_evidence
-        job.result = _validated_result(
-            job.kind,
-            {
-                **(
-                    json.loads(canonical_message(recorded_result))
-                    if recorded_result is not None
-                    else {}
-                ),
-                evidence_field: node_evidence,
-            },
-        ).model_dump(mode="json")
+        job.result = serialize_json_value(
+            _validated_result(
+                job.kind,
+                {
+                    **(
+                        json.loads(canonical_message(recorded_result))
+                        if recorded_result is not None
+                        else {}
+                    ),
+                    evidence_field: node_evidence,
+                },
+            )
+        )
         children = tuple(
             session.scalars(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job.id)

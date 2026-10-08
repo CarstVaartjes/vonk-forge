@@ -62,7 +62,7 @@ from ..recipe_stop_payloads import (
     stop_payload_from_job_run,
 )
 from ..stored_json import read_row_column
-from ..strict_json import read_stored_model
+from ..strict_json import read_stored_model, serialize_json_value
 from .errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
@@ -346,17 +346,23 @@ class JobRunStopMixin:
                 targets=list(targets),
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
-                result=_validated_result(
-                    WireAgentOperation.RECIPE_STOP.value, {RunState.STOPPED.value: True}
-                ).model_dump(mode="json"),
+                result=serialize_json_value(
+                    _validated_result(
+                        WireAgentOperation.RECIPE_STOP.value,
+                        {RunState.STOPPED.value: True},
+                    )
+                ),
                 created_at=now,
                 updated_at=now,
             )
             if pending_job is not None:
                 RecipeOperationAdapter().finish(pending_job, now, failed=False)
-                pending_job.result = _validated_result(
-                    WireAgentOperation.RECIPE_STOP.value, {RunState.STOPPED.value: True}
-                ).model_dump(mode="json")
+                pending_job.result = serialize_json_value(
+                    _validated_result(
+                        WireAgentOperation.RECIPE_STOP.value,
+                        {RunState.STOPPED.value: True},
+                    )
+                )
                 pending_job.updated_at = now
             else:
                 session.add(job)

@@ -49,6 +49,7 @@ from ..recipe_progress import (
     _parent_identity as _parent_identity,  # noqa: PLC0414 -- shared helper export
 )
 from ..stored_json import read_row_column
+from ..strict_json import serialize_json_value
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .intent import _bound_workload_intent
 from .interfaces import RecipeOperationView
@@ -188,9 +189,9 @@ class RetryMixin:
                         "installation_id": owner_id,
                         "plan_digest": previous_plan_digest,
                         "expected_bytes": node.required_bytes,
-                        "compiled_execution_plan": compiled_plans[
-                            node.node_id
-                        ].model_dump(mode="json"),
+                        "compiled_execution_plan": serialize_json_value(
+                            compiled_plans[node.node_id]
+                        ),
                     },
                 )
                 for node in nodes
