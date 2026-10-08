@@ -74,7 +74,7 @@ impl AgentHttpClient {
         let body = canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?;
         let response = self
             .current_client()
-            .await
+            .await?
             .post(self.endpoint("/agent/renew")?)
             .timeout(ROTATION_REQUEST_TIMEOUT)
             .header("content-type", "application/json")
@@ -88,7 +88,11 @@ impl AgentHttpClient {
             // outcomes; generic 401/403 responses remain rejections.
             let status = response.status();
             let endpoint = response.url().path().to_owned();
-            let operation = format!("controller.request {endpoint}");
+            let operation = format!(
+                "{} {endpoint}",
+                vonk_agent_protocol::generated::AgentDiagnosticOperation::ControllerRequest
+                    .as_str()
+            );
             let request_id = response
                 .headers()
                 .get("x-request-id")

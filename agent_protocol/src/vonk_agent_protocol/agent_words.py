@@ -293,3 +293,52 @@ class ProfileRetryDisposition(WireEnum):
 
     WAIT = "wait"
     SUPERSEDE = "supersede"
+
+
+class AgentClientDecision(WireEnum):
+    """The client's bounded observation decision after a request outcome."""
+
+    RETRY = "retry"
+    RECORD = "record"
+    EXIT = "exit"
+    DEFER = "defer"
+
+
+class AgentTransportKind(WireEnum):
+    """Safe transport classifications; unknown never invents a network cause."""
+
+    TIMEOUT = "timeout"
+    CONNECT = "connect"
+    BODY = "body"
+    PROTOCOL = "protocol"
+    UNKNOWN = "unknown"
+
+
+class OciFailureCategory(WireEnum):
+    """Secret-free OCI failure context preserved across the helper boundary."""
+
+    STORAGE_PERMISSION_DENIED = "storage-permission-denied"
+    STORAGE_NOT_FOUND = "storage-not-found"
+    PROCESS = "process"
+    WORKLOAD = "workload"
+    RUNTIME = "runtime"
+    IMAGE_DIGEST = "image-digest"
+    ARTIFACT = "artifact"
+    STORAGE = "storage"
+    METADATA = "metadata"
+    CAPACITY = "capacity"
+    RECONCILIATION_BUSY = "reconciliation-busy"
+
+
+class AgentDiagnosticOperation(WireEnum):
+    """Stable diagnostic origins for client requests and local preparation."""
+
+    CONTROLLER_REQUEST = "controller.request"
+    WORKLOAD_PRELOAD_MEMORY = "workload.preload_memory"
+    MODEL_MATERIALIZATION_COPY_FALLBACK = "model.materialization_copy_fallback"
+
+
+class RecipeRunDispositionValue(WireEnum):
+    """The header verdict for a run the Controller never owned."""
+
+    UNOWNED = "unowned"

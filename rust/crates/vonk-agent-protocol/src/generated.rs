@@ -254,6 +254,98 @@ impl ::std::convert::From<RecipeUninstallPayload> for AgentClaimPayload {
         Self::RecipeUninstallPayload(value)
     }
 }
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AgentClientDecision {
+    #[serde(rename = "retry")]
+    Retry,
+    #[serde(rename = "record")]
+    Record,
+    #[serde(rename = "exit")]
+    Exit,
+    #[serde(rename = "defer")]
+    Defer,
+}
+impl ::std::fmt::Display for AgentClientDecision {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Retry => f.write_str("retry"),
+            Self::Record => f.write_str("record"),
+            Self::Exit => f.write_str("exit"),
+            Self::Defer => f.write_str("defer"),
+        }
+    }
+}
+impl ::std::str::FromStr for AgentClientDecision {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "retry" => Ok(Self::Retry),
+            "record" => Ok(Self::Record),
+            "exit" => Ok(Self::Exit),
+            "defer" => Ok(Self::Defer),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AgentClientDecision {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AgentClientDecision {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AgentDiagnosticOperation {
+    #[serde(rename = "controller.request")]
+    ControllerRequest,
+    #[serde(rename = "workload.preload_memory")]
+    WorkloadPreloadMemory,
+    #[serde(rename = "model.materialization_copy_fallback")]
+    ModelMaterializationCopyFallback,
+}
+impl ::std::fmt::Display for AgentDiagnosticOperation {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::ControllerRequest => f.write_str("controller.request"),
+            Self::WorkloadPreloadMemory => f.write_str("workload.preload_memory"),
+            Self::ModelMaterializationCopyFallback => {
+                f.write_str("model.materialization_copy_fallback")
+            }
+        }
+    }
+}
+impl ::std::str::FromStr for AgentDiagnosticOperation {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "controller.request" => Ok(Self::ControllerRequest),
+            "workload.preload_memory" => Ok(Self::WorkloadPreloadMemory),
+            "model.materialization_copy_fallback" => Ok(Self::ModelMaterializationCopyFallback),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AgentDiagnosticOperation {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AgentDiagnosticOperation {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -781,6 +873,57 @@ impl ::std::convert::TryFrom<&str> for AgentRuntimeIdentityArchitecture {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for AgentRuntimeIdentityArchitecture {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AgentTransportKind {
+    #[serde(rename = "timeout")]
+    Timeout,
+    #[serde(rename = "connect")]
+    Connect,
+    #[serde(rename = "body")]
+    Body,
+    #[serde(rename = "protocol")]
+    Protocol,
+    #[serde(rename = "unknown")]
+    Unknown,
+}
+impl ::std::fmt::Display for AgentTransportKind {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Timeout => f.write_str("timeout"),
+            Self::Connect => f.write_str("connect"),
+            Self::Body => f.write_str("body"),
+            Self::Protocol => f.write_str("protocol"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+impl ::std::str::FromStr for AgentTransportKind {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "timeout" => Ok(Self::Timeout),
+            "connect" => Ok(Self::Connect),
+            "body" => Ok(Self::Body),
+            "protocol" => Ok(Self::Protocol),
+            "unknown" => Ok(Self::Unknown),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for AgentTransportKind {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for AgentTransportKind {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -5578,7 +5721,10 @@ impl ::std::convert::TryFrom<::std::string::String> for LifecycleSubject {
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct LifecycleVocabulary {
+    pub agent_client_decision: AgentClientDecision,
+    pub agent_diagnostic_operation: AgentDiagnosticOperation,
     pub agent_result_state: AgentResultState,
+    pub agent_transport_kind: AgentTransportKind,
     pub artifact_preparation: ArtifactPreparation,
     pub asset_availability: AssetAvailability,
     pub blocker_category: BlockerCategory,
@@ -5604,6 +5750,7 @@ pub struct LifecycleVocabulary {
     pub model_file_state: ModelFileState,
     pub observation_cause: ObservationCause,
     pub observed_assignment_state: ObservedAssignmentState,
+    pub oci_failure_category: OciFailureCategory,
     pub operator_action: OperatorActionName,
     pub operator_surface: OperatorSurface,
     pub outcome_kind: OutcomeKind,
@@ -5624,6 +5771,7 @@ pub struct LifecycleVocabulary {
     pub profile_retry_disposition: ProfileRetryDisposition,
     pub profile_switch_child_kind: ProfileSwitchChildKind,
     pub progress_phase: ProgressPhase,
+    pub recipe_run_disposition: RecipeRunDispositionValue,
     pub reservation_state: ReservationState,
     pub resource_blocker_code: ResourceBlockerCode,
     pub route_publication_state: RoutePublicationState,
@@ -6688,6 +6836,81 @@ impl ::std::convert::TryFrom<&str> for ObservedAssignmentState {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for ObservedAssignmentState {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum OciFailureCategory {
+    #[serde(rename = "storage-permission-denied")]
+    StoragePermissionDenied,
+    #[serde(rename = "storage-not-found")]
+    StorageNotFound,
+    #[serde(rename = "process")]
+    Process,
+    #[serde(rename = "workload")]
+    Workload,
+    #[serde(rename = "runtime")]
+    Runtime,
+    #[serde(rename = "image-digest")]
+    ImageDigest,
+    #[serde(rename = "artifact")]
+    Artifact,
+    #[serde(rename = "storage")]
+    Storage,
+    #[serde(rename = "metadata")]
+    Metadata,
+    #[serde(rename = "capacity")]
+    Capacity,
+    #[serde(rename = "reconciliation-busy")]
+    ReconciliationBusy,
+}
+impl ::std::fmt::Display for OciFailureCategory {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::StoragePermissionDenied => f.write_str("storage-permission-denied"),
+            Self::StorageNotFound => f.write_str("storage-not-found"),
+            Self::Process => f.write_str("process"),
+            Self::Workload => f.write_str("workload"),
+            Self::Runtime => f.write_str("runtime"),
+            Self::ImageDigest => f.write_str("image-digest"),
+            Self::Artifact => f.write_str("artifact"),
+            Self::Storage => f.write_str("storage"),
+            Self::Metadata => f.write_str("metadata"),
+            Self::Capacity => f.write_str("capacity"),
+            Self::ReconciliationBusy => f.write_str("reconciliation-busy"),
+        }
+    }
+}
+impl ::std::str::FromStr for OciFailureCategory {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "storage-permission-denied" => Ok(Self::StoragePermissionDenied),
+            "storage-not-found" => Ok(Self::StorageNotFound),
+            "process" => Ok(Self::Process),
+            "workload" => Ok(Self::Workload),
+            "runtime" => Ok(Self::Runtime),
+            "image-digest" => Ok(Self::ImageDigest),
+            "artifact" => Ok(Self::Artifact),
+            "storage" => Ok(Self::Storage),
+            "metadata" => Ok(Self::Metadata),
+            "capacity" => Ok(Self::Capacity),
+            "reconciliation-busy" => Ok(Self::ReconciliationBusy),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for OciFailureCategory {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for OciFailureCategory {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -9783,6 +10006,41 @@ pub struct RecipeReconcileResult {}
 pub struct RecipeReconciliationIdentity {
     pub installation_id: ::uuid::Uuid,
     pub plan_digest: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum RecipeRunDispositionValue {
+    #[serde(rename = "unowned")]
+    Unowned,
+}
+impl ::std::fmt::Display for RecipeRunDispositionValue {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Unowned => f.write_str("unowned"),
+        }
+    }
+}
+impl ::std::str::FromStr for RecipeRunDispositionValue {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "unowned" => Ok(Self::Unowned),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for RecipeRunDispositionValue {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for RecipeRunDispositionValue {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -15106,7 +15364,7 @@ impl<'de> ::serde::Deserialize<'de> for ActivationManifest {
     }
 }
 impl ActivationManifestState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Maintenance => "maintenance",
             Self::Published => "published",
@@ -15165,7 +15423,7 @@ impl<'de> ::serde::Deserialize<'de> for ActivationMarker {
     }
 }
 impl ActivationMarkerState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Maintenance => "maintenance",
             Self::Published => "published",
@@ -15189,7 +15447,7 @@ impl ::std::cmp::PartialEq<&str> for ActivationMarkerState {
     }
 }
 impl AdmissionCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::AdmissionCapacityBusy => "admission.capacity_busy",
         }
@@ -15355,6 +15613,128 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaimPayload {
         )))
     }
 }
+impl AgentClientDecision {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Retry => "retry",
+            Self::Record => "record",
+            Self::Exit => "exit",
+            Self::Defer => "defer",
+        }
+    }
+}
+impl ::std::ops::Deref for AgentClientDecision {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for AgentClientDecision {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for AgentClientDecision {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentClientDecision {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("AgentClientDecision"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "retry")]
+            Retry,
+            #[serde(rename = "record")]
+            Record,
+            #[serde(rename = "exit")]
+            Exit,
+            #[serde(rename = "defer")]
+            Defer,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Retry => Self::Retry,
+            Raw::Record => Self::Record,
+            Raw::Exit => Self::Exit,
+            Raw::Defer => Self::Defer,
+        })
+    }
+}
+impl AgentDiagnosticOperation {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::ControllerRequest => "controller.request",
+            Self::WorkloadPreloadMemory => "workload.preload_memory",
+            Self::ModelMaterializationCopyFallback => "model.materialization_copy_fallback",
+        }
+    }
+}
+impl ::std::ops::Deref for AgentDiagnosticOperation {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for AgentDiagnosticOperation {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for AgentDiagnosticOperation {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentDiagnosticOperation {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("AgentDiagnosticOperation"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "controller.request")]
+            ControllerRequest,
+            #[serde(rename = "workload.preload_memory")]
+            WorkloadPreloadMemory,
+            #[serde(rename = "model.materialization_copy_fallback")]
+            ModelMaterializationCopyFallback,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::ControllerRequest => Self::ControllerRequest,
+            Raw::WorkloadPreloadMemory => Self::WorkloadPreloadMemory,
+            Raw::ModelMaterializationCopyFallback => Self::ModelMaterializationCopyFallback,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for AgentDirective {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value =
@@ -15381,7 +15761,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentDirective {
     }
 }
 impl AgentEvidenceCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::AgentEvidenceClaimHintDropped => "agent_evidence.claim_hint_dropped",
             Self::AgentEvidenceFailureDiagnosticsDropped => {
@@ -15476,7 +15856,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentEvidenceCode {
     }
 }
 impl AgentFailureKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::TemporaryDependency => "temporary-dependency",
             Self::UncertainEffect => "uncertain-effect",
@@ -15670,7 +16050,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentInstallResult {
     }
 }
 impl AgentOperation {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RuntimePreflightV1 => "runtime.preflight.v1",
             Self::AgentUpgradeV1 => "agent.upgrade.v1",
@@ -15972,7 +16352,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentResultResult {
     }
 }
 impl AgentResultState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
@@ -16061,7 +16441,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentRuntimeIdentity {
     }
 }
 impl AgentRuntimeIdentityArchitecture {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::LinuxAmd64 => "linux-amd64",
             Self::LinuxArm64 => "linux-arm64",
@@ -16082,6 +16462,72 @@ impl ::std::cmp::PartialEq<str> for AgentRuntimeIdentityArchitecture {
 impl ::std::cmp::PartialEq<&str> for AgentRuntimeIdentityArchitecture {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
+    }
+}
+impl AgentTransportKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Connect => "connect",
+            Self::Body => "body",
+            Self::Protocol => "protocol",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+impl ::std::ops::Deref for AgentTransportKind {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for AgentTransportKind {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for AgentTransportKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for AgentTransportKind {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("AgentTransportKind"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "timeout")]
+            Timeout,
+            #[serde(rename = "connect")]
+            Connect,
+            #[serde(rename = "body")]
+            Body,
+            #[serde(rename = "protocol")]
+            Protocol,
+            #[serde(rename = "unknown")]
+            Unknown,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Timeout => Self::Timeout,
+            Raw::Connect => Self::Connect,
+            Raw::Body => Self::Body,
+            Raw::Protocol => Self::Protocol,
+            Raw::Unknown => Self::Unknown,
+        })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for AgentUpgradeGrantRequest {
@@ -16216,7 +16662,7 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactDistributionResult {
     }
 }
 impl ArtifactLifecycleCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ArtifactAssetAvailabilityUnknown => "artifact.asset_availability_unknown",
             Self::ArtifactDeletionBusy => "artifact.deletion_busy",
@@ -16317,7 +16763,7 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactLifecycleCode {
     }
 }
 impl ArtifactPreparation {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Draft => "draft",
             Self::Ready => "ready",
@@ -16371,7 +16817,7 @@ impl<'de> ::serde::Deserialize<'de> for ArtifactPreparation {
     }
 }
 impl AssetAvailability {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Verified => "verified",
             Self::Partial => "partial",
@@ -16433,7 +16879,7 @@ impl<'de> ::serde::Deserialize<'de> for AssetAvailability {
     }
 }
 impl BlockerCategory {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::SecurityEdge => "security-edge",
             Self::InputValidation => "input-validation",
@@ -16515,7 +16961,7 @@ impl<'de> ::serde::Deserialize<'de> for BoundedErrorResponse {
     }
 }
 impl CacheReferenceReason {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RecipeInstallation => "recipe-installation",
             Self::RunningModel => "running-model",
@@ -16573,7 +17019,7 @@ impl<'de> ::serde::Deserialize<'de> for CacheReferenceReason {
     }
 }
 impl CapabilityReason {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CapabilityInitializing => "capability.initializing",
             Self::CapabilityConfigurationInvalid => "capability.configuration_invalid",
@@ -16659,7 +17105,7 @@ impl<'de> ::serde::Deserialize<'de> for CapabilityUnavailableReply {
     }
 }
 impl CatalogCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CatalogActor => "catalog.actor",
             Self::CatalogCandidateExists => "catalog.candidate_exists",
@@ -16824,7 +17270,7 @@ impl<'de> ::serde::Deserialize<'de> for CatalogCode {
     }
 }
 impl CatalogSyncCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CatalogSyncActorInvalid => "catalog.sync_actor_invalid",
             Self::CatalogSyncCommitInvalid => "catalog.sync_commit_invalid",
@@ -16946,7 +17392,7 @@ impl<'de> ::serde::Deserialize<'de> for CatalogSyncCode {
     }
 }
 impl CatalogSyncState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Syncing => "syncing",
             Self::Current => "current",
@@ -17008,7 +17454,7 @@ impl<'de> ::serde::Deserialize<'de> for CatalogSyncState {
     }
 }
 impl CertificateCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CertificateResponseUnrepresentable => "certificate.response_unrepresentable",
         }
@@ -17058,7 +17504,7 @@ impl<'de> ::serde::Deserialize<'de> for CertificateCode {
     }
 }
 impl CertificateState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Valid => "valid",
             Self::Missing => "missing",
@@ -17195,7 +17641,7 @@ impl<'de> ::serde::Deserialize<'de> for CliReleaseProjection {
     }
 }
 impl CliReleaseProjectionChannel {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Dev => "dev",
             Self::Stable => "stable",
@@ -17238,7 +17684,7 @@ impl<'de> ::serde::Deserialize<'de> for CliWheelProjection {
     }
 }
 impl ClusterMappingCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::MappingActor => "mapping.actor",
             Self::MappingEndpointOwner => "mapping.endpoint_owner",
@@ -17569,7 +18015,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledJobInputSlot {
     }
 }
 impl CompiledJobInterface {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ImageJob => "image-job",
             Self::AudioJob => "audio-job",
@@ -17770,7 +18216,7 @@ impl<'de> ::serde::Deserialize<'de> for CompiledSecurityMount {
     }
 }
 impl CompiledSecurityMountSource {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Model => "model",
             Self::Inputs => "inputs",
@@ -17795,7 +18241,7 @@ impl ::std::cmp::PartialEq<&str> for CompiledSecurityMountSource {
     }
 }
 impl CompiledSecurityNetworkMode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Bridge => "bridge",
@@ -17863,7 +18309,7 @@ impl<'de> ::serde::Deserialize<'de> for ConfirmPackageActivationOperation {
     }
 }
 impl ControllerCapability {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CertificateAuthority => "certificate-authority",
             Self::EnrollmentBootstrap => "enrollment-bootstrap",
@@ -17989,7 +18435,7 @@ impl<'de> ::serde::Deserialize<'de> for ControllerCapability {
     }
 }
 impl ControllerErrorCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ControllerConflict => "controller.conflict",
             Self::ControllerFleetRevocationUncertain => "controller.fleet.revocation_uncertain",
@@ -18106,7 +18552,7 @@ impl<'de> ::serde::Deserialize<'de> for ControllerRefusalBody {
     }
 }
 impl DesiredAssignmentState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Installed => "installed",
             Self::Running => "running",
@@ -18185,7 +18631,7 @@ impl<'de> ::serde::Deserialize<'de> for DistributionAssignment {
     }
 }
 impl DistributionAssignmentState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Active => "active",
             Self::Revoked => "revoked",
@@ -18245,7 +18691,7 @@ impl<'de> ::serde::Deserialize<'de> for DistributionAssignmentState {
     }
 }
 impl DistributionCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::DistributionAssignmentConflict => "distribution.assignment_conflict",
             Self::DistributionExpired => "distribution.expired",
@@ -18355,7 +18801,7 @@ impl<'de> ::serde::Deserialize<'de> for DistributionObject {
     }
 }
 impl EndpointState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::InstalledOnly => "installed-only",
             Self::NotPublishedYet => "not-published-yet",
@@ -18484,7 +18930,7 @@ impl<'de> ::serde::Deserialize<'de> for EnrollmentEvidence {
     }
 }
 impl EnrollmentGrantState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::Expired => "expired",
@@ -18610,7 +19056,7 @@ impl<'de> ::serde::Deserialize<'de> for ErrorCatalogError {
     }
 }
 impl ErrorCategory {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::SecurityRefusal => "security-refusal",
             Self::InvalidRequest => "invalid-request",
@@ -18702,7 +19148,7 @@ impl<'de> ::serde::Deserialize<'de> for ErrorContextResponse {
     }
 }
 impl ErrorContextResponseDecision {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Retry => "retry",
             Self::Defer => "defer",
@@ -18727,7 +19173,7 @@ impl ::std::cmp::PartialEq<&str> for ErrorContextResponseDecision {
     }
 }
 impl ErrorContextResponseSource {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RemoteRejection => "remote_rejection",
             Self::Transport => "transport",
@@ -18804,7 +19250,7 @@ impl<'de> ::serde::Deserialize<'de> for ExecuteContainerRuntimeRequestOperation 
     }
 }
 impl ExecuteContainerRuntimeRequestOperationAction {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
             Self::ImagePull => "image-pull",
@@ -18858,7 +19304,7 @@ impl<'de> ::serde::Deserialize<'de> for ExpiredRenewRequest {
     }
 }
 impl FailureCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::HookVmBusy => "hook.vm_busy",
             Self::HookVmProcessKilled => "hook.vm_process_killed",
@@ -19016,7 +19462,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureDiagnostics {
     }
 }
 impl FailureDiagnosticsCategory {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::PlatformPolicy => "platform-policy",
             Self::Capacity => "capacity",
@@ -19089,7 +19535,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureProperty {
     }
 }
 impl FailureStage {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::AgentRestart => "agent-restart",
             Self::AgentUpgradeInstalled => "agent-upgrade-installed",
@@ -19314,7 +19760,7 @@ impl<'de> ::serde::Deserialize<'de> for FailureStage {
     }
 }
 impl GatewayRouteState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Published => "published",
             Self::Maintenance => "maintenance",
@@ -19372,7 +19818,7 @@ impl<'de> ::serde::Deserialize<'de> for GatewayRouteState {
     }
 }
 impl HelperErrorCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CallJoinFailed => "call_join_failed",
             Self::ConcurrencyLimit => "concurrency_limit",
@@ -19728,7 +20174,7 @@ impl<'de> ::serde::Deserialize<'de> for HelperErrorCode {
     }
 }
 impl HelperOperationCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::HelperArtifactInvalid => "helper.artifact_invalid",
             Self::HelperCommandFailed => "helper.command_failed",
@@ -20053,7 +20499,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
     }
 }
 impl HostHelperResponseStatus {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Rejected => "rejected",
             Self::PackageInstalled => "package-installed",
@@ -20255,7 +20701,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeGrantRequest {
     }
 }
 impl HostRuntimeGrantRequestAction {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
             Self::ImagePull => "image-pull",
@@ -20348,7 +20794,7 @@ impl<'de> ::serde::Deserialize<'de> for HostRuntimeRequest {
     }
 }
 impl HostRuntimeRequestAction {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RuntimePreflight => "runtime-preflight",
             Self::ImagePull => "image-pull",
@@ -20377,7 +20823,7 @@ impl ::std::cmp::PartialEq<&str> for HostRuntimeRequestAction {
     }
 }
 impl ImageStoreCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ImageStoreBusy => "image_store.busy",
             Self::ImageStoreCollectionDeferred => "image_store.collection_deferred",
@@ -20476,7 +20922,7 @@ impl<'de> ::serde::Deserialize<'de> for ImageStoreCode {
     }
 }
 impl InstallAdmissionCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::InstallAgentUpgradeRequired => "install.agent_upgrade_required",
             Self::InstallArtifactSizeUnderdeclared => "install.artifact_size_underdeclared",
@@ -20579,7 +21025,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallAdmissionCode {
     }
 }
 impl InstallDegradedReason {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ExternalMember => "external-member",
             Self::MappingIncomplete => "mapping-incomplete",
@@ -20739,7 +21185,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallationMetadataReceipt {
     }
 }
 impl InstallationNodeState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Planned => "planned",
             Self::Installed => "installed",
@@ -20830,7 +21276,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallationReconciliationCheckpoint {
     }
 }
 impl InstallationReconciliationCheckpointState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Prepared => "prepared",
             Self::Removing => "removing",
@@ -20880,7 +21326,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallationReconciliationReceipt {
     }
 }
 impl InstallationState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Planned => "planned",
             Self::Installing => "installing",
@@ -20985,7 +21431,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerAcceptanceBaselineRelease {
     }
 }
 impl InstallerAcceptanceBaselineReleaseChannel {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Dev => "dev",
             Self::Stable => "stable",
@@ -21153,7 +21599,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerCandidateRelease {
     }
 }
 impl InstallerCandidateReleaseChannel {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Dev => "dev",
             Self::Stable => "stable",
@@ -21239,7 +21685,7 @@ impl<'de> ::serde::Deserialize<'de> for InstallerReleaseIdentity {
     }
 }
 impl InstallerReleaseIdentityChannel {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Dev => "dev",
             Self::Stable => "stable",
@@ -21366,7 +21812,7 @@ impl<'de> ::serde::Deserialize<'de> for InvalidRequest {
     }
 }
 impl InvalidRequestCategory {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::InvalidRequest => "invalid-request",
         }
@@ -21389,7 +21835,7 @@ impl ::std::cmp::PartialEq<&str> for InvalidRequestCategory {
     }
 }
 impl InvalidRequestReason {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Malformed => "malformed",
             Self::OutOfRange => "out-of-range",
@@ -21542,7 +21988,7 @@ impl<'de> ::serde::Deserialize<'de> for InventoryRequest {
     }
 }
 impl InventoryRequestMemoryPool {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Shared => "shared",
             Self::Separate => "separate",
@@ -21599,7 +22045,7 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
     }
 }
 impl LibraryAssessmentCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::LibraryAssessmentUnavailable => "library.assessment_unavailable",
             Self::LibraryCacheMissing => "library.cache_missing",
@@ -21664,7 +22110,7 @@ impl<'de> ::serde::Deserialize<'de> for LibraryAssessmentCode {
     }
 }
 impl LibraryProjectionCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ProjectionEvidenceTruncated => "projection.evidence_truncated",
             Self::ProjectionReasonsTruncated => "projection.reasons_truncated",
@@ -21720,7 +22166,7 @@ impl<'de> ::serde::Deserialize<'de> for LibraryProjectionCode {
     }
 }
 impl LifecycleEffect {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Unknown => "unknown",
             Self::None => "none",
@@ -21786,7 +22232,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleEffect {
     }
 }
 impl LifecycleEventKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Submitted => "submitted",
             Self::Claimed => "claimed",
@@ -21868,7 +22314,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleEventKind {
     }
 }
 impl LifecycleState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Queued => "queued",
             Self::Running => "running",
@@ -21950,7 +22396,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleState {
     }
 }
 impl LifecycleSubject {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Job => "Job",
             Self::JobAttempt => "JobAttempt",
@@ -22024,7 +22470,10 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
+            pub agent_client_decision: AgentClientDecision,
+            pub agent_diagnostic_operation: AgentDiagnosticOperation,
             pub agent_result_state: AgentResultState,
+            pub agent_transport_kind: AgentTransportKind,
             pub artifact_preparation: ArtifactPreparation,
             pub asset_availability: AssetAvailability,
             pub blocker_category: BlockerCategory,
@@ -22050,6 +22499,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub model_file_state: ModelFileState,
             pub observation_cause: ObservationCause,
             pub observed_assignment_state: ObservedAssignmentState,
+            pub oci_failure_category: OciFailureCategory,
             pub operator_action: OperatorActionName,
             pub operator_surface: OperatorSurface,
             pub outcome_kind: OutcomeKind,
@@ -22070,6 +22520,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             pub profile_retry_disposition: ProfileRetryDisposition,
             pub profile_switch_child_kind: ProfileSwitchChildKind,
             pub progress_phase: ProgressPhase,
+            pub recipe_run_disposition: RecipeRunDispositionValue,
             pub reservation_state: ReservationState,
             pub resource_blocker_code: ResourceBlockerCode,
             pub route_publication_state: RoutePublicationState,
@@ -22087,7 +22538,10 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
+            agent_client_decision: raw.agent_client_decision,
+            agent_diagnostic_operation: raw.agent_diagnostic_operation,
             agent_result_state: raw.agent_result_state,
+            agent_transport_kind: raw.agent_transport_kind,
             artifact_preparation: raw.artifact_preparation,
             asset_availability: raw.asset_availability,
             blocker_category: raw.blocker_category,
@@ -22113,6 +22567,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             model_file_state: raw.model_file_state,
             observation_cause: raw.observation_cause,
             observed_assignment_state: raw.observed_assignment_state,
+            oci_failure_category: raw.oci_failure_category,
             operator_action: raw.operator_action,
             operator_surface: raw.operator_surface,
             outcome_kind: raw.outcome_kind,
@@ -22133,6 +22588,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
             profile_retry_disposition: raw.profile_retry_disposition,
             profile_switch_child_kind: raw.profile_switch_child_kind,
             progress_phase: raw.progress_phase,
+            recipe_run_disposition: raw.recipe_run_disposition,
             reservation_state: raw.reservation_state,
             resource_blocker_code: raw.resource_blocker_code,
             route_publication_state: raw.route_publication_state,
@@ -22150,7 +22606,7 @@ impl<'de> ::serde::Deserialize<'de> for LifecycleVocabulary {
     }
 }
 impl MigrationStep {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Step2 => "step-2",
             Self::Step3 => "step-3",
@@ -22220,7 +22676,7 @@ impl<'de> ::serde::Deserialize<'de> for MigrationStep {
     }
 }
 impl ModelCacheBlockerCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::InsufficientReservedStorage => "insufficient-reserved-storage",
             Self::ModelNotCached => "model-not-cached",
@@ -22280,7 +22736,7 @@ impl<'de> ::serde::Deserialize<'de> for ModelCacheBlockerCode {
     }
 }
 impl ModelCacheCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ModelCacheAccessRecheckUnavailable => "model_cache.access_recheck_unavailable",
             Self::ModelCacheArtifactCount => "model_cache.artifact_count",
@@ -22697,7 +23153,7 @@ impl<'de> ::serde::Deserialize<'de> for ModelCacheCode {
     }
 }
 impl ModelCacheOperatorStatus {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
         }
@@ -22749,7 +23205,7 @@ impl<'de> ::serde::Deserialize<'de> for ModelCacheOperatorStatus {
     }
 }
 impl ModelFileState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Partial => "partial",
             Self::Verified => "verified",
@@ -23058,7 +23514,7 @@ impl<'de> ::serde::Deserialize<'de> for NasRequiredValuePrompt {
     }
 }
 impl NasRequiredValuePromptValidation {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::NonEmpty => "non_empty",
             Self::Ipv4 => "ipv4",
@@ -23192,7 +23648,7 @@ impl<'de> ::serde::Deserialize<'de> for NetworkInterface {
     }
 }
 impl NetworkInterfaceKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Wired => "wired",
             Self::Wifi => "wifi",
@@ -23219,7 +23675,7 @@ impl ::std::cmp::PartialEq<&str> for NetworkInterfaceKind {
     }
 }
 impl NodeOfflineReason {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Unregistered => "unregistered",
             Self::AgentInactive => "agent-inactive",
@@ -23309,7 +23765,7 @@ impl<'de> ::serde::Deserialize<'de> for NodeOfflineReason {
     }
 }
 impl ObservationCause {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ReportedUnknown => "reported-unknown",
             Self::LeaseLapsed => "lease-lapsed",
@@ -23363,7 +23819,7 @@ impl<'de> ::serde::Deserialize<'de> for ObservationCause {
     }
 }
 impl ObservedAssignmentState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::NotPlaced => "not-placed",
             Self::Placed => "placed",
@@ -23434,6 +23890,96 @@ impl<'de> ::serde::Deserialize<'de> for ObservedAssignmentState {
         })
     }
 }
+impl OciFailureCategory {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::StoragePermissionDenied => "storage-permission-denied",
+            Self::StorageNotFound => "storage-not-found",
+            Self::Process => "process",
+            Self::Workload => "workload",
+            Self::Runtime => "runtime",
+            Self::ImageDigest => "image-digest",
+            Self::Artifact => "artifact",
+            Self::Storage => "storage",
+            Self::Metadata => "metadata",
+            Self::Capacity => "capacity",
+            Self::ReconciliationBusy => "reconciliation-busy",
+        }
+    }
+}
+impl ::std::ops::Deref for OciFailureCategory {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for OciFailureCategory {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for OciFailureCategory {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for OciFailureCategory {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("OciFailureCategory"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "storage-permission-denied")]
+            StoragePermissionDenied,
+            #[serde(rename = "storage-not-found")]
+            StorageNotFound,
+            #[serde(rename = "process")]
+            Process,
+            #[serde(rename = "workload")]
+            Workload,
+            #[serde(rename = "runtime")]
+            Runtime,
+            #[serde(rename = "image-digest")]
+            ImageDigest,
+            #[serde(rename = "artifact")]
+            Artifact,
+            #[serde(rename = "storage")]
+            Storage,
+            #[serde(rename = "metadata")]
+            Metadata,
+            #[serde(rename = "capacity")]
+            Capacity,
+            #[serde(rename = "reconciliation-busy")]
+            ReconciliationBusy,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::StoragePermissionDenied => Self::StoragePermissionDenied,
+            Raw::StorageNotFound => Self::StorageNotFound,
+            Raw::Process => Self::Process,
+            Raw::Workload => Self::Workload,
+            Raw::Runtime => Self::Runtime,
+            Raw::ImageDigest => Self::ImageDigest,
+            Raw::Artifact => Self::Artifact,
+            Raw::Storage => Self::Storage,
+            Raw::Metadata => Self::Metadata,
+            Raw::Capacity => Self::Capacity,
+            Raw::ReconciliationBusy => Self::ReconciliationBusy,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value =
@@ -23460,7 +24006,7 @@ impl<'de> ::serde::Deserialize<'de> for OperationCheckpoint {
     }
 }
 impl OperationFailureCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::FleetProfileApplicationFailed => "fleet_profile_application_failed",
             Self::ArtifactProcessFailed => "artifact_process_failed",
@@ -23578,7 +24124,7 @@ impl<'de> ::serde::Deserialize<'de> for OperationMemberProgress {
     }
 }
 impl OperationMemberProgressActivity {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Active => "active",
             Self::Waiting => "waiting",
@@ -23664,7 +24210,7 @@ impl<'de> ::serde::Deserialize<'de> for OperationProgress {
     }
 }
 impl OperationProgressActivity {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Active => "active",
             Self::Waiting => "waiting",
@@ -23689,7 +24235,7 @@ impl ::std::cmp::PartialEq<&str> for OperationProgressActivity {
     }
 }
 impl OperatorActionName {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Resume => "resume",
             Self::Retire => "retire",
@@ -23751,7 +24297,7 @@ impl<'de> ::serde::Deserialize<'de> for OperatorActionName {
     }
 }
 impl OperatorSurface {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Resume => "resume",
             Self::Retire => "retire",
@@ -23879,7 +24425,7 @@ impl<'de> ::serde::Deserialize<'de> for OutcomeDone {
     }
 }
 impl OutcomeDoneKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Done => "done",
         }
@@ -24059,7 +24605,7 @@ impl<'de> ::serde::Deserialize<'de> for OutcomeFailed {
     }
 }
 impl OutcomeFailedKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Failed => "failed",
         }
@@ -24082,7 +24628,7 @@ impl ::std::cmp::PartialEq<&str> for OutcomeFailedKind {
     }
 }
 impl OutcomeKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Done => "done",
             Self::Failed => "failed",
@@ -24173,7 +24719,7 @@ impl<'de> ::serde::Deserialize<'de> for OutcomeUnknown {
     }
 }
 impl OutcomeUnknownKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Unknown => "unknown",
         }
@@ -24215,7 +24761,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageActivationGrantRequest {
     }
 }
 impl PackageActivationPhase {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Armed => "armed",
             Self::ActivationFailed => "activation_failed",
@@ -24419,7 +24965,7 @@ impl<'de> ::serde::Deserialize<'de> for PackageRollbackTransaction {
     }
 }
 impl PlacementInstallState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Complete => "complete",
             Self::Partial => "partial",
@@ -24483,7 +25029,7 @@ impl<'de> ::serde::Deserialize<'de> for PlacementInstallState {
     }
 }
 impl PlacementLoadState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Loaded => "loaded",
             Self::NotLoaded => "not_loaded",
@@ -24541,7 +25087,7 @@ impl<'de> ::serde::Deserialize<'de> for PlacementLoadState {
     }
 }
 impl PrebuiltImageCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::PrebuiltBuildKeyMismatch => "prebuilt.build_key_mismatch",
             Self::PrebuiltNotPinned => "prebuilt.not_pinned",
@@ -24604,7 +25150,7 @@ impl<'de> ::serde::Deserialize<'de> for PrebuiltImageCode {
     }
 }
 impl ProfileAction {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Switch => "switch",
             Self::Keep => "keep",
@@ -24662,7 +25208,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileAction {
     }
 }
 impl ProfileCancellationCause {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Operator => "operator",
             Self::Superseded => "superseded",
@@ -24718,7 +25264,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileCancellationCause {
     }
 }
 impl ProfileChildJobKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RecipeRunSwitchV2 => "recipe.run-switch.v2",
             Self::RecipeStopV2 => "recipe.stop.v2",
@@ -24777,7 +25323,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileChildJobKind {
     }
 }
 impl ProfileChildPhase {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ModelDownload => "model-download",
             Self::ContainerDownload => "container-download",
@@ -24875,7 +25421,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileChildPhase {
     }
 }
 impl ProfileChildSource {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::SwitchAdapter => "switch-adapter",
         }
@@ -24925,7 +25471,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileChildSource {
     }
 }
 impl ProfileDocumentState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Active => "active",
             Self::Draft => "draft",
@@ -24991,7 +25537,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileDocumentState {
     }
 }
 impl ProfileEffectState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::NotIssued => "not-issued",
             Self::Pending => "pending",
@@ -25061,7 +25607,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileEffectState {
     }
 }
 impl ProfileInstallationPolicy {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::KeepCached => "keep-cached",
             Self::Exact => "exact",
@@ -25117,7 +25663,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileInstallationPolicy {
     }
 }
 impl ProfileOperationKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::FleetProfileApply => "fleet-profile.apply",
         }
@@ -25167,7 +25713,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileOperationKind {
     }
 }
 impl ProfileProjectionKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Job => "job",
             Self::ProfileApplication => "profile-application",
@@ -25235,7 +25781,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileProjectionKind {
     }
 }
 impl ProfileReasonCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ProfileAdmissionBusy => "profile.admission_busy",
             Self::ProfileAdmissionEffectBusy => "profile.admission_effect_busy",
@@ -25430,7 +25976,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReasonCode {
     }
 }
 impl ProfileReasonSeverity {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Info => "info",
             Self::Warning => "warning",
@@ -25494,7 +26040,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReasonSeverity {
     }
 }
 impl ProfileReportedPhase {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::FinalVerify => "final_verify",
         }
@@ -25544,7 +26090,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileReportedPhase {
     }
 }
 impl ProfileRetryDisposition {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Wait => "wait",
             Self::Supersede => "supersede",
@@ -25600,7 +26146,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileRetryDisposition {
     }
 }
 impl ProfileSwitchChildKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Install => "install",
             Self::Run => "run",
@@ -25664,7 +26210,7 @@ impl<'de> ::serde::Deserialize<'de> for ProfileSwitchChildKind {
     }
 }
 impl ProgressPhase {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Queued => "queued",
             Self::Pending => "pending",
@@ -25802,7 +26348,7 @@ impl<'de> ::serde::Deserialize<'de> for ProgressPhase {
     }
 }
 impl ProjectionCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::CpuLowClock => "cpu.low-clock",
             Self::FleetFrameBudgetExceeded => "fleet.frame_budget_exceeded",
@@ -26145,7 +26691,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildCleanupRequest {
     }
 }
 impl RecipeBuildCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::BuildAdapterUnavailable => "build.adapter_unavailable",
             Self::BuildCancellationPending => "build.cancellation_pending",
@@ -26499,7 +27045,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildOptions {
     }
 }
 impl RecipeBuildOptionsFormat {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Oci => "oci",
             Self::Docker => "docker",
@@ -26523,7 +27069,7 @@ impl ::std::cmp::PartialEq<&str> for RecipeBuildOptionsFormat {
     }
 }
 impl RecipeBuildOptionsLayerCompression {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Disabled => "disabled",
             Self::Gzip => "gzip",
@@ -26547,7 +27093,7 @@ impl ::std::cmp::PartialEq<&str> for RecipeBuildOptionsLayerCompression {
     }
 }
 impl RecipeBuildOptionsSquash {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::None => "none",
             Self::New => "new",
@@ -26615,7 +27161,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeBuildRequest {
     }
 }
 impl RecipeImageCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RecipeImageActionInvalid => "recipe_image.action_invalid",
             Self::RecipeImageBuildCancelled => "recipe_image.build_cancelled",
@@ -27154,7 +27700,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeJobRunResult {
     }
 }
 impl RecipeOperationCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RecipeOperationConflict => "recipe.operation_conflict",
             Self::RecipeEvidenceUnproven => "recipe.evidence_unproven",
@@ -27276,7 +27822,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeOperationRequestPayload {
     }
 }
 impl RecipePackageCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RecipePackageCacheUnavailable => "recipe_package.cache_unavailable",
             Self::RecipePackageDigestMismatch => "recipe_package.digest_mismatch",
@@ -27436,6 +27982,58 @@ impl<'de> ::serde::Deserialize<'de> for RecipeReconciliationIdentity {
         Ok(Self {
             installation_id: raw.installation_id,
             plan_digest: raw.plan_digest,
+        })
+    }
+}
+impl RecipeRunDispositionValue {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unowned => "unowned",
+        }
+    }
+}
+impl ::std::ops::Deref for RecipeRunDispositionValue {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for RecipeRunDispositionValue {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for RecipeRunDispositionValue {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RecipeRunDispositionValue {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(
+            deserializer,
+            Some("RecipeRunDispositionValue"),
+        )?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "unowned")]
+            Unowned,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::Unowned => Self::Unowned,
         })
     }
 }
@@ -27640,7 +28238,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeStartPayload {
     }
 }
 impl RecipeStartPayloadPhase {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RankLaunch => "rank-launch",
             Self::CollectiveReadiness => "collective-readiness",
@@ -27778,7 +28376,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeUninstallResult {
     }
 }
 impl RecipeUpdateCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RecipeUpdateClaimLost => "recipe_update.claim_lost",
             Self::RecipeUpdateObservationInvalid => "recipe_update.observation_invalid",
@@ -27849,7 +28447,7 @@ impl<'de> ::serde::Deserialize<'de> for RecipeUpdateCode {
     }
 }
 impl ReconcileCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ReconcileActiveEffectUnknown => "reconcile.active_effect_unknown",
             Self::ReconcileAgentUnavailable => "reconcile.agent_unavailable",
@@ -28044,7 +28642,7 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
     }
 }
 impl ReservationState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Active => "active",
             Self::Promised => "promised",
@@ -28106,7 +28704,7 @@ impl<'de> ::serde::Deserialize<'de> for ReservationState {
     }
 }
 impl ResourceBlockerCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ResourceCapacityUnknown => "resource.capacity_unknown",
             Self::ResourceInsufficient => "resource.insufficient",
@@ -28185,7 +28783,7 @@ impl<'de> ::serde::Deserialize<'de> for ResourceBlockerCode {
     }
 }
 impl ResourcePlanningCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ResourceEnvelopeExceedsCapacity => "resource.envelope_exceeds_capacity",
             Self::ResourceEnvelopeUnverified => "resource.envelope_unverified",
@@ -28336,7 +28934,7 @@ impl<'de> ::serde::Deserialize<'de> for ResourcePlanningCode {
     }
 }
 impl ResourceTerm {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Context => "context",
             Self::Concurrency => "concurrency",
@@ -28393,7 +28991,7 @@ impl<'de> ::serde::Deserialize<'de> for ResourceTerm {
     }
 }
 impl ResourceTermProblem {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Unknown => "unknown",
             Self::EvidenceInvalid => "evidence_invalid",
@@ -28455,7 +29053,7 @@ impl<'de> ::serde::Deserialize<'de> for ResourceTermProblem {
     }
 }
 impl RoutePublicationState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::WithdrawalPending => "withdrawal-pending",
             Self::RoutesWithdrawn => "routes-withdrawn",
@@ -28523,7 +29121,7 @@ impl<'de> ::serde::Deserialize<'de> for RoutePublicationState {
     }
 }
 impl RouteState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Withdrawn => "withdrawn",
             Self::Pending => "pending",
@@ -28584,7 +29182,7 @@ impl<'de> ::serde::Deserialize<'de> for RouteState {
     }
 }
 impl RunAdmissionCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RunPlanInvalid => "run.plan_invalid",
             Self::RunPlanStale => "run.plan_stale",
@@ -28691,7 +29289,7 @@ impl<'de> ::serde::Deserialize<'de> for RunAdmissionCode {
     }
 }
 impl RunDegradedReason {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ExternalMember => "external-member",
             Self::MappingIncomplete => "mapping-incomplete",
@@ -28793,7 +29391,7 @@ impl<'de> ::serde::Deserialize<'de> for RunLifecycleRecord {
     }
 }
 impl RunState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Planned => "planned",
             Self::Starting => "starting",
@@ -28866,7 +29464,7 @@ impl<'de> ::serde::Deserialize<'de> for RunState {
     }
 }
 impl RunSwitchCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RunSwitchActiveRunConflict => "run-switch.active-run-conflict",
             Self::RunSwitchAdvanceFailed => "run-switch.advance-failed",
@@ -30010,7 +30608,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimeGenerationFence {
     }
 }
 impl RuntimeImageCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RegistryDestinationForbidden => "registry.destination_forbidden",
             Self::RegistryDigestMismatch => "registry.digest_mismatch",
@@ -30218,7 +30816,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimeImageCode {
     }
 }
 impl RuntimePreflightCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::RuntimePreflightChildMissing => "runtime_preflight.child_missing",
             Self::RuntimePreflightExecutionFailed => "runtime_preflight.execution_failed",
@@ -30340,7 +30938,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightFinding {
     }
 }
 impl RuntimePreflightFindingCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::PreflightFindingArchitectureMismatch => "preflight_finding.architecture_mismatch",
             Self::PreflightFindingAvailable => "preflight_finding.available",
@@ -31009,7 +31607,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightFindingCode {
     }
 }
 impl RuntimePreflightFindingStatus {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Passed => "passed",
             Self::Failed => "failed",
@@ -31059,7 +31657,7 @@ impl<'de> ::serde::Deserialize<'de> for RuntimePreflightRequest {
     }
 }
 impl RuntimePreflightRequestFabricConnectivity {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Connected => "connected",
@@ -31125,7 +31723,7 @@ impl<'de> ::serde::Deserialize<'de> for SecurityRefusal {
     }
 }
 impl SecurityRefusalCategory {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::SecurityRefusal => "security-refusal",
         }
@@ -31148,7 +31746,7 @@ impl ::std::cmp::PartialEq<&str> for SecurityRefusalCategory {
     }
 }
 impl SecurityRefusalReason {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::X401 => "401",
             Self::X403 => "403",
@@ -31461,7 +32059,7 @@ impl<'de> ::serde::Deserialize<'de> for SitePorts {
     }
 }
 impl SourceBundleCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::BundleArchiveTooLarge => "bundle.archive_too_large",
             Self::BundleDigestInvalid => "bundle.digest_invalid",
@@ -31664,7 +32262,7 @@ impl<'de> ::serde::Deserialize<'de> for SourceBundleManifest {
     }
 }
 impl SourcePolicyCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::ComposeCapabilities => "compose.capabilities",
             Self::ComposeDevices => "compose.devices",
@@ -31875,7 +32473,7 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyFresh {
     }
 }
 impl SparkApplyFreshOperation {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Fresh => "fresh",
         }
@@ -31965,7 +32563,7 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyPair {
     }
 }
 impl SparkApplyPairOperation {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Pair => "pair",
         }
@@ -32005,7 +32603,7 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyRecover {
     }
 }
 impl SparkApplyRecoverOperation {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Recover => "recover",
         }
@@ -32051,7 +32649,7 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyReenroll {
     }
 }
 impl SparkApplyReenrollOperation {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Reenroll => "reenroll",
         }
@@ -32091,7 +32689,7 @@ impl<'de> ::serde::Deserialize<'de> for SparkApplyUpgrade {
     }
 }
 impl SparkApplyUpgradeOperation {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Upgrade => "upgrade",
         }
@@ -32164,7 +32762,7 @@ impl<'de> ::serde::Deserialize<'de> for SparkHostMapping {
     }
 }
 impl StateAlias {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::WaitingForOperator => "waiting-for-operator",
             Self::Cancelling => "cancelling",
@@ -32229,7 +32827,7 @@ impl<'de> ::serde::Deserialize<'de> for StateAlias {
     }
 }
 impl StateWriteKind {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Attribute => "attribute",
             Self::DictItem => "dict-item",
@@ -32295,7 +32893,7 @@ impl<'de> ::serde::Deserialize<'de> for StateWriteKind {
     }
 }
 impl StopOutcome {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Confirmed => "confirmed",
             Self::Unconfirmed => "unconfirmed",
@@ -32348,7 +32946,7 @@ impl<'de> ::serde::Deserialize<'de> for StopOutcome {
     }
 }
 impl StopPlanCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::StopCapacityReleaseDeferred => "stop.capacity_release_deferred",
             Self::StopRankMembershipChanged => "stop.rank_membership_changed",
@@ -32414,7 +33012,7 @@ impl<'de> ::serde::Deserialize<'de> for StopPlanCode {
     }
 }
 impl StorageDemandCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::StorageEvicting => "storage.evicting",
             Self::StorageInsufficientAfterEviction => "storage.insufficient_after_eviction",
@@ -32473,7 +33071,7 @@ impl<'de> ::serde::Deserialize<'de> for StorageDemandCode {
     }
 }
 impl SupersedeCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::SupersededByIntent => "superseded-by-intent",
             Self::SupersededByRetry => "superseded-by-retry",
@@ -32562,7 +33160,7 @@ impl<'de> ::serde::Deserialize<'de> for SupervisorAcknowledgement {
     }
 }
 impl SupervisorAcknowledgementState {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Maintenance => "maintenance",
             Self::Published => "published",
@@ -32657,7 +33255,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
     }
 }
 impl TopologyCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::TopologyFabricInsufficient => "topology.fabric_insufficient",
             Self::TopologyInvalid => "topology.invalid",
@@ -32723,7 +33321,7 @@ impl<'de> ::serde::Deserialize<'de> for TopologyCode {
     }
 }
 impl UninstallPlanCode {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::UninstallAbandonNeverInstalled => "uninstall.abandon-never-installed",
             Self::UninstallActiveRun => "uninstall.active_run",
@@ -32820,7 +33418,7 @@ impl<'de> ::serde::Deserialize<'de> for UnknownError {
     }
 }
 impl UnknownErrorCategory {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Unknown => "unknown",
         }
@@ -32843,7 +33441,7 @@ impl ::std::cmp::PartialEq<&str> for UnknownErrorCategory {
     }
 }
 impl WaitReason {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::OperationNotEnabled => "operation-not-enabled",
             Self::AgentUpgradeAwaitingIdentity => "agent-upgrade-awaiting-identity",
@@ -32960,7 +33558,7 @@ impl<'de> ::serde::Deserialize<'de> for WaitReason {
     }
 }
 impl WaitVerdict {
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Keep => "KEEP",
             Self::SelfHeal => "SELF-HEAL",

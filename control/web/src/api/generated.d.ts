@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 a97ce0818c6793e04dbfb40a57ed4600d6d4bc0b837048ebf495d7f1abe5d0a1. Do not edit.
+// Generated from canonical OpenAPI SHA256 a26289606b7401b436744d040867a0bff867cee2699a3210a801530133525899. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -1206,6 +1206,18 @@ export interface components {
          */
         AdmissionCode: "admission.capacity_busy";
         /**
+         * AgentClientDecision
+         * @description The client's bounded observation decision after a request outcome.
+         * @enum {string}
+         */
+        AgentClientDecision: "retry" | "record" | "exit" | "defer";
+        /**
+         * AgentDiagnosticOperation
+         * @description Stable diagnostic origins for client requests and local preparation.
+         * @enum {string}
+         */
+        AgentDiagnosticOperation: "controller.request" | "workload.preload_memory" | "model.materialization_copy_fallback";
+        /**
          * AgentEvidenceCode
          * @description Optional agent evidence that was dropped so the mandatory report is kept.
          *
@@ -1329,6 +1341,12 @@ export interface components {
          * @enum {string}
          */
         AgentResultState: "succeeded" | "failed" | "cancelled" | "observing";
+        /**
+         * AgentTransportKind
+         * @description Safe transport classifications; unknown never invents a network cause.
+         * @enum {string}
+         */
+        AgentTransportKind: "timeout" | "connect" | "body" | "protocol" | "unknown";
         /** AgentUpgradeDiagnosticsResponse */
         AgentUpgradeDiagnosticsResponse: {
             expected_identity: components["schemas"]["AgentUpgradeIdentityResponse"];
@@ -5797,7 +5815,10 @@ export interface components {
          *     from this one module.
          */
         LifecycleVocabulary: {
+            agent_client_decision: components["schemas"]["AgentClientDecision"];
+            agent_diagnostic_operation: components["schemas"]["AgentDiagnosticOperation"];
             agent_result_state: components["schemas"]["AgentResultState"];
+            agent_transport_kind: components["schemas"]["AgentTransportKind"];
             artifact_preparation: components["schemas"]["ArtifactPreparation"];
             asset_availability: components["schemas"]["AssetAvailability"];
             blocker_category: components["schemas"]["BlockerCategory"];
@@ -5823,6 +5844,7 @@ export interface components {
             model_file_state: components["schemas"]["ModelFileState"];
             observation_cause: components["schemas"]["ObservationCause"];
             observed_assignment_state: components["schemas"]["ObservedAssignmentState"];
+            oci_failure_category: components["schemas"]["OciFailureCategory"];
             operator_action: components["schemas"]["OperatorActionName"];
             operator_surface: components["schemas"]["OperatorSurface"];
             outcome_kind: components["schemas"]["OutcomeKind"];
@@ -5843,6 +5865,7 @@ export interface components {
             profile_retry_disposition: components["schemas"]["ProfileRetryDisposition"];
             profile_switch_child_kind: components["schemas"]["ProfileSwitchChildKind"];
             progress_phase: components["schemas"]["ProgressPhase"];
+            recipe_run_disposition: components["schemas"]["RecipeRunDispositionValue"];
             reservation_state: components["schemas"]["ReservationState"];
             resource_blocker_code: components["schemas"]["ResourceBlockerCode"];
             route_publication_state: components["schemas"]["RoutePublicationState"];
@@ -7044,6 +7067,12 @@ export interface components {
          * @enum {string}
          */
         ObservedAssignmentState: "not-placed" | "placed" | "installing" | "installed" | "running" | "degraded";
+        /**
+         * OciFailureCategory
+         * @description Secret-free OCI failure context preserved across the helper boundary.
+         * @enum {string}
+         */
+        OciFailureCategory: "storage-permission-denied" | "storage-not-found" | "process" | "workload" | "runtime" | "image-digest" | "artifact" | "storage" | "metadata" | "capacity" | "reconciliation-busy";
         /**
          * OfflineStopIntent
          * @description Exact Stop orders retained for reconciliation after node contact returns.
@@ -9707,6 +9736,12 @@ export interface components {
              */
             occurred_at: string;
         };
+        /**
+         * RecipeRunDispositionValue
+         * @description The header verdict for a run the Controller never owned.
+         * @enum {string}
+         */
+        RecipeRunDispositionValue: "unowned";
         /** RecipeRunPayload */
         RecipeRunPayload: {
             /** Alias */
