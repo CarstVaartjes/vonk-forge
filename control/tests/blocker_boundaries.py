@@ -1139,7 +1139,16 @@ def write_counts(
     return {
         **document,
         "max_debt": sum(1 for entry in kept_waits if entry["verdict"] != "KEEP"),
-        "debt_ceiling": {**document["debt_ceiling"], **debt},  # type: ignore[dict-item]
+        # Regeneration cannot authorize additional debt. Preserve an exceeded
+        # ceiling so the gate reports the unfinished product behavior instead
+        # of silently raising its allowance to the current scan.
+        "debt_ceiling": {
+            **document["debt_ceiling"],  # type: ignore[dict-item]
+            **{
+                key: min(value, document["debt_ceiling"][key])  # type: ignore[index]
+                for key, value in debt.items()
+            },
+        },
         "categorized_raises": _lowered_guard(document, guard),
         "operator_waits": kept_waits,
         "fail_closed": families,

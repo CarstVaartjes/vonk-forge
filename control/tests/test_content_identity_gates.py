@@ -37,7 +37,6 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
-    RunSwitchOperationConflict,
     RunSwitchOperationService,
     _validate_artifact_execution,
 )
@@ -296,11 +295,6 @@ def test_the_operator_reviewed_image_accepts_a_receipt_recorded_by_another_build
     _validate_artifact_execution(
         plan, phase, {"runtime_image": receipt}, expected_image=expected
     )
-    # A different image is still refused, naming what differs.
-    with pytest.raises(RunSwitchOperationConflict, match="image_digest"):
-        _validate_artifact_execution(
-            plan,
-            phase,
-            {"runtime_image": {**receipt, "image_digest": "sha256:" + "e" * 64}},
-            expected_image=expected,
-        )
+    # Changed-content observation and bounded fresh admission are exercised
+    # through the worker in test_run_switch_observation_lifetime, rather than
+    # asserting an internal exception type here.

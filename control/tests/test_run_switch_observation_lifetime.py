@@ -14,14 +14,20 @@ from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchCleanupResult,
+    RunSwitchPhase,
+    RunSwitchRuntimeImageResult,
     RunSwitchTargetTransferEvidenceResult,
 )
 from vonk_control.run_switch_observation_contract import RunSwitchObservedImageIdentity
-from vonk_control.run_switch_operations import PhaseExecution
+from vonk_control.run_switch_operations import (
+    PhaseExecution,
+    _validate_artifact_execution,
+)
 from vonk_control.run_switch_operations.constants import _FINAL_VERIFICATION_MAX_SECONDS
 from vonk_control.run_switch_operations.image_receipts import (
     _require_profile_runtime_image,
 )
+from vonk_control.runtime_image_preparation import RuntimeImageReceipt
 
 from .non_blocking import assert_ended_without_blocking
 from .test_recipe_operations import installed_recipe, setup_services
@@ -30,6 +36,7 @@ from .test_run_switch_operations import (
     CompleteArtifactInspector,
     RecordingArtifactExecutor,
     _request,
+    _runtime_receipt,
     _service,
 )
 
@@ -41,6 +48,7 @@ from .test_run_switch_operations import (
         "nas-eviction",
         "unplanned-cleanup",
         "verify-image",
+        "prepare-image",
         "verify-archive",
         "profile-size",
         "profile-architecture",
@@ -67,7 +75,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
                 ProfileChildPhase.TRANSFER
                 if fault == "transfer-bytes"
                 else ProfileChildPhase.VERIFY
-                if fault.startswith(("verify-", "profile-"))
+                if fault.startswith(("verify-", "profile-", "prepare-"))
                 else ProfileChildPhase.CLEANUP
             ):
                 self.calls.append(phase.kind)
@@ -78,6 +86,32 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
                         node_id=nodes[0],
                         copied_bytes=0,
                     ).model_copy(update={"copied_bytes": -1})
+                elif fault == "prepare-image":
+                    # The phase adapter returns a validly shaped but stale image
+                    # projection. No ingress verification or denied grant occurs.
+                    prepared = RuntimeImageReceipt.model_validate_json(
+                        canonical_message(
+                            _runtime_receipt(plan, image="sha256:" + "f" * 64)
+                        )
+                    )
+                    prepare_phase = RunSwitchPhase.model_construct(
+                        index=phase.index,
+                        kind=ProfileChildPhase.PREPARE.value,
+                        subphase="runtime-image",
+                    )
+                    _validate_artifact_execution(
+                        plan,
+                        prepare_phase,
+                        RunSwitchRuntimeImageResult(
+                            phase=ProfileChildPhase.PREPARE.value,
+                            subphase="runtime-image",
+                            runtime_image=prepared,
+                            image_digest=prepared.image_digest,
+                            oci_layout_sha256=prepared.oci_archive_sha256,
+                            image_bytes=prepared.image_bytes,
+                        ),
+                    )
+                    return super().execute(plan, phase, **kwargs)
                 elif fault.startswith("profile-"):
                     expected = RuntimeImageIdentity(
                         image_digest=plan.image_digest,
@@ -183,7 +217,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             ProfileChildPhase.TRANSFER
             if fault == "transfer-bytes"
             else ProfileChildPhase.VERIFY
-            if fault.startswith(("verify-", "profile-"))
+            if fault.startswith(("verify-", "profile-", "prepare-"))
             else ProfileChildPhase.CLEANUP
         )
         for _ in range(10):

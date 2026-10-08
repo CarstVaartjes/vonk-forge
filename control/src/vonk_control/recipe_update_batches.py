@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     RuntimeImageCode,
     SecurityRefusalReason,
     WaitReason,
+    canonical_message,
 )
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -907,18 +908,33 @@ class RecipeUpdateBatches:
                         "child receipt does not establish the accepted content and request",
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
-                child.operation_id = observed.id
-                child.state = cast(UpdateState, observed.state)
-                child.failure = (
-                    None
-                    if observed.failure is None
-                    else RecipeUpdateFailure(
-                        code=str(observed.failure["code"]),
-                        detail=str(redact_text(str(observed.failure["detail"])))[:512],
-                        retryable=observed.failure.get("retryable") is True,
-                    )
+                # Revalidate the entire peer projection before adopting any
+                # child identity or terminal state. A model instance can contain
+                # unchecked nested data (for example after model_copy); required
+                # failure fields must never be defaulted or indexed unchecked.
+                observed = RecipeImageAvailabilityView.model_validate_json(
+                    canonical_message(observed.model_dump(mode="json", by_alias=True)),
+                    strict=True,
                 )
-                child.retry_at = None
+                failure = observed.failure_evidence
+                candidate = child.model_copy(
+                    update={
+                        "operation_id": observed.id,
+                        "state": observed.state,
+                        "failure": None
+                        if failure is None
+                        else RecipeUpdateFailure(
+                            code=failure.code,
+                            detail=str(redact_text(failure.detail))[:512],
+                            retryable=failure.retryable,
+                        ),
+                        "retry_at": None,
+                    }
+                )
+                child = RecipeUpdateChild.model_validate_json(
+                    canonical_message(candidate.model_dump(mode="json")), strict=True
+                )
+                document.children[index] = child
             except RecipeUpdateClaimLost:
                 raise
             except (
@@ -940,9 +956,12 @@ class RecipeUpdateBatches:
                     else LifecycleState.FAILED
                 )
                 child.retry_at = (
-                    now
-                    + timedelta(
-                        seconds=min(300, max(2, error.retry_after_seconds or 2))
+                    min(
+                        observation_deadline,
+                        now
+                        + timedelta(
+                            seconds=min(300, max(2, error.retry_after_seconds or 2))
+                        ),
                     )
                     if retryable
                     else None
@@ -962,7 +981,11 @@ class RecipeUpdateBatches:
                     detail="child operation evidence is unavailable",
                     retryable=retryable,
                 )
-                child.retry_at = now + _OBSERVATION_INTERVAL if retryable else None
+                child.retry_at = (
+                    min(observation_deadline, now + _OBSERVATION_INTERVAL)
+                    if retryable
+                    else None
+                )
             child.observed_at = now
             document.next_child = (index + 1) % len(document.children)
         with self.sessions.begin() as session:

@@ -8,6 +8,7 @@ ratchets. Bootstrap is deliberately separate from routine maintenance.
 from __future__ import annotations
 
 import ast
+import gc
 import json
 import re
 import sys
@@ -960,6 +961,24 @@ def source_files(mode: str) -> list[Path]:
 
 
 def scan_sites(mode: str) -> list[Site]:
+    """Scan all sources without repeatedly collecting the retained AST cache.
+
+    The cache keeps every product tree alive for the other inventory scanners;
+    automatic cyclic collection during each new parse repeatedly traverses that
+    growing live graph. ASTs created by this scan have no cycles. Restore the
+    caller's collection policy even if a source cannot be read or parsed.
+    """
+    collecting = gc.isenabled()
+    if collecting:
+        gc.disable()
+    try:
+        return _scan_sites(mode)
+    finally:
+        if collecting:
+            gc.enable()
+
+
+def _scan_sites(mode: str) -> list[Site]:
     sites: list[Site] = []
     modules = []
     for path in source_files(mode):

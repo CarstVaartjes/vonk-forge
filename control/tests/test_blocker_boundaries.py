@@ -522,6 +522,18 @@ def test_write_counts_lowers_and_never_adds() -> None:
     assert evaluate_raise_gate(raises[:-5], fewer) == []
 
 
+def test_regeneration_cannot_authorize_surviving_bookkeeping_debt() -> None:
+    """Catches baseline regeneration paying debt with an increased allowance."""
+    document = load_allowlist()
+    waits = scan_waits()
+    raises = scan_raises()
+    tightened = copy.deepcopy(document)
+    tightened["debt_ceiling"] = {"total": 0, "unaudited": 0}
+    rewritten = write_counts(tightened, waits, raises)
+    assert rewritten["debt_ceiling"] == tightened["debt_ceiling"]
+    assert evaluate_raise_gate(raises, rewritten)
+
+
 def test_the_committed_file_is_what_the_writer_produces() -> None:
     text = ALLOWLIST_PATH.read_text(encoding="utf-8")
     assert dump_document(json.loads(text)) == text

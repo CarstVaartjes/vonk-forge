@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from pydantic import BaseModel, ValidationError
 from vonk_agent_protocol import (
     RunSwitchCode,
-    SecurityRefusalReason,
     WaitReason,
     canonical_message,
 )
@@ -25,7 +24,7 @@ from ..run_switch_observation_contract import (
     RunSwitchArtifactGuardEvidence,
     RunSwitchObservedImageIdentity,
 )
-from .errors import RunSwitchRefused, RunSwitchRetryLater
+from .errors import RunSwitchRetryLater
 from .image_receipts import _require_profile_runtime_image
 from .result_helpers import _phase_result
 
@@ -87,8 +86,9 @@ def _validate_artifact_execution(
             receipt,
         )
         if "image_digest" in differing:
-            raise RunSwitchRefused(
-                SecurityRefusalReason.RUN_SWITCH_RUNTIME_IMAGE_PREPARATION_DIGEST_MISMATCH.value
+            raise RunSwitchRetryLater(
+                RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
+                reason=WaitReason.SCOPE_CHANGED,
             )
         if "archive_sha256" in differing:
             raise RunSwitchRetryLater(
@@ -149,10 +149,6 @@ def _validate_artifact_execution(
                 RunSwitchCode.ARTIFACT_VERIFICATION_RESULT_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
-        if verification.verified is not True:
-            raise RunSwitchRefused(
-                SecurityRefusalReason.RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED.value
-            )
         # Build row IDs identify producers, not image bytes. Bind verification
         # to the reviewed content whenever that content was known at acceptance.
         verified_image = ImageContent(

@@ -7,6 +7,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -34,6 +35,7 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .non_blocking import assert_ended_without_blocking
 from .runtime_image_fixtures import place_test_image
 from .test_recipe_image_availability import (
     ARCHIVE,
@@ -1341,3 +1343,79 @@ def test_invalid_child_observation_repairs_then_has_a_bounded_end_and_fresh_admi
     assert service.get_operator_operation(broken.id).state == LifecycleState.FAILED
     admitted = _start(service, [next(iter(recipes))])
     assert admitted.id != broken.id and admitted.state == LifecycleState.QUEUED
+
+
+@pytest.mark.parametrize("missing_field", ["code", "detail"])
+@pytest.mark.parametrize("repair", [False, True])
+def test_unreadable_child_failure_reobserves_exact_request_across_restart(
+    update_env, monkeypatch, missing_field, repair
+):
+    """Missing peer failure fields cannot adopt terminal state or duplicate work."""
+    from vonk_agent_protocol import RecipeUpdateCode
+    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
+    from vonk_control.operation_contract import AvailabilityOperationFailure
+
+    sessions, recipes, now, fresh = update_env
+    service = fresh()
+    parent = _start(service, [next(iter(recipes))])
+    service.run_update_claim(service.claim_update(owner="worker"))
+    child = service.get_operator_operation(parent.id).children[0]
+    assert child.operation_id is not None
+    observed = service.get_operator_request(child.request_key, actor="operator")
+    failure = AvailabilityOperationFailure(
+        code=RecipeUpdateCode.OBSERVATION_INVALID,
+        detail="child evidence unavailable",
+    ).model_dump(mode="json")
+    del failure[missing_field]
+    damaged = observed.model_copy(
+        update={
+            "state": LifecycleState.FAILED.value,
+            "failure_evidence": AvailabilityOperationFailure.model_construct(**failure),
+        }
+    )
+    with sessions() as session:
+        identities = set(session.scalars(select(Job.id)))
+
+    # A new service reads the same persisted parent and exact child request.
+    service = fresh()
+    monkeypatch.setattr(service, "get_operator_request", lambda *_a, **_k: damaged)
+    now[0] += timedelta(seconds=2) if repair else CANCEL_BUDGET - timedelta(seconds=1)
+    service.run_update_claim(service.claim_update(owner="worker"))
+    waiting = service.get_operator_operation(parent.id)
+    assert waiting.children[0].state != LifecycleState.FAILED
+    assert waiting.children[0].operation_id == child.operation_id
+    assert waiting.children[0].retry_at is not None
+    assert waiting.children[0].retry_at <= parent.created_at + CANCEL_BUDGET
+    with sessions() as session:
+        assert set(session.scalars(select(Job.id))) == identities
+
+    service = fresh()
+    if repair:
+        now[0] = waiting.children[0].retry_at
+        service.run_update_claim(service.claim_update(owner="worker"))
+        repaired = service.get_operator_operation(parent.id).children[0]
+        assert repaired.operation_id == child.operation_id
+        assert repaired.retry_at is None and repaired.failure is None
+    else:
+        monkeypatch.setattr(service, "get_operator_request", lambda *_a, **_k: damaged)
+        now[0] += CANCEL_BUDGET
+        service.run_update_claim(service.claim_update(owner="worker"))
+        ended = service.get_operator_operation(parent.id)
+        assert ended.state == LifecycleState.FAILED
+        assert ended.children[0].retry_at is None
+
+        def failure_evidence(receipt):
+            assert receipt.children[0].failure is not None
+            assert receipt.children[0].failure.code
+            assert not receipt.children[0].failure.retryable
+
+        _, admitted = assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            parent,
+            end=lambda _operation: ended,
+            fresh=lambda _world: _start(service, [next(iter(recipes))]),
+            assert_reason=failure_evidence,
+        )
+        assert admitted.id != parent.id and admitted.state == LifecycleState.QUEUED
+    with sessions() as session:
+        assert set(session.scalars(select(Job.id))).issuperset(identities)
