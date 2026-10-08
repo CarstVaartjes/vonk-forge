@@ -110,6 +110,11 @@ from .run_switch_contract import (
     RunSwitchDistributionChildResult,
     RunSwitchOperationResult,
 )
+from .run_switch_journal_contract import (
+    RunSwitchJournalRepairEndEvidence,
+    RunSwitchJournalRepairEvidence,
+    RunSwitchJournalRepairPendingState,
+)
 from .stored_documents import RouteClaimMarker
 from .stored_json import bind
 
@@ -282,3 +287,13 @@ bind(
 )
 bind("agent_operation_attempts", "progress", OperationProgress, nullable=True)
 bind("agent_operation_attempts", "result", AgentResultPayload, nullable=True)
+
+bind(
+    "run_switch_journal_repairs",
+    "evidence",
+    RunSwitchJournalRepairEvidence | RunSwitchJournalRepairEndEvidence,
+)
+
+bind(
+    "run_switch_journal_repair_pending", "progress", RunSwitchJournalRepairPendingState
+)

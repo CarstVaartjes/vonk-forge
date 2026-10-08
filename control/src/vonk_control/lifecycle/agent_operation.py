@@ -773,6 +773,18 @@ class AgentOperationAdapter:
         operation.retry_due_at = None
 
     @staticmethod
+    def end_unobserved_attempt(attempt: AgentOperationAttempt, now: datetime) -> None:
+        """Fence an abandoned idempotent attempt without fabricating a receipt.
+
+        Its retained result and progress remain historical evidence. Failed
+        means this attempt ended, not that remote files were removed.
+        """
+        if attempt.state == State.RUNNING.value or aos.attempt_is_observing(attempt):
+            attempt.state = State.FAILED.value
+            attempt.observation_cause = None
+            attempt.lease_deadline = aware(now)
+
+    @staticmethod
     def expire_attempt(attempt: AgentOperationAttempt) -> None:
         """An attempt that can no longer report is ``expired``; its fence stays."""
 

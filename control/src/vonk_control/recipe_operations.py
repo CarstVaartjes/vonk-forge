@@ -9938,6 +9938,42 @@ def _current_phase_index(
     return None
 
 
+def current_recipe_progress_attribution(
+    session: Session, job: Job, *, now: datetime
+) -> (
+    tuple[OperationProgress, tuple[tuple[AgentOperation, AgentOperationAttempt], ...]]
+    | None
+):
+    """Read the canonical projection with the exact native samples that produced it.
+
+    This is evidence only. It neither advances nor authorizes a child. Callers
+    committing derived state must lock/recheck these same native rows themselves.
+    """
+    progress = _project_recipe_operation_progress(session, job, now=now)
+    if progress is None:
+        return None
+    rows = tuple(
+        session.execute(
+            select(AgentOperation, AgentOperationAttempt)
+            .join(
+                AgentOperationAttempt,
+                (AgentOperationAttempt.operation_id == AgentOperation.id)
+                & (AgentOperationAttempt.attempt == AgentOperation.current_attempt),
+            )
+            .where(AgentOperation.parent_job_id == job.id)
+            .order_by(AgentOperation.node_id, AgentOperation.id)
+        )
+    )
+    measured = tuple(
+        (operation, attempt)
+        for operation, attempt in rows
+        if stored_progress(attempt) is not None
+    )
+    if not measured:
+        return None
+    return progress, measured
+
+
 def _project_recipe_operation_progress(
     session: Session, job: Job, *, now: datetime
 ) -> OperationProgress | None:

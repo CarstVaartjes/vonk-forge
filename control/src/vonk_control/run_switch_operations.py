@@ -32,7 +32,7 @@ import httpx2
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, object_session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     AgentFailureResult,
@@ -205,6 +205,7 @@ from .profile_capacity import (
 from .recipe_build_cancellation import (
     BuildConsumerError,
     lock_run_switch_build_dependency,
+    needs_container_build,
 )
 from .recipe_builds import RecipeBuildAdmissionBusy, RecipeBuildPlan
 from .recipe_execution_contract import (
@@ -3606,6 +3607,12 @@ class RunSwitchOperationService:
         self, operation_id: str, *, actor: str, request_key: str, reason: str
     ) -> RunSwitchOperation:
         """Stop at the next safe phase boundary, keeping shared immutable work."""
+        from .run_switch_journal_repair import (
+            is_zero_transfer_journal_fault,
+            record_repair_cancellation,
+            try_repair_zero_transfer_journal,
+        )
+
         stop_run_id: str | None = None
         profile_application_id: str | None = None
         cancellation = RunSwitchCancellation(
@@ -3614,43 +3621,91 @@ class RunSwitchOperationService:
             reason=" ".join(reason.split()),
             requested_at=_now(self._clock),
         )
+        with self._sessions() as session:
+            snapshot = session.get(Job, operation_id)
+            if (
+                snapshot is not None
+                and snapshot.kind in _OPERATION_KINDS
+                and snapshot.state not in _LIVE_STATES
+            ):
+                return self._operation_view(snapshot)
+            damaged = snapshot is not None and is_zero_transfer_journal_fault(snapshot)
+        if damaged:
+            record_repair_cancellation(self._sessions, operation_id, cancellation)
+            try_repair_zero_transfer_journal(
+                self._sessions, operation_id, _now(self._clock)
+            )
+            return self.get(operation_id)
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
                 raise MissingRecord(operation_id)
             progress = _read_progress(job.result)
-            previous = progress.cancellation
-            if previous:
-                if (previous.request_key, previous.actor, previous.reason) != (
-                    cancellation.request_key,
-                    cancellation.actor,
-                    cancellation.reason,
-                ):
-                    raise RunSwitchRequestInvalid(
-                        "run-switch cancellation request was already used differently",
-                        reason=InvalidRequestReason.CONFLICT,
-                    )
-                return self._operation_view(job)
             if job.state not in _LIVE_STATES:
-                raise RunSwitchRequestInvalid("run-switch operation is not cancellable")
-            # A cancel always completes: a plan that cannot be read is unknown,
+                return self._operation_view(job)
+            if progress.cancellation is None:
+                progress.cancellation = cancellation
+                job.result = _persisted_result(progress)
+                job.updated_at = cancellation.requested_at
+        # The intent above is committed before a build lock, child observation
+        # or Stop admission can fail. Repeated cancels retain that first intent.
+        with self._sessions.begin() as session:
+            # Read identities first, then acquire the build before its parent.
+            # Detachment and last-consumer cleanup must share this NOWAIT fence.
+            snapshot = session.get(Job, operation_id)
+            if snapshot is None:
+                return self.get(operation_id)
+            snapshot_plan = _stored_job_plan(snapshot)
+            snapshot_index = _read_progress(snapshot.result).phase_index
+            if snapshot_plan is not None:
+                try:
+                    lock_run_switch_build_dependency(
+                        session,
+                        snapshot_plan,
+                        phase_index=snapshot_index,
+                        allow_cancelling=True,
+                    )
+                except BuildConsumerError as error:
+                    raise RunSwitchRetryLater(
+                        f"{error.code}: {error}",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ) from error
+            try:
+                job = session.scalar(
+                    select(Job)
+                    .where(Job.id == operation_id)
+                    .with_for_update(nowait=True)
+                    .execution_options(populate_existing=True)
+                )
+            except DBAPIError as error:
+                if getattr(error.orig, "sqlstate", None) != "55P03":
+                    raise
+                raise RunSwitchRetryLater(
+                    "run-switch cancellation owner is busy",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
+            if job is None:
+                return self.get(operation_id)
+            if job.state not in _LIVE_STATES:
+                return self._operation_view(job)
+            progress = _read_progress(job.result)
+            if (
+                _stored_job_plan(job) != snapshot_plan
+                or progress.phase_index != snapshot_index
+            ):
+                # Replan in a fresh transaction; never append an earlier lock.
+                raise RunSwitchRetryLater(
+                    "run-switch cancellation boundary changed",
+                    reason=WaitReason.SCOPE_CHANGED,
+                )
+            cancellation = progress.cancellation or cancellation
+            # A recorded cancel is retried: an unreadable plan is unknown,
             # so the cancel treats the operation as possibly started and Stops
             # through the child's run, without the plan's build-dependency lock.
             plan = _stored_job_plan(job)
             profile_application_id = _string_or_none(progress.profile_application_id)
             phase = None
             if plan is not None:
-                try:
-                    lock_run_switch_build_dependency(
-                        session,
-                        plan,
-                        phase_index=require_integer(
-                            progress.phase_index, "phase index"
-                        ),
-                        allow_cancelling=True,
-                    )
-                except BuildConsumerError as error:
-                    raise RunSwitchRequestInvalid(f"{error.code}: {error}") from error
                 phase = plan.phases[
                     min(
                         require_integer(progress.phase_index, "phase index"),
@@ -3922,6 +3977,11 @@ class RunSwitchOperationService:
         due_at = func.replace(
             Job.result["observation_due_at"].as_string(), "Z", "+00:00"
         )
+        deadline_at = func.replace(
+            Job.result["observation_deadline_at"].as_string(), "Z", "+00:00"
+        )
+        from .models import RunSwitchJournalRepairPending
+
         with self._sessions() as session:
             active = (
                 select(Job.id)
@@ -3940,8 +4000,10 @@ class RunSwitchOperationService:
                         Job.state.in_(job_states.words(LifecycleState.NEEDS_OPERATOR)),
                     ),
                     or_(
+                        Job.id.in_(select(RunSwitchJournalRepairPending.job_id)),
                         due_at.is_(None),
                         due_at <= _now(self._clock).isoformat(),
+                        deadline_at <= _now(self._clock).isoformat(),
                         # A cancel in flight is looked at on every tick: it ends as
                         # soon as its child does (its stop attempts are spaced by
                         # the core, not by this clock).
@@ -4013,6 +4075,10 @@ class RunSwitchOperationService:
                     LifecycleState.OBSERVING,
                 ):
                     return
+                if _progress_damaged(job.result):
+                    # An unexpected observer error cannot replace evidence of
+                    # an issued child with the empty projection fallback.
+                    return
                 progress = _read_progress(job.result)
                 code = error_code(error) or RunSwitchCode.ADVANCE_FAILED
                 attempt = (
@@ -4046,6 +4112,14 @@ class RunSwitchOperationService:
         replaced at each check and empty once the operation runs on or settles.
         """
 
+        from .run_switch_journal_repair import is_zero_transfer_journal_fault
+
+        with self._sessions() as session:
+            snapshot = session.get(Job, operation_id)
+            if snapshot is not None and is_zero_transfer_journal_fault(snapshot):
+                # The bounded repair already owns this unknown observation. Do
+                # not turn its NOWAIT refusal into an unbounded wait here.
+                return
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
@@ -7261,6 +7335,47 @@ class RunSwitchOperationService:
 
     def _advance(self, operation_id: str) -> bool:
         now = _now(self._clock)
+        from .run_switch_journal_contract import JournalRepairDisposition
+        from .run_switch_journal_repair import try_repair_zero_transfer_journal
+
+        repair = try_repair_zero_transfer_journal(self._sessions, operation_id, now)
+        if repair != JournalRepairDisposition.NOT_APPLICABLE:
+            # Repair dispatches nothing. The next ordinary turn observes the
+            # same child; ambiguous evidence retains its raw journal and scope.
+            return repair in {
+                JournalRepairDisposition.REPAIRED,
+                JournalRepairDisposition.ENDED,
+            }
+        # A deferred build detachment re-enters the same fenced cancel path,
+        # before child observation can end the parent through the lifecycle core.
+        # A busy boundary leaves only the durable intent and releases all locks;
+        # the worker's bounded polling retries it without a Stop of shared work.
+        with self._sessions() as session:
+            snapshot = session.get(Job, operation_id)
+            plan = _stored_job_plan(snapshot) if snapshot is not None else None
+            progress = _read_progress(snapshot.result) if snapshot is not None else None
+            cancellation = progress.cancellation if progress is not None else None
+            detach_build = (
+                snapshot is not None
+                and snapshot.state in _LIVE_STATES
+                and plan is not None
+                and progress is not None
+                and needs_container_build(plan, progress.phase_index)
+            )
+        if detach_build and cancellation is not None:
+            for _attempt in admission_attempts():
+                try:
+                    self.cancel(
+                        operation_id,
+                        actor=cancellation.actor,
+                        request_key=cancellation.request_key,
+                        reason=cancellation.reason,
+                    )
+                except RunSwitchRetryLater:
+                    # The failed transaction has closed before bounded backoff.
+                    continue
+                return True
+            return False
         if self._refresh_blocked_plan(operation_id, now):
             return True
         with self._sessions() as session:
@@ -8978,6 +9093,55 @@ class RunSwitchOperationService:
             )
             else []
         )
+        repair_due: datetime | None = None
+        from .run_switch_journal_repair import (
+            REPAIR_WAIT,
+            is_zero_transfer_journal_fault,
+        )
+
+        if (
+            persisted_result is None
+            and job.state
+            in {
+                LifecycleState.QUEUED.value,
+                LifecycleState.RUNNING.value,
+                LifecycleState.OBSERVING.value,
+            }
+            and is_zero_transfer_journal_fault(job)
+        ):
+            from .models import RunSwitchJournalRepairPending
+            from .run_switch_journal_contract import RunSwitchJournalRepairPendingState
+
+            view_session = object_session(job)
+            pending = (
+                view_session.get(RunSwitchJournalRepairPending, job.id)
+                if view_session is not None
+                else None
+            )
+            retained = (
+                read_row_column(pending, "progress") if pending is not None else None
+            )
+            if isinstance(retained, RunSwitchJournalRepairPendingState):
+                repair_due = retained.next_attempt_at
+            projected_state = "unknown"
+            blockers = [
+                make_blocker(
+                    REPAIR_WAIT,
+                    job.status_reason
+                    or f"{REPAIR_WAIT}: waiting for exact accepted child evidence",
+                    node_ids=list(job.targets),
+                )
+            ]
+        from .run_switch_journal_contract import JournalRepairCode
+
+        if (job.status_reason or "").startswith(JournalRepairCode.EXHAUSTED):
+            blockers = [
+                make_blocker(
+                    JournalRepairCode.EXHAUSTED,
+                    job.status_reason or JournalRepairCode.EXHAUSTED,
+                    node_ids=list(job.targets),
+                )
+            ]
         return RunSwitchOperation(
             operation_id=job.id,
             kind=_OPERATION_KIND_ADAPTER.validate_python(job.kind, strict=True),
@@ -9003,7 +9167,8 @@ class RunSwitchOperationService:
             "recorded identity.",
             result=persisted_result,
             blockers=blockers,
-            next_attempt_at=(
+            next_attempt_at=repair_due
+            or (
                 persisted_result.observation_due_at
                 if blockers and persisted_result is not None
                 else None
@@ -9078,7 +9243,7 @@ class RunSwitchOperationProvider:
                     .limit(limit)
                 )
             )
-        items = tuple(self._item(job) for job in jobs[:limit])
+            items = tuple(self._item(job) for job in jobs[:limit])
         return OperationListPage(items, None, total)
 
     def get_operation(self, operation_id: str) -> Mapping[str, object]:
@@ -9172,10 +9337,13 @@ class RunSwitchOperationProvider:
                 and operation.result.retryable
                 else ["cancel"]
                 if operation.state
-                in job_states.words(
-                    LifecycleState.QUEUED,
-                    LifecycleState.RUNNING,
-                    LifecycleState.OBSERVING,
+                in (
+                    *job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.OBSERVING,
+                    ),
+                    "unknown",
                 )
                 and not (operation.result and operation.result.cancellation)
                 and (

@@ -236,6 +236,8 @@ module defines its own.
 | `control/src/vonk_control/resource_planning_contract.py` | controller-contract | 2 | Canonical nested recipe topology and resource settings read projections. |
 | `control/src/vonk_control/route_bundle_contract.py` | controller-contract | 6 | The published route bundle (`routes.json`) and the identity document whose digest names a candidate bundle. |
 | `control/src/vonk_control/run_switch_contract.py` | controller-contract | 66 | Strict, transport-neutral contracts for high-level Run and Switch work. |
+| `control/src/vonk_control/run_switch_identity_contract.py` | controller-contract | 1 | Shared Run/Switch request identity constraints and typed cancellation intent independent of ORM and workers. |
+| `control/src/vonk_control/run_switch_journal_contract.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
 | `control/src/vonk_control/run_switch_observation_contract.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
 | `control/src/vonk_control/runtime_image_preparation.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
 | `control/src/vonk_control/runtime_spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
@@ -255,3 +257,38 @@ module defines its own.
 | TypeScript hand-written API data shapes | 1 named by the owner (`CliTokenDownload`), plus an inline body type and a blocker shape | 0; 44 UI-only shapes allowlisted with reasons |
 | Python duplicate model groups (same name or same bases and fields) | 12 | 0 |
 | Python copies of contract words | 2 (`cli_states.py`, `route_activation.py`) | 0; both read generated modules |
+
+
+### Narrow Run/Switch journal repair evidence
+
+`run_switch_journal_contract.py` owns the typed append-only evidence in
+`run_switch_journal_repairs.evidence`. `Job.result` remains the sole live
+Run/Switch checkpoint. The evidence stores the original SQL document's explicit
+canonical text (including nulls), original/corrected digests and exact native
+first-attempt sample witnesses. It is never a plan, runnable state or scheduler.
+Measurement repair requires a current accepted zero-transfer plan and an exactly
+reproduced original native install sample. Cancellation and expired/terminal
+owner observation require the same exact accepted child/phase/payload/fence
+binding; they normalize only the proven zero distribution budget and leave
+phase measurements to their native owner. Historical samples are never promoted
+to fresh evidence by this normalization.
+Later attempts or changed samples cannot authorize measurement repair. Foreign
+children/scopes or ambiguous identity defer as unknown while the raw journal
+remains untouched. A typed `run_switch_journal_repair_pending.progress` record
+owns a fixed two-minute observation deadline, capped exponential backoff, and
+monotonic cancellation intent. Cancellation commits before proof or observation.
+Immutable end evidence retains that intent when the pending record is removed.
+Repair and its pending-state handoff commit atomically. Expiry ends with
+`run-switch.journal-repair-exhausted`, fences the accepted installation's native
+attempts, removes retry/queue holds and releases its preparation reservations.
+Reusable files remain; no stale observation withdraws a working route. A fresh
+request is admitted immediately. Failed owners are never reopened.
+
+Schema impact: two additive tables with Job foreign keys: append-only typed
+repair/end evidence (indexed separately for each original digest) and transient
+typed observation/cancel intent. Startup schema
+reconciliation creates them without reset or backfill; exact-integer storage
+remains unchanged. Terminal history collection deletes both with their owning
+Job. PostgreSQL regressions exercise historical production, restart, exact
+native continuation, cancellation, contention, bounded missing/mismatched
+proof, and fresh same-Spark admission through the shared non-blocking helper.

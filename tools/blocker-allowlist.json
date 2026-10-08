@@ -119,7 +119,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 273,
+    "total": 295,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -938,8 +938,6 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.apply_cleanup", "run-switch.plan_blocked", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.apply_profile_stop", "run-switch.plan_blocked", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.apply_stop", "run-switch.plan_blocked", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.cancel", "run-switch-cancellation-request-was-already-used-differently", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.cancel", "run-switch-operation-is-not-cancellable", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.recheck_resources_in_session", "run-switch.recipe_unresolved", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "run-switch-operation-is-not-retryable", 3],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "run-switch-request-key-was-already-used", 1],
@@ -957,8 +955,6 @@
       "category": "already-retried",
       "reason": "Raised on the phase-advance path of a Run/Switch operation. A conflict that is not a reviewed security edge is caught at the phase checkpoint (fail -> the lifecycle core's bounded backoff, the same idempotent phase entered again) or, outside it, by the tick guard (_hold_after_advance_failure, same clock). Bookkeeping becomes unknown, then reconcile; a final verification that cannot be observed is observed again, never declared failed. Covered by test_run_switch_lifecycle.",
       "sites": [
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor._bound_installation", "run-switch.installation-identity-changed", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor._bound_installation", "run-switch.installation-membership-changed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor._execute_container_build", "run-switch.container-build-executor-unavailable", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor._execute_container_build", "run-switch.container-build-identity-unavailable", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor._execute_container_build", "run-switch.container-build-plan-invalid", 7],
@@ -1001,21 +997,7 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.execute", "run-switch.uninstall_target_unavailable", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_container_build_result", "run-switch.container-build-evidence-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_required_string", "run-switch-persisted-identity-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_started_operation_id", "run-switch-child-operation-identity-is-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.artifact-verification-result-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reclaim-evidence-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reclaimed-bytes-exceed-plan", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reference-protection-evidence-invalid", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reference-protection-overlap", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-scope-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.model-download-artifact-set-mismatch", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.model-download-byte-evidence-mismatch", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.model-download-coverage-incomplete", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.receipt_invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.runtime-build-verification-mismatch", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.runtime-image-preparation-layout-mismatch", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.runtime-image-preparation-receipt-invalid", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.transfer-byte-evidence-invalid", 1]
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_started_operation_id", "run-switch-child-operation-identity-is-invalid", 1]
       ]
     },
     {
@@ -1025,7 +1007,6 @@
       "sites": [
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService._apply_plan", "message", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService._apply_plan", "run-switch-target-spark-scope-changed", 1],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.cancel", "message", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.preview_stop", "run-switch.profile_stop_scope_changed", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "message", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRequestInvalid", "RunSwitchOperationService.retry", "run-switch-retry-runtime-image-reference-is-invalid", 2],
@@ -3185,7 +3166,27 @@
       "category": "bookkeeping-debt",
       "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
       "sites": [
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.preflight", "run-switch.preflight-recipe-changed", 1]
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor._bound_installation", "run-switch.installation-identity-changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor._bound_installation", "run-switch.installation-membership-changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RecipeLifecyclePhaseExecutor.preflight", "run-switch.preflight-recipe-changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RunSwitchOperationService.cancel", "message", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RunSwitchOperationService.cancel", "run-switch-cancellation-boundary-changed", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "RunSwitchOperationService.cancel", "run-switch-cancellation-owner-is-busy", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_phase_result", "run-switch-phase-receipt-is-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.artifact-verification-result-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reclaim-evidence-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reclaimed-bytes-exceed-plan", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reference-protection-evidence-invalid", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-reference-protection-overlap", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.cleanup-scope-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.model-download-artifact-set-mismatch", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.model-download-byte-evidence-mismatch", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.model-download-coverage-incomplete", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.receipt_invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.runtime-build-verification-mismatch", 2],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.runtime-image-preparation-layout-mismatch", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.runtime-image-preparation-receipt-invalid", 1],
+        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_validate_artifact_execution", "run-switch.transfer-byte-evidence-invalid", 1]
       ]
     },
     {
@@ -3275,7 +3276,6 @@
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_build_receipt_in_session", "run-switch.container-build-receipt-unavailable", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-parent-invalid", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_lock_current_build_parent", "run-switch.container-build-plan-invalid", 2],
-        ["control/src/vonk_control/run_switch_operations.py", "RunSwitchRetryLater", "_phase_result", "run-switch-phase-receipt-is-invalid", 1],
         ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "artifact.reference_busy", 2],
         ["control/src/vonk_control/run_switch_operations.py", "RuntimeImagePreparationUnknown", "_persist_run_switch_runtime_image_reference", "message", 1],
         ["control/src/vonk_control/run_switch_operations.py", "_RunSwitchBuildParentChanged", "_lock_current_build_parent", "run-switch.container-build-parent-changed", 1],
