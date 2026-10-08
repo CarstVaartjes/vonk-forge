@@ -69,11 +69,21 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     expected_errors = {
         "resumeJob": {"401", "403", "404", "409", "503"},
     }
+    bounded_ref = {"$ref": "#/components/schemas/BoundedErrorResponse"}
+    unavailable_ref = {"$ref": "#/components/schemas/CapabilityUnavailableReply"}
     for operation_id, statuses in expected_errors.items():
         for status_code in statuses:
-            assert operations[operation_id]["responses"][status_code]["content"][
-                "application/json"
-            ]["schema"] == {"$ref": "#/components/schemas/BoundedErrorResponse"}
+            response_schema = operations[operation_id]["responses"][status_code][
+                "content"
+            ]["application/json"]["schema"]
+            if status_code == "503":
+                # A 503 is either a bounded error or a typed capability-unavailable reply.
+                assert response_schema == {
+                    "anyOf": [bounded_ref, unavailable_ref],
+                    "title": "Response 503 Resumejob",
+                }
+            else:
+                assert response_schema == bounded_ref
     bounded_error = schema["components"]["schemas"]["BoundedErrorResponse"]
     assert bounded_error["additionalProperties"] is False
     assert bounded_error["properties"]["detail"]["maxLength"] == 256

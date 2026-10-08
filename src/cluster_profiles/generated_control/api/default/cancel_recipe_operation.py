@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.recipe_cancellation_request import RecipeCancellationRequest
 from ...models.recipe_image_availability_response import RecipeImageAvailabilityResponse
 from ...models.recipe_operator_response import RecipeOperatorResponse
@@ -46,7 +47,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
     if response.status_code == 202:
         def _parse_response_202(data: object) -> RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse:
             try:
@@ -127,9 +128,26 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return response_422
 
     if response.status_code == 503:
-        response_503 = BoundedErrorResponse.from_dict(response.json())
+        def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_503_type_0 = BoundedErrorResponse.from_dict(data)
 
 
+
+                return response_503_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_503_type_1 = CapabilityUnavailableReply.from_dict(data)
+
+
+
+            return response_503_type_1
+
+        response_503 = _parse_response_503(response.json())
 
         return response_503
 
@@ -139,7 +157,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -154,7 +172,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: RecipeCancellationRequest,
 
-) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
     """ Cancel Operation
 
     Args:
@@ -166,7 +184,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]
      """
 
 
@@ -188,7 +206,7 @@ def sync(
     client: AuthenticatedClient,
     body: RecipeCancellationRequest,
 
-) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
     """ Cancel Operation
 
     Args:
@@ -200,7 +218,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem
      """
 
 
@@ -217,7 +235,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: RecipeCancellationRequest,
 
-) -> Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]:
     """ Cancel Operation
 
     Args:
@@ -229,7 +247,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem]
      """
 
 
@@ -251,7 +269,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: RecipeCancellationRequest,
 
-) -> BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem | None:
     """ Cancel Operation
 
     Args:
@@ -263,7 +281,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeImageAvailabilityResponse | RecipeOperatorResponse | RecipeRemovalUnavailableView | RecipeUpdateResponse | RequestValidationProblem
      """
 
 

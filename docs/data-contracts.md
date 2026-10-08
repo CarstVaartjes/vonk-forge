@@ -298,3 +298,6 @@ native continuation, cancellation, contention, bounded missing/mismatched
 proof, and fresh same-Spark admission through the shared non-blocking helper.
 
 Run/Switch orchestration records are defined in `control/src/vonk_control/run_switch_operations/contracts.py`.
+
+Controller capability availability and retryable refusals are owned by
+`control/src/vonk_control/capability_contract.py`.

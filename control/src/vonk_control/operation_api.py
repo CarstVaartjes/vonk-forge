@@ -246,12 +246,14 @@ class JobResponse(StrictModel):
 
 
 def bounded_error_responses(*status_codes: int) -> dict[int | str, dict[str, Any]]:
-    """Describe stable JSON errors for generated clients."""
+    from .capability_contract import CapabilityUnavailableReply
 
     return {
         status_code: {
             "model": RequestValidationProblem
             if status_code == 422
+            else BoundedErrorResponse | CapabilityUnavailableReply
+            if status_code == 503
             else BoundedErrorResponse,
             "content": {"application/json": {}},
         }
@@ -1683,9 +1685,7 @@ class _DurableOperationProjection:
                     else:
                         states[item.assignment_id] = EndpointState.PUBLISHED
 
-                # A new application or route generation between membership
-                # lookup and bundle verification must never authorize a stale
-                # endpoint. Fence the projection with a fresh SQL read.
+                # Fence endpoint authorization with a fresh SQL read after route validation.
                 try:
                     with self._sessions() as session:
                         current = self._profile_endpoint_intent(session, number)

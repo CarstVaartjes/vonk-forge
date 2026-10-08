@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.fleet_log_response import FleetLogResponse
 from ...models.get_fleet_log_info_source_type_0 import check_get_fleet_log_info_source_type_0
 from ...models.get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
@@ -79,7 +80,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FleetLogResponse | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = FleetLogResponse.from_dict(response.json())
 
@@ -109,9 +110,26 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return response_422
 
     if response.status_code == 503:
-        response_503 = BoundedErrorResponse.from_dict(response.json())
+        def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_503_type_0 = BoundedErrorResponse.from_dict(data)
 
 
+
+                return response_503_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_503_type_1 = CapabilityUnavailableReply.from_dict(data)
+
+
+
+            return response_503_type_1
+
+        response_503 = _parse_response_503(response.json())
 
         return response_503
 
@@ -121,7 +139,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -140,7 +158,7 @@ def sync_detailed(
     source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
     follow: bool | Unset = False,
 
-) -> Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem]:
     """ Fleet Loginfo
 
     Args:
@@ -156,7 +174,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem]
      """
 
 
@@ -186,7 +204,7 @@ def sync(
     source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
     follow: bool | Unset = False,
 
-) -> BoundedErrorResponse | FleetLogResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem | None:
     """ Fleet Loginfo
 
     Args:
@@ -202,7 +220,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | FleetLogResponse | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem
      """
 
 
@@ -227,7 +245,7 @@ async def asyncio_detailed(
     source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
     follow: bool | Unset = False,
 
-) -> Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem]:
     """ Fleet Loginfo
 
     Args:
@@ -243,7 +261,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | FleetLogResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem]
      """
 
 
@@ -273,7 +291,7 @@ async def asyncio(
     source: GetFleetLogInfoSourceType0 | None | Unset = UNSET,
     follow: bool | Unset = False,
 
-) -> BoundedErrorResponse | FleetLogResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem | None:
     """ Fleet Loginfo
 
     Args:
@@ -289,7 +307,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | FleetLogResponse | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetLogResponse | RequestValidationProblem
      """
 
 

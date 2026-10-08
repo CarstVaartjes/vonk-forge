@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.list_model_library_sort import check_list_model_library_sort
 from ...models.list_model_library_sort import ListModelLibrarySort
 from ...models.model_library_response import ModelLibraryResponse
@@ -155,7 +156,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = ModelLibraryResponse.from_dict(response.json())
 
@@ -178,9 +179,26 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return response_422
 
     if response.status_code == 503:
-        response_503 = BoundedErrorResponse.from_dict(response.json())
+        def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_503_type_0 = BoundedErrorResponse.from_dict(data)
 
 
+
+                return response_503_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_503_type_1 = CapabilityUnavailableReply.from_dict(data)
+
+
+
+            return response_503_type_1
+
+        response_503 = _parse_response_503(response.json())
 
         return response_503
 
@@ -190,7 +208,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -215,7 +233,7 @@ def sync_detailed(
     sort: ListModelLibrarySort | Unset = 'updated',
     cached: bool | Unset = False,
 
-) -> Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem]:
     """ Model Library
 
     Args:
@@ -237,7 +255,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem]
      """
 
 
@@ -279,7 +297,7 @@ def sync(
     sort: ListModelLibrarySort | Unset = 'updated',
     cached: bool | Unset = False,
 
-) -> BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem | None:
     """ Model Library
 
     Args:
@@ -301,7 +319,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem
      """
 
 
@@ -338,7 +356,7 @@ async def asyncio_detailed(
     sort: ListModelLibrarySort | Unset = 'updated',
     cached: bool | Unset = False,
 
-) -> Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem]:
     """ Model Library
 
     Args:
@@ -360,7 +378,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem]
      """
 
 
@@ -402,7 +420,7 @@ async def asyncio(
     sort: ListModelLibrarySort | Unset = 'updated',
     cached: bool | Unset = False,
 
-) -> BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem | None:
     """ Model Library
 
     Args:
@@ -424,7 +442,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | ModelLibraryResponse | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | ModelLibraryResponse | RequestValidationProblem
      """
 
 

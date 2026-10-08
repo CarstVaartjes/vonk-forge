@@ -26,7 +26,6 @@ from vonk_control.agent_api import AgentApiServices
 from vonk_control.api import build_agent_services
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.models import Base
-from vonk_control.presence import AgentPresenceService
 
 # Keep this import first so the TDD RED proves the provider is absent before
 # any new runtime dependency is imported.
@@ -845,13 +844,12 @@ def test_production_agent_service_builder_does_not_block_startup_on_step_ca(
     services = build_agent_services(settings, _sessions(tmp_path), lambda: NOW)
 
     assert isinstance(services, AgentApiServices)
-    assert len(calls) == 1
-    assert calls[0]["ca_url"] == CA_URL
-    assert settings.agent_artifact_root.is_dir()
-    assert isinstance(services.presence, AgentPresenceService)
+    assert calls == []
+    assert services.enrollment is not None
+    assert services.presence is not None
 
 
-def test_production_agent_service_builder_always_constructs_step_ca(
+def test_production_agent_service_builder_defers_step_ca(
     tmp_path: Path, monkeypatch
 ) -> None:
     calls: list[dict[str, object]] = []
@@ -866,8 +864,7 @@ def test_production_agent_service_builder_always_constructs_step_ca(
     settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
     build_agent_services(settings, _sessions(tmp_path), lambda: NOW)
 
-    assert len(calls) == 1
-    assert calls[0]["ca_url"] == CA_URL
+    assert calls == []
 
 
 def test_production_agent_service_builder_passes_configured_certificate_lifetime(
@@ -886,7 +883,13 @@ def test_production_agent_service_builder_passes_configured_certificate_lifetime
     settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
     settings.agent_ca_certificate_lifetime_seconds = 90
 
-    build_agent_services(settings, _sessions(tmp_path), lambda: NOW)
+    from vonk_control.capabilities import CapabilityRegistry
+
+    registry = CapabilityRegistry()
+    build_agent_services(
+        settings, _sessions(tmp_path), lambda: NOW, capabilities=registry
+    )
+    registry.retry_due()
 
     assert calls[0]["certificate_lifetime_seconds"] == 90
 
@@ -1254,6 +1257,155 @@ step crypto jwk thumbprint < agent-ca-public.jwk
             timeout=30,
             check=False,
         )
+
+
+@pytest.mark.parametrize("fault", ["configuration", "credential-file", "network"])
+def test_production_ca_fault_isolated_and_repaired(
+    tmp_path, monkeypatch, postgres_engine, fault
+):
+    """CA construction/health failure cannot take fleet down or issue a leaf.
+
+    Catches eager PKI configuration, ignored missing key material, network
+    health treated as permanent, and retries that run inside enrollment SQL.
+    """
+    import time
+
+    import httpx2
+    from fastapi.testclient import TestClient
+    from vonk_agent_protocol.enrollment import (
+        EnrollmentEvidence,
+        EnrollmentSubmitRequest,
+    )
+    from vonk_control import api, route_runtime
+    from vonk_control.auth import Actor, TokenCodec
+    from vonk_control.capabilities import CapabilityRegistry
+    from vonk_control.capability_contract import (
+        CapabilityAvailability,
+        ControllerCapability,
+    )
+    from vonk_control.models import Base
+
+    Base.metadata.create_all(postgres_engine)
+    settings = _builder_settings(tmp_path, direct_fabric_cidrs="192.168.100.0/24")
+    settings.database_url = postgres_engine.url.render_as_string(hide_password=False)
+    settings.state_path = tmp_path / "state"
+    settings.model_cache_root = tmp_path / "models"
+    settings.token_signing_key = b"startup-fault-test-signing-key-32-bytes"
+    settings.metrics_token = "startup-metrics-token"
+    settings.agent_proxy_auth = b"a" * 32
+    settings.huggingface_token_path = None
+    settings.recipe_library_release = "latest"
+    clock = [datetime.now(UTC)]
+    registry = CapabilityRegistry(clock=lambda: clock[0])
+    monkeypatch.setattr(api, "CapabilityRegistry", lambda: registry)
+    broken = [True]
+    original_gateway = api.GatewayKeyService.__init__
+    original_publisher = route_runtime.AtomicRouteBundlePublisher.__init__
+
+    def gateway(self, **kwargs):
+        original_gateway(
+            self,
+            master_key=lambda: "test-master-key",
+            transport=httpx2.MockTransport(
+                lambda _request: httpx2.Response(200, json={"keys": []})
+            ),
+        )
+
+    def publisher(self, *args, **kwargs):
+        original_publisher(self, tmp_path / "routes", **kwargs)
+
+    monkeypatch.setattr(api.GatewayKeyService, "__init__", gateway)
+    monkeypatch.setattr(route_runtime.AtomicRouteBundlePublisher, "__init__", publisher)
+
+    def health(self):
+        if fault == "network" and broken[0]:
+            raise StepCAError("injected provider outage")
+
+    monkeypatch.setattr(StepCertificateAuthority, "check_health", health)
+    credential = settings.agent_ca_credential_path.read_bytes()
+    if fault == "configuration":
+        settings.agent_ca_certificate_lifetime_seconds = 89
+    if fault == "credential-file":
+        settings.agent_ca_credential_path.unlink()
+    from typing import cast
+
+    from vonk_control.settings import Settings
+
+    app = api.production_app(cast(Settings, settings))
+    client = TestClient(app)
+    registry.retry_due()
+    capability = next(
+        s
+        for s in registry.statuses()
+        if s.capability == ControllerCapability.CERTIFICATE_AUTHORITY
+    )
+    assert capability.availability == CapabilityAvailability.UNAVAILABLE
+    token = TokenCodec(settings.token_signing_key).issue(
+        Actor("operator", "administrator"), ttl_seconds=3600, now=int(time.time())
+    )
+    assert (
+        client.get(
+            "/api/fleet", headers={"Authorization": f"Bearer {token}"}
+        ).status_code
+        == 200
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/profile", headers=headers).status_code == 200
+    assert client.get("/api/key", headers=headers).status_code == 200
+    request = EnrollmentSubmitRequest(
+        grant_token="a" * 43,
+        csr=_csr().decode(),
+        evidence=EnrollmentEvidence(
+            node_id=NODE_ID,
+            csr_public_key_fingerprint="a" * 64,
+            host_key_fingerprint="host",
+            hardware_fingerprint="hardware",
+            agent_digest="b" * 64,
+            boot_id="boot",
+        ),
+    )
+    _assert_unavailable_enrollment(client, request)
+    broken[0] = False
+    settings.agent_ca_certificate_lifetime_seconds = 2592000
+    settings.agent_ca_credential_path.write_bytes(credential)
+    clock[0] += timedelta(seconds=61)
+    registry.retry_due()
+    capability = next(
+        s
+        for s in registry.statuses()
+        if s.capability == ControllerCapability.CERTIFICATE_AUTHORITY
+    )
+    assert capability.availability == CapabilityAvailability.AVAILABLE
+    # A fresh request is admitted to normal enrollment verification after repair.
+    assert (
+        client.post("/agent/enroll", json=request.model_dump(mode="json")).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            "/api/fleet", headers={"Authorization": f"Bearer {token}"}
+        ).status_code
+        == 200
+    )
+    for service in registry._services:
+        close = getattr(service._value, "close", None)
+        if callable(close):
+            close()
+
+
+def _assert_unavailable_enrollment(client, request) -> None:
+    from vonk_control.capability_contract import (
+        CapabilityUnavailableReply,
+        ControllerCapability,
+    )
+
+    response = client.post("/agent/enroll", json=request.model_dump(mode="json"))
+    assert response.status_code == 503
+    reply = CapabilityUnavailableReply.model_validate_json(response.content)
+    assert (
+        reply.capability == ControllerCapability.CERTIFICATE_AUTHORITY
+        and reply.retryable
+    )
 
 
 @pytest.mark.parametrize("lifetime", (90, 86400, 2592000))
