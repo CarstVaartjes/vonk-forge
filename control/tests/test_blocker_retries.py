@@ -1078,6 +1078,37 @@ def test_retry_proof_follows_imported_mixin_aliases_and_receiver_casts() -> None
     assert not Prover(graph, {}).prove("pkg/effects.py", "Busy", "Service.issue").proven
 
 
+def test_recipe_build_unknown_outcomes_have_no_unhandled_or_swallowed_path(
+    retry_proof_graph: object,
+) -> None:
+    """A broad catch or new entry must not silently restore build debt."""
+    from .blocker_boundaries import scan_raises
+
+    document = load_allowlist()
+    path = "control/src/vonk_control/recipe_builds.py"
+    for site in scan_raises():
+        if site.path == path and site.exception_class in unknown_classes():
+            assert proven(document, path, site.exception_class, site.function), (
+                site.render()
+            )
+
+    # Removing the production handoff must invalidate persistence credit.
+    damaged = copy.deepcopy(document)
+    loops = damaged["retry_loops"]
+    assert isinstance(loops, list)
+    damaged["retry_loops"] = [
+        entry
+        for entry in loops
+        if entry["function"] != "build_recipe_image_availability.builder"
+    ]
+    assert not proven(
+        damaged,
+        path,
+        "RecipeBuildUnknown",
+        "RecipeBuildService.persist_plan_in_session",
+    )
+
+
 @pytest.mark.parametrize("escape", ["", "unknown(alias)", "return alias"])
 def test_forwarded_callback_alias_keeps_unknown_consumer_as_debt(escape: str) -> None:
     """Reject credit if a forwarded callback also reaches an unknown consumer."""

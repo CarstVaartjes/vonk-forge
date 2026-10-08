@@ -104,3 +104,31 @@ def test_a_build_is_reusable_by_executable_inputs_not_by_the_builder_binary() ->
         source_bundle_sha256="s" * 64,
         recorded_builder_binary_digest="old-builder",
     )
+
+
+def test_damaged_cached_builder_identity_does_not_block_fresh_resolution() -> None:
+    """A corrupt cached receipt must be a miss, not a refusal of a fresh build."""
+    from vonk_control.recipe_builds import RecipeBuildResolution
+
+    resolution = RecipeBuildResolution(
+        recipe_revision_id="recipe",
+        recipe_content_sha256="a" * 64,
+        source_bundle_sha256="b" * 64,
+        input_intent_sha256="c" * 64,
+        input_intent={},
+    )
+    assert not reusable_build(
+        resolution,
+        build_input_sha256="d" * 64,
+        source_bundle_sha256=resolution.source_bundle_sha256,
+        recorded_builder_binary_digest="damaged",
+    )
+    # The same resolution immediately accepts a valid content identity.
+    valid = resolution.build_input_for_builder("e" * 64)
+    assert valid is not None
+    assert reusable_build(
+        resolution,
+        build_input_sha256=valid,
+        source_bundle_sha256=resolution.source_bundle_sha256,
+        recorded_builder_binary_digest="e" * 64,
+    )

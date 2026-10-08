@@ -121,3 +121,50 @@ def test_a_class_of_a_category_type_names_its_family(cls: str, category: str) ->
     """The error type decides, whatever the message says."""
 
     assert classify(_site(cls, "stored plan is missing")).category == category
+
+
+@pytest.mark.parametrize(
+    ("function", "code", "category"),
+    [
+        ("CatalogEntityService.resolve_reference", "catalog.reference_missing", INPUT),
+        ("CatalogEntityService.revise", "catalog.revision_missing", DEBT),
+        ("_head", "catalog.head_missing", DEBT),
+        (
+            "CatalogEntityService._bind_recipe_models",
+            "catalog.model_artifact_missing",
+            DEBT,
+        ),
+    ],
+)
+def test_reference_request_validation_does_not_hide_persisted_catalog_debt(
+    function: str, code: str, category: str
+) -> None:
+    """Missing a caller's exact target is distinct from losing stored metadata."""
+    document = load_allowlist()
+    families = document["fail_closed"]
+    assert isinstance(families, list)
+    family = next(
+        family
+        for family in families
+        if any(
+            site[:4]
+            == [
+                "control/src/vonk_control/catalog_entities.py",
+                "CatalogValidationError",
+                function,
+                code,
+            ]
+            for site in family["sites"]
+        )
+    )
+    assert family["category"] == category
+
+
+def test_supplied_harness_projection_is_distinct_from_compiler_omissions() -> None:
+    """A pure input validator must not credit the compiler's missing output."""
+    families = load_allowlist()["fail_closed"]
+    assert isinstance(families, list)
+    categories = {family["family"]: family["category"] for family in families}
+    assert categories["common.projection-request"] == INPUT
+    assert categories["canonical.image-handle-request"] == INPUT
+    assert categories["recipe_runtime_specs.bookkeeping-debt"] == DEBT
