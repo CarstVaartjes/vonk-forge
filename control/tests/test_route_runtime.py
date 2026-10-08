@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from vonk_agent_protocol import UnknownError, WaitReason
+from vonk_agent_protocol.route_activation import ActivationMarker
 from vonk_control.litellm import render_empty_config
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
@@ -43,8 +45,10 @@ def _publish(
     """Drive one activation through the steps the recipe route adapter uses."""
 
     publisher._identity(authority_id, plan_digest, evidence_set_digest)
-    with publisher._locked():
+    with publisher._locked() as uncertainty:
+        assert uncertainty is None
         current = publisher._read_marker(optional=True, verify_files=True)
+        assert not isinstance(current, UnknownError)
         generation = (current.generation if current is not None else 0) + 1
         marker = publisher._activate(
             generation=generation,
@@ -63,7 +67,10 @@ def _publish(
             ),
             litellm=render_empty_config(),
         )
-        publisher._require_supervisor_ack(marker)
+        assert not isinstance(marker, UnknownError)
+        assert isinstance(marker, ActivationMarker)
+        uncertainty = publisher._require_supervisor_ack(marker)
+        assert uncertainty is None
         return marker
 
 
@@ -92,6 +99,7 @@ def test_actual_publisher_bytes_are_accepted_by_reader_and_supervisor(
     assert marker.authority_id == RECIPE_ROUTE_AUTHORITY_ID
     assert "reconciliation_id" not in marker.model_dump()
     bundle = verify_active_route_bundle(root)
+    assert not isinstance(bundle, UnknownError)
     assert bundle.marker == marker
     supervisor = _supervisor(monkeypatch, root)
     request = supervisor._active_request()
@@ -169,32 +177,35 @@ def test_validation_failure_preserves_previous_activation(tmp_path):
     rejecting = _publisher(tmp_path, validate_litellm=lambda _: False)
     with pytest.raises(RouteRuntimeError, match="validation"):
         _publish(rejecting)
-    assert _publisher(tmp_path).inspect() == marker
+    assert _inspected(_publisher(tmp_path)) == marker
 
 
 def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(tmp_path):
     def unavailable(marker):
         raise RuntimeError("supervisor unavailable")
 
-    with pytest.raises(RouteRuntimeError, match="acknowledgement"):
-        _publish(_publisher(tmp_path, await_supervisor_ack=unavailable))
-    assert _publisher(tmp_path).inspect().generation == 1
+    publisher = _publisher(tmp_path, await_supervisor_ack=unavailable)
+    marker = _publish(_publisher(tmp_path))
+    observed = publisher._require_supervisor_ack(marker)
+    assert isinstance(observed, UnknownError)
+    assert observed.reason is WaitReason.RUNTIME_EFFECT_UNCONFIRMED
+    assert _inspected(_publisher(tmp_path)).generation == 1
 
 
 def test_restart_verifies_exact_marker_and_publishes_next_generation(tmp_path):
     first = _publish(_publisher(tmp_path))
     restarted = _publisher(tmp_path)
-    assert restarted.inspect(expected=first) == first
+    assert _inspected(restarted, expected=first) == first
     assert _publish(restarted).generation == 2
-    with pytest.raises(RouteRuntimeError, match="expected"):
-        restarted.inspect(expected=first)
+    assert _inspected(restarted, expected=first).generation == 2
+    assert _publish(restarted).generation == 3
 
 
 def test_concurrent_writers_serialize_generation_allocation(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as pool:
         markers = list(pool.map(lambda _: _publish(_publisher(tmp_path)), range(2)))
     assert sorted(m.generation for m in markers) == [1, 2]
-    assert _publisher(tmp_path).inspect().generation == 2
+    assert _inspected(_publisher(tmp_path)).generation == 2
 
 
 def _process_publish(path):
@@ -212,7 +223,7 @@ def test_filesystem_lock_serializes_independent_processes(tmp_path):
     for worker in workers:
         worker.join(timeout=15)
         assert worker.exitcode == 0
-    assert _publisher(tmp_path).inspect().generation == 2
+    assert _inspected(_publisher(tmp_path)).generation == 2
 
 
 def test_symlink_lock_and_generation_are_rejected(tmp_path):
@@ -259,8 +270,9 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
         monotonic=lambda: next(moments),
         sleep=lambda _seconds: None,
     )
-    with pytest.raises(RouteRuntimeError, match="timed out"):
-        mismatched(marker)
+    observed = mismatched(marker)
+    assert isinstance(observed, UnknownError)
+    assert observed.reason is WaitReason.RUNTIME_EFFECT_UNCONFIRMED
 
 
 @pytest.mark.parametrize("ack_after", [90, 150])
@@ -323,11 +335,24 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
             ack["unexpected"] = None
         path.write_bytes(_encoded(ack))
 
-    with pytest.raises(RouteRuntimeError, match="timed out"):
-        FileSupervisorAcknowledger(
-            path,
-            clock=lambda: NOW + timedelta(seconds=elapsed[0]),
-            monotonic=lambda: elapsed[0],
-            sleep=sleep,
-            poll_seconds=1,
-        )(marker)
+    observed = FileSupervisorAcknowledger(
+        path,
+        clock=lambda: NOW + timedelta(seconds=elapsed[0]),
+        monotonic=lambda: elapsed[0],
+        sleep=sleep,
+        poll_seconds=1,
+    )(marker)
+    assert isinstance(observed, UnknownError)
+    assert observed.reason is WaitReason.RUNTIME_EFFECT_UNCONFIRMED
+
+
+def _verified_bundle(root):
+    bundle = verify_active_route_bundle(root)
+    assert not isinstance(bundle, UnknownError)
+    return bundle
+
+
+def _inspected(publisher, **kwargs):
+    marker = publisher.inspect(**kwargs)
+    assert not isinstance(marker, UnknownError)
+    return marker
