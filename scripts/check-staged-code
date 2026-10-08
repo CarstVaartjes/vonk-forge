@@ -4,23 +4,95 @@
 from __future__ import annotations
 
 import platform
+import re
 import shlex
 import subprocess
+import sys
+import time
 import tomllib
 from pathlib import Path
 
-import sys
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 import os
+
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from check_environment import ensure_web
+from hook_words_generated import HookFailureCode, HookFailureKind
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def run(command: list[str], *, cwd: Path = ROOT) -> None:
     subprocess.run(command, cwd=cwd, check=True, timeout=600)
+
+
+# One budget includes lock contention and execution, for both Rust checks.
+VM_CARGO_BUDGET_SECONDS = 600
+VM_LOCK_WAIT_SECONDS = 60
+VM_BUSY_EXIT = 75
+VM_CARGO_LOCK = "/tmp/vonk-ci-cargo.lock"
+
+
+def vm_cargo_command(command: list[str], remaining: float) -> list[str]:
+    # Keep the inode permanently: the kernel releases the flock on process death.
+    # VM timeout bounds contention AND cargo, even if the host disconnects.
+    # The inherited lock descriptor covers cargo descendants until they exit.
+    grace = min(5.0, remaining / 2)
+    script = (
+        f"cd {shlex.quote(str(ROOT))} && "
+        'export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/target-vonk-ci-infra}" && '
+        "export CARGO_BUILD_JOBS=2 && "
+        f"exec timeout --signal=TERM --kill-after={grace:.3f}s "
+        f"{remaining - grace:.3f}s "
+        f"flock --wait {min(VM_LOCK_WAIT_SECONDS, remaining):.3f} "
+        f"--conflict-exit-code {VM_BUSY_EXIT} {shlex.quote(VM_CARGO_LOCK)} "
+        f"{shlex.join(command)}"
+    )
+    return ["orb", "-m", "vonk-ci", "bash", "-lc", script]
+
+
+def vm_fault(code: HookFailureCode, reason: str) -> None:
+    raise SystemExit(
+        f"{code.value} [{HookFailureKind.TEMPORARY_DEPENDENCY.value}]: {reason}"
+    )
+
+
+def run_vm_cargo(command: list[str], deadline: float) -> None:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        vm_fault(HookFailureCode.HOOK_VM_TIMEOUT, "VM cargo budget exhausted")
+    invocation = vm_cargo_command(command, remaining)
+    try:
+        result = subprocess.run(
+            invocation,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=remaining,
+        )
+    except subprocess.TimeoutExpired:
+        vm_fault(
+            HookFailureCode.HOOK_VM_TIMEOUT, "VM cargo observation deadline elapsed"
+        )
+        return
+    # Retain compiler diagnostics; an ordinary compile failure stays a compile failure.
+    print(result.stdout, end="")
+    print(result.stderr, end="", file=sys.stderr)
+    if result.returncode == VM_BUSY_EXIT:
+        vm_fault(HookFailureCode.HOOK_VM_BUSY, "VM busy: cargo lock deadline elapsed")
+    if result.returncode in {-9, 137} or re.search(
+        r"signal: 9, SIGKILL|(?:clippy-driver|rustc).*SIGKILL", result.stderr
+    ):
+        vm_fault(
+            HookFailureCode.HOOK_VM_PROCESS_KILLED,
+            "VM cargo process killed; possible memory exhaustion",
+        )
+    if result.returncode in {124, 143}:
+        vm_fault(HookFailureCode.HOOK_VM_TIMEOUT, "VM cargo execution deadline elapsed")
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, invocation)
 
 
 def main() -> None:
@@ -91,14 +163,10 @@ def main() -> None:
                 "warnings",
             ],
         ]
+        deadline = time.monotonic() + VM_CARGO_BUDGET_SECONDS
         for command in commands:
             if platform.system() == "Darwin":
-                script = (
-                    f"cd {shlex.quote(str(ROOT))} && "
-                    'export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/target-vonk-ci-infra}" && '
-                    f"{shlex.join(command)}"
-                )
-                run(["orb", "-m", "vonk-ci", "bash", "-lc", script])
+                run_vm_cargo(command, deadline)
             else:
                 run(command)
 
