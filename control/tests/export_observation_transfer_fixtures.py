@@ -150,7 +150,7 @@ def _export_peer_response_errors(
         }
     )
     with patch(
-        "vonk_control.api.api_only_observation",
+        "vonk_control.api.application.api_only_observation",
         side_effect=ObservationCaptureUnavailable(phase="stored-worker-validation"),
     ):
         response = peer.get("/api/platform")

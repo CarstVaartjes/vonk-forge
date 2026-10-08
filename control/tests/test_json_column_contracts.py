@@ -262,7 +262,9 @@ def test_journal_columns_return_models_and_keep_damaged_reads_non_blocking(docum
         )
         session.flush()
         if isinstance(document, RunSwitchJournalRepairPendingState):
-            row = RunSwitchJournalRepairPending(job_id=identity, progress=document)
+            row = RunSwitchJournalRepairPending(
+                job_id=identity, deadline_at=document.deadline_at, progress=document
+            )
         else:
             row = RunSwitchJournalRepair(
                 id=identity,

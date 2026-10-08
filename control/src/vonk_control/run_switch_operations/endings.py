@@ -40,7 +40,7 @@ from .provider import _ADAPTER
 from .result_helpers import _persisted_result, _read_progress
 
 if TYPE_CHECKING:
-    from ..distribution_executor import _ChildView
+    from ..distribution_executor.receipts import _ChildView
     from .service import RunSwitchOperationService
 
 
@@ -85,11 +85,42 @@ class EndingsMixin:
         self._mark_failed(job, code, now=now, failure_code=code, progress=progress)
         return True
 
+    def _settle_checkpoint_observation(
+        self,
+        session: Session,
+        job: Job,
+        progress: RunSwitchOperationResult,
+        now: datetime,
+    ) -> bool:
+        """End this observer, preserving independent effects and accepted scope.
+
+        Request creation is immutable and cannot be reset by changing causes,
+        corrupt receipts, re-planning or a worker restart. Ending observation
+        neither Stops a child nor withdraws a serving route.
+        """
+        if progress.cancellation is not None or progress.retry_reason is None:
+            return False
+        deadline = _aware(job.created_at) + timedelta(
+            seconds=_FINAL_VERIFICATION_MAX_SECONDS
+        )
+        if now < deadline:
+            return False
+        progress.observation_deadline_at = deadline
+        self._mark_failed(
+            job,
+            RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+            now=now,
+            failure_code=RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+            progress=progress,
+        )
+        release_dead_owner_reservations(session, now)
+        return True
+
     def _get_child_operation(
         self, operation_id: str
     ) -> RecipeOperationView | _ChildView | RunSwitchOperation | None:
         service = typing_cast("RunSwitchOperationService", self)
-        from ..distribution_executor import _ChildView
+        from ..distribution_executor.receipts import _ChildView
 
         getter = getattr(service._phase_executor, "get", None)
         if callable(getter):
@@ -122,7 +153,8 @@ class EndingsMixin:
         Everything else (a receipt that does not validate, a verification that
         cannot be observed, a missing child, a wiring gap) is an unknown: the same
         idempotent phase is entered again at the core's bounded backoff, so the
-        failure never ends a load whose bytes and workload are fine.  The caller
+        observation ends at the immutable request deadline without certifying
+        cleanup or withdrawing an independently owned serving route. The caller
         no longer chooses; the classifier does (``failure_classification``).
         ``definite`` is only for an owner that typed its own verdict (the image
         preparation's non-retryable errors: an invalid archive or identity).
@@ -205,7 +237,8 @@ class EndingsMixin:
         Its effect is unknown, so the phase is entered again at the core's backoff:
         an idempotent child is issued again under a new identity (``reissue``), a
         receipt read from the Controller's own records is simply observed again.
-        Only a reviewed destructive-effect or digest guard ends the operation.
+        A reviewed destructive-effect or digest guard ends immediately; other
+        unknowns end when the immutable observation deadline expires.
         The progress is re-read, so nothing half-merged from the invalid receipt is
         kept.
         """
@@ -233,7 +266,22 @@ class EndingsMixin:
         job: Job, progress: RunSwitchOperationResult, reason: str, now: datetime
     ) -> None:
         """Wait at the exact checkpoint without replacing accepted intent."""
+        deadline = _aware(job.created_at) + timedelta(
+            seconds=_FINAL_VERIFICATION_MAX_SECONDS
+        )
+        progress.observation_deadline_at = deadline
+        if now >= deadline:
+            EndingsMixin._mark_failed(
+                job,
+                RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+                now=now,
+                failure_code=RunSwitchCode.FINAL_VERIFICATION_TIMEOUT,
+                progress=progress,
+            )
+            return
         _ADAPTER.retry(job, progress, reason, now)
+        if progress.observation_due_at is not None:
+            progress.observation_due_at = min(progress.observation_due_at, deadline)
         job.result = _persisted_result(progress)
         job.updated_at = now
 

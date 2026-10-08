@@ -304,8 +304,8 @@ def _persist_run_switch_runtime_image_reference(
                     ),
                 )
             except (RunSwitchOperationConflict, ValueError) as error:
-                raise _RuntimeImageIdentityMismatch(
-                    "runtime image differs from the accepted Fleet profile"
+                raise _RuntimeImageIdentityUnknown(
+                    "runtime image observation differs from the accepted Fleet profile"
                 ) from error
 
         intent = RunSwitchRuntimeImageReferenceIntent(

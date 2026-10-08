@@ -17,6 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from .lifecycle.evidence import Residue
 from .model_primitives import Base, _lower_hex
+from .run_switch_identity_contract import RunSwitchCancellation
 from .run_switch_journal_contract import (
     RunSwitchJournalRepairEndEvidence,
     RunSwitchJournalRepairEvidence,
@@ -31,6 +32,16 @@ class RunSwitchJournalRepairPending(Base):
     __tablename__ = "run_switch_journal_repair_pending"
     job_id: Mapped[str] = mapped_column(
         ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True
+    )
+    # The immutable deadline survives damage to the mutable observation projection.
+    deadline_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    cancellation: Mapped[RunSwitchCancellation | Residue | None] = mapped_column(
+        ContractJSON[RunSwitchCancellation](
+            "run_switch_journal_repair_pending", "cancellation"
+        ),
+        nullable=True,
     )
     progress: Mapped[RunSwitchJournalRepairPendingState | Residue] = mapped_column(
         ContractJSON[RunSwitchJournalRepairPendingState](

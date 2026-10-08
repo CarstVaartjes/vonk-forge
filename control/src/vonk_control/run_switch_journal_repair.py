@@ -662,13 +662,6 @@ def _try_repair_once(
             return JournalRepairDisposition.REPAIRED
     except AdmissionLockBusy:
         return JournalRepairDisposition.DEFERRED
-    except DBAPIError as error:
-        code = getattr(error.orig, "sqlstate", None) or getattr(
-            error.orig, "pgcode", None
-        )
-        if code == "55P03":
-            return JournalRepairDisposition.DEFERRED
-        raise
 
 
 def _plan_digest(job: Job) -> str:
@@ -693,7 +686,9 @@ def _pending(
         state = RunSwitchJournalRepairPendingState(
             deadline_at=now + REPAIR_BUDGET, next_attempt_at=now
         )
-        row = RunSwitchJournalRepairPending(job_id=job.id, progress=state)
+        row = RunSwitchJournalRepairPending(
+            job_id=job.id, deadline_at=state.deadline_at, progress=state
+        )
         session.add(row)
     else:
         try:
@@ -701,17 +696,20 @@ def _pending(
                 canonical_message(row.progress), strict=True
             )
         except (TypeError, ValueError):
-            # The clock is local bookkeeping, never authority. Damage cannot
-            # reset the budget: use the accepted request's durable creation time.
-            # Only the independently readable canonical checkpoint can recover
-            # cancellation; do not infer it from damaged diagnostics.
+            # The deadline column owns the clock independently of this mutable
+            # projection. Cancellation belongs to its independent typed column.
             progress = _candidate(job)
             state = RunSwitchJournalRepairPendingState(
-                deadline_at=job.created_at + REPAIR_BUDGET,
+                deadline_at=row.deadline_at,
                 next_attempt_at=now,
                 cancellation=progress.cancellation if progress is not None else None,
             )
             row.progress = state
+    state.deadline_at = row.deadline_at
+    # Mutable progress never owns acknowledged cancellation. Its independent
+    # typed column survives corruption of the observation projection.
+    if isinstance(row.cancellation, RunSwitchCancellation):
+        state.cancellation = row.cancellation
     return row, state
 
 
@@ -741,8 +739,10 @@ def record_repair_cancellation(
                 job.updated_at = cancellation.requested_at
             return
         row, state = _pending(session, job, cancellation.requested_at)
-        if state.cancellation is None:
-            state.cancellation = cancellation
+        if row.cancellation is None:
+            row.cancellation = cancellation
+        if isinstance(row.cancellation, RunSwitchCancellation):
+            state.cancellation = row.cancellation
         state.next_attempt_at = cancellation.requested_at
         row.progress = state
 
@@ -753,6 +753,32 @@ def try_repair_zero_transfer_journal(
     now: datetime,
     *,
     purpose: JournalRepairPurpose = JournalRepairPurpose.MEASUREMENT,
+) -> JournalRepairDisposition:
+    """Observe within the durable clock even when a database boundary fails.
+
+    The clock is never rewritten by a failed read or commit. When the database
+    returns, the normal worker either resumes or reconciles the expired owner.
+    Database authentication and authorization remain actual refusals.
+    """
+    try:
+        return _observe_zero_transfer_journal(
+            sessions, operation_id, now, purpose=purpose
+        )
+    except DBAPIError as error:
+        code = getattr(error.orig, "sqlstate", None) or getattr(
+            error.orig, "pgcode", None
+        )
+        if code is not None and (code.startswith("28") or code == "42501"):
+            raise
+        return JournalRepairDisposition.DEFERRED
+
+
+def _observe_zero_transfer_journal(
+    sessions: sessionmaker[Session],
+    operation_id: str,
+    now: datetime,
+    *,
+    purpose: JournalRepairPurpose,
 ) -> JournalRepairDisposition:
     from .agent_operation_facts import aware
 
@@ -797,7 +823,20 @@ def try_repair_zero_transfer_journal(
             return _end_unproven_journal(sessions, operation_id, now)
         except AdmissionLockBusy:
             return JournalRepairDisposition.DEFERRED
-    result = _try_repair_once(sessions, operation_id, now, purpose=purpose)
+    try:
+        result = _try_repair_once(sessions, operation_id, now, purpose=purpose)
+    except DBAPIError as error:
+        # Observation has already committed its immutable clock. Recoverable
+        # database access faults consume that same budget, never a new one.
+        # Authentication and permission refusals remain the database's answer.
+        code = getattr(error.orig, "sqlstate", None) or getattr(
+            error.orig, "pgcode", None
+        )
+        if code is not None and (code.startswith("28") or code == "42501"):
+            raise
+        result = JournalRepairDisposition.DEFERRED
+    except (TypeError, ValueError, UnknownOutcomeError):
+        result = JournalRepairDisposition.DEFERRED
     with sessions.begin() as session:
         job = session.scalar(
             select(Job).where(Job.id == operation_id).with_for_update(skip_locked=True)

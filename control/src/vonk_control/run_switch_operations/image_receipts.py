@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
+from ..content_identity import differing_image_fields
 from ..models import (
     RecipeBuild,
 )
@@ -26,7 +27,7 @@ from ..run_switch_observation_contract import (
     RunSwitchEffectiveBuildReceipt,
     RunSwitchObservedImageIdentity,
 )
-from .errors import RunSwitchRetryLater, _RunSwitchDefiniteConflict
+from .errors import RunSwitchRetryLater
 from .identity_helpers import _is_hex_digest, _is_oci_digest, _node_missing_bytes
 
 
@@ -170,25 +171,17 @@ def effective_build_receipt(
 def _require_profile_runtime_image(
     expected: RuntimeImageIdentity, observed: RunSwitchObservedImageIdentity
 ) -> None:
-    """Compare observed identity fields with the accepted image, naming drift."""
-    actual = observed
-    values = (
-        ("image_digest", expected.image_digest, actual.image_digest),
-        ("oci_layout_sha256", expected.oci_layout_sha256, actual.oci_layout_sha256),
-        ("image_bytes", expected.image_bytes, actual.image_bytes),
-        ("architecture", expected.architecture, actual.architecture),
-        ("runtime_interface", expected.runtime_interface, actual.runtime_interface),
-    )
-    changes = [
-        name
-        for name, wanted, observed_value in values
-        if name in actual.model_fields_set and wanted != observed_value
-    ]
+    """Observe a projection without interpreting damage as changed consent.
+
+    This record is not an ingress verification of bytes. The phase owner
+    re-reads its managed image on a retry; its immutable request deadline ends
+    unresolved observation without changing the accepted image or live routes.
+    """
+    changes = differing_image_fields(expected, observed)
     if changes:
-        raise _RunSwitchDefiniteConflict(
-            f"{ProfileReasonCode.RUNTIME_IMAGE_CHANGED}: "
-            + ", ".join(changes)
-            + " differs from the accepted image; review and load the profile again"
+        raise RunSwitchRetryLater(
+            f"{ProfileReasonCode.RUNTIME_IMAGE_CHANGED}: " + ", ".join(changes),
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
 
 

@@ -30088,6 +30088,36 @@
         "title": "RunSwitchDistributionChildResult",
         "type": "object"
       },
+      "RunSwitchDistributionEndedResult": {
+        "additionalProperties": false,
+        "description": "A missing durable distribution child; no node effect is asserted.",
+        "properties": {
+          "error_code": {
+            "$ref": "#/components/schemas/DistributionCode"
+          },
+          "phase": {
+            "const": "transfer",
+            "title": "Phase",
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/WaitReason"
+          },
+          "subphase": {
+            "const": "target-copy",
+            "title": "Subphase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phase",
+          "subphase",
+          "reason",
+          "error_code"
+        ],
+        "title": "RunSwitchDistributionEndedResult",
+        "type": "object"
+      },
       "RunSwitchFinalVerifyResult": {
         "additionalProperties": false,
         "properties": {
@@ -31160,6 +31190,9 @@
           "final_observation": {
             "anyOf": [
               {
+                "$ref": "#/components/schemas/RunSwitchDistributionEndedResult"
+              },
+              {
                 "$ref": "#/components/schemas/RunSwitchContainerBuildResult"
               },
               {
@@ -31329,6 +31362,9 @@
           "phase_results": {
             "items": {
               "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunSwitchDistributionEndedResult"
+                },
                 {
                   "$ref": "#/components/schemas/RunSwitchContainerBuildResult"
                 },
@@ -44592,6 +44628,9 @@
     ],
     "run_nodes.observation_failure_diagnostics": [
       "FailureDiagnostics"
+    ],
+    "run_switch_journal_repair_pending.cancellation": [
+      "RunSwitchCancellation"
     ],
     "run_switch_journal_repair_pending.progress": [
       "RunSwitchJournalRepairPendingState"

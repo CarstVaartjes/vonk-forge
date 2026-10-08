@@ -137,8 +137,13 @@ class AdvanceMixin:
                 and plan is not None
                 and progress is not None
                 and not _progress_damaged(read_row_column(snapshot, "result"))
-                and service._settle_stop_observation(
-                    session, snapshot, plan, progress, now
+                and (
+                    service._settle_checkpoint_observation(
+                        session, snapshot, progress, now
+                    )
+                    or service._settle_stop_observation(
+                        session, snapshot, plan, progress, now
+                    )
                 )
             ):
                 session.commit()

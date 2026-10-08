@@ -174,8 +174,9 @@ def _validate_artifact_execution(
                 RunSwitchCode.CLEANUP_SCOPE_INVALID, reason=WaitReason.SCOPE_CHANGED
             )
         if evidence.nas_evicted is True:
-            raise RunSwitchRefused(
-                SecurityRefusalReason.RUN_SWITCH_CLEANUP_NAS_EVICTION_FORBIDDEN.value
+            raise RunSwitchRetryLater(
+                RunSwitchCode.CLEANUP_SCOPE_INVALID,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         reclaimed = evidence.reclaimed_bytes
         if type(reclaimed) is not int or reclaimed < 0:
@@ -210,8 +211,9 @@ def _validate_artifact_execution(
         allowed_reclaimable = set(plan.storage.reclaimable_digests)
         allowed_reclaimable.update(plan.runtime_storage.reclaimable_digests)
         if not reclaimed_digests <= allowed_reclaimable:
-            raise RunSwitchRefused(
-                SecurityRefusalReason.RUN_SWITCH_CLEANUP_RECLAIMED_DIGEST_NOT_PLANNED.value
+            raise RunSwitchRetryLater(
+                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         maximum_reclaimable = (
             plan.storage.reclaimable_bytes + plan.runtime_storage.reclaimable_bytes

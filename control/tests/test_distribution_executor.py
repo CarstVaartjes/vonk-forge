@@ -28,7 +28,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
-from vonk_control import distribution_executor as executor_module
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
@@ -44,6 +43,8 @@ from vonk_control.distribution_executor import (
     RuntimeImagePull,
     _phase_receipt,
 )
+from vonk_control.distribution_executor import children as executor_module
+from vonk_control.distribution_executor import durable as durable_executor_module
 from vonk_control.job_documents import (
     DistributionJobPayload,
     DistributionTransferProgress,
@@ -72,6 +73,7 @@ from vonk_control.run_switch_contract import (
     RunSwitchPhase,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
+    RunSwitchRuntimeImageResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchTargetTransferResult,
     RunSwitchVerifyResult,
@@ -83,12 +85,14 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
     _validate_artifact_execution,
 )
+from vonk_control.runtime_image_preparation import RuntimeImageReceipt
 from vonk_control.strict_json import read_stored_model
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .runtime_image_fixtures import place_test_image
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 from .test_recipe_operations import NOW, setup_services
+from .test_run_switch_operations import _runtime_receipt
 
 
 def _receipt_json(receipt: BaseModel | None) -> dict[str, object]:
@@ -460,7 +464,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         )
 
 
-def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
+def test_build_verify_handoff_reuses_content_from_another_producer() -> None:
     node_id = NODE_A
     build_id = str(uuid4())
     artifact_digest = "c" * 64
@@ -554,22 +558,43 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
     assert result["verified_build_id"] == build_id
     _validate_artifact_execution(plan, _phase(kind="verify"), result)
 
-    with pytest.raises(
-        RunSwitchOperationConflict, match="runtime-build-verification-mismatch"
-    ):
-        _validate_artifact_execution(
-            plan,
-            _phase(kind="verify"),
-            {key: value for key, value in result.items() if key != "verified_build_id"},
-        )
-    with pytest.raises(
-        RunSwitchOperationConflict, match="runtime-build-verification-mismatch"
-    ):
-        _validate_artifact_execution(
-            plan,
-            _phase(kind="verify"),
-            {**result, "verified_build_id": str(uuid4())},
-        )
+    # Persist a preparation receipt from a different producer, then feed it
+    # through the real distribution identity and final verification consumer.
+    foreign_id = str(uuid4())
+    foreign = RunSwitchRuntimeImageResult(
+        phase="prepare",
+        subphase="runtime-image",
+        image_digest=image_digest,
+        oci_layout_sha256=layout_digest,
+        image_bytes=11,
+        build_id=foreign_id,
+        runtime_image=RuntimeImageReceipt.model_validate_json(
+            canonical_message(
+                _runtime_receipt(
+                    plan,
+                    image=image_digest,
+                    layout=layout_digest,
+                    size=11,
+                    build_id=foreign_id,
+                )
+            )
+        ),
+    )
+    progress.phase_results.append(foreign)
+    restored = RunSwitchOperationResult.model_validate_json(progress.model_dump_json())
+    verified = executor._verify_evidence(plan, restored, (node_id,), ())
+    assert verified.verified_image_digest == image_digest
+    assert verified.verified_oci_layout_sha256 == layout_digest
+    _validate_artifact_execution(
+        plan,
+        _phase(kind="verify"),
+        verified.model_copy(update={"verified_build_id": foreign_id}),
+    )
+    _validate_artifact_execution(
+        plan,
+        _phase(kind="verify"),
+        verified.model_copy(update={"verified_build_id": None}),
+    )
 
     cached = DurableDistributionPhaseExecutor(
         *_unused_executor_services(lambda: datetime.now(UTC)),
@@ -1368,15 +1393,40 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
             node = session.get(AgentNode, node_id)
             assert node is not None
             node.workload_intent_ordinal = 1
+    # Preparation may have been produced by another recipe/build. Its
+    # serialized content receipt still feeds the real durable distribution.
+    foreign_id = str(uuid4())
+    foreign_image = RunSwitchRuntimeImageResult(
+        phase="prepare",
+        subphase="runtime-image",
+        runtime_image=RuntimeImageReceipt.model_validate_json(
+            canonical_message(
+                _runtime_receipt(
+                    plan,
+                    image=image_digest,
+                    layout=archive_digest,
+                    size=len(archive_payload),
+                    build_id=foreign_id,
+                )
+            )
+        ),
+        image_digest=image_digest,
+        oci_layout_sha256=archive_digest,
+        image_bytes=len(archive_payload),
+        build_id=foreign_id,
+    )
+    copy_progress = RunSwitchOperationResult.model_validate_json(
+        RunSwitchOperationResult(
+            workload_intent_ordinal=1, phase_results=[foreign_image]
+        ).model_dump_json()
+    )
     copy_child = executor.execute(
         plan,
         copy_phase,
         item_index=0,
         actor="operator",
         request_key=parent_request,
-        progress=RunSwitchOperationResult.model_validate_json(
-            canonical_message({"workload_intent_ordinal": 1})
-        ),
+        progress=copy_progress,
     )
     assert copy_child.operation_id
     with services.sessions.begin() as session:
@@ -1454,6 +1504,34 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert view.state == "succeeded"
     assert {member.node_id for member in view.result.members} == set(nodes)
     assert len(view.result.evidence) == 2
+    copy_progress.phase_results.extend(
+        RunSwitchTargetTransferEvidenceResult.model_validate_json(
+            canonical_message(
+                {
+                    **item.model_dump(mode="json"),
+                    "phase": "transfer",
+                    "subphase": "target-copy",
+                }
+            )
+        )
+        for item in view.result.evidence
+    )
+    verified = executor.execute(
+        plan,
+        _phase(kind="verify", node_ids=list(nodes), index=2),
+        item_index=0,
+        actor="operator",
+        request_key=parent_request,
+        progress=RunSwitchOperationResult.model_validate_json(
+            copy_progress.model_dump_json()
+        ),
+    )
+    assert isinstance(verified.result, RunSwitchVerifyResult)
+    assert verified.result.verified_image_digest == image_digest
+    assert verified.result.verified_oci_layout_sha256 == archive_digest
+    assert {item.node_id for item in verified.result.evidence} == set(nodes)
+    _validate_artifact_execution(plan, _phase(kind="verify"), verified.result)
+
     replay = executor.execute(
         plan,
         copy_phase,
@@ -1776,7 +1854,8 @@ def test_child_persistence_retains_in_place_default_members(
     initial,
 ):
     """Both child writers must retain mutations nested in their typed receipt."""
-    original = executor_module._child_receipt
+    writer_module = executor_module if initial else durable_executor_module
+    original = writer_module._child_receipt
     member = OperationMemberProgress(member_id=NODE_A, phase=ProgressPhase.TRANSFER)
     writes = []
 
@@ -1802,7 +1881,7 @@ def test_child_persistence_retains_in_place_default_members(
                     writes.append(receipt)
                     assert receipt.progress.operation.members == [member]
 
-    monkeypatch.setattr(executor_module, "_child_receipt", mutated_receipt)
+    monkeypatch.setattr(writer_module, "_child_receipt", mutated_receipt)
     sessions = agent_system[1].sessions
     event.listen(sessions, "after_flush", check_written_receipt)
     try:

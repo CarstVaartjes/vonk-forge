@@ -25,7 +25,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
-from vonk_control.distribution_executor import _ChildView
+from vonk_control.distribution_executor.receipts import _ChildView
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.failure_classification import is_security_failure
 from vonk_control.install_admission import (
@@ -2102,14 +2102,15 @@ def _cold_compile_switch(
         actor="admin",
     )
 
-    def drive() -> None:
+    def drive(operation_id: str | None = None) -> None:
         """Advance one due phase, answering any ordinary preflight probe."""
-        before = service.get(operation.operation_id)
+        operation_id = operation_id or operation.operation_id
+        before = service.get(operation_id)
         due = before.result.observation_due_at if before.result is not None else None
         if due is not None and due > clock.now:
             clock.now = due
         service.tick()
-        view = service.get(operation.operation_id)
+        view = service.get(operation_id)
         assert view.result is not None
         checkpoint = view.result.preflight
         if checkpoint is not None and checkpoint.pending_job_id:
@@ -2326,50 +2327,65 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
         switch.clock.now = due
 
 
-def test_preflight_refresh_after_repeated_cold_compiles_recovers_exact_plan(
+def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
-    """Freshness expiry backs off without abandoning accepted exact intent."""
+    """Persistent stale preflight ends its observer; repaired fresh intent runs."""
+    from vonk_control.run_switch_operations import _run_switch_payload
+
+    from .non_blocking import assert_ended_without_blocking
+
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
-        original = dict(session.get(Job, operation.operation_id).payload)
-    # A phase may compile more than once while refreshing bound build evidence.
-    # Keep the fault present until six durable failures have actually occurred,
-    # independent of the number of compiler calls made by each phase attempt.
-    for _ in range(60):
-        view = service.get(operation.operation_id)
-        assert view.state in {"queued", "running"}, view.status_reason
-        if (_result(view).retry_attempt or 1) >= 7:
-            break
+        request = _run_switch_payload(
+            session.get(Job, operation.operation_id)
+        ).intent.request
+
+    def end(_operation):
+        for _ in range(60):
+            view = service.get(operation.operation_id)
+            if view.result.failed_phase is not None:
+                break
+            switch.drive()
+        else:
+            pytest.fail("persistent preflight did not end within its request budget")
         assert "runtime-install" not in switch.executor.events
-        switch.drive()
-        held = service.get(operation.operation_id)
-        if (
-            held.result.retry_reason is not None
-            and held.result.observation_due_at is not None
-        ):
-            assert held.result.observation_due_at <= switch.clock.now + timedelta(
-                seconds=60
-            )
-            if held.result.observation_due_at > switch.clock.now:
-                assert service.tick() is False
-    else:
-        pytest.fail("cold compilation never exercised six failed recovery cycles")
-    assert _result(view).retry_attempt == 7
-    with switch.sessions() as session:
-        assert list(session.scalars(select(RecipeInstallation))) == []
-    switch.compiler._slow_compiles = 0
+        with switch.sessions() as session:
+            assert not list(session.scalars(select(RecipeInstallation)))
+        return view
+
+    def fresh(_world):
+        switch.compiler._slow_compiles = 0
+        return service.apply(
+            RunSwitchApplyRequest.model_validate_json(
+                canonical_message(
+                    request.model_copy(
+                        update={"request_key": str(uuid.uuid4()), "plan_digest": None}
+                    )
+                )
+            ),
+            actor="admin",
+        )
+
+    def cause(receipt):
+        assert receipt.result.failure_code is not None
+
+    _, admitted = assert_ended_without_blocking(
+        switch,
+        operation,
+        end=end,
+        fresh=fresh,
+        assert_reason=cause,
+    )
     for _ in range(20):
-        switch.drive()
+        switch.drive(admitted.operation_id)
         if "runtime-install" in switch.executor.events:
             break
     assert switch.executor.events.count("runtime-install") == 1
     with switch.sessions() as session:
-        assert session.get(Job, operation.operation_id).payload == original
-        installations = list(session.scalars(select(RecipeInstallation)))
-        assert len(installations) == 1
-        assert installations[0].plan_digest == switch.admitted.plan_digest
+        assert session.get(Job, admitted.operation_id) is not None
+        assert len(list(session.scalars(select(RecipeInstallation)))) == 1
 
 
 def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(

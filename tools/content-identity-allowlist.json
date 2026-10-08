@@ -212,48 +212,6 @@
       "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
     },
     {
-      "path": "control/src/vonk_control/distributed_recovery.py",
-      "function": "_recovery_authority",
-      "kind": "provenance_comparison",
-      "expression": "run_plan.recipe_revision_id != installation.recipe_revision_id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/distributed_recovery.py",
-      "function": "_singleton_recovery_authority",
-      "kind": "provenance_comparison",
-      "expression": "installation_plan.recipe_revision_id != revision.id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/distributed_recovery.py",
-      "function": "_singleton_recovery_authority",
-      "kind": "provenance_comparison",
-      "expression": "run_plan.recipe_revision_id != revision.id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/distributed_recovery.py",
-      "function": "_singleton_recovery_authority",
-      "kind": "provenance_comparison",
-      "expression": "str(accepted_start.recipe_revision_id) != revision.id",
-      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
-    },
-    {
-      "path": "control/src/vonk_control/distribution_executor.py",
-      "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
-      "kind": "provenance_comparison",
-      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
-      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
-    },
-    {
-      "path": "control/src/vonk_control/distribution_executor.py",
-      "function": "DurableDistributionPhaseExecutor._runtime_identity",
-      "kind": "provenance_comparison",
-      "expression": "receipt.build_id != build_id",
-      "reason": "Operation-internal binding: the verified runtime image receipt must name the exact build already selected by this distribution operation; image digest, archive digest and byte identity are checked separately. A foreign receipt cannot complete the accepted transfer."
-    },
-    {
       "path": "control/src/vonk_control/fleet_profile_adapter_conversion.py",
       "function": "_job_proof",
       "kind": "provenance_comparison",
@@ -329,20 +287,6 @@
       "kind": "provenance_comparison",
       "expression": "plan.recipe_revision_id == assignment.recipe_revision_id",
       "reason": "Ownership of a profile child operation: the child plan must name the revision and nodes its bound assignment was accepted for, otherwise adoption is refused."
-    },
-    {
-      "path": "control/src/vonk_control/fleet_projection.py",
-      "function": "FleetProjection._installation_rows",
-      "kind": "provenance_comparison",
-      "expression": "CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id",
-      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
-    },
-    {
-      "path": "control/src/vonk_control/fleet_projection.py",
-      "function": "FleetProjection._run_rows",
-      "kind": "provenance_comparison",
-      "expression": "CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id",
-      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
       "path": "control/src/vonk_control/host_runtime_plan_authority.py",
@@ -433,34 +377,6 @@
       "function": "load_placement_operational_evidence",
       "kind": "provenance_comparison",
       "expression": "RecipeInstallation.recipe_revision_id == recipe_revision_id",
-      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
-    },
-    {
-      "path": "control/src/vonk_control/library_projection.py",
-      "function": "LibraryProjection._recipe_projection",
-      "kind": "provenance_comparison",
-      "expression": "(key := (selection.model.publisher, selection.model.slug, selection.model.content_sha256)) in model_by_key",
-      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
-    },
-    {
-      "path": "control/src/vonk_control/library_projection.py",
-      "function": "LibraryProjection.authoring_recipe_detail",
-      "kind": "provenance_comparison",
-      "expression": "CatalogDocumentRevision.document_id == recipe_id",
-      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
-    },
-    {
-      "path": "control/src/vonk_control/library_projection.py",
-      "function": "LibraryProjection.recipe_library",
-      "kind": "provenance_comparison",
-      "expression": "(selection.model.publisher, selection.model.slug, selection.model.content_sha256) in selected_keys",
-      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
-    },
-    {
-      "path": "control/src/vonk_control/prebuilt_images.py",
-      "function": "prebuilt_failed",
-      "kind": "provenance_comparison",
-      "expression": "RecipeBuild.recipe_revision_id == recipe_revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
@@ -574,48 +490,6 @@
       "kind": "provenance_comparison",
       "expression": "RecipeBuild.recipe_revision_id == recipe_revision_id",
       "reason": "Cancellation and ownership lookup: finds the consumers and the claim of one specific build row by its id so that a cancel or a lock acts on exactly that build; unknown ownership blocks the release."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService._reserve_in_session",
-      "kind": "provenance_comparison",
-      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
-      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService._reserve_in_session",
-      "kind": "provenance_comparison",
-      "expression": "RecipeBuild.id == plan.build_id",
-      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService._reserve_in_session",
-      "kind": "provenance_comparison",
-      "expression": "requested_plan.build_id != plan.build_id",
-      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService.persist_plan_in_session",
-      "kind": "provenance_comparison",
-      "expression": "RecipeBuild.recipe_revision_id == plan.recipe_revision_id",
-      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService.persist_plan_in_session",
-      "kind": "provenance_comparison",
-      "expression": "existing.recipe_revision_id == plan.recipe_revision_id",
-      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_builds.py",
-      "function": "RecipeBuildService._prepare_plan_once",
-      "kind": "provenance_comparison",
-      "expression": "resolution.recipe_revision_id != revision.id",
-      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
     },
     {
       "path": "control/src/vonk_control/recipe_execution_contract.py",
@@ -828,13 +702,6 @@
       "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/run_switch_contract.py",
-      "function": "RunSwitchPlan.cleanup_authority_matches_effect",
-      "kind": "provenance_comparison",
-      "expression": "authority.recipe_revision_id != self.recipe_revision_id",
-      "reason": "Signed plan self-consistency: a cleanup authority must name the same revision as the plan whose effect it cleans up."
-    },
-    {
       "path": "control/src/vonk_control/run_switch_operations/executor_verification.py",
       "function": "ExecutorVerificationMixin._bound_installation",
       "kind": "provenance_comparison",
@@ -919,42 +786,187 @@
       "reason": "Fencing of an image publication intent: only the operation attempt and claim that wrote the intent may complete it; ownership, not content."
     },
     {
-      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "path": "control/src/vonk_control/distributed_recovery/authority.py",
+      "function": "_recovery_authority",
+      "kind": "provenance_comparison",
+      "expression": "run_plan.recipe_revision_id != installation.recipe_revision_id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery/singleton.py",
+      "function": "_singleton_recovery_authority",
+      "kind": "provenance_comparison",
+      "expression": "installation_plan.recipe_revision_id != revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery/singleton.py",
+      "function": "_singleton_recovery_authority",
+      "kind": "provenance_comparison",
+      "expression": "run_plan.recipe_revision_id != revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/distributed_recovery/singleton.py",
+      "function": "_singleton_recovery_authority",
+      "kind": "provenance_comparison",
+      "expression": "str(accepted_start.recipe_revision_id) != revision.id",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_projection/service.py",
+      "function": "FleetProjection._installation_rows",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_projection/service.py",
+      "function": "FleetProjection._run_rows",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/library_projection/catalog.py",
+      "function": "_recipe_projection",
+      "kind": "provenance_comparison",
+      "expression": "(key := (selection.model.publisher, selection.model.slug, selection.model.content_sha256)) in model_by_key",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    },
+    {
+      "path": "control/src/vonk_control/library_projection/views.py",
+      "function": "authoring_recipe_detail",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.document_id == recipe_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/library_projection/views.py",
+      "function": "recipe_library",
+      "kind": "provenance_comparison",
+      "expression": "(selection.model.publisher, selection.model.slug, selection.model.content_sha256) in selected_keys",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    },
+    {
+      "path": "control/src/vonk_control/prebuilt_images.py",
+      "function": "prebuilt_failed",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/persistence.py",
+      "function": "_reserve_in_session",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/persistence.py",
+      "function": "_reserve_in_session",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.id == plan.build_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/persistence.py",
+      "function": "_reserve_in_session",
+      "kind": "provenance_comparison",
+      "expression": "requested_plan.build_id != plan.build_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/persistence.py",
+      "function": "persist_plan_in_session",
+      "kind": "provenance_comparison",
+      "expression": "RecipeBuild.recipe_revision_id == plan.recipe_revision_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/persistence.py",
+      "function": "persist_plan_in_session",
+      "kind": "provenance_comparison",
+      "expression": "existing.recipe_revision_id == plan.recipe_revision_id",
+      "reason": "Build row identity for the plan being persisted or reserved: finds the one row for this revision, builder and build input (idempotent persist) or the row the plan names; a content match is decided by reusable_build."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_builds/planning.py",
+      "function": "_prepare_plan_once",
+      "kind": "provenance_comparison",
+      "expression": "resolution.recipe_revision_id != revision.id",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "path": "control/src/vonk_control/unused_storage_collection/evidence.py",
       "function": "_Evidence.read",
       "kind": "provenance_comparison",
       "expression": "(row.publisher.casefold(), row.slug.casefold()) in pointers",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "path": "control/src/vonk_control/unused_storage_collection/evidence.py",
       "function": "_Evidence.read",
       "kind": "provenance_filter",
       "expression": "CatalogRecipeModelReference.recipe_revision_id.in_(pointed_ids)",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "path": "control/src/vonk_control/unused_storage_collection/evidence.py",
       "function": "_Evidence.read",
       "kind": "provenance_filter",
       "expression": "RecipeBuild.recipe_revision_id.in_(pointed_ids)",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "path": "control/src/vonk_control/unused_storage_collection/references.py",
       "function": "_installation_kept",
       "kind": "provenance_comparison",
       "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/unused_storage_collection.py",
+      "path": "control/src/vonk_control/unused_storage_collection/references.py",
       "function": "_installation_kept",
       "kind": "provenance_comparison",
       "expression": "newest[0] == installation.recipe_revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/distribution_executor/preparation.py",
+      "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
+      "kind": "provenance_comparison",
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "path": "control/src/vonk_control/run_switch_contract.py",
+      "function": "RunSwitchPlan.cleanup_authority_matches_effect",
+      "kind": "provenance_comparison",
+      "expression": "authority.recipe_revision_id != self.recipe_revision_id",
+      "reason": "Signed plan self-consistency: a cleanup authority must name the same revision as the plan whose effect it cleans up."
     }
   ],
   "content_identities": {
+    "control/src/vonk_control/artifact_reference_scan.py": {
+      "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
+      "_reason_projection": "e0a699c0788ea845ed78a90710c66e67389da9f008120a254923cdd4efbde9f6",
+      "require_model_sets_open": "e5213082fba248642c9b6ff7955f1900e54e5417746976052c4b7252c7c3ec06",
+      "model_set_objects": "b3f846270636729ad6febbaed69899eb1b6eafd11e8e2f31b900e31083f384e6",
+      "model_set_reference_findings": "2b36ecc43b37935876294fd1c9013e150d7e4c4325dfc2a84b3b624405b94c84",
+      "model_set_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
+      "model_set_reference_reasons": "8873ed7b1fc4d46fc3d0e5cf89d05bcfe552753b64a3118776d35d1212fbfd09",
+      "runtime_image_reference_findings": "adcf56d41c236640e378d01f09a17a40332e019cc1e3786c84257cbc998b80e5",
+      "runtime_image_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
+      "runtime_image_reference_reasons": "d6257e372269c4a0b0d0f994dc63dab9dd19628c1d80f0f08c5cfc22fb660fa0",
+      "_profile_plan": "32f8a20e21bc91a775d0161a568917af8eef9eabf8d590afdeb6802ecd0d023d",
+      "_run_switch_plan": "33d5925118d8e75da1c7b727b45cf82b8a242084900614a40462a25e80c1efc7",
+      "_stated": "8940aad2e7963e3364e059cc7bd2f16977accb8175772896cd669201a59c02b2",
+      "_approved_images": "cc6fe9d4e74ac91302ee391791b76a1ca6928aafd9e451848fa15d4025417d51",
+      "_run_switch_runtime_image_intent": "f87d5d52872d21040b3d97b26bdb585f29585f479124443b858af0aa7a031650",
+      "_run_switch_kinds": "b0d724aa893828e9c1fd3c716a56044fe570bd707fb6559663461170da1919d5",
+      "<module>": "7ed3a28a64581ec153a059fe5bbc0ba862461b9ea9afea6065be98d78a9beba0"
+    },
     "control/src/vonk_control/attempt_residues.py": {
       "_owned_nodes": "75e9cec6a7baac6d6f2572b7b96712d9f6c8f4e8b5b731af87c6a40df5e0b0dc",
       "unowned_never_installed": "391b4b042010dac2b6cb04793457827596a3d265e4516538ba4d552736688d1b",
@@ -1138,76 +1150,48 @@
       "_aware": "e3f863dd032191f03c6bc6cdd1d84a10cbae0188f0a6e678b74883dc6aedeaa0",
       "<module>": "f87af347552150d2116fe5055218605de241ca89e27703f81ef91330310f1eb1"
     },
-    "control/src/vonk_control/distributed_recovery.py": {
-      "_unproven": "2aed4ead507cf6c0307e3f6ae475cda8784ac63988db2e0e8b34c44a8c097593",
-      "_parent": "987a4e5e850e73a13c97298aa68b432553254b51579cb8d1c5e21bfe9f32f949",
-      "_cancelled": "28afc64fd56f27125100b696a18e1eb6507d6d4d55bd92d664a6026e011dafdd",
-      "_active_recipe_revision": "402d780f772421fb1c2100daa507613f18a911652f7088ca809b1c9efaebea40",
-      "_RecoveryJobQueue.enqueue_in_session": "f598b46531e57e6a96bea18696a74e0c7baf87e3bdc7b3d092f5bc8557899311",
-      "_RecoveryJobQueue.notify_available": "cd9ff09c539b579bf45a04971aaf38ad7f19b267e2305547648b1f23d7b9829a",
-      "_RecoveryRoutes.publication_transaction": "f740716c3a4ac88a18eef505f4cf42ecee2f0924646ab7a453afc8a67fc65e29",
-      "_RecoveryRoutes.withdraw_runs": "6a1d738384884be08aa1b011393d097a30d2bebec16491003e74782a1afd9cd6",
-      "_RecoveryRoutes.withdrawal_complete_in_session": "8f416cb96dfab0e7421f79975599d3f0be19c29f83742a492e2a99c079fe9106",
-      "_RecoveryRunStops.queue_recovery_stop_in_session": "e839fbf6e01d6f1006429bbfd49a805a2ccfc779066e9792e3ab87890247347e",
-      "DistributedRecoveryCoordinator.__init__": "06ad8d0a4e3e35a7bb72794f6ed5b2c49a9e7007e9e2bd02750c46a0240a5676",
-      "DistributedRecoveryCoordinator.tick": "27be13d2a0a7847405bbb9be1c038ed7e3dd66f66a9b93c06572d16de48a733f",
-      "DistributedRecoveryCoordinator._withdraw_routes": "961714332f6331f725f691236cbb5d79ee9ee2f3aebcce321c433059fc0290ee",
-      "DistributedRecoveryCoordinator._settle_unreadable_runs": "2f24e042f772707840c3af94d2984ba71bec9d2fa3af558258fad13733e27316",
-      "DistributedRecoveryCoordinator._active_recovery": "7c20072930824c148572087df4eb89e8fd60545c26e373fc21ed210545003496",
-      "_unreadable_run_ids": "4051040dd211303fd1e92655bda31ca2b34eba98b462a0806cabe112309aa0d5",
-      "_recovery_marker": "8bf002a04258456e280d3c92f25aa2f5bbcfbae41beb3b6fd081cb948c7913a1",
-      "recovery_start_plan": "4bb6c7662de9582473491e7c1077f404c9f6168c0ac28b61c54c3645923fa5fc",
-      "enforce_recovery_deadline": "e26fbb37c30d6e6e9358eb962575465ec4aff21a13f1461b6a3dc4e2074d96df",
-      "_proves_fresh_absence": "757e189d1ce19d81df314490bf71eea7835e38c315fbb8a58313f231baccda8d",
-      "run_node_reports_absent": "cf18aa07561eeac703677be006c69d45336210cf1013d79787fd44a8238c27a2",
-      "_superseded": "0d84e97b26953b548e71f962a219ca6b9a81fa3c99440fadd7473101403126c3",
-      "_settle_unrecoverable": "1538ef9c4182e9579bf09fc001e88c1fb432e6c90a92628d3e9a3ef8c558cecc",
-      "release_inactive_run_claims_in_session": "015509a59040803e8010831a37b368fac8bcb762ffe1b8fa956e23a5e76dc36e",
-      "settle_observed_absent_runs_in_session": "5f30d1efa4e4b4a3a4aaca550b7911f8b5d83a3fdcf3797da8c532784fc612bc",
-      "settle_absent_run_in_session": "7de1d42144f32564eadf86e2a4f1246af56c978df760695a9456faa3c127a5e5",
-      "_advance_recovery_check": "b9bbf2c5a7ea44d2ac8a2ec39a36dd3d172d757dce7a5f00ae02cec3519cc1bf",
-      "_schedule_recovery_wait": "1fbb4e9c5537085de89309415eda6e10efa36994ed4d0ac6d09727b44624fa8a",
-      "_singleton_recovery_authority": "7f33e0ccf09cec69c302f3002bf2370ee73dd5b6558be62eecbf604a1b002efc",
-      "_accepted_start_authority": "293df1fed38db5027ebce111f129739e98e49b93dccf6c1b2865d1a92b6d9147",
-      "_launch_generation": "d4e0fe33d6ff8b33daf0d8420ac2f3712bcd01b4497b24ec5f339ee9ac96c488",
-      "_validate_singleton_recovery_start_origin": "fdb7af12f2cb3e5c112af86c08ab6f6e09e92478088648204c0f1a862ea732a4",
-      "_start_binds_current_run_plan": "5d6508cf71bab753e02a27a619f402c83d86d1fb398329bfd241a1704ad69e23",
+    "control/src/vonk_control/distributed_recovery/authority.py": {
+      "_start_binds_current_run_plan": "d682be7cc7ee2358b66b3f67a8c0aabffc136c43bae47bf8d49a2489a3232df0",
       "_project_start_phases": "6aba82169d2a4dd13e5bcd6f06da9f3c6c900455b00d6b04d2e9f8dc3d944d45",
       "_accepted_start_authority_payload": "c39ec056b72116e45716561ac5de39cc935462e1c680440367c631e1ab4ed02f",
       "_accepted_start_child": "9b849eeca86d948635e52077b7bee34ab36ffe9c107037033d53feb3c1567404",
       "_recovery_authority": "026df91f0e14cca3ee442ce3b60e092e4a99449c64339a68c5d94851583a545a",
-      "_enqueue_recovery_stop": "03b514fbcfcfbf0388a1f802019d26bf4fbea8c6c9d004fc28bd779ba66440a5",
-      "_original_start_authority": "f2eaaad5ae67019a721c804bbbef7a83f5b4a301bb55295f5d41fc4470e34959",
-      "_encode_phases": "470938c54efa46f72ca99d0499cb9404994efe894546de343be2be505da6ab57",
-      "_decode_phases": "3bedacc8490633f435912b3d43757949b26d83d9aff81dd6223d9b793cc51841",
-      "_aware": "1877666505e1deb8c90e258421147c6548cffc9637d3dcc6172c19297f1a064f",
-      "<module>": "bb3eba1350b4c1fd90d0fe314ba93ceaf32e65a948b9948395cd76d7cb9f6bf4"
+      "_enqueue_recovery_stop": "ddb0e4bd257065ae1a084fbf7d81c41bb7f65900b695236de9a53e15b3bd8bf4",
+      "_original_start_authority": "f2eaaad5ae67019a721c804bbbef7a83f5b4a301bb55295f5d41fc4470e34959"
     },
-    "control/src/vonk_control/distribution_executor.py": {
-      "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
-      "_phase_receipt": "da3fef88dc994840c9dedfc3e3f66705c7c3a2a6f554f123eb7957e5a9e4fbc2",
-      "_child_receipt": "88edff8ff7e7d8e1cef0b35fc6f9525bf80eecd5ab8013876fee17103b488910",
-      "_typed_failure": "cc9e487f8ceded968908107806b604c02ff6cb7987d8957b29d6c658b57e3870",
-      "_evidence_projection": "32e1414057fe560be9cd3c46d0ccd7667d78e1f64895bce73b8c1aaddd33465c",
-      "DurableDistributionPhaseExecutor.__init__": "26f5c704678602f9f0c62d0d511f6cb04fadcafb69e715cdec1cc23e873254a7",
+    "control/src/vonk_control/distributed_recovery/singleton.py": {
+      "_singleton_recovery_authority": "7f33e0ccf09cec69c302f3002bf2370ee73dd5b6558be62eecbf604a1b002efc",
+      "_accepted_start_authority": "293df1fed38db5027ebce111f129739e98e49b93dccf6c1b2865d1a92b6d9147",
+      "_launch_generation": "d4e0fe33d6ff8b33daf0d8420ac2f3712bcd01b4497b24ec5f339ee9ac96c488",
+      "_validate_singleton_recovery_start_origin": "c9cf469ddc9cac7ed8647b9d54613c65f90004bd93bfbc7cc2d99f081be583aa"
+    },
+    "control/src/vonk_control/distribution_executor/__init__.py": {
+      "<module>": "e47108b63ec263ee2c85f3d612ed57e171d836d211d057723b7b10e529025c01"
+    },
+    "control/src/vonk_control/distribution_executor/children.py": {
+      "DistributionChildren._adopt_child": "d59f1401354fb44060610ea2997c112feae4aac5967ec2e89bcaa9ad9b703a4d",
+      "DistributionChildren._ensure_child": "797cb018a4ed9f3a22e767083ae9b43758e7db524bc22782fc4281ccf7a2bddf"
+    },
+    "control/src/vonk_control/distribution_executor/durable.py": {
       "DurableDistributionPhaseExecutor.execute": "b1c42d9ca3e70c3098616aabbb92fb21a77a240fbe525f26af46eedc4ecc4a89",
       "DurableDistributionPhaseExecutor.abandon": "3fe415540f9b7017fd75db969e03eadd7374ed2c599e8c61f47afd7bd106c638",
-      "DurableDistributionPhaseExecutor.get": "4f8cfecf3a31683b4360c474004339cd9dbcccbe59851a809997cc348c37c90e",
-      "DurableDistributionPhaseExecutor._verification_result": "dca78d6d984770bb2c64c0d2ea92543fcc14ac0baaeb417ad26e1538e90967b0",
-      "DurableDistributionPhaseExecutor._adopt_child": "d59f1401354fb44060610ea2997c112feae4aac5967ec2e89bcaa9ad9b703a4d",
-      "DurableDistributionPhaseExecutor._ensure_child": "797cb018a4ed9f3a22e767083ae9b43758e7db524bc22782fc4281ccf7a2bddf",
-      "DurableDistributionPhaseExecutor._model_objects": "7f329ff1f097dcc1e51d893ff704ab8cb6d93faf7b3fb2e88cb71db89eaf5fbe",
-      "DurableDistributionPhaseExecutor._runtime_identity": "3018371712332cf081ef6faa841f36eb9b9e361c2ce66882eac04f0651ba5f4f",
-      "DurableDistributionPhaseExecutor._source_runtime_storage": "7a1856b4a9c400c18c454bfcc2db753ae08bfe4b64a58be49b142fa2cb938ac0",
-      "DurableDistributionPhaseExecutor._archive": "43c456ca180de404f879f20126c3df08f01f1870fa0a29aa8111e58394cb5b98",
-      "DurableDistributionPhaseExecutor._stored_config_digest": "0d2c3d3be5982faa6d0b00977d6026bda88daf46b76efb9343aa875147ce27b6",
-      "DurableDistributionPhaseExecutor._assignment": "8a5075cd9baa429f4d2344283863bef5d4ddad1f36cc9a04d7b1d126cd90242f",
-      "DurableDistributionPhaseExecutor._cached_targets": "236f6bf07d8af9ea08fb48512482b10f9668289238ae7f57bd54c930de0293d7",
-      "DurableDistributionPhaseExecutor._target_bytes": "febfe369902c560320c09bf4dea5ccb8b9a67795d86c410462b220abb0e09ada",
-      "DurableDistributionPhaseExecutor._verify_evidence": "3629668f8b30f5d694e4a42cf315c02e5762c4c172342304f28b00556ed8c177",
-      "DurableDistributionPhaseExecutor._member_state": "20ced512b3544d175603fed6c6274bad8cbdcd5b86b2449737c0ba1ae8312996",
-      "DurableDistributionPhaseExecutor._int": "23f785a8220b8ddd3323d2f4d0bc8373fc842103b85483a1404e3d705a667f9b",
-      "DurableDistributionPhaseExecutor._digest": "026fc484cd30b8648c047b41bd09118ea764c40fc7fa3db4fed897f60bbe2370",
+      "DurableDistributionPhaseExecutor.get": "4f8cfecf3a31683b4360c474004339cd9dbcccbe59851a809997cc348c37c90e"
+    },
+    "control/src/vonk_control/distribution_executor/identity.py": {
+      "DistributionIdentity.__init__": "26f5c704678602f9f0c62d0d511f6cb04fadcafb69e715cdec1cc23e873254a7",
+      "DistributionIdentity._model_objects": "7f329ff1f097dcc1e51d893ff704ab8cb6d93faf7b3fb2e88cb71db89eaf5fbe",
+      "DistributionIdentity._runtime_identity": "3018371712332cf081ef6faa841f36eb9b9e361c2ce66882eac04f0651ba5f4f",
+      "DistributionIdentity._source_runtime_storage": "7a1856b4a9c400c18c454bfcc2db753ae08bfe4b64a58be49b142fa2cb938ac0",
+      "DistributionIdentity._archive": "43c456ca180de404f879f20126c3df08f01f1870fa0a29aa8111e58394cb5b98",
+      "DistributionIdentity._stored_config_digest": "0d2c3d3be5982faa6d0b00977d6026bda88daf46b76efb9343aa875147ce27b6",
+      "DistributionIdentity._assignment": "8a5075cd9baa429f4d2344283863bef5d4ddad1f36cc9a04d7b1d126cd90242f",
+      "DistributionIdentity._cached_targets": "236f6bf07d8af9ea08fb48512482b10f9668289238ae7f57bd54c930de0293d7",
+      "DistributionIdentity._target_bytes": "febfe369902c560320c09bf4dea5ccb8b9a67795d86c410462b220abb0e09ada",
+      "DistributionIdentity._member_state": "20ced512b3544d175603fed6c6274bad8cbdcd5b86b2449737c0ba1ae8312996",
+      "DistributionIdentity._int": "23f785a8220b8ddd3323d2f4d0bc8373fc842103b85483a1404e3d705a667f9b",
+      "DistributionIdentity._digest": "026fc484cd30b8648c047b41bd09118ea764c40fc7fa3db4fed897f60bbe2370"
+    },
+    "control/src/vonk_control/distribution_executor/preparation.py": {
       "CompositeDistributionPhaseExecutor.__init__": "0a2ca4ae8caedd100668af236f590a182c815e5ab7bcce1389d8dd8d0d30f2d4",
       "CompositeDistributionPhaseExecutor.memory_footprint": "ac93d09598e40ba98532886d65e00f66c982d13add5a24e557de3975428d325b",
       "CompositeDistributionPhaseExecutor.close": "7fe75185b69aa1ae560c9876c3b10d0a6171e30439f18c8cf78742a9046e1dd0",
@@ -1217,8 +1201,18 @@
       "CompositeDistributionPhaseExecutor._prepare_runtime_image.persist_reference": "1f214ae4fc81d21fdfa5058399b8f56e34c5a7f8176b932859c01f065751bacc",
       "CompositeDistributionPhaseExecutor.get": "3925260150357e56c329665f7c3f87b73f48abafee316602ef5c7fb7dc5d8735",
       "CompositeDistributionPhaseExecutor._cache_state": "67285a481816574b36d780a9f44023c2ac18d9a350abb0b8ffadf8f9c98b5087",
-      "CompositeDistributionPhaseExecutor._cache_result": "ddcdf2d1318a6d0e245b8f7533388a7848c2e71103af773022de376cf6d00f86",
-      "<module>": "e47108b63ec263ee2c85f3d612ed57e171d836d211d057723b7b10e529025c01"
+      "CompositeDistributionPhaseExecutor._cache_result": "ddcdf2d1318a6d0e245b8f7533388a7848c2e71103af773022de376cf6d00f86"
+    },
+    "control/src/vonk_control/distribution_executor/receipts.py": {
+      "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
+      "_phase_receipt": "da3fef88dc994840c9dedfc3e3f66705c7c3a2a6f554f123eb7957e5a9e4fbc2",
+      "_child_receipt": "88edff8ff7e7d8e1cef0b35fc6f9525bf80eecd5ab8013876fee17103b488910",
+      "_typed_failure": "cc9e487f8ceded968908107806b604c02ff6cb7987d8957b29d6c658b57e3870",
+      "_evidence_projection": "32e1414057fe560be9cd3c46d0ccd7667d78e1f64895bce73b8c1aaddd33465c"
+    },
+    "control/src/vonk_control/distribution_executor/verification.py": {
+      "DistributionVerification._verification_result": "dca78d6d984770bb2c64c0d2ea92543fcc14ac0baaeb417ad26e1538e90967b0",
+      "DistributionVerification._verify_evidence": "3629668f8b30f5d694e4a42cf315c02e5762c4c172342304f28b00556ed8c177"
     },
     "control/src/vonk_control/fleet_profile_adapter_conversion.py": {
       "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",
@@ -1292,16 +1286,8 @@
       "RunSwitchFleetProfileAdapter._adopt_child.unknown": "b7f69802087ba302f4ee35c3d63741c5cea3c66d9cb291174b11b74a8fe159a8",
       "<module>": "f74be4538acfd927911785b4fa5b5e512eb0b9867f987ff0f3420d8486d71bd1"
     },
-    "control/src/vonk_control/fleet_projection.py": {
-      "_canonical_recipe": "da0b8f50654bf53c9f66b9736203a00612b64c92eb39e2bb2712a6827b1b2fef",
-      "_installation_payload_expectations": "46bc99cffafdb58db010cd34e76d3beec03e51ee981989c77aae4ed20a7a54a2",
-      "_install_partial_warnings": "1ad960c24133b515f20dbbebd419b6d822156bd471807ef80282254cb1b2792e",
-      "_install_degraded_reason": "fe547a9a5a379f648e095c959f3eabf4378dbe28ea1c8593da2e7421aac175b6",
-      "_run_degraded_reason": "7eef69d2c1bfc0edc1dda5f4b90a6cf87593fe2c19a4505f261e0dff871cddc6",
-      "_low_clock_detail": "3310d3281aca61277ac129b5c017353b54453cd51eb0e421423d24d9e20a54ce",
-      "_unavailable_presence": "f91ee836aad78c59e7d6f03ab33790b94acd589f4c16940b947649035b981926",
-      "telemetry_point": "7c6158ff4548c238a8e057b15bab8d99ebdc97fc014074c64c08087c68028e5c",
-      "_utc": "fbbb50d3ca5be4177c7567f574443e15265e47aedff64b175d1293e410db713a",
+    "control/src/vonk_control/fleet_projection/service.py": {
+      "FleetProjection": "9a63c54234d69697f8b6401e5371077f31953907f324d1d79c299a3299d8b87a",
       "FleetProjection.__init__": "0f477d467fb4347121fe44148bac6675c81bd0a189c3ac3e0172a19270c3998a",
       "FleetProjection.read": "19173693160714d86a7eafe621b0ae926fdbf016ed34ee6d1fef96e0e4eebf27",
       "FleetProjection.update_display_name": "c722da06cc04dd1e7fcd263a2d1edb319693101c39be5cbf6416c8cfcff8dbb0",
@@ -1314,17 +1300,11 @@
       "FleetProjection._installation_rows": "0850dcf8ff26f4351730a31451081adfd0ac8dcf66fdcd1c545c2c31882ebad7",
       "FleetProjection._mapping_members": "0932a057a09961e41ee44f61fec471cc98f915baed1c0e2fc5ede18cd06a914f",
       "FleetProjection._exact_group_reason": "bb8a8359d8162a503928729f85bc903d4fbe2090040248aa924e1401bf75e6bf",
-      "FleetProjection._installed_presence": "10c20bbe29061cbca5d87abaa08a60f35a443a49bc14a9ad9aabccd763979dc7",
-      "FleetProjection._loaded_presence": "d2f60ee75f283ef20f15b63241b607057fe9d744ace4b023f713c3399067b5fe",
       "FleetProjection._run_rows": "f3a9ea5e9ca638c1800434d54b5be0a137c0ce92f137c69b5025c3008f77d5c5",
       "FleetProjection._reservations": "0a83ab7dfa2340348632ec8c5455ad09d595729afa88e3d21a26f30e4c3b94c3",
       "FleetProjection._stalled_loads": "2becf9baecbd9a7b033f80bd837571028a7ee418715cfa5df49e33f273f7461a",
-      "FleetProjection._node": "48b2a4ba2900c76a1377d74e368cfd560603ddaea3de87941a6f53ec4cc659a0",
-      "FleetProjection._connection": "18195b44b9ace5d11446b61f5baeb232ca29b1ef16b2c17da6897e97fa52ff8a",
       "FleetProjection._certificate_state": "53a4657b142dfa70ce4830168bccba394e6412c703c36051d6ba476a9f42a567",
-      "FleetProjection._inventory": "412f79069fd29a9acf8917a0213a0a9a1c23a4e4a9601197023d65900c1babb4",
-      "FleetProjection._telemetry_state": "2d81212aed79d5a533b7d5be3928b6a3cff3fbc1dbd300dafb3867c18a4b93aa",
-      "<module>": "be41d5991b843cf797b2426494d3608bcf78bf4f0606d0c663ae9cca9d89232b"
+      "<module>": "9a63c54234d69697f8b6401e5371077f31953907f324d1d79c299a3299d8b87a"
     },
     "control/src/vonk_control/host_runtime_plan_authority.py": {
       "derive_runtime_plan_binding": "18854fd474b0011885e791cbcc53e118a976255889b1a43460f0a7b1f4de9244",
@@ -1392,67 +1372,42 @@
       "load_placement_operational_evidence": "c8cd37790dfa5d30d3f1be90f01bd08e61459af905c71640a4f1af629e6d7b6d",
       "<module>": "c58ecf5ae011b705348a81c9150cce540521a93f0c4f35f555e04efedb6e1d62"
     },
-    "control/src/vonk_control/library_projection.py": {
-      "LibrarySelectorAmbiguous.__init__": "9b80add580dbc1ae0468c9903bd496f8c66fe099c9a15b700c7a698568bf9d95",
-      "_wire_json_bytes": "7bdebff104929439dbf4d896338c9c539ca7e3afdb756056f468f4e995dee6bb",
-      "_bounded_library_page": "883045569c496de399891de500df5182f5d7e34b973be6b252cfab3ebce0a45a",
-      "_controller_state": "e2adf8121de7acad35318accba1c9feb867b3ac814f70abbcb7413a7311281cf",
-      "_filter_digest": "92a2b44a388520894403f3737e35a9d312537a9f4f9a77381cdddfe6c158b02c",
-      "_note_unreadable": "62b391bf76a9699d47e3f839a21974eee4cd98b049665a367ba84de19792b183",
-      "_readable_document": "b16e77280df81d6522cdc7109c919604ccec1fc9da75577141f157ef9b083342",
-      "_canonical_document": "8db6e8d373331bcdef66d67c16baea2b8be9c6ce16921d7b29800064e461eab0",
-      "_canonical_model": "ffbd0939503282624e3c3e44b86574e60e44e8783255a83c7cd31da6bd5dfb23",
-      "_canonical_recipe": "b9c21ccea1f9045bbea79b259d1a8578bd2b9ee486e9e1cfad3effd86c0d1059",
-      "_model_identity": "1e1a5bcb65f05e2ccb2eeb37cd6768c93644d096aed4fe863cce86e32769d65b",
-      "_recipe_creator": "065b648afb930560fbb89c8602638e8a32eaac3f46aaf770be8d6b720553bdcf",
-      "_canonical_recipe_summary": "693e657369f51e8fcba3a875f684579ecf43a8ce97e95ab63ca04046280cc526",
-      "LibraryProjection.__init__": "522b6d369c16bda6af84f680bc39ae22a9382f7867d8e8f1b8c4cf849fac79f1",
-      "LibraryProjection._assessed": "59d111efeb4a5d0bc8137a6b853b86efe4145c660cbb608e86f4907a79009680",
-      "LibraryProjection.selector": "2204eebbd2660227fac8805b652dbbc6902d1731cffe6d3070c6dc651a6f7048",
-      "LibraryProjection._local_state_snapshot": "797c8a24887a53413d2f162ee76ba044a72152656cb713ea72cbf6173bb32c12",
-      "LibraryProjection._local": "c55736ac69dcbeb9d42ac463fc49c827c4d109b636d1d72960499895b7dccfc5",
-      "LibraryProjection._merge_local": "53448e4cbe6295b172733ffaef5fce57becb7fa6ef5a503910055d9ab106e562",
-      "LibraryProjection._cache_progress": "7fae25686144682a35a727320b00dbf64dde94ab57f528e2ed5bb5dfd91ca4b6",
-      "LibraryProjection._database_local_state": "80830dbf0398d59648ab00c081b3f4112912db04aaa0ad3edec3257f57da9c74",
-      "LibraryProjection._apply_image_presence": "fc3b9ac10ee24f547aae6af34b459a4a589fdc1babc9ccf4cfea62361d75750d",
-      "LibraryProjection._library_release": "ab314cf336f2794231220c4d4baef55e9b842ac0eb5f4bb48bfc9617e2b274be",
-      "LibraryProjection._model_usage": "0471a2e6c7d40c81089ee6a4d41e5c9dd6b12748915d63d5a14eab136f31395d",
-      "LibraryProjection._recipe_resources": "e88a07664678b06bb1dba782daecf048f1b021284068bd238f013913b710bcbf",
-      "LibraryProjection._model_projection": "5174057185655cdabbb08a1e9fe29c27e1d97d6b1417883431d2f228028704ed",
-      "LibraryProjection._recipe_projection": "794bd57ceff632e73fcc4d6785fae6c00fbabb6feab37d009d2fbc3270575fe8",
-      "LibraryProjection._alignment_by_model": "2f3b7371a31f5a11748a769ab014bfa23983b8f86f679f966d186d828942b108",
-      "LibraryProjection._catalog_documents": "6d479d5f703060f7076aa4090f71142a57eee0877d673d4190ac64de0565bbac",
-      "LibraryProjection._documents_for_snapshot": "5dbe1e7e9c39107ce468f30dfe9f198ae5db83fbe5a260e23b8b1ea848833d6f",
-      "LibraryProjection._matches_any": "3ba6342aa7196ac6e6f3eadf6ac5dabf3e118989596f9e7c0bd2d450723b61dd",
-      "LibraryProjection._resolve_selector": "5db731cf6a4b501e07f70ac94dcf9cdb686d9468afc0eec735f6811e2449ec78",
-      "LibraryProjection._facet_values": "622d4137be7cb6ebc7ba1ae2db41ba80677fa0c0f855b44974d63d86a17cd79e",
-      "LibraryProjection._recipe_facet_values": "e916aa49686f8fe248cd00772603eb5f8ef06eae7411cb316089a1e3fe15dacc",
-      "LibraryProjection.models": "675460dbd8a768b889e14c84492633e8fddfd153d773a469a439d34f08e8ac35",
-      "LibraryProjection.models.encode_cursor": "34896e8d6e0ff54b62dc9a277613fbabc5cd73b7281600c42ae311ca900e6bd2",
-      "LibraryProjection._model_sort_key": "70a3de1090d812285d367eceed1604d29fa382fbdbc4fd108594e3fd6ad11c50",
-      "LibraryProjection.model_detail": "8e41fba0950e926d248d00306ff28c09a2ebd4f6c4a6de8c99f6cb995f3e8dc8",
-      "LibraryProjection.recipe_library": "b87acc1d37c20b5643921b1cb9b901571d23efcf532ecf2b4ced15ff87933d6d",
-      "LibraryProjection.recipe_library.encode_cursor": "5139d843710b75e07b8832673ea0a1b70fae4933e9a3aee0ec1a647dbe02d293",
-      "LibraryProjection._recipe_sort_key": "83d4424a095f6aeef6c6193f84928bf00782f3c55729b874ce7840dcb7ac704e",
-      "LibraryProjection.recipe_detail": "d7890b5ef6b12747041baaf1338a5c54ba6790091de56cd7fd37f459e3677d5f",
-      "LibraryProjection.authoring_recipe_detail": "c6beab0ebed9b5145bd6889b2d51f9cdf21c1e3af773255dceb4700f462af976",
-      "<module>": "11ee906b165112486ea52b5808114c7ff9835e6700691a7969516dad460c83e0"
+    "control/src/vonk_control/library_projection/catalog.py": {
+      "_library_release": "f94b3344781ca6a9a1f45f282d0562f22514d83d6a907d277f7538cff2a7eb21",
+      "_model_projection": "e50023b5b434a5db8bc087414ce91078e5264bd66e412ebe18fea69e1acb4a7e",
+      "_recipe_projection": "750702cf09ebf990be512cd592fb2daaf34b5b9c87664a1401f5d9198995eb22",
+      "_catalog_documents": "6d479d5f703060f7076aa4090f71142a57eee0877d673d4190ac64de0565bbac",
+      "_documents_for_snapshot": "26452018a5cfbfcffc54a6b52705caa13374e88e119430b49c5a816eb9ccf340",
+      "_recipe_facet_values": "3ef9b261fcd244524476d723da665301fb08705fc9b3cb17fbd48141e1e70a39",
+      "<module>": "d24fcd46f22e2f4d56a433b4d83d7be8582b9bf1e54e90b2661f5d8fb4674572"
+    },
+    "control/src/vonk_control/library_projection/views.py": {
+      "models": "a3fcbfacee4201f56f6825954c3c614bd1ed8abd37ac5be100c17605d053a6d2",
+      "models.encode_cursor": "34896e8d6e0ff54b62dc9a277613fbabc5cd73b7281600c42ae311ca900e6bd2",
+      "model_detail": "cef2a57dca6708cdeab52e171e064d56cc1ccd33fb11013a727ac0996999defe",
+      "recipe_library": "c6880d13496998c1496f3be57475244bb9029e90f3128d3597aff5829d6f56ae",
+      "recipe_library.encode_cursor": "5139d843710b75e07b8832673ea0a1b70fae4933e9a3aee0ec1a647dbe02d293",
+      "recipe_detail": "2d6b349a52208779173e3cea3590373750ff23341d74a00fa83c64570ab2fa78",
+      "authoring_recipe_detail": "184588c9418f25270f6f82a0a84bf8de341e3f27038bef3b8bc3c2b2a2f80057",
+      "<module>": "d24fcd46f22e2f4d56a433b4d83d7be8582b9bf1e54e90b2661f5d8fb4674572"
     },
     "control/src/vonk_control/prebuilt_images.py": {
+      "PrebuiltDecision": "d1429d424ba8b6b772ac20212881c02e69966d10cd623ca14f2161b6e07cd08a",
       "PrebuiltDecision.used": "541ea1bda9032677b6c660aef258029739b4b248636d3cc5788f95d2471243f7",
       "PrebuiltDecision.__str__": "9c77ca629033c8a065a0fd2ef604892135060c11097d4dd67570c689f3c3fa1c",
       "executable_build_key": "a3f7ec678c9df399f5b2fe91b871153f2bc3ba385561f6299a9420d15a93cc34",
       "package_build_intent": "0499ec1649ea492f1498aadd402b1d1bc8f85c7c08017f1814ec5ff59fc5005f",
       "_scalar": "22e88adbd8d8219918071462442c5074bf1db952a4a4fd8923c983e76c29ca0c",
       "podman_build_arguments": "b7cb5cef8d57cf68cf001a65a5abce2bea15e99ab0cae8083170ce9c8baf5423",
-      "write_library_image_plan": "b5211ee00ce58ec41eeeb2dc77fd13222e5e9b3bee4557a26fefe0b13449cab1",
+      "write_library_image_plan": "3cfd8391e3ab49affea16d0fb9cbf2b21fa0d83b6bcacf7b5f3c96fb4055bb61",
       "_library_recipe": "4bc95571723440c32e6c405d7d723ec592bddbaaaf11871283675610ea062927",
-      "_require_source_policy": "1fdf965d865d2706e98e28acea289aa4dcf607551fe58ed90da90ac68c725dcf",
+      "_require_source_policy": "fca4f199c13dd0e704774ac5680607e636abce1c881f10f64641187b805c07ea",
       "_reason": "8df9a7dc5b43bb303288f34b0728f349b46f646813df45a17058c78dff853c80",
-      "library_source_policy_failures": "a194b88c88d64521f7c451debae89c420502eeea74c7211b08e8afa373d09153",
+      "library_source_policy_failures": "d182f053d2ac321f083a9ea3f4b823ae5bded54bfd382b4a78fd4e1a0d3f4e36",
       "_bundle_relative": "201650b23267d0d5dc7f0f2c8f775e882627d7e54e3a3a570a6ad6b2b4a8e745",
       "prebuilt_reference": "0e6c3e0f3ecabb00245a0c17c9662c8570c017d724fcd1dafd2447e41d27566f",
-      "policy_prebuilt_reference": "d80a3ff32340a7163db4c9fe34a60ac981e9ae50e4ab771cf0196f639497c878",
+      "policy_prebuilt_reference": "8c60a37c2beeb7a6e4f5e713f49a77db905b3a78b5dbc2a82fb4d21dbff97b9c",
+      "PrebuiltImageImporter": "db96c3c83515cbf29826dcb003354fde98852efb316a0e927d718c57ad51a5fb",
       "PrebuiltImageImporter.__init__": "a02f59bd439f98df005a87c2ab9f41c760fa3c41fe6aa93dd5e84ae068c5a501",
       "PrebuiltImageImporter.close": "9b2b387b1331a01c8674603b64939526af56271a00a63f4e5b5646db742c3109",
       "PrebuiltImageImporter.tick": "7bd97362e92cc0bf9b93c594f4c8b28783584a2040c9f1b76e740ab3972f9a12",
@@ -1522,63 +1477,21 @@
       "request_build_cancellation": "ce6ab9e43dec22fdb0aaa017801591033b2e26aa51c0296b093fbe4b7380a429",
       "<module>": "565873573688fbfa972d58ce8043f570ea9caa429a1ba28c55f618d2fd155750"
     },
-    "control/src/vonk_control/recipe_builds.py": {
-      "derive_build_input_identity": "a838512d59d3626ef8273c1fff389dd870c5bfced5fae871b691979a438efada",
-      "_resolved_adapter": "2f15430702fcf65c05ca2d816211d408a1764be915cb9a8f1eec2b57fcb7bef7",
-      "_build_effective_settings": "99b54dccb0485e57d3041581a1c9778fdec6065303993aa2ced6ccc58e397aa5",
-      "_canonical_recipe_document": "919b214003a42633c35d7e45d1f350953a3d6fff2b1f1f6890be6c01d8e23c05",
-      "_canonical_model_build_inputs": "2cdf605a1120447b18daa59d16b4190eb30c3bb2912c7875cf3a59b86172e6cf",
-      "canonical_build": "d98706168907de0d0d071a3f2e085e3d377bb35c1540f3f750f64f19d80c70e1",
-      "_canonical_build": "1a791ddb5b2b5b0bb1a15ae4b1df6bf774f7fe95595f1e5d5e33278cb84f8d65",
-      "_bundle_dockerfile_path": "e0c46e24768ca85837c0d333dfca0494bffa44da8a402e0fcda5fbe73fd37462",
-      "_source_bundle_handle": "3bc0b2a9df42e028411b7cbd7e61f44a2dba3c38b8c3dc522fedb6d05831d691",
-      "_canonical_build_resources": "d9c424ad597afe89ad2a45f24d08b294133e658172f763e4a5d4bcabb9536e94",
-      "_source_policy_document": "d7a6b47c356a47ca395564dbc3e7cfc11a729264d4cfe1757b441c6f98618c51",
-      "inspect_package_source_policy": "956b1cff1d056a3dcb537faf05f1a8c7d6531a1ccd930dd9437cf2442fb15b01",
-      "_build_disk_envelope": "69036c413ce694cb477ba9c45e21c63b684cf4d2bc1b75fd78ff04529b48fff1",
-      "_build_disk_reserve": "2a0c0468528b32ed788e81bd6bcf07316990c2f24c503490536485bd0f6dfdf6",
-      "RecipeBuildError.__init__": "3fc69271001b4ea25d07c8f7013ffb9b85e643eb74ebb229333c803cbef059ba",
-      "RecipeBuildRefused.__init__": "0af59a03d29772dc7c6429a77ba385aba93beee028053034b3b2f5b645b0cbd3",
-      "RecipeBuildInvalid.__init__": "fb0ab9996d39e1fefc6abe1749e3bb7019af27005c610eda122f8bf48a01a136",
-      "RecipeBuildUnknown.__init__": "c04aac78235e2466bf55d776a4a17b4f42ccb57fe43048ed091f4ce7fe9a0bb9",
-      "RecipeSourcePolicyError.__init__": "8d9327ff7afc2ea389ff3c64714aa743c31eb2902800e8e43445a49a33ee704c",
-      "RecipeBuildAdmissionBusy.__init__": "90bd65f856fb7024ef68dfa245139c15fb0a63999c0844d7ac7e2569765ebb63",
-      "_read_recipe_projection": "5cb0a98d09e66f56835a8ee5ce30d18dfc6a89e51449dfbebac30eeb0fc6c67f",
-      "RecipeBuildResolution.cached": "f842f76c6f6223e59507167e1279a416eb244f9996988b63c606ace0ec2dff55",
-      "RecipeBuildResolution.build_input_for_builder": "c6f0d9db1baa213dcd7b124b58bece74ca3ef3dabd17fa075f47ad6402f4b3c3",
-      "SourceBundleRederiver.__call__": "d59b4c65acb0925b66894f7cdf8cccc6c7b55b2e47398a9bdab825358fb475db",
-      "rederive_source_bundle_from_closure": "cda69a2cff296f0ea098bd73a23c41e9841e752380fd7a33d935cb9ee995e1ec",
-      "RecipeBuildService.__init__": "7e3be94c4565501ac4c82a926d2e13ae03159f2a7f9ce38ed623fca10728fbd1",
-      "RecipeBuildService.bind_storage_demands": "2f2c792b05cb8b59dc724b2320a9f332aa385269a7d6ec9978ee43426038bc59",
-      "RecipeBuildService._stored_archive_present": "868a8143694003f27dfe5683523a0f0be991dc493964eb94c9274a5096ad7d40",
-      "RecipeBuildService._succeeded_build_available": "4dd1344abe882a9171ffccf8f3bbf7174f9c3ff8b23d7bb114006d3e2d47806c",
-      "RecipeBuildService._verified_bundle": "55c1381d061a56ef96ea4d9cc47b402b44fc9f259f989c8a15893e7d106ce06d",
-      "RecipeBuildService._verified_bundle.read": "61ceba5d8a26f354011914e99e319603e5a9dad0b1837baaca20f05a97bca2d8",
-      "RecipeBuildService._verified_bundle.damaged": "52ec268c64835651309ac62c8599489e11e7e935268fa469b5ca12b81d8e38a1",
-      "RecipeBuildService._heal_source_bundle": "2e5a724e0fdda788e308cbe9074060d909e42d6438c5e65478128ad81abc74af",
-      "RecipeBuildService.check_source": "89b6b41462967836a9049369545b4b355ec969954bc7c8e2f35c9ce0b808e721",
-      "RecipeBuildService._check_source_once": "01c92eeb67021eb159f65c70bdc4181018d9833df182b3cd7b47733d99bce6ad",
-      "RecipeBuildService.resolve": "066f234775c57f296bd0b0ae91cc6659b982a5ebf8960707696b6f9993acbbc4",
-      "RecipeBuildService._resolve_once": "be6f155ee85ffb5105414c5dfae1754e851cfa752ccf1eaf2647fac18d347b16",
-      "RecipeBuildService._admit_spark_build": "5771a928c4bb1f68948bf5a7764df6b78ab22509fc0531859d4c24f83db97558",
-      "RecipeBuildService._usable_prebuilt": "ff52fa747cfb401344c0658fe4033ec5347f53d8ca4ff5ac4f742bb05a5142eb",
-      "RecipeBuildService.prepare_plan": "e2a77ac9eff76c68cae58dee90ca4dd0a59828ac77d82e95f59ed489df12b7e5",
-      "RecipeBuildService._prepare_plan_once": "e30c2e59501773e4532d8fdec6a173e64bd0b63ba8a9b017ef783754e941896a",
-      "RecipeBuildService.plan": "55cb64393025fd98a4962ec9b8301cd9e73e60232bbc199cfeee3b9e042ad4d6",
-      "RecipeBuildService.reusable_build_id": "b46c72fad4a5b361a4d97f5f291866eef1ae5505376252b57d13c373309c1fab",
-      "RecipeBuildService.persist_plan_in_session": "de4ed0a27c555aef35c003f53126b678d684a9d5f0cf4368db74a7eab5ed2230",
-      "RecipeBuildService.record_success": "4bdadbe2d81ac0957b3ffa276ec5c4d81b8a182dd8915e7dca83b4bc3b381753",
-      "RecipeBuildService.reserve_in_session": "0f2c217ed5842d546c434d09edca0fe1d64acae88767030daadab945abf0a64a",
-      "RecipeBuildService._reserve_in_session": "b47df6bad2199b71160317ab0a1c63702f2079fdab5d0e0dbb9e54c2ecba21bb",
-      "_validate_builder": "802a3f78fede4fa9bf6236be1da8d356c76f7fd4264f3ad5e92a6628ea6a2d01",
-      "_public_build_network": "3a1416761dc1234017818821db8fe6dc267462c545e76e6eedaf908c2e62f909",
-      "_declared_image_bytes": "fca54e6ee2b60667e01f28c4f34d3d91257644c0a8bf0327b900cd52aa95a04c",
-      "_available_build_memory": "7d503f5cd08f3263e4d5dd7a514d42756b2b1f5884c98dec45f5d5f041c318b3",
-      "_valid_succeeded_receipt": "de221d70ebd442155fbe507560e983b61ce5167a2b8e2e5fafd293b72fcc4fe8",
-      "_has_build_receipt": "a24bd7e531123889316c0bdeb20bf3c89c6ab944b4bb7e9f40185be889dc44bd",
-      "_reopen_build_attempt": "40a27eacecc9e3837ff642c0c46659092456f974f8fc2e8f285ce608336d3c4d",
-      "_digest": "6073c487755ee8fff97be9c815bfb4b393de66792aa9e00a7c279356ccc2cee4",
-      "<module>": "6d2dddab285bff67083ea4a7dd159de2733aa2c0d9f69815acc2be06ab70c310"
+    "control/src/vonk_control/recipe_builds/persistence.py": {
+      "persist_plan_in_session": "76d3b99fe7f7db08b5006b6be0f7fa7bb113e0cd9e45a30a9458ad6d10fa1b5d",
+      "record_success": "8a7b0934ad87f2f9e571be98d5bacdfcd6f8c127dc2d356240d1bb1c272ed96e",
+      "reserve_in_session": "97e5a4a3df871f7b90850b8dd3b80a8ab1bd4095b3d39f7be6db50d6a6a3e993",
+      "_reserve_in_session": "9af417eb7f4f00b3c110c834427b8abf83088b5256b7d1b5a65724b915626f14",
+      "<module>": "30cc5da7c01fa5cfd907c57747cbe9f2f51253a2bcc830c7dde3a22766d2c42f"
+    },
+    "control/src/vonk_control/recipe_builds/planning.py": {
+      "_admit_spark_build": "19d8081764c4ca5332aae443e6e89ca85907cde879c249fe48f9bfeebef68a06",
+      "_usable_prebuilt": "25d6d985c60b7871f3b666e64d38227e9e409874fae5dd5ef7633bc7cfa7d00e",
+      "prepare_plan": "2d015085b4930e7c414af05d7be47d3832eef73079915faa694afe9cbccd9d83",
+      "_prepare_plan_once": "c254a7d6fc8cde17ce670ad2f8e6249263dc028032dc4d3ba4f366c318a4323a",
+      "plan": "0199120b2d8176dd583f6ecbd08ac34d5bdeb771d9fdec50e94399211b9d3952",
+      "reusable_build_id": "be1c6ec511d013f22f5c8f9365d25b3cf740edf89d59b62002b589874749b7a2",
+      "<module>": "30cc5da7c01fa5cfd907c57747cbe9f2f51253a2bcc830c7dde3a22766d2c42f"
     },
     "control/src/vonk_control/recipe_execution_contract.py": {
       "RecipeExecutionContractError.__init__": "da4f86129107958663ce2754468e9afd0fd49464d36dff1ed2db4998ed04d23a",
@@ -1875,83 +1788,6 @@
       "RunPlanningMixin._preview_run": "29bfd40599c7a5c4c874af464c600099cb1427271549b0fc8370d6f2a31247c7",
       "<module>": "4711792a94d8f3b9c03922abbfe5c0092bc717203b70040b3f10fab682dcee5d"
     },
-    "control/src/vonk_control/unused_storage_collection.py": {
-      "UnusedModelRemoval.accept_unused_removal": "fb5e5ae95d82c156741324008ab9203667816bafb86bef8fae128b47e509956c",
-      "UnusedModelRemoval.accept_unused_set_removal": "848da7f185247b49bc4509647b7f52ef17695440ecb8127c2d43a0c16cf21f0c",
-      "UnusedModelRemoval.unused_set_bytes": "dfbb7d5c366d90a4c8a30f26e0ed9f8aaed5298aed01c4eaedb0f652a7c5c12c",
-      "InstallationRemoval.preview_uninstall": "0bd1872f0165955e96d5823ba4bc6ea74360a8180b1a34797520cedeb45bb9c8",
-      "InstallationRemoval.uninstall": "731c0d6de1b806844d520747923301ae06000786b2dd764eeeed19f702c5ac7c",
-      "ImageBlobReclaimer.collect": "674e79f2263ea03dcc3af80a1d36dfd69613970b5d02e1a3a3b870558972f18f",
-      "_kept_sentence": "ed107bf68dd453769ac84377ad0ca050c6aa33d8062039b7c4241c786ee9530b",
-      "EvictionCapacity.plan": "f74cc5df25907cee8f6e2dc5791c68d82d4281d5ca5c279c90656c129a5a2491",
-      "_eviction_order": "5dc496194c581b71b87b0899aa14af551df7890faf9cca6c45126782a7b4a5db",
-      "_freeable_in_order": "947e54fd46e97c2cd369222938444a232f6028debe82ddf5420b98663daa4d5f",
-      "_model_objects": "36af47c135b82577e48511aa4e2c64d0c2bac4f12d0674f8fb7332feb5021f76",
-      "_eviction_sentence": "ccccf2fcd0074b5193b8c8979975c5156d290ee6df128504ee249d122699ed16",
-      "spark_eviction_capacity": "aa3815873ef59c5bbc9c6c0a696061dc84933377bc9abcc04e901752e3bf6508",
-      "_waits_for_storage": "557af0f3fda5ef61ac5cf153e151be3556ed75273f5adfed6a99158dae9dadd7",
-      "_Evidence.read": "d36cd9de6a11afa70f1c64702d4ea661e24f7b71342620c5ba16411cf06acea0",
-      "_Outcome.line": "a6f8a3367763dbcc73230ec367a46d2fd676109f9d4c205fe09d6eb9ba1810bd",
-      "_disk_usage": "26f7ded8bfcf127505f960660eeda9992dff57c6160b6f1956920f765bacf764",
-      "UnusedStorageCollector.__init__": "2e033e6dbba016409a7782eb658eaa3eadd00d3d2476bdb2a036589a6a6c0c25",
-      "UnusedStorageCollector.memory_footprint": "e0fc0662c295ec4bb9a6d63b6a1c5e6e62506699bdd68f843f5a714ba53e7cef",
-      "UnusedStorageCollector.tick": "f096ecb3f339d8e124b8a3a73ef036d80d4376a02be685080ffca601f62376e0",
-      "UnusedStorageCollector.collect": "6fbc1bb60992cb2f668b03f16bdc41af356bd2cc5495caba6ea4e0fa944a24ee",
-      "UnusedStorageCollector.relief_for_spark": "9db822cebdf8852c130fdebee0ecd5716b839d62099f73c11a6b2526c70f0664",
-      "UnusedStorageCollector._pressures": "ec0d4432b685eb8f893b01aed45d4449cc629c5e558f49ce875b98e319841888",
-      "UnusedStorageCollector._pressure": "104f7e487990f8effda54dd35d5cc48a815b7ac0f89b4e82a6ca1dfb43a41a57",
-      "UnusedStorageCollector._nas_filesystems": "e054867066650ac6bd76babd6e7c5fea2fe8c062f759eb78b3066351d2f240a8",
-      "UnusedStorageCollector._relieve": "3aa1afb489b9745d6608856b78ebb35145f9a4ae3a2fb29af43eb6c50d8567d4",
-      "UnusedStorageCollector._check_round": "d59173e6994715b069b686606f6528d2a3568129f381aed328381e50e95a1381",
-      "UnusedStorageCollector._remove": "375fef98b088b4445b7e567c1222620dfbd22a3ae9a7d5eff98fa7ad6f6a8284",
-      "UnusedStorageCollector._reclaim_blobs": "0258c24e00fedf91eb5e3a81d7c7767bc202a4c810b732b6dfb0bff2bb5d7c1b",
-      "UnusedStorageCollector._spark_items": "634e3d86abf65235c4c6278870bbcbe9e9bcff4e0fbd00006269f676d523ad84",
-      "UnusedStorageCollector._uninstall": "1bf83b9127c6b291d772a7d6441b7dd58fedab25fe343862e5e6abb39e0e1c02",
-      "UnusedStorageCollector._uninstall.still_unused": "527e404cd12368ebc1b288467483e5b92bae3d0ee3b2b1051eefcbd3ffa0b080",
-      "UnusedStorageCollector._nas_items": "61837eabf4ba37ec0b6896ffe5233ebc3185716f47fb8db4f2b0ca54ae120798",
-      "UnusedStorageCollector._image_items": "c4b56861e0ccbe5d66f71e5ae9128f1e300ec0d32eec2d5c6014985f79ce397d",
-      "UnusedStorageCollector._damaged_manifest_bytes": "8c7acd8421331fba3519105b4cd9264d9b0abb62dab9bf8159b7213cedba5ec6",
-      "UnusedStorageCollector._remove_receipt": "5fd1a1fe26ded51b2e293f6f944f5dffbc87074e3f4fb024903df38df8528a37",
-      "UnusedStorageCollector._model_items": "272418b7e3d023a308a9965982fd75dceb463a195af84977a34f0c37a1baa7c3",
-      "UnusedStorageCollector._remove_model_set": "dbfd0128a74d18ca8b5be1d317229f906150c500042483b334bb1a07fbfcc486",
-      "UnusedStorageCollector._remove_model_set.verify": "4bc846a0ab7eee901418cc67c5776efe94a23bf0bc0e276b1a0576408967b0e6",
-      "UnusedStorageCollector._remove_model": "d12431268939613b0bdc38ade766f5645b5be73b0af5abc29dfa6c5ec53bba9e",
-      "UnusedStorageCollector._remove_model.verify": "cd9789c5a3a376bd62e2d4bca13228ab93a678a3057636cdb55ab17ac18033c0",
-      "_installation_kept": "2d23b668ba78e13975586f52d31a1abc630f276d1f848910c4c1e4ebfe9c15b3",
-      "_points_at": "b0a401e1b7525aae26ad8ade34286ab10eb44b8b24d8e146048cde7b3329f5b0",
-      "_installation_pointing": "1f1e7c5401ad175d1ca34a5f0b4d1b298007e9610fd96afb7080d87d45e95d1c",
-      "_installation_last_used": "2cbbf0a3f9bdbc45af8e6f80d4931b14904dae60291c89baaba933edf87e9136",
-      "_applied_revision_ids": "aa30d91fc729e48bf4e3cc5e00a587fed6f06f89025054dd726ad85a002c7080",
-      "_model_kept": "88ed6262ed01a89b2e33976832795ead22263d83c5019eec6ba9c4c62bd3709d",
-      "_image_kept": "a2066f66c4249c2af03657d8370480ab84dc69916d96028bee231aa61b63a108",
-      "_latest_snapshots": "c7a0f69fb8a83cda0b8923302cd85c711afc9b05c6155251b6fdd7f6eed0ff7a",
-      "_spark_settling": "5d3e2d2b6b95233e51b589835ab8605d1a3e41cffb68f4137b8ebc9045a0d97b",
-      "_model_removal_in_flight": "e94dea1a120b883f57e3f1bf8795f5effb37ef07dafc46aae237400d8fe69c69",
-      "_profile_pointers": "440a502f4a325eef3bd683528990c027bc75d7f2c23787d466746960a7c2a9cb",
-      "_mtime": "0ac538a9601eea7e2aa1b65d6a6389af0531b2b530c43645a325cf10bd3ba8fd",
-      "_code": "b2486f5b86056b3c8a7c0a3ff171cb365d4ed20612e26ed3e0d2d3b59950d92d",
-      "_utc": "9e25fc48452b46805ba4b789f09e9695d425d77d1755508846d9b824a8533ec0",
-      "<module>": "4abfb63eead1f79648fb903b62a17248e4294771e989916efca180edfe494aef"
-    },
-    "control/src/vonk_control/artifact_reference_scan.py": {
-      "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
-      "_reason_projection": "e0a699c0788ea845ed78a90710c66e67389da9f008120a254923cdd4efbde9f6",
-      "require_model_sets_open": "e5213082fba248642c9b6ff7955f1900e54e5417746976052c4b7252c7c3ec06",
-      "model_set_objects": "b3f846270636729ad6febbaed69899eb1b6eafd11e8e2f31b900e31083f384e6",
-      "model_set_reference_findings": "2b36ecc43b37935876294fd1c9013e150d7e4c4325dfc2a84b3b624405b94c84",
-      "model_set_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
-      "model_set_reference_reasons": "8873ed7b1fc4d46fc3d0e5cf89d05bcfe552753b64a3118776d35d1212fbfd09",
-      "runtime_image_reference_findings": "adcf56d41c236640e378d01f09a17a40332e019cc1e3786c84257cbc998b80e5",
-      "runtime_image_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
-      "runtime_image_reference_reasons": "d6257e372269c4a0b0d0f994dc63dab9dd19628c1d80f0f08c5cfc22fb660fa0",
-      "_profile_plan": "32f8a20e21bc91a775d0161a568917af8eef9eabf8d590afdeb6802ecd0d023d",
-      "_run_switch_plan": "33d5925118d8e75da1c7b727b45cf82b8a242084900614a40462a25e80c1efc7",
-      "_stated": "8940aad2e7963e3364e059cc7bd2f16977accb8175772896cd669201a59c02b2",
-      "_approved_images": "cc6fe9d4e74ac91302ee391791b76a1ca6928aafd9e451848fa15d4025417d51",
-      "_run_switch_runtime_image_intent": "f87d5d52872d21040b3d97b26bdb585f29585f479124443b858af0aa7a031650",
-      "_run_switch_kinds": "b0d724aa893828e9c1fd3c716a56044fe570bd707fb6559663461170da1919d5",
-      "<module>": "7ed3a28a64581ec153a059fe5bbc0ba862461b9ea9afea6065be98d78a9beba0"
-    },
     "control/src/vonk_control/runtime_image_preparation/contracts.py": {
       "RuntimeImagePreparationError.__init__": "30125364d3c106246e9646b1344c8c4216b3ef019a2f0526b77a0d0a26d52075",
       "RuntimeImagePreparationRefused.__init__": "673ade916ef30fb92e50d7be9f74595a7982596786efda105060558de4ed6c86",
@@ -1981,13 +1817,21 @@
       "_atomic_json_replace": "44daa0ae0f73f598076f2b06f95c9a35f4a51f9e7f44daf2a13a1b4014dbb007",
       "_unlink_quietly": "5b0e3bfdb5c144fbab744dfc3ffa3237c7b2378df0acc2bb787a4eda2ca34ae2"
     },
-    "control/src/vonk_control/runtime_image_preparation/transport.py": {
-      "OciLayoutImageTransport.inspect_archive": "09d010ebf2e8e99ff6178772bfdf333dbee861ccaf2dd88e64e7514f631dd0c2",
-      "_validate_evidence": "457b4f87e33c4f8f70e3a6907ee8a3197d981aed8492eb7948aae880c4640288",
-      "_run_json_text": "e047d16dbb0f871b9f8ca95678ad4061f07a670ad6125965132bdf7f5c8c76a4",
-      "_observed_architecture": "ac93f0957b1ab0670f15638c4bb90c71e8b00fddd0641104f42bc43af934f3de",
-      "_observed_runtime_interface": "581e3d2ead65986b26f2d5c96343a5c563495167deda7602d35af4fafbd2de9e",
-      "_config_digest": "e3c74f85165381d5b0647d420aabe8dfe02cc54550fd8c531c9d2195ccd4522b"
+    "control/src/vonk_control/runtime_image_preparation/preparation.py": {
+      "prepare_runtime_image": "7c20094084d6ea074bfddb303f56461420a777dacab2586aeadc003f9efd90ad",
+      "RuntimeImagePreparer.__call__": "623028fdbb49b6b503f2532e8f2e419319ddc2739bbe76696970715c2b0c37b6",
+      "make_runtime_image_receipt_preparer": "bc1d8554ffcf68ac821bfe4bbd9b56f30f0c80701410ab2819840ca590de01be",
+      "make_runtime_image_receipt_preparer.prepare": "7b191902d061461aac674f0d4aa83c9dc606285e39c38f7ebd86aab96e8768b6",
+      "stored_runtime_image_resolver": "c4f53d9e5a45523576d1d177604c5b27a46fbfa430e7e967883ec378132d4efb",
+      "stored_runtime_image_resolver.resolve": "52066d4797e30226c7bc9e0b2cff3f07903dcc2f1d0f3f3f362ef31ac733797f",
+      "_prepare_from_build": "5ab15d6f0687accabd328c65243ba3c82a3c9e2219d8154dd24e030b6826931d",
+      "_canonical_recipe": "eac35d6ea02ac912c3d946431c1fa95f9486ef67906e0fd39d778585e983c53e",
+      "runtime_image_expectations": "db199f316850896cbf30e3f78630f64703d20db85b81d418d677042b5a6513db",
+      "_receipt_runtime_identity": "d75295c3f0786d6e263d43c5bbf0579758df172b6c3b141daf66ba1f9d88360d",
+      "_recipe_digest": "777c7fa0aa1ec9c00093ee6e26c87333b3c303df9b1f2a496415117a00ab0697",
+      "_object_mapping": "0e6a072414e4e091d7e20135e909ea5ba4d95a9f607d57df9763601d92a33518",
+      "_string": "d4a2b392f73c2478f23d739dd10fadc00bd718ec9605871f0b63a146763b0a27",
+      "_timestamp": "76ae5ce281add20e8f0b89d98dc62b77dc824748e3f98bfe4b34863ab8cb6962"
     },
     "control/src/vonk_control/runtime_image_preparation/storage.py": {
       "FilesystemRuntimeImageStorage.__init__": "456f828685584efe3b21c35ba3937d15f2d5d79ae32e22069a3814b4274a0f68",
@@ -2006,21 +1850,40 @@
       "FilesystemRuntimeImageStorage._archive_is_present": "c4905bb63d84c44f653613753c37e4b95133860f5613ab78851b69a3f0fb2d90",
       "FilesystemRuntimeImageStorage.read_receipt": "50ef46f21e6480f7a1aa21dc5aff61b2fef135b5e1314bb066eb18941c451d67"
     },
-    "control/src/vonk_control/runtime_image_preparation/preparation.py": {
-      "prepare_runtime_image": "7c20094084d6ea074bfddb303f56461420a777dacab2586aeadc003f9efd90ad",
-      "RuntimeImagePreparer.__call__": "623028fdbb49b6b503f2532e8f2e419319ddc2739bbe76696970715c2b0c37b6",
-      "make_runtime_image_receipt_preparer": "bc1d8554ffcf68ac821bfe4bbd9b56f30f0c80701410ab2819840ca590de01be",
-      "make_runtime_image_receipt_preparer.prepare": "7b191902d061461aac674f0d4aa83c9dc606285e39c38f7ebd86aab96e8768b6",
-      "stored_runtime_image_resolver": "c4f53d9e5a45523576d1d177604c5b27a46fbfa430e7e967883ec378132d4efb",
-      "stored_runtime_image_resolver.resolve": "52066d4797e30226c7bc9e0b2cff3f07903dcc2f1d0f3f3f362ef31ac733797f",
-      "_prepare_from_build": "5ab15d6f0687accabd328c65243ba3c82a3c9e2219d8154dd24e030b6826931d",
-      "_canonical_recipe": "eac35d6ea02ac912c3d946431c1fa95f9486ef67906e0fd39d778585e983c53e",
-      "runtime_image_expectations": "db199f316850896cbf30e3f78630f64703d20db85b81d418d677042b5a6513db",
-      "_receipt_runtime_identity": "d75295c3f0786d6e263d43c5bbf0579758df172b6c3b141daf66ba1f9d88360d",
-      "_recipe_digest": "777c7fa0aa1ec9c00093ee6e26c87333b3c303df9b1f2a496415117a00ab0697",
-      "_object_mapping": "0e6a072414e4e091d7e20135e909ea5ba4d95a9f607d57df9763601d92a33518",
-      "_string": "d4a2b392f73c2478f23d739dd10fadc00bd718ec9605871f0b63a146763b0a27",
-      "_timestamp": "76ae5ce281add20e8f0b89d98dc62b77dc824748e3f98bfe4b34863ab8cb6962"
+    "control/src/vonk_control/runtime_image_preparation/transport.py": {
+      "OciLayoutImageTransport.inspect_archive": "09d010ebf2e8e99ff6178772bfdf333dbee861ccaf2dd88e64e7514f631dd0c2",
+      "_validate_evidence": "457b4f87e33c4f8f70e3a6907ee8a3197d981aed8492eb7948aae880c4640288",
+      "_run_json_text": "e047d16dbb0f871b9f8ca95678ad4061f07a670ad6125965132bdf7f5c8c76a4",
+      "_observed_architecture": "ac93f0957b1ab0670f15638c4bb90c71e8b00fddd0641104f42bc43af934f3de",
+      "_observed_runtime_interface": "581e3d2ead65986b26f2d5c96343a5c563495167deda7602d35af4fafbd2de9e",
+      "_config_digest": "e3c74f85165381d5b0647d420aabe8dfe02cc54550fd8c531c9d2195ccd4522b"
+    },
+    "control/src/vonk_control/unused_storage_collection/evidence.py": {
+      "_Evidence": "1cc5a0490b823cad83454d458cc6c92fe4fd511bb963783839a502be0a13d8f7",
+      "_Evidence.read": "d36cd9de6a11afa70f1c64702d4ea661e24f7b71342620c5ba16411cf06acea0",
+      "_Pressure": "8094d87d57145313abdc93ab93793418298a86c0b538e312d5e098a384b6b184",
+      "_Item": "d6525348f15641d0f02a28f950d77dfa2d5812fa12fb2e7216155ad6336f6014",
+      "_Outcome": "ac8ef4596c5c3f1520746c45d42a9bde59a2d1222a1dd7343d9e16fdb6a8702f",
+      "_Outcome.line": "a6f8a3367763dbcc73230ec367a46d2fd676109f9d4c205fe09d6eb9ba1810bd",
+      "_Round": "44edce9e12566d5719d110721364f092b7adda3e851687d2a8d16053d1040efd",
+      "<module>": "0200c46f43345d1736b769a1cdddc5e0b2542e97ca693283c7ff503596af22cd"
+    },
+    "control/src/vonk_control/unused_storage_collection/references.py": {
+      "_installation_kept": "2d23b668ba78e13975586f52d31a1abc630f276d1f848910c4c1e4ebfe9c15b3",
+      "_points_at": "b0a401e1b7525aae26ad8ade34286ab10eb44b8b24d8e146048cde7b3329f5b0",
+      "_installation_pointing": "1f1e7c5401ad175d1ca34a5f0b4d1b298007e9610fd96afb7080d87d45e95d1c",
+      "_installation_last_used": "2cbbf0a3f9bdbc45af8e6f80d4931b14904dae60291c89baaba933edf87e9136",
+      "_applied_revision_ids": "aa30d91fc729e48bf4e3cc5e00a587fed6f06f89025054dd726ad85a002c7080",
+      "_model_kept": "88ed6262ed01a89b2e33976832795ead22263d83c5019eec6ba9c4c62bd3709d",
+      "_image_kept": "a2066f66c4249c2af03657d8370480ab84dc69916d96028bee231aa61b63a108",
+      "_latest_snapshots": "c7a0f69fb8a83cda0b8923302cd85c711afc9b05c6155251b6fdd7f6eed0ff7a",
+      "_spark_settling": "5d3e2d2b6b95233e51b589835ab8605d1a3e41cffb68f4137b8ebc9045a0d97b",
+      "_model_removal_in_flight": "e94dea1a120b883f57e3f1bf8795f5effb37ef07dafc46aae237400d8fe69c69",
+      "_profile_pointers": "440a502f4a325eef3bd683528990c027bc75d7f2c23787d466746960a7c2a9cb",
+      "_mtime": "0ac538a9601eea7e2aa1b65d6a6389af0531b2b530c43645a325cf10bd3ba8fd",
+      "_code": "b2486f5b86056b3c8a7c0a3ff171cb365d4ed20612e26ed3e0d2d3b59950d92d",
+      "_utc": "9e25fc48452b46805ba4b789f09e9695d425d77d1755508846d9b824a8533ec0",
+      "<module>": "2b754a64e6fe253d82a839a08e6276887ee1d5a6142386360e37b75ea3d29dde"
     }
   }
 }

@@ -1039,6 +1039,8 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
             child = session.get(Job, install_id)
             assert child is not None
             child.request_id = str(uuid4())
+    # Delayed discovery must not recover a creation-time deadline on corruption.
+    clock[0] += timedelta(hours=1)
     assert not planner.tick()
     with sessions() as session:
         pending = session.get(RunSwitchJournalRepairPending, switch_id)
@@ -1093,6 +1095,17 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
             pending = session.get(RunSwitchJournalRepairPending, switch_id)
             assert pending is not None
             pending.progress = {}
+        _profiles, planner = _measured_profile_service(sessions, _lifecycle)
+        clock[0] = first.deadline_at - timedelta(seconds=1)
+        assert not planner.tick()
+        with sessions() as session:
+            pending = session.get(RunSwitchJournalRepairPending, switch_id)
+            assert pending is not None
+            recovered = RunSwitchJournalRepairPendingState.model_validate_json(
+                canonical_message(pending.progress), strict=True
+            )
+            assert recovered.deadline_at == first.deadline_at
+            assert (recovered.cancellation is not None) == cancel
     clock[0] = first.deadline_at
 
     def end(_operation):
@@ -1122,7 +1135,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
         fresh=fresh,
         assert_reason=reason,
     )
-    if cancel and fault != "damaged-pending":
+    if cancel:
         assert ended.state == "cancelled"
     assert admitted.node_ids == list(nodes)
     with sessions() as session:
@@ -1144,9 +1157,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
             canonical_message(audit.evidence), strict=True
         )
         assert retained.original_document == journal_document(raw)
-        assert (retained.cancellation is not None) == (
-            cancel and fault != "damaged-pending"
-        )
+        assert (retained.cancellation is not None) == cancel
         assert not list(
             session.scalars(
                 select(ResourceReservation).where(

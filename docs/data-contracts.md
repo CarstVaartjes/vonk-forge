@@ -178,7 +178,7 @@ module defines its own.
 | `agent_protocol/src/vonk_agent_protocol/source_bundles.py` | agent-protocol | 3 | Canonical source-bundle digest document and verified storage metadata. |
 | `agent_protocol/src/vonk_agent_protocol/telemetry.py` | agent-protocol | 3 | The authenticated agent telemetry wire contract: a flat sample of host scalars. |
 | `agent_protocol/src/vonk_agent_protocol/wire_model.py` | agent-protocol | 5 | Shared strict JSON boundary helpers for Pydantic wire models. |
-| `control/src/vonk_control/agent_api.py` | declared | 8 | mTLS-authenticated machine agent API routes. |
+| `control/src/vonk_control/agent_api/common.py` | declared | 8 | mTLS-authenticated machine agent API routes. |
 | `control/src/vonk_control/agent_upgrade_contract.py` | controller-contract | 5 | Package, repair manifest, request intent, plan and result documents of an agent upgrade rollout. |
 | `control/src/vonk_control/agent_job_contract.py` | controller-contract | 1 | The bounded facts the agent job queue renders into a refused-claim note. |
 | `control/src/vonk_control/artifact_blob_store.py` | declared | 2 | Usage and reconciliation reports of the artifact blob store. |
@@ -204,7 +204,7 @@ module defines its own.
 | `control/src/vonk_control/fleet_profile_adapter_conversion_contract.py` | controller-contract | 3 | Private one-time retained journal proof inputs and typed conversion outcome; never execution authority. |
 | `control/src/vonk_control/fleet_profile_contract.py` | controller-contract | 50 | Strict public contracts for saved Fleet profiles and their applications. |
 | `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
-| `control/src/vonk_control/fleet_projection.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
+| `control/src/vonk_control/fleet_projection/common.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
 | `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
@@ -279,9 +279,12 @@ phase measurements to their native owner. Historical samples are never promoted
 to fresh evidence by this normalization.
 Later attempts or changed samples cannot authorize measurement repair. Foreign
 children/scopes or ambiguous identity defer as unknown while the raw journal
-remains untouched. A typed `run_switch_journal_repair_pending.progress` record
-owns a fixed two-minute observation deadline, capped exponential backoff, and
-monotonic cancellation intent. Cancellation commits before proof or observation.
+remains untouched. The immutable `run_switch_journal_repair_pending.deadline_at` column owns the
+two-minute observation deadline from first discovery. The independent typed
+`cancellation` column owns acknowledged cancellation. Mutable typed `progress`
+projects those facts and owns capped backoff; corrupt progress is reconstructed
+without changing the deadline or losing cancellation. Cancellation commits
+before proof or observation.
 Immutable end evidence retains that intent when the pending record is removed.
 Repair and its pending-state handoff commit atomically. Expiry ends with
 `run-switch.journal-repair-exhausted`, fences the accepted installation's native
