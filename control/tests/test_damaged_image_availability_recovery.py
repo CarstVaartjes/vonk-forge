@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import time
 import uuid
 from datetime import timedelta
@@ -41,16 +40,12 @@ from .preflight_fixtures import record_passing_preflight
 from .test_oci_image_store import _docker_archive, _layer
 from .test_recipe_builds import setup as build_setup
 
-pytestmark = pytest.mark.lane
+pytestmark = pytest.mark.needs_skopeo
 
 
 def test_damaged_receipted_manifest_recovers_through_new_availability_request(
     tmp_path: Path,
 ) -> None:
-    if shutil.which("skopeo") is None:
-        if os.environ.get("VONK_CI_DAMAGED_IMAGE_PROOF") == "1":
-            pytest.fail("the damaged image proof lane must provide skopeo")
-        pytest.skip("requires the Controller image ingress tool skopeo")
     sessions, bundles, initial, node_id, revision = build_setup(
         tmp_path, recipe_slug="damaged-image-recovery"
     )
