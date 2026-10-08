@@ -134,6 +134,26 @@ class ArtifactReferenceUnsettled(UnknownOutcomeError, ArtifactLifecycleError):
         self.typed_reason = reason
 
 
+class ArtifactReferenceUnverified(SecurityRefusalError, ArtifactLifecycleError):
+    """A destructive scan has not proven its exact deletion scope safe.
+
+    This is deliberately separate from admission contention. An incomplete
+    reference inventory cannot authorize unlinking managed user data. It does
+    not create a removal fence or an availability fact.
+    """
+
+    def __init__(
+        self,
+        code: ArtifactLifecycleCode,
+        detail: str,
+        *,
+        retryable: bool = True,
+        reason: SecurityRefusalReason = SecurityRefusalReason.OPERATION_INVALID_ARTIFACT,
+    ) -> None:
+        ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
+        self.typed_reason = reason
+
+
 class ArtifactReferenceIdentityStale(InvalidRequestError, ArtifactLifecycleError):
     """The accepted identities disagree with the current membership: the caller
     refreshes its plan and asks again."""
@@ -699,6 +719,7 @@ __all__ = [
     "ArtifactLifecycleError",
     "ArtifactReferenceIdentityStale",
     "ArtifactReferenceUnsettled",
+    "ArtifactReferenceUnverified",
     "ArtifactRemovalFenceLost",
     "RemovalOwnerKind",
     "check_removal_fence_nowait",
