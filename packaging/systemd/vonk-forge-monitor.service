@@ -26,12 +26,14 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 PrivateTmp=yes
 PrivateDevices=no
+# NVML opens NVIDIA device nodes O_RDWR even for read-only sensor queries.
+# The monitor has no capabilities and can access only these GPU devices.
 DevicePolicy=closed
-DeviceAllow=/dev/nvidiactl r
-DeviceAllow=/dev/nvidia-uvm r
-DeviceAllow=/dev/nvidia-uvm-tools r
-DeviceAllow=/dev/nvidia-modeset r
-DeviceAllow=/dev/nvidia0 r
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia-uvm rw
+DeviceAllow=/dev/nvidia-uvm-tools rw
+DeviceAllow=/dev/nvidia-modeset rw
+DeviceAllow=/dev/nvidia0 rw
 ProtectSystem=strict
 ProtectHome=yes
 ProtectKernelTunables=yes

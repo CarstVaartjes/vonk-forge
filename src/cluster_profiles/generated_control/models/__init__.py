@@ -322,6 +322,7 @@ from .gateway_route_state import GatewayRouteState
 from .get_fleet_log_info_source_type_0 import GetFleetLogInfoSourceType0
 from .git_hub_release_asset import GitHubReleaseAsset
 from .git_hub_release_source import GitHubReleaseSource
+from .gpu_unavailable_reason import GpuUnavailableReason
 from .helper_error_code import HelperErrorCode
 from .helper_operation_code import HelperOperationCode
 from .host_helper_response_status import HostHelperResponseStatus
@@ -1221,6 +1222,7 @@ __all__ = (
     "GetFleetLogInfoSourceType0",
     "GitHubReleaseAsset",
     "GitHubReleaseSource",
+    "GpuUnavailableReason",
     "HelperErrorCode",
     "HelperOperationCode",
     "HostHelperResponseStatus",

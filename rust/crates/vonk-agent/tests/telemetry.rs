@@ -13,8 +13,8 @@ use uuid::Uuid;
 use vonk_agent::{
     process::{ProcessError, ProcessOutput, ProcessRunner, Program},
     telemetry::{
-        FileSystemCapacity, FileSystemProvider, TelemetryCollector, TelemetryPaths,
-        valid_report_batch,
+        FileSystemCapacity, FileSystemProvider, GpuUnavailableReason, TelemetryCollector,
+        TelemetryPaths, valid_report_batch,
     },
 };
 
@@ -89,7 +89,7 @@ const MEMINFO: &[u8] = b"MemTotal:       1000 kB\nMemAvailable:    400 kB\n";
 #[test]
 fn unified_memory_accelerator_reports_host_memory_only() {
     let directory = tempdir().unwrap();
-    let runner = runner(b"NVIDIA GB10, 25, [N/A], [N/A], 61\n");
+    let runner = runner(include_bytes!("fixtures/telemetry/gb10.csv"));
     let collector = collector(directory.path(), MEMINFO, runner.clone());
 
     let sample = collector.sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
@@ -140,6 +140,10 @@ fn malformed_or_oversized_sources_become_null_values() {
     assert_eq!(sample.memory_available_bytes, None);
     assert_eq!(sample.gpu_utilization_percent, None);
     assert_eq!(sample.gpu_memory_total_bytes, None);
+    assert_eq!(
+        sample.gpu_unavailable_reason,
+        Some(GpuUnavailableReason::GpuInvalidOutput)
+    );
     assert!(valid_report_batch(std::slice::from_ref(&sample)));
 }
 
@@ -202,4 +206,113 @@ fn cpu_frequency_is_null_without_cpufreq() {
     assert_eq!(sample.cpu_frequency_avg_mhz, None);
     assert_eq!(sample.cpu_frequency_min_mhz, None);
     assert_eq!(sample.cpu_frequency_max_mhz, None);
+}
+
+#[test]
+fn unsupported_or_malformed_memory_preserves_gpu_sensors() {
+    for fixture in [
+        include_bytes!("fixtures/telemetry/gb10-memory-unsupported.csv").as_slice(),
+        include_bytes!("fixtures/telemetry/dedicated-memory-malformed.csv").as_slice(),
+    ] {
+        let directory = tempdir().unwrap();
+        let sample = collector(directory.path(), MEMINFO, runner(fixture)).sample();
+        assert!(sample.gpu_utilization_percent.is_some());
+        assert!(sample.gpu_temperature_c.is_some());
+        assert_eq!(sample.gpu_memory_total_bytes, None);
+        assert_eq!(sample.gpu_unavailable_reason, None);
+        assert!(valid_report_batch(&[sample]));
+    }
+}
+
+#[test]
+fn unsupported_sensors_have_typed_reason_and_next_sample_recovers() {
+    let directory = tempdir().unwrap();
+    let sample = collector(
+        directory.path(),
+        MEMINFO,
+        runner(include_bytes!("fixtures/telemetry/unsupported.csv")),
+    )
+    .sample();
+    assert_eq!(
+        sample.gpu_unavailable_reason,
+        Some(GpuUnavailableReason::GpuUnsupportedMetrics)
+    );
+    let recovered = collector(
+        directory.path(),
+        MEMINFO,
+        runner(include_bytes!("fixtures/telemetry/temperature-only.csv")),
+    )
+    .sample();
+    assert_eq!(recovered.gpu_unavailable_reason, None);
+    assert_eq!(recovered.gpu_temperature_c, Some(61));
+    assert_eq!(recovered.gpu_utilization_percent, None);
+    assert!(valid_report_batch(&[recovered]));
+}
+
+#[derive(Clone)]
+struct RecoveringRunner {
+    first: Arc<Mutex<bool>>,
+    timeout: bool,
+}
+
+impl ProcessRunner for RecoveringRunner {
+    fn run(
+        &self,
+        _: Program,
+        _: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        assert_eq!(timeout, Duration::from_secs(10));
+        let mut first = self.first.lock().unwrap();
+        if *first {
+            *first = false;
+            if self.timeout {
+                return Err(ProcessError::Timeout);
+            }
+            return Ok(ProcessOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"Failed to initialize NVML: Insufficient Permissions".to_vec(),
+            });
+        }
+        Ok(ProcessOutput {
+            success: true,
+            stdout: include_bytes!("fixtures/telemetry/gb10.csv").to_vec(),
+            stderr: Vec::new(),
+        })
+    }
+}
+
+#[test]
+fn failed_query_is_typed_and_same_collector_recovers_without_latching() {
+    for (timeout, reason) in [
+        (false, GpuUnavailableReason::GpuCommandFailed),
+        (true, GpuUnavailableReason::GpuCommandTimeout),
+    ] {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        fs::write(&meminfo, MEMINFO).unwrap();
+        let collector = TelemetryCollector::new(
+            RecoveringRunner {
+                first: Arc::new(Mutex::new(true)),
+                timeout,
+            },
+            FakeFileSystem,
+            TelemetryPaths {
+                meminfo,
+                cpu_root: directory.path().join("cpu"),
+                store: directory.path().to_path_buf(),
+            },
+            Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+        )
+        .unwrap();
+        let failed = collector.sample();
+        assert_eq!(failed.gpu_unavailable_reason, Some(reason));
+        assert_eq!(failed.gpu_utilization_percent, None);
+        assert_eq!(failed.memory_total_bytes, Some(1_024_000));
+        let recovered = collector.sample();
+        assert_eq!(recovered.gpu_unavailable_reason, None);
+        assert_eq!(recovered.gpu_utilization_percent, Some(25.0));
+        assert!(valid_report_batch(&[recovered]));
+    }
 }

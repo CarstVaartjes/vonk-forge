@@ -73,8 +73,7 @@ class AgentNode(Base):
     binary_digest: Mapped[str | None] = mapped_column(String(64))
     contact_certificate_serial: Mapped[str | None] = mapped_column(String(128))
     contact_observation_digest: Mapped[str | None] = mapped_column(String(64))
-    # The host-runtime fingerprint the agent's last claim reported; a runtime
-    # preflight proof is current only while it matches.
+    # Preflight proof is current only while this last-claim fingerprint matches.
     preflight_fingerprint: Mapped[str | None] = mapped_column(String(64))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

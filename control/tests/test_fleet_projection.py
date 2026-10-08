@@ -466,6 +466,7 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
                         "memory_available_bytes": 1400,
                         "disk_total_bytes": 1000,
                         "disk_free_bytes": 700,
+                        "gpu_unavailable_reason": None,
                         "gpu_utilization_percent": 12.5,
                         "gpu_memory_total_bytes": 2000,
                         "gpu_memory_free_bytes": 1300,

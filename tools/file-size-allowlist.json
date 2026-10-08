@@ -2,7 +2,7 @@
   "schema_version": 1,
   "note": "Exact line counts of existing authored sources over 1500 lines. Counts may only fall; remove an entry when it reaches 1500. Generated client and wire outputs are excluded by the scanner.",
   "files": {
-    "control/src/vonk_control/agent_api.py": 1898,
+    "control/src/vonk_control/agent_api.py": 1894,
     "control/src/vonk_control/api.py": 1736,
     "control/src/vonk_control/availability_production.py": 1555,
     "control/src/vonk_control/distributed_recovery.py": 1883,
@@ -21,7 +21,7 @@
     "rust/crates/vonk-agent/src/host_runtime.rs": 2089,
     "scripts/install-release-publication": 2176,
     "scripts/verify-agent-deb": 1836,
-    "src/cluster_profiles/cli_render.py": 2067,
+    "src/cluster_profiles/cli_render.py": 2062,
     "src/cluster_profiles/control_client.py": 1823,
     "src/cluster_profiles/controller_cli.py": 4259,
     "src/cluster_profiles/qualification_fixtures.py": 2262

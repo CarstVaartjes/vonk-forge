@@ -950,3 +950,49 @@ def test_platform_presents_current_response_contract(workers_available, capsys):
     else:
         assert "Workers: unavailable" in output
         assert contract.worker_issue in output
+
+
+def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
+    # Catches discarding temperature when utilisation is unsupported.
+    from vonk_agent_protocol.telemetry import GpuUnavailableReason
+
+    from cluster_profiles.cli_render import _gpu
+
+    assert (
+        _gpu(
+            {
+                "telemetry": {
+                    "freshness": "live",
+                    "sample": {
+                        "gpu_utilization_percent": 0.0,
+                        "gpu_temperature_c": 61,
+                    },
+                }
+            }
+        )
+        == "0%, 61 °C"
+    )
+    assert (
+        _gpu(
+            {
+                "telemetry": {
+                    "freshness": "live",
+                    "sample": {
+                        "gpu_temperature_c": 61,
+                    },
+                }
+            }
+        )
+        == "61 °C"
+    )
+    reason = GpuUnavailableReason.COMMAND_FAILED
+    assert str(reason) in _gpu(
+        {
+            "telemetry": {
+                "freshness": "live",
+                "sample": {
+                    "gpu_unavailable_reason": reason,
+                },
+            }
+        }
+    )

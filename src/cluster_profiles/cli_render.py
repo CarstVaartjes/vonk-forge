@@ -13,6 +13,8 @@ from datetime import datetime
 from . import cli_states
 from .cli_platform_render import render_platform
 from .cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
+from .cli_telemetry_render import gpu_readings
+from .cli_telemetry_render import size as _size
 from .generated_control.models.platform_observation import PlatformObservation
 
 
@@ -312,16 +314,6 @@ def _node(node: Mapping[str, object], *, detail: bool) -> None:
     _reasons(node.get("warnings"), subject=name)
 
 
-def _size(value: object) -> str:
-    """A short human size for tables; the exact byte count stays in --json."""
-    if type(value) is not int or value < 0:
-        return "unavailable"
-    for unit, divisor in (("TiB", 1 << 40), ("GiB", 1 << 30), ("MiB", 1 << 20)):
-        if value >= divisor:
-            return f"{value / divisor:.1f} {unit}"
-    return f"{value} B"
-
-
 def _memory(node: Mapping[str, object]) -> str:
     """Used share of the Spark's memory, preferring the live telemetry sample."""
     telemetry = _optional(node.get("telemetry"), "telemetry")
@@ -343,10 +335,13 @@ def _memory(node: Mapping[str, object]) -> str:
 def _gpu(node: Mapping[str, object]) -> str:
     telemetry = _optional(node.get("telemetry"), "telemetry")
     sample = _optional(telemetry.get("sample"), "telemetry sample")
-    value = sample.get("gpu_utilization_percent")
-    if telemetry.get("freshness") != "live" or not isinstance(value, (int, float)):
+    if telemetry.get("freshness") != "live":
         return "unavailable"
-    return f"{round(value)}%"
+    return gpu_readings(
+        sample.get("gpu_utilization_percent"),
+        sample.get("gpu_temperature_c"),
+        sample.get("gpu_unavailable_reason"),
+    )
 
 
 def _cpu_clock(node: Mapping[str, object]) -> str:

@@ -11972,6 +11972,16 @@
         "title": "GitHubReleaseSource",
         "type": "object"
       },
+      "GpuUnavailableReason": {
+        "enum": [
+          "gpu.command-failed",
+          "gpu.command-timeout",
+          "gpu.invalid-output",
+          "gpu.unsupported-metrics"
+        ],
+        "title": "GpuUnavailableReason",
+        "type": "string"
+      },
       "HelperErrorCode": {
         "description": "Every code the privileged helper, or the agent speaking about it, names as an error.\n\nThe helper builds its rejection from a member; the agent reads a reply code\nthrough the enum, so a word outside it is a malformed rejection, never a code\nthe agent invents or forwards.  ``runtime_helper_*`` is the spelling of an\nagent-side cause in failure evidence.",
         "enum": [
@@ -35862,6 +35872,16 @@
               }
             ],
             "title": "Gpu Temperature C"
+          },
+          "gpu_unavailable_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GpuUnavailableReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "gpu_utilization_percent": {
             "anyOf": [
