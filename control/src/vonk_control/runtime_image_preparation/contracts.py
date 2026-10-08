@@ -28,7 +28,6 @@ from vonk_agent_protocol.wire_model import Digest, WireModel
 
 from ..categorized_faults import security_reason
 from ..integer_domains import MAX_DATABASE_INTEGER
-from ..validation_detail import validation_error_detail
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -231,108 +230,62 @@ class RuntimeImageReferenceIntent(WireModel):
 
 def read_runtime_image_reference_intent(
     value: object,
-) -> RuntimeImageReferenceIntent:
-    """Validate a decoded SQL JSON value through its canonical wire model."""
+) -> RuntimeImageReferenceIntent | None:
+    """Observe a decoded stored reference; damage supplies no authority."""
 
     try:
         return RuntimeImageReferenceIntent.model_validate_json(
             canonical_message(value), strict=True
         )
-    except (TypeError, ValueError, ValidationError) as error:
-        raise RuntimeImagePreparationUnknown(
-            RuntimeImageCode.REFERENCE_INTENT_INVALID,
-            "runtime image reference intent is malformed",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
+    except (TypeError, ValueError, ValidationError):
+        return None
 
 
-def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
-    if not isinstance(value, Mapping) or value.get("schema_version") != 2:
-        raise RuntimeImagePreparationUnknown(
-            RuntimeImageCode.RECEIPT_INVALID,
-            "runtime image receipt schema version is unsupported",
-            reason=WaitReason.RECEIPT_MISSING,
-        )
+class RuntimeImageReceiptObservation(WireModel):
+    """One non-refusing read of derived metadata; only readable damage retires."""
+
+    receipt: RuntimeImageReceipt | None = None
+    damaged: bool = False
+    detail: str = ""
+
+
+def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt | None:
     try:
-        return RuntimeImageReceipt.model_validate(value)
-    except (TypeError, ValueError) as error:
-        raise RuntimeImagePreparationUnknown(
-            RuntimeImageCode.RECEIPT_UNAVAILABLE,
-            "runtime image receipt identity is unavailable or malformed"
-            + validation_error_detail(error),
-            reason=WaitReason.RECEIPT_MISSING,
-        ) from error
+        return RuntimeImageReceipt.model_validate_json(canonical_message(value))
+    except (TypeError, ValueError):
+        return None
 
 
-class _ReceiptDocumentRejected(UnknownOutcomeError):
-    """A present receipt file the current contract cannot parse.
-
-    Deliberately not a ``RuntimeImagePreparationError``: a scan over all
-    receipts treats the file as one archive's stale metadata and skips it,
-    while an exact-identity read of that archive still reports it.  It carries
-    the contract code and bounded detail that rejected the document, never a
-    field read out of it.
-    """
-
-    def __init__(self, code: str, detail: str) -> None:
-        self.code = code
-        self.detail = detail
-        super().__init__(detail, reason=WaitReason.RECEIPT_MISSING)
-
-
-def _load_receipt_document(path: Path) -> RuntimeImageReceipt:
-    """Read one stored receipt file under the current contract.
-
-    Unavailable local metadata is retryable uncertainty. Scans skip it;
-    exact request-led preparation re-observes the verified image.
-    """
-
+def _load_receipt_document(path: Path) -> RuntimeImageReceiptObservation:
+    """Missing/unavailable evidence is a miss; complete malformed bytes are damage."""
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as error:
-        raise RuntimeImagePreparationUnknown(
-            RuntimeImageCode.RECEIPT_UNAVAILABLE,
-            "runtime image receipt could not be read",
-            retryable=True,
-            reason=WaitReason.RECEIPT_MISSING,
-        ) from error
-    except UnicodeDecodeError as error:
-        raise _ReceiptDocumentRejected(
-            RuntimeImageCode.RECEIPT_UNAVAILABLE,
-            "runtime image receipt is not valid UTF-8 JSON",
-        ) from error
+    except UnicodeDecodeError:
+        return RuntimeImageReceiptObservation(
+            damaged=True, detail="receipt encoding is unavailable"
+        )
+    except OSError:
+        return RuntimeImageReceiptObservation(detail="receipt storage is unavailable")
     try:
         document = json.loads(text)
-    except ValueError as error:
-        raise _ReceiptDocumentRejected(
-            RuntimeImageCode.RECEIPT_UNAVAILABLE,
-            "runtime image receipt identity is unavailable or malformed",
-        ) from error
-    try:
-        return _parse_runtime_image_receipt(document)
-    except RuntimeImagePreparationError as error:
-        raise _ReceiptDocumentRejected(
-            error.code,
-            error.detail,
-        ) from error
-    except (TypeError, ValueError) as error:
-        raise _ReceiptDocumentRejected(
-            RuntimeImageCode.RECEIPT_UNAVAILABLE,
-            "runtime image receipt identity is unavailable or malformed",
-        ) from error
+    except ValueError:
+        return RuntimeImageReceiptObservation(
+            damaged=True, detail="receipt document is unreadable"
+        )
+    receipt = _parse_runtime_image_receipt(document)
+    return RuntimeImageReceiptObservation(
+        receipt=receipt,
+        damaged=receipt is None,
+        detail="receipt contract is unavailable" if receipt is None else "",
+    )
 
 
-def _log_rejected_receipt(path: Path, rejection: _ReceiptDocumentRejected) -> None:
-    """Record the bounded rule that rejected one stored receipt file.
-
-    The archive digest and the rejecting contract rule are diagnostic; the
-    unreadable document is never carried into the record.
-    """
-
+def _log_rejected_receipt(
+    path: Path, rejection: RuntimeImageReceiptObservation
+) -> None:
     _LOGGER.warning(
-        "runtime image receipt %s rejected by %s: %s",
+        "runtime image receipt %s is unavailable: %s",
         path.name.removesuffix(".receipt.json"),
-        rejection.code,
         rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
     )
 

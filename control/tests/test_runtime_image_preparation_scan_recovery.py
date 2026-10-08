@@ -178,6 +178,7 @@ def test_unknown_receipt_attempt_ends_without_blocking_fresh_preparation(
     with sessions() as session:
         ended = session.get(Job, pending.id)
         assert ended is not None
+        assert ended is not None
         assert ended.payload.get("claim_owner") is None
     from types import SimpleNamespace
 
@@ -206,3 +207,270 @@ def test_unknown_receipt_attempt_ends_without_blocking_fresh_preparation(
     with storage.publication_lock(ARCHIVE_SHA):
         pass
     engine.dispose()
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    "fault", ["dependency", "unknown", "io", "payload", "future_retry"]
+)
+def test_observation_budget_is_owned_by_request_across_restart_for_all_unknowns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from vonk_agent_protocol import (
+        LifecycleState,
+        RecipeImageCode,
+        RuntimeImageCode,
+        WaitReason,
+    )
+    from vonk_control.models import Base, Job
+    from vonk_control.recipe_image_availability import BuildUnsettled
+    from vonk_control.runtime_image_preparation import RuntimeImagePreparationUnknown
+
+    from .test_recipe_image_availability import (
+        _add_revision,
+        _builder,
+        _recipe,
+        _runtime,
+        _service,
+    )
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'budget.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    recipe = _recipe("recipe-source-build.json")
+    with sessions.begin() as session:
+        _add_revision(session, "budget", recipe)
+    storage = FilesystemRuntimeImageStorage(tmp_path / "images")
+    now = [datetime.now(UTC)]
+    blocked = [True]
+    verified_builder = _builder(storage)
+
+    def builder(*args, **kwargs):
+        if not blocked[0]:
+            return verified_builder(*args, **kwargs)
+        if fault == "dependency":
+            return BuildUnsettled(
+                RecipeImageCode.BUILD_WAIT,
+                "dependency unavailable",
+                retryable=True,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        if fault == "unknown":
+            raise RuntimeImagePreparationUnknown(
+                RuntimeImageCode.RECEIPT_UNAVAILABLE,
+                "evidence unavailable",
+                retryable=True,
+                reason=WaitReason.RECEIPT_MISSING,
+            )
+        raise OSError("temporary local I/O failure")
+
+    def owner():
+        return _service(
+            sessions,
+            storage=storage,
+            builder=builder,
+            authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+            clock=lambda: now[0],
+        )
+
+    service = owner()
+    pending = service.start("budget", actor="operator", request_id="pending")
+    if fault == "payload":
+        with sessions.begin() as session:
+            row = session.get(Job, pending.id)
+            assert row is not None
+            row.payload = {}
+            row.payload["unreadable"] = True
+    service.run_pending()
+    assert service.get(pending.id).result is None
+    if fault == "future_retry":
+        import json
+
+        from vonk_control.job_documents import AvailabilityJobPayload
+        from vonk_control.strict_json import serialize_json_value
+
+        with sessions.begin() as session:
+            row = session.get(Job, pending.id)
+            assert row is not None
+            payload = AvailabilityJobPayload.model_validate_json(
+                json.dumps(row.payload)
+            )
+            row.payload = serialize_json_value(
+                payload.model_copy(
+                    update={"retry_after_at": now[0] + timedelta(days=1)}
+                )
+            )
+    now[0] += timedelta(minutes=16)
+    service = owner()
+    service.run_pending()
+    assert service.get(pending.id).state == LifecycleState.FAILED
+    with sessions() as session:
+        row = session.get(Job, pending.id)
+        assert row is not None
+        assert row.payload.get("claim_owner") is None
+        assert row.payload.get("claim_until") is None
+    fresh = service.start("budget", actor="operator", request_id="fresh")
+    assert fresh.id != pending.id
+    blocked[0] = False
+    service.run_pending()
+    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED
+    engine.dispose()
+
+
+def _hold_availability_row(database_url: str, operation_id: str, pipe) -> None:
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import sessionmaker
+    from vonk_control.models import Job
+
+    engine = create_engine(database_url)
+    try:
+        with sessionmaker(engine).begin() as session:
+            session.scalar(select(Job).where(Job.id == operation_id).with_for_update())
+            pipe.send(True)
+            if not pipe.poll(20):
+                raise TimeoutError("concurrent owner did not release test lock")
+            pipe.recv()
+    finally:
+        engine.dispose()
+        pipe.close()
+
+
+@pytest.mark.postgres
+@pytest.mark.linux_only
+@pytest.mark.slow(60)
+def test_postgres_concurrent_owner_newer_intent_fences_stale_claim_and_restarts(
+    tmp_path: Path,
+    postgres_engine,
+) -> None:
+    import json
+    import multiprocessing
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy.orm import sessionmaker
+    from vonk_agent_protocol import LifecycleState, RecipeImageCode, WaitReason
+    from vonk_control.job_documents import AvailabilityJobResult
+    from vonk_control.models import Base, Job
+    from vonk_control.recipe_image_availability import BuildUnsettled
+
+    from .test_recipe_image_availability import (
+        _add_recipe_successors,
+        _builder,
+        _recipe,
+        _runtime,
+        _service,
+        _set_active_head,
+        _successor,
+    )
+
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    recipe = _recipe("recipe-source-build.json")
+    newer = _successor(recipe, "new accepted intent")
+    with sessions.begin() as session:
+        _add_recipe_successors(
+            session,
+            older_id="old-owner",
+            older=recipe,
+            newer_id="new-owner",
+            newer=newer,
+        )
+    now = [datetime.now(UTC)]
+    storage = FilesystemRuntimeImageStorage(tmp_path / "images")
+    calls = []
+    verified = _builder(storage, calls=calls)
+    blocked = [True]
+
+    def build(*args, **kwargs):
+        if blocked[0]:
+            return BuildUnsettled(
+                RecipeImageCode.BUILD_WAIT,
+                "dependency observation unavailable",
+                retryable=True,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        return verified(*args, **kwargs)
+
+    def owner():
+        return _service(
+            sessions,
+            storage=storage,
+            builder=build,
+            authority=lambda revision_id, **_: (
+                newer if revision_id == "new-owner" else recipe,
+                _runtime(),
+            ),
+            clock=lambda: now[0],
+        )
+
+    service = owner()
+    old = service.start("old-owner", actor="operator", request_id="old")
+    stale = service.claim_pending(owner_id="old-process")[0]
+    service.run_claim(stale)
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe()
+    postgres_engine.dispose()
+    process = context.Process(
+        target=_hold_availability_row,
+        args=(postgres_engine.url.render_as_string(hide_password=False), old.id, child),
+    )
+    process.start()
+    child.close()
+    try:
+        assert parent.poll(10)
+        assert parent.recv() is True
+        with sessions.begin() as session:
+            _set_active_head(session, "new-owner")
+        accepted = service.start("new-owner", actor="operator", request_id="new")
+        blocked[0] = False
+        # The unrelated row is locked by a real process. SKIP LOCKED must let
+        # this newer authorized owner prepare without waiting for that process.
+        service.run_pending()
+        assert service.get(accepted.id).state == LifecycleState.SUCCEEDED
+        parent.send(True)
+        process.join(timeout=10)
+        assert process.exitcode == 0
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+        parent.close()
+    now[0] += timedelta(minutes=16)
+    service = owner()
+    service.run_pending()
+    assert service.get(old.id).state in (
+        LifecycleState.CANCELLED,
+        LifecycleState.FAILED,
+    )
+    before = len(calls)
+    service.run_claim(stale)
+    assert len(calls) == before
+    assert service.get(accepted.id).state == LifecycleState.SUCCEEDED
+    with sessions() as session:
+        row = session.get(Job, old.id)
+        assert row is not None
+        assert row.payload.get("claim_owner") is None
+    accepted_document = service.get(accepted.id).result
+    assert accepted_document is not None
+    accepted_result = AvailabilityJobResult.model_validate_json(
+        json.dumps(accepted_document)
+    )
+    receipt_path = storage.root / f"{accepted_result.oci_archive_sha256}.receipt.json"
+    published_receipt = receipt_path.read_bytes()
+    fresh = service.start(
+        "new-owner", actor="operator", request_id="fresh-after-ending"
+    )
+    assert fresh.id != old.id
+    service.run_pending()
+    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED
+    fresh_document = service.get(fresh.id).result
+    assert fresh_document is not None
+    fresh_result = AvailabilityJobResult.model_validate_json(json.dumps(fresh_document))
+    assert fresh_result.image_digest == accepted_result.image_digest
+    assert fresh_result.oci_archive_sha256 == accepted_result.oci_archive_sha256
+    assert receipt_path.read_bytes() == published_receipt

@@ -273,10 +273,20 @@ def test_unsafe_artifact_paths_are_still_refused(cache, tmp_path: Path):
         set_digest, object_digest, "weights.bin"
     )
     assert path.is_file() and size == len(b"served bytes")
-    for unsafe in ("../weights.bin", "/etc/passwd", "other.bin"):
+    for unsafe in ("../weights.bin", "/etc/passwd"):
         with pytest.raises(ModelCacheNotFound) as refused:
             service.cached_artifact_file(set_digest, object_digest, unsafe)
         assert refused.value.code == "model_cache.artifact_missing"
+    from vonk_agent_protocol import UnknownOutcomeError
+
+    with pytest.raises(UnknownOutcomeError):
+        service.cached_artifact_file(set_digest, object_digest, "other.bin")
+    assert (
+        service.cached_artifact_file(set_digest, object_digest, "weights.bin")[
+            0
+        ].read_bytes()
+        == b"served bytes"
+    )
 
 
 def test_requests_naming_nothing_still_get_a_defined_refusal(cache, tmp_path):

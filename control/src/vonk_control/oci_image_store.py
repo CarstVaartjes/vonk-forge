@@ -33,6 +33,7 @@ import fcntl
 import json
 import os
 import re
+import stat
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -167,10 +168,16 @@ class OciImageStore:
             return None
         for digest, size in sizes.items():
             try:
-                if self.blob_path(digest).stat().st_size != size:
+                metadata = self.blob_path(digest).stat()
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != size:
                     return None
-            except FileNotFoundError:
+            except (FileNotFoundError, NotADirectoryError):
                 return None
+            except OSError as error:
+                return StoreUnknown(
+                    ImageStoreCode.MANIFEST_UNREADABLE,
+                    f"stored image blob is unreadable: {error}"[:512],
+                )
         return image
 
     def import_reference(self, reference: str) -> StoredImage | StoreUnknown:

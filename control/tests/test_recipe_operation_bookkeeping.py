@@ -471,6 +471,7 @@ def test_a_replayed_result_with_different_evidence_keeps_the_first_receipt(
     assert _evidence(replayed, "node_evidence", nodes[0]) == {"installed_bytes": 120}
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
 def test_build_evidence_that_does_not_hold_is_reported_not_raised(tmp_path) -> None:
     sessions, _service, _queue, _mapping_id, build_id, _nodes = setup_services(
         tmp_path, nodes=1
@@ -493,7 +494,6 @@ def test_build_evidence_that_does_not_hold_is_reported_not_raised(tmp_path) -> N
                     "oci_layout_sha256": "b" * 64,
                 },
                 now=NOW,
-                replace_existing=True,
             )
             is True
         )

@@ -159,7 +159,7 @@ def make_runtime_image_receipt_preparer(
 
 def stored_runtime_image_resolver(
     storage: RuntimeImageStorage,
-) -> Callable[[object, str, RuntimeSpec], RuntimeImageReceipt]:
+) -> Callable[[object, str, RuntimeSpec], RuntimeImageReceipt | None]:
     """Resolve a compiled image to the verified archive managed storage holds.
 
     The image is identified by its content: no recipe revision is consulted.
@@ -169,20 +169,13 @@ def stored_runtime_image_resolver(
 
     def resolve(
         _document: object, image_digest: str, runtime_spec: RuntimeSpec
-    ) -> RuntimeImageReceipt:
+    ) -> RuntimeImageReceipt | None:
         expectations = runtime_image_expectations(runtime_spec.runtime)
         receipt = storage.find_verified(
             image_digest,
             expected_architecture=expectations["architecture"],
             expected_runtime_interface=expectations["interface"],
         )
-        if receipt is None:
-            raise RuntimeImagePreparationUnknown(
-                RuntimeImageCode.RECEIPT_UNAVAILABLE,
-                "runtime image preparation is incomplete",
-                retryable=True,
-                reason=WaitReason.RECEIPT_MISSING,
-            )
         return receipt
 
     return resolve

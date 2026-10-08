@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import uuid
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -29,6 +30,7 @@ from ..cache_removal_review import (
     CacheRemovalReview,
 )
 from ..categorized_errors import InvalidValue
+from ..install_admission import InstallPlan
 from ..job_documents import (
     AvailabilityJobPayload,
     AvailabilityModelChild,
@@ -42,6 +44,7 @@ from ..models import (
     CatalogDocumentRevision,
     Job,
     ModelCacheOperation,
+    RecipeBuild,
 )
 from ..operation_blockers import (
     OperationBlocker,
@@ -143,6 +146,25 @@ class RecipeImageAvailabilityService:
         from ..recipe_update_batches import RecipeUpdateBatches
 
         self._updates = RecipeUpdateBatches(self, sessions)
+
+    def prepare_install(self, plan: InstallPlan, actor: str, request_id: str) -> None:
+        # The durable child owns observation/rebuild, including restart and its
+        # total deadline. Installation keeps its reviewed exact image binding.
+        with self._sessions() as session:
+            build = session.get(RecipeBuild, plan.recipe_build_id)
+            input_digest = build.build_input_sha256 if build is not None else None
+        preparation = self.start(
+            plan.recipe_revision_id,
+            actor=actor,
+            request_id=str(
+                uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:install-preparation:{request_id}")
+            ),
+            build_input_sha256=input_digest,
+        )
+        # Dispatch only this request's child through the normal fenced owner.
+        # No acceptance transaction is held while it verifies/reconstructs.
+        for claim in self.claim_pending(limit=1, operation_id=preparation.id):
+            self.run_claim(claim)
 
     def _payload(self, operation: Job) -> AvailabilityJobPayload | Residue:
         return persistence._payload(self, operation)
@@ -665,9 +687,15 @@ class RecipeImageAvailabilityService:
         return scheduling.run_pending(self, limit=limit)
 
     def claim_pending(
-        self, *, limit: int = 4, owner_id: str | None = None
+        self,
+        *,
+        limit: int = 4,
+        owner_id: str | None = None,
+        operation_id: str | None = None,
     ) -> tuple[RecipeImageAvailabilityClaim, ...]:
-        return scheduling.claim_pending(self, limit=limit, owner_id=owner_id)
+        return scheduling.claim_pending(
+            self, limit=limit, owner_id=owner_id, requested_operation_id=operation_id
+        )
 
     def _park_for_model(
         self, operation: Job, payload: AvailabilityJobPayload, now: datetime

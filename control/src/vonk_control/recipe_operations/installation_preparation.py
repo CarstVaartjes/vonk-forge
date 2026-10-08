@@ -15,12 +15,14 @@ from vonk_agent_protocol import (
     InstallationNodeState,
     InstallationState,
     LifecycleState,
+    UnknownOutcomeError,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
 )
 
 from .. import job_states
+from ..admission_locking import admission_attempts
 from ..install_admission import (
     InstallAdmissionBusy,
     InstallPlan,
@@ -83,6 +85,36 @@ class InstallationPreparationMixin:
         profile_application_id: str | None = None,
         workload_intent_ordinal: int | None = None,
     ) -> str:
+        service = typing_cast("RecipeOperationService", self)
+        last_error: UnknownOutcomeError = RecipeRetryLater(
+            "installation preparation observation exhausted"
+        )
+        for _attempt in admission_attempts():
+            try:
+                return service._prepare_installation_once(
+                    plan,
+                    actor=actor,
+                    profile_application_id=profile_application_id,
+                    workload_intent_ordinal=workload_intent_ordinal,
+                )
+            except UnknownOutcomeError as error:
+                if service._install_preparation is not None:
+                    service._install_preparation(
+                        plan,
+                        actor,
+                        f"{plan.plan_digest}:{profile_application_id}:{workload_intent_ordinal}",
+                    )
+                last_error = error
+        raise last_error
+
+    def _prepare_installation_once(
+        self,
+        plan: InstallPlan,
+        *,
+        actor: str,
+        profile_application_id: str | None = None,
+        workload_intent_ordinal: int | None = None,
+    ) -> str:
         """Persist an admitted installation without starting Spark work.
 
         Run/Switch has to compile and persist the exact launch document before
@@ -135,8 +167,10 @@ class InstallationPreparationMixin:
             )
         except InstallAdmissionBusy:
             raise
+        except UnknownOutcomeError:
+            raise
         except (RuntimeError, ValueError) as error:
-            raise RecipeRequestInvalid(str(error)) from error
+            raise RecipeRetryLater("installation evidence is unavailable") from error
         with service._sessions.begin() as session:
             existing_id = service._prepared_installation_id(session, plan)
             if existing_id is not None:
@@ -152,10 +186,15 @@ class InstallationPreparationMixin:
                 )
             except InstallAdmissionBusy:
                 raise
+            except UnknownOutcomeError:
+                raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeRequestInvalid(str(error)) from error
+                raise RecipeRetryLater(
+                    "installation evidence is unavailable"
+                ) from error
             installation = session.get(RecipeInstallation, installation_id)
-            assert installation is not None
+            if installation is None:
+                raise RecipeRetryLater("installation evidence is unavailable")
             # The row was written by this very transaction: its plan must carry
             # the compiled documents before anything can commit it.
             try:
@@ -163,11 +202,11 @@ class InstallationPreparationMixin:
                     read_row_column(installation, "plan")
                 )
             except RecipeExecutionContractError as error:
-                raise RecipeRequestInvalid(
+                raise RecipeRetryLater(
                     "compiled execution plan was not persisted"
                 ) from error
             if not stored_plan.compiled_execution_plans:
-                raise RecipeRequestInvalid("compiled execution plan was not persisted")
+                raise RecipeRetryLater("compiled execution plan was not persisted")
             return installation_id
 
     @staticmethod

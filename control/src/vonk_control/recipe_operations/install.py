@@ -36,7 +36,7 @@ from ..models import (
     RecipeInstallation,
 )
 from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid
+from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import RecipeOperationView
 
 if TYPE_CHECKING:
@@ -82,10 +82,10 @@ class InstallMixin:
         require_same_install_execution(reviewed, plan)
         try:
             service._install_admission.refresh_install_receipts(plan, now=now)
-        except InstallAdmissionBusy:
+        except UnknownOutcomeError:
             raise
         except (RuntimeError, ValueError) as error:
-            raise RecipeRequestInvalid(str(error)) from error
+            raise RecipeRetryLater("installation evidence is unavailable") from error
         with service._sessions.begin() as session:
             try:
                 acquire_admission_keys(
@@ -116,15 +116,20 @@ class InstallMixin:
                 )
             except InstallAdmissionBusy:
                 raise
+            except UnknownOutcomeError:
+                raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeRequestInvalid(str(error)) from error
+                raise RecipeRetryLater(
+                    "installation evidence is unavailable"
+                ) from error
             installation = session.get(RecipeInstallation, installation_id)
-            assert installation is not None
+            if installation is None:
+                raise RecipeRetryLater("installation evidence is unavailable")
             installation.state = InstallationState.INSTALLING
             installation.updated_at = now
             compiled_plans = plan.compiled_plan_by_node
             if set(compiled_plans) != {node.node_id for node in plan.nodes}:
-                raise RecipeRequestInvalid(
+                raise RecipeRetryLater(
                     "compiled execution plan is missing for one or more mapped nodes"
                 )
             job = service._queue_in_session(
@@ -166,7 +171,9 @@ class InstallMixin:
         workload_intent_ordinal: int | None = None,
     ) -> RecipeOperationView:
         service = typing_cast("RecipeOperationService", self)
-        refused: UnknownOutcomeError | None = None
+        refused: UnknownOutcomeError = RecipeRetryLater(
+            "installation observation exhausted"
+        )
         for _attempt in admission_attempts():
             try:
                 return service._install_once(
@@ -177,8 +184,9 @@ class InstallMixin:
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
             except UnknownOutcomeError as error:
+                if service._install_preparation is not None:
+                    service._install_preparation(plan, actor, request_id)
                 refused = error
                 if admission_wait_exhausted(error):
                     break
-        assert refused is not None
         raise refused

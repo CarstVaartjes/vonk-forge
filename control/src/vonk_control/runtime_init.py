@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import errno
 import logging
 import os
 import secrets
@@ -13,6 +14,7 @@ from pathlib import Path
 from vonk_agent_protocol import WaitReason
 
 from .categorized_errors import UnsettledOutcome
+from .runtime_asset_contract import RuntimeAssetInventory
 
 _LOGGER = logging.getLogger(__name__)
 _MAX_PRIVATE_KEY_BYTES = 16 * 1024
@@ -44,7 +46,16 @@ def read_runtime_secret(
     """Read one bounded regular Compose secret without following a symlink."""
     if not 0 < maximum_bytes <= _MAX_PRIVATE_KEY_BYTES:
         raise RuntimeSecretError("runtime secret size bound is invalid")
-    return _read_runtime_file(source, maximum_bytes=maximum_bytes)
+    last_error = UnsettledOutcome(
+        "runtime secret observation exhausted",
+        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+    )
+    for _attempt in range(3):
+        try:
+            return _read_runtime_file(source, maximum_bytes=maximum_bytes)
+        except UnsettledOutcome as error:
+            last_error = error
+    raise last_error
 
 
 def _read_runtime_file(source: Path, *, maximum_bytes: int) -> bytes:
@@ -57,7 +68,11 @@ def _read_runtime_file(source: Path, *, maximum_bytes: int) -> bytes:
             os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
         )
     except OSError as error:
-        raise RuntimeSecretError("runtime secret source is unsafe") from error
+        if error.errno == errno.ELOOP:
+            raise RuntimeSecretError("runtime secret source is unsafe") from error
+        raise UnsettledOutcome(
+            "runtime source is unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
+        ) from error
     try:
         before = os.fstat(descriptor)
         if (
@@ -77,15 +92,23 @@ def _read_runtime_file(source: Path, *, maximum_bytes: int) -> bytes:
             content.extend(chunk)
         after = os.fstat(descriptor)
         if len(content) != before.st_size or _identity(before) != _identity(after):
-            raise RuntimeSecretError("runtime secret changed while read")
+            raise UnsettledOutcome(
+                "runtime source changed during observation",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
     except OSError as error:
-        raise RuntimeSecretError("runtime secret cannot be read") from error
+        raise UnsettledOutcome(
+            "runtime source is unreadable", reason=WaitReason.OBSERVATION_UNAVAILABLE
+        ) from error
     finally:
-        os.close(descriptor)
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
     return bytes(content)
 
 
-def stage_runtime_file(
+def _stage_runtime_file_once(
     source: Path,
     destination: Path,
     *,
@@ -99,14 +122,12 @@ def stage_runtime_file(
     destination = Path(destination)
 
     parent = destination.parent
-    parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-    if os.geteuid() == 0:
-        os.chown(parent, 0, 10001)
-    # Consumers use different UIDs. The directory is traversable, while each
-    # staged file remains owner-readable only.
-    os.chmod(parent, 0o755)
     temporary = parent / f".{destination.name}.{secrets.token_hex(12)}.new"
     try:
+        parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+        if os.geteuid() == 0:
+            os.chown(parent, 0, 10001)
+        os.chmod(parent, 0o755)
         descriptor = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
@@ -116,8 +137,15 @@ def stage_runtime_file(
             os.fchown(descriptor, owner_uid, owner_gid)
             os.fchmod(descriptor, mode)
             offset = 0
-            while offset < len(content):
-                offset += os.write(descriptor, content[offset:])
+            # Each successful write advances at least one byte. The source
+            # byte bound therefore owns the maximum number of attempts.
+            for _write in range(len(content)):
+                if offset == len(content):
+                    break
+                written = os.write(descriptor, content[offset:])
+                if written <= 0:
+                    raise OSError("runtime staging write made no progress")
+                offset += written
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -126,12 +154,85 @@ def stage_runtime_file(
     except OSError as error:
         try:
             temporary.unlink()
-        except FileNotFoundError:
+        except OSError:
             pass
         raise UnsettledOutcome(
             "runtime file staging is unavailable",
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         ) from error
+
+
+def stage_runtime_file(
+    source: Path,
+    destination: Path,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+    mode: int = 0o444,
+    maximum_bytes: int = _MAX_RUNTIME_FILE_BYTES,
+) -> Path:
+    """Each staging request owns three fresh observations; prior bytes survive."""
+    last_error: BaseException | None = None
+    for _attempt in range(3):
+        try:
+            return _stage_runtime_file_once(
+                source,
+                destination,
+                owner_uid=owner_uid,
+                owner_gid=owner_gid,
+                mode=mode,
+                maximum_bytes=maximum_bytes,
+            )
+        except (OSError, UnsettledOutcome) as error:
+            last_error = error
+    raise UnsettledOutcome(
+        "runtime staging observation exhausted",
+        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+    ) from last_error
+
+
+def write_runtime_asset_inventory(source_root: Path) -> bool:
+    """Image assembly observes complete kit membership within three attempts."""
+    last_error: BaseException | None = None
+    for _attempt in range(3):
+        try:
+            _write_runtime_asset_inventory_once(source_root)
+            return True
+        except (OSError, UnsettledOutcome, ValueError) as error:
+            last_error = error
+    _LOGGER.warning("runtime kit assembly observation ended: %s", last_error)
+    return False
+
+
+def _write_runtime_asset_inventory_once(source_root: Path) -> None:
+    """Image assembly owns membership; runtime traversal cannot retire files."""
+    members: list[str] = []
+
+    def unavailable(error: OSError) -> None:
+        raise error
+
+    for root, _, names in os.walk(source_root, onerror=unavailable):
+        for name in names:
+            path = Path(root) / name
+            if name in (".inventory.json", ".inventory.json.new"):
+                continue
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                raise UnsettledOutcome(
+                    "runtime kit member observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            members.append(path.relative_to(source_root).as_posix())
+    inventory = RuntimeAssetInventory(schema_version=2, files=tuple(sorted(members)))
+    temporary = source_root / ".inventory.json.new"
+    try:
+        temporary.write_text(inventory.model_dump_json())
+        os.replace(temporary, source_root / ".inventory.json")
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def stage_private_key(
@@ -167,18 +268,25 @@ def _stage_optional_private_key(
     # Compose uses /dev/null as the bounded default for an unset optional
     # secret. A bind mount appears at /run/secrets/hf-token, so identify it by
     # its zero-length character-device type and exact Linux null-device ID.
-    if source.is_symlink():
+    try:
+        metadata = source.lstat()
+    except FileNotFoundError:
+        metadata = None
+    source_is_absent = metadata is None or _is_null_device_metadata(metadata)
+    if (
+        metadata is not None
+        and not source_is_absent
+        and not stat.S_ISREG(metadata.st_mode)
+    ):
         raise RuntimeSecretError("optional runtime secret source is unsafe")
-    source_is_absent = _is_null_device(source) or not source.exists()
-    if not source_is_absent and not source.is_file():
-        raise RuntimeSecretError("optional runtime secret source is unsafe")
-    if source_is_absent or source.stat().st_size == 0:
-        if destination.exists() or destination.is_symlink():
-            if destination.is_dir() and not destination.is_symlink():
-                raise RuntimeSecretError(
-                    "optional runtime secret destination is unsafe"
-                )
-            destination.unlink()
+    if source_is_absent or (metadata is not None and metadata.st_size == 0):
+        try:
+            projected = destination.lstat()
+        except FileNotFoundError:
+            return
+        if stat.S_ISDIR(projected.st_mode):
+            raise RuntimeSecretError("optional runtime secret destination is unsafe")
+        destination.unlink()
         return
     stage_private_key(
         source,
@@ -194,6 +302,10 @@ def _is_null_device(source: Path) -> bool:
         metadata = source.stat()
     except OSError:
         return False
+    return _is_null_device_metadata(metadata)
+
+
+def _is_null_device_metadata(metadata: os.stat_result) -> bool:
     return bool(
         stat.S_ISCHR(metadata.st_mode)
         and metadata.st_size == 0
@@ -211,16 +323,17 @@ def stage_runtime_assets(
     Atomic per-file replacement retains the previous file on an I/O failure.
     No unavailable inventory is interpreted as permission to remove old files.
     """
-    for attempt in range(3):
+    last_error: BaseException | None = None
+    for _attempt in range(3):
         try:
             _stage_runtime_assets_once(source_root, destination_root)
             return
         except (OSError, RuntimeSecretError, UnsettledOutcome) as error:
-            if attempt == 2:
-                raise UnsettledOutcome(
-                    "runtime assets staging is unavailable",
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                ) from error
+            last_error = error
+    raise UnsettledOutcome(
+        "runtime assets staging is unavailable",
+        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+    ) from last_error
 
 
 def _stage_runtime_assets_once(
@@ -236,18 +349,26 @@ def _stage_runtime_assets_once(
     """
     source_root = Path(source_root)
     destination_root = Path(destination_root)
-    shipped = {
-        path.relative_to(source_root)
-        for path in source_root.rglob("*")
-        if path.is_file() and not path.is_symlink()
-    }
-    if not shipped:
-        raise UnsettledOutcome(
-            "runtime assets are unavailable in the image",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+    try:
+        inventory = RuntimeAssetInventory.model_validate_json(
+            _read_runtime_file(
+                source_root / ".inventory.json", maximum_bytes=_MAX_RUNTIME_FILE_BYTES
+            )
         )
+        shipped = {Path(member) for member in inventory.files}
+        # Observe every authoritative member before any retirement. Incomplete
+        # traversal or a vanished sibling can never be evidence of retirement.
+        for relative in shipped:
+            _read_runtime_file(
+                source_root / relative, maximum_bytes=_MAX_RUNTIME_FILE_BYTES
+            )
+    except (OSError, ValueError) as error:
+        raise UnsettledOutcome(
+            "runtime kit inventory is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        ) from error
     for relative in sorted(shipped):
-        stage_runtime_file(
+        _stage_runtime_file_once(
             source_root / relative,
             destination_root / relative,
             mode=0o444,
@@ -263,6 +384,24 @@ def _stage_runtime_assets_once(
 
 
 def stage_compose_secrets(
+    source_root: Path = Path("/run/secrets"),
+    destination_root: Path = Path("/normalized"),
+) -> None:
+    """Startup owns bounded retries, including optional projection cleanup."""
+    last_error: BaseException | None = None
+    for _attempt in range(3):
+        try:
+            _stage_compose_secrets_once(source_root, destination_root)
+            return
+        except (OSError, UnsettledOutcome) as error:
+            last_error = error
+    raise UnsettledOutcome(
+        "runtime secret staging observation exhausted",
+        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+    ) from last_error
+
+
+def _stage_compose_secrets_once(
     source_root: Path = Path("/run/secrets"),
     destination_root: Path = Path("/normalized"),
 ) -> None:

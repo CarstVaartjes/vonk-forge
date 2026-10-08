@@ -203,10 +203,17 @@ class CheckpointsMixin:
         try:
             metadata = os.fstat(fd)
         except OSError:
-            return None
+            metadata = None
         finally:
-            os.close(fd)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != expected_bytes:
+            try:
+                os.close(fd)
+            except OSError:
+                metadata = None
+        if (
+            metadata is None
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_size != expected_bytes
+        ):
             return None
         return expected_bytes
 

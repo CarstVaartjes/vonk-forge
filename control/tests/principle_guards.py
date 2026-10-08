@@ -323,6 +323,130 @@ def _calls_observation_deadline(
     )
 
 
+def relative_import_owner(path: str, node: ast.ImportFrom) -> Path | None:
+    """Resolve concrete relative owners, including a module just split into a package."""
+    if not node.level or node.module is None:
+        return None
+    owner = ROOT / path
+    if not owner.exists() and owner.with_suffix("").is_dir():
+        owner = owner.with_suffix("") / "__moved__.py"
+    parent = owner.parent
+    for _ in range(node.level - 1):
+        parent = parent.parent
+    return parent.joinpath(*node.module.split("."))
+
+
+def imported_helpers(
+    tree: ast.Module, path: str
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Follow explicit sibling helper imports so extraction cannot hide GET refusals."""
+    helpers = {}
+    for imported in tree.body:
+        if not isinstance(imported, ast.ImportFrom) or imported.level != 1:
+            continue
+        owner = relative_import_owner(path, imported)
+        if (
+            owner is None
+            or not (owner.parent.parent / "__init__.py").is_file()
+            or not owner.with_suffix(".py").is_file()
+        ):
+            continue
+        definitions = {
+            node.name: node
+            for node in ast.parse(owner.with_suffix(".py").read_text()).body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        for alias in imported.names:
+            if alias.name in definitions:
+                helpers[alias.asname or alias.name] = definitions[alias.name]
+    return helpers
+
+
+def proves_fresh_completion(
+    function: ast.FunctionDef | None, ending: ast.Assert
+) -> bool:
+    """Recognize ending followed by a distinct request's observed completion.
+
+    This credits execution and identity assertions, never error taxonomy. As
+    with the other scanner patterns it supplements behavioral tests.
+    """
+    if function is None or not isinstance(ending.test, ast.Compare):
+        return False
+    subject = ending.test.left
+    if not (
+        isinstance(subject, ast.Attribute)
+        and subject.attr == "state"
+        and isinstance(subject.value, ast.Call)
+        and subject.value.args
+    ):
+        return False
+    old_identity = ast.dump(subject.value.args[0], include_attributes=False)
+    following = [
+        part
+        for part in local_nodes(function)
+        if getattr(part, "lineno", 0) > ending.lineno
+    ]
+    for admission in following:
+        if not (
+            isinstance(admission, ast.Assign)
+            and len(admission.targets) == 1
+            and isinstance(admission.targets[0], ast.Name)
+            and isinstance(admission.value, ast.Call)
+            and isinstance(admission.value.func, ast.Attribute)
+            and admission.value.func.attr == "start"
+        ):
+            continue
+        identifier = admission.targets[0].id
+        fresh_identity = ast.dump(
+            ast.Attribute(
+                value=ast.Name(id=identifier, ctx=ast.Load()), attr="id", ctx=ast.Load()
+            ),
+            include_attributes=False,
+        )
+        assertions = [
+            part
+            for part in following
+            if isinstance(part, ast.Assert) and part.lineno > admission.lineno
+        ]
+        distinct = any(
+            isinstance(part.test, ast.Compare)
+            and len(part.test.ops) == 1
+            and isinstance(part.test.ops[0], ast.NotEq)
+            and {
+                ast.dump(part.test.left, include_attributes=False),
+                ast.dump(part.test.comparators[0], include_attributes=False),
+            }
+            == {fresh_identity, old_identity}
+            for part in assertions
+        )
+        if not distinct:
+            continue
+        for completed in assertions:
+            test = completed.test
+            if not (
+                isinstance(test, ast.Compare)
+                and len(test.ops) == 1
+                and isinstance(test.ops[0], ast.Eq)
+                and "SUCCEEDED" in literals(test)
+                and isinstance(test.left, ast.Attribute)
+                and test.left.attr == "state"
+                and isinstance(test.left.value, ast.Call)
+                and test.left.value.args
+                and ast.dump(test.left.value.args[0], include_attributes=False)
+                == fresh_identity
+            ):
+                continue
+            if any(
+                isinstance(part, ast.Call)
+                and isinstance(part.func, ast.Attribute)
+                and part.func.attr == "run_pending"
+                and admission.lineno < part.lineno < completed.lineno
+                for part in following
+            ):
+                return True
+    return False
+
+
 def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
@@ -379,8 +503,11 @@ def scan_source(
         alias.asname or alias.name
         for imported in tree.body
         if isinstance(imported, ast.ImportFrom)
-        and imported.module == "operation_api"
-        and imported.level == 1
+        and (
+            (imported.module == "operation_api" and imported.level == 1)
+            or relative_import_owner(path, imported)
+            == ROOT / "control/src/vonk_control/operation_api"
+        )
         for alias in imported.names
         if alias.name == "_OperationResponseTooLarge"
     }
@@ -665,6 +792,7 @@ def scan_source(
                         comparison, self.diagnostic_reports
                     )
                     and TRANSIENT.search(self.context)
+                    and not proves_fresh_completion(self.receiver, node)
                     and not re.search(
                         r"assert[^\n]*(?:reason_code|\.code\b)", self.context
                     )
@@ -682,6 +810,8 @@ def scan_source(
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         }
+        local_functions = set(functions)
+        functions.update(imported_helpers(tree, path))
         bad = {
             key
             for key, node in functions.items()
@@ -703,6 +833,8 @@ def scan_source(
                 break
             bad = propagated
         for key, node in functions.items():
+            if key not in local_functions:
+                continue
             is_get = any(
                 isinstance(d, ast.Call)
                 and (
@@ -983,6 +1115,7 @@ def relocate(document: dict, moves=None) -> dict:
             group: [
                 {
                     **entry,
+                    "function": moves.scope(entry["path"], entry["function"]),
                     "path": moves.function(
                         entry["path"],
                         entry["function"],

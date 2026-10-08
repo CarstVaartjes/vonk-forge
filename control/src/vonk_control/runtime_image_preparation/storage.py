@@ -34,10 +34,10 @@ from .contracts import (
     RuntimeImagePreparationRefused,
     RuntimeImagePreparationUnknown,
     RuntimeImageReceipt,
+    RuntimeImageReceiptObservation,
     _atomic_json_replace,
     _load_receipt_document,
     _log_rejected_receipt,
-    _ReceiptDocumentRejected,
     _runtime_interface_label,
     _same_image,
     _wire_architecture,
@@ -63,17 +63,16 @@ class FilesystemRuntimeImageStorage:
         self._reported_receipts: set[tuple[str, int]] = set()
         self._reported_damaged: set[str] = set()
 
-    @contextmanager
-    def publication_lock(self, archive_sha256: str) -> Iterator[None]:
-        """Serialize reference fencing and atomic publication for one archive."""
-
+    def _acquire_publication_lock(self, archive_sha256: str) -> int:
         if _SHA256.fullmatch(archive_sha256) is None:
             raise RuntimeImagePreparationInvalid(
                 RuntimeImageCode.IDENTITY_INVALID,
                 "publication lock requires an exact archive SHA-256",
             )
-        lock_root = self.root / ".publication-locks"
+        directory_fd = None
+        descriptor = None
         try:
+            lock_root = self.root / ".publication-locks"
             lock_root.mkdir(mode=0o700, parents=True, exist_ok=True)
             directory_fd = os.open(
                 lock_root,
@@ -82,15 +81,6 @@ class FilesystemRuntimeImageStorage:
                 | getattr(os, "O_NOFOLLOW", 0)
                 | getattr(os, "O_CLOEXEC", 0),
             )
-        except OSError as error:
-            raise RuntimeImagePreparationUnknown(
-                RuntimeImageCode.LOCK_UNAVAILABLE,
-                "managed image publication lock directory is unavailable",
-                retryable=True,
-                recovery_actions=("retry",),
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
-        try:
             descriptor = os.open(
                 f"{archive_sha256}.lock",
                 os.O_CREAT
@@ -100,38 +90,65 @@ class FilesystemRuntimeImageStorage:
                 0o600,
                 dir_fd=directory_fd,
             )
-        except OSError as error:
-            os.close(directory_fd)
-            raise RuntimeImagePreparationUnknown(
-                RuntimeImageCode.LOCK_UNAVAILABLE,
-                "managed image publication lock file is unavailable",
-                retryable=True,
-                recovery_actions=("retry",),
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            ) from error
-        os.close(directory_fd)
-        with os.fdopen(descriptor, "a+b") as lock:
-            if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise RuntimeImagePreparationUnknown(
                     RuntimeImageCode.LOCK_UNAVAILABLE,
                     "managed image publication lock is not a regular file",
-                    retryable=True,
-                    recovery_actions=("retry",),
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            raise RuntimeImagePreparationUnknown(
+                RuntimeImageCode.LOCK_UNAVAILABLE,
+                "managed image publication lock is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ) from error
+        except RuntimeImagePreparationUnknown:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            raise
+        finally:
+            if directory_fd is not None:
+                try:
+                    os.close(directory_fd)
+                except OSError:
+                    pass
+        return descriptor
+
+    @contextmanager
+    def publication_lock(self, archive_sha256: str) -> Iterator[None]:
+        """Observe lock availability three times; never replay a yielded effect."""
+        last_error = None
+        descriptor = None
+        for _attempt in range(3):
             try:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError as error:
-                raise RuntimeImagePreparationUnknown(
-                    RuntimeImageCode.PUBLICATION_CONTENDED,
-                    "waiting for another owner to finish this image publication",
-                    retryable=True,
-                    recovery_actions=("retry",),
-                ) from error
+                descriptor = self._acquire_publication_lock(archive_sha256)
+                break
+            except RuntimeImagePreparationUnknown as error:
+                last_error = error
+        if descriptor is None:
+            if last_error is not None:
+                raise last_error
+            return
+        try:
+            yield
+        finally:
             try:
-                yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
     def commit(
         self, staged: Path, *, receipt: RuntimeImageReceipt
@@ -151,13 +168,10 @@ class FilesystemRuntimeImageStorage:
         receipt_path = self.root / f"{receipt.oci_archive_sha256}.receipt.json"
         existing_receipt: RuntimeImageReceipt | None = None
         if receipt_path.exists():
-            try:
-                existing_receipt = _load_receipt_document(receipt_path)
-            except _ReceiptDocumentRejected as rejection:
-                # This is derived metadata, never a competing contract owner.
-                # Current verified observation replaces any rejected shape.
-                _log_rejected_receipt(receipt_path, rejection)
-                existing_receipt = None
+            observed = _load_receipt_document(receipt_path)
+            existing_receipt = observed.receipt
+            if observed.damaged:
+                _log_rejected_receipt(receipt_path, observed)
         if existing_receipt is not None and _same_image(existing_receipt, receipt):
             # The same image bytes under another build (a sibling recipe that
             # publishes the same prebuilt image, an editorial revision) are
@@ -216,6 +230,17 @@ class FilesystemRuntimeImageStorage:
         return self.layout.blob_path(image.manifest_digest)
 
     def _stored_image(self, archive_sha256: str) -> StoredImage | None:
+        last_error = None
+        for _attempt in range(3):
+            try:
+                return self._observe_stored_image(archive_sha256)
+            except RuntimeImagePreparationUnknown as error:
+                last_error = error
+        if last_error is not None:
+            raise last_error
+        return None
+
+    def _observe_stored_image(self, archive_sha256: str) -> StoredImage | None:
         if _SHA256.fullmatch(archive_sha256) is None:
             raise RuntimeImagePreparationInvalid(
                 RuntimeImageCode.ARCHIVE_INVALID, "runtime image address is invalid"
@@ -412,21 +437,16 @@ class FilesystemRuntimeImageStorage:
                 f"{archive_sha256}.receipt.json"
             ):
                 continue
-            try:
-                yield _load_receipt_document(receipt_path)
-            except _ReceiptDocumentRejected as rejection:
-                self._discard_rejected_receipt(receipt_path, rejection)
-            except RuntimeImagePreparationUnknown as error:
-                if self._first_report(receipt_path):
-                    _LOGGER.warning(
-                        "deferred runtime image receipt %s: %s; %s",
-                        receipt_path.name,
-                        error.code,
-                        error.detail,
-                    )
+            observed = _load_receipt_document(receipt_path)
+            if observed.receipt is not None:
+                yield observed.receipt
+            elif observed.damaged:
+                self._discard_rejected_receipt(receipt_path, observed)
+            elif self._first_report(receipt_path):
+                _log_rejected_receipt(receipt_path, observed)
 
     def _discard_rejected_receipt(
-        self, receipt_path: Path, rejection: _ReceiptDocumentRejected
+        self, receipt_path: Path, rejection: RuntimeImageReceiptObservation
     ) -> None:
         """Delete one of our own receipts that the current contract rejects.
 
@@ -443,11 +463,9 @@ class FilesystemRuntimeImageStorage:
             return
         try:
             with self.publication_lock(archive_sha256):
-                try:
-                    _load_receipt_document(receipt_path)
+                observed = _load_receipt_document(receipt_path)
+                if observed.receipt is not None or not observed.damaged:
                     return
-                except _ReceiptDocumentRejected:
-                    pass
                 receipt_path.unlink(missing_ok=True)
         except (RuntimeImagePreparationError, OSError) as error:
             # Say why the stale file stays, once: the cause (a lock or file
@@ -458,7 +476,7 @@ class FilesystemRuntimeImageStorage:
                     "could not discard stale runtime image receipt %s rejected by "
                     "%s: %s; %s: %s",
                     archive_sha256,
-                    rejection.code,
+                    RuntimeImageCode.RECEIPT_UNAVAILABLE,
                     rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
                     getattr(error, "code", type(error).__name__),
                     cause,
@@ -467,7 +485,7 @@ class FilesystemRuntimeImageStorage:
         _LOGGER.warning(
             "discarded runtime image receipt %s rejected by %s: %s",
             archive_sha256,
-            rejection.code,
+            RuntimeImageCode.RECEIPT_UNAVAILABLE,
             rejection.detail[:_MAX_RECEIPT_REJECTION_DETAIL],
         )
 
@@ -509,6 +527,19 @@ class FilesystemRuntimeImageStorage:
         return True
 
     def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
+        last_error = RuntimeImagePreparationUnknown(
+            RuntimeImageCode.RECEIPT_UNAVAILABLE,
+            "runtime image receipt observation exhausted",
+            reason=WaitReason.RECEIPT_MISSING,
+        )
+        for _attempt in range(3):
+            try:
+                return self._read_receipt_once(archive_sha256)
+            except RuntimeImagePreparationUnknown as error:
+                last_error = error
+        raise last_error
+
+    def _read_receipt_once(self, archive_sha256: str) -> RuntimeImageReceipt:
         """Read the exact receipt for one named archive; never a scan miss.
 
         A document the current contract cannot parse is reported here rather
@@ -517,9 +548,11 @@ class FilesystemRuntimeImageStorage:
         """
 
         path = self.root / f"{archive_sha256}.receipt.json"
-        try:
-            return _load_receipt_document(path)
-        except _ReceiptDocumentRejected as rejection:
-            raise RuntimeImagePreparationUnknown(
-                rejection.code, rejection.detail
-            ) from rejection
+        observed = _load_receipt_document(path)
+        if observed.receipt is not None:
+            return observed.receipt
+        raise RuntimeImagePreparationUnknown(
+            RuntimeImageCode.RECEIPT_UNAVAILABLE,
+            observed.detail,
+            reason=WaitReason.RECEIPT_MISSING,
+        )

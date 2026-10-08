@@ -18,7 +18,6 @@ from .contracts import _atomic_json_replace as _atomic_json_replace
 from .contracts import _load_receipt_document as _load_receipt_document
 from .contracts import _log_rejected_receipt as _log_rejected_receipt
 from .contracts import _parse_runtime_image_receipt as _parse_runtime_image_receipt
-from .contracts import _ReceiptDocumentRejected as _ReceiptDocumentRejected
 from .contracts import _runtime_interface_label as _runtime_interface_label
 from .contracts import _same_image as _same_image
 from .contracts import _unlink_quietly as _unlink_quietly

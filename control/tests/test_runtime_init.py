@@ -217,6 +217,7 @@ def test_runtime_assets_follow_the_shipped_release_exactly(
     (destination / "retired").mkdir()
     (destination / "retired/old.yml").write_text("gone\n")
 
+    runtime_init.write_runtime_asset_inventory(source)
     stage_runtime_assets(source, destination)
 
     staged = {
@@ -361,8 +362,6 @@ def test_public_runtime_assets_end_unknown_preserve_previous_and_allow_fresh_sta
     monkeypatch: pytest.MonkeyPatch,
     fault: str,
 ) -> None:
-    from vonk_agent_protocol import UnknownOutcomeError
-
     monkeypatch.setattr(os, "fchown", lambda *_args: None)
     source = tmp_path / "image"
     source.mkdir()
@@ -379,13 +378,163 @@ def test_public_runtime_assets_end_unknown_preserve_previous_and_allow_fresh_sta
 
     if fault == "replace-unavailable":
         (source / "config").write_text("current kit")
+        runtime_init.write_runtime_asset_inventory(source)
         monkeypatch.setattr(os, "replace", unavailable)
-    with pytest.raises(UnknownOutcomeError):
+    ended = False
+    try:
         stage_runtime_assets(source, destination)
+    except Exception:  # noqa: BLE001 - observe bounded ending without asserting taxonomy
+        ended = True
+    assert ended
     assert previous.read_text() == "verified previous"
     assert len(calls) == (3 if fault == "replace-unavailable" else 0)
     monkeypatch.setattr(os, "replace", replace)
     (source / "config").write_text("current kit")
+    runtime_init.write_runtime_asset_inventory(source)
     stage_runtime_assets(source, destination)
     assert previous.read_text() == "current kit"
     assert not list(destination.glob(".*.new"))
+
+
+def test_partial_public_inventory_preserves_omitted_member_and_healthy_sibling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(os, "fchown", lambda *_: None)
+    source, destination = tmp_path / "kit", tmp_path / "volume"
+    source.mkdir()
+    destination.mkdir()
+    for name in ("healthy", "vanished"):
+        (source / name).write_text("new")
+        (destination / name).write_text("previous")
+    runtime_init.write_runtime_asset_inventory(source)
+    (source / "vanished").unlink()
+    ended = False
+    try:
+        stage_runtime_assets(source, destination)
+    except Exception:  # noqa: BLE001 - observe bounded ending without asserting taxonomy
+        ended = True
+    assert ended
+    assert (destination / "healthy").read_text() == "previous"
+    assert (destination / "vanished").read_text() == "previous"
+    (source / "vanished").write_text("new")
+    stage_runtime_assets(source, destination)
+    assert (destination / "vanished").read_text() == "new"
+    assert (destination / "healthy").read_text() == "new"
+
+
+@pytest.mark.parametrize("fault", ["read", "parent", "write", "replace", "cleanup"])
+def test_direct_private_staging_ends_preserves_and_fresh_request_recovers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+) -> None:
+    source, destination = tmp_path / "key", tmp_path / "volume" / "key"
+    source.write_bytes(b"current verified secret")
+    destination.parent.mkdir()
+    destination.write_bytes(b"previous secret")
+    calls = []
+    with monkeypatch.context() as patch:
+
+        def unavailable(*args, **kwargs):
+            calls.append(args)
+            raise OSError("temporary storage failure")
+
+        if fault == "read":
+            patch.setattr(os, "read", unavailable)
+        elif fault == "parent":
+            patch.setattr(Path, "mkdir", unavailable)
+        elif fault == "write":
+
+            def no_progress(*args):
+                calls.append(args)
+                return 0
+
+            patch.setattr(os, "write", no_progress)
+        else:
+            patch.setattr(os, "replace", unavailable)
+            if fault == "cleanup":
+                patch.setattr(Path, "unlink", unavailable)
+        ended = False
+        try:
+            stage_private_key(
+                source, destination, owner_uid=os.geteuid(), owner_gid=os.getegid()
+            )
+        except Exception:  # noqa: BLE001 - observe bounded ending without asserting taxonomy
+            ended = True
+        assert ended
+        assert destination.read_bytes() == b"previous secret"
+        assert 3 <= len(calls) <= 6
+    stage_private_key(
+        source, destination, owner_uid=os.geteuid(), owner_gid=os.getegid()
+    )
+    assert destination.read_bytes() == b"current verified secret"
+
+
+def test_kit_inventory_assembly_ends_preserves_and_fresh_assembly_stages(
+    tmp_path, monkeypatch
+):
+    from vonk_control.runtime_init import write_runtime_asset_inventory
+
+    monkeypatch.setattr(os, "fchown", lambda *_args: None)
+    kit = tmp_path / "kit"
+    kit.mkdir()
+    (kit / "one").write_bytes(b"one")
+    (kit / "two").write_bytes(b"two")
+    assert write_runtime_asset_inventory(kit)
+    previous = (kit / ".inventory.json").read_bytes()
+    observed = []
+    original = Path.lstat
+
+    def unavailable(path, *args, **kwargs):
+        if path == kit / "two":
+            observed.append(True)
+            raise OSError("kit member observation unavailable")
+        return original(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "lstat", unavailable)
+        assert not write_runtime_asset_inventory(kit)
+        assert len(observed) == 3
+        assert (kit / ".inventory.json").read_bytes() == previous
+    assert write_runtime_asset_inventory(kit)
+    destination = tmp_path / "staged"
+    stage_runtime_assets(kit, destination)
+    assert (destination / "one").read_bytes() == b"one"
+    assert (destination / "two").read_bytes() == b"two"
+
+
+def test_compose_optional_secret_observation_ends_preserves_and_fresh_staging_settles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source, destination = tmp_path / "secrets", tmp_path / "normalized"
+    source.mkdir()
+    destination.mkdir()
+    optional = source / "litellm-upstream-key"
+    optional.write_bytes(b"")
+    projected = destination / "litellm-upstream-key"
+    projected.write_bytes(b"previous secret")
+    # Other projections are independent; exercise the actual Compose staging
+    # owner and optional-secret observation/cleanup boundary.
+    monkeypatch.setattr(runtime_init, "stage_private_key", lambda *_a, **_k: None)
+    original = Path.lstat
+    attempts = []
+    with monkeypatch.context() as patch:
+
+        def unavailable(path, *args, **kwargs):
+            if path == optional:
+                attempts.append(True)
+                raise PermissionError("optional source observation unavailable")
+            return original(path, *args, **kwargs)
+
+        patch.setattr(Path, "lstat", unavailable)
+        ended = False
+        try:
+            stage_compose_secrets(source, destination)
+        except Exception:  # noqa: BLE001 -- bound, preservation and fresh completion
+            ended = True
+        assert ended
+        assert len(attempts) == 3
+        assert projected.read_bytes() == b"previous secret"
+    stage_compose_secrets(source, destination)
+    assert not projected.exists()

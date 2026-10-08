@@ -40,6 +40,7 @@ from vonk_forge_contracts import RecipeDefinition
 
 from .distribution_assignment import NodeDistributionAssignment
 from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
+from .lifecycle.evidence import BookkeepingReason
 from .mapping_parameters import EngineArgumentValue
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure
@@ -421,6 +422,18 @@ class AvailabilityJobPayload(_Document):
     removal_fence: UuidText | None = None
     removal_archives: list[DigestText] | None = None
     supersession: AvailabilitySupersession | None = None
+
+
+class AvailabilityUnknownEnd(_Document):
+    """An ended owner whose execution intent could not be re-derived.
+
+    Contains no lease, dependency or publication authority. It is evidence of
+    ending, never an alternate executable preparation payload.
+    """
+
+    residue: BookkeepingReason
+    claim_owner: None = None
+    claim_until: None = None
 
 
 class AvailabilityJobResult(_Document):

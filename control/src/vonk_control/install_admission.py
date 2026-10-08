@@ -338,8 +338,9 @@ class InstallAdmissionService:
             if mapping is None:
                 raise MissingRecord(mapping_id, reason=InvalidRequestReason.NOT_FOUND)
             if recipe_build_id is not None and build is None:
-                raise MissingRecord(
-                    recipe_build_id, reason=InvalidRequestReason.NOT_FOUND
+                raise BookkeepingUnknown(
+                    "recipe build evidence is unavailable",
+                    reason=WaitReason.RECEIPT_MISSING,
                 )
             if mapping.state != "ready":
                 raise InvalidValue(
@@ -363,9 +364,9 @@ class InstallAdmissionService:
                 or build.image_bytes is None
                 or build.oci_layout_sha256 is None
             ):
-                raise InvalidValue(
-                    "successful recipe build does not match the mapping",
-                    reason=InvalidRequestReason.NOT_READY,
+                raise BookkeepingUnknown(
+                    "recipe build evidence is unavailable",
+                    reason=WaitReason.RECEIPT_MISSING,
                 )
             mapping_nodes = tuple(
                 session.scalars(
@@ -456,6 +457,7 @@ class InstallAdmissionService:
                     compiled_execution_plans = {}
                 except Exception as error:  # noqa: BLE001 - provider errors become typed admission evidence
                     compiled_plan_error = str(error)[:512]
+                    compiled_plan_unsettled = True
                     compiled_execution_plans = {}
             compiled_plan_by_node = dict(compiled_execution_plans or {})
             # Build input identity belongs to build resolution; current-revision

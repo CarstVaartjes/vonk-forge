@@ -181,7 +181,6 @@ class ProjectionMixin:
                     build,
                     evidence,
                     now=now,
-                    replace_existing=force_rebuild,
                 )
                 if succeeded and not recorded_build:
                     unproven[node_id] = "recipe build evidence is invalid"

@@ -16,9 +16,9 @@ _OPERATOR_PREPARATION = re.compile(
     r"""(?<!")["'(]Prepare the (exact|named|model|runtime|asset)|[;,] prepare the (exact|named|model|runtime|asset)""",
 )
 _SCANNED = (
-    *sorted((ROOT / "control/src/vonk_control").glob("*.py")),
-    *sorted((ROOT / "control/src/vonk_control/fleet_profiles").glob("*.py")),
-    ROOT / "src/cluster_profiles/cli.py",
+    # Whole trees: a module split into a package must stay in scope.
+    *sorted((ROOT / "control/src/vonk_control").rglob("*.py")),
+    *sorted((ROOT / "src/cluster_profiles").rglob("*.py")),
     ROOT / "docs/runbooks/development-agent-workloads.md",
 )
 

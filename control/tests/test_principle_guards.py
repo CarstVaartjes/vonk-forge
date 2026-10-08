@@ -474,3 +474,53 @@ def test_history_relocations_conserve_debt(count, keep_original, rejected, tmp_p
     moved = {**entry, "path": "old/scan.py", "count": count}
     current = {"debt": [moved, *([entry] if keep_original else [])], "exceptions": []}
     assert bool(history_gate(current, previous, moves)) is rejected
+
+
+def test_nested_package_get_helper_refusal_follows_concrete_import(
+    tmp_path, monkeypatch
+):
+    """Moving a GET's rejecting helper cannot erase its existing refusal finding."""
+    from . import principle_guards as guards
+
+    root = tmp_path / "control/src/vonk_control"
+    root.mkdir(parents=True)
+    (root / "__init__.py").write_text("")
+    package = root / "api"
+    package.mkdir()
+    (package / "common.py").write_text(
+        "def required():\n    raise HTTPException(status_code=503)\n"
+    )
+    route = "from .common import required\n@router.get('/x')\ndef observe():\n    return required()\n"
+    path = "control/src/vonk_control/api/application.py"
+    (tmp_path / path).write_text(route)
+    monkeypatch.setattr(guards, "ROOT", tmp_path)
+    assert [
+        site.kind for site in guards.scan_source(route, path=path, mode="reads")
+    ] == ["get-helper-refusal"]
+    (package / "common.py").write_text("def required():\n    return 1\n")
+    assert not guards.scan_source(route, path=path, mode="reads")
+
+
+def test_bounded_ending_requires_distinct_fresh_execution_and_completion():
+    ending = "def test_storage_unavailable():\n    assert service.get(old.id).state == LifecycleState.FAILED\n"
+    admitted = (
+        ending
+        + "    fresh = service.start(request_id='fresh')\n    assert fresh.id != old.id\n"
+    )
+    observed = (
+        admitted
+        + "    service.run_pending()\n    assert service.get(fresh.id).state == LifecycleState.SUCCEEDED\n"
+    )
+    assert scan_source(ending, path="test_owner.py", mode="tests")
+    assert scan_source(admitted, path="test_owner.py", mode="tests")
+    assert not scan_source(observed, path="test_owner.py", mode="tests")
+    assert scan_source(
+        observed.replace("fresh.id != old.id", "fresh.id == old.id"),
+        path="test_owner.py",
+        mode="tests",
+    )
+    assert scan_source(
+        observed.replace("    service.run_pending()\n", ""),
+        path="test_owner.py",
+        mode="tests",
+    )

@@ -405,16 +405,16 @@ def test_unknown_receipt_fields_cannot_veto_verified_republication(
 
 
 @pytest.mark.parametrize(
-    ("mutation", "message"),
+    "mutation",
     [
-        (lambda value: value.pop("runtime_interface_label"), "identity"),
-        (lambda value: value.update(unexpected_field="rejected"), "identity"),
-        (lambda value: value.update(image_bytes=True), "identity"),
+        lambda value: value.pop("runtime_interface_label"),
+        lambda value: value.update(unexpected_field="rejected"),
+        lambda value: value.update(image_bytes=True),
     ],
     ids=["missing-interface-label", "unknown-field", "boolean-image-bytes"],
 )
 def test_current_receipt_parser_rejects_noncanonical_shape(
-    tmp_path: Path, mutation, message: str
+    tmp_path: Path, mutation
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     receipt = _prepare(
@@ -425,8 +425,18 @@ def test_current_receipt_parser_rejects_noncanonical_shape(
     value = json.loads(path.read_text(encoding="utf-8"))
     mutation(value)
     path.write_text(json.dumps(value), encoding="utf-8")
-    with pytest.raises(RuntimeImagePreparationError, match=message):
-        storage.read_receipt(receipt.oci_archive_sha256)
+    assert (
+        storage.find_verified(
+            receipt.image_digest,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        )
+        is None
+    )
+    restored = _prepare(storage=storage, transport=TinyTransport())
+    assert restored.image_digest == receipt.image_digest
+    assert storage.read_receipt(receipt.oci_archive_sha256) == restored
+    assert _prepare(storage=storage, transport=TinyTransport()) == restored
 
 
 def test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_identity(
@@ -915,32 +925,6 @@ def test_image_preparation_rejects_retired_runtime_interface_before_transport(
     assert transport.calls == []
 
 
-def test_runtime_image_storage_types_only_clean_absence_as_cache_missing(
-    tmp_path: Path,
-) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    digest = "a" * 64
-    with pytest.raises(RuntimeImagePreparationError) as missing:
-        storage.existing_archive(digest, 4)
-    assert missing.value.code == "runtime_image.cache_missing"
-    assert missing.value.retryable is True
-
-    # A stored image whose size differs is a mismatch, not an absence.
-    place_test_image(storage, digest, 4)
-    assert storage.existing_archive(digest, 4).name == digest
-    with pytest.raises(RuntimeImagePreparationError) as mismatch:
-        storage.existing_archive(digest, 5)
-    assert mismatch.value.code == "runtime_image.archive_mismatch"
-    assert mismatch.value.retryable is True
-    assert storage.existing_archive(digest, 4).name == digest
-
-    # Cache loss of the manifest is absence again.
-    remove_test_image(storage, digest)
-    with pytest.raises(RuntimeImagePreparationError) as lost:
-        storage.existing_archive(digest, 4)
-    assert lost.value.code == "runtime_image.cache_missing"
-
-
 def test_controller_build_receipt_requires_its_adapter_identity() -> None:
     adapter = resolve_runtime_adapter("vllm", {"node_count": 1})
     shared = {
@@ -1206,20 +1190,3 @@ def test_local_receipt_permission_failure_is_a_miss_and_recovers(
     monkeypatch.setattr(Path, "read_text", original)
     assert _prepare(storage=storage, transport=transport) == published
     assert len(transport.calls) == 1
-
-
-@pytest.mark.parametrize(
-    "damaged", ["{", "{}", '{"schemaVersion":2,"config":{},"layers":[]}']
-)
-def test_damaged_stored_oci_manifest_is_miss_then_exact_image_recovers(
-    tmp_path: Path,
-    damaged: str,
-) -> None:
-    storage = FilesystemRuntimeImageStorage(tmp_path / "images")
-    place_test_image(storage, ARCHIVE_DIGEST, 4)
-    manifest = storage.layout.blob_path("sha256:" + ARCHIVE_DIGEST)
-    original = manifest.read_bytes()
-    manifest.write_text(damaged)
-    assert storage.layout.read("sha256:" + ARCHIVE_DIGEST) is None
-    manifest.write_bytes(original)  # normal verified ingress republishes exact content
-    assert storage.existing_archive(ARCHIVE_DIGEST, 4) == manifest

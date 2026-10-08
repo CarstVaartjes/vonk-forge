@@ -119,7 +119,7 @@
       "kind": "agent-protocol"
     },
     {
-      "module": "control/src/vonk_control/agent_api.py",
+      "module": "control/src/vonk_control/agent_api/common.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -236,7 +236,7 @@
       "kind": "controller-contract"
     },
     {
-      "module": "control/src/vonk_control/fleet_projection.py",
+      "module": "control/src/vonk_control/fleet_projection/common.py",
       "kind": "declared",
       "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
     },
@@ -451,6 +451,10 @@
     },
     {
       "module": "control/src/vonk_control/capability_contract.py",
+      "kind": "controller-contract"
+    },
+    {
+      "module": "control/src/vonk_control/runtime_asset_contract.py",
       "kind": "controller-contract"
     }
   ],
