@@ -462,13 +462,13 @@ def test_failure_report_is_evidence_not_a_terminal_operation(subject):
 )
 def test_history_relocations_conserve_debt(count, keep_original, rejected, tmp_path):
     """Catch package moves buying new debt or keeping the old allowance too."""
-    from .package_moves import PackageMoves
+    from .package_moves import PackageMoves, identities
 
     package = tmp_path / "old"
     package.mkdir()
     source = "def bounded_scan():\n    return 1\n"
     (package / "scan.py").write_text(source)
-    moves = PackageMoves(tmp_path, lambda path: source)
+    moves = PackageMoves(tmp_path, {"old.py": identities(source)})
     entry = {"path": "old.py", "function": "bounded_scan", "kind": "wait", "count": 1}
     previous = {"debt": [entry], "exceptions": []}
     moved = {**entry, "path": "old/scan.py", "count": count}

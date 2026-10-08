@@ -1,34 +1,45 @@
-"""Carry reviewed allowances through module-to-package splits by AST content.
-
-The baseline ref supplies *source*, never identity: no revision or build ID is
-compared. Writers must run before the split and its registry update land together.
-Missing source, changed bodies and ambiguous copies receive no move credit.
-"""
+"""Carry reviewed allowances through package splits using registry content only."""
 
 from __future__ import annotations
 
 import ast
 import hashlib
-import subprocess
 from collections import Counter
 from collections.abc import Callable
-from functools import cache
 from pathlib import Path
 
+from pydantic import TypeAdapter
+
 ROOT = Path(__file__).resolve().parents[2]
+CONTENT_IDENTITIES = TypeAdapter(dict[str, dict[str, str]])
 
 
-@cache
-def baseline_source(path: str, reference: str = "origin/main") -> str | None:
-    result = subprocess.run(
-        ["git", "show", f"{reference}:{path}"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
+def record_identities(document: dict, root: Path = ROOT) -> dict:
+    """Snapshot only working-tree paths referenced by this registry."""
+    paths: set[str] = set()
+
+    def visit(value) -> None:
+        if isinstance(value, str) and value.endswith(".py"):
+            paths.add(value)
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                visit(key)
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    visit(
+        {key: value for key, value in document.items() if key != "content_identities"}
     )
-    return result.stdout if result.returncode == 0 else None
+    return {
+        **document,
+        "content_identities": {
+            path: identities((root / path).read_text())
+            for path in sorted(paths)
+            if (root / path).is_file()
+        },
+    }
 
 
 def identities(source: str) -> dict[str, str]:
@@ -67,10 +78,12 @@ class PackageMoves:
     def __init__(
         self,
         root: Path = ROOT,
-        source: Callable[[str], str | None] = baseline_source,
+        recorded: object = None,
     ) -> None:
         self.root = root
-        self.source = source
+        self.recorded = CONTENT_IDENTITIES.validate_python(
+            {} if recorded is None else recorded, strict=True
+        )
         self._targets: dict[str, dict[str, dict[str, str]]] = {}
 
     def targets(self, path: str) -> dict[str, dict[str, str]]:
@@ -81,10 +94,7 @@ class PackageMoves:
         package = old.with_suffix("")
         if old.exists() or old.suffix != ".py" or not package.is_dir():
             return {}
-        source = self.source(path)
-        if source is None:
-            return {}
-        previous = identities(source)
+        previous = self.recorded.get(path, {})
         candidates = {
             file.relative_to(self.root).as_posix(): identities(file.read_text())
             for file in sorted(package.rglob("*.py"))
@@ -104,10 +114,30 @@ class PackageMoves:
         }
         return self._targets[path]
 
-    def function(self, path: str, function: str) -> str:
-        matches = [
-            file for file, names in self.targets(path).items() if function in names
-        ]
+    def function(
+        self,
+        path: str,
+        function: str,
+        matches_site: Callable[[str, str], bool] | None = None,
+    ) -> str:
+        old = self.root / path
+        package = old.with_suffix("")
+        if old.exists() or old.suffix != ".py" or not package.is_dir():
+            return path
+        previous = self.recorded.get(path, {})
+        digest = previous.get(function)
+        matches = []
+        for file in sorted(package.rglob("*.py")):
+            source = file.read_text()
+            for name, current in identities(source).items():
+                if name.rsplit(".", 1)[-1] != function.rsplit(".", 1)[-1]:
+                    continue
+                if digest is not None:
+                    eligible = current == digest
+                else:
+                    eligible = matches_site is not None and matches_site(source, name)
+                if eligible:
+                    matches.append(file.relative_to(self.root).as_posix())
         return matches[0] if len(matches) == 1 else path
 
     def paths(self, path: str) -> list[str]:

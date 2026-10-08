@@ -7,13 +7,11 @@ import argparse
 import json
 import subprocess
 import sys
-from functools import partial
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from control.tests.package_moves import PackageMoves, baseline_source
 from control.tests.principle_guards import ALLOWLISTS, history_gate, load_allowlist
 
 
@@ -29,7 +27,6 @@ def main() -> int:
         capture_output=True,
         timeout=10,
     )
-    moves = PackageMoves(ROOT, partial(baseline_source, reference=args.base))
     messages = []
     for stem in ALLOWLISTS.values():
         relative = f"tools/{stem}-allowlist.json"
@@ -60,7 +57,7 @@ def main() -> int:
         messages.extend(
             f"{relative}: {message}"
             for message in history_gate(
-                load_allowlist(ROOT / relative), json.loads(previous.stdout), moves
+                load_allowlist(ROOT / relative), json.loads(previous.stdout)
             )
         )
     for message in messages:

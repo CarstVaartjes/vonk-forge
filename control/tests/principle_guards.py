@@ -976,12 +976,25 @@ def load_allowlist(path: Path) -> dict:
 def relocate(document: dict, moves=None) -> dict:
     from .package_moves import PackageMoves
 
-    moves = moves or PackageMoves(ROOT)
+    moves = moves or PackageMoves(ROOT, document.get("content_identities"))
     return {
         **document,
         **{
             group: [
-                {**entry, "path": moves.function(entry["path"], entry["function"])}
+                {
+                    **entry,
+                    "path": moves.function(
+                        entry["path"],
+                        entry["function"],
+                        lambda source, name, entry=entry: any(
+                            site.function == name and site.kind == entry["kind"]
+                            for mode in ALLOWLISTS
+                            for site in scan_source(
+                                source, path=entry["path"], mode=mode
+                            )
+                        ),
+                    ),
+                }
                 for entry in document[group]
             ]
             for group in ("debt", "exceptions")
@@ -1021,7 +1034,9 @@ def lower(document: dict, sites: Sequence[Site]) -> dict:
             for e in document[group]
             if actual[(e["path"], e["function"], e["kind"])]
         ]
-    return result
+    from .package_moves import record_identities
+
+    return record_identities(result, ROOT)
 
 
 def history_gate(document: dict, previous: dict, moves=None) -> list[str]:

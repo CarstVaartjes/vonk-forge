@@ -737,7 +737,9 @@ def evaluate_guard_gate(
     current = Counter(site.path for site in sites)
     from .package_moves import PackageMoves
 
-    grandfathered = PackageMoves(REPO_ROOT).counts(grandfathered, dict(current))
+    grandfathered = PackageMoves(REPO_ROOT, document.get("content_identities")).counts(
+        grandfathered, dict(current)
+    )
     first = {site.path: site for site in reversed(sites)}
     messages: list[str] = []
     for path, count in sorted(current.items()):
@@ -789,10 +791,39 @@ def _require_text(
 def relocate_document(document, moves=None):
     from .package_moves import PackageMoves
 
-    moves = moves or PackageMoves(REPO_ROOT)
+    moves = moves or PackageMoves(REPO_ROOT, document.get("content_identities"))
 
     def entry(value):
-        result = {**value, "path": moves.function(value["path"], value["function"])}
+        def matches_site(source: str, name: str) -> bool:
+            if "kind" in value:
+                return any(
+                    site.function == name and site.kind == value["kind"]
+                    for site in scan_python_waits(source, path=value["path"])
+                )
+            if "catches" in value:
+                for node in ast.walk(ast.parse(source)):
+                    if (
+                        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+                        and node.name == name.rsplit(".", 1)[-1]
+                    ):
+                        caught = {
+                            child.id
+                            for handler in ast.walk(node)
+                            if isinstance(handler, ast.ExceptHandler)
+                            and handler.type is not None
+                            for child in ast.walk(handler.type)
+                            if isinstance(child, ast.Name)
+                        }
+                        if set(value["catches"]) <= caught:
+                            return True
+                return False
+            # Call-edge declarations have only the function name as site identity.
+            return True
+
+        result = {
+            **value,
+            "path": moves.function(value["path"], value["function"], matches_site),
+        }
         if "calls" in value:
             result["calls"] = [entry(call) for call in value["calls"]]
         return result
@@ -805,7 +836,24 @@ def relocate_document(document, moves=None):
         {
             **family,
             "sites": [
-                [moves.function(path, function), exception, function, code, count]
+                [
+                    moves.function(
+                        path,
+                        function,
+                        lambda source, name, path=path, exception=exception, code=code: (
+                            any(
+                                site.function == name and site.code == code
+                                for site in scan_raise_source(
+                                    source, path=path, classes=frozenset({exception})
+                                )
+                            )
+                        ),
+                    ),
+                    exception,
+                    function,
+                    code,
+                    count,
+                ]
                 for path, exception, function, code, count in family["sites"]
             ],
         }
@@ -1040,7 +1088,9 @@ def _lowered_guard(
     recorded: dict[str, int] = section["grandfathered"]  # type: ignore[assignment]
     from .package_moves import PackageMoves
 
-    recorded = PackageMoves(REPO_ROOT).counts(recorded, dict(current))
+    recorded = PackageMoves(REPO_ROOT, document.get("content_identities")).counts(
+        recorded, dict(current)
+    )
     lowered = {
         path: min(count, current[path])
         for path, count in recorded.items()
@@ -1095,9 +1145,13 @@ def write_counts(
     }
 
 
-def dump_document(document: dict[str, object]) -> str:
+def dump_document(document: dict[str, object], *, record_content: bool = False) -> str:
     """One site per line: a diff of the allowlist reads as a diff of sites."""
 
+    from .package_moves import record_identities
+
+    if record_content:
+        document = record_identities(document, REPO_ROOT)
     waits = ",\n".join(
         "    " + json.dumps(entry, indent=2).replace("\n", "\n    ")
         for entry in document["operator_waits"]  # type: ignore[attr-defined]
@@ -1141,7 +1195,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if arguments and arguments[0] == "--write-baseline":
         updated = write_counts(document, waits, raises, guard)
-        ALLOWLIST_PATH.write_text(dump_document(updated), encoding="utf-8")
+        ALLOWLIST_PATH.write_text(
+            dump_document(updated, record_content=True), encoding="utf-8"
+        )
         print("lowered the recorded counts; new sites are never written")
         return 0
     messages = evaluate_blocker_gate(waits, raises, document, guard)

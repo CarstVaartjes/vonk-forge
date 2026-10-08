@@ -518,24 +518,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments == ["--classify-new"]:
         families = propose_families(scan_raises(), document)
         document["fail_closed"].extend(families)  # type: ignore[attr-defined]
-        ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
+        ALLOWLIST_PATH.write_text(
+            dump_document(document, record_content=True), encoding="utf-8"
+        )
         added = sum(len(family["sites"]) for family in families)  # type: ignore[arg-type]
         print(f"appended {len(families)} families covering {added} site keys")
         return 0
     if arguments == ["--demote-unproven"]:
         moved = demote_unproven(document)
-        ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
+        ALLOWLIST_PATH.write_text(
+            dump_document(document, record_content=True), encoding="utf-8"
+        )
         print(f"moved {moved} unproven already-retried sites to bookkeeping-debt")
         return 0
     if arguments == ["--promote-proven"]:
         moved = promote_proven(document)
-        ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
+        ALLOWLIST_PATH.write_text(
+            dump_document(document, record_content=True), encoding="utf-8"
+        )
         print(f"moved {moved} proven unknown-outcome sites out of bookkeeping-debt")
         return 0
     if arguments == ["--rebalance"]:
         demoted = demote_unproven(document)
         promoted = promote_proven(document)
-        ALLOWLIST_PATH.write_text(dump_document(document), encoding="utf-8")
+        ALLOWLIST_PATH.write_text(
+            dump_document(document, record_content=True), encoding="utf-8"
+        )
         print(f"moved {demoted} sites to bookkeeping-debt and {promoted} out of it")
         return 0
     print(__doc__)

@@ -805,7 +805,7 @@ def _scan_code_positions(files: Iterable[Path] | None, root: Path) -> list[str]:
 
 def load_baseline() -> dict[str, dict[str, int]]:
     document = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    return {tier: dict(document.get(tier, {})) for tier in TIERS}
+    return document
 
 
 def problems(
@@ -863,7 +863,7 @@ def flat_problems(
 def relocated_baseline(counts, baseline, moves=None):
     from .package_moves import PackageMoves
 
-    moves = moves or PackageMoves(REPO_ROOT)
+    moves = moves or PackageMoves(REPO_ROOT, baseline.get("content_identities"))
     return {
         tier: dict(
             sorted(
@@ -903,6 +903,9 @@ def write_baseline(counts: Counter[tuple[str, str]]) -> None:
         ),
         **{tier: dict(sorted(updated[tier].items())) for tier in TIERS},
     }
+    from .package_moves import record_identities
+
+    document = record_identities(document, REPO_ROOT)
     BASELINE_PATH.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
 

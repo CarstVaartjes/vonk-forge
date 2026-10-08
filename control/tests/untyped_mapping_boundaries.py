@@ -191,15 +191,25 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, list[dict[str, obje
         count = entry.get("count")
         if not isinstance(count, int) or count < 1:
             raise ValueError(f"{where}: count must be a positive integer")
-    return {"permanent": permanent, "debt": debt}
+    return {**document, "permanent": permanent, "debt": debt}
 
 
 def relocated_allowlist(sites, allowlist, moves=None):
     from .package_moves import PackageMoves
 
-    moves = moves or PackageMoves(REPO_ROOT)
+    moves = moves or PackageMoves(REPO_ROOT, allowlist.get("content_identities"))
     permanent = [
-        {**entry, "path": moves.function(entry["path"], entry["function"])}
+        {
+            **entry,
+            "path": moves.function(
+                entry["path"],
+                entry["function"],
+                lambda source, name, entry=entry: any(
+                    site.function == name and site.annotation == entry["annotation"]
+                    for site in scan_source(source, path=entry["path"])
+                ),
+            ),
+        }
         for entry in allowlist["permanent"]
     ]
     allowed = {
@@ -213,6 +223,7 @@ def relocated_allowlist(sites, allowlist, moves=None):
         {entry["path"]: entry["count"] for entry in allowlist["debt"]}, dict(remaining)
     )
     return {
+        **allowlist,
         "permanent": permanent,
         "debt": [
             {"path": path, "count": count} for path, count in sorted(debt.items())
@@ -288,6 +299,9 @@ def update_debt(path: Path = ALLOWLIST_PATH) -> int:
             {"path": file, "count": count} for file, count in sorted(remaining.items())
         ],
     }
+    from .package_moves import record_identities
+
+    document = record_identities(document, REPO_ROOT)
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     return sum(remaining.values())
 

@@ -10,7 +10,7 @@ from . import blocker_boundaries as blockers
 from . import principle_guards as principles
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
-from .package_moves import PackageMoves
+from .package_moves import PackageMoves, identities, record_identities
 
 OLD = "control/src/vonk_control/sample.py"
 NEW = "control/src/vonk_control/sample/worker.py"
@@ -21,7 +21,7 @@ def moved_tree(tmp_path: Path, source: str = SOURCE) -> PackageMoves:
     target = tmp_path / NEW
     target.parent.mkdir(parents=True)
     target.write_text(source)
-    return PackageMoves(tmp_path, lambda path: SOURCE if path == OLD else None)
+    return PackageMoves(tmp_path, {OLD: identities(SOURCE)})
 
 
 @pytest.mark.parametrize("mode", ["waits", "remedies", "reads"])
@@ -33,7 +33,7 @@ def test_site_registry_move_preserves_budget_and_rejects_new_site(tmp_path, mode
     }
     source = sources[mode]
     moves = moved_tree(tmp_path, source)
-    moves.source = lambda path: source
+    moves.recorded = {OLD: identities(source)}
     old_sites = principles.scan_source(source, path=OLD, mode=mode)
     assert old_sites
     document = {
@@ -46,7 +46,7 @@ def test_site_registry_move_preserves_budget_and_rejects_new_site(tmp_path, mode
     relocated = principles.relocate(document, moves)
     sites = principles.scan_source(source, path=NEW, mode=mode)
     assert principles.evaluate_gate(sites, relocated) == []
-    assert principles.lower(relocated, sites) == relocated
+    assert principles.lower(relocated, sites)["debt"] == relocated["debt"]
     extra = principles.scan_source(
         source.replace("work", "new_work"), path=NEW, mode=mode
     )
@@ -60,7 +60,7 @@ def test_per_file_registries_split_counts_without_new_allowances(tmp_path):
     other = "control/src/vonk_control/sample/other.py"
     source = "def second():\n    return 'waiting-for-operator'\n"
     (tmp_path / other).write_text(source)
-    moves.source = lambda path: SOURCE + source
+    moves.recorded = {OLD: identities(SOURCE + source)}
     counts = Counter({("distinctive", NEW): 1, ("distinctive", other): 1})
     old = {"distinctive": {OLD: 2}}
     relocated = vocabulary.relocated_baseline(counts, old, moves)
@@ -150,7 +150,7 @@ def test_new_changed_copied_or_unproven_content_gets_no_credit(tmp_path, change)
         (tmp_path / NEW).unlink()
         (tmp_path / "unrelated.py").write_text(SOURCE)
     elif change == "missing-source":
-        moves.source = lambda path: None
+        moves.recorded = {}
     else:
         (tmp_path / OLD).write_text(SOURCE)
     assert moves.function(OLD, "work") == OLD
@@ -161,7 +161,14 @@ def test_untyped_writer_moves_entries_and_refuses_new_debt(tmp_path, monkeypatch
     moves = moved_tree(tmp_path)
     path = tmp_path / "allowlist.json"
     path.write_text(
-        json.dumps({"schema": 1, "permanent": [], "debt": [{"path": OLD, "count": 1}]})
+        json.dumps(
+            {
+                "schema": 1,
+                "permanent": [],
+                "debt": [{"path": OLD, "count": 1}],
+                "content_identities": {OLD: identities(SOURCE)},
+            }
+        )
     )
     sites = mappings.scan_source(SOURCE, path=NEW)
     monkeypatch.setattr(mappings, "scan_sites", lambda: sites)
@@ -187,9 +194,171 @@ def test_normalization_ignores_positions_comments_and_import_location(tmp_path):
     assert moves.counts({OLD: 1}, {NEW: 1}) == {NEW: 1}
 
 
-def test_history_never_credits_same_name_with_a_changed_body(tmp_path):
+def test_registry_never_credits_same_name_with_a_changed_body(tmp_path):
     moves = moved_tree(tmp_path, SOURCE.replace("event.wait()", "other.wait()"))
     entry = {"path": OLD, "function": "work", "kind": "wait", "count": 1}
     old = {"debt": [entry], "exceptions": []}
     current = {"debt": [{**entry, "path": NEW}], "exceptions": []}
     assert principles.history_gate(current, old, moves)
+
+
+@pytest.mark.parametrize("mode", ["waits", "remedies", "reads"])
+def test_undigested_sites_match_only_unique_recorded_kind(tmp_path, mode):
+    source = {
+        "waits": "def work():\n    event.wait()\n",
+        "remedies": "def work():\n    return 'Prepare cache'\n",
+        "reads": "@router.get('/x')\ndef work():\n    raise HTTPException(status_code=503)\n",
+    }[mode]
+    moves = moved_tree(tmp_path, source)
+    moves.recorded = {}
+    site = principles.scan_source(source, path=OLD, mode=mode)[0]
+    document = {
+        "debt": [
+            {"path": OLD, "function": site.function, "kind": site.kind, "count": 1}
+        ],
+        "exceptions": [],
+    }
+    assert principles.relocate(document, moves)["debt"][0]["path"] == NEW
+    (tmp_path / NEW).with_name("copy.py").write_text(source)
+    assert principles.relocate(document, moves)["debt"][0]["path"] == OLD
+    (tmp_path / NEW).with_name("copy.py").unlink()
+    (tmp_path / NEW).write_text("def work():\n    return 1\n")
+    assert principles.relocate(document, moves)["debt"][0]["path"] == OLD
+
+
+def test_writer_snapshot_survives_removal_and_rejects_changed_body(tmp_path):
+    old = tmp_path / OLD
+    old.parent.mkdir(parents=True)
+    old.write_text(SOURCE)
+    document = record_identities({"debt": [{"path": OLD, "count": 1}]}, tmp_path)
+    old.unlink()
+    new = tmp_path / NEW
+    new.parent.mkdir()
+    new.write_text(SOURCE)
+    moves = PackageMoves(tmp_path, document["content_identities"])
+    assert moves.counts({OLD: 1}, {NEW: 1}) == {NEW: 1}
+    new.write_text(SOURCE.replace("event.wait()", "other.wait()"))
+    moves = PackageMoves(tmp_path, document["content_identities"])
+    assert moves.counts({OLD: 1}, {NEW: 1}) == {OLD: 1}
+
+
+def test_path_only_budget_without_identity_never_moves(tmp_path):
+    moves = moved_tree(tmp_path)
+    moves.recorded = {}
+    assert moves.counts({OLD: 1}, {NEW: 1}) == {OLD: 1}
+
+
+def test_undigested_raise_matches_exception_and_reason(tmp_path):
+    source = "def work():\n    raise SampleError('sample.reason')\n"
+    moves = moved_tree(tmp_path, source)
+    moves.recorded = {}
+    document = {
+        "fail_closed": [{"sites": [[OLD, "SampleError", "work", "sample.reason", 1]]}]
+    }
+    assert (
+        blockers.relocate_document(document, moves)["fail_closed"][0]["sites"][0][0]
+        == NEW
+    )
+    for changed in (
+        source.replace("SampleError", "OtherError"),
+        source.replace("sample.reason", "other.reason"),
+    ):
+        (tmp_path / NEW).write_text(changed)
+        assert (
+            blockers.relocate_document(document, moves)["fail_closed"][0]["sites"][0][0]
+            == OLD
+        )
+
+
+@pytest.mark.parametrize("writer", ["mappings", "vocabulary", "blockers", "principles"])
+def test_registry_writers_persist_identities_used_after_split(
+    tmp_path, monkeypatch, writer
+):
+    old = tmp_path / OLD
+    old.parent.mkdir(parents=True)
+    old.write_text(SOURCE)
+    path = tmp_path / "registry.json"
+    if writer == "mappings":
+        monkeypatch.setattr(mappings, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(
+            mappings, "scan_sites", lambda: mappings.scan_source(SOURCE, path=OLD)
+        )
+        path.write_text(
+            json.dumps(
+                {"schema": 1, "debt": [{"path": OLD, "count": 1}], "permanent": []}
+            )
+        )
+        mappings.update_debt(path)
+        document = json.loads(path.read_text())
+    elif writer == "vocabulary":
+        monkeypatch.setattr(vocabulary, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(vocabulary, "BASELINE_PATH", path)
+        path.write_text(json.dumps({"schema": 1, "distinctive": {OLD: 1}}))
+        vocabulary.write_baseline(Counter({("distinctive", OLD): 1}))
+        document = json.loads(path.read_text())
+    elif writer == "blockers":
+        monkeypatch.setattr(blockers, "REPO_ROOT", tmp_path)
+        document = json.loads(
+            blockers.dump_document(
+                {
+                    "operator_waits": [{"path": OLD, "function": "work", "sites": 1}],
+                    "fail_closed": [],
+                },
+                record_content=True,
+            )
+        )
+    else:
+        monkeypatch.setattr(principles, "ROOT", tmp_path)
+        sites = principles.scan_source(SOURCE, path=OLD, mode="waits")
+        document = principles.lower(
+            {
+                "debt": [
+                    {
+                        "path": OLD,
+                        "function": site.function,
+                        "kind": site.kind,
+                        "count": 1,
+                    }
+                    for site in sites
+                ],
+                "exceptions": [],
+            },
+            sites,
+        )
+    old.unlink()
+    new = tmp_path / NEW
+    new.parent.mkdir()
+    new.write_text(SOURCE)
+    assert (
+        PackageMoves(tmp_path, document["content_identities"]).function(OLD, "work")
+        == NEW
+    )
+
+
+def test_invalid_recorded_identity_is_not_silently_ignored(tmp_path):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        PackageMoves(tmp_path, {OLD: {"work": 123}})
+
+
+def test_undigested_retry_registration_keeps_its_exception_identity(tmp_path):
+    source = "def work():\n    try:\n        operation()\n    except SampleError:\n        return\n"
+    moves = moved_tree(tmp_path, source)
+    moves.recorded = {}
+    document = {
+        "retry_loops": [{"path": OLD, "function": "work", "catches": ["SampleError"]}],
+        "call_edges": [
+            {
+                "path": OLD,
+                "function": "work",
+                "calls": [{"path": OLD, "function": "work"}],
+            }
+        ],
+        "fail_closed": [],
+    }
+    relocated = blockers.relocate_document(document, moves)
+    assert relocated["retry_loops"][0]["path"] == NEW
+    assert relocated["call_edges"][0]["calls"][0]["path"] == NEW
+    (tmp_path / NEW).write_text(source.replace("SampleError", "OtherError"))
+    assert blockers.relocate_document(document, moves)["retry_loops"][0]["path"] == OLD
