@@ -33,6 +33,7 @@ from ..fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileAssignmentInput,
     FleetProfileChildResult,
+    FleetProfileDefinition,
     FleetProfileEffects,
     FleetProfilePreview,
     FleetProfileReviewedDecision,
@@ -41,6 +42,7 @@ from ..fleet_profile_contract import (
     FleetProfileSwitchQueueItem,
     FleetProfileView,
 )
+from ..lifecycle.evidence import Residue
 from ..models import (
     FleetProfile,
     FleetProfileApplication,
@@ -537,7 +539,33 @@ def _expanded_roles(topology: RecipeTopology) -> tuple[tuple[str, bool], ...]:
     )
 
 
+def _profile_definition(row: FleetProfile) -> FleetProfileDefinition:
+    """Read complete intent without embedding a damaged-column marker in a field."""
+
+    labels = read_row_column(row, "labels")
+    assignments = read_row_column(row, "assignments")
+    for value in (labels, assignments):
+        if isinstance(value, Residue):
+            # Validate the unavailable document at the definition boundary. It
+            # must fail there, even when its string fields could pass as labels.
+            return FleetProfileDefinition.model_validate(value, strict=True)
+    return FleetProfileDefinition.model_validate_json(
+        canonical_message(
+            {
+                "name": row.name,
+                "description": row.description,
+                "installation_policy": row.installation_policy,
+                "labels": labels,
+                "favorite": row.favorite,
+                "assignments": assignments,
+            }
+        ),
+        strict=True,
+    )
+
+
 def _profile_document(row: FleetProfile) -> SavedProfileDocument:
+    definition = _profile_definition(row)
     return SavedProfileDocument.model_validate_json(
         canonical_message(
             {
@@ -545,12 +573,7 @@ def _profile_document(row: FleetProfile) -> SavedProfileDocument:
                 "id": row.id,
                 "number": row.number,
                 "revision": row.revision,
-                "name": row.name,
-                "description": row.description,
-                "installation_policy": row.installation_policy,
-                "labels": read_row_column(row, "labels"),
-                "favorite": row.favorite,
-                "assignments": read_row_column(row, "assignments"),
+                **definition.model_dump(mode="json"),
             }
         )
     )

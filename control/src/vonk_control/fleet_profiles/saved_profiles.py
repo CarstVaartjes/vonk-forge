@@ -9,7 +9,7 @@ from typing import cast as _typing_cast
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InvalidRequestReason, canonical_message
+from vonk_agent_protocol import InvalidRequestReason
 from vonk_agent_protocol.agent_words import (
     ProfileDocumentState,
     ProfileInstallationPolicy,
@@ -29,13 +29,13 @@ from ..fleet_profile_contract import (
     UnavailableFleetProfileView,
 )
 from ..models import AgentNode, AgentNodeProfile, FleetProfile, FleetProfileApplication
-from ..stored_json import read_row_column
 from .contracts import (
     FleetProfileInvalid,
 )
 from .projection_support import (
     _aware,
     _digest,
+    _profile_definition,
     _with_save_notes,
 )
 
@@ -158,17 +158,7 @@ class FleetProfileService:
     def _definition(row: FleetProfile) -> FleetProfileDefinition:
         """Read exact authoring intent; partial reconstruction could delete choices."""
 
-        return FleetProfileDefinition.model_validate_json(
-            canonical_message(
-                {
-                    name: read_row_column(row, name)
-                    if name in {"labels", "assignments"}
-                    else getattr(row, name)
-                    for name in FleetProfileDefinition.model_fields
-                }
-            ),
-            strict=True,
-        )
+        return _profile_definition(row)
 
     @staticmethod
     def _definition_issue() -> SavedProfileProjectionIssue:
