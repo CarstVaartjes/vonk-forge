@@ -14,10 +14,11 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
     ActivateRequest, AgentEvidenceCode, AgentUpgradeGrantRequest, BoundedErrorResponse,
-    ClaimRequest, ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse,
-    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
-    PackageActivationGrantRequest, ProgressPhase, RenewRequest, RequestValidationIssueLocItem,
-    RequestValidationProblem, SecurityRefusalReason, TelemetryRequest,
+    ClaimRequest, ControllerErrorCode, ControllerRefusalBody, ExpiredRenewRequest,
+    HostHelperGrantResponse, HostRuntimeGrantRequest, HostRuntimeGrantRequestAction,
+    IssuedCertificateResponse, PackageActivationGrantRequest, ProgressPhase, RenewRequest,
+    RequestValidationIssueLocItem, RequestValidationProblem, SecurityRefusalReason,
+    TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
@@ -1610,6 +1611,54 @@ impl AgentHttpClient {
         }
     }
 
+    pub async fn renew_expired(
+        &self,
+        config: &AgentConfig,
+        csr: &[u8],
+    ) -> Result<IssuedCertificateResponse, ClientError> {
+        let root = config.data_dir.join("credentials");
+        let paths = active_identity_paths(&root).map_err(|_| ClientError::Identity)?;
+        let key_pem = fs::read(&paths.private_key)?;
+        let key = rustls_pemfile::private_key(&mut key_pem.as_slice())
+            .map_err(|_| ClientError::Identity)?
+            .ok_or(ClientError::Identity)?;
+        let signer = ring::signature::Ed25519KeyPair::from_pkcs8(key.secret_der())
+            .map_err(|_| ClientError::Identity)?;
+        let signed_at = chrono::Utc::now().timestamp();
+        let serial =
+            crate::identity::active_certificate_serial(&root).map_err(|_| ClientError::Identity)?;
+        let request = expired_renewal_request(&self.node_id, serial, csr, signed_at, &signer)?;
+        let ca_pem = fs::read(&config.ca_path)?;
+        verify_ca_pin(&ca_pem, &config.ca_sha256).map_err(|_| ClientError::Pin)?;
+        let ca = Certificate::from_pem(&ca_pem).map_err(|_| ClientError::Identity)?;
+        // Server authentication is identical; no expired client identity is
+        // sent to the public, proof-authenticated enrollment ingress.
+        let transport = Client::builder()
+            .https_only(true)
+            .tls_certs_only([ca])
+            .connect_timeout(ROTATION_REQUEST_TIMEOUT)
+            .timeout(ROTATION_REQUEST_TIMEOUT)
+            .build()?;
+        let response = transport
+            .post(
+                config
+                    .enrollment_url
+                    .join("/agent/renew/expired")
+                    .map_err(|_| ClientError::Protocol)?,
+            )
+            .header("content-type", "application/json")
+            .body(canonical_generated_json(&request).map_err(|_| ClientError::Protocol)?)
+            .send()
+            .await?;
+        classify_response(&response)?;
+        let issued: IssuedCertificateResponse =
+            parse_strict(&bounded_body(response).await?).map_err(|_| ClientError::Protocol)?;
+        if issued.node_id != self.node_id || issued.generation == 0 {
+            return Err(ClientError::Protocol);
+        }
+        Ok(issued)
+    }
+
     pub async fn renew(&self, csr: &[u8]) -> Result<IssuedCertificateResponse, ClientError> {
         let csr = std::str::from_utf8(csr).map_err(|_| ClientError::Protocol)?;
         if csr.is_empty() || csr.len() > 16 * 1024 {
@@ -1887,6 +1936,28 @@ pub fn parse_claim_response(status: u16, body: &[u8]) -> Result<Option<AgentClai
             }
         }
     }
+}
+
+fn expired_renewal_request(
+    node_id: &str,
+    serial: String,
+    csr: &[u8],
+    signed_at: i64,
+    signer: &ring::signature::Ed25519KeyPair,
+) -> Result<ExpiredRenewRequest, ClientError> {
+    let proof = format!(
+        "vonk-expired-renew-v1\n{node_id}\n{serial}\n{signed_at}\n{}",
+        hex_sha256(csr)
+    );
+    Ok(ExpiredRenewRequest {
+        node_id: node_id.to_owned(),
+        serial,
+        signed_at: signed_at.into(),
+        csr: std::str::from_utf8(csr)
+            .map_err(|_| ClientError::Protocol)?
+            .to_owned(),
+        signature: hex::encode(signer.sign(proof.as_bytes()).as_ref()),
+    })
 }
 
 fn classify_status(status: StatusCode) -> Result<(), ClientError> {
@@ -2650,6 +2721,25 @@ mod tests {
         let before = request.clone();
         assert!(clamp_inventory_request(&mut request).is_empty());
         assert_eq!(request, before);
+    }
+
+    #[test]
+    fn expired_renewal_proof_matches_the_controller_signed_wire_fixture() {
+        let expected: vonk_agent_protocol::generated::ExpiredRenewRequest =
+            vonk_agent_protocol::parse_strict(include_bytes!(
+                "../../../../agent_protocol/fixtures/expired-renewal-request.json"
+            ))
+            .unwrap();
+        let signer = ring::signature::Ed25519KeyPair::from_seed_unchecked(&[42; 32]).unwrap();
+        let actual = super::expired_renewal_request(
+            &expected.node_id,
+            expected.serial.clone(),
+            expected.csr.as_bytes(),
+            1_800_000_000,
+            &signer,
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]

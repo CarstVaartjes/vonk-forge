@@ -220,3 +220,38 @@ restoring ingress.
 Step CA is the sole issuer in the canonical runtime. The setup flow generates
 or imports one coherent Step CA hierarchy and controller certificate set. There
 is no built-in issuer, provider overlay, or in-place provider migration path.
+
+
+## Recovery after a Spark was offline past certificate expiry
+
+An agent with its enrolled active key uses `POST /agent/renew/expired` on the
+CA-pinned enrollment ingress. This path does not use an expired certificate for
+TLS authentication. It requires an Ed25519 signature by the key of the exact
+stored active certificate, covering a domain separator, node ID, source serial,
+Unix timestamp and SHA-256 of the durable replacement CSR, separated by newlines.
+The timestamp must be within five minutes of Controller time. Recovery is allowed
+through 30 days after the stored certificate expiry. Removed, retired and revoked
+identities cannot recover. Key rotation means the latest authorized active key,
+rather than the key of a previously retired generation, owns this proof.
+
+Recovery reuses the rotation journal and CA request identity: retries replay the
+same CSR and staged result; a conflicting unactivated certificate is revoked
+before replacement. Issuance, activation with the new valid mTLS identity, and
+atomic local publication follow the normal rotation path. A lost response does
+not require a new enrollment. Provider uncertainty retries with bounded backoff;
+the certificate expiry fixes the recovery deadline across agent restarts.
+
+Grace exhaustion returns `agent.expired_renewal_grace_exhausted`. A Controller
+security refusal or local grace exhaustion exits with status 78; the packaged
+unit prevents restart for that status. Re-enrollment requires new authority.
+The proof endpoint is rate limited and accepts only a bounded canonical request;
+ordinary work endpoints still require valid mTLS.
+
+The agent starts after NVIDIA persistence and udev coldplug, then performs a
+bounded udev settle before constructing its serving process. NVIDIA device-unit
+ordering applies where the distribution tags those devices for systemd; the
+unit avoids pulling in device jobs that may never activate. PrivateDevices,
+DevicePolicy and the explicit device grants remain enabled. Inventory failure
+for five minutes exits nonzero, and systemd restarts after 30 seconds to rebuild
+its private device namespace. The restart rate is bounded without a start-limit
+latch that could permanently strand a recovering host.

@@ -3676,6 +3676,10 @@
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-is-not-staged-for-activation", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "certificate-serial-does-not-identify-node", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.activate", "node-identity-is-retired-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-identity-is-removed-or-revoked", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-key-is-not-ed25519", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-proof-is-invalid", 1],
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.renew_expired", "expired-renewal-proof-is-stale", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_grant", "enrollment-grant-is-consumed-inspect-the-enrolled-spark", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.revoke_node", "node-identity-does-not-exist", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "EnrollmentService.submit", "csr-is-too-large", 1],
@@ -3699,7 +3703,8 @@
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-has-no-certificate-history", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_persist_issued_enrollment", "node-identity-is-retired-or-revoked", 1],
         ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_require_issuance_binding", "enrollment-issuance-binding-changed", 1],
-        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1]
+        ["control/src/vonk_control/enrollment.py", "EnrollmentDenied", "_validate_issued_binding", "certificate-authority-result-differs-from-accepted-issuance", 1],
+        ["control/src/vonk_control/enrollment.py", "ExpiredRenewalGraceExhausted", "EnrollmentService.renew_expired", "expired-renewal-grace-exhausted-re-enrollment-required", 1]
       ]
     },
     {

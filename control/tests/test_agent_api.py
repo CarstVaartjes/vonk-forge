@@ -24,7 +24,7 @@ from cryptography.x509.oid import NameOID
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx2 import ASGITransport, AsyncClient, Response
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, delete, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.types import Message
 from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
@@ -34,6 +34,7 @@ from vonk_agent_protocol import (
     InstallVonkDebOperation,
     PackageRollbackAuthority,
     RecipeStopPayload,
+    SecurityRefusalReason,
     SignedHostHelperGrant,
     canonical_message,
 )
@@ -322,7 +323,7 @@ def agent_system(tmp_path):
     return make_agent_system(tmp_path)
 
 
-def make_agent_system(tmp_path, *, engine=None):
+def make_agent_system(tmp_path, *, engine=None, authority=None):
     if engine is None:
         engine = create_engine(
             f"sqlite:///{tmp_path / 'agent-api.sqlite'}",
@@ -363,7 +364,7 @@ def make_agent_system(tmp_path, *, engine=None):
     operations.set_contact_consumer(observe_contact)
     controller_ca_pem, controller_ca_fingerprint = _controller_ca()
     services = AgentApiServices(
-        enrollment=EnrollmentService(sessions, Authority(), clock=clock),
+        enrollment=EnrollmentService(sessions, authority or Authority(), clock=clock),
         operations=operations,
         sessions=sessions,
         clock=clock,
@@ -3818,3 +3819,60 @@ def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial
     repaired = client.post("/agent/enroll", json=body)
     assert repaired.status_code == 200
     assert repaired.json()["node_id"] == NODE_C
+
+
+@pytest.mark.parametrize("failure", [None, "grace", "revoked", "removed", "wrong-key"])
+def test_expired_renewal_endpoint_requires_enrolled_key_without_mtls(tmp_path, failure):
+    from .test_enrollment import RecoveryAuthority, csr, enroll, expired_proof
+
+    client, services, _codec, clock = make_agent_system(
+        tmp_path, authority=RecoveryAuthority()
+    )
+    enrollment = services.enrollment
+    assert enrollment is not None
+    key = ed25519.Ed25519PrivateKey.generate()
+    issued = enroll(enrollment, node_id=NODE_C, request=csr(NODE_C, key=key))
+    clock.now = issued.not_after + timedelta(days=1)
+    if failure == "grace":
+        clock.now = issued.not_after + timedelta(days=30, seconds=1)
+    if failure in {"revoked", "removed"}:
+        with services.sessions.begin() as session:
+            if failure == "removed":
+                session.execute(
+                    delete(AgentCertificate).where(AgentCertificate.node_id == NODE_C)
+                )
+                session.execute(delete(AgentNode).where(AgentNode.node_id == NODE_C))
+            else:
+                certificate = session.get(AgentCertificate, issued.serial)
+                assert certificate is not None
+                certificate.revoked_at = clock.now
+    signer = ed25519.Ed25519PrivateKey.generate() if failure == "wrong-key" else key
+    proof = expired_proof(signer, NODE_C, issued.serial, csr(NODE_C), clock.now)
+    response = client.post(
+        "/agent/renew/expired",
+        content=proof.model_dump_json(),
+        headers={"content-type": "application/json"},
+    )
+    if failure is None:
+        assert response.status_code == 200
+        assert (
+            client.post(
+                "/agent/renew/expired",
+                content=proof.model_dump_json(),
+                headers={"content-type": "application/json"},
+            ).json()
+            == response.json()
+        )
+    else:
+        assert response.status_code == 403
+        expected = (
+            SecurityRefusalReason.AGENT_EXPIRED_RENEWAL_GRACE_EXHAUSTED
+            if failure == "grace"
+            else SecurityRefusalReason.AGENT_EXPIRED_RENEWAL_REFUSED
+        )
+        assert response.json()["detail"]["reason_code"] == expected.value
+    # The proof-only exemption must never admit expired identity to work.
+    assert client.post("/agent/claim", json={}).status_code == 401
+    assert (
+        enrollment.create("spk_" + "e" * 32, "admin", 60).node_id == "spk_" + "e" * 32
+    )

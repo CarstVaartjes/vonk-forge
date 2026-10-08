@@ -30,6 +30,7 @@ from pydantic import (
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.concurrency import run_in_threadpool
 from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     AgentClaim,
@@ -45,6 +46,7 @@ from vonk_agent_protocol import (
     RouteState,
     RunState,
     SecurityRefusalError,
+    SecurityRefusalReason,
     SignedHostHelperGrant,
     SourceBundleCode,
     canonical_message,
@@ -54,6 +56,7 @@ from vonk_agent_protocol.enrollment import (
     ActivateRequest,
     EnrollmentBootstrapResponse,
     EnrollmentSubmitRequest,
+    ExpiredRenewRequest,
     IssuedCertificateResponse,
     RenewRequest,
 )
@@ -79,6 +82,8 @@ from .enrollment import (
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     EnrollmentService,
+    ExpiredRenewalGraceExhausted,
+    RenewalConflictRevocationUncertain,
     RenewalInProgress,
     RenewalIssuanceUncertain,
 )
@@ -1533,6 +1538,50 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    @agent.post("/renew/expired", response_model=IssuedCertificateResponse)
+    @raw_json_body(ExpiredRenewRequest)
+    async def renew_expired(request: Request) -> Response:
+        required = _require_services(services)
+        if not limiter.admit():
+            raise HTTPException(
+                status_code=429, detail="enrollment rate limit exceeded"
+            )
+        raw = await _bounded_enrollment_body(request, required)
+        try:
+            body = ExpiredRenewRequest.model_validate_json(raw)
+        except ValidationError:
+            raise HTTPException(
+                status_code=422, detail="expired renewal proof is malformed"
+            ) from None
+        try:
+            issued = await run_in_threadpool(
+                _require_enrollment(required).renew_expired, body
+            )
+        except CertificateResponseCapacityRefused as error:
+            return _json_response(
+                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
+                status_code=422,
+            )
+        except (
+            RenewalInProgress,
+            RenewalIssuanceUncertain,
+            RenewalConflictRevocationUncertain,
+        ) as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except (EnrollmentDenied, ValueError) as error:
+            code = (
+                error.reason_code
+                if isinstance(error, ExpiredRenewalGraceExhausted)
+                else SecurityRefusalReason.AGENT_EXPIRED_RENEWAL_REFUSED
+            )
+            response = _json_response(
+                {"detail": {"reason_code": code, "message": str(error)}},
+                status_code=403,
+            )
+            response.headers["X-Vonk-Error-Code"] = code
+            return response
+        return _json_response(_issued_response(issued))
+
     @agent.post("/renew", response_model=IssuedCertificateResponse)
     def renew(body: RenewRequest, request: Request) -> Response:
         _scope_identity(request)
@@ -1914,20 +1963,24 @@ def install_agent_routes(
 
     def openapi_with_enrollment_contract() -> dict[str, object]:
         document = standard_openapi()
-        request_schema = EnrollmentSubmitRequest.model_json_schema(
-            ref_template="#/components/schemas/{model}"
-        )
         components = document.setdefault("components", {}).setdefault("schemas", {})
-        components.update(request_schema.pop("$defs", {}))
-        components[EnrollmentSubmitRequest.__name__] = request_schema
-        document["paths"]["/agent/enroll"]["post"]["requestBody"] = {
-            "required": True,
-            "content": {
-                "application/json": {
-                    "schema": {"$ref": "#/components/schemas/EnrollmentSubmitRequest"}
-                }
-            },
-        }
+        for path, model in (
+            ("/agent/enroll", EnrollmentSubmitRequest),
+            ("/agent/renew/expired", ExpiredRenewRequest),
+        ):
+            request_schema = model.model_json_schema(
+                ref_template="#/components/schemas/{model}"
+            )
+            components.update(request_schema.pop("$defs", {}))
+            components[model.__name__] = request_schema
+            document["paths"][path]["post"]["requestBody"] = {
+                "required": True,
+                "content": {
+                    "application/json": {
+                        "schema": {"$ref": f"#/components/schemas/{model.__name__}"}
+                    }
+                },
+            }
         return document
 
     app.openapi = openapi_with_enrollment_contract

@@ -315,7 +315,7 @@ https://{$VONK_AGENT_ENROLL_HOSTNAME:enroll.example.invalid}:{$VONK_BACKEND_PORT
 	}
 	@enrollment {
 		method POST
-		path /agent/enroll
+		path /agent/enroll /agent/renew/expired
 	}
 	handle @bootstrap {
 		request_header -X-Vonk-Agent-*
@@ -348,7 +348,7 @@ https://{$VONK_AGENT_HOSTNAME:agents.example.invalid}:{$VONK_BACKEND_PORT:8443} 
 
 	@agent_api {
 		path /agent/*
-		not path /agent/enroll
+		not path /agent/enroll /agent/renew/expired
 	}
 		handle @agent_api {
 		# Remove caller-controlled identity before adding Caddy's verified values.
