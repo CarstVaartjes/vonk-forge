@@ -244,7 +244,7 @@ module defines its own.
 | `control/src/vonk_control/run_switch_identity_contract.py` | controller-contract | 1 | Shared Run/Switch request identity constraints and typed cancellation intent independent of ORM and workers. |
 | `control/src/vonk_control/run_switch_journal_contract.py` | controller-contract | 4 | Typed run-switch journal repair evidence and audit records. |
 | `control/src/vonk_control/run_switch_observation_contract.py` | controller-contract | 7 | Typed observed progress, retained lifecycle identity, artifact guards and build receipts. |
-| `control/src/vonk_control/runtime_image_preparation.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
+| `control/src/vonk_control/runtime_image_preparation/contracts.py` | declared | 2 | Controller-owned preparation of exact runtime image archives. |
 | `control/src/vonk_control/runtime_spec_contract.py` | controller-contract | 18 | The compiled runtime specification the recipe compiler produces and the launch plan projects. |
 | `control/src/vonk_control/step_ca.py` | declared | 8 | step-ca provisioning documents the Controller reads and writes. |
 | `control/src/vonk_control/stored_documents.py` | controller-contract | 2 | Typed documents stored in plan, run and installation JSON columns. |

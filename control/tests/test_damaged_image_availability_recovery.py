@@ -19,7 +19,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentResult, canonical_message
-from vonk_control import runtime_image_preparation
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.image_store_collection import GRACE, ImageStoreCollector
@@ -38,6 +37,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     prepare_runtime_image,
 )
+from vonk_control.runtime_image_preparation import storage as runtime_image_storage
 
 from .preflight_fixtures import record_passing_preflight
 from .test_oci_image_store import _docker_archive, _layer
@@ -53,7 +53,7 @@ def test_damaged_receipted_manifest_recovers_through_new_availability_request(
     skopeo = shutil.which("skopeo")
     assert skopeo is not None
     monkeypatch.setattr(
-        runtime_image_preparation,
+        runtime_image_storage,
         "OciImageStore",
         partial(OciImageStore, skopeo=skopeo),
     )
