@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.fleet_profile_view import FleetProfileView
 from ...models.request_validation_problem import RequestValidationProblem
 from ...models.unavailable_fleet_profile_view import UnavailableFleetProfileView
@@ -36,7 +37,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem | None:
     if response.status_code == 200:
         def _parse_response_200(data: object) -> FleetProfileView | UnavailableFleetProfileView:
             try:
@@ -76,9 +77,26 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return response_422
 
     if response.status_code == 503:
-        response_503 = BoundedErrorResponse.from_dict(response.json())
+        def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_503_type_0 = BoundedErrorResponse.from_dict(data)
 
 
+
+                return response_503_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_503_type_1 = CapabilityUnavailableReply.from_dict(data)
+
+
+
+            return response_503_type_1
+
+        response_503 = _parse_response_503(response.json())
 
         return response_503
 
@@ -88,7 +106,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -102,7 +120,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]:
     """ Get Profile
 
     Args:
@@ -113,7 +131,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]
      """
 
 
@@ -133,7 +151,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem | None:
     """ Get Profile
 
     Args:
@@ -144,7 +162,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem
      """
 
 
@@ -159,7 +177,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]:
     """ Get Profile
 
     Args:
@@ -170,7 +188,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem]
      """
 
 
@@ -190,7 +208,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem | None:
     """ Get Profile
 
     Args:
@@ -201,7 +219,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | FleetProfileView | UnavailableFleetProfileView | RequestValidationProblem
      """
 
 

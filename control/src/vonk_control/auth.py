@@ -203,7 +203,7 @@ class TrustedProxyAgentIdentityMiddleware:
         self,
         app: Any,
         *,
-        trusted_proxy_auth: bytes = b"",
+        trusted_proxy_auth: bytes | Callable[[], bytes] = b"",
         agent_identity_validator: Callable[[AgentIdentity], bool] | None = None,
         activation_identity_validator: Callable[[AgentIdentity], bool] | None = None,
     ) -> None:
@@ -236,9 +236,31 @@ class TrustedProxyAgentIdentityMiddleware:
         safe_scope.pop(_AGENT_SOURCE_SCOPE_KEY, None)
         safe_scope["headers"] = sanitized
         supplied_proxy_auth = forwarded.get("x-vonk-agent-proxy-auth", "").encode()
+        proxy_auth = self._trusted_proxy_auth
+        if callable(proxy_auth):
+            # Ordinary admin reads do not depend on the agent ingress secret.
+            if supplied_proxy_auth:
+                from fastapi import HTTPException
+
+                from .capability_contract import CapabilityUnavailableReply
+
+                try:
+                    proxy_auth = proxy_auth()
+                except HTTPException as error:
+                    if not isinstance(error.detail, CapabilityUnavailableReply):
+                        raise
+                    response = Response(
+                        error.detail.model_dump_json(),
+                        status_code=503,
+                        media_type="application/json",
+                    )
+                    await response(scope, receive, send)
+                    return
+            else:
+                proxy_auth = b""
         if (
-            self._trusted_proxy_auth
-            and hmac.compare_digest(supplied_proxy_auth, self._trusted_proxy_auth)
+            proxy_auth
+            and hmac.compare_digest(supplied_proxy_auth, proxy_auth)
             and not duplicate_forwarded_headers
         ):
             try:

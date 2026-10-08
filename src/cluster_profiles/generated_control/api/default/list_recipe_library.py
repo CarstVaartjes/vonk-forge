@@ -9,6 +9,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
+from ...models.capability_unavailable_reply import CapabilityUnavailableReply
 from ...models.list_recipe_library_sort import check_list_recipe_library_sort
 from ...models.list_recipe_library_sort import ListRecipeLibrarySort
 from ...models.recipe_library_response import RecipeLibraryResponse
@@ -186,7 +187,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem | None:
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem | None:
     if response.status_code == 200:
         response_200 = RecipeLibraryResponse.from_dict(response.json())
 
@@ -209,9 +210,26 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return response_422
 
     if response.status_code == 503:
-        response_503 = BoundedErrorResponse.from_dict(response.json())
+        def _parse_response_503(data: object) -> BoundedErrorResponse | CapabilityUnavailableReply:
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                response_503_type_0 = BoundedErrorResponse.from_dict(data)
 
 
+
+                return response_503_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            if not isinstance(data, dict):
+                raise TypeError()
+            response_503_type_1 = CapabilityUnavailableReply.from_dict(data)
+
+
+
+            return response_503_type_1
+
+        response_503 = _parse_response_503(response.json())
 
         return response_503
 
@@ -221,7 +239,7 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx2.Re
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx2.Response) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -250,7 +268,7 @@ def sync_detailed(
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
 
-) -> Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem]:
     """ Recipe Library
 
     Args:
@@ -276,7 +294,7 @@ def sync_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem]
      """
 
 
@@ -326,7 +344,7 @@ def sync(
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
 
-) -> BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem | None:
     """ Recipe Library
 
     Args:
@@ -352,7 +370,7 @@ def sync(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem
      """
 
 
@@ -397,7 +415,7 @@ async def asyncio_detailed(
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
 
-) -> Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]:
+) -> Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem]:
     """ Recipe Library
 
     Args:
@@ -423,7 +441,7 @@ async def asyncio_detailed(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem]
+        Response[BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem]
      """
 
 
@@ -473,7 +491,7 @@ async def asyncio(
     updated_since: datetime.datetime | None | Unset = UNSET,
     sort: ListRecipeLibrarySort | Unset = 'updated',
 
-) -> BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem | None:
+) -> BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem | None:
     """ Recipe Library
 
     Args:
@@ -499,7 +517,7 @@ async def asyncio(
         httpx2.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        BoundedErrorResponse | RecipeLibraryResponse | RequestValidationProblem
+        BoundedErrorResponse | BoundedErrorResponse | CapabilityUnavailableReply | RecipeLibraryResponse | RequestValidationProblem
      """
 
 

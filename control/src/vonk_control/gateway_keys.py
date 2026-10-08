@@ -270,6 +270,13 @@ class GatewayKeyService:
             base_url=base_url, transport=transport, timeout=10.0
         )
 
+    def check_health(self) -> bool:
+        code, _payload = self._request("GET", "/health/readiness")
+        return code == 200
+
+    def close(self) -> None:
+        self._client.close()
+
     def _request(
         self,
         method: str,
@@ -479,7 +486,7 @@ async def keep_default_key(
             if await asyncio.to_thread(lambda: service.ensure_default(path)):
                 _LOGGER.info("default gateway client key is ready")
             return
-        except (GatewayKeyError, OSError) as error:
+        except (GatewayKeyError, OSError, HTTPException) as error:
             _LOGGER.warning(
                 "default gateway client key not ready: %s; retrying in %s seconds",
                 error,

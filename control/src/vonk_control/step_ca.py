@@ -319,6 +319,9 @@ class StepCertificateAuthority(CertificateAuthority):
     ) -> IssuedCertificate | None:
         return self._sign(csr_pem, now, request=request, mode="observe")
 
+    def close(self) -> None:
+        self._client.close()
+
     def check_health(self) -> None:
         if not _is_ok(self._json_request("GET", "/health", None)):
             raise StepCAError("step-ca health response is invalid")
