@@ -29,6 +29,31 @@ from .test_recipe_operation_bookkeeping import _running_recipe
     "method,once,args,kwargs",
     [
         ("check_build_source", "_check_build_source_once", ("revision",), {}),
+        ("preview_build", "_preview_build_once", ("revision", "builder"), {}),
+        (
+            "build",
+            "_build_once",
+            ("exact-plan",),
+            {
+                "build_input_sha256": "exact-digest",
+                "actor": "admin",
+                "request_id": "request",
+                "force": False,
+                "admission_guard": None,
+            },
+        ),
+        (
+            "start",
+            "_start_once",
+            ("exact-plan",),
+            {
+                "plan_digest": "exact-digest",
+                "actor": "admin",
+                "request_id": "request",
+                "workload_intent_ordinal": None,
+                "profile_application_id": None,
+            },
+        ),
         (
             "preview_uninstall",
             "_preview_uninstall_once",
@@ -62,7 +87,7 @@ def test_request_reobserves_identical_input_with_a_finite_budget(
         return recovered
 
     monkeypatch.setattr(owner, "admission_attempts", lambda: iter(range(3)))
-    monkeypatch.setattr(service, once, observe)
+    monkeypatch.setattr(service, once, observe, raising=False)
     if uncertain == 3:
         with pytest.raises(UnknownOutcomeError) as ended:
             getattr(service, method)(*args, **kwargs)
@@ -79,6 +104,31 @@ def test_request_reobserves_identical_input_with_a_finite_budget(
     "method,once,args,kwargs",
     [
         ("check_build_source", "_check_build_source_once", ("revision",), {}),
+        ("preview_build", "_preview_build_once", ("revision", "builder"), {}),
+        (
+            "build",
+            "_build_once",
+            ("exact-plan",),
+            {
+                "build_input_sha256": "exact-digest",
+                "actor": "admin",
+                "request_id": "request",
+                "force": False,
+                "admission_guard": None,
+            },
+        ),
+        (
+            "start",
+            "_start_once",
+            ("exact-plan",),
+            {
+                "plan_digest": "exact-digest",
+                "actor": "admin",
+                "request_id": "request",
+                "workload_intent_ordinal": None,
+                "profile_application_id": None,
+            },
+        ),
         (
             "preview_uninstall",
             "_preview_uninstall_once",
@@ -105,7 +155,7 @@ def test_request_does_not_retry_an_authority_refusal(
             "authority changed", reason=SecurityRefusalReason.STALE_FENCE
         )
 
-    monkeypatch.setattr(service, once, refuse)
+    monkeypatch.setattr(service, once, refuse, raising=False)
     with pytest.raises(SecurityRefusalError) as refused:
         getattr(service, method)(*args, **kwargs)
     assert refused.value.typed_reason == SecurityRefusalReason.STALE_FENCE
@@ -161,4 +211,26 @@ def test_gone_retirement_owner_releases_claims_and_admits_a_fresh_run(tmp_path):
         fresh=fresh,
         assert_released=release,
         request_key=lambda receipt: receipt.id,
+    )
+
+
+@pytest.mark.parametrize(
+    "authority,plan,evidence",
+    [
+        ("malformed", "a" * 64, "b" * 64),
+        ("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", "a" * 64, "b" * 64),
+        ("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "not-a-digest", "b" * 64),
+    ],
+)
+def test_publication_input_validation_leaves_a_fresh_input_eligible(
+    authority, plan, evidence
+):
+    # The wrong implementation treats caller syntax as stored-state damage,
+    # or keeps a busy publication owner after rejecting the input.
+    from vonk_control.route_runtime import AtomicRouteBundlePublisher, RouteRuntimeError
+
+    with pytest.raises(RouteRuntimeError):
+        AtomicRouteBundlePublisher._identity(authority, plan, evidence)
+    AtomicRouteBundlePublisher._identity(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "a" * 64, "b" * 64
     )

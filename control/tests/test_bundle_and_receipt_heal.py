@@ -174,10 +174,10 @@ def test_a_bundle_that_cannot_be_derived_again_waits_instead_of_failing(
     assert not isinstance(raised.value, (RecipeBuildInvalid, RecipeSourcePolicyError))
 
 
-def test_a_source_still_invalid_after_fresh_verification_is_the_recipes_fault(
+def test_incomplete_local_evidence_after_reingress_remains_unknown(
     tmp_path: Path,
 ) -> None:
-    """Catches healing that hides a recipe whose verified source really is invalid."""
+    """Catches local damage after re-ingress misclassified as a recipe fault."""
 
     sessions, bundles, _now, _node, revision = setup(tmp_path)
 
@@ -204,8 +204,10 @@ def test_a_source_still_invalid_after_fresh_verification_is_the_recipes_fault(
         source_rederiver=lambda *_args: archive,
     )
 
-    with pytest.raises((RecipeSourcePolicyError, RecipeBuildInvalid)):
+    with pytest.raises(RecipeBuildUnknown):
         service.resolve(revision.id)
+    service._bundles = bundles
+    assert service.resolve(revision.id) is not None
 
 
 def test_the_closure_rederiver_returns_only_a_digest_matching_archive(
