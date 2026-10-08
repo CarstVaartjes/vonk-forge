@@ -805,7 +805,7 @@ def _scan_code_positions(files: Iterable[Path] | None, root: Path) -> list[str]:
 
 def load_baseline() -> dict[str, dict[str, int]]:
     document = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    return {tier: dict(document.get(tier, {})) for tier in TIERS}
+    return document
 
 
 def problems(
@@ -813,6 +813,7 @@ def problems(
 ) -> list[str]:
     """Every way the repository breaks the ratchet, in a stable order."""
 
+    baseline = relocated_baseline(counts, baseline)
     found: list[str] = []
     for tier in TIERS:
         recorded = baseline.get(tier, {})
@@ -859,11 +860,29 @@ def flat_problems(
     return found
 
 
+def relocated_baseline(counts, baseline, moves=None):
+    from .package_moves import PackageMoves
+
+    moves = moves or PackageMoves(REPO_ROOT, baseline.get("content_identities"))
+    return {
+        tier: dict(
+            sorted(
+                moves.counts(
+                    baseline.get(tier, {}),
+                    {path: n for (t, path), n in counts.items() if t == tier},
+                ).items()
+            )
+        )
+        for tier in TIERS
+    }
+
+
 def lowered_baseline(
     counts: Counter[tuple[str, str]], baseline: dict[str, dict[str, int]]
 ) -> dict[str, dict[str, int]]:
     """The baseline with every fallen count lowered; a risen count is left to fail."""
 
+    baseline = relocated_baseline(counts, baseline)
     updated: dict[str, dict[str, int]] = {}
     for tier in TIERS:
         updated[tier] = {}
@@ -884,6 +903,9 @@ def write_baseline(counts: Counter[tuple[str, str]]) -> None:
         ),
         **{tier: dict(sorted(updated[tier].items())) for tier in TIERS},
     }
+    from .package_moves import record_identities
+
+    document = record_identities(document, REPO_ROOT)
     BASELINE_PATH.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
 
 

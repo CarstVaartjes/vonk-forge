@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import signal
 import socket
 import threading
 import urllib.error
@@ -171,6 +172,31 @@ class HTTPSResponse(io.BufferedIOBase):
             await self._client.aclose()
 
     def close(self) -> None:
+        # Runner.close drives shutdown coroutines without Runner.run's SIGINT
+        # handling. Defer Ctrl-C across that boundary so it cannot abandon an
+        # unawaited coroutine; deliver it after resources have been released.
+        if threading.current_thread() is not threading.main_thread():
+            self._close_runner()
+            return
+        handler = signal.getsignal(signal.SIGINT)
+        if handler != signal.default_int_handler:
+            self._close_runner()
+            return
+        interrupted = False
+
+        def defer(_signum, _frame) -> None:
+            nonlocal interrupted
+            interrupted = True
+
+        signal.signal(signal.SIGINT, defer)
+        try:
+            self._close_runner()
+        finally:
+            signal.signal(signal.SIGINT, handler)
+            if interrupted:
+                raise KeyboardInterrupt
+
+    def _close_runner(self) -> None:
         if self._closed:
             return
         self._closed = True

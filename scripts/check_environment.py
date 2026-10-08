@@ -170,3 +170,34 @@ def ensure_catalog(root: Path, library: Path) -> None:
         lambda: (library / "catalog-index.json").is_file(),
         [[str(root / "scripts/build-recipe-library"), str(library)]],
     )
+
+
+def run_in_control(root: Path) -> None:
+    """The locked environment is ready before generator imports execute."""
+
+    environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))
+    if not environment.is_absolute():
+        environment = root / environment
+    ensure_control(root, environment)
+    if Path(sys.prefix).resolve() != environment.resolve():
+        # Like ``uv run``: the environment's console scripts (code generators)
+        # resolve before any system copy.
+        binaries = str(environment / "bin")
+        os.execve(
+            str(environment / "bin/python"),
+            [
+                str(environment / "bin/python"),
+                str(Path(sys.argv[0]).resolve()),
+                *sys.argv[1:],
+            ],
+            {
+                **os.environ,
+                "VIRTUAL_ENV": str(environment),
+                "PATH": os.pathsep.join(
+                    [
+                        binaries,
+                        *filter(None, os.environ.get("PATH", "").split(os.pathsep)),
+                    ]
+                ),
+            },
+        )

@@ -191,7 +191,44 @@ def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, list[dict[str, obje
         count = entry.get("count")
         if not isinstance(count, int) or count < 1:
             raise ValueError(f"{where}: count must be a positive integer")
-    return {"permanent": permanent, "debt": debt}
+    return {**document, "permanent": permanent, "debt": debt}
+
+
+def relocated_allowlist(sites, allowlist, moves=None):
+    from .package_moves import PackageMoves
+
+    moves = moves or PackageMoves(REPO_ROOT, allowlist.get("content_identities"))
+    permanent = [
+        {
+            **entry,
+            "path": moves.function(
+                entry["path"],
+                entry["function"],
+                lambda source, name, entry=entry: any(
+                    site.function == name and site.annotation == entry["annotation"]
+                    for site in scan_source(source, path=entry["path"])
+                ),
+            ),
+        }
+        for entry in allowlist["permanent"]
+    ]
+    allowed = {
+        (entry["path"], entry["function"], entry["annotation"]): entry["count"]
+        for entry in permanent
+    }
+    remaining = Counter()
+    for key, count in Counter(site.key for site in sites).items():
+        remaining[key[0]] += max(0, count - allowed.get(key, 0))
+    debt = moves.counts(
+        {entry["path"]: entry["count"] for entry in allowlist["debt"]}, dict(remaining)
+    )
+    return {
+        **allowlist,
+        "permanent": permanent,
+        "debt": [
+            {"path": path, "count": count} for path, count in sorted(debt.items())
+        ],
+    }
 
 
 def evaluate_gate(
@@ -199,6 +236,7 @@ def evaluate_gate(
 ) -> list[str]:
     """One message per violation; an empty list is a pass."""
 
+    allowlist = relocated_allowlist(sites, allowlist)
     messages: list[str] = []
     permanent = {
         (str(e["path"]), str(e["function"]), str(e["annotation"])): int(e["count"])  # type: ignore[call-overload]
@@ -237,17 +275,23 @@ def evaluate_gate(
 
 
 def update_debt(path: Path = ALLOWLIST_PATH) -> int:
-    allowlist = load_allowlist(path)
+    sites = scan_sites()
+    allowlist = relocated_allowlist(sites, load_allowlist(path))
     permanent = {
         (str(e["path"]), str(e["function"]), str(e["annotation"])): int(e["count"])  # type: ignore[call-overload]
         for e in allowlist["permanent"]
     }
-    seen = Counter(site.key for site in scan_sites())
+    seen = Counter(site.key for site in sites)
     remaining: Counter[str] = Counter()
     for key, count in seen.items():
         extra = count - permanent.get(key, 0)
         if extra > 0:
             remaining[key[0]] += extra
+    recorded = {str(entry["path"]): int(entry["count"]) for entry in allowlist["debt"]}
+    if any(count > recorded.get(file, 0) for file, count in remaining.items()):
+        raise ValueError(
+            "cannot increase debt; new sites need a reviewed permanent entry"
+        )
     document = {
         "schema": 1,
         "permanent": allowlist["permanent"],
@@ -255,6 +299,9 @@ def update_debt(path: Path = ALLOWLIST_PATH) -> int:
             {"path": file, "count": count} for file, count in sorted(remaining.items())
         ],
     }
+    from .package_moves import record_identities
+
+    document = record_identities(document, REPO_ROOT)
     path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     return sum(remaining.values())
 

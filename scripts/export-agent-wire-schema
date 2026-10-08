@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import get_args
 
 ROOT = Path(__file__).resolve().parents[1]
+
+if __name__ == "__main__":
+    from check_environment import run_in_control
+
+    run_in_control(ROOT)
 sys.path[:0] = [str(ROOT / "agent_protocol/src"), str(ROOT / "control/src")]
 
 import vonk_agent_protocol
