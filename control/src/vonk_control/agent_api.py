@@ -78,7 +78,7 @@ from .auth import (
     agent_source_from_scope,
 )
 from .contract_graph import raw_json_body
-from .distribution import DistributionError, DistributionService
+from .distribution import DistributionError, DistributionService, DistributionUnknown
 from .download_contract import download_responses, upload_request_body
 from .enrollment import (
     CertificateResponseCapacityRefused,
@@ -149,7 +149,7 @@ from .source_bundles import (
     SourceBundleStoreProtocol,
     SourceBundleUnknown,
 )
-from .strict_json import ControllerAPIRoute, StrictJSONModel
+from .strict_json import ControllerAPIRoute, StrictJSONModel, _retry_later_response
 from .telemetry import TelemetryRepository, TelemetrySampleInput
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -1775,14 +1775,15 @@ def install_agent_routes(
         return _served_from_edge(required, path, f'"sha256:{sha256}"')
 
     def _distribution_error(error: DistributionError) -> HTTPException:
-        # Name the refusing check on the wire.  Without it the generic 403
-        # boundary code is all the agent can report, so an authority denial
-        # cannot be attributed to an assignment, node or expiry.
+        # Preserve the typed cause and bounded observation retry on the wire.
         headers = (
             {"x-vonk-error-code": error.code}
             if _DISTRIBUTION_ERROR_CODE.fullmatch(error.code)
             else {}
         )
+        if isinstance(error, DistributionUnknown):
+            headers.update(_retry_later_response(error).headers)
+            headers["Cache-Control"] = "no-store"
         if isinstance(error, SecurityRefusalError) or error.code in {
             DistributionCode.UNASSIGNED,
             DistributionCode.WRONG_NODE,
@@ -1847,7 +1848,6 @@ def install_agent_routes(
             )
         except DistributionError as error:
             raise _distribution_error(error) from None
-        # Only the name and size are needed; the edge opens the file itself.
         etag = f'"sha256:{object_spec.sha256}"'
         # The edge answers the client's range from the file, so a checkpoint
         # from another object must be refused here rather than served.

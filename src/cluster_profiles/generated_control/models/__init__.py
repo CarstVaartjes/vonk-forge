@@ -752,6 +752,7 @@ from .run_switch_code import RunSwitchCode
 from .run_switch_container_build_result import RunSwitchContainerBuildResult
 from .run_switch_container_build_result_state import RunSwitchContainerBuildResultState
 from .run_switch_distribution_child_result import RunSwitchDistributionChildResult
+from .run_switch_distribution_ended_result import RunSwitchDistributionEndedResult
 from .run_switch_final_verify_result import RunSwitchFinalVerifyResult
 from .run_switch_final_verify_result_subphase_type_0 import RunSwitchFinalVerifyResultSubphaseType0
 from .run_switch_installation_verify_result import RunSwitchInstallationVerifyResult
@@ -1652,6 +1653,7 @@ __all__ = (
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildResultState",
     "RunSwitchDistributionChildResult",
+    "RunSwitchDistributionEndedResult",
     "RunSwitchFinalVerifyResult",
     "RunSwitchFinalVerifyResultSubphaseType0",
     "RunSwitchInstallationVerifyResult",

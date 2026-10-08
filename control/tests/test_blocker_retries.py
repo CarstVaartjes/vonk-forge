@@ -867,7 +867,7 @@ def test_a_callback_through_an_injected_service_has_its_caller(
     graph = build_graph_for(load_allowlist())
     callback = graph.by_key[
         (
-            "control/src/vonk_control/distribution_executor.py",
+            "control/src/vonk_control/distribution_executor/preparation.py",
             "CompositeDistributionPhaseExecutor._prepare_runtime_image.before_publish",
         )
     ]

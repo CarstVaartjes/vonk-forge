@@ -28,7 +28,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
-from vonk_control import distribution_executor as executor_module
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
@@ -44,6 +43,7 @@ from vonk_control.distribution_executor import (
     RuntimeImagePull,
     _phase_receipt,
 )
+from vonk_control.distribution_executor import children as executor_module
 from vonk_control.job_documents import (
     DistributionJobPayload,
     DistributionTransferProgress,

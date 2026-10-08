@@ -179,7 +179,7 @@ def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(
     unavailable = client.get(
         path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_A, "serial-a")
     )
-    assert unavailable.status_code == 503
+    assert unavailable.status_code == 403
     assert unavailable.headers["x-vonk-error-code"] == "distribution.object_unavailable"
 
 
