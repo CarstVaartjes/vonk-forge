@@ -793,14 +793,14 @@
       "reason": "Reads the stored run plan's own identity against the run's relational revision; disagreement reports the membership not exact, never trusted."
     },
     {
-      "path": "control/src/vonk_control/recipe_packages.py",
+      "path": "control/src/vonk_control/recipe_packages/__init__.py",
       "function": "RecipePackageClient._parse_index",
       "kind": "provenance_comparison",
       "expression": "[(item.publisher, item.slug) for item in items] != sorted(((item.publisher, item.slug) for item in items))",
       "reason": "Recipe package index structure (publisher and slug name documents in a release); not image identity."
     },
     {
-      "path": "control/src/vonk_control/recipe_packages.py",
+      "path": "control/src/vonk_control/recipe_packages/__init__.py",
       "function": "_bind_release",
       "kind": "provenance_comparison",
       "expression": "f'{item.publisher}/{item.slug}' not in skipped",
@@ -1765,7 +1765,7 @@
       "RetryMixin._retry_build_in_session.rebuild": "21ee438dc07e4c833911f2334842efcd0717a7912ce6506dcd768055edd84673",
       "<module>": "5043e204bea041cdf3a8b387598064ef4c2d6ae14819aa8729a550c54b8373fe"
     },
-    "control/src/vonk_control/recipe_packages.py": {
+    "control/src/vonk_control/recipe_packages/__init__.py": {
       "_select_release": "b005492cd677be9ca46434128b6b01c29accbefe49e764597cf214fb4c8ce5f6",
       "RecipePackageHandle.recipe_identity": "d85ca395b109aed44948b5a11635e4016d5907be34018b5dd028296dc98266f3",
       "RecipePackageHandle.model_identities": "2e0740dd7138848b2da1ec33440dfd9972ae4c9f760bdc8e33024f0ede8c9f44",

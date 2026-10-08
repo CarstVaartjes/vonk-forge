@@ -1,4 +1,10 @@
-from vonk_agent_protocol import DesiredAssignmentState, ReservationState
+from vonk_agent_protocol import (
+    DesiredAssignmentState,
+    ReservationState,
+    RunSwitchCode,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
 """Capacity ownership from accepted profile intent to its exact child.
 
@@ -738,10 +744,6 @@ def inherited_profile_disk(
     return claims
 
 
-class ProfileHandoffInconsistent(ValueError):
-    """Active claims name different owners: a handoff is atomic, so this is a fault."""
-
-
 def prepared_profile_installation(
     session: Session,
     application_id: str,
@@ -755,8 +757,8 @@ def prepared_profile_installation(
     ``None`` means nothing is handed off: the promise is still the profile's,
     or a claim was released or never existed (the caller admits the
     installation as usual and reserves afresh). Active claims that disagree
-    about their owner cannot come from the atomic handoff, so they are named
-    rather than adopted or silently replaced.
+    about their owner cannot prove the atomic handoff. They remain accounted
+    to their existing owners; a typed unknown outcome triggers bounded reconciliation.
     """
     _, _, requirements, claims = _profile_disk_binding(
         session,
@@ -781,8 +783,10 @@ def prepared_profile_installation(
         or claim.amount_bytes > (requirements[node_id] or 0)
         for node_id, claim in claims.items()
     ):
-        raise ProfileHandoffInconsistent(
-            "the profile's active disk claims name different owners"
+        # Active ownership is authority, not a disposable admission shortcut.
+        raise UnknownOutcomeError(
+            RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT,
+            reason=WaitReason.SCOPE_CHANGED,
         )
     return identities.pop()
 

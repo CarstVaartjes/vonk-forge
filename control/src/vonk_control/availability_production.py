@@ -1465,11 +1465,9 @@ def _cached_build_receipt(resolution: Any) -> Mapping[str, object] | None:
         or isinstance(resolution.image_bytes, bool)
         or resolution.image_bytes < 1
     ):
-        raise AvailabilityUnsettled(
-            RecipeImageCode.BUILD_INVALID,
-            "cached Recipe build receipt is incomplete",
-            reason=WaitReason.RECEIPT_MISSING,
-        )
+        # Incomplete cache bookkeeping authorizes no reuse. The request enters
+        # normal preparation, which verifies or rebuilds the exact artifact.
+        return None
     return {
         "state": "succeeded",
         "build_id": resolution.build_id,

@@ -137,8 +137,13 @@ def parse_source_bundle(
     """Read a canonical source bundle archive into its verified files."""
 
     active = limits or BundleLimits()
-    manifest = _inspect_archive(archive, active)
-    return _generated_bundle(archive, manifest, active)
+    try:
+        manifest = _inspect_archive(archive, active)
+        return _generated_bundle(archive, manifest, active)
+    except SourceBundleError as error:
+        # This boundary owns incoming bytes, before any managed storage effect.
+        # Stored readers retain the decoder's unknown-outcome category instead.
+        raise SourceBundleInvalid(error.code, error.detail) from error
 
 
 def inspect_source_bundle(
@@ -413,7 +418,7 @@ def _generated_bundle(
                 continue
             stream = bundle.extractfile(member)
             if stream is None:
-                raise SourceBundleError(
+                raise SourceBundleUnknown(
                     SourceBundleCode.READ_FAILED, "source bundle file cannot be read"
                 )
             files[_safe_path(member.name)] = stream.read(limits.max_file_bytes + 1)
