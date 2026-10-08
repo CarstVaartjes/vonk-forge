@@ -25,7 +25,9 @@ from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import (
     CertificateResponseCapacityRefused,
     EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
     EnrollmentService,
+    RenewalIssuanceUncertain,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -1014,8 +1016,9 @@ def test_renewal_provider_exception_observes_committed_effect_without_reissue(
     issued = enroll(enrollment)
     request = csr()
     authority.renew_error = RuntimeError("provider response deliberately lost")
+    with pytest.raises(RenewalIssuanceUncertain):
+        enrollment.renew(NODE_ID, issued.serial, request)
     adopted = enrollment.renew(NODE_ID, issued.serial, request)
-    assert isinstance(adopted, IssuedCertificate)
     assert isinstance(adopted, IssuedCertificate)
     assert adopted.generation == 2
     assert len(authority.calls) == 2
@@ -1060,8 +1063,10 @@ def test_renewal_persistence_ambiguity_remains_observable_without_reissue(
             )
         )
 
-    assert isinstance(enrollment.renew(NODE_ID, issued.serial, request), UnknownError)
-    assert isinstance(enrollment.renew(NODE_ID, issued.serial, request), UnknownError)
+    with pytest.raises(RenewalIssuanceUncertain):
+        enrollment.renew(NODE_ID, issued.serial, request)
+    with pytest.raises(RenewalIssuanceUncertain):
+        enrollment.renew(NODE_ID, issued.serial, request)
 
     assert len(authority.calls) == 2
     assert len(authority.renew_request_ids) == 1
@@ -1549,8 +1554,8 @@ def test_enrollment_persistence_failure_stays_recoverable_without_reissuing(
     grant = enrollment.create(NODE_ID, "admin", 600)
 
     with pytest.raises(
-        EnrollmentDenied,
-        match="certificate persistence failed; retry exact request observation",
+        EnrollmentIssuanceUncertain,
+        match="certificate persistence observation is unavailable",
     ):
         enrollment.submit(grant.token, request, evidence(request))
 
@@ -1576,9 +1581,8 @@ def test_historical_provider_failure_does_not_invent_journal_authority(
     request = csr()
     grant = enrollment.create(NODE_ID, "admin", 600)
 
-    assert isinstance(
-        enrollment.submit(grant.token, request, evidence(request)), UnknownError
-    )
+    with pytest.raises(EnrollmentIssuanceUncertain):
+        enrollment.submit(grant.token, request, evidence(request))
     with sessions.begin() as session:
         stored = session.scalar(select(AgentEnrollment))
         assert stored is not None
@@ -1586,7 +1590,7 @@ def test_historical_provider_failure_does_not_invent_journal_authority(
     with pytest.raises(EnrollmentDenied, match="historical"):
         enrollment.submit(grant.token, request, evidence(request))
 
-    assert len(authority.calls) == 4
+    assert len(authority.calls) == 1
     with sessions() as session:
         stored = session.scalar(select(AgentEnrollment))
         assert stored is None
@@ -1607,17 +1611,18 @@ def test_provider_failure_logs_the_cause_with_the_node_identity(
     request = csr()
     grant = enrollment.create(NODE_ID, "admin", 600)
 
-    with caplog.at_level(logging.ERROR, logger="vonk_control.enrollment"):
-        assert isinstance(
-            enrollment.submit(grant.token, request, evidence(request)), UnknownError
-        )
+    with (
+        caplog.at_level(logging.ERROR, logger="vonk_control.enrollment"),
+        pytest.raises(EnrollmentIssuanceUncertain),
+    ):
+        enrollment.submit(grant.token, request, evidence(request))
 
     records = [
         record
         for record in caplog.records
         if record.name == "vonk_control.enrollment" and record.levelno == logging.ERROR
     ]
-    assert len(records) == 4
+    assert len(records) == 1
     record = records[0]
     assert NODE_ID in record.getMessage()
     assert getattr(record, "failure_type", None) == "RuntimeError"

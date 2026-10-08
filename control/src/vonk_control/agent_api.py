@@ -31,7 +31,6 @@ from pydantic import (
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from starlette.concurrency import run_in_threadpool
 from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     AgentClaim,
@@ -84,10 +83,17 @@ from .download_contract import download_responses, upload_request_body
 from .enrollment import (
     CertificateResponseCapacityRefused,
     EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
     EnrollmentService,
     ExpiredRenewalGraceExhausted,
+    RenewalIssuanceUncertain,
 )
-from .enrollment.responses import certificate_post, unknown_response
+from .enrollment.responses import (
+    _issued_response,
+    _json_response,
+    _now,
+    unknown_response,
+)
 from .enrollment_body import (
     _bounded_enrollment_body as _bounded_enrollment_body,  # noqa: PLC0414 -- shared helper export
 )
@@ -107,7 +113,7 @@ from .enrollment_body import (
     _skip_json_whitespace as _skip_json_whitespace,  # noqa: PLC0414 -- shared helper export
 )
 from .enrollment_bootstrap import EnrollmentBootstrapConfig, InstallerUrl
-from .enrollment_contract import EnrollmentId
+from .enrollment_contract import EnrollmentId, EnrollmentObservationReply
 from .host_helper_authority import (
     HostHelperAuthorityError,
     HostRuntimeAuthorityService,
@@ -133,7 +139,6 @@ from .models import (
 )
 from .openapi_numbers import install_canonical_openapi
 from .operation_api import bounded_error_responses
-from .pki import IssuedCertificate
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
@@ -400,35 +405,6 @@ class HostHelperGrantResponse(StrictJSONModel):
 
 def _host_grant_response(grant: SignedHostHelperGrant) -> HostHelperGrantResponse:
     return HostHelperGrantResponse(grant=grant)
-
-
-def _wire(value: object) -> object:
-    return json.loads(canonical_message(value))
-
-
-def _now(value: datetime) -> datetime:
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
-def _issued_response(issued: IssuedCertificate) -> IssuedCertificateResponse:
-    return IssuedCertificateResponse(
-        node_id=issued.node_id,
-        certificate_pem=issued.certificate_pem.decode("ascii"),
-        chain_pem=issued.chain_pem.decode("ascii"),
-        serial=issued.serial,
-        fingerprint=issued.fingerprint,
-        not_before=_now(issued.not_before).isoformat(),
-        not_after=_now(issued.not_after).isoformat(),
-        generation=issued.generation,
-    )
-
-
-def _json_response(value: object, *, status_code: int = 200) -> Response:
-    return Response(
-        content=canonical_message(value),
-        status_code=status_code,
-        media_type="application/json",
-    )
 
 
 def _require_services(services: AgentApiServices | None) -> AgentApiServices:
@@ -759,9 +735,11 @@ def install_agent_routes(
             )
         )
 
-    enrollment_post = certificate_post(agent)
-
-    @enrollment_post("/enroll")
+    @agent.post(
+        "/enroll",
+        response_model=IssuedCertificateResponse,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     @raw_json_body(EnrollmentSubmitRequest)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
@@ -826,6 +804,8 @@ def install_agent_routes(
             outcome = _require_enrollment(required).submit(
                 submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
             )
+        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
+            return unknown_response(error)
         except CertificateResponseCapacityRefused as error:
             return _json_response(
                 {"detail": {"reason_code": error.reason_code, "message": str(error)}},
@@ -1446,7 +1426,11 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @enrollment_post("/renew/expired")
+    @agent.post(
+        "/renew/expired",
+        response_model=IssuedCertificateResponse,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     @raw_json_body(ExpiredRenewRequest)
     async def renew_expired(request: Request) -> Response:
         required = _require_services(services)
@@ -1462,9 +1446,11 @@ def install_agent_routes(
                 status_code=422, detail="expired renewal proof is malformed"
             ) from None
         try:
-            issued = await run_in_threadpool(
+            issued = await asyncio.to_thread(
                 _require_enrollment(required).renew_expired, body
             )
+        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
+            return unknown_response(error)
         except CertificateResponseCapacityRefused as error:
             return _json_response(
                 {"detail": {"reason_code": error.reason_code, "message": str(error)}},
@@ -1486,7 +1472,11 @@ def install_agent_routes(
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
-    @enrollment_post("/renew")
+    @agent.post(
+        "/renew",
+        response_model=IssuedCertificateResponse,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     def renew(body: RenewRequest, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -1500,6 +1490,8 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
+        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
+            return unknown_response(error)
         except CertificateResponseCapacityRefused as error:
             return _json_response(
                 {"detail": {"reason_code": error.reason_code, "message": str(error)}},
@@ -1511,7 +1503,11 @@ def install_agent_routes(
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
 
-    @enrollment_post("/renew/recover")
+    @agent.post(
+        "/renew/recover",
+        response_model=IssuedCertificateResponse,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     def recover_renewal(body: RenewRequest, request: Request) -> Response:
         """Recover a staged certificate that was created for another CSR.
 
@@ -1531,6 +1527,8 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
+        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
+            return unknown_response(error)
         except CertificateResponseCapacityRefused as error:
             return _json_response(
                 {"detail": {"reason_code": error.reason_code, "message": str(error)}},

@@ -51,12 +51,10 @@ from ..pki import IssuedCertificate
 from .rotation import RotationService
 from .types import (
     EnrollmentDenied,
-    EnrollmentIssuanceUncertain,
     ExpiredRenewalGraceExhausted,
     RemoteRevocationUncertain,
     RenewalConflictRevocationUncertain,
     RenewalInProgress,
-    RenewalIssuanceUncertain,
 )
 
 
@@ -274,15 +272,13 @@ class EnrollmentService(RotationService):
     def submit(
         self, token: str, csr: bytes, evidence: Mapping[str, str]
     ) -> IssuedCertificate | UnknownError:
-        """Observe exact durable intent within a bounded exponential backoff."""
+        """Bounded bookkeeping retries; issuance uncertainty preserves its typed handoff."""
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:
                 time.sleep(delay)
             try:
                 return self._submit_once(token, csr, evidence)
             except (
-                EnrollmentIssuanceUncertain,
-                RenewalIssuanceUncertain,
                 RenewalConflictRevocationUncertain,
                 RemoteRevocationUncertain,
                 RenewalInProgress,
@@ -295,15 +291,13 @@ class EnrollmentService(RotationService):
     def renew(
         self, node_id: str, serial: str, csr: bytes, *, expired: bool = False
     ) -> IssuedCertificate | UnknownError:
-        """Observe exact durable intent within a bounded exponential backoff."""
+        """Bounded bookkeeping retries; issuance uncertainty preserves its typed handoff."""
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:
                 time.sleep(delay)
             try:
                 return self._renew_once(node_id, serial, csr, expired=expired)
             except (
-                EnrollmentIssuanceUncertain,
-                RenewalIssuanceUncertain,
                 RenewalConflictRevocationUncertain,
                 RemoteRevocationUncertain,
                 RenewalInProgress,
@@ -316,7 +310,7 @@ class EnrollmentService(RotationService):
     def recover_rotation(
         self, node_id: str, serial: str, csr: bytes, *, expired: bool = False
     ) -> IssuedCertificate | UnknownError:
-        """Observe exact durable intent within a bounded exponential backoff."""
+        """Bounded bookkeeping retries; issuance uncertainty preserves its typed handoff."""
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:
                 time.sleep(delay)
@@ -325,8 +319,6 @@ class EnrollmentService(RotationService):
                     node_id, serial, csr, expired=expired
                 )
             except (
-                EnrollmentIssuanceUncertain,
-                RenewalIssuanceUncertain,
                 RenewalConflictRevocationUncertain,
                 RemoteRevocationUncertain,
                 RenewalInProgress,
@@ -344,8 +336,6 @@ class EnrollmentService(RotationService):
             try:
                 return self._revoke_node_once(node_id, actor)
             except (
-                EnrollmentIssuanceUncertain,
-                RenewalIssuanceUncertain,
                 RenewalConflictRevocationUncertain,
                 RemoteRevocationUncertain,
                 RenewalInProgress,

@@ -37,6 +37,7 @@ from vonk_agent_protocol import (
     RunState,
     SecurityRefusalReason,
     SignedHostHelperGrant,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.host_helper import (
@@ -56,13 +57,13 @@ from vonk_control.auth import Actor, AgentSource, TokenCodec
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
+from vonk_control.enrollment_contract import EnrollmentObservationReply
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
 )
 from vonk_control.models import (
     AgentCertificate,
-    AgentCertificateRotation,
     AgentNode,
     AgentOperation,
     AgentOperationAttempt,
@@ -2533,6 +2534,11 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
     replay = client.post("/agent/enroll", json=body)
 
     assert first.status_code == replay.status_code == 503
+    for response in (first, replay):
+        observation = EnrollmentObservationReply.model_validate_json(response.content)
+        assert observation.detail.reason is WaitReason.OBSERVATION_UNAVAILABLE
+        assert 0 < int(response.headers["Retry-After"]) <= 300
+        assert response.headers["Cache-Control"] == "no-store"
     assert calls == 1
 
 
@@ -2628,33 +2634,45 @@ def _csr_fingerprint(csr_pem: bytes) -> str:
 
 def test_fresh_rotation_follower_receives_canonical_retryable_response(
     agent_system,
+    monkeypatch,
 ) -> None:
     client, services, _, clock = agent_system
-    request = _csr_for(NODE_A)
     with services.sessions.begin() as session:
-        session.add(
-            AgentCertificateRotation(
-                node_id=NODE_A,
-                source_serial="serial-a",
-                generation=2,
-                csr_pem=request.decode("ascii"),
-                csr_public_key_fingerprint=_csr_fingerprint(request),
-                provider_request_id="r" * 43,
-                state="issuing",
-                created_at=clock.now,
-                updated_at=clock.now,
-            )
+        source = session.scalar(
+            select(AgentCertificate).where(AgentCertificate.serial == "serial-a")
         )
+        assert source is not None
+        source.serial = "101"
+        source.fingerprint = "fingerprint-101"
+    request = _csr_for(NODE_A)
+    claim = services.enrollment._claim_rotation(
+        NODE_A, "101", request, _csr_fingerprint(request), clock.now
+    )
+    assert not isinstance(claim, IssuedCertificate)
+    assert claim.provider_request is not None
+    authority = services.enrollment._authority
+    authority._begin(claim.provider_request)
+    attempts = []
+
+    def pending(*_args, request, **_kwargs):
+        attempts.append(request)
+        authority._begin(request)
+        pytest.fail("a follower must preserve the pending exact binding")
+
+    monkeypatch.setattr(authority, "renew_node", pending)
 
     response = client.post(
         "/agent/renew",
-        headers=agent_headers(NODE_A, "serial-a"),
+        headers=agent_headers(NODE_A, "101"),
         json={"node_id": NODE_A, "csr": request.decode()},
     )
 
+    assert attempts == [claim.provider_request] * 4
     assert response.status_code == 503
     assert response.content == canonical_message(response.json())
-    assert response.json() == {"detail": "certificate rotation issuance is in progress"}
+    observation = EnrollmentObservationReply.model_validate_json(response.content)
+    assert observation.detail.reason is WaitReason.OBSERVATION_UNAVAILABLE
+    assert 0 < int(response.headers["Retry-After"]) <= 300
 
 
 def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after_response_loss(

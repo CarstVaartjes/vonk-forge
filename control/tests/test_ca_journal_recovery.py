@@ -16,6 +16,7 @@ from vonk_control.ca_issuance_contract import (
 )
 from vonk_control.enrollment.service import EnrollmentService
 from vonk_control.enrollment.types import (
+    EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     RenewalIssuanceUncertain,
 )
@@ -181,7 +182,7 @@ def test_rotation_sql_failure_keeps_source_active_and_adopts_exact_result(
         assert certificate is not None and certificate.state == "staged"
 
 
-def test_historical_unbound_enrollment_remains_unknown_without_provider_effect(
+def test_unbound_enrollment_releases_claim_without_inventing_provider_authority(
     tmp_path,
 ):
     transport, provider, sessions, clock = setup(tmp_path)
@@ -196,12 +197,22 @@ def test_historical_unbound_enrollment_remains_unknown_without_provider_effect(
         assert accepted is not None
         accepted.provider_request = None
     calls = len(transport.tokens)
-    with pytest.raises(EnrollmentIssuanceUncertain, match="historical"):
+    with pytest.raises(EnrollmentDenied, match="historical"):
         EnrollmentService(sessions, provider, clock=clock).submit(
             grant.token, request, evidence(request)
         )
     assert len(transport.tokens) == calls
     assert transport.issue_calls == 1
+    with sessions() as session:
+        assert session.scalar(select(AgentEnrollment)) is None
+    # Missing journal authority cannot poison the next authorized same-node grant.
+    transport.path = tmp_path / "fresh.json"
+    restarted = EnrollmentService(sessions, provider, clock=clock)
+    fresh_grant = restarted.create(NODE_ID, "admin", 600)
+    fresh_request = csr()
+    issued = restarted.submit(fresh_grant.token, fresh_request, evidence(fresh_request))
+    assert isinstance(issued, IssuedCertificate)
+    assert transport.issue_calls == 2
 
 
 @pytest.mark.parametrize(

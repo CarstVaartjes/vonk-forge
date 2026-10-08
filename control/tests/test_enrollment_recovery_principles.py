@@ -12,7 +12,12 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.state_machines import EnrollmentRecordState
-from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
+from vonk_control.enrollment import (
+    EnrollmentDenied,
+    EnrollmentIssuanceUncertain,
+    EnrollmentService,
+    RenewalIssuanceUncertain,
+)
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -35,11 +40,14 @@ class Receipt(BaseModel):
 
 
 def test_lost_renewal_response_is_observed_in_the_original_request(service):
-    """Catches returning an uncertain refusal before observing a committed effect."""
+    """Catches hiding the typed handoff or reissuing a committed exact request."""
     enrollment, sessions, _clock, authority = service
     source = enroll(enrollment)
     authority.renew_error = RuntimeError("lost response")
-    issued = enrollment.renew(NODE_ID, source.serial, csr())
+    request = csr()
+    with pytest.raises(RenewalIssuanceUncertain):
+        enrollment.renew(NODE_ID, source.serial, request)
+    issued = enrollment.renew(NODE_ID, source.serial, request)
     assert isinstance(issued, IssuedCertificate)
     assert len(authority.renew_request_ids) == 1
     with sessions() as session:
@@ -120,8 +128,9 @@ def test_unknown_submit_has_bounded_attempts_and_reuses_exact_binding(
     monkeypatch.setattr(authority, "issue_node", unavailable)
     grant = enrollment.create(NODE_ID, "admin", 600)
     request = csr()
-    outcome = enrollment.submit(grant.token, request, evidence(request))
-    assert isinstance(outcome, UnknownError)
+    for _ in range(4):
+        with pytest.raises(EnrollmentIssuanceUncertain):
+            enrollment.submit(grant.token, request, evidence(request))
     assert len(attempts) == 4 and len(set(attempts)) == 1
     with sessions() as session:
         row = session.scalar(select(AgentEnrollment))
@@ -215,9 +224,8 @@ def test_unbound_enrollment_releases_old_gate_for_fresh_same_node(service, monke
         raise RuntimeError("provider unavailable")
 
     monkeypatch.setattr(authority, "issue_node", unavailable)
-    assert isinstance(
-        enrollment.submit(grant.token, request, evidence(request)), UnknownError
-    )
+    with pytest.raises(EnrollmentIssuanceUncertain):
+        enrollment.submit(grant.token, request, evidence(request))
     with sessions.begin() as session:
         accepted = session.scalar(select(AgentEnrollment))
         assert accepted is not None

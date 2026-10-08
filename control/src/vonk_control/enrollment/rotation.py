@@ -164,7 +164,7 @@ class RotationService(EnrollmentCore):
         if recovery.claim.csr_public_key_fingerprint != csr_fingerprint:
             # Finish the older exact binding before the bounded caller observes
             # it and prepares the requested replacement. Never rebind a journal.
-            raise RenewalIssuanceUncertain(
+            raise RenewalInProgress(
                 "completed competing rotation observation is pending"
             )
         return issued
