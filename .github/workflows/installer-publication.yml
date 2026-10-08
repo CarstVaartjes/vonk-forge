@@ -1106,7 +1106,8 @@ jobs:
         shell: bash
         env:
           SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
-          VERSION: ${{ needs.authority.outputs.version }}
+          CHANNEL: ${{ needs.authority.outputs.channel }}
+          GENERATION: ${{ needs.candidate.outputs.generation }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
@@ -1114,15 +1115,29 @@ jobs:
           git diff --cached --quiet
           test "$(uname -m)" = aarch64
           epoch=$(git show -s --format=%ct "$SOURCE_SHA")
-          lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
-          build_digest="sha256:$(
-            printf 'vonk-agent-build-v2\0%s\0%s\0%s\0%s' \
-              "$SOURCE_SHA" linux-arm64 "$lock_digest" "$VERSION" \
-              | sha256sum | cut -d' ' -f1
-          )"
+          # Reused packages retain their original identity and package version.
+          # Consume the same candidate graph that the Spark installer receives.
+          candidate_identity=$(uv run --project control --frozen python - <<'PYIDENTITY'
+          import os
+          from pathlib import Path
+
+          from vonk_agent_protocol.installer_release import InstallerCandidateRelease
+
+          release_path = (
+              Path(os.environ["RUNNER_TEMP"])
+              / "spark-publication/installer-publication/objects/artifacts"
+              / os.environ["CHANNEL"] / "releases" / os.environ["GENERATION"]
+              / "release.json"
+          )
+          release = InstallerCandidateRelease.model_validate_json(release_path.read_bytes())
+          package = release.artifacts.agent_package_linux_arm64
+          print(package.target_build_digest, package.package_version.split("~", 1)[0])
+          PYIDENTITY
+          )
+          read -r build_digest semantic_version <<< "$candidate_identity"
           export CARGO_INCREMENTAL=0 SOURCE_DATE_EPOCH="$epoch"
           export VONK_AGENT_BUILD_DIGEST="$build_digest"
-          export VONK_AGENT_SEMANTIC_VERSION="${VERSION%%~*}"
+          export VONK_AGENT_SEMANTIC_VERSION="$semantic_version"
           cargo build --release --locked --target aarch64-unknown-linux-gnu \
             --package vonk-agent --example acceptance_certificate_renewal
           install -D -m 0555 \
