@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol.contracts import AgentUpgradeResult
+from vonk_agent_protocol.package_upgrade import PackageActivationOutcome
 from vonk_control import agent_operation_states as aos
 from vonk_control import agent_upgrades as agent_upgrades_module
 from vonk_control import job_states
@@ -125,7 +126,7 @@ ACTIVATION_RECEIPT = {
     "phase": "acknowledged",
     "created_at": 1787788800,
     "updated_at": 1787788800,
-    "outcome": "controller_acknowledged",
+    "outcome": PackageActivationOutcome.CONTROLLER_CONFIRMED_ACTIVATION,
 }
 NEW_IDENTITY["package_activation"] = ACTIVATION_RECEIPT
 

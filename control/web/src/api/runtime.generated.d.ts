@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 4ac93477c8125cc423295611df0afab7e80d6a3fc9b65525c381a7aa922d9fce. Do not edit.
+// Generated from canonical OpenAPI SHA256 e3f6c9fe1930a38d73754aa63ac5676d832965a411f2fcc0c3ec6167384abb72. Do not edit.
 export interface NormalizationShape {
   type?: string | string[];
   preserveIntegerFloat?: boolean;
@@ -2145,6 +2145,7 @@ export const normalize1764: Validator;
 export const normalize1765: Validator;
 export const normalize1766: Validator;
 export const componentOutputLimits: Validator;
+export const componentPackageActivationOutcome: Validator;
 export const componentPackageActivationPhase: Validator;
 export const componentPackageActivationReceipt: Validator;
 export const componentPackageRollbackAuthority: Validator;

@@ -15,14 +15,12 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tar.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 vonk-agent-protocol = { path = "../vonk-agent-protocol" }
 wait-timeout.workspace = true
 xattr.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
 
 [lib]
 name = "vonk_agent_helper"

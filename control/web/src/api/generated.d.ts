@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 4ac93477c8125cc423295611df0afab7e80d6a3fc9b65525c381a7aa922d9fce. Do not edit.
+// Generated from canonical OpenAPI SHA256 e3f6c9fe1930a38d73754aa63ac5676d832965a411f2fcc0c3ec6167384abb72. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -7490,6 +7490,11 @@ export interface components {
             max_total_bytes: number;
         };
         /**
+         * PackageActivationOutcome
+         * @enum {string}
+         */
+        PackageActivationOutcome: "awaiting_controller_activation" | "candidate_install_failed" | "controller_confirmed_activation" | "restoring_captured_source" | "source_restored_and_restarted" | "source_restore_failed";
+        /**
          * PackageActivationPhase
          * @description Where a package activation transaction stands.
          * @enum {string}
@@ -7512,8 +7517,7 @@ export interface components {
             created_at: number | ExactNumber;
             /** Node Id */
             node_id: string;
-            /** Outcome */
-            outcome: string;
+            outcome: components["schemas"]["PackageActivationOutcome"];
             phase: components["schemas"]["PackageActivationPhase"];
             /**
              * Schema Version
