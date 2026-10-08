@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 fe1770f069622a92185dea3ec1af12bf621aef26f0d7d501580d1db5d4a11653. Do not edit.
+// Generated from canonical OpenAPI SHA256 498c10a3d634fdab81af1d3c68ba489d1ee1079888809a02f4daa618449e0b8f. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {

@@ -3,7 +3,7 @@
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
 pub struct ActivateRequest {
-    pub generation: u32,
+    pub generation: u64,
     pub node_id: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -5833,7 +5833,7 @@ pub struct IssuedCertificateResponse {
     pub certificate_pem: ::std::string::String,
     pub chain_pem: ::std::string::String,
     pub fingerprint: ::std::string::String,
-    pub generation: u32,
+    pub generation: u64,
     pub node_id: ::std::string::String,
     pub not_after: ::std::string::String,
     pub not_before: ::std::string::String,
@@ -15817,7 +15817,7 @@ impl<'de> ::serde::Deserialize<'de> for ActivateRequest {
         #[serde(deny_unknown_fields)]
         #[derive(Eq)]
         struct Raw {
-            pub generation: u32,
+            pub generation: u64,
             pub node_id: ::std::string::String,
         }
         #[allow(unused_variables)]
@@ -23117,7 +23117,7 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             pub certificate_pem: ::std::string::String,
             pub chain_pem: ::std::string::String,
             pub fingerprint: ::std::string::String,
-            pub generation: u32,
+            pub generation: u64,
             pub node_id: ::std::string::String,
             pub not_after: ::std::string::String,
             pub not_before: ::std::string::String,
