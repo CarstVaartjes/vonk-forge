@@ -336,7 +336,7 @@ def test_exception_classes_follow_the_bases_not_only_the_name() -> None:
     assert "_Kept" not in classes and "Helper" not in classes
 
 
-def test_the_scan_covers_every_module_of_control_src() -> None:
+def test_the_scan_covers_control_and_the_audited_rust_modules() -> None:
     document = load_allowlist()
     audited = audited_paths(document)
     paths = {site.path for site in scan_raises()}
@@ -346,6 +346,13 @@ def test_the_scan_covers_every_module_of_control_src() -> None:
         module.relative_to(REPO_ROOT).as_posix()
         for module in CONTROL_SOURCE_ROOT.rglob("*.py")
     }
+    from .blocker_rust import RUST_ROOTS
+
+    modules.update(
+        module.relative_to(REPO_ROOT).as_posix()
+        for root in RUST_ROOTS
+        for module in root.rglob("*.rs")
+    )
     assert audited <= modules
     assert paths - audited, "raises outside the audited modules are scanned too"
 

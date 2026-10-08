@@ -5,7 +5,12 @@
       "control/src"
     ],
     "rust_roots": [
-      "rust/crates/vonk-agent/src"
+      "rust/crates/vonk-agent/src",
+      "rust/crates/vonk-agent-helper/src",
+      "rust/crates/vonk-build-egress/src",
+      "rust/crates/vonk-spark-setup/src",
+      "rust/crates/vonk-nas-setup/src",
+      "rust/crates/vonk-monitor/src"
     ],
     "audited_paths": [
       "control/src/vonk_control/admission_locking.py",
@@ -266,7 +271,115 @@
       "control/src/vonk_control/runtime_image_preparation/storage.py",
       "control/src/vonk_control/runtime_image_preparation/transport.py",
       "control/src/vonk_control/source_bundles.py",
-      "control/src/vonk_control/topology.py"
+      "control/src/vonk_control/topology.py",
+      "rust/crates/vonk-agent-helper/src/host_memory_guard.rs",
+      "rust/crates/vonk-agent-helper/src/main.rs",
+      "rust/crates/vonk-agent-helper/src/operations/access.rs",
+      "rust/crates/vonk-agent-helper/src/operations/arguments.rs",
+      "rust/crates/vonk-agent-helper/src/operations/authority.rs",
+      "rust/crates/vonk-agent-helper/src/operations/commands.rs",
+      "rust/crates/vonk-agent-helper/src/operations/dispatch.rs",
+      "rust/crates/vonk-agent-helper/src/operations/fabric.rs",
+      "rust/crates/vonk-agent-helper/src/operations/generation.rs",
+      "rust/crates/vonk-agent-helper/src/operations/images.rs",
+      "rust/crates/vonk-agent-helper/src/operations/inspection.rs",
+      "rust/crates/vonk-agent-helper/src/operations/model_paths.rs",
+      "rust/crates/vonk-agent-helper/src/operations/packages.rs",
+      "rust/crates/vonk-agent-helper/src/operations/reconciliation.rs",
+      "rust/crates/vonk-agent-helper/src/operations/start.rs",
+      "rust/crates/vonk-agent-helper/src/operations/stop.rs",
+      "rust/crates/vonk-agent-helper/src/operations/storage.rs",
+      "rust/crates/vonk-agent-helper/src/operations/validation.rs",
+      "rust/crates/vonk-agent-helper/src/package_command.rs",
+      "rust/crates/vonk-agent-helper/src/package_rollback.rs",
+      "rust/crates/vonk-agent-helper/src/protocol.rs",
+      "rust/crates/vonk-agent-helper/src/runtime_fabric.rs",
+      "rust/crates/vonk-agent-helper/src/runtime_preflight.rs",
+      "rust/crates/vonk-agent/src/agent_upgrade.rs",
+      "rust/crates/vonk-agent/src/base_images.rs",
+      "rust/crates/vonk-agent/src/build_source.rs",
+      "rust/crates/vonk-agent/src/client/distribution.rs",
+      "rust/crates/vonk-agent/src/client/grants.rs",
+      "rust/crates/vonk-agent/src/client/jobs.rs",
+      "rust/crates/vonk-agent/src/client/mod.rs",
+      "rust/crates/vonk-agent/src/client/operations.rs",
+      "rust/crates/vonk-agent/src/client/renewal.rs",
+      "rust/crates/vonk-agent/src/client/reporting.rs",
+      "rust/crates/vonk-agent/src/client/response.rs",
+      "rust/crates/vonk-agent/src/client/storage.rs",
+      "rust/crates/vonk-agent/src/client/transfer.rs",
+      "rust/crates/vonk-agent/src/client/transport.rs",
+      "rust/crates/vonk-agent/src/config.rs",
+      "rust/crates/vonk-agent/src/executor/agent_loop.rs",
+      "rust/crates/vonk-agent/src/executor/agent_loop/tests_0.rs",
+      "rust/crates/vonk-agent/src/executor/distribution.rs",
+      "rust/crates/vonk-agent/src/executor/heartbeat.rs",
+      "rust/crates/vonk-agent/src/executor/jobs.rs",
+      "rust/crates/vonk-agent/src/executor/observations.rs",
+      "rust/crates/vonk-agent/src/executor/runtime.rs",
+      "rust/crates/vonk-agent/src/executor/start.rs",
+      "rust/crates/vonk-agent/src/executor/stop.rs",
+      "rust/crates/vonk-agent/src/failure_evidence.rs",
+      "rust/crates/vonk-agent/src/health.rs",
+      "rust/crates/vonk-agent/src/host_runtime/mod.rs",
+      "rust/crates/vonk-agent/src/host_runtime/responses.rs",
+      "rust/crates/vonk-agent/src/host_runtime/transport.rs",
+      "rust/crates/vonk-agent/src/identity.rs",
+      "rust/crates/vonk-agent/src/image_store.rs",
+      "rust/crates/vonk-agent/src/inventory.rs",
+      "rust/crates/vonk-agent/src/main.rs",
+      "rust/crates/vonk-agent/src/network_tests.rs",
+      "rust/crates/vonk-agent/src/oci/custody.rs",
+      "rust/crates/vonk-agent/src/oci/installation.rs",
+      "rust/crates/vonk-agent/src/oci/jobs.rs",
+      "rust/crates/vonk-agent/src/oci/lifecycle.rs",
+      "rust/crates/vonk-agent/src/oci/materialization.rs",
+      "rust/crates/vonk-agent/src/oci/metadata.rs",
+      "rust/crates/vonk-agent/src/oci/mod.rs",
+      "rust/crates/vonk-agent/src/oci/observation.rs",
+      "rust/crates/vonk-agent/src/oci/reconciliation.rs",
+      "rust/crates/vonk-agent/src/oci/storage.rs",
+      "rust/crates/vonk-agent/src/package_activation.rs",
+      "rust/crates/vonk-agent/src/pair.rs",
+      "rust/crates/vonk-agent/src/process.rs",
+      "rust/crates/vonk-agent/src/readiness.rs",
+      "rust/crates/vonk-agent/src/recipe_builder/budget.rs",
+      "rust/crates/vonk-agent/src/recipe_builder/builder.rs",
+      "rust/crates/vonk-agent/src/recipe_builder/cleanup.rs",
+      "rust/crates/vonk-agent/src/recipe_builder/egress.rs",
+      "rust/crates/vonk-agent/src/recipe_builder/images.rs",
+      "rust/crates/vonk-agent/src/rotation.rs",
+      "rust/crates/vonk-agent/src/runtime_identity.rs",
+      "rust/crates/vonk-agent/src/runtime_preflight.rs",
+      "rust/crates/vonk-agent/src/self_test.rs",
+      "rust/crates/vonk-agent/src/state.rs",
+      "rust/crates/vonk-agent/src/telemetry.rs",
+      "rust/crates/vonk-build-egress/src/main.rs",
+      "rust/crates/vonk-build-egress/src/runtime_probe.rs",
+      "rust/crates/vonk-nas-setup/src/environment.rs",
+      "rust/crates/vonk-nas-setup/src/filesystem.rs",
+      "rust/crates/vonk-nas-setup/src/install.rs",
+      "rust/crates/vonk-nas-setup/src/main.rs",
+      "rust/crates/vonk-nas-setup/src/pki_validation.rs",
+      "rust/crates/vonk-nas-setup/src/prompts.rs",
+      "rust/crates/vonk-nas-setup/src/secrets.rs",
+      "rust/crates/vonk-nas-setup/src/template.rs",
+      "rust/crates/vonk-nas-setup/src/upgrade.rs",
+      "rust/crates/vonk-spark-setup/src/apply.rs",
+      "rust/crates/vonk-spark-setup/src/config_files.rs",
+      "rust/crates/vonk-spark-setup/src/configuration.rs",
+      "rust/crates/vonk-spark-setup/src/enrollment.rs",
+      "rust/crates/vonk-spark-setup/src/firewall.rs",
+      "rust/crates/vonk-spark-setup/src/handoff.rs",
+      "rust/crates/vonk-spark-setup/src/installation.rs",
+      "rust/crates/vonk-spark-setup/src/main.rs",
+      "rust/crates/vonk-spark-setup/src/package.rs",
+      "rust/crates/vonk-spark-setup/src/plan.rs",
+      "rust/crates/vonk-spark-setup/src/prepare.rs",
+      "rust/crates/vonk-spark-setup/src/process.rs",
+      "rust/crates/vonk-spark-setup/src/readiness.rs",
+      "rust/crates/vonk-spark-setup/src/request.rs",
+      "rust/crates/vonk-spark-setup/src/staging.rs"
     ],
     "guard_paths": [
       "control/src/vonk_control/agent_jobs/__init__.py",
@@ -498,7 +611,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 116,
+    "total": 1133,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -9380,6 +9493,1463 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/distribution.py", "DistributionUnknown", "ModelCacheObjectSource.verified_model_objects_for_set", "distribution.model_set_identity_unavailable", 3]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/host_memory_guard.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/host_memory_guard.rs", "Err", "docker", "docker command failed . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/host_memory_guard.rs", "Err", "inventory_ids", "inventory is incomplete . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/host_memory_guard.rs", "Err", "stop_managed", "invalid container id . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/main.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "claim_once", "ClaimFailure :: Ledger", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "group_gid", "format ! ( required group {name} does not exist )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "handle", "HelperRejection :: new ( HelperErrorCode :: GrantNodeMismatch , grant is for a different node , )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "node_id_from_config", "agent configuration has duplicate node ID . to_owned ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "node_id_from_config", "agent node ID is invalid . to_owned ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "peer_identity", "peer credentials changed . to_owned ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "run", "exactly one systemd socket is required . to_owned ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "run", "systemd socket name is invalid . to_owned ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "run", "unknown helper operation . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "user_uid", "format ! ( required user {name} does not exist )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "Err", "verify_root_text", "format ! ( {} is unsafe , path . display ( ) )", 1],
+        ["rust/crates/vonk-agent-helper/src/main.rs", "process::exit", "main", "1", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/access.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/access.rs", "Err", "exact_runtime_read_acl", "OperationError :: InvalidArtifact", 4],
+        ["rust/crates/vonk-agent-helper/src/operations/access.rs", "Err", "prepare_runtime_access", "OperationError :: CommandFailed", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/access.rs", "Err", "reset_runtime_tmp_if_requested", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/access.rs", "Err", "reset_runtime_tmp_if_requested", "OperationError :: UnsafePath", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/access.rs", "Err", "reset_runtime_tmp_if_requested", "errno_io ( error ) . into ( )", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/access.rs", "Err", "runtime_read_tree_acl_ready", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/access.rs", "Err", "runtime_read_tree_acl_ready", "OperationError :: UnsafePath", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/arguments.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/arguments.rs", "Err", "parse_local_image_reference", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/arguments.rs", "Err", "parse_numeric_user", "OperationError :: InvalidOperation", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/authority.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/authority.rs", "Err", "authorize_runtime_effect", "OperationError :: InvalidOperation", 6],
+        ["rust/crates/vonk-agent-helper/src/operations/authority.rs", "Err", "execute_runtime_request", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/authority.rs", "Err", "execute_runtime_request", "OperationError :: InvalidOperation", 4],
+        ["rust/crates/vonk-agent-helper/src/operations/authority.rs", "Err", "read_runtime_request", "OperationError :: InvalidOperation", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/authority.rs", "Err", "read_runtime_request", "OperationError :: UnsafePath", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/commands.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/commands.rs", "Err", "run_captured_command", "compiled command exceeded its deadline . to_owned ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/commands.rs", "Err", "run_captured_command", "compiled command output exceeded its bound . to_owned ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/commands.rs", "Err", "run_captured_command", "compiled command output failed . to_owned ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/commands.rs", "Err", "run_with_timeout", "executable is not compiled into the helper . to_owned ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/dispatch.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/dispatch.rs", "Err", "execute_for_node", "error", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/dispatch.rs", "Err", "new", "OperationError :: UnsafePath", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/fabric.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/fabric.rs", "Err", "bind_native_fabric", "rejected ( firewall_rejection_reason ( & request , & output ) )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/fabric.rs", "Err", "require_authorised_published_endpoint", "rejected ( reason )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/generation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/generation.rs", "Err", "begin", "OperationError :: CommandFailed", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/generation.rs", "Err", "read_runtime_generation_fence", "OperationError :: InvalidArtifact", 4],
+        ["rust/crates/vonk-agent-helper/src/operations/generation.rs", "Err", "read_runtime_generation_fence", "error . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/generation.rs", "Err", "runtime_generation_fence_root", "error . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/generation.rs", "Err", "update_runtime_generation_fence", "OperationError :: InvalidOperation", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/generation.rs", "Err", "wait_for_active_start", "OperationError :: StopUncertain", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/generation.rs", "Err", "write_runtime_generation_fence", "OperationError :: InvalidOperation", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/images.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "inspect_runtime_image_if_present", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "inspect_runtime_image_if_present", "OperationError :: RuntimeImageInspectFailed", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "read_image_receipt", "OperationError :: InvalidArtifact", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "require_image_receipt", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "require_image_receipt", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_inspect", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_inspect", "OperationError :: InvalidOperation", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: InvalidOperation", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: RuntimeImageIdentityInvalid", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: RuntimeImageInspectFailed", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "runtime_image_pull", "OperationError :: RuntimeImageLoadFailed", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/images.rs", "Err", "write_image_receipt", "OperationError :: InvalidArtifact", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/inspection.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "container_exit_evidence", "the container exit inspection did not run", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "container_exit_evidence", "the container exit inspection failed", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "inspect_recipe_run", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "inspect_recipe_run_with_logs", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "runtime_run_container_running", "OperationError :: CommandFailed", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "runtime_run_container_running", "OperationError :: InvalidArtifact", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "runtime_run_container_running", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "runtime_run_inspect_detail", "OperationError :: CommandFailed", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "runtime_run_inspect_detail", "OperationError :: InvalidOperation", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "runtime_run_inspect_detail", "OperationError :: RuntimeRunMissing", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/inspection.rs", "Err", "runtime_run_inspect_detail", "process_exited ( logs , exit )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/model_paths.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/model_paths.rs", "Err", "canonical_model_root", "OperationError :: UnsafePath", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/model_paths.rs", "Err", "collect_model_tree", "OperationError :: UnsafePath", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/model_paths.rs", "Err", "require_safe_model_path", "OperationError :: UnsafePath", 4]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/packages.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/packages.rs", "Err", "cleanup_inner", "error . into ( )", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/packages.rs", "Err", "install_package", "OperationError :: PackageInstallFailed { exit_code : result . exit_code , diagnostic : String :: from_utf8_lossy ( & result . stdout ) . into_owned ( ) , }", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/packages.rs", "Err", "prepare_package_custody", "OperationError :: UnsafePath", 5],
+        ["rust/crates/vonk-agent-helper/src/operations/packages.rs", "Err", "require_package_field", "OperationError :: PackageMetadataInvalid", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/packages.rs", "Err", "take_package_custody", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/packages.rs", "Err", "take_package_custody", "OperationError :: UnsafePath", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/reconciliation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "lock_installation_runtime", "OperationError :: InstallationReconciliationBusy", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "lock_installation_runtime", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "lock_installation_runtime", "OperationError :: UnsafePath", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "lock_installation_runtime", "errno_io ( error ) . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "refuse_reconciled_runtime", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "require_no_unclassified_installation_runtime", "OperationError :: CommandFailed", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "require_no_unclassified_installation_runtime", "OperationError :: InvalidArtifact", 8],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "runtime_installation_cleanup_bound", "OperationError :: InvalidArtifact", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "runtime_installation_cleanup_bound", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "runtime_installation_cleanup_bound", "errno_io ( error ) . into ( )", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "runtime_reconcile_installation_inner", "OperationError :: InvalidArtifact", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "runtime_reconcile_installation_inner", "OperationError :: Io ( error )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/reconciliation.rs", "Err", "validate_reconciliation_installation_metadata", "OperationError :: UnsafePath", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/start.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/start.rs", "Err", "runtime_start_locked", "OperationError :: CommandFailed", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/start.rs", "Err", "runtime_start_locked", "OperationError :: InvalidArtifact", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/start.rs", "Err", "runtime_start_locked", "OperationError :: InvalidOperation", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/start.rs", "Err", "runtime_wait_for_job", "OperationError :: RuntimeJobWaitFailed { evidence }", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/start.rs", "Err", "runtime_wait_for_job", "runtime job deadline elapsed . to_owned ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/stop.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/stop.rs", "Err", "runtime_stop_once", "OperationError :: CommandFailed", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/stop.rs", "Err", "runtime_stop_once", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/stop.rs", "Err", "runtime_stop_once", "OperationError :: InvalidOperation", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/storage.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "ensure_private_directory", "error . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "ensure_runtime_directory", "OperationError :: UnsafePath", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "ensure_runtime_directory", "error . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "read_helper_reconciliation_receipt", "OperationError :: InvalidArtifact", 3],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "read_helper_reconciliation_receipt", "error . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "remove_directory_entry", "OperationError :: UnsafePath", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "require_agent_artifact", "OperationError :: InvalidArtifact", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "require_exact_directory", "OperationError :: UnsafePath", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "require_runtime_directory", "OperationError :: UnsafePath", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "require_safe_directory", "OperationError :: UnsafePath", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/storage.rs", "Err", "write_helper_reconciliation_receipt", "OperationError :: InvalidOperation", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/operations/validation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "docker_arguments", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "parse_mount", "OperationError :: InvalidOperation", 2],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "validate_docker_run_with_archive", "OperationError :: InvalidOperation", 32],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "validate_docker_run_with_archive", "OperationError :: UnsafePath", 4],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "validate_runtime_invocation", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "validate_runtime_invocation", "OperationError :: RuntimeInvocationLimitExceeded { string_limit : false , limit_bytes : limit , observed_bytes : observed , }", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "validate_runtime_invocation", "OperationError :: RuntimeInvocationLimitExceeded { string_limit : true , limit_bytes : limit , observed_bytes : observed , }", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "validate_runtime_job_plan", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "validate_runtime_start_plan", "OperationError :: InvalidOperation", 1],
+        ["rust/crates/vonk-agent-helper/src/operations/validation.rs", "Err", "validate_runtime_stop_plan", "OperationError :: InvalidOperation", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/package_command.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/package_command.rs", "Err", "run_inner", "e", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/package_rollback.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "acknowledge", "candidate executable identity changed . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "check_acknowledgement", "activation acknowledgement does not match this attempt . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "command_with_nonce", "format ! ( package command failed: {path} )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "command_with_nonce", "format ! ( package command failed: {path}: {} , String :: from_utf8_lossy ( & output . diagnostic ( ) ) )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "command_with_nonce", "package command timed out . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prepare", "activation attempt nonce was already used . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prepare", "another package activation is unresolved . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prepare", "captured source identity differs from installed package . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prepare", "invalid activation deadline or source . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prepare", "package identity mismatch . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prepare", "signed source payload does not match captured installed identity . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prepare", "source package is not configured . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prerequisites", "format ! ( unsafe package prerequisite: {executable} )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prove_running_process", "service process identity differs . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "prove_running_process", "service process is unavailable . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "read", "invalid rollback authority . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "restore", "captured source changed . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "restore", "installed executable escaped rollback authority . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "restore", "installed version escaped rollback authority . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "restore", "restored source executable mismatch . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "restore", "source package is not configured after rollback . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "retire_candidate_recovery", "candidate recovery belongs to another transaction . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "retire_candidate_recovery", "unsafe candidate recovery gate . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "retry_process_proof", "error", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "safe", "unsafe rollback custody . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "validate_maintainer_rollback", "captured source changed . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "validate_maintainer_rollback", "maintainer rollback is outside captured source authority . into ( )", 1],
+        ["rust/crates/vonk-agent-helper/src/package_rollback.rs", "Err", "validate_maintainer_rollback", "rollback unit cgroup unavailable . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/protocol.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/protocol.rs", "Err", "parse_inspection_request", "HelperError :: InvalidMessage", 2],
+        ["rust/crates/vonk-agent-helper/src/protocol.rs", "Err", "parse_request", "HelperError :: InvalidMessage", 2],
+        ["rust/crates/vonk-agent-helper/src/protocol.rs", "Err", "read_frame", "HelperError :: InvalidFrame", 1],
+        ["rust/crates/vonk-agent-helper/src/protocol.rs", "Err", "write_frame", "HelperError :: InvalidFrame", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/runtime_fabric.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/runtime_fabric.rs", "Err", "entries", "FabricError :: Unavailable", 1],
+        ["rust/crates/vonk-agent-helper/src/runtime_fabric.rs", "Err", "read", "FabricError :: Unavailable", 1],
+        ["rust/crates/vonk-agent-helper/src/runtime_fabric.rs", "Err", "resolve", "FabricError :: Unavailable", 5],
+        ["rust/crates/vonk-agent-helper/src/runtime_fabric.rs", "Err", "same_port_rails", "it has no IPv4 address at the GID index", 1],
+        ["rust/crates/vonk-agent-helper/src/runtime_fabric.rs", "Err", "same_port_rails", "its GID at that index has no interface", 1],
+        ["rust/crates/vonk-agent-helper/src/runtime_fabric.rs", "Err", "same_port_rails", "its GID at that index is not RoCE v2", 1],
+        ["rust/crates/vonk-agent-helper/src/runtime_fabric.rs", "Err", "same_port_rails", "its port is not active", 1],
+        ["rust/crates/vonk-agent-helper/src/runtime_fabric.rs", "Err", "same_port_rails", "reason", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/runtime_preflight.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/runtime_preflight.rs", "Err", "run", "io :: Error :: other ( unsafe installed runtime probe )", 1],
+        ["rust/crates/vonk-agent-helper/src/runtime_preflight.rs", "Err", "run", "io :: Error :: other ( unsafe runtime preflight root )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/agent_upgrade.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "call_helper", "AgentUpgradeError :: GrantInvalid", 1],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "call_helper", "AgentUpgradeError :: HelperResponseInvalid", 1],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "download", "AgentUpgradeError :: DownloadIdentityInvalid", 3],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "ensure_private_directory", "AgentUpgradeError :: DownloadIdentityInvalid", 1],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "ensure_private_directory", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "execute", "AgentUpgradeError :: HelperResponseInvalid", 1],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "execute", "AgentUpgradeError :: RestartNotObserved", 1],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "validate_helper_response", "AgentUpgradeError :: HelperResponseInvalid", 3],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "validate_helper_response", "match code { Some ( code ) => AgentUpgradeError :: HelperRejectedWithCode { code , exit_code : response . exit_code . map ( | code | code as i32 ) , diagnostic : response . diagnostic . as_deref ( ) . map ( crate :: failure_evidence :: sanitize_text ) , } , None => AgentUpgradeError :: HelperRejected , }", 1],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "verified_file", "AgentUpgradeError :: DownloadIdentityInvalid", 2],
+        ["rust/crates/vonk-agent/src/agent_upgrade.rs", "Err", "verified_file", "error . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/base_images.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "exact_manifest_digest", "BaseImageError :: Invalid", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "open", "BaseImageError :: Invalid", 2],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "open_or_create_directory", "BaseImageError :: Invalid", 2],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "open_or_create_directory", "classify_open_error ( error )", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "open_regular_at", "classify_open_error ( error )", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "produce_archive", "BaseImageError :: ArchiveEvidence", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "produce_archive", "BaseImageError :: BlobEvidence", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "produce_archive", "BaseImageError :: BlobTransfer", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "produce_archive", "BaseImageError :: Io ( std :: io :: Error :: from ( error ) )", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "produce_archive", "BaseImageError :: Limit", 4],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "produce_archive", "BaseImageError :: ManifestEvidence", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "produce_archive", "BaseImageError :: ManifestTransfer", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "read_archive_entry", "BaseImageError :: Invalid", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "read_archive_entry", "BaseImageError :: Limit", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "read_bounded", "BaseImageError :: Invalid", 2],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "read_bounded", "BaseImageError :: Limit", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "registry_source", "BaseImageError :: Invalid", 4],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "require_record", "BaseImageError :: Invalid", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "scan_archive", "BaseImageError :: Invalid", 3],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "validate_manifest", "BaseImageError :: Invalid", 3],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "validate_platform", "BaseImageError :: Invalid", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "verified_stored_image", "BaseImageError :: Invalid", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "verified_stored_image", "BaseImageError :: Limit", 1],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "verify_archive", "BaseImageError :: Invalid", 6],
+        ["rust/crates/vonk-agent/src/base_images.rs", "Err", "verify_archive", "BaseImageError :: Limit", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/build_source.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/build_source.rs", "Err", "materialize_source_bundle", "BuildSourceError :: Digest", 2],
+        ["rust/crates/vonk-agent/src/build_source.rs", "Err", "materialize_source_bundle", "BuildSourceError :: Entry", 2],
+        ["rust/crates/vonk-agent/src/build_source.rs", "Err", "materialize_source_bundle", "BuildSourceError :: Path", 1],
+        ["rust/crates/vonk-agent/src/build_source.rs", "Err", "materialize_source_bundle", "BuildSourceError :: Size", 3],
+        ["rust/crates/vonk-agent/src/build_source.rs", "Err", "safe_path", "BuildSourceError :: Path", 3]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/distribution.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/distribution.rs", "Err", "distribution_manifest", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/distribution.rs", "Err", "download_distribution_object", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/distribution.rs", "Err", "download_distribution_with_progress", "ClientError :: Protocol", 3],
+        ["rust/crates/vonk-agent/src/client/distribution.rs", "Err", "download_trusted_distribution_object_with_progress", "ClientError :: Protocol", 9],
+        ["rust/crates/vonk-agent/src/client/distribution.rs", "Err", "download_trusted_distribution_object_with_progress", "ClientError :: Retryable", 1],
+        ["rust/crates/vonk-agent/src/client/distribution.rs", "Err", "download_trusted_distribution_object_with_progress", "error", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/grants.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/grants.rs", "Err", "agent_upgrade_grant", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/grants.rs", "Err", "build_host_runtime_grant_request", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/grants.rs", "Err", "host_runtime_plan_binding", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/grants.rs", "Err", "recipe_run_disposition", "ClientError :: Protocol", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/jobs.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/jobs.rs", "Err", "download_recipe_job_input", "ClientError :: Protocol", 3],
+        ["rust/crates/vonk-agent/src/client/jobs.rs", "Err", "source_bundle", "ClientError :: Protocol", 2],
+        ["rust/crates/vonk-agent/src/client/jobs.rs", "Err", "upload_recipe_image", "ClientError :: Protocol", 4],
+        ["rust/crates/vonk-agent/src/client/jobs.rs", "Err", "upload_recipe_image", "ClientError :: Retryable", 2],
+        ["rust/crates/vonk-agent/src/client/jobs.rs", "Err", "upload_recipe_job_output", "ClientError :: Protocol", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/mod.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/mod.rs", "Err", "build_exact_recipe_run_observations", "ClientError :: Protocol", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/operations.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/operations.rs", "Err", "heartbeat", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/operations.rs", "Err", "image_store_request", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/operations.rs", "Err", "submit_result", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/operations.rs", "Err", "submit_result", "ClientError :: ResultRejected ( Box :: new ( error ) )", 1],
+        ["rust/crates/vonk-agent/src/client/operations.rs", "Err", "submit_result", "ClientError :: ResultSuperseded", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/renewal.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/renewal.rs", "Err", "renew", "ClientError :: Controller ( Box :: new ( controller_error ( status , & endpoint , & operation , request_id , code , ) ) )", 1],
+        ["rust/crates/vonk-agent/src/client/renewal.rs", "Err", "renew", "ClientError :: Protocol", 2],
+        ["rust/crates/vonk-agent/src/client/renewal.rs", "Err", "renew_expired", "ClientError :: Protocol", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/reporting.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/reporting.rs", "Err", "report_exact_recipe_run_observations", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/reporting.rs", "Err", "report_inventory", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/reporting.rs", "Err", "report_telemetry", "ClientError :: Protocol", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/response.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/response.rs", "Err", "bounded_body_limit", "ClientError :: Protocol", 2],
+        ["rust/crates/vonk-agent/src/client/response.rs", "Err", "classify_response", "ClientError :: Controller ( Box :: new ( response_controller_error ( response ) , ) )", 1],
+        ["rust/crates/vonk-agent/src/client/response.rs", "Err", "classify_status", "ClientError :: Controller ( Box :: new ( controller_error ( status , / , vonk_agent_protocol :: generated :: AgentDiagnosticOperation :: ControllerRequest . as_str ( ) , None , None , ) ) )", 1],
+        ["rust/crates/vonk-agent/src/client/response.rs", "Err", "parse_claim_response", "ClientError :: Protocol", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/storage.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/storage.rs", "Err", "ensure_private_parent", "ClientError :: Protocol", 4],
+        ["rust/crates/vonk-agent/src/client/storage.rs", "Err", "inspect_trusted_final", "ClientError :: Protocol", 2],
+        ["rust/crates/vonk-agent/src/client/storage.rs", "Err", "inspect_trusted_final", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/client/storage.rs", "Err", "open_trusted_partial", "ClientError :: Protocol", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/transfer.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/transfer.rs", "Err", "download_content_addressed_with_progress", "ClientError :: CredentialRead ( error )", 1],
+        ["rust/crates/vonk-agent/src/client/transfer.rs", "Err", "download_content_addressed_with_progress", "ClientError :: Protocol", 6]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/client/transport.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/client/transport.rs", "Err", "activate", "ClientError :: Protocol", 2],
+        ["rust/crates/vonk-agent/src/client/transport.rs", "Err", "activate_replacement_until", "ClientError :: Protocol", 1],
+        ["rust/crates/vonk-agent/src/client/transport.rs", "Err", "activate_replacement_until", "ClientError :: Retryable", 1],
+        ["rust/crates/vonk-agent/src/client/transport.rs", "Err", "recover_renewal", "ClientError :: Protocol", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/config.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/config.rs", "Err", "load", "ConfigError :: Unsafe ( configuration path )", 1],
+        ["rust/crates/vonk-agent/src/config.rs", "Err", "validate", "ConfigError :: Unsafe ( ca_sha256 )", 1],
+        ["rust/crates/vonk-agent/src/config.rs", "Err", "validate", "ConfigError :: Unsafe ( fabric settings )", 1],
+        ["rust/crates/vonk-agent/src/config.rs", "Err", "validate", "ConfigError :: Unsafe ( name )", 1],
+        ["rust/crates/vonk-agent/src/config.rs", "Err", "validate", "ConfigError :: Unsafe ( node_id )", 1],
+        ["rust/crates/vonk-agent/src/config.rs", "Err", "validate_origin", "ConfigError :: Unsafe ( field )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/executor/agent_loop.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/executor/agent_loop.rs", "Err", "run_once_with_heartbeat_interval", "error . into ( )", 4]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/executor/distribution.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/executor/distribution.rs", "Err", "execute_distribution", "error", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/executor/heartbeat.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/executor/heartbeat.rs", "Err", "run_heartbeats", "error . into ( )", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/executor/jobs.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/executor/jobs.rs", "Err", "collect_job_outputs", "job output changed while it was collected", 1],
+        ["rust/crates/vonk-agent/src/executor/jobs.rs", "Err", "collect_job_outputs", "job output file count exceeded its bound", 1],
+        ["rust/crates/vonk-agent/src/executor/jobs.rs", "Err", "collect_job_outputs", "job output file size exceeded its bound", 1],
+        ["rust/crates/vonk-agent/src/executor/jobs.rs", "Err", "collect_job_outputs", "job output is unsafe", 1],
+        ["rust/crates/vonk-agent/src/executor/jobs.rs", "Err", "collect_job_outputs", "job output media type is not allowed", 1],
+        ["rust/crates/vonk-agent/src/executor/jobs.rs", "Err", "job_placement", "WorkloadError :: Invalid ( job placement )", 1],
+        ["rust/crates/vonk-agent/src/executor/jobs.rs", "Err", "prepare_job_invocation", "WorkloadError :: Invalid ( job interface )", 1],
+        ["rust/crates/vonk-agent/src/executor/jobs.rs", "Err", "prepare_job_invocation", "WorkloadError :: Invalid ( job invocation authority )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/executor/observations.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "observe_unreadable_run", "RecipeObservationError :: UnownedRun", 1],
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "observe_unreadable_run", "skip ( retirement failed )", 1],
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "observe_unreadable_run", "skip ( the Controller does not have it running )", 1],
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "observe_unreadable_run", "skip ( the Controller is unreachable )", 1],
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "observe_unreadable_run", "skip ( the container could not be inspected )", 1],
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "observe_unreadable_run", "skip ( the container is running )", 1],
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "report_recipe_run_observation_page", "RecipeObservationError :: SkippedRun", 2],
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "report_recipe_run_observation_page", "RecipeObservationError :: UnownedRun", 1],
+        ["rust/crates/vonk-agent/src/executor/observations.rs", "Err", "report_recipe_run_observation_page", "error", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/executor/runtime.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/executor/runtime.rs", "Err", "cleanup_installation_cache", "crate :: host_runtime :: HostRuntimeError :: StopUncertain", 1],
+        ["rust/crates/vonk-agent/src/executor/runtime.rs", "Err", "execute_host_runtime", "crate :: host_runtime :: HostRuntimeError :: StopUncertain", 1],
+        ["rust/crates/vonk-agent/src/executor/runtime.rs", "Err", "execute_host_runtime_plan", "crate :: host_runtime :: HostRuntimeError :: StopUncertain", 1],
+        ["rust/crates/vonk-agent/src/executor/runtime.rs", "Err", "reconcile_installation_runtime", "crate :: host_runtime :: HostRuntimeError :: StopUncertain", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/executor/start.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/executor/start.rs", "Err", "execute_start", "crate :: host_runtime :: HostRuntimeError :: HelperRejected { code , . . }", 1],
+        ["rust/crates/vonk-agent/src/executor/start.rs", "Err", "execute_start", "error", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/executor/stop.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/executor/stop.rs", "Err", "heal_retained_run", "retained_container_foreign ( run_id )", 1],
+        ["rust/crates/vonk-agent/src/executor/stop.rs", "Err", "heal_retained_run", "stall . result", 1],
+        ["rust/crates/vonk-agent/src/executor/stop.rs", "Err", "stop_run_exact", "StopStall :: unproven ( unconfirmed ( WaitReason :: CleanupUnconfirmed , workload local cleanup remains unconfirmed , UnknownEvidence :: at ( FailureStage :: StopCleanup ) . because ( error . safe_category ( ) ) , ) )", 1],
+        ["rust/crates/vonk-agent/src/executor/stop.rs", "Err", "stop_run_exact", "StopStall :: unproven ( unconfirmed ( WaitReason :: StopUnconfirmed , workload stop remains unconfirmed , UnknownEvidence :: at ( FailureStage :: StopPlan ) . because ( no exact stop plan could be derived from the claim ) , ) )", 1],
+        ["rust/crates/vonk-agent/src/executor/stop.rs", "Err", "stop_run_exact", "StopStall :: unproven ( unconfirmed ( WaitReason :: StopUnconfirmed , workload stop remains unconfirmed , UnknownEvidence :: at ( FailureStage :: StopPlan ) . because ( the stop timeout differs from the authorized plan ) , ) )", 1],
+        ["rust/crates/vonk-agent/src/executor/stop.rs", "Err", "stop_run_exact", "StopStall { identity_refused : matches ! ( & error , crate :: host_runtime :: HostRuntimeError :: HelperRejected { code , . . } if * code = = HelperErrorCode :: OperationInvalidArtifact ) , result : unconfirmed ( WaitReason :: StopUnconfirmed , workload stop remains unconfirmed , host_runtime_evidence ( FailureStage :: Stop , & error ) , ) , }", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/failure_evidence.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/failure_evidence.rs", "Err", "bounded_command", "error", 1],
+        ["rust/crates/vonk-agent/src/failure_evidence.rs", "Err", "bounded_command", "std :: io :: Error :: new ( std :: io :: ErrorKind :: TimedOut , collection-budget-exhausted , )", 1],
+        ["rust/crates/vonk-agent/src/failure_evidence.rs", "Err", "bounded_command", "std :: io :: Error :: new ( std :: io :: ErrorKind :: TimedOut , diagnostic-command-timeout , )", 1],
+        ["rust/crates/vonk-agent/src/failure_evidence.rs", "Err", "bounded_command", "std :: io :: Error :: other ( diagnostic-command-failed )", 1],
+        ["rust/crates/vonk-agent/src/failure_evidence.rs", "Err", "bounded_command", "std :: io :: Error :: other ( diagnostic-output-limit )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/health.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/health.rs", "Err", "wait_ready_until", "HealthError :: Deadline", 3],
+        ["rust/crates/vonk-agent/src/health.rs", "Err", "wait_ready_until", "HealthError :: Path", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/host_runtime/mod.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/host_runtime/mod.rs", "Err", "execute_bound", "runtime_rejection ( & response , action )", 1],
+        ["rust/crates/vonk-agent/src/host_runtime/mod.rs", "Err", "inspect_recipe_run_report_with_permit", "HostRuntimeError :: HelperProtocol ( HelperProtocolCause :: InspectionOutcome , )", 2],
+        ["rust/crates/vonk-agent/src/host_runtime/mod.rs", "Err", "inspect_recipe_run_report_with_permit", "runtime_rejection ( & response , HostRuntimeAction :: RunInspect )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/host_runtime/responses.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/host_runtime/responses.rs", "Err", "require_bound_response", "HostRuntimeError :: HelperProtocol ( HelperProtocolCause :: ResponseUnbound , )", 2],
+        ["rust/crates/vonk-agent/src/host_runtime/responses.rs", "Err", "require_executed_outcome", "malformed ( )", 3]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/host_runtime/transport.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/host_runtime/transport.rs", "Err", "call_helper", "HostRuntimeError :: HelperProtocol ( HelperProtocolCause :: MessageFraming , )", 1],
+        ["rust/crates/vonk-agent/src/host_runtime/transport.rs", "Err", "call_helper", "HostRuntimeError :: HelperProtocolBound { cause : HelperProtocolCause :: MessageFraming , limit : Some ( MAX_HELPER_MESSAGE_BYTES as u64 ) , observed : body . len ( ) as u64 , }", 1],
+        ["rust/crates/vonk-agent/src/host_runtime/transport.rs", "Err", "write_request", "HostRuntimeError :: HelperProtocol ( HelperProtocolCause :: RequestStorage , )", 3],
+        ["rust/crates/vonk-agent/src/host_runtime/transport.rs", "Err", "write_request", "error . into ( )", 3]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/identity.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "archive_pointer", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "archive_pointer", "std :: io :: Error :: other ( identity generation pointer is invalid ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "atomic_private_write", "error", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "certificate_expired", "std :: io :: Error :: other ( identity certificate chain is empty ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "cleanup_abandoned_generations", "std :: io :: Error :: other ( identity generation is unsafe ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "clear_pending", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "ensure_private_directory", "std :: io :: Error :: other ( identity root is unsafe )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "generate_pending", "IdentityError :: Node", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "generation_paths", "std :: io :: Error :: other ( identity generation is unsafe ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "load_pending", "std :: io :: Error :: other ( pending identity is incomplete ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "load_pointer", "std :: io :: Error :: other ( identity generation pointer is invalid ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "persist_identity", "IdentityError :: Node", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "prune_retired_generations", "std :: io :: Error :: other ( retired identity archive is unsafe ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "publish_staged", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "publish_staged", "std :: io :: Error :: other ( staged identity generation changed ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "read_private", "std :: io :: Error :: other ( pending identity path is unsafe )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "renewal_time", "std :: io :: Error :: other ( active certificate validity is invalid ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "replacement_archive_path", "std :: io :: Error :: other ( identity replacement archive is exhausted ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "retire_expired_staged", "std :: io :: Error :: other ( staged identity generation changed ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "stage_identity", "IdentityError :: ActiveGeneration", 2],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "stage_identity", "IdentityError :: GenerationRollback", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "stage_identity", "IdentityError :: Node", 1],
+        ["rust/crates/vonk-agent/src/identity.rs", "Err", "stage_identity", "std :: io :: Error :: other ( identity generation is unsafe ) . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/image_store.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/image_store.rs", "Err", "parse_request_head", "RequestRefusal :: Malformed", 3],
+        ["rust/crates/vonk-agent/src/image_store.rs", "Err", "parse_request_head", "RequestRefusal :: Method", 1],
+        ["rust/crates/vonk-agent/src/image_store.rs", "Err", "parse_request_head", "RequestRefusal :: Path", 1],
+        ["rust/crates/vonk-agent/src/image_store.rs", "Err", "read_request_head", "std :: io :: Error :: other ( request head too large )", 1],
+        ["rust/crates/vonk-agent/src/image_store.rs", "Err", "read_request_head", "std :: io :: ErrorKind :: UnexpectedEof . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/inventory.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "available_memory_bytes", "InventoryError :: Parse", 2],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "collect", "InventoryError :: PrerequisiteUnavailable ( NVIDIA CDI device list , )", 1],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "collect", "InventoryError :: PrerequisiteUnavailable ( NVIDIA GPU discovery , )", 1],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "collect", "InventoryError :: PrerequisiteUnavailable ( Podman )", 1],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "maintain_state_database_reserve", "error", 3],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "maintain_state_database_reserve", "std :: io :: Error :: other ( state database reserve is unsafe )", 1],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "parse_gpus", "InventoryError :: Parse", 2],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "parse_meminfo", "InventoryError :: Parse", 1],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "startup_probe", "InventoryError :: PrerequisiteUnavailable ( dependency )", 1],
+        ["rust/crates/vonk-agent/src/inventory.rs", "Err", "text", "InventoryError :: Parse", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/main.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/main.rs", "Err", "agent_main", "pairing token must be supplied through --token-stdin . into ( )", 1],
+        ["rust/crates/vonk-agent/src/main.rs", "Err", "collect_inventory_until_ready", "error", 1],
+        ["rust/crates/vonk-agent/src/main.rs", "Err", "rotate_until_settled", "error", 1],
+        ["rust/crates/vonk-agent/src/main.rs", "Err", "run_agent", "error", 2],
+        ["rust/crates/vonk-agent/src/main.rs", "Err", "run_agent", "error . into ( )", 2],
+        ["rust/crates/vonk-agent/src/main.rs", "Err", "run_control_lane", "error . into ( )", 2],
+        ["rust/crates/vonk-agent/src/main.rs", "ExitCode::from", "main", "agent_error_exit_status ( error . as_ref ( ) )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/network_tests.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/network_tests.rs", "Err", "run", "crate :: process :: ProcessError :: Timeout", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/custody.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "begin_installation_acl_transition", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "finish_installation_acl_transition", "OciError :: Artifact", 3],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "load_uninstall_spec", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "model_store_objects", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "read_persisted_spec", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "recipe_digest", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "recipe_digest_if_present", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "recipe_digest_if_present", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "runtime_cache_present", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "runtime_cache_present", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/custody.rs", "Err", "validate_uninstall_with_model_cleanup", "OciError :: Artifact", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/installation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/installation.rs", "Err", "ensure_disk_available", "OciError :: Capacity", 1],
+        ["rust/crates/vonk-agent/src/oci/installation.rs", "Err", "install_unlocked", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/installation.rs", "Err", "install_unlocked", "install_error ( FailureStage :: InstallationMetadata , OciError :: Artifact , )", 1],
+        ["rust/crates/vonk-agent/src/oci/installation.rs", "Err", "reuse_completed_install", "OciError :: Artifact", 4],
+        ["rust/crates/vonk-agent/src/oci/installation.rs", "Err", "reuse_completed_install", "error . into ( )", 2],
+        ["rust/crates/vonk-agent/src/oci/installation.rs", "Err", "verify_image", "OciError :: ImageDigest", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/jobs.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/jobs.rs", "Err", "cleanup_job_scope", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/jobs.rs", "Err", "cleanup_job_scope", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/jobs.rs", "Err", "job_input_destination", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/jobs.rs", "Err", "job_output_root", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/jobs.rs", "Err", "job_output_state", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/jobs.rs", "Err", "verify_job_inputs", "OciError :: Artifact", 3],
+        ["rust/crates/vonk-agent/src/oci/jobs.rs", "Err", "write_job_input_manifest", "OciError :: Artifact", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/lifecycle.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/lifecycle.rs", "Err", "complete_stop", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/lifecycle.rs", "Err", "complete_stop", "error . into ( )", 3],
+        ["rust/crates/vonk-agent/src/oci/lifecycle.rs", "Err", "ensure_runtime_cache", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/lifecycle.rs", "Err", "prepare_job_start", "OciError :: Runtime", 1],
+        ["rust/crates/vonk-agent/src/oci/lifecycle.rs", "Err", "prepare_retained_start", "OciError :: Runtime", 2],
+        ["rust/crates/vonk-agent/src/oci/lifecycle.rs", "Err", "prepare_retained_start_with_inspection_identity", "OciError :: Runtime", 2],
+        ["rust/crates/vonk-agent/src/oci/lifecycle.rs", "Err", "prepare_start_internal", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/lifecycle.rs", "Err", "start_arguments", "OciError :: Runtime", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/materialization.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/materialization.rs", "Err", "materialize_compiled_models_with", "OciError :: Artifact", 8],
+        ["rust/crates/vonk-agent/src/oci/materialization.rs", "Err", "materialize_compiled_models_with", "OciError :: Workload ( WorkloadError :: Invalid ( compiled model artifact physical identity , ) )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/metadata.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/metadata.rs", "Err", "materialized_model_bytes", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/metadata.rs", "Err", "materialized_model_bytes", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/metadata.rs", "Err", "open_trusted_model_file", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/metadata.rs", "Err", "read_installation_metadata", "error . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/mod.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/mod.rs", "Err", "observation_directory_stamp", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/mod.rs", "Err", "observation_directory_stamp", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/mod.rs", "Err", "open_observation_directory", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/mod.rs", "Err", "open_observation_directory", "std :: io :: Error :: new ( std :: io :: ErrorKind :: WouldBlock , run inspection directory changed between capture and open , ) . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/observation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "ensure_run_metadata", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "ensure_run_metadata", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "load_run_lifecycle", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "read_run_lifecycle", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "read_run_lifecycle", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "recipe_run_inspection_page", "error", 1],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "recipe_run_inspection_page", "std :: io :: Error :: from ( error ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "recipe_run_inspection_plans", "error", 3],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "recipe_run_inspection_plans", "fault . error", 1],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "recipe_run_inspection_plans", "std :: io :: Error :: new ( std :: io :: ErrorKind :: TimedOut , run inspection aggregate budget expired , ) . into ( )", 2],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "recipe_run_inspection_plans", "std :: io :: Error :: new ( std :: io :: ErrorKind :: WouldBlock , run inspection coverage changed during collection , ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "recipe_run_inspection_plans", "std :: io :: Error :: new ( std :: io :: ErrorKind :: WouldBlock , run inspection enumeration restarted during collection , ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/observation.rs", "Err", "run_metadata_path", "OciError :: Artifact", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/reconciliation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "ensure_installation_reconciliation_root", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "ensure_installation_reconciliation_root", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "finalize_reconciliation", "OciError :: Artifact", 7],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "lock_installation_reconciliation", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "lock_installation_reconciliation", "OciError :: Io ( error . into ( ) )", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "lock_installation_reconciliation", "OciError :: ReconciliationBusy", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "path_exists_without_following", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "prepare_reconciliation", "OciError :: Artifact", 7],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "read_reconciliation_checkpoint", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "read_reconciliation_checkpoint", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "read_reconciliation_directory_identity", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "read_reconciliation_directory_identity", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "reconciliation_checkpoint_path", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "reconciliation_quarantine_path", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "refuse_reconciled_installation", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "refuse_reconciled_installation", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/reconciliation.rs", "Err", "write_reconciliation_checkpoint", "OciError :: Artifact", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/oci/storage.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/oci/storage.rs", "Err", "ensure_runtime_tmp", "OciError :: Artifact", 3],
+        ["rust/crates/vonk-agent/src/oci/storage.rs", "Err", "ensure_runtime_tmp", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/oci/storage.rs", "Err", "read_regular_file", "OciError :: Artifact", 2],
+        ["rust/crates/vonk-agent/src/oci/storage.rs", "Err", "release_page_cache", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/storage.rs", "Err", "tree_bytes", "OciError :: Artifact", 1],
+        ["rust/crates/vonk-agent/src/oci/storage.rs", "Err", "visit_files", "OciError :: Artifact", 5]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/package_activation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/package_activation.rs", "Err", "acknowledge", "AgentUpgradeError :: HelperResponseInvalid", 2],
+        ["rust/crates/vonk-agent/src/package_activation.rs", "Err", "read_receipt", "AgentUpgradeError :: GrantInvalid", 2],
+        ["rust/crates/vonk-agent/src/package_activation.rs", "Err", "read_receipt", "std :: io :: Error :: from ( error ) . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/pair.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "bounded_file", "PairingError :: Response", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "bounded_pairing_body", "PairingError :: ResponseTooLarge { maximum_bytes : MAX_RESPONSE_BYTES , observed_bytes : ( body . len ( ) as u64 ) . saturating_add ( chunk . len ( ) as u64 ) , }", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "bounded_pairing_body", "PairingError :: ResponseTooLarge { maximum_bytes : MAX_RESPONSE_BYTES , observed_bytes : length , }", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "collect_evidence_from", "PairingError :: Response", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "pair", "PairingError :: CaInvalid", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "pair", "PairingError :: CaPin", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "validate_enrollment_response", "PairingError :: Rejected", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "validate_enrollment_response", "PairingError :: Response", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "validate_enrollment_response", "PairingError :: Status ( status )", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "validate_issued", "PairingError :: Certificate", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "validate_token", "PairingError :: Token", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "verify_ca_pin", "PairingError :: CaInvalid", 1],
+        ["rust/crates/vonk-agent/src/pair.rs", "Err", "verify_ca_pin", "PairingError :: CaPin", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/process.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "present_during_scan", "error", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_bounded_directory", "ProcessError :: StorageLimit", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_bounded_directory_with_input", "ProcessError :: StorageLimit", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_bounded_directory_with_input_cancellable", "ProcessError :: Cancelled", 2],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_bounded_directory_with_output_limit_cancellable", "ProcessError :: Cancelled", 2],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_cancellable", "ProcessError :: Cancelled", 2],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process", "ProcessError :: Cancelled", 2],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process", "ProcessError :: Io ( error )", 2],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process", "ProcessError :: StorageLimit", 3],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process", "ProcessError :: Timeout", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process", "error . into ( )", 2],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process", "std :: io :: Error :: other ( subprocess stderr is unavailable ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process", "std :: io :: Error :: other ( subprocess stdout is unavailable ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process_to_file", "ProcessError :: StorageLimit", 2],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process_to_file", "ProcessError :: Timeout", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process_to_file", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_process_to_file", "std :: io :: Error :: other ( subprocess stderr is unavailable ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_to_file", "ProcessError :: OutputLimit", 1],
+        ["rust/crates/vonk-agent/src/process.rs", "Err", "run_with_input_cancellable", "ProcessError :: Cancelled", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/readiness.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/readiness.rs", "Err", "verify_readiness_at", "ReadinessError :: Mismatch", 1],
+        ["rust/crates/vonk-agent/src/readiness.rs", "Err", "verify_readiness_at", "ReadinessError :: Unsafe", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/recipe_builder/budget.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/recipe_builder/budget.rs", "Err", "ensure_build_disk_available", "ProcessError :: StorageLimit . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/recipe_builder/builder.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "build_adaptation", "RecipeBuildError :: AdapterBuild { diagnostic : podman_build_diagnostic ( & output ) , logs : Some ( Box :: new ( sanitized_process_logs ( & output ) ) ) , }", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "build_cancellable", "ProcessError :: Cancelled . into ( )", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "build_cancellable", "RecipeBuildError :: Evidence", 5],
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "build_cancellable", "RecipeBuildError :: ImageBuild { diagnostic : podman_build_diagnostic ( & output ) , logs : Some ( Box :: new ( sanitized_process_logs ( & output ) ) ) , }", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "build_cancellable", "RecipeBuildError :: ImageExport", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "build_cancellable", "RecipeBuildError :: OutputLimit", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "build_cancellable", "RecipeBuildError :: Policy ( policy )", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "import_base_images", "RecipeBuildError :: BaseImageImport { diagnostic : podman_import_diagnostic ( & loaded ) , logs : Some ( Box :: new ( sanitized_process_logs ( & loaded ) ) ) , }", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/builder.rs", "Err", "import_base_images", "RecipeBuildError :: OutputLimit", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/recipe_builder/cleanup.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/recipe_builder/cleanup.rs", "Err", "cleanup_build", "RecipeBuildError :: Evidence", 5]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/recipe_builder/egress.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/recipe_builder/egress.rs", "Err", "address", "network_boundary_error ( FailureStage :: EgressAddress , & output )", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/egress.rs", "Err", "start", "network_boundary_error ( FailureStage :: EgressImageImport , & imported , )", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/egress.rs", "Err", "start", "network_boundary_error ( FailureStage :: EgressNetworkCreate , & output , )", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/egress.rs", "Err", "start", "network_boundary_error ( FailureStage :: EgressServiceStart , & started , )", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/egress.rs", "Err", "start", "result . readiness_error ( probed )", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/egress.rs", "Err", "write_proxy_rootfs", "RecipeBuildError :: NetworkPolicy", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/recipe_builder/images.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/recipe_builder/images.rs", "Err", "inspect_adapted_image", "RecipeBuildError :: AdapterInspect", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/images.rs", "Err", "inspect_base_image", "RecipeBuildError :: Evidence", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/images.rs", "Err", "inspect_recipe_image", "RecipeBuildError :: ImageInspect", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/images.rs", "Err", "scalar", "RecipeBuildError :: Evidence", 1],
+        ["rust/crates/vonk-agent/src/recipe_builder/images.rs", "Err", "validate_adapter_containerfile", "RecipeBuildError :: AdapterInvalid", 6],
+        ["rust/crates/vonk-agent/src/recipe_builder/images.rs", "Err", "write_adapter_containerfile", "RecipeBuildError :: AdapterInvalid", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/rotation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/rotation.rs", "Err", "rotate_if_due_at", "IdentityError :: Node . into ( )", 1],
+        ["rust/crates/vonk-agent/src/rotation.rs", "Err", "rotate_if_due_at", "RotationError :: ExpiredRecoveryGraceExhausted", 1],
+        ["rust/crates/vonk-agent/src/rotation.rs", "Err", "rotate_if_due_at", "error . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/runtime_identity.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/runtime_identity.rs", "Err", "from_executable", "RuntimeIdentityError :: UnsafeExecutable", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/runtime_preflight.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/runtime_preflight.rs", "Err", "build_probe", "ProcessError :: Cancelled", 1],
+        ["rust/crates/vonk-agent/src/runtime_preflight.rs", "Err", "host_fingerprint", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/runtime_preflight.rs", "Err", "host_fingerprint", "std :: io :: Error :: other ( effective service policy unavailable ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/runtime_preflight.rs", "Err", "run", "error . into ( )", 1],
+        ["rust/crates/vonk-agent/src/runtime_preflight.rs", "Err", "run", "std :: io :: Error :: other ( unsafe preflight cache ) . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/self_test.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/self_test.rs", "Err", "verify_helper_upgrade_marker_state", "SelfTestError :: HelperUpgradePending", 1],
+        ["rust/crates/vonk-agent/src/self_test.rs", "Err", "verify_private_directory", "SelfTestError :: UnsafePath ( name )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/state.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "acknowledge", "StateError :: Stale", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "apply_heartbeat", "StateError :: Stale", 3],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "begin", "StateError :: Busy", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "begin", "StateError :: Expired", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "begin", "StateError :: Identity", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "finish", "StateError :: Identity", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "finish", "StateError :: Stale", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "finish_pending_state_repair", "error . into ( )", 2],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "finish_pending_state_repair", "std :: io :: Error :: other ( state quarantine path is unsafe ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "finish_pending_state_repair", "std :: io :: Error :: other ( state repair intent is unsafe ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "observation_checkpoint", "StateError :: Identity", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "open", "StateError :: Identity", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "open", "std :: io :: Error :: other ( state database path is unsafe ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "open_recovered", "error", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "open_recovered", "std :: io :: Error :: other ( state database path is unsafe ) . into ( )", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "save_observation_checkpoint", "StateError :: Identity", 1],
+        ["rust/crates/vonk-agent/src/state.rs", "Err", "supersede", "StateError :: Stale", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent/src/telemetry.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-agent/src/telemetry.rs", "Err", "new", "TelemetryError :: InvalidBootId", 1],
+        ["rust/crates/vonk-agent/src/telemetry.rs", "Err", "read_boot_id", "TelemetryError :: InvalidBootId", 1],
+        ["rust/crates/vonk-agent/src/telemetry.rs", "Err", "sample_at", "GpuUnavailableReason :: GpuCommandFailed", 1],
+        ["rust/crates/vonk-agent/src/telemetry.rs", "Err", "sample_at", "GpuUnavailableReason :: GpuInvalidOutput", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-build-egress/src/main.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "absolute_http", "400", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "absolute_http", "414", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "authority_checked", "403", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "connect_any", "( )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "copy_bounded", "io :: ErrorKind :: FileTooLarge . into ( )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "copy_bounded", "io :: ErrorKind :: TimedOut . into ( )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "parse_request", "400", 5],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "parse_request", "403", 2],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "parse_request", "405", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "parse_request", "413", 2],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "read_header", "io :: Error :: new ( io :: ErrorKind :: InvalidData , header exceeds limit , )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "read_header", "io :: ErrorKind :: UnexpectedEof . into ( )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "resolve_public", "( )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "run", "declared host allowlist is invalid . to_owned ( )", 2],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "run", "proxy probe response is invalid . to_owned ( )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "run", "usage: vonk-build-egress --allow-host HOST ... . to_owned ( )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "Err", "validate_resolved", "( )", 1],
+        ["rust/crates/vonk-build-egress/src/main.rs", "ExitCode::from", "main", "2", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-build-egress/src/runtime_probe.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-build-egress/src/runtime_probe.rs", "ExitCode::from", "failure", "code", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/environment.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/environment.rs", "Err", "parse_environment", "SetupError :: UnsafeDestination ( existing .env is too large or malformed . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/environment.rs", "Err", "parse_environment", "SetupError :: UnsafeDestination ( format ! ( existing .env repeats {name} ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/environment.rs", "Err", "read_existing_secret", "SetupError :: UnsafeDestination ( format ! ( {} is too large , path . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/environment.rs", "Err", "render_environment", "SetupError :: InvalidPayload ( format ! ( value for {key} contains NUL ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/environment.rs", "Err", "secret_file_exists", "SetupError :: UnsafeDestination ( format ! ( {} is not a regular secret file , path . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/environment.rs", "Err", "secret_file_exists", "error . into ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/filesystem.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "apply_secret_group", "SetupError :: UnsafeDestination ( format ! ( {} is not a regular secret file , path . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "apply_secret_group", "at_path ( & path , error )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "atomic_replace", "at_path ( path , error )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "atomic_replace_controller_leaf", "SetupError :: UnsafeDestination ( controller certificate and key replacements must be distinct files in one directory . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "atomic_replace_controller_leaf", "SetupError :: UnsafeDestination ( format ! ( controller certificate/key replacement failed ({error}) and certificate rollback failed ({rollback_error}) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "atomic_replace_controller_leaf", "error", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "atomic_replace_controller_leaf", "error . into ( )", 2],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "canonicalize_selected_path", "SetupError :: UnsafeDestination ( format ! ( {} is a symbolic link , absolute . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "canonicalize_selected_path", "SetupError :: UnsafeDestination ( format ! ( {} is not a directory , ancestor . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "canonicalize_selected_path", "SetupError :: UnsafeDestination ( parent traversal is not allowed . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "canonicalize_selected_path", "SetupError :: UnsafeDestination ( path has no existing ancestor . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "canonicalize_selected_path", "error . into ( )", 2],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "complete_sync", "error . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "create_staging_directory", "SetupError :: UnsafeDestination ( could not reserve a staging directory . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "create_staging_directory", "error . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "ensure_nested_parent", "SetupError :: InvalidPayload ( format ! ( invalid secret path {relative} ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "ensure_nested_parent", "SetupError :: UnsafeDestination ( format ! ( {} is not a real directory , current . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "ensure_nested_parent", "error . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "ensure_safe_output_root", "SetupError :: UnsafeDestination ( output root is not a real directory . to_owned ( ) , )", 2],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "ensure_safe_output_root", "SetupError :: UnsafeDestination ( path is empty . to_owned ( ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "ensure_safe_output_root", "error . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "ensure_secure_directory", "SetupError :: UnsafeDestination ( format ! ( {} is not a real directory , path . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "ensure_secure_directory", "error . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "remove_retired_runtime_configs", "error . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "require_real_directory", "SetupError :: MissingBundle", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "require_regular_file", "SetupError :: MissingBundle", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "set_secret_group", "at_path ( path , error )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "validate_existing_bundle", "SetupError :: UnsafeDestination ( format ! ( {} is an unexpected top-level entry , entry . path ( ) . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "validate_existing_bundle", "error . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "validate_secret_tree", "SetupError :: UnsafeDestination ( format ! ( {} has an unsafe path component , path . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "validate_secret_tree", "SetupError :: UnsafeDestination ( format ! ( {} is a symbolic link , path . display ( ) ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/filesystem.rs", "Err", "validate_secret_tree", "SetupError :: UnsafeDestination ( format ! ( {} is not a regular secret file , path . display ( ) ) )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/install.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/install.rs", "Err", "generate_missing_secrets", "error", 1],
+        ["rust/crates/vonk-nas-setup/src/install.rs", "Err", "install", "SetupError :: AlreadyExists", 1],
+        ["rust/crates/vonk-nas-setup/src/install.rs", "Err", "prepare", "SetupError :: PermissionDenied { path : bundle , source , }", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/main.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/main.rs", "Err", "open_private_answers", "answers file changed while it was opened . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/main.rs", "Err", "open_private_answers", "answers file must be a private, singly linked regular file . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/main.rs", "Err", "prepare_bundle", "template payload is not a regular file of an acceptable size . into ( )", 1],
+        ["rust/crates/vonk-nas-setup/src/main.rs", "process::exit", "main", "1", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/pki_validation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_es256_jwks", "invalid_pki ( private provisioner JWK does not match the public JWK , )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_es256_jwks", "invalid_pki ( provisioner JWK kid is not an RFC 7638 thumbprint , )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_es256_jwks", "invalid_pki ( provisioner JWK metadata is inconsistent )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( CA certificate is outside its validity period )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( Step CA configuration does not describe the imported authority , )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( certificate chain is inconsistent )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( controller certificate Authority Key Identifier must match the intermediate \\\n             subject key identifier; regenerate the Step CA/controller PKI group , )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( controller certificate hostnames do not match the configured hostnames , )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( controller certificate is not valid yet )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( controller certificate is outside its validity period , )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( controller private key does not match the controller certificate , )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( intermediate certificate must carry an Authority Key Identifier that matches the \\\n             root subject key identifier; regenerate the Step CA/controller PKI group , )", 1],
+        ["rust/crates/vonk-nas-setup/src/pki_validation.rs", "Err", "validate_pki_material_at", "invalid_pki ( intermediate private key does not match the intermediate certificate , )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/prompts.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/prompts.rs", "Err", "line", "SetupError :: InputEnded", 1],
+        ["rust/crates/vonk-nas-setup/src/prompts.rs", "Err", "read_secret", "io :: Error :: new ( io :: ErrorKind :: UnexpectedEof , input ended )", 1],
+        ["rust/crates/vonk-nas-setup/src/prompts.rs", "Err", "validate_ed25519_private_key", "SetupError :: InvalidSecretMaterial ( format ! ( {file} is not a canonical Ed25519 PKCS#8 PEM private key ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/prompts.rs", "Err", "validate_single_line_secret", "SetupError :: InvalidSecretMaterial ( format ! ( {file} must be a non-empty single-line value ) )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/secrets.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/secrets.rs", "Err", "generate", "SecretGenerationError", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/template.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( Hermes enabled and disabled values must be distinct single-line values . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( Hermes prompt is empty . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( Step CA/controller request is incomplete . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( docker compose payload is empty or malformed . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( PostgreSQL URL {} references undeclared password file {} , request . file , request . password_file ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( Step CA hostname environment key {} is undeclared , request . hostname_env ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( duplicate environment key {} , hermes . env ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( duplicate environment key {} , value . env ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( duplicate group-readable secret {file} ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( duplicate lab environment value {} , value . env ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( generation prefix for {} is invalid , request . file ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( generation size for {} is outside 16..=128 bytes , request . file ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( format ! ( internal value for {} contains NUL , value . env ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( install mode choices are invalid . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( preflight checklist is malformed . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( secret group needs a non-root gid and files . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate", "SetupError :: InvalidPayload ( unsupported schema version . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_env_name", "SetupError :: InvalidPayload ( format ! ( invalid environment key {name} ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_generated_file", "SetupError :: InvalidPayload ( format ! ( duplicate secret file {file} ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_postgres_url_request", "SetupError :: InvalidPayload ( format ! ( PostgreSQL URL request for {} is invalid , request . file ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_prompts", "SetupError :: InvalidPayload ( format ! ( default for {} does not satisfy its validator , value . env ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_prompts", "SetupError :: InvalidPayload ( format ! ( duplicate environment key {} , value . env ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_prompts", "SetupError :: InvalidPayload ( format ! ( duplicate secret file {} , secret . file ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_prompts", "SetupError :: InvalidPayload ( format ! ( prompt for {} is empty , secret . file ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_prompts", "SetupError :: InvalidPayload ( format ! ( prompt for {} is empty , value . env ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_prompts", "SetupError :: InvalidPayload ( format ! ( secret path {} conflicts with another secret , secret . file ) )", 1],
+        ["rust/crates/vonk-nas-setup/src/template.rs", "Err", "validate_secret_name", "SetupError :: InvalidPayload ( format ! ( invalid secret filename {name} ) )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-nas-setup/src/upgrade.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-nas-setup/src/upgrade.rs", "Err", "upgrade", "SetupError :: InvalidSecretMaterial ( partial Step CA/controller PKI group cannot be upgraded . to_owned ( ) , )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/apply.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/apply.rs", "Err", "apply_setup_from_with_authority", "SetupError :: PrivilegedInput", 3],
+        ["rust/crates/vonk-spark-setup/src/apply.rs", "Err", "validate_apply_envelope", "SetupError :: PrivilegedInput", 3],
+        ["rust/crates/vonk-spark-setup/src/apply.rs", "Err", "validate_plan_against_installation", "SetupError :: PrivilegedInput", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/config_files.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/config_files.rs", "Err", "atomic_root_write", "SetupError :: PrivilegedInput", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/configuration.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/configuration.rs", "Err", "install_configuration", "SetupError :: PrivilegedInput", 2],
+        ["rust/crates/vonk-spark-setup/src/configuration.rs", "Err", "install_host_mapping", "SetupError :: PrivilegedInput", 5],
+        ["rust/crates/vonk-spark-setup/src/configuration.rs", "Err", "pair_agent", "SetupError :: UnsafeInput ( pairing token )", 1],
+        ["rust/crates/vonk-spark-setup/src/configuration.rs", "Err", "refresh_configuration", "SetupError :: PrivilegedWrite ( error )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/enrollment.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/enrollment.rs", "Err", "discover_enrollment", "SetupError :: EnrollmentBootstrap", 1],
+        ["rust/crates/vonk-spark-setup/src/enrollment.rs", "Err", "parse_enrollment_bootstrap", "SetupError :: EnrollmentBootstrap", 1],
+        ["rust/crates/vonk-spark-setup/src/enrollment.rs", "Err", "required_origin", "SetupError :: UnsafeInput ( endpoint URL )", 1],
+        ["rust/crates/vonk-spark-setup/src/enrollment.rs", "Err", "required_sha256", "SetupError :: UnsafeInput ( SHA-256 )", 1],
+        ["rust/crates/vonk-spark-setup/src/enrollment.rs", "Err", "validate_enrollment_bootstrap", "SetupError :: EnrollmentBootstrap", 6],
+        ["rust/crates/vonk-spark-setup/src/enrollment.rs", "Err", "verify_ca", "SetupError :: ControllerCa", 2],
+        ["rust/crates/vonk-spark-setup/src/enrollment.rs", "Err", "verify_reenroll_controller_ca", "SetupError :: ControllerCaChanged { stored : config . ca_sha256 . clone ( ) , advertised : bootstrap . ca_fingerprint , }", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/firewall.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/firewall.rs", "Err", "collect", "SetupError :: UnsafeInput ( Spark network topology )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/handoff.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/handoff.rs", "Err", "authenticate_sudo_foreground", "SetupError :: Command ( sudo authentication failed . to_owned ( ) )", 1],
+        ["rust/crates/vonk-spark-setup/src/handoff.rs", "Err", "handoff_to_root_with_authority", "SetupError :: Command ( privileged installer handoff failed . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-spark-setup/src/handoff.rs", "Err", "handoff_to_root_with_authority", "SetupError :: Command ( sudo authorization expired before privileged apply; rerun setup from a terminal . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-spark-setup/src/handoff.rs", "Err", "root_handoff_script", "SetupError :: ReleaseSignature", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/installation.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/installation.rs", "Err", "install_state", "SetupError :: ExistingInstall", 2],
+        ["rust/crates/vonk-spark-setup/src/installation.rs", "Err", "installed_firewall_configuration", "SetupError :: ExistingInstall", 6],
+        ["rust/crates/vonk-spark-setup/src/installation.rs", "Err", "installed_helper_authority", "SetupError :: ExistingInstall", 2],
+        ["rust/crates/vonk-spark-setup/src/installation.rs", "Err", "paired_configuration", "SetupError :: ExistingInstall", 2],
+        ["rust/crates/vonk-spark-setup/src/installation.rs", "Err", "safe_existing_file", "SetupError :: ExistingInstall", 2],
+        ["rust/crates/vonk-spark-setup/src/installation.rs", "Err", "safe_existing_parent", "SetupError :: ExistingInstall", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/main.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/main.rs", "process::exit", "main", "1", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/package.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/package.rs", "Err", "file_digest", "SetupError :: PackageFormat", 1],
+        ["rust/crates/vonk-spark-setup/src/package.rs", "Err", "install_package", "SetupError :: Command ( /usr/bin/apt-get install . to_owned ( ) )", 1],
+        ["rust/crates/vonk-spark-setup/src/package.rs", "Err", "installed_package_matches", "SetupError :: PackageFormat", 1],
+        ["rust/crates/vonk-spark-setup/src/package.rs", "Err", "installed_package_matches", "error", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/plan.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/plan.rs", "Err", "from_signed_release", "SetupError :: UnsafeInput ( release-controlled setup arguments , )", 1],
+        ["rust/crates/vonk-spark-setup/src/plan.rs", "Err", "ipv4", "SetupError :: PrivilegedInput", 1],
+        ["rust/crates/vonk-spark-setup/src/plan.rs", "Err", "with_enrollment_values", "SetupError :: UnsafeInput ( SHA-256 )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/prepare.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/prepare.rs", "Err", "decode_apply_frame", "SetupError :: PrivilegedInput", 4],
+        ["rust/crates/vonk-spark-setup/src/prepare.rs", "Err", "encode_apply_frame", "SetupError :: PrivilegedInput", 1],
+        ["rust/crates/vonk-spark-setup/src/prepare.rs", "Err", "prepare_setup_with_authority", "SetupError :: UnsafeInput ( pairing token )", 3],
+        ["rust/crates/vonk-spark-setup/src/prepare.rs", "Err", "read_bounded_regular", "SetupError :: ReleaseSignature", 3],
+        ["rust/crates/vonk-spark-setup/src/prepare.rs", "Err", "validate_host_description", "SetupError :: UnsupportedHost", 1],
+        ["rust/crates/vonk-spark-setup/src/prepare.rs", "Err", "validate_native_architecture", "SetupError :: UnsupportedHost", 1],
+        ["rust/crates/vonk-spark-setup/src/prepare.rs", "Err", "validate_system_host", "SetupError :: UnsupportedHost", 2],
+        ["rust/crates/vonk-spark-setup/src/prepare.rs", "Err", "verified_release", "SetupError :: ReleaseSignature", 2]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/process.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/process.rs", "Err", "run_process", "format ! ( {} exceeded its command deadline , program . display ( ) )", 1],
+        ["rust/crates/vonk-spark-setup/src/process.rs", "Err", "value", "tty input ended . to_owned ( )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/readiness.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/readiness.rs", "Err", "run_checked", "SetupError :: Command ( name )", 1],
+        ["rust/crates/vonk-spark-setup/src/readiness.rs", "Err", "verify_sustained_readiness", "SetupError :: Command ( controller readiness was not sustained . to_owned ( ) , )", 1],
+        ["rust/crates/vonk-spark-setup/src/readiness.rs", "Err", "verify_sustained_readiness", "SetupError :: Command ( systemctl . to_owned ( ) )", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/request.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/request.rs", "Err", "authenticate_for", "SetupError :: CallerPhase", 1],
+        ["rust/crates/vonk-spark-setup/src/request.rs", "Err", "from_environment.optional", "SetupError :: UnsafeInput ( name )", 1],
+        ["rust/crates/vonk-spark-setup/src/request.rs", "Err", "from_pem", "SetupError :: ReleaseSignature", 1],
+        ["rust/crates/vonk-spark-setup/src/request.rs", "Err", "require_sudo_root", "SetupError :: CallerPhase", 1],
+        ["rust/crates/vonk-spark-setup/src/request.rs", "Err", "require_unprivileged", "SetupError :: CallerPhase", 1],
+        ["rust/crates/vonk-spark-setup/src/request.rs", "Err", "verify_bounded", "SetupError :: ReleaseSignature", 3]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-spark-setup/src/staging.rs.bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Conservatively inventoried: Rust ending has no reviewed ingress/request boundary or proven bounded retry.",
+      "sites": [
+        ["rust/crates/vonk-spark-setup/src/staging.rs", "Err", "stage_verified_package_from", "SetupError :: PackageDigest", 1],
+        ["rust/crates/vonk-spark-setup/src/staging.rs", "Err", "stage_verified_package_from", "SetupError :: UnsafePackage", 5],
+        ["rust/crates/vonk-spark-setup/src/staging.rs", "Err", "validated_staging_session", "SetupError :: PrivilegedInput", 5],
+        ["rust/crates/vonk-spark-setup/src/staging.rs", "Err", "verify_debian_identity", "SetupError :: PackageIdentity", 1],
+        ["rust/crates/vonk-spark-setup/src/staging.rs", "Err", "verify_debian_identity.field", "SetupError :: PackageFormat", 1],
+        ["rust/crates/vonk-spark-setup/src/staging.rs", "Err", "verify_regular_file_digest", "SetupError :: PackageDigest", 1],
+        ["rust/crates/vonk-spark-setup/src/staging.rs", "Err", "verify_regular_file_digest", "SetupError :: UnsafePackage", 2],
+        ["rust/crates/vonk-spark-setup/src/staging.rs", "Err", "verify_release_artifact_size", "SetupError :: ReleaseSignature", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/protocol.rs.authorize_peer",
+      "category": "security-edge",
+      "reason": "OS peer group authority is required before privileged effects.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/protocol.rs", "Err", "authorize_peer", "HelperError :: InvalidPeer", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/protocol.rs.authorize",
+      "category": "security-edge",
+      "reason": "Rejects expired, forged or incorrectly keyed signed grants before privileged effects.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/protocol.rs", "Err", "authorize", "HelperError :: InvalidAuthorization", 1]
+      ]
+    },
+    {
+      "family": "rust/crates/vonk-agent-helper/src/protocol.rs.artifact_signing_bytes",
+      "category": "input-validation",
+      "reason": "Pure encoder rejects caller-supplied kind/digest before effects.",
+      "sites": [
+        ["rust/crates/vonk-agent-helper/src/protocol.rs", "Err", "artifact_signing_bytes", "HelperError :: InvalidOperation", 1]
       ]
     }
   ]

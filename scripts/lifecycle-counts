@@ -62,6 +62,11 @@ KEYS = (*REPORT_KEYS, *INVENTORIES)
 COVERED_PREFIXES = (
     "control/src/vonk_control/lifecycle/",
     "rust/crates/vonk-agent/src/",
+    "rust/crates/vonk-agent-helper/src/",
+    "rust/crates/vonk-build-egress/src/",
+    "rust/crates/vonk-spark-setup/src/",
+    "rust/crates/vonk-nas-setup/src/",
+    "rust/crates/vonk-monitor/src/",
     "agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py",
 )
 COVERED_EXACT = (
@@ -70,6 +75,8 @@ COVERED_EXACT = (
     "tools/vocabulary-literals-baseline.json",
     "control/tests/lifecycle_writer_boundaries.py",
     "control/tests/blocker_boundaries.py",
+    "control/tests/blocker_rust.py",
+    "control/tests/blocker_classifier.py",
     "control/tests/vocabulary_literals.py",
     "scripts/lifecycle-counts",
     *INVENTORIES.values(),

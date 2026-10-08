@@ -142,3 +142,13 @@ def test_incomplete_report_is_a_diagnostic_instead_of_a_key_error() -> None:
         "before: writers=5\nafter: writers=5", REAL, REAL, ["scripts/lifecycle-counts"]
     )
     assert len(messages) == 2
+
+
+def test_all_inventoried_rust_crates_require_lifecycle_reporting() -> None:
+    """A helper/setup/monitor refusal change cannot silently bypass the PR report."""
+    from control.tests.blocker_rust import RUST_CRATES
+
+    module = _module()
+    for crate in RUST_CRATES:
+        assert module.is_covered(f"rust/crates/{crate}/src/main.rs")
+    assert module.is_covered("control/tests/blocker_rust.py")

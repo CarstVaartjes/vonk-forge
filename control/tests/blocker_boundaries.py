@@ -19,6 +19,13 @@ to, the verdict (``KEEP``, ``SELF-HEAL``, ``FIX-ACTION``, ``DERIVED``), and the
 operator action it advertises.  ``KEEP`` needs an irreversible effect and one of
 the real action surfaces; everything else is debt that ``max_debt`` caps.
 
+**Rust endings.** The six agent/helper/build-egress/setup/monitor crates also
+inventory explicit Err constructors, bail!/ensure! and process exit/abort calls
+through ``blocker_rust``'s token-tree scanner. Match patterns and test-only items
+are excluded. Sites share the family/count/debt ratchet below. Rust proposals
+are debt until a review establishes a narrow security/request boundary or a
+named bounded retry path; diagnostic words never prove such a boundary.
+
 **Fail-closed raises.**  Every ``raise C(...)`` in ``control/src`` where ``C`` is
 a class defined there that is an exception (its bases lead to a builtin
 exception, or its name ends in ``Conflict``, ``Error``, ``Refused``, ``Busy``,
@@ -588,7 +595,12 @@ def scan_raises(root: Path = CONTROL_SOURCE_ROOT) -> list[RaiseSite]:
             sites.extend(collector.sites)
         return sorted(sites, key=lambda site: (site.path, site.line))
 
-    return memoized_scan(("raises", root), [root], compute)
+    sites = memoized_scan(("raises", root), [root], compute)
+    if root == CONTROL_SOURCE_ROOT:
+        from .blocker_rust import scan_rust_raises
+
+        sites.extend(scan_rust_raises())
+    return sorted(sites, key=lambda site: (site.path, site.line))
 
 
 def scan_raise_source(
@@ -833,6 +845,21 @@ def relocate_document(document, moves=None):
     for group in ("operator_waits", "retry_loops", "call_edges", "route_guards"):
         if group in document:
             result[group] = [entry(value) for value in document[group]]
+
+    def matches_raise(source, name, path, exception, code):
+        if path.endswith(".rs"):
+            from .blocker_rust import scan_rust_source
+
+            sites = scan_rust_source(source, path=path)
+        else:
+            sites = scan_raise_source(source, path=path, classes=frozenset({exception}))
+        return any(
+            site.function == name
+            and site.exception_class == exception
+            and site.code == code
+            for site in sites
+        )
+
     result["fail_closed"] = [
         {
             **family,
@@ -842,12 +869,7 @@ def relocate_document(document, moves=None):
                         path,
                         function,
                         lambda source, name, path=path, exception=exception, code=code: (
-                            any(
-                                site.function == name and site.code == code
-                                for site in scan_raise_source(
-                                    source, path=path, classes=frozenset({exception})
-                                )
-                            )
+                            matches_raise(source, name, path, exception, code)
                         ),
                     ),
                     exception,

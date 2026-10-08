@@ -341,6 +341,11 @@ def classify(site: RaiseSite, document: dict[str, object] | None = None) -> Verd
     left is bookkeeping debt.
     """
 
+    if site.path.endswith(".rs"):
+        return Verdict(
+            DEBT,
+            "Rust ending has no reviewed ingress/request boundary or proven bounded retry",
+        )
     if site.exception_class in _CLASS_VERDICTS:
         return Verdict(*_CLASS_VERDICTS[site.exception_class])
     typed = _typed_classes().get(site.exception_class)
@@ -417,12 +422,17 @@ def propose_families(
     families: list[dict[str, object]] = []
     for (path, category), counts in sorted(grouped.items()):
         stem = path.rsplit("/", 1)[-1].removesuffix(".py")
+        review = (
+            "Conservatively inventoried: "
+            if path.endswith(".rs")
+            else "Rule-classified, then reviewed: "
+        )
         families.append(
             {
-                "family": f"{stem}.{category}",
+                "family": f"{path if path.endswith('.rs') else stem}.{category}",
                 "category": category,
                 "reason": (
-                    f"{CATEGORY_REASONS[category]} Rule-classified, then reviewed: "
+                    f"{CATEGORY_REASONS[category]} {review}"
                     + "; ".join(sorted(rules[(path, category)]))
                     + "."
                 ),
