@@ -78,17 +78,21 @@ class CancellationRetryMixin:
         """Commit cancellation intent and retry contention in fresh transactions.
 
         The first attempt persists intent before the contested boundary. When
-        admission backoff ends, the receipt remains pending and the ordinary
-        tick resumes the same cancellation under its durable stop deadline.
+        admission backoff ends, report the typed contention. The durable intent
+        remains pending; the ordinary tick resumes it under its stop deadline.
         """
         service = typing_cast("RunSwitchOperationService", self)
+        contention: RunSwitchRetryLater | None = None
         for _attempt in admission_attempts():
             try:
                 return service._cancel_once(
                     operation_id, actor=actor, request_key=request_key, reason=reason
                 )
-            except RunSwitchRetryLater:
+            except RunSwitchRetryLater as error:
+                contention = error
                 continue
+        if contention is not None:
+            raise contention
         return service.get(operation_id)
 
     def _cancel_once(

@@ -37,6 +37,7 @@ from vonk_control.run_switch_journal_repair import (
     journal_document,
     try_repair_zero_transfer_journal,
 )
+from vonk_control.run_switch_operations import advance as advance_owner
 from vonk_control.stored_json import write_guard_mode
 
 from .runtime_identity_support import claim_agent
@@ -103,7 +104,7 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
             0,
             0,
         )
-    original_merge = owner._merge_progress_evidence
+    original_merge = advance_owner._merge_progress_evidence
 
     def historical_merge(progress, plan, phase, evidence, now=None):
         # Isolated wrong-algorithm producer: the historical bug counted native
@@ -116,10 +117,10 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
             )
 
     with monkeypatch.context() as fault:
-        fault.setattr(owner, "_merge_progress_evidence", historical_merge)
+        fault.setattr(advance_owner, "_merge_progress_evidence", historical_merge)
         with write_guard_mode(strict=False):
             assert planner.tick()
-    assert owner._merge_progress_evidence is original_merge
+    assert advance_owner._merge_progress_evidence is original_merge
     with sessions() as session:
         row = session.get(Job, switch_id)
         assert row is not None and row.result is not None and row.state == "running"
