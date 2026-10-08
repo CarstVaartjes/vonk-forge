@@ -323,6 +323,45 @@ def _calls_observation_deadline(
     )
 
 
+def relative_import_owner(path: str, node: ast.ImportFrom) -> Path | None:
+    """Resolve concrete relative owners, including a module just split into a package."""
+    if not node.level or node.module is None:
+        return None
+    owner = ROOT / path
+    if not owner.exists() and owner.with_suffix("").is_dir():
+        owner = owner.with_suffix("") / "__moved__.py"
+    parent = owner.parent
+    for _ in range(node.level - 1):
+        parent = parent.parent
+    return parent.joinpath(*node.module.split("."))
+
+
+def imported_helpers(
+    tree: ast.Module, path: str
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    """Follow explicit sibling helper imports so extraction cannot hide GET refusals."""
+    helpers = {}
+    for imported in tree.body:
+        if not isinstance(imported, ast.ImportFrom) or imported.level != 1:
+            continue
+        owner = relative_import_owner(path, imported)
+        if (
+            owner is None
+            or not (owner.parent.parent / "__init__.py").is_file()
+            or not owner.with_suffix(".py").is_file()
+        ):
+            continue
+        definitions = {
+            node.name: node
+            for node in ast.parse(owner.with_suffix(".py").read_text()).body
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        for alias in imported.names:
+            if alias.name in definitions:
+                helpers[alias.asname or alias.name] = definitions[alias.name]
+    return helpers
+
+
 def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
@@ -379,8 +418,11 @@ def scan_source(
         alias.asname or alias.name
         for imported in tree.body
         if isinstance(imported, ast.ImportFrom)
-        and imported.module == "operation_api"
-        and imported.level == 1
+        and (
+            (imported.module == "operation_api" and imported.level == 1)
+            or relative_import_owner(path, imported)
+            == ROOT / "control/src/vonk_control/operation_api"
+        )
         for alias in imported.names
         if alias.name == "_OperationResponseTooLarge"
     }
@@ -682,6 +724,8 @@ def scan_source(
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         }
+        local_functions = set(functions)
+        functions.update(imported_helpers(tree, path))
         bad = {
             key
             for key, node in functions.items()
@@ -703,6 +747,8 @@ def scan_source(
                 break
             bad = propagated
         for key, node in functions.items():
+            if key not in local_functions:
+                continue
             is_get = any(
                 isinstance(d, ast.Call)
                 and (
@@ -983,6 +1029,7 @@ def relocate(document: dict, moves=None) -> dict:
             group: [
                 {
                     **entry,
+                    "function": moves.scope(entry["path"], entry["function"]),
                     "path": moves.function(
                         entry["path"],
                         entry["function"],

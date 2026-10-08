@@ -446,6 +446,7 @@ class CallGraph:
         self._edge_keys: set[tuple[Function, Function, tuple[int, ...]]] = set()
         self._ancestors: dict[str, frozenset[str]] = {}
         self._collect()
+        self._collect_bound_methods()
         self._infer_attribute_types()
         self._env_cache.clear()
         self._walk_all()
@@ -489,6 +490,46 @@ class CallGraph:
                     for base in cls.bases
                 )
         self._collect_factories()
+
+    def _collect_bound_methods(self) -> None:
+        """Resolve extracted descriptors from their exact imported function owner.
+
+        A class-level binding is dispatch, not a call or an escaped callback.
+        Ambiguous or computed bindings remain unknown and cannot earn retry credit.
+        """
+        for cls in self.class_by_key.values():
+            module = self.modules[cls.path]
+            for statement in cls.node.body:
+                if not (
+                    isinstance(statement, ast.Assign)
+                    and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Name)
+                ):
+                    continue
+                imported = module.imports.get(statement.value.id)
+                if imported is None or imported[1] is None:
+                    continue
+                owner = self.by_dotted.get(imported[0])
+                function = (
+                    owner.functions.get(imported[1]) if owner is not None else None
+                )
+                if function is None:
+                    continue
+                node = function.node
+                if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                parameters = [*node.args.posonlyargs, *node.args.args]
+                if not parameters or parameters[0].arg != "self":
+                    continue
+                name = statement.targets[0].id
+                cls.methods[name] = function
+                info = self.info[function]
+                info.owner = cls
+                info.self_class = cls
+                self.methods_named[name].append(function)
+                for nested in info.nested.values():
+                    self.info[nested].self_class = cls
 
     def _collect_factories(self) -> None:
         """Nested functions a function returns under an annotated class name."""
