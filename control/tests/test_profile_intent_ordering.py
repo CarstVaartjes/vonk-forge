@@ -215,11 +215,29 @@ def test_malformed_sibling_retry_root_does_not_block_new_pending_admission(
     with sessions() as session:
         node = session.get(AgentNode, nodes[0])
     assert node is not None and node.workload_intent_ordinal == 1
-    assert older_after.state == "failed"
-    assert "review source is unavailable" in (older_after.status_reason or "")
-    assert newer_after.state == "queued"
+    from types import SimpleNamespace
+
+    from vonk_agent_protocol import LifecycleState, SupersedeCode
+
+    from .non_blocking import assert_ended_without_blocking
+
+    assert older_after.state == LifecycleState.SUPERSEDED
+    assert (
+        profiles.application(older.id).progress.supersede_code
+        == SupersedeCode.SUPERSEDED_BY_INTENT
+    )
+    assert newer_after.state == "queued", newer_after.status_reason
     assert newer_after.progress["admission_pending"] is False
     assert newer_after.progress["workload_intent_ordinal"] == 1
+
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        profiles.application(older.id),
+        end=lambda _receipt: profiles.application(older.id),
+        fresh=lambda _world: profiles.apply(
+            _newer_profile.id, request_key=str(uuid4()), actor="admin"
+        ),
+    )
 
 
 def test_older_unbound_admission_cannot_overtake_newer_bound_deferred_intent(

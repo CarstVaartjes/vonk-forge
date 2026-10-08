@@ -381,10 +381,6 @@
       "count": 5
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "count": 5
-    },
-    {
       "path": "control/src/vonk_control/harnesses/canonical.py",
       "count": 5
     },

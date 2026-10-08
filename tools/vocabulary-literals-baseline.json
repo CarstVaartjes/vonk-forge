@@ -38,7 +38,6 @@
     "control/src/vonk_control/enrollment.py": 4,
     "control/src/vonk_control/execution_plan_service.py": 1,
     "control/src/vonk_control/fleet_profile_contract.py": 7,
-    "control/src/vonk_control/fleet_profiles.py": 63,
     "control/src/vonk_control/fleet_projection.py": 1,
     "control/src/vonk_control/host_helper_authority.py": 6,
     "control/src/vonk_control/image_store_collection.py": 2,

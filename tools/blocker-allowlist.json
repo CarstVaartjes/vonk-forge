@@ -49,7 +49,41 @@
       "control/src/vonk_control/enrollment_body.py",
       "control/src/vonk_control/enrollment_validation.py",
       "control/src/vonk_control/execution_plan_service.py",
-      "control/src/vonk_control/fleet_profiles.py",
+      "control/src/vonk_control/fleet_profiles/activity.py",
+      "control/src/vonk_control/fleet_profiles/contracts.py",
+      "control/src/vonk_control/fleet_profiles/persistence.py",
+      "control/src/vonk_control/fleet_profiles/assessment_support.py",
+      "control/src/vonk_control/fleet_profiles/projection_support.py",
+      "control/src/vonk_control/fleet_profiles/factory.py",
+      "control/src/vonk_control/fleet_profiles/dependencies.py",
+      "control/src/vonk_control/fleet_profiles/service.py",
+      "control/src/vonk_control/fleet_profiles/selection.py",
+      "control/src/vonk_control/fleet_profiles/recipe_choices.py",
+      "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+      "control/src/vonk_control/fleet_profiles/endpoint_projection.py",
+      "control/src/vonk_control/fleet_profiles/assessment.py",
+      "control/src/vonk_control/fleet_profiles/control_effects.py",
+      "control/src/vonk_control/fleet_profiles/continuing_effects.py",
+      "control/src/vonk_control/fleet_profiles/pending_application.py",
+      "control/src/vonk_control/fleet_profiles/apply.py",
+      "control/src/vonk_control/fleet_profiles/queue_application.py",
+      "control/src/vonk_control/fleet_profiles/preparation.py",
+      "control/src/vonk_control/fleet_profiles/retry.py",
+      "control/src/vonk_control/fleet_profiles/operation_projection.py",
+      "control/src/vonk_control/fleet_profiles/cancellation.py",
+      "control/src/vonk_control/fleet_profiles/reconcile.py",
+      "control/src/vonk_control/fleet_profiles/replan.py",
+      "control/src/vonk_control/fleet_profiles/pending_admission.py",
+      "control/src/vonk_control/fleet_profiles/cancellation_observation.py",
+      "control/src/vonk_control/fleet_profiles/recovery.py",
+      "control/src/vonk_control/fleet_profiles/assignment_persistence.py",
+      "control/src/vonk_control/fleet_profiles/profile_projection.py",
+      "control/src/vonk_control/fleet_profiles/assignment_assessment.py",
+      "control/src/vonk_control/fleet_profiles/application_projection.py",
+      "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+      "control/src/vonk_control/fleet_profiles/switch_observation.py",
+      "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+      "control/src/vonk_control/fleet_profiles/switch_projection.py",
       "control/src/vonk_control/gateway_keys.py",
       "control/src/vonk_control/harnesses/canonical.py",
       "control/src/vonk_control/harnesses/common.py",
@@ -163,7 +197,41 @@
       "control/src/vonk_control/availability_production.py",
       "control/src/vonk_control/distributed_lifecycle.py",
       "control/src/vonk_control/distributed_recovery.py",
-      "control/src/vonk_control/fleet_profiles.py",
+      "control/src/vonk_control/fleet_profiles/activity.py",
+      "control/src/vonk_control/fleet_profiles/contracts.py",
+      "control/src/vonk_control/fleet_profiles/persistence.py",
+      "control/src/vonk_control/fleet_profiles/assessment_support.py",
+      "control/src/vonk_control/fleet_profiles/projection_support.py",
+      "control/src/vonk_control/fleet_profiles/factory.py",
+      "control/src/vonk_control/fleet_profiles/dependencies.py",
+      "control/src/vonk_control/fleet_profiles/service.py",
+      "control/src/vonk_control/fleet_profiles/selection.py",
+      "control/src/vonk_control/fleet_profiles/recipe_choices.py",
+      "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+      "control/src/vonk_control/fleet_profiles/endpoint_projection.py",
+      "control/src/vonk_control/fleet_profiles/assessment.py",
+      "control/src/vonk_control/fleet_profiles/control_effects.py",
+      "control/src/vonk_control/fleet_profiles/continuing_effects.py",
+      "control/src/vonk_control/fleet_profiles/pending_application.py",
+      "control/src/vonk_control/fleet_profiles/apply.py",
+      "control/src/vonk_control/fleet_profiles/queue_application.py",
+      "control/src/vonk_control/fleet_profiles/preparation.py",
+      "control/src/vonk_control/fleet_profiles/retry.py",
+      "control/src/vonk_control/fleet_profiles/operation_projection.py",
+      "control/src/vonk_control/fleet_profiles/cancellation.py",
+      "control/src/vonk_control/fleet_profiles/reconcile.py",
+      "control/src/vonk_control/fleet_profiles/replan.py",
+      "control/src/vonk_control/fleet_profiles/pending_admission.py",
+      "control/src/vonk_control/fleet_profiles/cancellation_observation.py",
+      "control/src/vonk_control/fleet_profiles/recovery.py",
+      "control/src/vonk_control/fleet_profiles/assignment_persistence.py",
+      "control/src/vonk_control/fleet_profiles/profile_projection.py",
+      "control/src/vonk_control/fleet_profiles/assignment_assessment.py",
+      "control/src/vonk_control/fleet_profiles/application_projection.py",
+      "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+      "control/src/vonk_control/fleet_profiles/switch_observation.py",
+      "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+      "control/src/vonk_control/fleet_profiles/switch_projection.py",
       "control/src/vonk_control/host_runtime_plan_authority.py",
       "control/src/vonk_control/install_admission.py",
       "control/src/vonk_control/jobs.py",
@@ -234,7 +302,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 251,
+    "total": 241,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -352,7 +420,7 @@
       "reason": "The recovery tick schedules a recovery wait for a pending dependency and continues; the next tick reconciles the same run again."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/pending_admission.py",
       "function": "FleetProfileService._observe_pending_admissions",
       "catches": [
         "FleetProfileAdmissionBusy",
@@ -362,7 +430,7 @@
       "reason": "A busy or storage-blocked pending admission is deferred with a next attempt and resumed by the following observation pass."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/cancellation.py",
       "function": "FleetProfileService._reconcile_selected_roster",
       "catches": [
         "FleetProfileAdmissionBusy",
@@ -372,7 +440,7 @@
       "reason": "A busy admission during roster reconciliation defers the pending application with a retry delay; the reconcile pass runs again."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/apply.py",
       "function": "FleetProfileService.apply",
       "catches": [
         "FleetProfileAdmissionBusy",
@@ -382,12 +450,15 @@
       "reason": "A busy or storage-blocked admission is not raised to the caller: the request is stored as a pending application with a retry delay and the observation pass retries it automatically; the caller sees the queued application."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/reconcile.py",
       "function": "FleetProfileService.tick",
       "catches": [
+        "FleetProfileChildPlanBlocked",
+        "FleetProfileConflict",
+        "UnknownOutcomeError",
         "_FleetProfileRecoveryBindingConflict"
       ],
-      "reason": "The application tick parks a recovery whose artifact binding is unavailable and retries it when the next attempt is due."
+      "reason": "The tick preserves the accepted identity, records a typed blocker and schedules a bounded backoff for retryable conflicts; superseded intent ends and releases claims. Child dispatch failures are observed again under the same request identity."
     },
     {
       "path": "control/src/vonk_control/gateway_keys.py",
@@ -823,6 +894,22 @@
         "UnknownOutcomeError"
       ],
       "reason": "The worker pass contains one source's unknown outcome: the failure is logged, the pass moves on to the other sources and the heartbeat, and the failed source runs again on the next pass; no source state is ended by it."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles/cancellation_observation.py",
+      "function": "FleetProfileService._stop_children",
+      "catches": [
+        "FleetProfileChildPlanBlocked"
+      ],
+      "reason": "Child observation is rescheduled with a due time. The lifecycle stop budget ends cancellation after bounded attempts and releases profile claims even when the child outcome is unknown."
+    },
+    {
+      "path": "control/src/vonk_control/fleet_profiles/queue_application.py",
+      "function": "FleetProfileService._queue_application",
+      "catches": [
+        "BuildConsumerError"
+      ],
+      "reason": "A missing build record is retired as typed unknown evidence without blocking admission. A retryable dependency is converted to the durable admission handoff outside the handler, then rechecked by the bounded admission retry loop."
     }
   ],
   "call_edges": [
@@ -1552,82 +1639,74 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: the accepted review no longer matches.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._intended_profile", "persisted-application-plan-exceeds-its-reviewed-intent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._matching_application", "fleet-profile-request-key-was-reused-for-another-plan", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "application-has-been-superseded-by-another-application", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "application-has-been-superseded-by-another-workload-intent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "only-failed-or-waiting-applications-can-be-retried", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "profile-application-was-superseded-by-a-later-intent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._recipe_identity", "recipe-selector-is-not-an-exact-unique-active-recipe", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._recipe_identity", "recipe-selector-must-use-canonical-publisher-slug-form", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._start_step", "fleet-profile-step-kind-is-unsupported", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService._validated_assignments", "recipe-has-no-active-catalog-revision", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.apply", "fleet-profile-intent-contains-a-security-or-contract-blocker", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "malformed", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-already-has-a-different-cancellation-req", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-is-not-cancellable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-scope-changed-during-cancellation", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-cancellation-request-key-is-invalid", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.create", "a-fleet-profile-with-this-name-already-exists", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.preview", "recovery-review-owner-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.retry", "current-fleet-state-blocks-application-recovery", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.retry", "only-current-profile-loads-can-be-recovered", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.retry", "only-failed-or-waiting-applications-can-be-retried", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.retry", "retry-request-key-was-reused-for-another-application", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.update", "a-fleet-profile-with-this-name-already-exists", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.update", "profile-revision-conflict-expected", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.update_number", "profile-revision-conflict-profile-has-not-been-created", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._adopt_child", "profile-child-request-key-belongs-to-another-operation", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._plan_queue", "profile-workload-effects-can-no-longer-be-represented-safely", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._save_state", "profile-cancellation-prevents-child-state-creation", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter.start", "profile-cancellation-prevents-dispatch-of-another-child", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter.start", "profile-switch-scope-must-be-the-complete-sorted-node-bounda", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "FleetProfileService.apply", "the-profile-plan-changed-since-it-was-reviewed-review-the-c", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-intent-digest-is-inconsistent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-review-digest-is-inconsistent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._intended_profile", "persisted-application-review-source-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._queue_application", "persisted-application-review-source-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._queue_application", "selected-profile-differs-from-its-accepted-snapshot", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._queue_application", "selected-profile-revision-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService._reserve_saved_profile_references", "message", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "FleetProfileService.cancel", "profile-cancellation-authority-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "_application_order_key", "persisted-application-review-source-is-inconsistent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "_application_order_key", "persisted-application-review-source-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnavailable", "_application_order_key", "persisted-retry-receipt-cannot-be-its-own-reviewed-intent", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileUnsupportedStore", "_set_selected_profile", "fleet-profile-selection-requires-postgresql-or-sqlite", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "InvalidType", "FleetProfileService._observe_pending_admissions", "profile-admission-retry-cutoff-is-not-a-string", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "InvalidType", "FleetProfileService.preview", "malformed", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "InvalidValue", "FleetProfileService.preview", "the-planner-assessment-does-not-cover-the-exact-assignment-s", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "InvalidValue", "RunSwitchFleetProfileAdapter.assess", "profile-assignment-nodes-changed-during-preparation-projecti", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._application_assignments", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._create_pending_application", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._decline_retry_application", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._defer_pending_application", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._prepare_pending_admission", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService._queue_application", "not-found", 3],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.application", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.application_by_request_key", "not-found", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.application_cancellation_by_request", "not-found", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.cancel", "not-found", 3],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.definition_number", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.endpoint_intent", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.get", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.get_number", "not-found", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.load", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.operation_provider.get_operation", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.preview", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.progress_number", "not-found", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.read_number", "not-found", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.retry", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.update", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "FleetProfileService.update_number", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter._advance_in_session", "not-found", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter._child_review", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter._save_state", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter._start_child", "not-found", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter.advance", "not-found", 4],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter.get", "not-found", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "MissingRecord", "RunSwitchFleetProfileAdapter.request_cancellation", "not-found", 1]
+        ["control/src/vonk_control/fleet_profiles/application_projection.py", "FleetProfileInvalid", "FleetProfileService._intended_profile", "persisted-application-plan-exceeds-its-reviewed-intent", 1],
+        ["control/src/vonk_control/fleet_profiles/pending_application.py", "FleetProfileInvalid", "FleetProfileService._matching_application", "fleet-profile-request-key-was-reused-for-another-plan", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "application-has-been-superseded-by-another-application", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "application-has-been-superseded-by-another-workload-intent", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "only-failed-or-waiting-applications-can-be-retried", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileInvalid", "FleetProfileService._queue_application", "profile-application-was-superseded-by-a-later-intent", 1],
+        ["control/src/vonk_control/fleet_profiles/recipe_choices.py", "FleetProfileInvalid", "FleetProfileService._recipe_identity", "recipe-selector-is-not-an-exact-unique-active-recipe", 1],
+        ["control/src/vonk_control/fleet_profiles/recipe_choices.py", "FleetProfileInvalid", "FleetProfileService._recipe_identity", "recipe-selector-must-use-canonical-publisher-slug-form", 1],
+        ["control/src/vonk_control/fleet_profiles/recovery.py", "FleetProfileInvalid", "FleetProfileService._start_step", "fleet-profile-step-kind-is-unsupported", 1],
+        ["control/src/vonk_control/fleet_profiles/assignment_persistence.py", "FleetProfileInvalid", "FleetProfileService._validated_assignments", "recipe-has-no-active-catalog-revision", 1],
+        ["control/src/vonk_control/fleet_profiles/apply.py", "FleetProfileInvalid", "FleetProfileService.apply", "fleet-profile-intent-contains-a-security-or-contract-blocker", 1],
+        ["control/src/vonk_control/fleet_profiles/cancellation.py", "FleetProfileInvalid", "FleetProfileService.cancel", "malformed", 1],
+        ["control/src/vonk_control/fleet_profiles/cancellation.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-already-has-a-different-cancellation-req", 1],
+        ["control/src/vonk_control/fleet_profiles/cancellation.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-is-not-cancellable", 1],
+        ["control/src/vonk_control/fleet_profiles/cancellation.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-application-scope-changed-during-cancellation", 1],
+        ["control/src/vonk_control/fleet_profiles/cancellation.py", "FleetProfileInvalid", "FleetProfileService.cancel", "profile-cancellation-request-key-is-invalid", 2],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "FleetProfileInvalid", "FleetProfileService.create", "a-fleet-profile-with-this-name-already-exists", 1],
+        ["control/src/vonk_control/fleet_profiles/assessment.py", "FleetProfileInvalid", "FleetProfileService.preview", "recovery-review-owner-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles/retry.py", "FleetProfileInvalid", "FleetProfileService.retry", "current-fleet-state-blocks-application-recovery", 1],
+        ["control/src/vonk_control/fleet_profiles/retry.py", "FleetProfileInvalid", "FleetProfileService.retry", "only-current-profile-loads-can-be-recovered", 1],
+        ["control/src/vonk_control/fleet_profiles/retry.py", "FleetProfileInvalid", "FleetProfileService.retry", "only-failed-or-waiting-applications-can-be-retried", 1],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "FleetProfileInvalid", "FleetProfileService.update", "a-fleet-profile-with-this-name-already-exists", 1],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "FleetProfileInvalid", "FleetProfileService.update", "profile-revision-conflict-expected", 1],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "FleetProfileInvalid", "FleetProfileService.update_number", "profile-revision-conflict-profile-has-not-been-created", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._adopt_child", "profile-child-request-key-belongs-to-another-operation", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_projection.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._plan_queue", "profile-workload-effects-can-no-longer-be-represented-safely", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_projection.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter._save_state", "profile-cancellation-prevents-child-state-creation", 1],
+        ["control/src/vonk_control/fleet_profiles/run_switch_adapter.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter.start", "profile-cancellation-prevents-dispatch-of-another-child", 1],
+        ["control/src/vonk_control/fleet_profiles/run_switch_adapter.py", "FleetProfileInvalid", "RunSwitchFleetProfileAdapter.start", "profile-switch-scope-must-be-the-complete-sorted-node-bounda", 1],
+        ["control/src/vonk_control/fleet_profiles/apply.py", "FleetProfileReviewStale", "FleetProfileService.apply", "the-profile-plan-changed-since-it-was-reviewed-review-the-c", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "persisted-application-review-source-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "selected-profile-differs-from-its-accepted-snapshot", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "selected-profile-revision-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles/projection_support.py", "FleetProfileUnsupportedStore", "_set_selected_profile", "fleet-profile-selection-requires-postgresql-or-sqlite", 1],
+        ["control/src/vonk_control/fleet_profiles/pending_admission.py", "InvalidType", "FleetProfileService._observe_pending_admissions", "profile-admission-retry-cutoff-is-not-a-string", 1],
+        ["control/src/vonk_control/fleet_profiles/assessment.py", "InvalidType", "FleetProfileService.preview", "malformed", 1],
+        ["control/src/vonk_control/fleet_profiles/assessment.py", "InvalidValue", "FleetProfileService.preview", "the-planner-assessment-does-not-cover-the-exact-assignment-s", 1],
+        ["control/src/vonk_control/fleet_profiles/run_switch_adapter.py", "InvalidValue", "RunSwitchFleetProfileAdapter.assess", "profile-assignment-nodes-changed-during-preparation-projecti", 1],
+        ["control/src/vonk_control/fleet_profiles/application_projection.py", "MissingRecord", "FleetProfileService._application_assignments", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/pending_application.py", "MissingRecord", "FleetProfileService._create_pending_application", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/retry.py", "MissingRecord", "FleetProfileService._decline_retry_application", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/pending_application.py", "MissingRecord", "FleetProfileService._defer_pending_application", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/apply.py", "MissingRecord", "FleetProfileService._prepare_pending_admission", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "MissingRecord", "FleetProfileService._queue_application", "not-found", 3],
+        ["control/src/vonk_control/fleet_profiles/operation_projection.py", "MissingRecord", "FleetProfileService.application", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/operation_projection.py", "MissingRecord", "FleetProfileService.application_by_request_key", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles/operation_projection.py", "MissingRecord", "FleetProfileService.application_cancellation_by_request", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles/cancellation.py", "MissingRecord", "FleetProfileService.cancel", "not-found", 3],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "MissingRecord", "FleetProfileService.definition_number", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/endpoint_projection.py", "MissingRecord", "FleetProfileService.endpoint_intent", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "MissingRecord", "FleetProfileService.get", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "MissingRecord", "FleetProfileService.get_number", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "MissingRecord", "FleetProfileService.load", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/operation_projection.py", "MissingRecord", "FleetProfileService.operation_provider.get_operation", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/assessment.py", "MissingRecord", "FleetProfileService.preview", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "MissingRecord", "FleetProfileService.progress_number", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "MissingRecord", "FleetProfileService.read_number", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles/retry.py", "MissingRecord", "FleetProfileService.retry", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "MissingRecord", "FleetProfileService.update", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/saved_profiles.py", "MissingRecord", "FleetProfileService.update_number", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_observation.py", "MissingRecord", "RunSwitchFleetProfileAdapter._advance_in_session", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "MissingRecord", "RunSwitchFleetProfileAdapter._child_review", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_projection.py", "MissingRecord", "RunSwitchFleetProfileAdapter._save_state", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "MissingRecord", "RunSwitchFleetProfileAdapter._start_child", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/run_switch_adapter.py", "MissingRecord", "RunSwitchFleetProfileAdapter.advance", "not-found", 4],
+        ["control/src/vonk_control/fleet_profiles/run_switch_adapter.py", "MissingRecord", "RunSwitchFleetProfileAdapter.get", "not-found", 2],
+        ["control/src/vonk_control/fleet_profiles/run_switch_adapter.py", "MissingRecord", "RunSwitchFleetProfileAdapter.request_cancellation", "not-found", 1],
+        ["control/src/vonk_control/fleet_profiles/retry.py", "FleetProfileInvalid", "FleetProfileService.retry", "recovery-request-identity-was-reused-for-another-application", 1]
       ]
     },
     {
@@ -1635,8 +1714,8 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, certificate authority, fence authority or a destructive-effect owner guard. Rule-classified, then reviewed: class FleetProfilePermissionDenied guards a security boundary.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfilePermissionDenied", "FleetProfileService._authorize", "current-profile-authority-is-unavailable", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfilePermissionDenied", "FleetProfileService.application_cancellation_by_request", "current-profile-cancellation-authority-is-unavailable", 1]
+        ["control/src/vonk_control/fleet_profiles/selection.py", "FleetProfilePermissionDenied", "FleetProfileService._authorize", "current-profile-authority-is-unavailable", 1],
+        ["control/src/vonk_control/fleet_profiles/operation_projection.py", "FleetProfilePermissionDenied", "FleetProfileService.application_cancellation_by_request", "current-profile-cancellation-authority-is-unavailable", 1]
       ]
     },
     {
@@ -2521,7 +2600,7 @@
       "category": "security-edge",
       "reason": "Fail closed by design: authentication, authorization, signature, digest at ingress, path or secret safety, fence authority, or a destructive-effect owner guard. Audit notes: Authorization guard: a profile may not stop or remove a workload the owner did not review.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_cache_pending", 1],
+        ["control/src/vonk_control/fleet_profiles/assessment_support.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_cache_pending", 1],
         ["control/src/vonk_control/profile_stop_authority.py", "ProfileStopAuthorityError", "validate_profile_stop_owner", "current-profile-stop-plan-is-invalid", 2]
       ]
     },
@@ -2530,33 +2609,33 @@
       "category": "input-validation",
       "reason": "A malformed, stale, replayed or superseded user request or reviewed plan, refused at submit time (request-led). Audit notes: User request is stale, replayed, superseded or names an unknown recipe/profile.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-changed-its-reviewed-stop-target-scope", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-exceeds-its-reviewed-spark-scope", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-would-remove-an-unreviewed-installation-revie", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-would-stop-an-unreviewed-workload-review-agai", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "_validate_remaining_effects", "recovery-would-remove-an-unreviewed-installation-review-and", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "_validate_remaining_effects", "recovery-would-stop-an-unreviewed-workload-review-and-load", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileSelectionLost", "FleetProfileService._queue_application", "selected-profile-retry-lost-its-current-selection", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._create_pending_application", "fleet-profile-changed-before-its-admission-intent-was-persis", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._create_pending_application", "selected-profile-or-fleet-membership-changed-during-reconcil", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._prepare_pending_admission", "pending-profile-workload-scope-changed-before-fencing", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._queue_application", "profile-fleet-scope-changed-during-admission-review-again", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._queue_application", "profile-switch-scope-changed-during-admission", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._queue_application", "profile-workload-effects-changed-during-admission-review-ag", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._queue_application", "selected-profile-changed-before-roster-admission", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._validate_draft_review_identity", "fleet-profile-changed-during-application-admission-review-a", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._validate_draft_review_identity", "profile-assignment-set-changed-during-admission-review-agai", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "FleetProfileService._validate_draft_review_identity", "profile-recipe-head-changed-during-admission-review-again", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "_replace_selected_profile_application", "selected-profile-changed-before-its-retry-was-admitted", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileStalePlanConflict", "_replace_selected_profile_roster", "selected-profile-or-fleet-membership-changed-during-reconcil", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "a-later-accepted-profile-intent-owns-the-workload-scope", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "pending-profile-intent-was-superseded-by-a-later-accepted-re", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "pending-profile-workload-intent-was-superseded-before-recove", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "selected-fleet-profile-was-replaced-before-admission-resumed", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "profile-intent-was-superseded-by-a-later-accepted-overlappin", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "profile-load-was-superseded-by-a-newer-accepted-profile", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "profile-workload-intent-was-superseded-before-admission-resu", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "selected-fleet-profile-was-replaced-by-a-newer-load", 1]
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-changed-its-reviewed-stop-target-scope", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-exceeds-its-reviewed-spark-scope", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-would-remove-an-unreviewed-installation-revie", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-would-stop-an-unreviewed-workload-review-agai", 1],
+        ["control/src/vonk_control/fleet_profiles/projection_support.py", "FleetProfileReviewStale", "_validate_remaining_effects", "recovery-would-remove-an-unreviewed-installation-review-and", 1],
+        ["control/src/vonk_control/fleet_profiles/projection_support.py", "FleetProfileReviewStale", "_validate_remaining_effects", "recovery-would-stop-an-unreviewed-workload-review-and-load", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileSelectionLost", "FleetProfileService._queue_application", "selected-profile-retry-lost-its-current-selection", 1],
+        ["control/src/vonk_control/fleet_profiles/pending_application.py", "FleetProfileStalePlanConflict", "FleetProfileService._create_pending_application", "fleet-profile-changed-before-its-admission-intent-was-persis", 1],
+        ["control/src/vonk_control/fleet_profiles/pending_application.py", "FleetProfileStalePlanConflict", "FleetProfileService._create_pending_application", "selected-profile-or-fleet-membership-changed-during-reconcil", 1],
+        ["control/src/vonk_control/fleet_profiles/apply.py", "FleetProfileStalePlanConflict", "FleetProfileService._prepare_pending_admission", "pending-profile-workload-scope-changed-before-fencing", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileStalePlanConflict", "FleetProfileService._queue_application", "profile-fleet-scope-changed-during-admission-review-again", 2],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileStalePlanConflict", "FleetProfileService._queue_application", "profile-switch-scope-changed-during-admission", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileStalePlanConflict", "FleetProfileService._queue_application", "profile-workload-effects-changed-during-admission-review-ag", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileStalePlanConflict", "FleetProfileService._queue_application", "selected-profile-changed-before-roster-admission", 1],
+        ["control/src/vonk_control/fleet_profiles/recipe_choices.py", "FleetProfileStalePlanConflict", "FleetProfileService._validate_draft_review_identity", "fleet-profile-changed-during-application-admission-review-a", 1],
+        ["control/src/vonk_control/fleet_profiles/recipe_choices.py", "FleetProfileStalePlanConflict", "FleetProfileService._validate_draft_review_identity", "profile-assignment-set-changed-during-admission-review-agai", 1],
+        ["control/src/vonk_control/fleet_profiles/recipe_choices.py", "FleetProfileStalePlanConflict", "FleetProfileService._validate_draft_review_identity", "profile-recipe-head-changed-during-admission-review-again", 1],
+        ["control/src/vonk_control/fleet_profiles/projection_support.py", "FleetProfileStalePlanConflict", "_replace_selected_profile_application", "selected-profile-changed-before-its-retry-was-admitted", 1],
+        ["control/src/vonk_control/fleet_profiles/projection_support.py", "FleetProfileStalePlanConflict", "_replace_selected_profile_roster", "selected-profile-or-fleet-membership-changed-during-reconcil", 1],
+        ["control/src/vonk_control/fleet_profiles/apply.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "a-later-accepted-profile-intent-owns-the-workload-scope", 1],
+        ["control/src/vonk_control/fleet_profiles/apply.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "pending-profile-intent-was-superseded-by-a-later-accepted-re", 1],
+        ["control/src/vonk_control/fleet_profiles/apply.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "pending-profile-workload-intent-was-superseded-before-recove", 1],
+        ["control/src/vonk_control/fleet_profiles/apply.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._prepare_pending_admission", "selected-fleet-profile-was-replaced-before-admission-resumed", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "profile-intent-was-superseded-by-a-later-accepted-overlappin", 2],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "profile-load-was-superseded-by-a-newer-accepted-profile", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "profile-workload-intent-was-superseded-before-admission-resu", 1],
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "_FleetProfileSupersededIntentConflict", "FleetProfileService._queue_application", "selected-fleet-profile-was-replaced-by-a-newer-load", 1]
       ]
     },
     {
@@ -2564,7 +2643,7 @@
       "category": "already-retried",
       "reason": "Admission or capacity busy and provider-transient errors that carry a retry; the owner retries them.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._prepare_pending_admission", "profile-admission-is-waiting-for-the-active-workload-owner-t", 2]
+        ["control/src/vonk_control/fleet_profiles/apply.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._prepare_pending_admission", "profile-admission-is-waiting-for-the-active-workload-owner-t", 2]
       ]
     },
     {
@@ -2572,7 +2651,7 @@
       "category": "security-edge",
       "reason": "Exact artifact identity fence: a recovery must not silently replace the model or runtime image bound in the accepted plan (docs/engineering-principles: exact identity fails closed; an alternative must be an explicit new load). The recovery caller parks the receipt with the shown reason (profile.recovery_artifact_changed) and the identity is never re-hashed here.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_artifact_changed", 1]
+        ["control/src/vonk_control/fleet_profiles/assessment_support.py", "_FleetProfileRecoveryBindingConflict", "_require_recovery_preparation", "profile.recovery_artifact_changed", 1]
       ]
     },
     {
@@ -3326,22 +3405,6 @@
       ]
     },
     {
-      "family": "fleet_profiles.bookkeeping-debt",
-      "category": "bookkeeping-debt",
-      "reason": "An unknown-outcome class is raised here, but no registered retry or observe loop is proven to catch and retry it: counted as bookkeeping debt until a loop is registered in retry_loops or the raise is removed.",
-      "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionBusy", "FleetProfileService._admission_session", "profile-admission-is-busy", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionBusy", "FleetProfileService._admission_session", "profile-admission-is-busy-review-again-after-the-current-fl", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._admission_session", "profile-admission-is-busy-review-again-after-the-current-fl", 2],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._queue_application", "message", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._reserve_preview_assets", "message", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionEffectBusy", "RunSwitchFleetProfileAdapter.validate_resources_in_session", "profile-resource-admission-is-waiting-for-capacity", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileAdmissionStorageError", "FleetProfileService._admission_session", "profile-admission-database-constraint", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileChildPlanBlocked", "RunSwitchFleetProfileAdapter._start_child", "profile-child-plan-blocked", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileResourceRecheckUnavailable", "RunSwitchFleetProfileAdapter.validate_resources_in_session", "profile-resource-admission-could-not-be-rechecked", 1]
-      ]
-    },
-    {
       "family": "install_admission.bookkeeping-debt",
       "category": "bookkeeping-debt",
       "reason": "Code-reviewed bookkeeping debt: stored state, missing evidence, capacity or ownership uncertainty still refuses or blocks without a registered retry proven on every call path. Retained conservatively: a retryable flag, busy name, internal integrity check or instruction to retry is not a security ingress, invalid-request boundary or automatic retry proof.",
@@ -3537,8 +3600,8 @@
       "category": "security-edge",
       "reason": "Preserves the current selected whole-fleet authority: stale executor cancellation cannot revoke newer adopted intent, and a reviewed stop child cannot broaden beyond its complete currently authorized assignment scope. These are authorization boundaries before effects, not recoverable observation failures.",
       "sites": [
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileInvalid", "FleetProfileService.cancel", "this-application-s-continuing-effects-now-belong-to-selected", 1],
-        ["control/src/vonk_control/fleet_profiles.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-stop-exceeds-its-current-authorized-scope", 1]
+        ["control/src/vonk_control/fleet_profiles/cancellation.py", "FleetProfileInvalid", "FleetProfileService.cancel", "this-application-s-continuing-effects-now-belong-to-selected", 1],
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "FleetProfileReviewStale", "RunSwitchFleetProfileAdapter._validate_child_effects", "profile-child-stop-exceeds-its-current-authorized-scope", 1]
       ]
     },
     {
@@ -4209,6 +4272,50 @@
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
         ["control/src/vonk_control/model_cache/http.py", "ModelCacheStorageUnknown", "HttpMixin._open_http_response_once", "model_cache.source_unavailable", 1]
+      ]
+    },
+    {
+      "family": "assignment_persistence.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles/assignment_persistence.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._reserve_preview_assets", "message", 1]
+      ]
+    },
+    {
+      "family": "queue_application.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles/queue_application.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._queue_application", "message", 1]
+      ]
+    },
+    {
+      "family": "run_switch_adapter.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles/run_switch_adapter.py", "FleetProfileAdmissionEffectBusy", "RunSwitchFleetProfileAdapter.validate_resources_in_session", "profile-resource-admission-is-waiting-for-capacity", 1],
+        ["control/src/vonk_control/fleet_profiles/run_switch_adapter.py", "FleetProfileResourceRecheckUnavailable", "RunSwitchFleetProfileAdapter.validate_resources_in_session", "profile-resource-admission-could-not-be-rechecked", 1]
+      ]
+    },
+    {
+      "family": "selection.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles/selection.py", "FleetProfileAdmissionBusy", "FleetProfileService._admission_session", "profile-admission-is-busy", 1],
+        ["control/src/vonk_control/fleet_profiles/selection.py", "FleetProfileAdmissionBusy", "FleetProfileService._admission_session", "profile-admission-is-busy-review-again-after-the-current-fl", 1],
+        ["control/src/vonk_control/fleet_profiles/selection.py", "FleetProfileAdmissionEffectBusy", "FleetProfileService._admission_session", "profile-admission-is-busy-review-again-after-the-current-fl", 2],
+        ["control/src/vonk_control/fleet_profiles/selection.py", "FleetProfileAdmissionStorageError", "FleetProfileService._admission_session", "profile-admission-database-constraint", 1]
+      ]
+    },
+    {
+      "family": "switch_dispatch.proven-retry",
+      "category": "already-retried",
+      "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
+      "sites": [
+        ["control/src/vonk_control/fleet_profiles/switch_dispatch.py", "FleetProfileChildPlanBlocked", "RunSwitchFleetProfileAdapter._start_child", "profile-child-plan-blocked", 1]
       ]
     }
   ]

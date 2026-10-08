@@ -38,6 +38,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileSwitchChildState,
     FleetProfileSwitchQueueItem,
     FleetProfileVerificationResult,
+    FleetProfileView,
 )
 from vonk_control.fleet_profiles import (
     FleetProfileAdmissionBusy,
@@ -2146,9 +2147,36 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
-    sessions = _database()
-    _seed(sessions)
+def test_all_idle_profile_supersedes_a_queued_load_without_a_run(
+    tmp_path: Path,
+) -> None:
+    from vonk_agent_protocol.agent_words import ProfileChildJobKind
+    from vonk_control.job_documents import RunSwitchJobPayload
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import CompleteArtifactInspector, _request
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path
+    )
+    planner = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        memory_floor_bytes=0,
+    )
+    plan = planner.preview(_request(sessions, nodes[0]), actor="admin")
+    payload = RunSwitchJobPayload(
+        schema_version=2,
+        operation_kind=ProfileChildJobKind.RUN_SWITCH.value,
+        action=plan.action,
+        plan_digest=plan.plan_digest,
+        plan=plan,
+        progress=RunSwitchOperationResult(workload_intent_ordinal=1),
+        workload_intent_ordinal=1,
+    )
     with sessions.begin() as session:
         node = session.get(AgentNode, _node_id(1))
         assert node is not None
@@ -2163,8 +2191,8 @@ def test_all_idle_profile_supersedes_a_queued_load_without_a_run() -> None:
                 authority_revision="a" * 64,
                 targets=[_node_id(1)],
                 payload_digest="b" * 64,
-                payload={"workload_intent_ordinal": 1},
-                result={},
+                payload=payload.model_dump(mode="json"),
+                result=payload.progress.model_dump(mode="json"),
                 created_at=NOW,
                 updated_at=NOW,
             )
@@ -3606,6 +3634,15 @@ def test_profile_round_trip_rejects_corrupt_stored_assignment(damage):
     # Keep the exact saved identity observable. Dropping a malformed choice
     # would let an ordinary edit silently delete accepted authoring intent.
     observed = service.read_number(created.number)
+    if damage == "extra":
+        # The column owner adopts retired fields on reads. Known intent stays
+        # visible, and observing it never rewrites the stored document.
+        assert isinstance(observed, FleetProfileView)
+        assert observed.definition == created.definition
+        with sessions() as session:
+            row = session.get(FleetProfile, created.id)
+            assert row is not None and row.assignments == assignments
+        return
     assert isinstance(observed, UnavailableFleetProfileView)
     assert observed.id == created.id and observed.revision == created.revision
     assert observed.definition is None

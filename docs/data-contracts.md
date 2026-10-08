@@ -201,6 +201,7 @@ module defines its own.
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
 | `control/src/vonk_control/fleet_profile_adapter_conversion_contract.py` | controller-contract | 3 | Private one-time retained journal proof inputs and typed conversion outcome; never execution authority. |
 | `control/src/vonk_control/fleet_profile_contract.py` | controller-contract | 50 | Strict public contracts for saved Fleet profiles and their applications. |
+| `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
 | `control/src/vonk_control/fleet_projection.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
 | `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |

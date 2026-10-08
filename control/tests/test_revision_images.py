@@ -217,30 +217,35 @@ def test_a_saved_profile_keeps_the_image_its_recipes_successor_reuses(
     assert findings["9" * 64] == ()
 
 
-def test_a_new_saved_profile_selector_waits_for_removal_of_the_image_it_resolves_to(
-    sessions,
-) -> None:
-    """Saving a selector serializes with removal of the recipe's own images."""
-
+def test_saved_profile_selector_remains_editable_during_image_removal(sessions) -> None:
+    """Cache availability is enforced by apply; saving logical intent never waits."""
     from vonk_control.artifact_lifecycle import ArtifactIdentity, reserve_removal
-    from vonk_control.fleet_profile_contract import FleetProfileAssignmentInput
-    from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
+    from vonk_control.fleet_profile_contract import (
+        FleetProfileAssignmentInput,
+        FleetProfileInput,
+    )
+    from vonk_control.fleet_profiles import FleetProfileService
+
+    from .test_fleet_profiles import _seed
 
     with sessions.begin() as session:
-        lineage = _lineage(session)
-        _build(session, lineage.first, archive=ARCHIVE_SHA)
-    assignment = FleetProfileAssignmentInput.model_validate(
-        {
-            "recipe_selector": lineage.selector,
-            "spark_ids": ["spk_" + "a" * 32],
-            "option_choices": {},
-        }
+        recipe_id, revision_id = _seed(sessions)
+        _build(session, revision_id, archive=ARCHIVE_SHA)
+    with sessions() as session:
+        from vonk_control.models import CatalogDocument
+
+        recipe = session.get(CatalogDocument, recipe_id)
+        assert recipe is not None
+        selector = f"{recipe.publisher}/{recipe.slug}"
+    assignment = FleetProfileAssignmentInput(
+        recipe_selector=selector,
+        spark_ids=["spk_" + "a" * 32],
+    )
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = service.create(
+        FleetProfileInput(assignments=[assignment]), actor="operator"
     )
     with sessions.begin() as session:
-        # Nothing is being removed: the selector can be saved.
-        FleetProfileService._reserve_saved_profile_references(
-            session, [assignment], now=NOW
-        )
         reserve_removal(
             session,
             [ArtifactIdentity("runtime-image", ARCHIVE_SHA)],
@@ -249,7 +254,14 @@ def test_a_new_saved_profile_selector_waits_for_removal_of_the_image_it_resolves
             fence=str(uuid.uuid4()),
             now=NOW,
         )
-    with sessions.begin() as session, pytest.raises(FleetProfileConflict):
-        FleetProfileService._reserve_saved_profile_references(
-            session, [assignment], now=NOW
-        )
+    saved = service.update(
+        created.id,
+        FleetProfileInput(
+            expected_revision=created.revision, assignments=[assignment], name="Edited"
+        ),
+        actor="operator",
+    )
+    assert saved.revision == created.revision + 1
+    assert saved.definition is not None
+    assert saved.definition.name == "Edited"
+    assert saved.definition.assignments == [assignment]

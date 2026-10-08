@@ -20,7 +20,25 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, NamedTuple
 
-from .agent_words import FailureStage, HostHelperResponseStatus, ProgressPhase
+from .agent_words import (
+    FailureStage,
+    HostHelperResponseStatus,
+    ProfileAction,
+    ProfileCancellationCause,
+    ProfileChildJobKind,
+    ProfileChildPhase,
+    ProfileChildSource,
+    ProfileDocumentState,
+    ProfileEffectState,
+    ProfileInstallationPolicy,
+    ProfileOperationKind,
+    ProfileProjectionKind,
+    ProfileReasonSeverity,
+    ProfileReportedPhase,
+    ProfileRetryDisposition,
+    ProfileSwitchChildKind,
+    ProgressPhase,
+)
 from .state_machines import (
     AssetAvailability,
     CatalogSyncState,
@@ -757,6 +775,21 @@ class LifecycleVocabulary(WireModel):
     generator and the OpenAPI/TypeScript generators emit each closed word set
     from this one module.
     """
+
+    profile_installation_policy: ProfileInstallationPolicy
+    profile_child_phase: ProfileChildPhase
+    profile_reported_phase: ProfileReportedPhase
+    profile_retry_disposition: ProfileRetryDisposition
+    profile_action: ProfileAction
+    profile_document_state: ProfileDocumentState
+    profile_reason_severity: ProfileReasonSeverity
+    profile_projection_kind: ProfileProjectionKind
+    profile_operation_kind: ProfileOperationKind
+    profile_switch_child_kind: ProfileSwitchChildKind
+    profile_effect_state: ProfileEffectState
+    profile_cancellation_cause: ProfileCancellationCause
+    profile_child_job_kind: ProfileChildJobKind
+    profile_child_source: ProfileChildSource
 
     state: LifecycleState
     agent_result_state: AgentResultState

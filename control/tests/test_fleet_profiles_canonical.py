@@ -299,6 +299,42 @@ def test_definition_read_preserves_a_malformed_saved_choice_as_unknown():
         assert row.assignments == [{"recipe_selector": "vonk-forge/missing-fields"}]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    "field,value", [("labels", []), ("assignments", [{"invalid": "choice"}])]
+)
+def test_saved_profile_identity_never_embeds_a_damaged_column(field, value):
+    from vonk_control.fleet_profiles import _profile_document
+    from vonk_control.models import FleetProfile
+
+    sessions = _sessions()
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    created = service.create(FleetProfileInput(name="Damaged"), actor="test")
+    with sessions() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        original = _profile_document(row)
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        setattr(row, field, value)
+    with sessions() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        # A marker substituted as labels would silently acquire a content
+        # identity. No bound plan may mistake that for saved authoring intent.
+        with pytest.raises(ValidationError):
+            _profile_document(row)
+    with sessions.begin() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        setattr(row, field, getattr(original, field))
+    with sessions() as session:
+        row = session.get(FleetProfile, created.id)
+        assert row is not None
+        assert _profile_document(row) == original
+
+
 def test_profile_accepts_the_library_publisher_slug_selector() -> None:
     sessions = _sessions()
     _seed(sessions)

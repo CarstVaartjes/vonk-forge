@@ -28,7 +28,7 @@ from .blocker_retries import (
 #: The repository parse is shared setup, not the first test's own time.
 pytestmark = pytest.mark.usefixtures("parsed_repository")
 
-PATH = "control/src/vonk_control/fleet_profiles.py"
+PATH = "control/src/vonk_control/fleet_profiles/apply.py"
 
 
 def _site(exception_class: str, function: str) -> RaiseSite:
@@ -1045,3 +1045,42 @@ def test_protocol_return_filter_retains_subtypes_and_uncertain_candidates() -> N
         "Generic.read",
         "Structural.read",
     } <= targets
+
+
+def test_retry_proof_follows_imported_mixin_aliases_and_receiver_casts() -> None:
+    """A split must retain the real sibling-method edge, never infer a loop."""
+    graph = _graph(
+        {
+            "effects": _BASE
+            + textwrap.dedent("""
+                class Service:
+                    def issue(self):
+                        raise Busy("observation pending")
+            """),
+            "worker": """
+                from typing import cast as receiver_cast
+                from .effects import Busy
+                from .service import Service as CompleteService
+                class Service:
+                    def tick(self):
+                        self = receiver_cast("CompleteService", self)
+                        try:
+                            self.issue()
+                        except Busy:
+                            pass
+            """,
+            "service": """
+                from .effects import Service as Effects
+                from .worker import Service as Worker
+                class Service(Effects, Worker):
+                    pass
+            """,
+        }
+    )
+    loop = ("pkg/worker.py", "Service.tick")
+    proof = Prover(graph, {loop: frozenset({"Busy"})}).prove(
+        "pkg/effects.py", "Busy", "Service.issue"
+    )
+    assert proof.proven
+    assert proof.loop is not None and proof.loop.path == loop[0]
+    assert not Prover(graph, {}).prove("pkg/effects.py", "Busy", "Service.issue").proven

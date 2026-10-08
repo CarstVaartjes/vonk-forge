@@ -15,24 +15,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "FleetProfileService._observe_pending_admissions",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "FleetProfileService.retry",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "_require_recovery_preparation",
-      "kind": "imperative-remedy",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/gateway_keys.py",
       "function": "keep_default_key",
       "kind": "imperative-remedy",

@@ -105,18 +105,6 @@
       "count": 1
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "FleetProfileService._application_is_current_selection",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
-      "path": "control/src/vonk_control/fleet_profiles.py",
-      "function": "FleetProfileService._repeated_failure",
-      "kind": "loop-without-deadline",
-      "count": 1
-    },
-    {
       "path": "control/src/vonk_control/fleet_stream.py",
       "function": "FleetStream.events",
       "kind": "loop-without-deadline",

@@ -2,6 +2,114 @@
 // vonk_agent_protocol.lifecycle_vocabulary and
 // vonk_agent_protocol.reason_codes. Do not edit.
 
+export const ProfileInstallationPolicy = {
+  KEEP_CACHED: "keep-cached",
+  EXACT: "exact",
+} as const;
+export type ProfileInstallationPolicy = (typeof ProfileInstallationPolicy)[keyof typeof ProfileInstallationPolicy];
+
+export const ProfileChildPhase = {
+  MODEL_DOWNLOAD: "model-download",
+  CONTAINER_DOWNLOAD: "container-download",
+  CONTAINER_BUILD: "container-build",
+  TARGET_COPY: "target-copy",
+  RUNTIME_INSTALL: "runtime-install",
+  START: "start",
+  FINAL_VERIFY: "final-verify",
+  TRANSFER: "transfer",
+  VERIFY: "verify",
+  PREPARE: "prepare",
+  CLEANUP: "cleanup",
+  STOP: "stop",
+  UNINSTALL: "uninstall",
+} as const;
+export type ProfileChildPhase = (typeof ProfileChildPhase)[keyof typeof ProfileChildPhase];
+
+export const ProfileReportedPhase = {
+  FINAL_VERIFY: "final_verify",
+} as const;
+export type ProfileReportedPhase = (typeof ProfileReportedPhase)[keyof typeof ProfileReportedPhase];
+
+export const ProfileRetryDisposition = {
+  WAIT: "wait",
+  SUPERSEDE: "supersede",
+} as const;
+export type ProfileRetryDisposition = (typeof ProfileRetryDisposition)[keyof typeof ProfileRetryDisposition];
+
+export const ProfileAction = {
+  SWITCH: "switch",
+  KEEP: "keep",
+  ADOPT: "adopt",
+} as const;
+export type ProfileAction = (typeof ProfileAction)[keyof typeof ProfileAction];
+
+export const ProfileDocumentState = {
+  ACTIVE: "active",
+  DRAFT: "draft",
+  READY: "ready",
+  LOADED: "loaded",
+  NOT_CREATED: "not-created",
+} as const;
+export type ProfileDocumentState = (typeof ProfileDocumentState)[keyof typeof ProfileDocumentState];
+
+export const ProfileReasonSeverity = {
+  INFO: "info",
+  WARNING: "warning",
+  ERROR: "error",
+  BLOCKER: "blocker",
+} as const;
+export type ProfileReasonSeverity = (typeof ProfileReasonSeverity)[keyof typeof ProfileReasonSeverity];
+
+export const ProfileProjectionKind = {
+  JOB: "job",
+  APPLICATION: "profile-application",
+  STEP: "profile-step",
+  AGENT_OPERATION: "agent-operation",
+  FLEET_APPLICATION: "fleet-profile-application",
+} as const;
+export type ProfileProjectionKind = (typeof ProfileProjectionKind)[keyof typeof ProfileProjectionKind];
+
+export const ProfileOperationKind = {
+  APPLY: "fleet-profile.apply",
+} as const;
+export type ProfileOperationKind = (typeof ProfileOperationKind)[keyof typeof ProfileOperationKind];
+
+export const ProfileSwitchChildKind = {
+  INSTALL: "install",
+  RUN: "run",
+  STOP: "stop",
+  CLEANUP: "cleanup",
+} as const;
+export type ProfileSwitchChildKind = (typeof ProfileSwitchChildKind)[keyof typeof ProfileSwitchChildKind];
+
+export const ProfileEffectState = {
+  NOT_ISSUED: "not-issued",
+  PENDING: "pending",
+  SUCCEEDED: "succeeded",
+  FAILED: "failed",
+  CANCELLED: "cancelled",
+  UNKNOWN: "unknown",
+} as const;
+export type ProfileEffectState = (typeof ProfileEffectState)[keyof typeof ProfileEffectState];
+
+export const ProfileCancellationCause = {
+  OPERATOR: "operator",
+  SUPERSEDED: "superseded",
+} as const;
+export type ProfileCancellationCause = (typeof ProfileCancellationCause)[keyof typeof ProfileCancellationCause];
+
+export const ProfileChildJobKind = {
+  RUN_SWITCH: "recipe.run-switch.v2",
+  STOP: "recipe.stop.v2",
+  CLEANUP: "recipe.cleanup.v2",
+} as const;
+export type ProfileChildJobKind = (typeof ProfileChildJobKind)[keyof typeof ProfileChildJobKind];
+
+export const ProfileChildSource = {
+  SWITCH_ADAPTER: "switch-adapter",
+} as const;
+export type ProfileChildSource = (typeof ProfileChildSource)[keyof typeof ProfileChildSource];
+
 export const LifecycleState = {
   QUEUED: "queued",
   RUNNING: "running",

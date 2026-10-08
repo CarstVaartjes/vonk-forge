@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 0e44e8cf7084e846fca96b834e45a0ed7d207538eb1b4dd734b2ae24ecf5425d. Do not edit.
+// Generated from canonical OpenAPI SHA256 e13c356f5f5d962f9fb80d261473ad17872ad026969d0b95214bdaf8de01aee4. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5789,6 +5789,20 @@ export interface components {
             outcome_kind: components["schemas"]["OutcomeKind"];
             placement_install_state: components["schemas"]["PlacementInstallState"];
             placement_load_state: components["schemas"]["PlacementLoadState"];
+            profile_action: components["schemas"]["ProfileAction"];
+            profile_cancellation_cause: components["schemas"]["ProfileCancellationCause"];
+            profile_child_job_kind: components["schemas"]["ProfileChildJobKind"];
+            profile_child_phase: components["schemas"]["ProfileChildPhase"];
+            profile_child_source: components["schemas"]["ProfileChildSource"];
+            profile_document_state: components["schemas"]["ProfileDocumentState"];
+            profile_effect_state: components["schemas"]["ProfileEffectState"];
+            profile_installation_policy: components["schemas"]["ProfileInstallationPolicy"];
+            profile_operation_kind: components["schemas"]["ProfileOperationKind"];
+            profile_projection_kind: components["schemas"]["ProfileProjectionKind"];
+            profile_reason_severity: components["schemas"]["ProfileReasonSeverity"];
+            profile_reported_phase: components["schemas"]["ProfileReportedPhase"];
+            profile_retry_disposition: components["schemas"]["ProfileRetryDisposition"];
+            profile_switch_child_kind: components["schemas"]["ProfileSwitchChildKind"];
             progress_phase: components["schemas"]["ProgressPhase"];
             reservation_state: components["schemas"]["ReservationState"];
             resource_blocker_code: components["schemas"]["ResourceBlockerCode"];
@@ -7517,6 +7531,54 @@ export interface components {
             severity: "blocker" | "warning" | "info";
         };
         /**
+         * ProfileAction
+         * @description Fleet profile Action contract words.
+         * @enum {string}
+         */
+        ProfileAction: "switch" | "keep" | "adopt";
+        /**
+         * ProfileCancellationCause
+         * @description Fleet profile CancellationCause contract words.
+         * @enum {string}
+         */
+        ProfileCancellationCause: "operator" | "superseded";
+        /**
+         * ProfileChildJobKind
+         * @description Fleet profile ChildJobKind contract words.
+         * @enum {string}
+         */
+        ProfileChildJobKind: "recipe.run-switch.v2" | "recipe.stop.v2" | "recipe.cleanup.v2";
+        /**
+         * ProfileChildPhase
+         * @description Fleet profile ChildPhase contract words.
+         * @enum {string}
+         */
+        ProfileChildPhase: "model-download" | "container-download" | "container-build" | "target-copy" | "runtime-install" | "start" | "final-verify" | "transfer" | "verify" | "prepare" | "cleanup" | "stop" | "uninstall";
+        /**
+         * ProfileChildSource
+         * @description Fleet profile ChildSource contract words.
+         * @enum {string}
+         */
+        ProfileChildSource: "switch-adapter";
+        /**
+         * ProfileDocumentState
+         * @description Profile views and catalogue documents used by profile resolution.
+         * @enum {string}
+         */
+        ProfileDocumentState: "active" | "draft" | "ready" | "loaded" | "not-created";
+        /**
+         * ProfileEffectState
+         * @description Fleet profile EffectState contract words.
+         * @enum {string}
+         */
+        ProfileEffectState: "not-issued" | "pending" | "succeeded" | "failed" | "cancelled" | "unknown";
+        /**
+         * ProfileInstallationPolicy
+         * @description Fleet profile InstallationPolicy contract words.
+         * @enum {string}
+         */
+        ProfileInstallationPolicy: "keep-cached" | "exact";
+        /**
          * ProfileJobRunStopAuthorization
          * @description Current accepted profile Stop owns this immutable JobRun scope.
          */
@@ -7626,6 +7688,12 @@ export interface components {
             stop_payload_sha256: string;
         };
         /**
+         * ProfileOperationKind
+         * @description Fleet profile OperationKind contract words.
+         * @enum {string}
+         */
+        ProfileOperationKind: "fleet-profile.apply";
+        /**
          * ProfilePartialStop
          * @description The reachable ranks a profile Stop reaches and the ranks it cannot.
          */
@@ -7636,11 +7704,35 @@ export interface components {
             target_node_ids: string[];
         };
         /**
+         * ProfileProjectionKind
+         * @description Typed identities in profile effects and operation projections.
+         * @enum {string}
+         */
+        ProfileProjectionKind: "job" | "profile-application" | "profile-step" | "agent-operation" | "fleet-profile-application";
+        /**
          * ProfileReasonCode
          * @description Reasons a fleet profile cannot be applied or is waiting.
          * @enum {string}
          */
         ProfileReasonCode: "profile.admission_busy" | "profile.admission_effect_busy" | "profile.application_intent.invalid" | "profile.choices_unreadable" | "profile.definition_unavailable" | "profile.cleanup_delegated" | "profile.distributed_cross_scope" | "profile.failure_repeated" | "profile.incomplete_multi_spark_model" | "profile.interruption_expected" | "profile.pending_cross_scope" | "profile.preparation_not_started" | "profile.preparation_scope_mismatch" | "profile.preparation_unavailable" | "profile.recipe_unavailable" | "profile.recovery_assignments_changed" | "profile.recovery_cache_pending" | "profile.recovery_scope_changed" | "profile.recovery_waiting" | "profile.resource_recheck_unavailable" | "profile.retry_conflict" | "profile.retry_executor_unavailable" | "profile.retry_intent_unavailable" | "profile.retry_review_unavailable" | "profile.review_stale" | "profile.runtime_image_rebuild_pending" | "profile.shared_installation_scope" | "profile.spark_removed" | "profile.spark_unavailable" | "profile.stale_plan" | "profile.switch_authority_unavailable" | "profile.switch_scope_unresolved" | "profile.topology_incomplete" | "profile.recovery_artifact_changed" | "profile.runtime-image-changed" | "profile.selection_lost" | "profile.asset_reservation_unavailable";
+        /**
+         * ProfileReasonSeverity
+         * @description A profile reason and its upstream assessment severity.
+         * @enum {string}
+         */
+        ProfileReasonSeverity: "info" | "warning" | "error" | "blocker";
+        /**
+         * ProfileReportedPhase
+         * @description Run-switch phase projected into a profile child checkpoint.
+         * @enum {string}
+         */
+        ProfileReportedPhase: "final_verify";
+        /**
+         * ProfileRetryDisposition
+         * @description An accepted profile intent either retries or ends as superseded.
+         * @enum {string}
+         */
+        ProfileRetryDisposition: "wait" | "supersede";
         /**
          * ProfileStopOwnerBinding
          * @description The canonical accepted profile operation that owns this exact Stop.
@@ -7686,6 +7778,12 @@ export interface components {
             /** Workload Intent Ordinal */
             workload_intent_ordinal: number;
         };
+        /**
+         * ProfileSwitchChildKind
+         * @description Fleet profile SwitchChildKind contract words.
+         * @enum {string}
+         */
+        ProfileSwitchChildKind: "install" | "run" | "stop" | "cleanup";
         /**
          * ProgressPhase
          * @description What an operation is doing, as the measured progress names it.

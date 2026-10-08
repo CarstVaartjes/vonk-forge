@@ -371,3 +371,49 @@ def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
         _require_recovery_preparation("assignment", accepted, other)
     # An accepted plan that never bound an identity has none to replace.
     _require_recovery_preparation("assignment", None, accepted)
+
+
+@pytest.mark.parametrize("damage", ["intent-identity", "review-identity"])
+def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) -> None:
+    from types import SimpleNamespace
+
+    from vonk_agent_protocol import LifecycleState
+
+    from .non_blocking import assert_ended_without_blocking
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = _service(sessions)
+    profile, application = _loaded(service, revision_id, 1100)
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        progress = dict(row.progress)
+        intended_value = progress["intended_profile"]
+        assert isinstance(intended_value, dict)
+        intended = dict(intended_value)
+        intended[
+            "profile_digest" if damage == "intent-identity" else "reviewed_plan_digest"
+        ] = "e" * 64
+        progress["intended_profile"] = intended
+        row.progress = progress
+
+    def end(receipt):
+        for _ in range(4):
+            service.tick()
+            current = service.application(receipt.id)
+            if current.state == LifecycleState.SUPERSEDED:
+                return current
+        return service.application(receipt.id)
+
+    ended, fresh = assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        application,
+        end=end,
+        fresh=lambda _world: service.apply(
+            profile.id, request_key=_uuid(1101), actor="admin"
+        ),
+    )
+    assert ended.state == LifecycleState.SUPERSEDED
+    assert ended.progress.supersede_code is not None
+    assert fresh.id != ended.id

@@ -261,70 +261,70 @@
       "reason": "Retained child adoption binds the exact accepted assignment revision, after proving the immutable application request, queue index, child kind, payload digest, workload-intent ordinal, parent receipt and target scope. This checks ownership of an already-issued child; it neither compares reusable content nor prevents content-equivalent artifacts from reuse across revisions."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/assignment_assessment.py",
       "function": "FleetProfileService._assignment_state",
       "kind": "provenance_comparison",
       "expression": "ClusterMapping.recipe_revision_id == assignment.recipe_revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/assignment_assessment.py",
       "function": "FleetProfileService._assignment_state",
       "kind": "provenance_comparison",
       "expression": "RecipeBuild.recipe_revision_id == assignment.recipe_revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/assignment_assessment.py",
       "function": "FleetProfileService._assignment_state",
       "kind": "provenance_comparison",
       "expression": "RecipeInstallation.recipe_revision_id == assignment.recipe_revision_id",
       "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/preparation.py",
       "function": "FleetProfileService._cancel_owned_preparations",
       "kind": "provenance_comparison",
       "expression": "item.recipe_revision_id == revision_id",
       "reason": "Ownership by revision id: another running profile application resolving the same revision shares the preparation, so cancelling skips it."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/replan.py",
       "function": "FleetProfileService._follow_newest_recipe_revisions",
       "kind": "provenance_comparison",
       "expression": "item.recipe_revision_id != accepted[item.id].recipe_revision_id",
       "reason": "Profiles follow the newest revision of each recipe they name: a moved head is detected by comparing the accepted revision with the current head, which is the version the operator asked to follow."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/profile_projection.py",
       "function": "FleetProfileService._loaded_recipe_update",
       "kind": "provenance_comparison",
       "expression": "assignment.recipe_id == recipe.id",
       "reason": "Finds the loaded assignment of a recipe on a roster and whether it runs the newest revision; the revision is the recipe version shown in the update notice."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/profile_projection.py",
       "function": "FleetProfileService._loaded_recipe_update",
       "kind": "provenance_comparison",
       "expression": "loaded.recipe_revision_id == newest.id",
       "reason": "Finds the loaded assignment of a recipe on a roster and whether it runs the newest revision; the revision is the recipe version shown in the update notice."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/profile_projection.py",
       "function": "FleetProfileService._observed_assignment_state",
       "kind": "provenance_comparison",
       "expression": "assignment.recipe_id == recipe_id",
       "reason": "Finds the loaded assignment of a recipe on a roster and whether it runs the newest revision; the revision is the recipe version shown in the update notice."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/recipe_choices.py",
       "function": "FleetProfileService._validate_draft_review_identity",
       "kind": "provenance_comparison",
       "expression": "(assignment.recipe_id, assignment.recipe_revision_id) != tuple(identity)",
       "reason": "Review binding: a profile accepted from a review must still resolve each assignment to the recipe and the head revision that were reviewed; a moved head raises a stale-plan conflict and asks for a new review (revision is the reviewed recipe version, not an image)."
     },
     {
-      "path": "control/src/vonk_control/fleet_profiles.py",
+      "path": "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
       "function": "RunSwitchFleetProfileAdapter._adopt_child",
       "kind": "provenance_comparison",
       "expression": "plan.recipe_revision_id == assignment.recipe_revision_id",

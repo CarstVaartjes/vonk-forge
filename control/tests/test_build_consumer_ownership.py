@@ -10,7 +10,7 @@ import pytest
 import vonk_control.recipe_image_availability.cancellation as availability_module
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState
-from vonk_control import fleet_profiles as profile_module
+from vonk_control.fleet_profiles import queue_application as profile_module
 from vonk_control.job_documents import AvailabilityRuntime
 from vonk_control.models import (
     AgentNode,
