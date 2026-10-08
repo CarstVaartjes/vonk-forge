@@ -62,7 +62,10 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import OperationQuery
 from vonk_control.operation_blockers import PHASE_RETRY_CODE
-from vonk_control.operation_contract import OperationFailureEvidence
+from vonk_control.operation_contract import (
+    OperationFailureEvidence,
+    OperationRecoveryAction,
+)
 from vonk_control.operation_item_contract import OperationItem, operation_item
 from vonk_control.recipe_build_cancellation import (
     lock_build_dependency,
@@ -4160,7 +4163,7 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(
     assert item.node_ids == list(nodes)
     assert item.node_id == nodes[0]
     assert item.attempt >= 1
-    assert item.supported_actions == ["cancel"]
+    assert item.supported_actions == [OperationRecoveryAction.CANCEL]
     assert progress.total_bytes_known is True
     assert progress.members[0].member_id == nodes[0]
     assert checkpoint.digest == operation.plan_digest

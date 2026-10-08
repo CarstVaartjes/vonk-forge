@@ -28,6 +28,7 @@ from vonk_control.models import (
     RunSwitchJournalRepair,
     RunSwitchJournalRepairPending,
 )
+from vonk_control.operation_contract import OperationRecoveryAction
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_switch_journal_contract import (
     JournalRepairDisposition,
@@ -429,7 +430,7 @@ def test_unproven_owner_preserves_raw_journal_during_bounded_observation(
         from sqlalchemy import delete
         from vonk_control.models import AgentNode, AgentOperationAttempt
 
-        with sessions.begin() as session, write_guard_mode(strict=False):
+        with write_guard_mode(strict=False), sessions.begin() as session:
             child = session.get(Job, install_id)
             row = session.get(Job, switch_id)
             assert child is not None and row is not None
@@ -1040,7 +1041,7 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
             mismatched = RunSwitchJournalRepairEvidence.model_validate_json(
                 canonical_message(audit.evidence), strict=True
             ).model_copy(update={"request_key": str(uuid4())})
-    with sessions.begin() as session, write_guard_mode(strict=False):
+    with write_guard_mode(strict=False), sessions.begin() as session:
         if fault == "missing-attempt":
             session.execute(
                 delete(AgentOperationAttempt).where(
@@ -1080,7 +1081,8 @@ def test_unproven_repair_ends_without_blocking_fresh_same_spark(
     assert first.attempts == 1 and first.next_attempt_at > clock[0]
     assert planner.get(switch_id).next_attempt_at == first.next_attempt_at
     activity = planner.activity_provider().get_operation(switch_id)
-    assert activity["supported_actions"] == ["cancel"]
+    assert activity is not None
+    assert activity.supported_actions == [OperationRecoveryAction.CANCEL]
     # No busy loop or deadline reset at the same clock, including after restart.
     assert not planner.tick()
     if cancel:

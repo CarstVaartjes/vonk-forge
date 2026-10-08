@@ -2099,14 +2099,8 @@
     {
       "path": "control/tests/test_run_switch_postgres.py",
       "function": "test_postgres_final_verification_timeout_hands_run_to_recovery",
-      "kind": "observation-withdrawal-assertion",
-      "count": 1
-    },
-    {
-      "path": "control/tests/test_run_switch_postgres.py",
-      "function": "test_postgres_final_verification_timeout_hands_run_to_recovery",
       "kind": "transient-failed-assertion",
-      "count": 2
+      "count": 1
     },
     {
       "path": "control/tests/test_runtime_image_preparation.py",
@@ -5367,11 +5361,11 @@
       "_CountingPreviewLifecycle.__init__": "2eb5c68fa34bdf110e478b94b9582142a0f534026f34e6ae51bdd0401686708c",
       "_CountingPreviewLifecycle.preview_run": "6be84d8128e0f8d903de0ffbe3c6e82ea12882cbce208f01f28bad2934d661d1",
       "_CountingPreviewLifecycle.__getattr__": "2222da26666acf79581d9bb705465a10b96900cc011c7a6c5b682a7b7941103e",
-      "test_start_phase_adopts_the_child_it_already_queued": "de7ed543eeebc75db88ee25b0f75779b91c2ff5edc22bfa75e32e9167319c7a1",
+      "test_start_phase_adopts_the_child_it_already_queued": "c7265342059d9b12ab213b508c7933b70285bb3cd34b9d79088a3f790c974974",
       "test_cleanup_adapter_retries_when_executor_reports_nas_eviction": "067baa6d9e4f1b3cfd34634a7fbb52f48457b5be1ac170d3619da84c6356e80a",
       "test_cleanup_adapter_retries_when_executor_reports_nas_eviction.NasEvictingExecutor.execute": "4ddff3f3139223c6d50eb6be14e648fcd0109afd6e6d149b968f5f1dd1a37fa0",
       "test_invocation_metadata_does_not_change_plan_digest": "f5c0a59685ea7803a9aae487c01e79f673a6fbb8a526b9ce674a8d70fb6124c0",
-      "test_activity_provider_preserves_group_and_canonical_nested_progress": "8ca7c83a9c716a88caad3efd135fae41d3b62e06f4f494a82edf175400f6b9f7",
+      "test_activity_provider_preserves_group_and_canonical_nested_progress": "e0000b765ccefd2c1a51725d55abf72ddab700f35aae5df0747d83f79b4af820",
       "test_activity_provider_integrates_with_global_cursor_and_detail_projection": "7531402efd3ab51d8678d99744d94a2db7cf43a8d456ac7426e901da70a8a404",
       "test_activity_provider_keeps_valid_items_when_one_plan_is_unreadable": "33118098683f5ecad9c6218fb4b1b93a2bc2fecf5a57b61a845fa6bb01f8dd72",
       "test_measured_operation_keeps_unknown_totals_and_failure_readable": "72635ccee2e603d0dc8e88cbcb0bd9b410294f710b358261b015582bd24a1846",
@@ -5449,7 +5443,7 @@
       "test_postgres_running_switch_allows_route_publication_and_survives_restart": "8fb22c42fbbda0c587751dac8923aeb1f29fccc15600ff720c57f0df636dccb4",
       "test_postgres_final_verification_backs_off_after_durable_deadline": "23773ca9fc2ada49690ab82e319208dd4e5c44bdfba3d723acc7669c53525bdc",
       "test_postgres_final_verification_waits_after_accepted_start_deadline": "5124758bfb5e5cbfaf041cefc68c9eb376b88ace4ff97f9a851012aed5e93a41",
-      "test_postgres_final_verification_timeout_hands_run_to_recovery": "d4079af090edbc48b43e4f7d613c7a84350a45beb96469404aa30f2cd1d7cc01",
+      "test_postgres_final_verification_timeout_hands_run_to_recovery": "ef079b13a097cf12ca12de35d61ca9b411730c26e5885abdb62c00bcb61b7cd4",
       "test_postgres_newer_intent_supersedes_parked_final_verification": "9336aadf4fd4aa62dc35397d983f56c9ea26ba4b299ef4249115260a9fc6caf3",
       "test_postgres_duplicate_apply_converges_under_target_lock": "0d8f58b69133f2f8b94bd930114a95312bbd330d5de3d2f51146a7628bd42b3b",
       "test_postgres_duplicate_apply_converges_under_target_lock.apply": "24498fbb1cda1fb0e3e32583e4708f225d315d5fd27548b6b56f73b1a495694d"

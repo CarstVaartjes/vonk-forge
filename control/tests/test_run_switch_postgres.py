@@ -10,11 +10,13 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import event, select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, RunSwitchCode
+from vonk_agent_protocol.state_machines import RouteState
 from vonk_control.logging import configure_controller_logging
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
+    Job,
     RecipeRun,
     ResourceReservation,
     RunNode,
@@ -27,6 +29,7 @@ from vonk_control.run_switch_contract import (
     SparkGroup,
     SparkGroupNode,
 )
+from vonk_control.run_switch_operations import _stored_job_plan
 
 from .test_recipe_operations import (
     NOW,
@@ -363,7 +366,7 @@ def test_postgres_final_verification_waits_after_accepted_start_deadline(
 def test_postgres_final_verification_timeout_hands_run_to_recovery(
     tmp_path, migrated_engine
 ):
-    sessions, lifecycle, _routes, _, service, operation = _awaiting_final_verification(
+    sessions, lifecycle, routes, _, service, operation = _awaiting_final_verification(
         tmp_path, migrated_engine, distributed=True
     )
     current = service.get(operation.operation_id)
@@ -382,15 +385,46 @@ def test_postgres_final_verification_timeout_hands_run_to_recovery(
     failed = service.get(operation.operation_id)
     assert failed.state == LifecycleState.FAILED
     assert failed.status_reason is not None
-    assert "final-verification-timeout" in failed.status_reason
-    assert "exact workload recovery" in failed.status_reason
+    assert failed.result is not None
+    assert failed.result.failure_code == RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+    assert failed.status_reason.startswith(RunSwitchCode.FINAL_VERIFICATION_TIMEOUT)
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         nodes = tuple(session.scalars(select(RunNode).where(RunNode.run_id == run_id)))
         assert run is not None and run.state == LifecycleState.RUNNING
-        assert run.route_state == "withdrawn"
-        assert run.route_next_attempt_at == now
-        assert nodes and any(node.state == LifecycleState.FAILED for node in nodes)
+        # The fixture has never published a working route. Recovery retains
+        # the run and schedules its route worker rather than claiming a stop.
+        assert observation.route_state == RouteState.PENDING
+        assert run.route_state == RouteState.PENDING
+        assert nodes and all(node.state == LifecycleState.RUNNING for node in nodes)
+    # A settled observation timeout must release the planner's busy state even
+    # while the existing run's route worker owns exact workload recovery.
+    with sessions() as session:
+        job = session.get(Job, failed.operation_id)
+        assert job is not None
+        plan = _stored_job_plan(job)
+        assert plan is not None
+    request = _request(sessions, failed.node_ids[0]).model_copy(
+        update={"spark_group": plan.spark_group}
+    )
+    fresh = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), request_key=str(uuid.uuid4())),
+        actor="admin",
+    )
+    assert fresh.operation_id != failed.operation_id
+    # The fresh request adopts the exact running workload and observes its
+    # route, rather than queuing another launch or refusing the old outcome.
+    assert fresh.state == LifecycleState.OBSERVING
+    assert fresh.node_ids == failed.node_ids
+    # Exact observations recover through the normal route worker; a terminal
+    # planner row must not poison the still-running workload's publication.
+    mark_current_exact_observations(sessions, run_id, now)
+    routes._clock = lambda: now
+    routes.publish_run(run_id)
+    with sessions() as session:
+        recovered = session.get(RecipeRun, run_id)
+        assert recovered is not None and recovered.state == LifecycleState.RUNNING
+        assert recovered.route_state == RouteState.PUBLISHED
 
 
 def test_postgres_newer_intent_supersedes_parked_final_verification(
