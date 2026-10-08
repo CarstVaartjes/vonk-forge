@@ -110,7 +110,7 @@ def _removal_payload(
 
 
 def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
-    postgres_engine, tmp_path: Path
+    postgres_engine, tmp_path: Path, monkeypatch
 ) -> None:
     service, sessions = _removal_service(postgres_engine, tmp_path)
     accepted, _model_digest, object_path = _seed_removal(
@@ -127,6 +127,17 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
     step_errors: list[Exception] = []
     step_results: list[bool] = []
     original_advance = service._advance_model_removal
+    from vonk_control.model_cache import removal_execution
+
+    original_scan = removal_execution.model_set_reference_reasons
+    scans_while_locked = []
+
+    def observe_scan(*args, **kwargs):
+        if key_acquired.is_set() and not release_holder.is_set():
+            scans_while_locked.append(True)
+        return original_scan(*args, **kwargs)
+
+    monkeypatch.setattr(removal_execution, "model_set_reference_reasons", observe_scan)
 
     def contend_after_candidate_select(
         operation_id: str, *, now: datetime | None = None
@@ -173,6 +184,7 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
     assert completed_count == 0
     assert step_errors == []
     assert step_results == [False]
+    assert scans_while_locked == [], "a busy owner must defer before reference scans"
     assert object_path.is_file(), "the locked owner must retain its managed bytes"
     after_busy = _removal_payload(sessions, accepted.id)
     assert after_busy.removal_fence == initial.removal_fence

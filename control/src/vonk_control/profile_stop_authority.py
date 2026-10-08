@@ -411,7 +411,9 @@ def validate_profile_stop_owner(
             or linked.kind != "recipe.stop"
             or linked.request_id != expected_key
             or linked.payload_digest
-            != hashlib.sha256(canonical_message(linked.payload)).hexdigest()
+            != hashlib.sha256(
+                canonical_message(read_row_column(linked, "payload"))
+            ).hexdigest()
         ):
             raise ProfileStopAuthorityError(
                 "profile Stop linked child identity changed"
