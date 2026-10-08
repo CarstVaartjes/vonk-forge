@@ -1107,3 +1107,171 @@ def test_recipe_build_unknown_outcomes_have_no_unhandled_or_swallowed_path(
         "RecipeBuildUnknown",
         "RecipeBuildService.persist_plan_in_session",
     )
+
+
+@pytest.mark.parametrize("escape", ["", "unknown(alias)", "return alias"])
+def test_forwarded_callback_alias_keeps_unknown_consumer_as_debt(escape: str) -> None:
+    """Reject credit if a forwarded callback also reaches an unknown consumer."""
+    source = """
+        def work():
+            raise Busy("later")
+        def invoke(callback):
+            callback()
+        def forward(callback):
+            alias = callback
+            invoke(alias)
+            {escape}
+        def tick():
+            try:
+                forward(work)
+            except Busy:
+                pass
+    """
+    source = textwrap.dedent(source).format(escape=escape or "pass")
+    proof = _prove(source, "work", loops={"tick": ("Busy",)})
+    assert proof.reached_by_a_loop
+    assert proof.proven is (not escape)
+
+
+@pytest.mark.parametrize("escape", [False, True])
+@pytest.mark.parametrize("interface", ["protocol", "abstract"])
+def test_interface_dispatch_preserves_each_call_context(
+    interface: str, escape: bool
+) -> None:
+    """Reject credit if any interface invocation escapes the registered catch."""
+    definition = (
+        "from typing import Protocol as Interface\nclass Port(Interface):"
+        if interface == "protocol"
+        else "from abc import ABC as Interface, abstractmethod\nclass Port(Interface):"
+    )
+    decorator = "    @abstractmethod\n" if interface == "abstract" else ""
+    source = definition + "\n" + decorator + "    def perform(self): ...\n"
+    source += textwrap.dedent("""
+        class Worker(Port):
+            def perform(self):
+                raise Busy("later")
+        class StructuralWorker:
+            def perform(self):
+                raise Busy("later")
+        def tick(port: Port):
+            try:
+                port.perform()
+            except Busy:
+                pass
+    """)
+    if escape:
+        source += "\ndef other(port: Port):\n    port.perform()\n"
+    target = "StructuralWorker.perform" if interface == "protocol" else "Worker.perform"
+    proof = _prove(source, target, loops={"tick": ("Busy",)})
+    assert proof.reached_by_a_loop
+    assert proof.proven is not escape
+
+
+@pytest.mark.parametrize("escape", [False, True])
+def test_literal_getattr_alias_preserves_each_call_context(escape: bool) -> None:
+    """Reject credit when the same literal method alias is called outside try."""
+    source = """
+        class Worker:
+            def perform(self):
+                raise Busy("later")
+        def tick(worker: Worker):
+            action = getattr(worker, "perform")
+            try:
+                action()
+            except Busy:
+                pass
+            {escape}
+    """
+    proof = _prove(
+        textwrap.dedent(source).format(escape="action()" if escape else "pass"),
+        "Worker.perform",
+        loops={"tick": ("Busy",)},
+    )
+    assert proof.reached_by_a_loop
+    assert proof.proven is not escape
+
+
+@pytest.mark.parametrize("dispatch", ["direct", "alias", "callback"])
+def test_untyped_literal_getattr_never_supplies_retry_evidence(dispatch: str) -> None:
+    """A guessed method-name edge may withdraw credit but cannot supply it."""
+    call = {
+        "direct": 'getattr(worker, "perform")()',
+        "alias": 'action = getattr(worker, "perform"); action()',
+        "callback": 'action = getattr(worker, "perform"); invoke(action)',
+    }[dispatch]
+    source = """
+        def invoke(callback):
+            callback()
+        class Worker:
+            def perform(self):
+                raise Busy("later")
+        def tick(worker):
+            try:
+                {call}
+            except Busy:
+                pass
+    """
+    proof = _prove(
+        textwrap.dedent(source).format(call=call),
+        "Worker.perform",
+        loops={"tick": ("Busy",)},
+    )
+    assert not proof.proven
+
+
+def test_model_source_literal_dispatch_has_a_typed_cache_receiver(
+    retry_proof_graph: object,
+) -> None:
+    """Reject retry credit based only on an opaque adapter's method-name guess."""
+    graph = build_graph_for(load_allowlist())
+    caller = graph.by_key[
+        ("control/src/vonk_control/distribution.py", "ModelCacheObjectSource._describe")
+    ]
+    target = graph.by_key[
+        (
+            "control/src/vonk_control/model_cache/availability.py",
+            "AvailabilityMixin.resolve_verified_artifact_set",
+        )
+    ]
+    edges = [edge for edge in graph.callees[caller] if edge.callee == target]
+    assert edges and all(edge.kind != "fallback" for edge in edges)
+
+
+@pytest.mark.parametrize("awaited", [False, True])
+def test_forwarded_thread_callback_requires_observation(awaited: bool) -> None:
+    """An awaited task surfaces its failure; an unobserved task escapes."""
+    source = """
+        import asyncio
+        def work():
+            raise Busy("later")
+        async def forward(callback):
+            {observe}asyncio.to_thread(callback)
+        async def tick():
+            try:
+                await forward(work)
+            except Busy:
+                pass
+    """
+    proof = _prove(
+        textwrap.dedent(source).format(observe="await " if awaited else ""),
+        "work",
+        loops={"tick": ("Busy",)},
+    )
+    assert proof.proven is awaited
+
+
+@pytest.mark.parametrize("escape", [False, True])
+def test_callback_binding_converges_beyond_a_fixed_pass_limit(escape: bool) -> None:
+    """Reject truncated propagation that hides a deep callback's escape."""
+    source = "def work():\n    raise Busy('later')\n"
+    for index in range(16):
+        invocation = f"forward_{index + 1}(alias)" if index < 15 else "alias()"
+        source += (
+            f"def forward_{index}(callback):\n    alias = callback\n    {invocation}\n"
+        )
+        if escape and index == 15:
+            source += "    unknown(alias)\n"
+    source += "def tick():\n    try:\n        forward_0(work)\n    except Busy:\n        pass\n"
+    proof = _prove(source, "work", loops={"tick": ("Busy",)})
+    assert proof.reached_by_a_loop
+    assert proof.proven is not escape

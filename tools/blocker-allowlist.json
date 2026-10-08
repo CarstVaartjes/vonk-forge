@@ -2013,7 +2013,7 @@
       "ModelCacheObjectSource.open_object": "0ff87d9e6d4c77b2dc3477bce5950d54ed26c588d2cabfc6b90a08dfef1fa11e",
       "ModelCacheObjectSource.verify_runtime_image": "660757c621d6f51a2b5703fd7e95582284ac556fddcadc8b9c5ab96aca8383fe",
       "ModelCacheObjectSource.from_service": "31d55ae58c88cc6957e991b4f92c9c5ac133ad686af7045c2d64e58b6659f193",
-      "ModelCacheObjectSource._from_cache_service": "d5839f5ac978449696d90379cfb5372ae7303ebb398bc664894bc84b45beaf1e",
+      "ModelCacheObjectSource._from_cache_service": "4408efd48d335dbc349ede84ade8e4114073a271173177f5250287bec8e2c960",
       "ModelCacheObjectSource._load_manifest": "74d1af8db119dff90ee503cff98ad1659841fb60d21c0b769c59328b26dea3ee",
       "ModelCacheObjectSource._describe": "7368aeced6ba6e22ee53c959542386c7364273febcf68dc4b11f084a9480660c",
       "ModelCacheObjectSource._open_cache_object": "533c0016a85c925570021d70f7253de3ffc2c89e400b8d4f005db23136dbb8c0",
@@ -2048,7 +2048,7 @@
       "record_distributed_runtime_image": "cd13be509addbbc48fb3a6ae09f0b2681f1e8ef318ae344818ed037d1f443552",
       "build_distribution_service": "90d71fa5561622844c14f716149298ade8a3dd91eb26ce66e64ddd667684da07",
       "build_distribution_service_from_components": "cfe34867778564e9f3aa745892abd7d0cadd3713b5474b0a6617d4d6e4e5f5f7",
-      "<module>": "f80dec55b8720341d2dca75d108a9b5e80a8b6e920dc1df8934545880f0011c8"
+      "<module>": "000809e28efdc4aaab780e37d97dabfb26d9bf3569b1e2bbc2d734ac2b7b6cf1"
     },
     "control/src/vonk_control/distribution_executor.py": {
       "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
