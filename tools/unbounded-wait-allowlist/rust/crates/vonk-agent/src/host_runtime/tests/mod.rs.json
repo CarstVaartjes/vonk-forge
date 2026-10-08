@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "request_root_publication_has_no_permissive_intermediate_state",
+      "justification": "The actual separate writer owns a cloned fixture path and reports its result over recv_timeout using one unchanged absolute 30-second budget. Its exact JoinHandle is joined only after that same handle is_finished; deadline/error paths retain the fixture rather than removing files under an unresolved writer. The isolated parent has the same total elapsed budget, reserves its last second for exact-child kill/try_wait reaping, and reports an unreaped child as failure. No scoped-thread implicit join or unconditional child wait remains; all unsafe-intermediate and atomic publication assertions remain.",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent/src/host_runtime/tests/mod.rs",
+      "reason": "resource-bound"
+    }
+  ]
+}

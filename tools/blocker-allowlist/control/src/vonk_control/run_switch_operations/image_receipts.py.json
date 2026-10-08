@@ -1,0 +1,46 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/image_receipts.py": {
+      "_build_receipt_in_session": "7f0091897371a66745bb002c798dcee5eba9ac0def79fd94284af8162dee5360",
+      "_plan_target_node_ids": "1f7b6079e00286679d8f2b451f5a10737139cae316ff6f8cebb59a2e2179eadf",
+      "_planned_transfer_bytes": "09cf4aa75f6cfed1cb0268b1833d096d65e0548518d0f128fb9f5cb954ce64b3",
+      "_planned_transfer_parts": "5922015152980c318995a3d1cb2edd5e3aea99313d6d91a74825584e23ea46fa",
+      "_require_profile_runtime_image": "3ee304d3d09a06815e4ea119e1d0fecfc0ede429528fc25219572770dc599969",
+      "effective_build_receipt": "3e3ce0b1914e2ba9810634f9e996f6edb425ee7a921c2c8e87d4e95a66ae2ce1"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/image_receipts.py",
+          "RunSwitchRetryLater",
+          "_build_receipt_in_session",
+          "run-switch.container-build-receipt-unavailable",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/image_receipts.py",
+          "_RunSwitchDefiniteConflict",
+          "_require_profile_runtime_image",
+          "profile.runtime-image-changed",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/image_receipts.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/image_receipts.py"
+    ]
+  }
+}

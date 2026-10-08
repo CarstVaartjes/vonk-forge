@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/catalog_revision_collection.py": {
+      "<module>": "b8f701787b4806f22ae57c7e42691922cede447d1a5b69b918125e581549d64b",
+      "CatalogRevisionCollector": "848ed4e059264437243a21d48f5bc21efa0c3606852d3d126c8e62bfa0972ca1",
+      "CatalogRevisionCollector.__init__": "14bf29064a9e9328b44c2a96dacfd6e2020a6b7133cc72f613d40d2b9b25fe9f",
+      "CatalogRevisionCollector._candidates": "8df90e64e4d42d73ecb1b9cc3af052532fb99be5805581df1ec95493efd75094",
+      "CatalogRevisionCollector._collect_bundles": "9cc8028fa4a876e38da56009d47ba29d9f3bb04e57e6325be8c7ff1a589bdfc2",
+      "CatalogRevisionCollector._delete_dead_rows": "eea76b853a74b7351387ffdc49d222e949bf66f683ace05d13a1b967402fd5ae",
+      "CatalogRevisionCollector._remove": "5a3abff842d1e63396cfc16b6d81b22cc129995aba441aa787880ac6c3c86d6a",
+      "CatalogRevisionCollector._require_no_remaining_reference": "8b9ff5f0a82b672815ca97fb0745f8811bfe3884a9dbaec137e448e8020989b8",
+      "CatalogRevisionCollector._require_unused": "f734b70d266b0e06e29b9eca0aab3f1283d6f5608fd2b68c9b39f579906a9a15",
+      "CatalogRevisionCollector.collect": "f5d3532b3ed70eb1d280cff07ed3a88bb00070cd96c80fa33d2aac5cbfc2e150",
+      "CatalogRevisionCollector.tick": "1734d2853848970b2e0a3cbde94229209746a52b4bfe1f1a3cb426e4ac0b8300",
+      "Collected": "540a362f01e51bb21f6a7b3b8ba4f0e27a79f8e101a36a6a1d1b604cce4d2ab8",
+      "_Candidate": "619af2d444cf89a240b5c85eb1d6736453aab0c7ae18451eb6102cb61f1f6cd5",
+      "_Kept": "72d45e36ac83350e78ebc30556c973a67daedc72ae311ec2e52600caa8b02450",
+      "_ids": "89b9259da5c72a0bdbc59f6133f8269d8cb145a673e73c2c7317767b01d22f83",
+      "_utc": "9e25fc48452b46805ba4b789f09e9695d425d77d1755508846d9b824a8533ec0",
+      "live_tokens": "aab55d60d2f6016dc32074a51cad50b5560f833d78c27a9bf2e62211cb545bb1",
+      "operation_tokens": "893017605c91dbeb1f45f9680f7173672e8af50eb78e6829e969d82866829420",
+      "operation_tokens.live": "9abff3ea76ed54e44993f36dae1485b549940d815bf87908ad55544a23120e81",
+      "pinned_by_heads": "07fd88cec50d092763aae2d7dd5ba11cdac5d7e3cc0cc94b6066ce8aea633a69",
+      "streamed_tokens": "29bcbb1f22b745ccfe58ee93856c274a2574f9e67b43cd7eed286d95111c742a",
+      "tokens": "725939f9c9c2800176ab6010d89344cbc688a16cd0d799390249bfe937b6a535"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/catalog_revision_collection.py": 5
+  }
+}

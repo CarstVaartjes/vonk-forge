@@ -1,0 +1,41 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/recipe_operation.py": {
+      "<module>": "39de96b80180566834679c2a59fc6444159031ae5c67cd07dc82e57114862788",
+      "RecipeOperationAdapter": "39721c9aa240537c72f9122606377a995668a14c5620732d8cbc44a8bdf5a072",
+      "RecipeOperationAdapter._write": "6c56eee6519ce5be5f2e3d9f6982d1a822c7a2dd7765416720df209d2347f599",
+      "RecipeOperationAdapter.actions": "2a4339764d54ce7aaa252f73c42e32adce97919e0f2f38cef320c586e13ef17d",
+      "RecipeOperationAdapter.adopt": "eab4c3980646b5ab1aea2171b0afc0314c213e9ec16476a44ffa56e6bf4ffa21",
+      "RecipeOperationAdapter.cancel_race": "d8cff4b18d4be03148ad95c35b1fe9a80ac4fb9b60cbd966fc35874410171184",
+      "RecipeOperationAdapter.cancelled": "dcfb06c01ad57b1e32b9c40ef41604f61df83dfae760823a642839c4af03a326",
+      "RecipeOperationAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "RecipeOperationAdapter.execute": "9bebe78a7961a8a077bbee348d361155190dfb4d649bf6a23e74d06b0e96fcd0",
+      "RecipeOperationAdapter.finish": "f267abc399362116885564ce26c4ed9439557732ca6e4bde11e9df995d4af171",
+      "RecipeOperationAdapter.heal": "7901e2a4f6401093bc347f4fac5520c96153d2f3afb045d7ce87443ab33839f9",
+      "RecipeOperationAdapter.irreversible": "4ab9e4b1daf7af8eff649c37e3a4e0833126db1748555af2d4a457adfeae8619",
+      "RecipeOperationAdapter.lifecycle": "ea8d063cc12c5c1e61ae5b577fa41b530ac43337d44c019e1f3470ce4eed66c1",
+      "RecipeOperationAdapter.new_job": "566e13b0a6f3e8a07f636423e03ad2601e8eab44372763ebea05629275957a21",
+      "RecipeOperationAdapter.observe": "a77353ae3dbdc8c71f048c1e3f0c21113d792dc8102032640d8b1c680abd2d54",
+      "RecipeOperationAdapter.project": "28ff22ff9839eee269c7dba6bd47ade2bb0159bf3047a213407d6e4ba7cce757",
+      "RecipeOperationAdapter.request_cancel": "fd52c511733c1fba59b7ab37f78bb678b46edbe66b8ccd4fe9c63ee48eefcda6",
+      "RecipeOperationAdapter.retry_not_before": "b44b940ce07854e720fe4db639b99915d3439138008f5c5c760051a7032df7bb",
+      "RecipeOperationAdapter.stop": "b420eced2d0abab4f6a0b2cc855d8351782309257da70f60e01642eeaec7d57f",
+      "_when": "0feb37714b26b6d4004ed1105879957dc6719a12879c152d414fc2f788498936",
+      "cancel_flagged": "eb4c8b256375f7c520f877d201af7e73b3ac2c21820c0a31b84330df87f5f4e2"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_operation.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/lifecycle/recipe_operation.py",
+          "InvalidValue",
+          "RecipeOperationAdapter.new_job",
+          "a-recipe-operation-cannot-be-created",
+          1
+        ]
+      ]
+    }
+  ]
+}

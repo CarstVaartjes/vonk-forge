@@ -1,0 +1,36 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/common.py": {
+      "<module>": "078bcd110695e59f2b25eb245f17488d1bfd1808e37dbb4b74941b6aba4b224e",
+      "_actions": "9e68404d4aa894c234832351e45c1a86a39da8e04b996c369858cc17599e1f09",
+      "_bytes": "4d6f0683c069ae68e8cb4c32f066df75eb83f19d46e3102ffd8eb49985b2994f",
+      "_failure": "55c00171cd31f6a77f30e1b018b7ce935ec8721083074a9d2a4ca7a0eeb0637f",
+      "_field": "4a2f652ef505ec1da9a13a51b966e94f620f40f69c048e007c86759012213586",
+      "_freshness": "909e192cbb76aa8cc07405ba742198ec3d9eadd72ba9ad445c4347d9164ac282",
+      "_headroom": "576ef073448922754e84596b8d862e4e5a60b66812bfa64516bb3c89af236765",
+      "_is_update_notice": "9b649cb49189b1f3746b7cbda8916d222195a5a2c0de18a6dd16ea203a7e8c45",
+      "_object": "8f846a7e0250717bee5b0134c066f89488ec0a30d7a3073ca362fc0c5cd66a94",
+      "_optional": "866f2b0d8c879d86ee4fa2148636887388bff4c2a6aac1b838f899ef3ff53bc2",
+      "_projection_issues": "24735e22c069b977b8949fa3f8f2ee9959fca555e583a9bd5863cab3bc2292bb",
+      "_reasons": "999417257fd7fa4d7add919a5786b2be759dccc97f356ae696e03d8a48eb5331",
+      "_recommendation": "45aea613e01aa09e136db466804e74f6ad7588a399d06bf33560c3a6432bd0a3",
+      "_records": "701e546fbceb7f514401c0047e8829da16e2e1c1138b28b78c27475c703952c8",
+      "_table": "a53cdc5854ce2870371ddcaa5a8789b596cbaefce4ee5b5f94cce041aeefb23d",
+      "_text": "fefd58bc0b0c0b059ee4f25f909717d0b26ef5064e1dccd27ceff52c13f8bdb4",
+      "_time": "2f85c5bf91468e379f3c9841c8f0aaf350a1182a673d9b230dee6d5ae5bdc782",
+      "_waiting": "d4224d320587bcf01a843644866c3b5a732f02306c85bbdd9b601224f8ed5c00",
+      "_warn": "7e9f87f1da6a94bdde20dea2ce1a6f79f519b6ce1e29c3c47779fb40bb67b4ac",
+      "_width": "79667abdedaa6fa69148fa1cd7d07dcfa70b453f3a7770f101cd4007f318785a",
+      "_words": "fc34167457bdc14d491baf516641850507b5c738e8b1e1cd23a84252d3026c5d",
+      "terminal_text": "9cc795573e1da83d0426de419d699a1d5715ae053e5086d5f31c18db9079ba1d"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "_failure",
+      "kind": "imperative-remedy",
+      "path": "src/cluster_profiles/cli_render/common.py"
+    }
+  ]
+}

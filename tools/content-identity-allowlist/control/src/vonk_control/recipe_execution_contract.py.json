@@ -1,0 +1,35 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_execution_contract.py": {
+      "<module>": "bf0d2f2a234cb7cd1fa4a42211c96dcad31660f6b95d4e32e4a55c46ab589bb4",
+      "RecipeExecutionContractError.__init__": "da4f86129107958663ce2754468e9afd0fd49464d36dff1ed2db4998ed04d23a",
+      "StoredInstallNodePlan.observation_timestamp_is_aware": "4a083a452e8ad06daf1c5cffd3a8c4dc63fac79fc5799b500cdaa72bde96222d",
+      "StoredInstallationPlan.node_and_compiled_ids_match": "39ce915c3dad2d99fb8b878f3ab01edf25a05d7fcef926b8a1d14a791aa5b2e0",
+      "StoredRunNodePlan.observation_timestamp_is_aware": "4a083a452e8ad06daf1c5cffd3a8c4dc63fac79fc5799b500cdaa72bde96222d",
+      "StoredRunPlan.nodes_are_unique": "12a2e9c56750db73f44c17c6083b8cd5946e2b6847144794aba618ec69ad6777",
+      "_document": "9ed9297ca562cf87ebcb5a1aeb92d52e37d25cbc51bc1dc8af6a87842036e1e3",
+      "_validate_json": "083e3184b3a77cac183c6c2b0b1b0d081a149e00df7015112ee00cf1ee278ddf",
+      "build_plan_document": "84a2ae8f16da92868f90005d6ddf275e6bf3929c183cfd8a55dc2d687a2335a4",
+      "build_policy_document": "7f695390444d31510c61941273ecd6e4401d3e48f364711743644d8db5dbd244",
+      "installation_matches_runtime_image": "f804c52f2786fb1f349a74aaa4b30dbf5c4303713ee3661daef523b2fe5c3658",
+      "installation_plan_document": "c1f09e2ca48b67689239bfc4926bca5a9890b2d02522218dcdf5c8cdca7f506b",
+      "installation_serves_authorised_ports": "105d070bc67d4b96d4c1c56979f498cb9b95bddadf512d80ddde6b2c0475058b",
+      "parse_stored_build_plan": "e17763666b409b0611b4e3d7d726233c767b118082450d5f1fed5b959d13f296",
+      "parse_stored_build_policy": "0b1f67089e34cb646903e64794c4ca0459097eede69dcba476c4a69280694415",
+      "parse_stored_installation_plan": "1a2386ec8c2fcfe3a5ee72b0bd6d2b41f11836ee583de9493989302585f17435",
+      "parse_stored_run_endpoint": "7bb97615b06d1e9a72e974675bea20c2fe58552a34a5695563a77f8835a66356",
+      "parse_stored_run_plan": "79500036a5bbb194483b2987f1f2047e9b9b59880b23fd73f9a4f5a1a38b8564",
+      "run_endpoint_document": "50ce0581e113e24bb754263e420134eabf12fc6aaf830a83eaf26b151ca3742b",
+      "run_plan_document": "0777a588c1958cae110c99e06d87d9bbd57c5aebd4312a7f8233d9dfdd0b0164"
+    }
+  },
+  "sites": [
+    {
+      "expression": "plan.recipe_revision_id == installation.recipe_revision_id",
+      "function": "installation_matches_runtime_image",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_execution_contract.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    }
+  ]
+}

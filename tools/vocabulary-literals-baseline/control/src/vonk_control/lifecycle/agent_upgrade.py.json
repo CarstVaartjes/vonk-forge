@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/agent_upgrade.py": {
+      "<module>": "63078b7679d14d1699bccb6c2d118404ef500ffbe273ea3990c1079b6b9bce28",
+      "AgentUpgradeAdapter": "a6cb8518398aa1c27e0efcc55ea4eeebeb6a78d1f12442525774f9d1169fb0ac",
+      "AgentUpgradeAdapter.actions": "128af0c1ab8b45eff14a8db3a386506e8a4b6f3ccaa622fe8c7a729d21cdd546",
+      "AgentUpgradeAdapter.adopt": "b1c296880a3033e45c25d03a319251d40928203d2518ee81b44421ec2396d2cb",
+      "AgentUpgradeAdapter.apply": "5cd074d90334512531b5a827d69aaba0b636e910fa0e6529eec89f9975e4ff28",
+      "AgentUpgradeAdapter.cancelled": "237f6f36ff997414bf92ee1c95e02161d7706dcff530ea50a8cbb88050a81470",
+      "AgentUpgradeAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "AgentUpgradeAdapter.decide": "b5c415ea78da71bfe8c8b996382238ef57cbe0589d59c2aa2b2a3ef3438b834c",
+      "AgentUpgradeAdapter.execute": "9bebe78a7961a8a077bbee348d361155190dfb4d649bf6a23e74d06b0e96fcd0",
+      "AgentUpgradeAdapter.expire_worker_attempt": "76333bac5eabfb805392d6f863f322ad2c12b08793f85d027a052f43d0cd543e",
+      "AgentUpgradeAdapter.fail": "cb0b118622a2a8187d91668fb2ebfc960f66be033edeca2f35fa6864cf692c7d",
+      "AgentUpgradeAdapter.irreversible": "4ab9e4b1daf7af8eff649c37e3a4e0833126db1748555af2d4a457adfeae8619",
+      "AgentUpgradeAdapter.new_rollout": "ec9cbd8aa321aa97ed8f535b79519741a3dc7dacda33f3ca7aeb987b021e9202",
+      "AgentUpgradeAdapter.observe": "cb30ca0170f92e41384572226bc39f1fe98b3cd02f4e2a78d17dc008f8c1b32c",
+      "AgentUpgradeAdapter.project": "fbfd39c088849645db18c6cb1c6f41341240caa1751a03b8f7d5fe52d9e506e6",
+      "AgentUpgradeAdapter.reopen": "7de4725d1af9ef010d1d0e0233b680ffb0526f0a5bb301a7afb7d315cc906c84",
+      "AgentUpgradeAdapter.retry_not_before": "0de17b7eacf847688cc4298be229b2ca9856a336b56091ee556366c0d3906f50",
+      "AgentUpgradeAdapter.settled": "1ce287ded54bc23b997700d8f06078b96c92dcbd2bdbcee17a8eabde190c5f96",
+      "AgentUpgradeAdapter.settled.save": "7aede6f54c054fef9b9a2e0ea4e1b8d57c2841548ac9fc8ab4c2d55e1149b5cc",
+      "AgentUpgradeAdapter.stop": "37f01dff33895f5c6c02f9174b02ec4e3ce9113b02a0c8d8a2dbdfd60ce2b17c",
+      "AgentUpgradeAdapter.succeed": "6fec6334aa2991c74444cdfe30d7c425178bb7a859499a6af1ac64d799f9f31c"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/lifecycle/agent_upgrade.py": 15
+  }
+}

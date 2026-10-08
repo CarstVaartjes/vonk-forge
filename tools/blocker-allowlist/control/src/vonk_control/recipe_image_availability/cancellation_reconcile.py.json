@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/cancellation_reconcile.py": {
+      "<module>": "7f5da3b836ca0c66ff2515f1fb4cd2ebe560068c83c2f4488813b6385e43cec5",
+      "_end_spent_cancellation": "605be18c068036e2614c23f6d0d7342f90f01a8c042f515dff7bd80c3b9fb8c1",
+      "_reconcile_availability_cancellation": "d4875974d38ea2af962371ec19402c8d2dbde8684672eadd9cc345dcaf7b5d4c",
+      "_reconcile_cancellation_pass": "53131727f01d992d9e10ff6c1074cb9b630971f52146b57d967f1955ad221a3f",
+      "_release_cancelled_claim": "f458bb829b5a87c41bd610978ed24df3dc1b113e330386dccd36f3a6255385af",
+      "claim_update": "3c2301afb19cc4c01a71b33246a17bd99bfda0bf50d75d653cca552167686a95",
+      "run_update_claim": "01e5733b1474cf4713ca409088757d7d4149c974c00bdcd14325618b6a48b1ca",
+      "update_activity_provider": "b8190c53fbaf97185a1aa7312c23381a3cae70efb279820f09bb79498f3f2880"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/cancellation_reconcile.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/cancellation_reconcile.py"
+    ]
+  }
+}

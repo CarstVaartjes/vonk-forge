@@ -202,7 +202,8 @@ def test_product_code_and_other_workflows_do_not_need_a_lane_proof() -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        "tools/blocker-allowlist.json",
+        "tools/blocker-allowlist",
+        "tools/blocker-allowlist/control/src/vonk_control/step_ca.py.json",
         "rust/crates/vonk-agent/src/executor/mod.rs",
     ],
 )

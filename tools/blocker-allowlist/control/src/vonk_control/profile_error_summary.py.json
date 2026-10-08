@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/profile_error_summary.py": {
+      "<module>": "d348ccc130340d20921f8d03c266b65655fb7723dbbb1f3344141840167fe891",
+      "_error_summary": "b79ba4ee256061d5513b4d59f89c55f4d0fd846f8188159886f5ce373098353c",
+      "_normalized_failure_text": "38e75655a0269473ee0cadfdbb7e505da31f44bd415ef493309003f877a970b4"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/profile_error_summary.py"
+    ]
+  }
+}

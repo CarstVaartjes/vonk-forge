@@ -1,0 +1,44 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_api/observations.py": {
+      "install_observations_routes": "0dbe085e59817e1d35abd500b07a82939081ab2c4eba9f4bab19ab946002ec99",
+      "install_observations_routes.claim": "f7e1b263077dfdcef35cf1f7525a14a71eff2aed1e2cc0cc1925f96e1328c339",
+      "install_observations_routes.helper_identity": "5763db4d78e939fd006e410c7c7ed2290b7b69dc9e0fac9bcbecc221c8482bef",
+      "install_observations_routes.inventory": "7dbd080d897bb42f6df3fe66606dd85364645f7282f70fb87c5a74ddc986ec94",
+      "install_observations_routes.recipe_run_disposition": "34b97af81e53d328e2e8beff8515a0a56e9eb7cbf9f5d46c714a74f062bbb692",
+      "install_observations_routes.recipe_run_observations": "a8418840f88082b6dc9afc811a96ae633fdab46013d8b64ce49feaef72ff8062",
+      "install_observations_routes.source_bundle": "af8d74262ec3f30f120fded9172a865fea750e54ae91678982128f5851148a2d",
+      "install_observations_routes.telemetry": "91dc9e3c27097d58261036c72f4d453bd518381b9c019e30d70189221dc157b6"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "install_observations_routes.recipe_run_disposition",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/agent_api/observations.py"
+    },
+    {
+      "count": 1,
+      "function": "recipe_run_disposition",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/agent_api/observations.py"
+    },
+    {
+      "count": 1,
+      "function": "source_bundle",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/agent_api/observations.py"
+    }
+  ],
+  "exceptions": [
+    {
+      "count": 2,
+      "function": "install_observations_routes.source_bundle",
+      "justification": "The authenticated agent source transfer must preserve explicit denied-access HTTP403; its existing HTTP503 reports actual source storage outage without inventing bundle bytes. These are transport authorization/dependency refusals, not damaged stored progress admission gates.",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/agent_api/observations.py",
+      "reason": "security-edge"
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/errors.py": {
+      "<module>": "ffd3805e4a0970ac5bd0613ef24a88eefe22ec50811343373d435dc8a50d9d6a",
+      "ModelCacheConflict": "6b6d355b18564cd14cf2a45306e25dfe1a3a57a8254c91343b00b2c256128f04",
+      "ModelCacheConflictInvalid": "dbd2585e04d5c4a4ece4bbe86e9d81d626d82cff5a4525c42f18725c8ef26b6a",
+      "ModelCacheConflictRefused": "926453041964776c9fab151bd54647ed83b41275026a475c26e466faffb5550d",
+      "ModelCacheConflictUnknown": "a816883146baf3f89a5ce4267e49630efaece6c7191e718c705b3b303febfa22",
+      "ModelCacheCredentialPathUnsafe": "53154760f2b45f53e0daa1dbe25839b9bb41a00cb966a54ceb3ab7d0b153a812",
+      "ModelCacheDeletionFenceLost": "bc7edd33f06b9c3ca265ba9182ec6426b7a706109d2066f821b10c301a5a651c",
+      "ModelCacheDeletionFenceLost.__init__": "f76cd1c14f097c1b844fc232934aadbd18149c9d727bf13447a26cac9ffd1573",
+      "ModelCacheError": "7ebc823967a37aec019d2588948d6b0c381e9e8d8ddf5d7b7b1b2905ab38824b",
+      "ModelCacheError.__init__": "89cb2e35e5fbfd0bbc0ea52637bee04daa0b2546d198cefe484fe8ef105ea758",
+      "ModelCacheNotFound": "ada1cbc3705aabf4058652343d0d4f835b21c8f3bc1d8db6c5f4b899fcc90bb6",
+      "ModelCacheNotFoundInvalid": "997a4ae6b14ae6ee32bd14803fe9e1fd3b999006cd3e70664f4d714ec4cf6834",
+      "ModelCacheNotFoundRefused": "5ffd8069943c6716f4bd6f4098157ebbf567c2ac726b4f3d4723ee9b2c18afb9",
+      "ModelCacheRemovalOwnerInvalid": "79bac37c789c4bf7965287fe172bc80143b437813ae474359988ef5bf29d7483",
+      "ModelCacheRemovalOwnerInvalid.__init__": "41659d001647b72315d15eff27148debc7cb0e753379ebb8ab91e4d049a752a7",
+      "ModelCacheResolutionError": "211050a655bcea34e40062aee15005dd9c0fd381e0775c870633266e7da29a07",
+      "ModelCacheResolutionInvalid": "2e9c95ddf125c8320fcc4c4162ed2ef04da58e879c4ce2751a73d1915a237375",
+      "ModelCacheResolutionRefused": "bf8e1598d46b309db347dcff99a1cd998d943f999469e89bd3135282781070ac",
+      "ModelCacheStorageError": "578afa5f4296c10418286cb1c72964474912d1eaf88a5807679d1078f15ba0b9",
+      "ModelCacheStorageInvalid": "8b75e86ba5572d146684226ce2342d8d6ef9c5d2a960e3aeca0d036f000eba99",
+      "ModelCacheStorageRefused": "6d3b88326132f0419ee514e3c6a47e893f3321e04a686ed4063e745b77510e09",
+      "ModelCacheStorageUnknown": "3132be1531824ea2de28d7f704195401bcd05d7642f50024beb29ac449a86921",
+      "_ArtifactWriterBusy": "fb0fafc62933266d47c3efb4fee75188667c90d05626b2b05ecd814f0e493a8e",
+      "_ArtifactWriterBusy.__init__": "28aba187c89d66b8198cf4449dfbe636d36cfd30b5b72101d35156d43291fbfe",
+      "_CacheInvalid": "651fe3d106d72b75c68cd32066866cac49868da64840bf7255e12ed71f824e7d",
+      "_CacheInvalid.__init__": "076545087d661cd28e79fc3857f8b3648eab463cecf54e962705ab2a3233a259",
+      "_CacheRefusal": "a044209968c47424b41cb0814318b117b6bf3dfeb0c6cc9db29f992d8f0ef08a",
+      "_CacheRefusal.__init__": "9030d866d641ecb0c733ea6c2c2f029fe80b6feb3ed725bc1021b94e07f61bd9",
+      "_CacheUnknown": "261930edc25987ed7ad0cbcb599d1fe009c1b15a625394d3ec0dec4d76e60360",
+      "_CacheUnknown.__init__": "c20fd4997c84118eb462eb44986e46f7a33c74bdfed8a0da0c0ac65c222731d0",
+      "_huggingface_access_url": "eba08424712fbfdff00b7a57f6cb4bbb772a189710ce73706f36b0ef14eb160c",
+      "_refusal_reason": "a5064082a595dd6992b60e435b0a2ff7b50b7993e85ec179c309e2dce82d71b8",
+      "_retry_after_seconds": "2e3a03a4d99c7c9722fd7d0e1892645e32cd53ca4de6c562c3a4a2ff226f61d2",
+      "_retryable_failure": "e99ee4c350035aac52368b61f8deb93c0a7619c3dc3b0efc1697c765114e7471",
+      "model_cache_failure_is_terminal": "b4dd07c5104e430f94b28aa45f09ad89cc42a5205b3afa9374d8b3682664b168"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/errors.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/errors.py"
+    ]
+  }
+}

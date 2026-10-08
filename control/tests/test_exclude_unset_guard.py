@@ -8,12 +8,12 @@ The empty allowlist is a ratchet; stale or unmatched entries fail too.
 from __future__ import annotations
 
 import ast
-import json
 from pathlib import Path
 
 import pytest
 
 from .parsed_sources import parse_file
+from .registry_storage import read_registry
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = ("control/src", "agent_protocol/src", "src")
@@ -64,7 +64,7 @@ def exclude_unset_sites(tree: ast.Module) -> list[tuple[str, str]]:
 
 
 def test_exclude_unset_only_in_reviewed_partial_requests() -> None:
-    allowance = json.loads((ROOT / "tools/exclude-unset-allowlist.json").read_text())
+    allowance = read_registry(ROOT / "tools/exclude-unset-allowlist")
     assert allowance["schema"] == 1
     reviewed = allowance["sites"]
     assert len(reviewed) <= allowance["max_sites"]

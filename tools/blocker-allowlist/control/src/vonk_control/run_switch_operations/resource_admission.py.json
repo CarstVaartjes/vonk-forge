@@ -1,0 +1,32 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/resource_admission.py": {
+      "<module>": "5183207db23500147fac8dbe7c6997b987e13ccbf9b227d19e5e4d2360a2e51a",
+      "ResourceAdmissionMixin": "779a7d79e3acce7f53bac753945e185976f952c34fc57de0b2046c30e86a6e4d",
+      "ResourceAdmissionMixin._resource_fits": "68d4e10b668f0756a7f45aa143084de9b298bd33b7116701c50e569e27564b25",
+      "ResourceAdmissionMixin.recheck_resources_in_session": "ad230da4bef7467b5222950c30b8b3105137f0f52a51b793582ef1a9217d1989"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "runswitch.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/resource_admission.py",
+          "RunSwitchRequestInvalid",
+          "ResourceAdmissionMixin.recheck_resources_in_session",
+          "run-switch.recipe_unresolved",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/resource_admission.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/resource_admission.py"
+    ]
+  }
+}

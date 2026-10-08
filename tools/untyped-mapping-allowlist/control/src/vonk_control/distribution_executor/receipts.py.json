@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distribution_executor/receipts.py": {
+      "<module>": "788336106e904bd409972b40992aea3e367bf05f931399d44c9ceea1f9ea7003",
+      "RuntimeImagePull": "ba1d5118e46bc69b4ca1e665c0c450ddf3247fdcb93a7a384635dc3bd6acc03e",
+      "_ChildView": "3705c4a008199c1d1af9844eaa7055a6cc8d1e53a39fac1f64c8d08146b67636",
+      "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
+      "_child_receipt": "c63d8d8419d99a3e1f04b5966947ba841852e3a441b96449f2e8ed797ba15c73",
+      "_evidence_projection": "32e1414057fe560be9cd3c46d0ccd7667d78e1f64895bce73b8c1aaddd33465c",
+      "_phase_receipt": "539fd9da932d3a24b787abfe17e48943a895e84ff7a5f903217d7983ceebce6b",
+      "_typed_failure": "cc9e487f8ceded968908107806b604c02ff6cb7987d8957b29d6c658b57e3870"
+    }
+  },
+  "debt": [
+    {
+      "count": 4,
+      "path": "control/src/vonk_control/distribution_executor/receipts.py"
+    }
+  ]
+}

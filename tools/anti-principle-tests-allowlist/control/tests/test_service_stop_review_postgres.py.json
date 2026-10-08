@@ -1,0 +1,68 @@
+{
+  "content_identities": {
+    "control/tests/test_service_stop_review_postgres.py": {
+      "claims": "196a048d48af60b9e24f56c814dac7191c5382650b7a02a67e3a77456c24ccea",
+      "published_service_run": "d33306033fb6e69d9c09d632765f8174200d6f63c09dfc32ef6f800b088a33c0",
+      "test_accepted_service_stop_resumes_same_review_after_withdrawal_restart": "7e13725e140086e6ad8ce02e7ca3888c78e7faabeae9502d4df7f5ba14baca6a",
+      "test_accepted_service_stop_resumes_same_review_after_withdrawal_restart.process_lost": "2bc0260210feb2f6d883358d89c901982690985a49ad6a33645a885c4c14fa31",
+      "test_lost_service_start_history_exact_stop_restart_releases_fresh_run": "e6a017115802412ce7c0fc29582cab330e5f0b4523f1feded579fa75e6360961",
+      "test_lost_service_start_history_exact_stop_restart_releases_fresh_run.process_lost": "6612dafaaf3e6f422a0b1e6f8643f2dc013279f9f8d5f81b14b625ad33c873e9",
+      "test_pending_service_stop_cannot_resume_under_changed_authority": "cb3c21ca2797a62c2ed3a602803a996a63d504a297cd73654eb0d49890713c9f",
+      "test_pending_service_stop_cannot_resume_under_changed_authority.process_lost": "2bc0260210feb2f6d883358d89c901982690985a49ad6a33645a885c4c14fa31",
+      "test_profile_adopts_exact_accepted_stop_before_native_dispatch": "ad8fa36eddcd20b1c8e46e577bed93188bb0c6d877c91ea5cf1f16f0ee621336",
+      "test_profile_adopts_exact_accepted_stop_before_native_dispatch.freeze_after_withdrawal": "8f45d6e76ec97afcf00ab761353f4793200aa4da7c0839812cce293a5859494e",
+      "test_profile_adopts_exact_accepted_stop_before_native_dispatch.freeze_after_withdrawal.dispatch": "f652529effe3f6ffbb9266bbce7c9fd8a5f0a863833ddb774cdcbea9b074d7bd",
+      "test_unreviewed_service_stop_has_no_publication_or_admission_effect": "08c0e7985ec481f7641eb6ed18514af420f339614ecb0b2a5d81ae531ac11966"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_accepted_service_stop_resumes_same_review_after_withdrawal_restart",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_lost_service_start_history_exact_stop_restart_releases_fresh_run",
+      "justification": "Unknown observations and deleted Start history preserve the healthy route and active claims until an explicitly reviewed exact Stop is accepted. Withdrawal is that accepted command effect; restart then records a fenced Stop receipt before releasing claims and completing a real fresh Start.",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_pending_service_stop_cannot_resume_under_changed_authority",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_profile_adopts_exact_accepted_stop_before_native_dispatch",
+      "justification": "The withdrawal is an explicitly reviewed Stop effect, not a reaction to observation uncertainty. Fresh exact observations and expired grace must not republish that run while its same accepted destructive owner awaits native dispatch.",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_unreviewed_service_stop_has_no_publication_or_admission_effect",
+      "justification": "Reject stale consent or preserve the exact pending native Stop and capacity claims; this safety guard claims no terminal effect or released capacity. The connected adopted profile case separately records a fenced successful receipt and completes a fresh native Start.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "reason": "input-validation"
+    },
+    {
+      "count": 2,
+      "function": "test_accepted_service_stop_resumes_same_review_after_withdrawal_restart",
+      "justification": "The withdrawal is an explicitly reviewed Stop effect, not a reaction to observation uncertainty. Fresh exact observations and expired grace must not republish that run while its same accepted destructive owner awaits native dispatch.",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_service_stop_review_postgres.py",
+      "reason": "security-edge"
+    }
+  ]
+}

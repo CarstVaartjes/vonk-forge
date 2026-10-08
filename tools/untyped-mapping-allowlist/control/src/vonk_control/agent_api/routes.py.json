@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_api/routes.py": {
+      "install_agent_routes": "62baed3c8a75eb9413693ae8716d484f783d682e692d12856e7f58b61e2b44e1",
+      "install_agent_routes.openapi_with_enrollment_contract": "7e5225da3574f9335b8f837170069f5a760467ee4029d4b519c93fbd4468d7bd"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/agent_api/routes.py"
+    }
+  ]
+}

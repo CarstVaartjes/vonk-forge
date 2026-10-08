@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/telemetry.py": {
+      "<module>": "49befa6fa6f78196a45187aebded7fba1c3b8390475df673924c47f1386517da",
+      "FleetEventCursor": "278a7d0d37dd61c267b28345f0a4662cab8cb88ed8164c369dcc0b09c7499fa1",
+      "FleetStreamEvent": "6e965bb63f6080382a825b4f3e6bf9e392dc141bfde0ea08dc37589aa59f1074",
+      "NodeArtifact": "4fa629b224d29b3785c5ec448319a3717e7ab69b93ef44ce02f726844ee24609",
+      "NodeInventorySnapshot": "bf67ce55f24a3b8f64bc71d8c9fa91a963330df2fbec2ae3fadc7705e2a13215",
+      "NodeTelemetryLatest": "b2765fcb121b3b74a5359461b7bbd53d4dd34d13025679294567049764f02e85",
+      "NodeTelemetrySample": "34fde413f6e6f7c6ddc96f9b67ee64071773fff57f4911cf00ee8065fe7bc44b",
+      "_seed_fleet_event_cursor": "6e61b2d03be40c87e87bd3d51cc11fbd077a5e3cc54a531c1ad8552f88b3be15"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "control/src/vonk_control/models/telemetry.py"
+    }
+  ]
+}

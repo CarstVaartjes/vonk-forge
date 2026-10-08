@@ -7,13 +7,13 @@ that rule, each against a reviewed allowlist under ``tools/``:
 ``rust_serde_types``
     a ``struct``/``enum`` outside ``generated.rs`` that derives ``Serialize`` or
     ``Deserialize`` (or implements them by hand) is a hand-written copy of data.
-    ``tools/serde-derive-allowlist.json`` names each survivor with its reason.
+    ``tools/serde-derive-allowlist`` names each survivor with its reason.
 ``typescript_shapes``
     ``type X = {`` / ``interface X {`` outside generated files and tests declares
     a shape.  A shape that describes API data is an alias of the generated
-    schema instead; ``tools/ts-shapes-allowlist.json`` names the UI-only ones.
+    schema instead; ``tools/ts-shapes-allowlist`` names the UI-only ones.
 ``python_models``
-    a Pydantic model class lives in a module of ``tools/python-model-registry.json``
+    a Pydantic model class lives in a module of ``tools/python-model-registry``
     and no two registered models share a name or a field set.
 
 The allowlists only shrink: an unlisted entry fails, and a listed entry that no
@@ -23,17 +23,18 @@ longer occurs fails as stale, so a fixed copy must be removed from the list.
 from __future__ import annotations
 
 import ast
-import json
 import re
 from collections import defaultdict
 from pathlib import Path
+
+from control.tests.registry_storage import read_registry
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 
 # -- Rust --------------------------------------------------------------------------
 
-RUST_ALLOWLIST = TOOLS / "serde-derive-allowlist.json"
+RUST_ALLOWLIST = TOOLS / "serde-derive-allowlist"
 _RUST_DERIVE = re.compile(
     r"#\[derive\(([^\]]*?)\)\]((?:\s*#\[[^\]]*\])*)\s*"
     r"(?:pub(?:\([^)]*\))?\s+)?(struct|enum)\s+(\w+)",
@@ -76,7 +77,7 @@ def is_production_rust(file: str) -> bool:
 
 # -- TypeScript --------------------------------------------------------------------
 
-TS_ALLOWLIST = TOOLS / "ts-shapes-allowlist.json"
+TS_ALLOWLIST = TOOLS / "ts-shapes-allowlist"
 WEB_SRC = ROOT / "control/web/src"
 _TS_SHAPE = re.compile(
     r"^[ \t]*(?:export\s+)?(?:declare\s+)?"
@@ -111,7 +112,7 @@ def typescript_shapes(root: Path = ROOT) -> list[tuple[str, str]]:
 
 # -- Python ------------------------------------------------------------------------
 
-PY_REGISTRY = TOOLS / "python-model-registry.json"
+PY_REGISTRY = TOOLS / "python-model-registry"
 PY_SCAN_DIRS = (
     "agent_protocol/src",
     "control/src",
@@ -193,7 +194,7 @@ def python_registry_problems(
     root: Path = ROOT, registry: dict | None = None
 ) -> list[str]:
     if registry is None:
-        registry = json.loads((root / "tools/python-model-registry.json").read_text())
+        registry = read_registry(root / "tools/python-model-registry")
     modules = {entry["module"] for entry in registry["modules"]}
     problems: list[str] = []
     models = python_models(root)

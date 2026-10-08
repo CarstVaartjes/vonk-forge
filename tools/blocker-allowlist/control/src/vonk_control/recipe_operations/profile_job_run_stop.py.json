@@ -1,0 +1,99 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/profile_job_run_stop.py": {
+      "<module>": "f6bf28e188d4f7822d8378e73c57e8a585d0c0e392d2312ec2121fb85ebe1b08",
+      "ProfileJobRunStopMixin": "8d764eac5073717721c835a3309875258bb96c7e91bc806155984a9d68e0a637",
+      "ProfileJobRunStopMixin._artifact_job_targets": "32953ea18b9591114768ffbad05b3584e09f4497d44b3c5a0f1e23436612a2e6",
+      "ProfileJobRunStopMixin._one_shot_stop_prerequisite": "95f70296fb193c304fd126263657137c11dd7b7c9b777694dfe724fb19af7ca8",
+      "ProfileJobRunStopMixin._profile_jobrun_stop_in_session": "9f0db1370455aa73164b75510d6448bb93105b2b699a071c03a79a5e453d34b0"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "RecipeRequestInvalid",
+          "ProfileJobRunStopMixin._one_shot_stop_prerequisite",
+          "artifact-job-cancellation-authority-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "RecipeRequestInvalid",
+          "ProfileJobRunStopMixin._one_shot_stop_prerequisite",
+          "artifact-job-has-no-cancellation-authority",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.stop-authority",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "RecipeStopAuthorityRefused",
+          "ProfileJobRunStopMixin._profile_jobrun_stop_in_session",
+          "accepted-profile-does-not-authorize-this-exact-jobrun-stop",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "RecipeStopAuthorityRefused",
+          "ProfileJobRunStopMixin._profile_jobrun_stop_in_session",
+          "artifact-jobrun-escaped-its-immutable-run-membership",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "RecipeStopAuthorityRefused",
+          "ProfileJobRunStopMixin._profile_jobrun_stop_in_session",
+          "artifact-jobrun-is-not-the-exact-current-run-effect",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "RecipeStopAuthorityRefused",
+          "ProfileJobRunStopMixin._profile_jobrun_stop_in_session",
+          "artifact-jobrun-physical-stop-identity-is-ambiguous",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "RecipeStopAuthorityRefused",
+          "ProfileJobRunStopMixin._profile_jobrun_stop_in_session",
+          "artifact-jobrun-request-cannot-authorize-exact-stop",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "RecipeStopAuthorityRefused",
+          "ProfileJobRunStopMixin._profile_jobrun_stop_in_session",
+          "profile-jobrun-stop-parent-contract-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+          "InvalidValue",
+          "ProfileJobRunStopMixin._profile_jobrun_stop_in_session",
+          "accepted-profile-has-no-unique-stop-for-this-run",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/profile_job_run_stop.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/profile_job_run_stop.py"
+    ]
+  }
+}

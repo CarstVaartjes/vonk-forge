@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "run_automatic_sync",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/catalog_sync.py"
+    },
+    {
+      "count": 2,
+      "function": "run_automatic_sync",
+      "kind": "wait-without-timeout",
+      "path": "control/src/vonk_control/catalog_sync.py"
+    }
+  ]
+}

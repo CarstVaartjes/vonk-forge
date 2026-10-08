@@ -1,0 +1,145 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/catalog_helpers.py": {
+      "_canonical_model_artifacts": "9e985a9d6fe905c2421f771c7ee6e1a12b7ccb0773c973c293b0f62a88b735ef",
+      "_datetime": "93e80e144dab372513aa80bf1af6a4c3ebe52072ee8e823f151cf784404d984b",
+      "_github_release_asset_binding": "fa662913e55ed3755039adadb622af017d9aa6efa5413ddddf72f7d2d2ba23af",
+      "_github_repository_parts": "7de542d226ee65d7b315851d3153378e26b482712ccb17be098827e0579ca462",
+      "_iso": "3bb64fdbfa10010cd8657837ceb54b0575dde5240a40d95894a01175098ef006",
+      "_iso_now": "7b4319f04d0c9f8d8667e87ec443173a755e0cc0abff1945cf029ef403369346",
+      "_model_lineage_signature": "f44979a06267badf04da4ce79e4190d1a20b585a843d18975eb1c14b71471e86",
+      "_parse_iso": "c7c588fbab5c069beea1fbb3a2c73b8bd21dff52a71980b9403728fa420d4db8",
+      "_recipe_definition": "c05e49406b2ac7e600bf46a29c7f0ac062f4c8638a70c9fb8158fd3ad0673822",
+      "_recipe_model_content_digests": "dfb699ad3688de98acbb8303a7d069718f34356fa1f35dac60198808a563761b",
+      "_recipe_model_file_ids": "a0abefff7a57c2240da6da3954d2879b06ae7186c83c32ca29f36c02e3e991f1",
+      "_revision_identity": "5521accf3233bd4c2ae56ff761a90646193246965e8a2520d3b84bbd13d33417",
+      "_same_model_artifact_identity": "fa629d69484cb837949b484006e60f66c2b96f6d38ac0a8eca4a4c30ec45658b",
+      "_source_for_catalog_artifact": "5ff236e00b4b46850d46bdfaa32bf6660457596360a773665be7d29fc04e778b",
+      "_valid_repository": "8490242f8a3145758c7743cc4ef357241a537c5678ecbff9d70e9949dee92f08",
+      "_validate_source": "db92078f0e6042b77cb51d8d955539e0ba6e6c68bbd83960561b6568e5e8ba21"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.artifact-identity",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionRefused",
+          "_github_release_asset_binding",
+          "model_cache.source_invalid",
+          3
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionRefused",
+          "_github_repository_parts",
+          "model_cache.source_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionRefused",
+          "_source_for_catalog_artifact",
+          "model_cache.artifact_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionRefused",
+          "_source_for_catalog_artifact",
+          "model_cache.revision_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionRefused",
+          "_source_for_catalog_artifact",
+          "model_cache.source_invalid",
+          5
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionRefused",
+          "_validate_source",
+          "model_cache.source_invalid",
+          4
+        ]
+      ]
+    },
+    {
+      "family": "model.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheConflictInvalid",
+          "_parse_iso",
+          "model_cache.cursor_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionInvalid",
+          "_canonical_model_artifacts",
+          "model_cache.model_definition_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionInvalid",
+          "_recipe_definition",
+          "model_cache.recipe_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionInvalid",
+          "_recipe_model_content_digests",
+          "model_cache.dependency_count",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionInvalid",
+          "_recipe_model_content_digests",
+          "model_cache.model_pin_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionInvalid",
+          "_recipe_model_content_digests",
+          "model_cache.recipe_model_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "ModelCacheResolutionInvalid",
+          "_source_for_catalog_artifact",
+          "model_cache.source_unsupported",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model_cache.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/catalog_helpers.py",
+          "InvalidType",
+          "_canonical_model_artifacts",
+          "catalog-revision-is-not-a-model",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/catalog_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/catalog_helpers.py"
+    ]
+  }
+}

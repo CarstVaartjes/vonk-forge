@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/failure_evidence_api.py": {
+      "install_failure_evidence_routes": "feedab9ff7cd95092f5dbce31f5ecec393999051595a7fcf82ebaa296e7fe7d3",
+      "install_failure_evidence_routes.evidence": "f9774702a1f3beb670dcbd2d7e333e587dd06e55e1ecd37fc38b42ad4c16aa78"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "function": "install_failure_evidence_routes.evidence",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/failure_evidence_api.py"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "content_identities": {},
+  "distinctive": {},
+  "legacy_state": {},
+  "machine_state": {},
+  "note": "Vocabulary literals that predate the guard, per file. The counts only fall: replace a literal with the contract enum and lower the count.",
+  "schema": 1,
+  "stored_state": {}
+}

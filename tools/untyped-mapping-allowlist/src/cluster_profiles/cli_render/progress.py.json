@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/progress.py": {
+      "_measured_progress": "c1ed1ce23a89db3c52d7357c8b6d99ff25091d0b5333a3ec3dccaebd2ab25230",
+      "progress_line": "1d79f82d28b1be4b9b9a1f39b690f66cb69a9d6ef2b9c4371ece0264fdf3cb8c"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "src/cluster_profiles/cli_render/progress.py"
+    }
+  ]
+}

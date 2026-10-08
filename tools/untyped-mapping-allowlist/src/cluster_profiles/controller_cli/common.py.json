@@ -1,0 +1,52 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/common.py": {
+      "<module>": "2cd2aee2e08b086935569074a5798fd651145fc409aea2726961a667fa1c070c",
+      "ControllerClient": "e573ecf916e36674be63726cee6d753262f81ff8185ccf5e4723a50016d90d1b",
+      "ControllerClient.profile_endpoints": "af8a7c06a6194bd18d5f89ff6a9bbe487241e2e73d85403e0fc40a0277aa180b",
+      "ControllerClient.request": "57faa5489933743e6cba1cda93bc6bff81bda21e4056cf560b903d19743a4dd7",
+      "ControllerClient.request_timeout_seconds": "d2151d77796e97a822bb5fbd5dfc1c58af8f8b0d287e46f0e5734b02041f7cef",
+      "_ValueList": "63bf56c7d1b3666ea9941369b826b1f2435087bdeca2bd6f5d810dbdfe23580c",
+      "_ValueList.__call__": "f6ce7eabee9d8d6911082f9b15ede139dfdb3e1110e6f701f773e71fb8b2d26c",
+      "_ValueList.__init__": "6ee7b3d6e67b007532304aae4bea4c631efd315d23bf1ba778a4e7213c110246",
+      "_WatchCallback": "a4f9bc8ae572f4e69b773c4490bf36117d3d32753ce4b053babf011f2da8f3d0",
+      "_WatchCallback.__call__": "84ee99c84ecfe154325473cd60241127bb49e20056d88b2431f4cf28ed41fb0f",
+      "_action_flags": "19fb0d6e41d29742314843510b39536bb5ebdd23a2da54fa1b0ad05633848e34",
+      "_activity_cursor": "353edf4fc55cd14a72ae7e8219e0c4e57a01fc34d9e6eae15a003e8aa9d0ad3e",
+      "_activity_limit": "afedda7e3e84124242312d5d87520fe310d0c9e62f9aff865f2215fba7a8010e",
+      "_activity_state": "82e9c4a59657a454c226553342783534141a14519c526016abd4f21db7917b24",
+      "_activity_target": "bac2e8e41e03767b2dbfabd9a202fe1c0ccfd821f4826910be3d4c84cf6c6092",
+      "_add_output": "8b9727cb07c45c51604e98f2133556a26d807a0fec81551852b886b1d4edffcf",
+      "_add_profile_selection": "0882bd9eb59403272ce6bbc1cef891c2ffaaa5dfe8a8214768b5e1db935b72f3",
+      "_add_yes": "54456ebeb02f691d1aa139ec6edf0ea0496e826ea69033482a27f0569df429b1",
+      "_bounded_int": "3d213c24ef799255e2539e498a4303ba90434ec3283ba964e9fc6d24219c70be",
+      "_filters": "4e64da7e740d567cc51e982c95b8dc79ce1d381198cc2956b9c9dbbab6aa8fb8",
+      "_finite_seconds": "e210e8230e63029369c7bdd6f54382c86c2ddca225395688ba49d3d2aaac71f4",
+      "_interval_seconds": "c1f0a102f5b79774a91784e95e94da2bea66a5372a9dc737944066c37f823894",
+      "_line_limit": "57efdeeaaec8b43c9aa6994f480b8379cc3ade34beee5c0bb0886fa3d83b3c07",
+      "_log_since": "6de7134c8ede0f698d2c7c3f2364d1216713ad4e4c5bb0879647ef20542116e0",
+      "_option_flag": "8e11457727d8a6d380453bdc7f4ab9227e4209b42789449ba6b05ee085e28ecb",
+      "_page_limit": "b3828d5b85aeab51f4338682311fc24d497da2a0fe5b99b38ea56a4a43a6cbff",
+      "_profile_edit_flags": "07ee2598454526aedbc431fa0cb29a7e7dd6d7a75c9fe3b5c494b17a886bf2ef",
+      "_profile_number": "6c6c90ff9f3c1299dc4e9d3d6435697cef34f662ef51f683c7d6c7d82695cce2",
+      "_query": "00a6352fdd5a2fbcb84cc59661cc9a8eb2911f141fbf008b84ae3e3577dae1f4",
+      "_quoted": "0f8904256eda325771699f5493307b36eb4102eac6ab9b87248e060df5c4b068",
+      "_request_key": "50d00f805ffac5b111624a4ea71f36c889f6009f270643f2142d122e064075bc",
+      "_revision": "a4cffce6525c185adae5ca88f0543e0ae810e12dd725c2d1e22a2d17845c354e",
+      "_selection_controls": "88d533c1b7548b8b2bb61660317f647ca6ab1a22720206a9374b05e975391978",
+      "_selector": "5c892e412c8bf92a34479c0e5f42c8ef355d636f70d84beed3ca5ba6cebc69b8",
+      "_sha256_digest": "71b6b2384627110fd88d51a10bfc7ee6684fb773a0563397ae24a79c91a23419",
+      "_timeout_seconds": "80a5bf9b73c917a74f77e60be5a0d643cfccb12b04b6764fd7396ee900d47ba4",
+      "_uuid_argument": "7838aee81d2dc873b26e7d9118eb1276c9f0181edb70e98efbfc43ecf6d8d30e",
+      "_uuid_selector": "8f19ebb4f3737916a7f0a84abc1e8b60fd5dea9a84abb253a9d019e401b70af3",
+      "_value_list": "095eff5c667614dcf3d34d11616ded238ce1b8deb6a131cb863a0eacc5bd7d7c",
+      "_watch_controls": "370f93d4c7dddf812742c4fb13d4b7dcf026679a3777e553db5591bbff0968ba"
+    }
+  },
+  "debt": [
+    {
+      "count": 5,
+      "path": "src/cluster_profiles/controller_cli/common.py"
+    }
+  ]
+}

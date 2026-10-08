@@ -1,0 +1,70 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/provider.py": {
+      "<module>": "e40b3d0a889543392fdd99246a9637551a2f26b7bc29a8946a638d7d560c008e",
+      "RunSwitchOperationProvider": "cbb36e50508481ff8b8a3090f9f61292fbfdab14bb28d2671700e44f40262e1a",
+      "RunSwitchOperationProvider.__init__": "0fd9dccd5c071f7331133218ff983ae31a331b5d0e079365312e2668f89bb7f8",
+      "RunSwitchOperationProvider._item": "608f4ed49dc56f6a26bd9d7c1ae475fc6d70ed4a5eea26e4012356f014dbf82c",
+      "RunSwitchOperationProvider.get_operation": "f32b7250c4b78382a09447ebc9a1e8b76737ece5b83cf3bb87f180d97175e414",
+      "RunSwitchOperationProvider.list_operations": "56ac32b0e74a2339c824f381049b68a4ae26cd1ba35078996206ba58672fff6f",
+      "RunSwitchOperationProvider.represented_job_kinds": "6d9ff657705379d93dced5740954b0d1a0516fcd7a6d21657b0365bcae379562"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/provider.py",
+          "InvalidValue",
+          "RunSwitchOperationProvider.list_operations",
+          "operation-provider-cursor-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/provider.py",
+          "InvalidValue",
+          "RunSwitchOperationProvider.list_operations",
+          "operation-provider-node-filter-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/provider.py",
+          "InvalidValue",
+          "RunSwitchOperationProvider.list_operations",
+          "operation-provider-page-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/provider.py",
+          "InvalidValue",
+          "RunSwitchOperationProvider.list_operations",
+          "operation-provider-request-filter-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/provider.py",
+          "InvalidValue",
+          "RunSwitchOperationProvider.list_operations",
+          "operation-provider-state-filter-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/provider.py",
+          "MissingRecord",
+          "RunSwitchOperationProvider.get_operation",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/provider.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/provider.py"
+    ]
+  }
+}

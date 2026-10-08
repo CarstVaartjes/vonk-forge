@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/retry.py": {
+      "<module>": "5043e204bea041cdf3a8b387598064ef4c2d6ae14819aa8729a550c54b8373fe",
+      "RetryMixin._retry_build_in_session": "94558ae6690db0d4b804fc783d235fc4eaa65c6c1c97824827e9151666698e46",
+      "RetryMixin._retry_build_in_session.plan_from": "81e7d2278bf19b9e1dc1d4f696232c52cc18a49af2508037e5fbdcbab679c098",
+      "RetryMixin._retry_build_in_session.rebuild": "21ee438dc07e4c833911f2334842efcd0717a7912ce6506dcd768055edd84673",
+      "RetryMixin._retry_install_in_session": "0d7c1865c62c9ceab0f4546ae65459f9adb9745cde9f5aa145cc90a4da5bfa22",
+      "RetryMixin.retry": "fbc532eec08b909c197d380dfe743fd86c590dd530558da0406aa74b86b36c3e"
+    }
+  },
+  "sites": [
+    {
+      "expression": "payload.get('build_id') != owner_id",
+      "function": "RetryMixin._retry_build_in_session.plan_from",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/retry.py",
+      "reason": "A recovered build order is accepted as the plan only when it names this very build; a mismatch rejects the candidate (the damage stays retired as unknown), nothing is widened."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "settle_acl_transition",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/executor/stop.rs"
+    }
+  ]
+}

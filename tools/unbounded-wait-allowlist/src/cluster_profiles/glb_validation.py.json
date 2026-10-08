@@ -1,0 +1,46 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_parse",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/glb_validation.py"
+    },
+    {
+      "count": 1,
+      "function": "_reachable_meshes",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/glb_validation.py"
+    },
+    {
+      "count": 1,
+      "function": "_reject_nonfinite_json",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/glb_validation.py"
+    },
+    {
+      "count": 1,
+      "function": "_valid_png",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/glb_validation.py"
+    },
+    {
+      "count": 1,
+      "function": "_valid_webp",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/glb_validation.py"
+    },
+    {
+      "count": 1,
+      "function": "validate_mesh_glb_bytes",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/glb_validation.py"
+    },
+    {
+      "count": 4,
+      "function": "_valid_jpeg",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/glb_validation.py"
+    }
+  ]
+}

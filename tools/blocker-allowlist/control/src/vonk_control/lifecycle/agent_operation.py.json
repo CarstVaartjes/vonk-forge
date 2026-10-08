@@ -1,0 +1,94 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/agent_operation.py": {
+      "<module>": "6ef5e6d4098eabd6b0f600c62ec72735163fdb4666d17ce88f31c7052e677f3c",
+      "AgentOperationAdapter": "5bfb1c0f7da4dd53704f8baf2a879f8dae7de9cea820f54f1594aaed4b9a5a50",
+      "AgentOperationAdapter.__init__": "52ca071660ae32fb74baa10a7709ec91ff964019b1ea5a4014d9debad220ccd3",
+      "AgentOperationAdapter._attempt_of": "b3b78533f73d40701ede46cbbd3defbc54ef6e15c6404bf0c0b7d51d1c50abf5",
+      "AgentOperationAdapter._fence_upgrade_attempt": "0fcb1a530a2426bec12fe1685aea648760f6e231c1e94b5cb9a8bc73dfbe2b45",
+      "AgentOperationAdapter._parent_of": "4fce3b8a5eadf46920197d5b760c2c73decd2dca840b8f6a73ca7a8c07d584ec",
+      "AgentOperationAdapter._read": "e3525784fa87432f9de0fdb4c53c2a90df2ff79fbb9c31a8a6ab4cab432d8b38",
+      "AgentOperationAdapter._scheduled_reason": "dd702c9ef0ec75af4c2258dcb06a6001f703d2011aa652962529e553bc2089d4",
+      "AgentOperationAdapter._stored": "835133237626ec1701ae517e6a207c657d5430386dbe06616de04f41fc7a05df",
+      "AgentOperationAdapter.actions": "e0482b40103692ea3942d3452f614ffc96c42dd3510e7e63191e05169e4a07f0",
+      "AgentOperationAdapter.adopt": "f5d404251321035e56bee9dea65f75a26a553caca46bdfa78a4d7eb9f66a7e98",
+      "AgentOperationAdapter.apply": "aa548284df7d480d1a6fa864b6fbcb10891de1b15a086d39e92dc9d6229cd608",
+      "AgentOperationAdapter.attempt_of": "f3c11709c0d81724d3bc42df8dcc3af12fd8532dcddbcff76627e5b22cc142a2",
+      "AgentOperationAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "AgentOperationAdapter.decide": "87816bbb41914bb6ffed016c758dffdc93bf63bb13e0a83accdef3156e4c7c6c",
+      "AgentOperationAdapter.end_unobserved_attempt": "7bd3467da313ac92436578e3c8b7ec491b77d963e3cdec90ec2fbe76446b2b66",
+      "AgentOperationAdapter.execute": "d2378dd1cb0c2ce7c35c8c90c2482ac51db47728f499819c6a1334fa032a3748",
+      "AgentOperationAdapter.expire_attempt": "8039016fc3c719e565ce665ee88ead433b5c8ebd978f9dbbdf224a91a912bc68",
+      "AgentOperationAdapter.irreversible": "7a3baea4402bd291a069e8e389234ae2a4525505dc012d0ea171aa206563e01d",
+      "AgentOperationAdapter.lifecycle": "a03e5473634f9d680fc10bebe6de274235712c7ff5f1f3cff1f94a28c2e12520",
+      "AgentOperationAdapter.new_order": "dad991e104ed08095f8d5f2fa3ed45f42499ce3d2c5163f4654ef1760058ea29",
+      "AgentOperationAdapter.now": "0565c3db5fb3147ed7226126ab761c52b6b1ebe1dc76c7cf69f08d57a76ded95",
+      "AgentOperationAdapter.observe": "f16f3ac19a8eaf97ba8fcb0fcf0509ef3062c93faf3ce1dc2f91e7eece4f0e6a",
+      "AgentOperationAdapter.record_outcome": "e235fc33d9ed049755b02a68696ca0661b71de03b5f9d1dfbbe8848e999e38d5",
+      "AgentOperationAdapter.record_report": "b063c8ab915ba730164a16a1ab1c7dc074cd59d27bf72ee64b165d379dfbca52",
+      "AgentOperationAdapter.reject_attempt": "4bb59ba17334644033b622986db28b6b8fd777bea3116ea70e84ff997106d213",
+      "AgentOperationAdapter.reopen": "b5001f43aa97a6dda55b87ce5fceb2dda4143b08b5747e0f50bbf48dc4de17e8",
+      "AgentOperationAdapter.retry_not_before": "b5a5553aec23d4a9c54168ca2ece033dc74f9a1e20a63ee66fad8f898ec93d0c",
+      "AgentOperationAdapter.settle": "8c9b5f18d78b3e5fa419451faf8fde13fe0188770047ae706e1657ec49758c57",
+      "AgentOperationAdapter.settle.residue": "b5b162ebde390ccf8ecf41518eae306502acb6657478d89d85d731d79af7beb1",
+      "AgentOperationAdapter.settle.save": "a7adfd7f4bb9011f3a222e365e8ed9bf0df551f1157045ef50070ccb8c81469a",
+      "AgentOperationAdapter.start_attempt": "4eac2cd1e121917c0967d7882b80825cdfab9920829bf8b2d4e256472ed551ba",
+      "AgentOperationAdapter.stop": "9ab188d775995d4f18fccfd562994be30634926dbc5c86398592b9648f043b64",
+      "AgentOperationAdapter.withdraw_retry": "6dcb69c22051cf3f3e3df3dd4651cb710d02f2247866e2d5367d5bba3ac4f9a7",
+      "_legacy_retry_due": "be6e660947f99e7b5c7e2107b2ca83c73cd4978e6ad27377b75ae4f266558c38",
+      "adopt_legacy_orders": "d0c873bb225316cd21308457398390af6b46093f23e52a5f8b8bbdde0e8f55d7",
+      "aggregate_parent_state": "c802a2922e01ed1656eb45f0cc26123684a8070c68ddf9034feff0bcb3817e7f",
+      "cancel_requested_at": "bafde810089e76797d290d63b3c4bf214387a2c4ed6642e13766bd3c4d7fabd2",
+      "is_artifact_owned": "021c7bc7bbaab5ac413522db67c0ade6bd634374867e125580cd0e743edaac96",
+      "lapsed_running_orders": "9b26656da6385a368c82e575c67095e21afee1cce1c91fc8c934370e2b05140c",
+      "parked_orders": "47bfcc8e626224a2c762e43dd3815936db6be029284223effd7af7f7b4a5fbd8",
+      "retry_scheduled": "ba80d3609661ef9b2849659585bf5612169731148d08e8f2771c11526bd22aa5",
+      "same_order": "f96c9d71691fff14d08049daf4400aeed997a72cc8dc14c1751786f836c224b8",
+      "set_parent_state": "4f2d73a8c618f0cafceb1e842a0da1cd0a77daafd5522859e82651c9f78b76ca"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "agent_operation.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/lifecycle/agent_operation.py",
+          "InvalidValue",
+          "AgentOperationAdapter.__init__",
+          "bind-the-adapter-to-a-session-or-to-a-session-factory",
+          1
+        ]
+      ]
+    }
+  ],
+  "operator_waits": [
+    {
+      "advertised_action": "resume/retire (operator_resume_candidates_in_session) while the order is eligible; otherwise the reconciler re-evaluates the wait on every pass and ends it when its job ends or is cancelled",
+      "function": "AgentOperationAdapter._stored",
+      "irreversible_effect": "a user job may have modified user data",
+      "kind": "control-state-projection",
+      "operation_kinds": [
+        "recipe.job.run.v1"
+      ],
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "reason": "Security edge: an uncertain user job may have destructive effects on user data; rerunning it requires explicit authority. Stop is advertised and accepted.",
+      "sites": 1,
+      "trigger": "the core requires explicit authority before repeating an uncertain user job",
+      "verdict": "KEEP"
+    },
+    {
+      "advertised_action": "stop via the artifact job",
+      "function": "aggregate_parent_state",
+      "irreversible_effect": "inherits the user job",
+      "kind": "control-state-projection",
+      "operation_kinds": [
+        "recipe.job.run.v1"
+      ],
+      "path": "control/src/vonk_control/lifecycle/agent_operation.py",
+      "reason": "Security edge: a parent mirrors only a child whose uncertain user-data effects require authority before repeat. Automatic observations and retries are live, never operator waits.",
+      "sites": 1,
+      "trigger": "an irreversible user-job child needs explicit authority",
+      "verdict": "KEEP"
+    }
+  ]
+}

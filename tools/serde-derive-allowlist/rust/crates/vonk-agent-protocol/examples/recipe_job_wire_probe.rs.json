@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-agent-protocol/examples/recipe_job_wire_probe.rs",
+      "reason": "test harness: stdin envelope of the Python wire-bridge test; the contract types inside it (AgentClaim, AgentResult) are the generated ones",
+      "type": "BridgeInput"
+    }
+  ]
+}

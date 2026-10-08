@@ -1,0 +1,12 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/heartbeat.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "heartbeat": "2e772b8a6c5d616bc9d381a3a0dc94dad79c39a409e8f0aa899ce3e594d854b7",
+      "known_superseded_cancellation": "33960eb99b9a6347620fbabfafe67df778829f6b40659c78aac8a675643e6aaa"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_jobs/heartbeat.py": 1
+  }
+}

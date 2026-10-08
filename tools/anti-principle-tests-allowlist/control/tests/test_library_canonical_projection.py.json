@@ -1,0 +1,52 @@
+{
+  "content_identities": {
+    "control/tests/test_library_canonical_projection.py": {
+      "<module>": "dad01cf55bafe95e7405af8eeea1852d7b260a603db39d2994401b9223dea6b7",
+      "_document_section": "ea1d304767c895d83a98af76360c33cf1809810f51d6f1ad95b6b92f9c862d98",
+      "_insert_canonical_rows": "a4e9781852935583a39ef06c1ca33941b6d5104f03f46a8734f0df58e0cf25a8",
+      "_local_projection_world": "527d8a516cacc87802fcde9ed50ee96eaa3a36d3edb201399d1288f16e752ec7",
+      "all_recipes": "3f804ab442a8c4e316c7e713ab7c3587087c65b23e1ea29eccd76e58fdf5337b",
+      "small_wire_budget": "33df11564e7086c6c9b6d51d8a05935634b7cb24703c2cf1ce3b6edf8f674abd",
+      "test_a_stored_image_that_cannot_be_read_is_named_not_a_cache_miss": "2fbfd1e59ea414d6dca31c6678810c58d34fa97951a6a49e74506c2183227c0e",
+      "test_a_stored_image_that_cannot_be_read_is_named_not_a_cache_miss.denied": "d6d4beab1ef1a6a46fb123ce788d9ce3655c3d3bc039dbf15081c50afe1552bb",
+      "test_a_stored_image_with_a_damaged_manifest_reads_as_not_cached": "d445c6f1e980531764c9bf77e276988aa5c950b92ed2d98950a0a41840c236e2",
+      "test_cached_download_progress_preserves_exact_totals_and_reads_negative_as_unknown": "c4e9da138e6926f055bed576382b11bfeb6bb9469496a9cdcf1b102041e68181",
+      "test_database_local_projection_reads_cache_build_and_spark_evidence": "45709550edfeb44b3e4f51c2e5031f0c341021710068afe14ee378236ddc5c0c",
+      "test_library_cursor_refuses_a_changed_accepted_catalog": "46d17b9d69076c3f47a7a46e6e809b4f0c164f54e199484024368184cad1565c",
+      "test_library_cursor_refuses_a_changed_accepted_catalog.read": "2a8be041e99b94d2a41b283793603437c66ec1d0ed727d774b7f2d9a2e6567a5",
+      "test_library_item_at_one_byte_over_wire_budget_is_refused": "238cfc81cd7321161be35903013c63b6626158fa27e9468e6816a9254c795c67",
+      "test_library_pagination_covers_more_than_one_page_without_gaps": "f18225152275128c4101758e3fd4349e09070c51568dbe4b78677b43168d3eef",
+      "test_model_detail_resolves_every_model_cache_selector_form": "837963ddab895ba81ac82f015d3db496be17a7542cc2ff8a7d897a9ce92fcecc",
+      "test_model_library_pages_by_wire_bytes_without_losing_entries": "0e93e4ddec51a355002a1718e93392d6d6392ff3afcafb9d8da69b32bc3ac9f8",
+      "test_published_corpus_projects_all_models_and_exact_recipe_bindings": "a8bdacf53d6970a75992fe7e957a02314829d91252eff86ff53ab3ec32760dc7",
+      "test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit": "cc43a9fe59023caf8de346214ba11cb1cba9972106146ce63d070745065783f5",
+      "test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably": "684c0962e96ab486b3fdc4e85a503046c44822e46197dc4cbf3f378bd6d47596"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_library_item_at_one_byte_over_wire_budget_is_refused",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_library_canonical_projection.py"
+    },
+    {
+      "count": 1,
+      "function": "test_recipe_library_pages_by_wire_bytes_without_changing_cursor_limit",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_library_canonical_projection.py"
+    },
+    {
+      "count": 1,
+      "function": "test_recipe_library_refuses_one_item_larger_than_wire_budget_actionably",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_library_canonical_projection.py"
+    },
+    {
+      "count": 2,
+      "function": "test_a_stored_image_that_cannot_be_read_is_named_not_a_cache_miss",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_library_canonical_projection.py"
+    }
+  ]
+}

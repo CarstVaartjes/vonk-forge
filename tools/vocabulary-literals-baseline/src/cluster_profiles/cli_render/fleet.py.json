@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/fleet.py": {
+      "_cpu_clock": "64e02ca7c75d9096e93863a97a3677b519320049f724b5cfee86038c7ce182e5",
+      "_fleet_attention": "9ba48b4ce80449629864d7de0c98a0b0b4704438604b71edd5b48b4a0fb5f5a5",
+      "_fleet_overview": "ae33f39ebd22f2ef60733dd658f40199e2593518b2b61dc44290517bbbd0706d",
+      "_fleet_updates": "1872da61d6c3f227cff3c53e4eacde2a3e94127afca29944ea3788950e14bd2c",
+      "_fleet_workloads": "c3e77d5f4c0f4bbc8671a4ebb549f13f16a28bb0a15ada81e627e8e8036d409a",
+      "_gpu": "6ec48228ff4cc239822e76459fd0794a9eb5d5e75502b7b00038286d49d7245d",
+      "_memory": "e3cddff3238ced837806d7597ba81dc17f0771494c60ba2006aaca00dde5835d",
+      "_nas_route": "9b6902881c2de954a28c6797e7808c0fa3c1bd4af1fde78b8400196efc8b8f4c",
+      "_node": "e4012c12ecad72c11650546f1cd5fd4debacfb6de63f009a66f2986ecfa77796",
+      "_status": "b999634c6b0e591b8cfdd134b0c81aaa824ceb067e98fcfdca0f1f5baffc09ec",
+      "_wired_ports": "feca208260b852789326877929656d17c481707d85696b5fb42435efc3536cf7"
+    }
+  },
+  "stored_state": {
+    "src/cluster_profiles/cli_render/fleet.py": 1
+  }
+}

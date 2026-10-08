@@ -1,0 +1,120 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/requests.py": {
+      "<module>": "7f5da3b836ca0c66ff2515f1fb4cd2ebe560068c83c2f4488813b6385e43cec5",
+      "_lock_build_consumer": "1421e6530895c19769d8b4ab07d54fc69df2296e8a12f3390a5ed8d72d6d04e3",
+      "_refresh_authority": "2edf40d8124575f7c62c5d54b4450e07820d251293fdace38015d7934ce8ba57",
+      "_start_request": "c6e660a1588a6cd570fd395c0cd3ed75439de01a322ff15dd95644a0dcd3afd4",
+      "_start_request_once": "f2ca230c86b8f7724516a8691daa29b4f87ba0cb615247383aafea9124a91855",
+      "_unaccepted_request_end": "672d62c433690dc4d7432e85f062154f41b0f372cafaa882aed28a68448ad32f",
+      "cancel_profile_preparation": "73d07bfd686c7971903f6c8953969e7b8c5c1e336273b20e021cfdf99faa2b06",
+      "ensure_preparation": "419cb04cabece98037297676f25e82dc0d2338f04aa616f52d9522f63f5297a6",
+      "start": "43d7d55ece66bc090c337f0f1507d062d39a4f96d81afcb14da53a0f006b0d6c"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_image_availability.configuration",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityInvalid",
+          "_start_request_once",
+          "recipe_image.metadata_refresh_unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.request-shape",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityInvalid",
+          "_start_request_once",
+          "recipe_image.identity_conflict",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityInvalid",
+          "_start_request_once",
+          "recipe_image.recipe_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityInvalid",
+          "_start_request_once",
+          "recipe_update.operation_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityInvalid",
+          "start",
+          "recipe_image.action_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityInvalid",
+          "start",
+          "recipe_image.recipe_invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "requests.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityUnknown",
+          "_lock_build_consumer",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityUnknown",
+          "_refresh_authority",
+          "recipe_image.metadata_refresh_failed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityUnknown",
+          "_start_request_once",
+          "recipe_image.build_input_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/requests.py",
+          "RecipeImageAvailabilityUnknown",
+          "_start_request_once",
+          "recipe_image.runtime_invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "RecipeImageAvailabilityUnknown"
+      ],
+      "function": "_start_request",
+      "path": "control/src/vonk_control/recipe_image_availability/requests.py",
+      "reason": "Admission reconciles the same request on bounded exponential backoff for at most 250 milliseconds; exhaustion returns a typed failed observation with no accepted effect, locks or claims. A new request is always eligible."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/requests.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/requests.py"
+    ]
+  }
+}

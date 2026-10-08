@@ -1,0 +1,44 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_artifact_jobs.py": {
+      "<module>": "db407463a8a0d113b52c10bf200069f3df5c45b014bac3e9c0eebad767e8d923",
+      "ArtifactJobClient": "9c88787c969ac38682e31b945d68cbe380c1c3215403d622f8e63593841b3e94",
+      "ArtifactJobClient.download_file": "eebd882e2dc0112d864964168eb386a0bf888b712cf11cb938a32eeb1ec8abae",
+      "ArtifactJobClient.request": "57faa5489933743e6cba1cda93bc6bff81bda21e4056cf560b903d19743a4dd7",
+      "ArtifactJobClient.request_timeout_seconds": "d2151d77796e97a822bb5fbd5dfc1c58af8f8b0d287e46f0e5734b02041f7cef",
+      "ArtifactJobClient.upload_file": "a7c8b3b045f6a1ec2baf8f534c5dd096f5e4ae032a3fc9a8100ef147c5bab57c",
+      "_cancel": "5fb1824ea496c8cb1ccf563b5a8f7cff03e8a160a1078fc34960fba62ba5da02",
+      "_canonical_create": "748e09470dd9739ce5cd73524cea54e85b25184a88b889e9c9dfae452030d46b",
+      "_capabilities": "08759720304998b4dd247a427889e6e4552b5518cf0cb792478bb12b119a6ccd",
+      "_create": "474dee9538e9e5c2cf7ded3cde4e99c23ef16461c43ec6bc70a7d384b6e9015c",
+      "_create_receipt": "9f93568df14a147229aa805f6a66e1f514ecf600d9eb916cccb01bc846734aeb",
+      "_create_with_reconcile": "5b88b5a121913a6468c8f4755eac540b3879d5ed023fb50ef7af281a5f247303",
+      "_declared_files": "f20735a46013bbd0a68a54de018b4fa8f5aaa4486a793232a0dd447819a30905",
+      "_deliver_inputs": "5631a04d825776406c0851a51659647c592f74ccee81261ab55e03b8138fbf41",
+      "_digest_regular_file": "c05b38bdb2272bf8fcd2ce4d02c18d88a9decfa8ab079db7944fb105d86d60ac",
+      "_download": "daefd661a2d26686a80bec14362a8a125b94d3a534622e857e5a14eda824807c",
+      "_existing_verified_file": "aaf3b5dabd7701993cc8e67c2932c29a828c75e6bfcb4c7b7904f01d164b39ff",
+      "_integer": "a0f1129f01f61da34f18fc7dd8cba80d0cd88829ce19d6a547064cb6c9ec8ca0",
+      "_job": "4473901257d31dd9f6dd45afdf24c0180336790063a04ae2a98d1cac5a9a8012",
+      "_json_mode": "e6228b99a2d4632eb9107ef6e0407503f14bba9afbfac339a33cd949c17b47a8",
+      "_mapping": "d69f786065b51aca83df8d1995b61fe896b3e2e591802001967a1c97d4862600",
+      "_match_input_binding": "6ec5142daab17d8718449287fee3fcfe7ac36b46c36e80b91a844c78fc4f4f3c",
+      "_may_have_completed": "3bd4241e0cf14d5d36776adf3f20e3b3f93e4eb79dad107677ebc6e107ec2ad8",
+      "_output_directory": "84105bcd7351ea3ec804656759a7d37708794fae51542a900711ed567f10a402",
+      "_prepare_inputs": "c1461f8d161d0cd55528ea971edd5a7dfe4155932d0b39de709eb5d657c01f00",
+      "_read_binding": "a5cf560dd2cbb496d6711fde0143716072aeab80e7e00a11ebdf344c848bc4d7",
+      "_reject_output_name_collisions": "c0c8847d0031e45efe9beb6e6234d3a708c1a8d00991d9a2f428d71a24df9fbc",
+      "_same_job": "bc5266cd823392cb08c7f75252c67a63219f9562c42e9dc1146dc3086ee955e1",
+      "_stable_request_key": "7a28c06cde2583055391ef4010f7a3799f4d8ea9d8823cd8fd8ed8662be2be1a",
+      "_submit": "9a304a51c0c0dc5371cef16702f0e5fce50e5a77f1b4daed80350da230e0cdf5",
+      "_transfer_client": "4fe322dfac2aec2e7bc50c690b7e6fc0feec95fa580f80a4bcfc0b3604b6f747",
+      "_upload_existing": "4ebaba8ea949c209e80ca5ed3ff1a1d6815732af1399d97f5fe88f63ec3c6500",
+      "_uuid_argument": "e33a5d2df2adc1a91a19ef293b9075c485c7087247adfbf0edb7bf4866a8d6d6",
+      "add_artifact_job_commands": "f2dd4bd5b49e2f95ffbefee0020f0c6cfa11f143bc1e4043cb886f2d85ae0de4",
+      "run_artifact_job": "a4e4cc6fa58c82f9394ba5ff282967291e0499f763aa1599449a1d8cc86ff735"
+    }
+  },
+  "stored_state": {
+    "src/cluster_profiles/cli_artifact_jobs.py": 9
+  }
+}

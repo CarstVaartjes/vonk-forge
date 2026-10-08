@@ -1,0 +1,241 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/execution_plan_service.py": {
+      "<module>": "5d1dc29dff3093ccfc1189c6d57663fe49d46563d9ddec53830b54e0973d6510",
+      "ControllerExecutionPlanService": "9d335555967a19c1eb5a864959551c6559b9dbf7b633d969294ad15a5bf58353",
+      "ControllerExecutionPlanService.__init__": "5e573c9b09ab4b22ab7abf439c2bde9336602e2d6a71dc3939e6797998873e5f",
+      "ControllerExecutionPlanService._runtime_image": "c78d684bf34f62aeeb7e2f38033589181878b25026780994a3e4b265b1e72ac8",
+      "ControllerExecutionPlanService.compile_installation": "1f859a0ca9c4a7598fedf87dd4d58ee2993b217598ee7f873998481253ed44ca",
+      "ExecutionPlanCompilationError": "d65d7dfa62e66c0255e4321fb0ffaf7a89ed0ca6cb73f25ac8387e4a45eb0bc1",
+      "ExecutionPlanCompilationError.__init__": "06de9d125a54edc920d774cafde20df6b67d13ccf283783fde9bbb8c5f5a0c66",
+      "ExecutionPlanEvidenceUnknown": "09425bcd6c9041ad9df62d2d28994ec02848d3383a6eb574d1a02a7fe6357b8d",
+      "ExecutionPlanEvidenceUnknown.__init__": "a6433f0ffdbaf267488b744934f81827b9ffc770ce5e0f5fb896430fd9085cca",
+      "ExecutionPlanReceiptRefused": "a70ec6fdadfde8c0354f9ad1ba7f59824fb6d0daacc889e0fbfa0bac14301178",
+      "ExecutionPlanReceiptRefused.__init__": "00517a618d8b6327c860ffee66a8f19a65566b9d5086a0d3879b2a6d157acc94",
+      "_PlacementTarget": "fc14f411a039c764fcae563c8d158fd7954052545d9984d53689309c6ffcdc45",
+      "_bind_runtime_artifacts": "04c066288f5687c804ce309075f7c36a2edbc8d35023b138d5d42ca96204f76a",
+      "_build_package": "dd5d3ea0ecb4320b88da6f1a78ce9023cc9c90eb8dd39d8fbc104c1319984f79",
+      "_image_digest": "ba7b17d355421bf5ab0cec0ba6d421404e67a38910f810da8d2702a71bdeccf7",
+      "_placement": "a4a8e8e255108cf25d8f0b6992ff917de706b9441ce59a03835781997f9a42a0",
+      "_runtime_image_receipt": "4c810c33f9d37e7fa4f061f4ba998dd938bed0c952dd3e5f1b0bedcb400d8d0a",
+      "_world_size": "5582448abe2d214f28bd8ffeded8ea9671f1150b951f583b63a22477517dae61",
+      "compile_job_invocation": "76fda2df0e54b8c323b506e90605eb7a3477bc21137acb547180aedd4e012a24"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "execution_plan_service.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "ControllerExecutionPlanService.compile_installation",
+          "compiled-execution-plan-for",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "ControllerExecutionPlanService.compile_installation",
+          "compiled-execution-plan-has-no-mapped-targets",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "ControllerExecutionPlanService.compile_installation",
+          "recipe-build-receipt-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "ControllerExecutionPlanService.compile_installation",
+          "recipe-does-not-satisfy-the-canonical-contract",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "_bind_runtime_artifacts",
+          "selected-model-file-is-absent-from-the-canonical-model-manif",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "_bind_runtime_artifacts",
+          "selected-model-file-path-does-not-match-the-canonical-manife",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "_image_digest",
+          "compiled-runtime-image-digest-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "_placement",
+          "compiled-runtime-endpoint-port-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "_placement",
+          "job-recipe-has-an-unexpected-runtime-endpoint",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "_placement",
+          "mapped-role",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "compile_job_invocation",
+          "job-build-differs-from-the-installed-workload",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "compile_job_invocation",
+          "job-memory-floor-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "compile_job_invocation",
+          "job-memory-reservation-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "compile_job_invocation",
+          "job-recipe-differs-from-the-installed-workload",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "compile_job_invocation",
+          "job-role-differs-from-the-accepted-canonical-workload",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "compile_job_invocation",
+          "job-timeout-exceeds-the-installed-workload",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "execution_plan_service.input-validation-reviewed",
+      "sites": [
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "ControllerExecutionPlanService.compile_installation",
+          "recipe-revision-digest-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "_image_digest",
+          "compiled-runtime-image-digest-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "_placement",
+          "compiled-runtime-endpoint-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanCompilationError",
+          "compile_job_invocation",
+          "compiled-runtime-job-settings-are-unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "execution_plan_service.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanEvidenceUnknown",
+          "ControllerExecutionPlanService._runtime_image",
+          "verified-oci-archive-receipt-is-unavailable-for-the-selected",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanEvidenceUnknown",
+          "ControllerExecutionPlanService.compile_installation",
+          "verified-model-artifact-set-receipt-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanEvidenceUnknown",
+          "_build_package",
+          "successful-controller-build-receipt-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanEvidenceUnknown",
+          "compile_job_invocation",
+          "job-build-receipt-is-unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "execution_plan_service.security-edge-reviewed",
+      "sites": [
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanReceiptRefused",
+          "ControllerExecutionPlanService._runtime_image",
+          "runtime-image-receipt-does-not-match-the-compiled-runtime-im",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanReceiptRefused",
+          "_runtime_image_receipt",
+          "runtime-image-receipt-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/execution_plan_service.py",
+          "ExecutionPlanReceiptRefused",
+          "_runtime_image_receipt",
+          "verified-runtime-image-receipt-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/execution_plan_service.py"
+    ]
+  }
+}

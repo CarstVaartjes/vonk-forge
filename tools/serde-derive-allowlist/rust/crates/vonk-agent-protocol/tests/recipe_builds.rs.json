@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-agent-protocol/tests/recipe_builds.rs",
+      "reason": "test harness: the shared-vector file layout of one integration test, not product data",
+      "type": "SharedVectorCase"
+    },
+    {
+      "file": "rust/crates/vonk-agent-protocol/tests/recipe_builds.rs",
+      "reason": "test harness: the shared-vector file layout of one integration test, not product data",
+      "type": "SharedVectorChange"
+    },
+    {
+      "file": "rust/crates/vonk-agent-protocol/tests/recipe_builds.rs",
+      "reason": "test harness: the shared-vector file layout of one integration test, not product data",
+      "type": "SharedVectors"
+    }
+  ]
+}

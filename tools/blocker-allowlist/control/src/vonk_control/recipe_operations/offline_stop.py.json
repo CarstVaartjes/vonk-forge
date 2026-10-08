@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/offline_stop.py": {
+      "<module>": "7b8468099d95bca672710f343c4b2815aab834233660ff04c2758fa1046c7f0b",
+      "OfflineStopMixin": "37b5c79ec4a13237a1c23fbf05b23b6ce8c2a0be73bfdf64c3666f3c1deb7c45",
+      "OfflineStopMixin._finish_offline_stop": "872ccc9da7a2b01e3ef1551b5371dc3c43839705ab448109af95939ba731b9ed",
+      "OfflineStopMixin.reconcile_offline_stops": "4893424141875f2f89f030b213b238e67e587d790c1218ad63b3980b9b9ae68b",
+      "OfflineStopMixin.reconcile_pending_service_stops": "86c272004fa668c179a18690d7cabcbe295043a76148dac66fa2a95c057b4d2e"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "OfflineStopMixin.reconcile_pending_service_stops",
+      "path": "control/src/vonk_control/recipe_operations/offline_stop.py",
+      "reason": "One oldest due accepted Stop per worker pass retries its exact durable request. A deferred row retains original bytes, claims and meaningful cause and advances its next-attempt clock, releasing transactions before publication and allowing other due rows to advance."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/offline_stop.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/offline_stop.py"
+    ]
+  }
+}

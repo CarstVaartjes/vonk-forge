@@ -1,0 +1,13 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distributed_recovery/singleton.py": {
+      "_accepted_start_authority": "293df1fed38db5027ebce111f129739e98e49b93dccf6c1b2865d1a92b6d9147",
+      "_launch_generation": "d4e0fe33d6ff8b33daf0d8420ac2f3712bcd01b4497b24ec5f339ee9ac96c488",
+      "_singleton_recovery_authority": "7f33e0ccf09cec69c302f3002bf2370ee73dd5b6558be62eecbf604a1b002efc",
+      "_validate_singleton_recovery_start_origin": "c9cf469ddc9cac7ed8647b9d54613c65f90004bd93bfbc7cc2d99f081be583aa"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/distributed_recovery/singleton.py": 4
+  }
+}

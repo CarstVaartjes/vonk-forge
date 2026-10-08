@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/replan.py": {
+      "<module>": "dbeab332476d02b667287bf910cee3bf7c0d5aa3f4c7d8ce15419bc40a68f068",
+      "FleetProfileService._defer_exact_step": "af0fe166dfca61a27e65d0f29300105bf6288c36fa0670a40c7754066b5a5b3b",
+      "FleetProfileService._follow_newest_recipe_revisions": "d7efa2bc2738157586856225bd84fde667e9cbfb8ddf66f8af5d4a7a50146294",
+      "FleetProfileService._replan_blocked_application": "b8b3fe9bdcd173cb742fd2115d5319a7c6c712ae3c3a6e4cbe02547be06613c4",
+      "FleetProfileService._step_unissued": "a52d7a38abed34fb71e79d6c7f208401d15beff3e2f8a26f94b9fb1a0c616dc5"
+    }
+  },
+  "sites": [
+    {
+      "expression": "item.recipe_revision_id != accepted[item.id].recipe_revision_id",
+      "function": "FleetProfileService._follow_newest_recipe_revisions",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/fleet_profiles/replan.py",
+      "reason": "Profiles follow the newest revision of each recipe they name: a moved head is detected by comparing the accepted revision with the current head, which is the version the operator asked to follow."
+    }
+  ]
+}

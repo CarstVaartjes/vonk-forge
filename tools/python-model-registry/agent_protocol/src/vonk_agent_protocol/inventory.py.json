@@ -1,0 +1,8 @@
+{
+  "modules": [
+    {
+      "kind": "agent-protocol",
+      "module": "agent_protocol/src/vonk_agent_protocol/inventory.py"
+    }
+  ]
+}

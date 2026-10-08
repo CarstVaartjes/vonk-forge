@@ -1,0 +1,13 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/dispatch.py": {
+      "render_payload": "f0e2244a0e61ac656cf9a980f9f1e739a4938b2aa538b968df24e234a1c0c058"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "src/cluster_profiles/cli_render/dispatch.py"
+    }
+  ]
+}

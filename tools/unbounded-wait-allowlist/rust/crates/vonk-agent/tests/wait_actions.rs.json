@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "wait_reasons_named",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/wait_actions.rs"
+    }
+  ]
+}

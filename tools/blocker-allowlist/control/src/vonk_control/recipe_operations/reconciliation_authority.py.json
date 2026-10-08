@@ -1,0 +1,73 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/reconciliation_authority.py": {
+      "<module>": "a705de7498a8ca17d85df7b77fe3abe063d52c3c5f94c4d4c5daef9ececa6589",
+      "ReconciliationAuthorityMixin": "4d294f61433f74f29f5dbf05e71f311061a6c2243bea5166a76af7ea64e31176",
+      "ReconciliationAuthorityMixin._lock_reconciliation_rows_in_session": "f3ae00b721d31cb5a19083d04d86735b0201fd1cf17ed5b17c3e5afad551788b",
+      "ReconciliationAuthorityMixin._preview_uninstall_once": "cdcda1e66ff4fce8b758a906293f099c514f7a93111f7fbd538a40de4a7677ce",
+      "ReconciliationAuthorityMixin._reconciliation_authority_in_session": "cc13918585e3eac61e7a5638aeda0bd82a9404b1aaf656621e54e88eb30c706b",
+      "ReconciliationAuthorityMixin._reconciliation_authority_in_session.blocked": "af0794fb5ec6d41c320568c14baac72779c09e303083bd8a0178367a8cb7a9c7",
+      "ReconciliationAuthorityMixin.preview_reconciliation_authority": "dbdf45351772d18d46181ef6685a75d8ee760c867dcb36ffc6dc6257fbe8fd76",
+      "ReconciliationAuthorityMixin.preview_uninstall": "3e111aa677d31b98e4125c685a33b81c183cdf7478f31f4bc048fa511531e0c0",
+      "ReconciliationAuthorityMixin.reconciliation_complete": "8d4c7e596995b9321732ae4668758728cbda70fe365e93035611a89d013f8a45"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+          "MissingRecord",
+          "ReconciliationAuthorityMixin._reconciliation_authority_in_session",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+          "InstallAdmissionBusy",
+          "ReconciliationAuthorityMixin._lock_reconciliation_rows_in_session",
+          "reconcile.capacity_busy",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+          "InstallAdmissionBusy",
+          "ReconciliationAuthorityMixin._lock_reconciliation_rows_in_session",
+          "reconcile.membership_changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+          "RecipeReconciliationBlocked",
+          "ReconciliationAuthorityMixin._reconciliation_authority_in_session.blocked",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "ReconciliationAuthorityMixin.preview_uninstall",
+      "path": "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+      "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/reconciliation_authority.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/reconciliation_authority.py"
+    ]
+  }
+}

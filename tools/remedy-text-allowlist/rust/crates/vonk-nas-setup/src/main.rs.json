@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "<module>",
+      "kind": "imperative-remedy",
+      "path": "rust/crates/vonk-nas-setup/src/main.rs"
+    }
+  ]
+}

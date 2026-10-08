@@ -1,0 +1,117 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/uninstall.py": {
+      "<module>": "57ed9cc9522b3aada8373c5fc9ce42ad665c49d096298f23053043bdfc535767",
+      "UninstallMixin": "b3b7dd77532c2b0704688e8ab74412568b6f74499ace93e2971d6d88d501b2d0",
+      "UninstallMixin._reconcile_installation_once": "ebf8dc56877dd3ccb9b5ec80fb2c5e54dffa212e711975d6251606b4080d5fde",
+      "UninstallMixin.abandon_never_installed": "589f93eef1303d4d44a0fa7003c54e53b932443cf0cd92fcb6e38400447cb0e4",
+      "UninstallMixin.reconcile_installation": "a5ac48a24138370e15e8b22263f45069cf12728affe9495068d458d8e7578ce1",
+      "UninstallMixin.uninstall": "308d55cfa0724fad66dc9aafaff848df1375b46a73d2680b295e615a2c6da8bd"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin._reconcile_installation_once",
+          "reconciliation-authority-changed-after-preview",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin._reconcile_installation_once",
+          "request-key-was-already-used-differently",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin.abandon_never_installed",
+          "installation-is-not-a-never-installed-plan-it-cannot-be-aba",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin.uninstall",
+          "request-key-was-already-used-differently",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin.uninstall",
+          "uninstall-plan-is-stale-or-blocked",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin._reconcile_installation_once",
+          "reconciliation-has-no-pending-targets-but-is-not-complete",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin.abandon_never_installed",
+          "recipe-installation-does-not-exist",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin.uninstall",
+          "installation-was-never-installed-abandon-it-instead-of-unin",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "RecipeRequestInvalid",
+          "UninstallMixin.uninstall",
+          "recipe-installation-does-not-exist",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/uninstall.py",
+          "InstallAdmissionBusy",
+          "UninstallMixin._reconcile_installation_once",
+          "reconcile.capacity_busy",
+          2
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "InstallAdmissionBusy"
+      ],
+      "function": "UninstallMixin.reconcile_installation",
+      "path": "control/src/vonk_control/recipe_operations/uninstall.py",
+      "reason": "The reconciliation request retries its whole admission transaction a bounded number of times with short jittered pauses; the request identity makes a repeat idempotent."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/uninstall.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/uninstall.py"
+    ]
+  }
+}

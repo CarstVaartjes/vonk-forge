@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/cache.py": {
+      "<module>": "9c0ccec7a1695061b766428c763bfed59acdbe504eea2a598c924dcbd1d4da3b",
+      "ArtifactLifecycleGate": "ed0a937c1fa45141e12054966807ddfd300e94cd0d4c37b5f3c0789a7f0db7a3",
+      "ModelCacheOperation": "4abbcef1d4132b8db371ea8f9705169454ec06d4507b9b58e8a8302bb0c665d3",
+      "ModelCacheSet": "4151ca5c10557e7602a835643ce45d302ef0fdfb5fcb517238b08f08fdd0e807",
+      "ModelCacheSetArtifact": "1215b4d0f4c31f2781defd182158d0ef610862752e2bf93d66d06fc5173d8d3b",
+      "RecipeBuild": "718612d0018b4d201d07ff369c54ddfb4482d72e51593102ea7f3298e6368009",
+      "RecipeLibrarySyncRun": "a5e34e6cf3101b6bd0f6945c1dfab80dd0205daeb3ca1a979268bc82a6d29da2"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "ArtifactLifecycleGate",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/cache.py"
+    }
+  ]
+}

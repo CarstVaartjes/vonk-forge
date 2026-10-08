@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/constants.py": {
+      "<module>": "1f1c919571ef4f4256d4fa9d299b815ae9ec6e558a3905c034fdeec95b0a34c3"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/constants.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/constants.py"
+    ]
+  }
+}

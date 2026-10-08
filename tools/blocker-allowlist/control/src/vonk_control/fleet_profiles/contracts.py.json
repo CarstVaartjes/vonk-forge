@@ -1,0 +1,49 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/contracts.py": {
+      "<module>": "a0db34bedc2fd9406219b596f1be856f2c53d5080b4aa40bdf37950fc1ecf81b",
+      "FleetProfileAdmissionBusy": "2ef98049e698e3464efcd1e9754796e1ea1cfa319d1fc710cc304bdc05f81861",
+      "FleetProfileAdmissionBusy.__init__": "9275abe0002f60a0dc6755917d5339c8d474113b816270a149e485e2025e83ab",
+      "FleetProfileAdmissionEffectBusy": "0b33f54298bda34aefcb92083fed20087da6a848e0063f66666a960125c6f990",
+      "FleetProfileAdmissionEffectBusy.__init__": "71248951cf87e4e860c1443994c0075b15392f057739a8783a9137bf5bf3182c",
+      "FleetProfileAdmissionStorageError": "5da67d71f5c9fc7f4b2de507df475456460ddd41c015d2d1be4d6e4003f59fe8",
+      "FleetProfileAdmissionStorageError.__init__": "1dfd55c8b04361eb11a0011f29626d6d7355ada2651138918ef6cc298fd204ad",
+      "FleetProfileAssetReservationConflict": "e0cc33b1f18dcc98f8f19842f2b0a6898011ac51114835c754cbd15e9576c36c",
+      "FleetProfileChildPlanBlocked": "a4ddd7283570098c482ca8437a08275d1683152bb49f5fa97d210cb030707515",
+      "FleetProfileChildPlanBlocked.__init__": "1dfd55c8b04361eb11a0011f29626d6d7355ada2651138918ef6cc298fd204ad",
+      "FleetProfileConflict": "801d8de74f0859d9d84e18af471f56fe181b301dae70dff873f370832fc077fb",
+      "FleetProfileInvalid": "01c2c841a97c97e959acf5f9d2de94ca71bbb1587903098e3d27f4ce8069d9fe",
+      "FleetProfilePermissionDenied": "25c651148d16f2f5a5cb22a9ade9ebe671176ddd554788f62e682c697a79568c",
+      "FleetProfilePermissionDenied.__init__": "477f2b636f0d8899f41ebc14d2448f651e61244941029ee085f299d20f427b87",
+      "FleetProfileResourceRecheckUnavailable": "786b28042061bd246155b235ad67737a2fdfa257e44199e91dc6623e46432c92",
+      "FleetProfileReviewStale": "8f4241ae698347a3d1f0b7123137d366a556e0fabda150697cc312a415e50371",
+      "FleetProfileSelectionLost": "a29c02ae8e9b7a253af9ee7dc45ce571cab64e173d31bbe38968715e07b10461",
+      "FleetProfileStalePlanConflict": "8ed71a75ebba3d8dd6abbc2f5e9c0a5c218a8a06fefce5959a50c9fac50a1451",
+      "FleetProfileStalePlanConflict.__init__": "7878076b95a4a3ebaa9f1b3f000e38d876856446d89b6e8d333fe53196d0fddb",
+      "FleetProfileUnavailable": "b7469179649a3dd503131063055fbef0ad1f27debc423adfe18ff3606f88efd0",
+      "FleetProfileUnsupportedStore": "aa4f6646bd4e7946d382f79cd03ada3425d70d045e2023ecd30bb3379ad3a499",
+      "PreparationCanceller": "cb2e2e31090aeada78611cf42dec6eee30341cbe00dcea1a91463d81a4dd6808",
+      "PreparationCanceller.__call__": "67d0c9af00b2625be99307089ec9b43e5f754164d4434a84f82ca312bd01065e",
+      "PreparationStarter": "8b6c8aec4946205d84493290f7e3dc35bd6534d0288004085a75309afc30dea1",
+      "PreparationStarter.__call__": "3db4fee94e193f36e5b305e2259ff2fdf35e78d92572414aecb66d6afaba8f05",
+      "SavedProfileDocument": "c9e03a8b5473488672f79fc65cb242f3645679749d49fc6e840257c6aa391988",
+      "StorageReliefProvider": "ce7abbd746f308dde2fcc2da65da39d1c2c06d345297bd3ad99468eeadab6e1c",
+      "StorageReliefProvider.__call__": "2834b80cc5587e64a07203040ea22993c40e2109a1bef5fc50eb05d984083e56",
+      "_AssessmentProvider": "a615b681a6dcbd7632932990ac94da65d1f0db2e8474fdca371a5dd88431e734",
+      "_AssessmentProvider.__call__": "95d739f573c1e0b0f1c4c2702445ca25b63b450e6d5ab4d63e098cbb38856197",
+      "_FleetProfileRecoveryBindingConflict": "a1e84717a326e478752ccb297528c4a89a6c798ae64d2dee21cd8f0211e1f323",
+      "_FleetProfileRecoveryBindingConflict.__init__": "1dfd55c8b04361eb11a0011f29626d6d7355ada2651138918ef6cc298fd204ad",
+      "_FleetProfileSupersededIntentConflict": "5f7565c72f5eb4014a2441276c1105a0c41b4e7ebb44219dd860c8cdd2681332",
+      "_ProfileControlEffects": "402aa3c823f6d01379d7205dd46b482e9c0a045e6f9f0f280de846be7eca1a6b",
+      "_SelectedProfileSnapshot": "4344506fa3155b0609a17801fef7c909fe3d35f2459b0f4192befefa1bd85f07"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/contracts.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/contracts.py"
+    ]
+  }
+}

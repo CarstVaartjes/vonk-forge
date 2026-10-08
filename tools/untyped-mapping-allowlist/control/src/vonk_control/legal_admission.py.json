@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/legal_admission.py": {
+      "<module>": "c90c4d837b1d89707f2f0ccf7e3eb9cbed180b665a56c55f5b630853532dce2f",
+      "TerritorialAdmissionDecision": "c90c4d837b1d89707f2f0ccf7e3eb9cbed180b665a56c55f5b630853532dce2f",
+      "territorial_admission": "8a2764e7157a5913cd7b1dbfc4ba86cbef338a71d8dde1b281de612dfb985a18"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/legal_admission.py"
+    }
+  ]
+}

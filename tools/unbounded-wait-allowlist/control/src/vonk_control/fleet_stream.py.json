@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "FleetStream.events",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/fleet_stream.py"
+    }
+  ]
+}

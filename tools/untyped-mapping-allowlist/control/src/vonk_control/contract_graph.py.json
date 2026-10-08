@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/contract_graph.py": {
+      "<module>": "3237623b1400c3aff032541d10baa648053cae177658f0d2930f40446e9923d9",
+      "ContractGraphError": "3237623b1400c3aff032541d10baa648053cae177658f0d2930f40446e9923d9",
+      "_declared_parameters": "8578507c7e3ff70db7df490750b0bcedae9267c9c603e868750c9df72cecbaa7",
+      "_models": "a2e9e248c74342088a87db29693748e96530916bb830c768269d1943b0da18ae",
+      "_reads_raw_body": "de0119984adbb7383fd9342d446c24720749b8dcf5974cafd6b3b61eb04c8d93",
+      "_routes": "cb9449028f7e9bb828ade10aceabbd68677cc5bf7cf11196beeea7e8a473ce6d",
+      "_structure": "e36b99ad8ed3faaa41d3043e3544f950361485f29cfae5b2b20bd1f3af863893",
+      "discover_contracts": "a26c96922ea445169dc4234ea34817d110ce365ad176e548305bc788a06d588e",
+      "raw_json_body": "ba2ef39473018823854e95ff44a861e8e9ad94cde6708ce4e4af06c6320fb017",
+      "raw_json_body.decorate": "10c87d1f84f72b7665dd958fb6b8930c8ae5f9da30109dcec2703fbce6c23151",
+      "require_wire_exports": "3a9833301afdc56bfa5079ad17e3a1675beb74f673e2a0387f2580a2aaccea7d",
+      "schema_application": "16849964039da3954dbdbcc9fc9303e6c325fdb9fb1232c7ffbcd3ce7260e05b"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "control/src/vonk_control/contract_graph.py"
+    }
+  ]
+}

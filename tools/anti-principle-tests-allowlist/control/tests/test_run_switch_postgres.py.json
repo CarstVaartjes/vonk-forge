@@ -1,0 +1,27 @@
+{
+  "content_identities": {
+    "control/tests/test_run_switch_postgres.py": {
+      "_awaiting_final_verification": "8cac8d66e7afb15df8b66886a87e6ac6aacaf4e9b849598f691755cebbddd3b1",
+      "_installed": "589d4a956339256d27ec803912b19b2dbbcce560f864b1d24869649fe8c572ff",
+      "migrated_engine": "ec34bc65ad868f933bcd561bdd098c6d15ac2a846c240eb48ef9c95fe4800c9e",
+      "migrated_engine.bounded_locks": "8ee9aa3207118cd4a1c61b88fe23f5477ae6472c9765c0c126f3494cb2d25016",
+      "test_postgres_conflicts_deduplicate_distributed_runs_and_preserve_group_safety": "85cb923eff8732a598982f0aab78f7b5b5cdaddf8fccfa3f098b10a2ad5e650b",
+      "test_postgres_duplicate_apply_converges_under_target_lock": "0d8f58b69133f2f8b94bd930114a95312bbd330d5de3d2f51146a7628bd42b3b",
+      "test_postgres_duplicate_apply_converges_under_target_lock.apply": "24498fbb1cda1fb0e3e32583e4708f225d315d5fd27548b6b56f73b1a495694d",
+      "test_postgres_final_verification_backs_off_after_durable_deadline": "23773ca9fc2ada49690ab82e319208dd4e5c44bdfba3d723acc7669c53525bdc",
+      "test_postgres_final_verification_timeout_hands_run_to_recovery": "ef079b13a097cf12ca12de35d61ca9b411730c26e5885abdb62c00bcb61b7cd4",
+      "test_postgres_final_verification_waits_after_accepted_start_deadline": "5124758bfb5e5cbfaf041cefc68c9eb376b88ace4ff97f9a851012aed5e93a41",
+      "test_postgres_invalid_terminal_child_is_retried_without_nested_row_lock": "35ebf29f1879cd5d155b201ffbd9148bb9f813988aa3e00deefbf197736f12e1",
+      "test_postgres_newer_intent_supersedes_parked_final_verification": "9336aadf4fd4aa62dc35397d983f56c9ea26ba4b299ef4249115260a9fc6caf3",
+      "test_postgres_running_switch_allows_route_publication_and_survives_restart": "8fb22c42fbbda0c587751dac8923aeb1f29fccc15600ff720c57f0df636dccb4"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_postgres_final_verification_timeout_hands_run_to_recovery",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_run_switch_postgres.py"
+    }
+  ]
+}

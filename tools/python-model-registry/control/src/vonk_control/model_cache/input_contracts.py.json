@@ -1,0 +1,8 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/model_cache/input_contracts.py"
+    }
+  ]
+}

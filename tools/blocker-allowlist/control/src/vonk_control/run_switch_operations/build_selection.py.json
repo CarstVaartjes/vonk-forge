@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/build_selection.py": {
+      "<module>": "efc4df3fb8c35496fee6719c6f87d7e7f6fcc36b39c7e1ef6dba4f6b894684f1",
+      "BuildSelectionMixin": "8251a6cf73185987e5e31afe26a83ffbbaf8755feb59dc33aa82e64c2afc2b69",
+      "BuildSelectionMixin._builder_admission": "dc437827282fddcb394140b0e3fbc9bc176ab1d6eb3bc45e273186e2f60640e3",
+      "BuildSelectionMixin._builder_nodes": "d4c0cbed0f1225e8fd49420fef39614d27f890eb03008cc25788161e86185105",
+      "BuildSelectionMixin._select_build": "95efef66f3fe435bfac505e996bbab459dfe6e741ada38a347dc2cd60fbf14aa"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "BuildSelectionMixin._select_build",
+      "path": "control/src/vonk_control/run_switch_operations/build_selection.py",
+      "reason": "An unknown builder receipt ends this preview with a waiting plan without choosing an alternative builder; accepted blocked plans re-enter preview through the timed plan-refresh tick until the same exact evidence becomes available."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/build_selection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/build_selection.py"
+    ]
+  }
+}

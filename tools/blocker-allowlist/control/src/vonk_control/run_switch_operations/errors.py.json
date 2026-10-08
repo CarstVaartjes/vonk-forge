@@ -1,0 +1,35 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/errors.py": {
+      "<module>": "0a47447703e273a75b21f4acd7e39be79689adc7a2e384bbd41bae8c84f0aa99",
+      "RunSwitchInstallPreflightExpired": "401287741ff631a43c68ac6fdc8f87a1541c5c21efdd4f9e0a4806804961c863",
+      "RunSwitchIssuedWorkloadPending": "548a37cdb42b54bfecb2c2369d3b7eca3e6047b1f6d6c97bccb56836c642a4f4",
+      "RunSwitchIssuedWorkloadPending.__init__": "e66ac7d82a654bc003eaee139c014103c60d51d2e1cbab6b17777055e5cbc3ad",
+      "RunSwitchOperationConflict": "fd1596361b3904ecd183b2e4f1095d34cd5b31899bee03d93953ca5f230ab977",
+      "RunSwitchPostStopEvidencePending": "3bad848868d9fdd9910389ac7c47ec95f06e9a3a851cecd0940484b8f5bcb65d",
+      "RunSwitchPostStopEvidencePending.__init__": "4d50c68949a0b9acadaaf1f188c43a76f72f91ff5b5a99e3749cddf8f497fdf2",
+      "RunSwitchRefused": "5dce56c4c54c7f321a5840fc0039b8ad32d0da868e09a449da0d40e19cdd9fc3",
+      "RunSwitchRefused.__init__": "708a7b3aab7deb339538a0ebd2183dcccffce7cc724dfcbc2a25c2b8b1d41434",
+      "RunSwitchRequestInvalid": "7869b9d09852bed3261ec69dfbe6138d4abb0e7c1d2ec9c6bc003fb778df5f6a",
+      "RunSwitchRetryLater": "80a183cd23f9cf8de129b88caf768262bb55119b9d92e5f5820546b089c18c1c",
+      "RunSwitchRuntimeSpecInvalid": "9fd05c3dd224cb6d4a74138d68b42f91dbab7d23067ae8320236afe1a1fb06af",
+      "_RunSwitchBuildParentChanged": "ab6870967831a34b8ba0ad8374714ec6ba3f9818add0210aa6a963e5b0ad74a9",
+      "_RunSwitchDefiniteConflict": "52e03b0dabaeed5978d20d395c1dc488008389c7012329df590cca530d8a0ac9",
+      "_RunSwitchIncompleteProfileGroupConflict": "2b59317b21e51e6443baf7275387b3d50b1f5f972e573778ccd87856a7b477b6",
+      "_RuntimeImageIdentityMismatch": "93f6ac3141d241b91852696aef859df5444cb69b905bf751bb35969f6008fd16",
+      "_RuntimeImageIdentityMismatch.__init__": "875312d9bb83d9f7e244a924c1a7e132da63e46cf8afc97986501d772550252a",
+      "_RuntimeImageIdentityUnknown": "2f580c7c50b279b968c7a33557cf77fe3c9407f2e14e1705153c789db5c99006",
+      "_RuntimeImageIdentityUnknown.__init__": "ebc74f8c1b4f2ebb0c3a7426161daae216ab5bcf5197553209d221cc20b5a439",
+      "_RuntimeImageOwnerChanged": "55df7c941d6be81d1a97996db7759b1627a9901ee35e036d6b4b31d9e4d892d6",
+      "_RuntimeImageOwnerChanged.__init__": "a7a3eae04a674103b0c6b1099373b5a49cc28bbd22784f37bfb562568807a64a"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/errors.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/errors.py"
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "content_identities": {
+    "control/tests/test_strict_json_scalar_contract.py": {
+      "<module>": "6393140583cb1b638bff6e8f40a690f6dac337549cfa7d69ce541481463ced91",
+      "_AliasedLiteralProbe": "7f3a2742e44f593a97b66c033923748e9baa30e4fe5e75938baa1b220752f0e6",
+      "_LiteralSemanticsProbe": "29000e708a56e0a78c48eff256fbe5d49c7b5a03a2a36ebed2fd0ddaaaef8b48",
+      "_PresenceMapProbe": "424144ab1160baee881bcde9d947a1c00acf2009433d498cad56887317de5e8d",
+      "_PresenceNestedProbe": "b2b6ba3ff3ef6e20bdd799a41b27db74c86be3c6012b5a2cd2a6381ac39727b1",
+      "_PresenceResponseProbe": "d6f1cc0fce9b08bc15afbbe0dc3e98b2a3c606c17d71c61838c8cbfb7b0d3781",
+      "_PresenceRootProbe": "1ca0e27720bdf21a0309593794ef54717160104ce24de45434ff4570143bb0ae",
+      "test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry": "451307c541ae557b978a3e37cf9ff5ae3e909b43c8b125e9e926eb1397895a95",
+      "test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry._Busy": "7c1dc339a76b1cf71feb9648e07e53fbf31b0e9546273c72451f9c8ce164d757",
+      "test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry.broken": "0abab89ad764cd02e0e08235cbc3b056bea4ba992580b74397665de4492c38b7",
+      "test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry.busy": "1bf6da7a5a7162e14d3f28d71eb48bd7661036f7bbb43541d99fd1570cf19f3b",
+      "test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry.busy_async": "4300dba0d8c1a42ff61d100c8d1e0c016579726ec59fe9ad22d12b61370ecfce",
+      "test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes": "bed25a237cfd9e39a4c29e757f8321a8bd485e98f3960c2f498754887737f1ed",
+      "test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes.cache": "d892af32e0be85ed9b61964d4c1d80019187ed20a25f3f76fff220dd955b3aed",
+      "test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes.image": "1979ec5bdbc379aa7ef5580c559f75d216651c660a402b4c723500130fc19df6",
+      "test_fastapi_presence_policy_preserves_dependency_response_metadata": "8fa51a52e4b80841d08dc62f607c82a545d73f6529d95a239bc134a5f3a1fcd9",
+      "test_fastapi_presence_policy_preserves_dependency_response_metadata.presence": "a09292e7ad978b92f62db22df8735472b1f61f28621fbff11fc7010051ab53a9",
+      "test_fastapi_presence_policy_preserves_dependency_response_metadata.set_metadata": "0a9be7e3a5f317d0b4d2de2e36ebccf6534feded5bbbbc4c6a1794691ef4cadb",
+      "test_fastapi_presence_policy_preserves_injected_response_metadata": "58b5c1b604b94e857884c3d0d37bc73d0aad95260a8b71f0aeb60abb7cb43ee0",
+      "test_fastapi_presence_policy_preserves_injected_response_metadata.presence": "ca860909d07458684380c4a386706ab19bda6fd5379f363f869a4f5c5f7c1c37",
+      "test_fastapi_presence_policy_traverses_mapping_response_values": "db25b0539889007596de4ea79356062c47d0def84a8d189d46273eab7dc4d3b0",
+      "test_fastapi_presence_policy_traverses_mapping_response_values.presence": "cad6741007fff61e967b3e22b8ce11ead126b3d5aa546bbe92a5d33eb5e9c98d",
+      "test_fastapi_response_uses_presence_policy_for_nested_contracts": "17d6b5659138e2fdf469b4a236003f6a502c67124c307f77fd6a32377bcf30ab",
+      "test_fastapi_response_uses_presence_policy_for_nested_contracts.presence": "11e0016dbd75359010d0915c3920e3ae9dce118e8a832102ee058736d64928b3",
+      "test_host_grants_require_the_signed_contract_structure": "ad4e61c5b7dccf282e3b6bc5cb9e06bc95bdbc3edbc9bb3b51689f9c9a3db665",
+      "test_library_identity_json_roundtrip_preserves_uuid_wire_text": "572593819d63d91ec128fee425d044252b2fbae1bb482ae93937835ca62e7f20",
+      "test_model_dump_omits_only_optional_none_values_recursively": "c0431c4c994026c4b2aef560b2c86688e1de3f692a269d856056a846e257e67a",
+      "test_model_library_json_roundtrip_preserves_datetime_and_strict_tags": "b189b4590a4c1dbf7961ecbed52cbb50c54ae546b3086e9a00a24d2659d6c667",
+      "test_numeric_literal_check_honors_alias_input_names": "0235dcc813c503d084b8fce39615bee3e99d5bdf2cd2e7b16d289f61f2f135e6",
+      "test_numeric_literal_check_preserves_union_semantics": "4c48f98acc0c9f7ad244be65802e74491ed5e663e02da33539a3d3ba37d35d83",
+      "test_presence_policy_traverses_typed_maps_and_root_models": "1b7453cb9ee5191ab75abeeecda74ae4ccc780fbe8b426c21afee2909c17ccc8",
+      "test_representative_wire_models_reject_scalar_coercion": "8edd3cd968389bc9c6ee825608ad4cf476310fbafab99bd96b0c7438890faa2a",
+      "test_strict_literal_hook_preserves_json_native_representations": "3e649e5abe410ee9619516790a3dfc960721c1c09482c01db653156e16e18f98",
+      "test_strict_literal_hook_preserves_json_native_representations.Wire": "32991dbc82784c525e9a9c9d2fbbf5e0d84c993bd01ab997b657a63bb835e3dd"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "function": "test_a_route_answers_an_unhandled_unknown_outcome_with_a_typed_retry",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_strict_json_scalar_contract.py"
+    }
+  ]
+}

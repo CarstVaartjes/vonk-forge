@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "scripts/spark_lifecycle_contract.py": {
+      "<module>": "e8f6935859855dae4434c3e0512317a0af9247bb8087a97f3dffde4c98252e10",
+      "ContractError": "4893eb8174737f38f8dbaf33edc83599572c88dd19d7411e62d50c97f97b0df3",
+      "_canonical": "01f65ca041b3ad6c825cfcd5e2c56c8b78d162c8cd0872b11349889dbca79316",
+      "_digest": "c0d7474cffd2fca394470d83c32b1f1c77ae4775f26b1c4998969574477c4c1f",
+      "_exact": "63fdd9466ad64c3b5af8c386561e19cbe0921392dee7a1392554a6c79a75c7e3",
+      "_object": "02ba464eeb82b0f0676600986023f94417b3b9b3e567a8088d03216c404efc50",
+      "_release_record": "6927216f867eefb09399ea8dfa3aa22b1d203d6c79f452efed7e24efa692cf06",
+      "_safe_object_bytes": "d34e3884167213c76b78be08408662e3f3a615fdc43e7a1a1c5ebc90891a36ea",
+      "_safe_release_document": "26a252a19e32fc7a2f20361545bbc2a7187275610f4e4c075f407fa2c523000b",
+      "_validate_arm64": "140dae553e12930161bb6a60fec32b4367a1b7d189982816ef8993fff780e2e2",
+      "_validate_canary": "225302ee76f9988359529086f6c8989b26ae776db1a7f0ced8b2c3e2b432e4ae",
+      "_validate_direct_agent": "02925ede34ba2990fe8eb33b13702b20f8a2c0a302acf1e6f8bc62e4880f18ec",
+      "_validate_graph": "d3e5d7a95b21e642982b45e657fb8c12b3ba18bee91b527300bea27990f4ffc4",
+      "_validate_install_identity": "adda26799fcded56bdc6c4803ae11def33847ee19efd2b1e8828db394cdee0dc",
+      "_version_tuple": "63769ce9f654837fece72d8ceddd51ddaee152cab159586b2cc17d6f6c9ca1ae",
+      "recompute_publication_graphs": "667a97f7e88bd41f2c40d81e8d270798fe8e7265c0bd4623be56b2057ce893dc",
+      "validate_lifecycle": "267c10f3ab0a70e80e3b2b8b68ff18a958dd91dc9bf1c526cddd577457027040"
+    }
+  },
+  "debt": [
+    {
+      "count": 13,
+      "path": "scripts/spark_lifecycle_contract.py"
+    }
+  ]
+}

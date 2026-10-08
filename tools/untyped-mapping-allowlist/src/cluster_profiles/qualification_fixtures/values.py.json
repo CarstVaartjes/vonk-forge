@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/values.py": {
+      "_integer": "a70c996a0c6d65ed9928b3192d1b85962747196153cb6327e012819c94e0aa78",
+      "_integer_value": "15f40fd1d12d80123139712dd6321805e24d1ca696e2f2af33edd5995ae23c98",
+      "_number_range": "d1a418a488768e5cc4c830288544bf704a3a3d34ecbf119c021edd620d59e7ab",
+      "_number_value": "ba42feb546ef62aaee55fdbde860f43d39c0daed5b00f96a964799357130c501",
+      "_numeric_token": "c69afbfa6c235a77f9f7cd311cea00391219bce9248cfd0ea2f61ece7bef0838",
+      "_object": "78f6acf2e55c8b1ce2e672d9c6d2d444a83e6438a8f1863b04e8b090c372b926",
+      "_positive_number": "6e3352751968aa9c39f3a28162bbd7a3855ccc622c9594a239d922acab7e1db9",
+      "_strict_json_loads": "c0bb316c235c296b41130c145068fc83cbfa349fec7dae584c54ca7c0f050ffa",
+      "_strict_json_loads.reject_constant": "1cc0ff908005c6776d784e137971240590470e0d46c202be9dffec0c16df8f92",
+      "_strict_json_loads.unique_object": "9bfeb27d9c64a8d616f7840ffb7b52991facdc4e7b0745015506c36c3a4bccad",
+      "_string_list_value": "7558c5f3209898b5cd4a4c760e76f9c5fa1d9ba8dcef5e96b75d2600b1793923"
+    }
+  },
+  "debt": [
+    {
+      "count": 7,
+      "path": "src/cluster_profiles/qualification_fixtures/values.py"
+    }
+  ]
+}

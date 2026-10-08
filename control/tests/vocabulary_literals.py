@@ -23,7 +23,7 @@ TypeScript sources of the web app, string literals equal to a vocabulary word:
 
 Docstrings are not literals.  The contract modules and the Controller's legacy
 adapter (:data:`ALLOWED_FILES`) are the only places allowed to spell the words.  The
-gate is a ratchet, like the other allowlists: ``tools/vocabulary-literals-baseline.json``
+gate is a ratchet, like the other allowlists: ``tools/vocabulary-literals-baseline``
 records the literals that predate it, per file, and
 
 * a literal in a file the baseline does not name fails (use the enum);
@@ -55,7 +55,6 @@ after a literal was removed; it never raises one.
 from __future__ import annotations
 
 import ast
-import json
 import re
 import sys
 from collections import Counter
@@ -85,9 +84,10 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.state_machines import MACHINES, ModelCacheOperatorStatus
 
 from .parsed_sources import memoized_scan, parse_file
+from .registry_storage import read_registry, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-BASELINE_PATH = REPO_ROOT / "tools" / "vocabulary-literals-baseline.json"
+BASELINE_PATH = REPO_ROOT / "tools" / "vocabulary-literals-baseline"
 
 PYTHON_ROOTS = (
     "control/src",
@@ -804,7 +804,7 @@ def _scan_code_positions(files: Iterable[Path] | None, root: Path) -> list[str]:
 
 
 def load_baseline() -> dict[str, dict[str, int]]:
-    document = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    document = read_registry(BASELINE_PATH)
     return document
 
 
@@ -828,7 +828,7 @@ def problems(
             elif now < before:
                 found.append(
                     f"{path}: {tier} count fell from {before} to {now}; lower "
-                    f"tools/vocabulary-literals-baseline.json "
+                    f"tools/vocabulary-literals-baseline "
                     f"(--write-baseline)"
                 )
     return found
@@ -906,7 +906,7 @@ def write_baseline(counts: Counter[tuple[str, str]]) -> None:
     from .package_moves import record_identities
 
     document = record_identities(document, REPO_ROOT)
-    BASELINE_PATH.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    write_registry(BASELINE_PATH, document)
 
 
 def main(argv: list[str]) -> int:

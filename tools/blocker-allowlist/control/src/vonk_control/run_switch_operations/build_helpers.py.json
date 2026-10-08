@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/build_helpers.py": {
+      "_container_build_result": "ba907420020590621c5d9a4426ed514a0448658b51a4df1fdb7a0fb9caab944a",
+      "_recipe_model_digests": "01648cb5ca888587b6ddbb5fa23434457899e881e7d76c4a5e12c94c43d0bf1c",
+      "_refreshed_freshness": "4ff07cc1a498c59d78eb3392980f4783aa66002ebc8cc35f0d8239494ced86b1"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "runswitch.phase-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/build_helpers.py",
+          "RunSwitchRetryLater",
+          "_container_build_result",
+          "run-switch.container-build-evidence-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/build_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/build_helpers.py"
+    ]
+  }
+}

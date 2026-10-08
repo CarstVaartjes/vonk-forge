@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/observation_transfer_reader.py": {
+      "<module>": "0be5bc60272de5cd492a28a1d3e239f73258adec41bcf34b7c27754b0d8d3414",
+      "ObservationStream": "194a09918b61a6409ac0f16062374173c598cef21d1e1d0432c365f063d1678b",
+      "ObservationStream.read": "e82646b127ee8ee647e3bdd3d311f49277e58fe52fa0d45bb6c4966a95b482f9",
+      "ObservationTransferInvalid": "45b21c8a70efff9aff66b923c9dc6899b5affe20143b5c2929f7e96f05fead19",
+      "ObservationTransferUnavailable": "f63f7041259f27a452d4c5113c5a261eb218a78bf04dcdc987a0583b35d2e256",
+      "ObservationTransferUnavailable.__init__": "b653a50a11d14ca08486cbab6f5458b434c1c69e4e59b3395f39c1ca4304f93a",
+      "_unique_members": "d202b3699ca969ee713b211405a021983e889d7e745bdddab18af051663987d8",
+      "check_observation_deadline": "6432dd9db4433571d58aaeef4d7cfcf06acb451b4b491ef97ee9264bce419182",
+      "receive_observation": "5039d9627c2fd52ccde172632e6438a21e018043b6d8c2f6a5de2c6ec501f829"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 2,
+      "function": "_unique_members",
+      "path": "src/cluster_profiles/observation_transfer_reader.py",
+      "reason": "Generic json.load/json.loads object-pairs hook checks duplicate JSON keys before any owning payload decoder. Both the result accumulator and return are the external JSON object format; the schema-selected owning callback validates the complete application document separately."
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/media.py": {
+      "_ffprobe_metadata": "b204b1c79b604600a0e2c5f2ac08f7fd6abd4b83fe5e3a3465a4760a1f600ac1",
+      "_glb_metadata": "f5d31cf1520939db3edaad2fe951042ac16f1503554d8b696dabbca35bd6713b",
+      "_load_content": "d9f12642eda54c0343fa59065f3f5f2c7f30987d3b13091b977b5db8de4ac702",
+      "_png_metadata": "ffb071f1bba591eeaa4a48c397c4978de8a80ee03750ef4225d2c93d69137366",
+      "_safe_zip_entries": "d29781c22af92cda1a54fbe573510a8656e904d102d99d1116d98f744fb04f3a",
+      "_validate_magic": "0726d423e6f20125a09c60af9d98399c6f91faa44b47508d6f74368dae7a27cb",
+      "_verify_media_decode": "d1d0d0b16a5ac20c19015ad9d843432495eea6820c3f876ef61944e5047711b2",
+      "_wav_metadata": "d96b1ea53c5cdbe0ba05ea8daab90d1f590642e012498015f54ff184975d60ee"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "_png_metadata",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/qualification_fixtures/media.py"
+    }
+  ]
+}

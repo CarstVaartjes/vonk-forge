@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "prune_retired_generations",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/identity.rs"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/platform_observation_errors.py": {
+      "<module>": "6ae48ac9054368d10a084d130c52bd0ae5e1d5b91eac760cdca0816d969ed6e8",
+      "ObservationCaptureUnavailable.__init__": "94d4cdf97a226ffa72a9ef38908e9b3290c4691dbfac4212fb0037e267914862",
+      "observation_capture_unavailable_response": "a5211f3470347320a9164fc550367786c26b1a0b683c1e838f41c3a0d439b48f"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "observation_capture_unavailable_response",
+      "justification": "The sole matched literal is the canonical HTTP Retry-After header name (value 5), not an imperative operator instruction. The typed retryable unknown observation remains repairable through the same authenticated read; no empty membership or manual-only recovery is introduced.",
+      "kind": "imperative-remedy",
+      "path": "control/src/vonk_control/platform_observation_errors.py",
+      "reason": "input-validation"
+    }
+  ]
+}

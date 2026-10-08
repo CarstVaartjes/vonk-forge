@@ -1,0 +1,104 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/http.py": {
+      "<module>": "2794290150c78f71672daad26adea303c8479112b0f77eaf9fd8a4a2e8216054",
+      "HttpMixin": "d5209ca1f85f11e65d3284cd5ef980b44f90cc096def1a2aef47b9208aa98398",
+      "HttpMixin._huggingface_credential_fingerprint": "adad095deae238b24da869e215057bf6f998926bb3e117076178e088b73a8074",
+      "HttpMixin._load_huggingface_token": "8847c6f355cb0d67ecd6ceae9551e8c1df138c008e7aab253324baedfd90e788",
+      "HttpMixin._manifest_coverage_complete": "bca683a7983a26f3ed6da063c619dbf00799bead50b9b7edf5a3b83488a6b600",
+      "HttpMixin._object_is_stored": "ff99aa2971789ad40e8afff32102fb90f0a5554c1a18e60a6aa479b670ca0393",
+      "HttpMixin._open_http_response": "a717a60275be92251ee5a712db48c086fe8c79a446c9ef24b349bde9378e8fe3",
+      "HttpMixin._open_http_response_once": "15de11c1456dc21b62af6534901920cb9778c5eaf3a7d0ff3fb859a03ed097c0",
+      "HttpMixin._place_object": "47e6db003522060f395c4ca50f9aaf6346e56787b2df1aaac1600ae824a5bd0c",
+      "HttpMixin._publish_object": "f666dafc8c968740f6a6ef21df31de713e099e6916fed198c298f56358fd0b5a",
+      "HttpMixin._resume_after_credential_change": "0401141bd7ad3e556f0960a9d5bca09c68ce1631980a739ddfbdf9a68ec20aa4",
+      "HttpMixin._verify_file": "c17ae32d737a7356aba06b05323c68468181df6603c3967e0630c741b7baccf7"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "http.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/http.py",
+          "ModelCacheStorageUnknown",
+          "HttpMixin._open_http_response_once",
+          "model_cache.source_unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/http.py",
+          "ModelCacheCredentialPathUnsafe",
+          "HttpMixin._load_huggingface_token",
+          "hugging-face-credential-path-is-unsafe",
+          2
+        ],
+        [
+          "control/src/vonk_control/model_cache/http.py",
+          "ModelCacheStorageRefused",
+          "HttpMixin._load_huggingface_token",
+          "model_cache.credentials_invalid",
+          3
+        ],
+        [
+          "control/src/vonk_control/model_cache/http.py",
+          "ModelCacheStorageRefused",
+          "HttpMixin._open_http_response_once",
+          "model_cache.credentials_denied",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/http.py",
+          "ModelCacheStorageRefused",
+          "HttpMixin._open_http_response_once",
+          "model_cache.credentials_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/http.py",
+          "ModelCacheStorageRefused",
+          "HttpMixin._open_http_response_once",
+          "model_cache.rate_limited",
+          2
+        ],
+        [
+          "control/src/vonk_control/model_cache/http.py",
+          "ModelCacheStorageRefused",
+          "HttpMixin._open_http_response_once",
+          "model_cache.redirect_forbidden",
+          3
+        ],
+        [
+          "control/src/vonk_control/model_cache/http.py",
+          "ModelCacheStorageRefused",
+          "HttpMixin._publish_object",
+          "model_cache.digest_mismatch",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "ModelCacheStorageUnknown"
+      ],
+      "function": "HttpMixin._open_http_response",
+      "path": "control/src/vonk_control/model_cache/http.py",
+      "reason": "The exact observation is retried through bounded_attempts, releasing responses and transactions between attempts. Missing provider files retain the durable lifecycle source-gone budget; exhausted requests carry the typed retry hint and hold no new claim."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/http.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/http.py"
+    ]
+  }
+}

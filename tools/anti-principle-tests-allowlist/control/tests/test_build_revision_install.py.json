@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "control/tests/test_build_revision_install.py": {
+      "_prepared_successor": "beb222e8adf15f9b2ef9f3e325ffec146660b75c98acb56a21e99e93252e66bd",
+      "_prepared_successor.ModelReceipts": "38f6231dc5260a691bc7f118b43fbeb51ee75d5fb8f6f342f3d6fb4f7b037eb1",
+      "_prepared_successor.ModelReceipts.resolve_artifact_set": "1f022ddd5991e7a30bb8207912375f28ae98c22fd4ba369069ca071c66c91d4e",
+      "_prepared_successor.ModelReceipts.verified_model_objects_for_set": "8cdf04e988323231e08207dcf8519a116c939f4460eaeafeb09fe50d79b72c08",
+      "_prepared_successor.NoBuild": "815c4d6e984dcceb8698a08de5878caa48aaac1f337bafc04ba6abd705834038",
+      "_prepared_successor.NoBuild.build": "9f2f6d50b59f287197193509f4de25077e41a3a775cd713e644e546c32901cd6",
+      "_prepared_successor.NoBuild.inspect_archive": "ad4307708e185fedbbe1974e9ad7f2814cc45c943d5d4b88a31fe271b148c0f1",
+      "_prepared_successor.compile_without_transaction": "9578e6457b999a97a68a30fb457deae44a49c0b3a47f05aa36f6dd24c0b92177",
+      "test_changed_executable_cannot_reuse_the_retained_build": "f037d25eef248578d0b2b8e08f3afd0c414e224bdf69222b73fade485779667d",
+      "test_editorial_successor_installs_and_starts_without_any_record_of_the_image": "1bbd68b0e4ffc76cb6d74cac27793d1aea947268de226b3f840fb547c2029ce0",
+      "test_install_accepts_a_sibling_build_of_the_same_image": "b2678a2c10145d1a6df5bd609281acdf82df3ecfec6bafebc023a5fe1d45898f",
+      "test_install_rechecks_the_stored_image_after_preview": "c87ef33efbf20f95564d9c793c4a217a4dbf8ec5568c0238dd6c60247f8e150d",
+      "test_installation_replay_adopts_accepted_effect_before_cache_refresh": "23823058b69e635540a9911c0fbf6488e885a734111764ca25c8f8d84201530f",
+      "test_prepared_successor_installs_the_original_verified_build": "bd7eb032022ed6a47430975222e72b6ebeef1b2194e79a0771ca2609fb6164b5",
+      "test_review_of_a_successor_finds_its_build_after_the_builder_was_upgraded": "85b3c97f5196c2d0dad5409c2dbea835b4ef5726eaf983825fd7c7259fcab53a"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_install_rechecks_the_stored_image_after_preview",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_revision_install.py"
+    }
+  ]
+}

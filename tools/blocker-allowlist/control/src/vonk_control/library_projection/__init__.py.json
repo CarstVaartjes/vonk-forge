@@ -1,0 +1,10 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_projection/__init__.py": {}
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/library_projection/__init__.py"
+    ]
+  }
+}

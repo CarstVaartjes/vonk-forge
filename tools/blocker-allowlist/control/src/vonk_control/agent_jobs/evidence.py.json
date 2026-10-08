@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/evidence.py": {
+      "_exact_service_stop_receipt_covers_start": "228ace903dcb32168f1458d7d82e034180611a123a9499dcf4a5df403024f628",
+      "_failure_result": "7fcc9b4c56ffe8782a4f22ac950f6cf85185b0965f98766cade49b328e436bca",
+      "_is_refusal_reason": "e78ffe2a2961221643dedc770e2edcab93561ca29dd1c510e1a35ff023508721",
+      "_lease_expiry_reason": "3fb636feb6b22c419a5e1ad41cc05392ae02fbeedac76f5e1de5632895bfe0a5",
+      "_profile_stop_covers_jobrun_mutations": "24e36a4701706d42756b6c9d296838eee103a4a08a7ce1fd772d9f8f814e8710",
+      "_reconciled_dead_attempt_reason": "e4a03b4c5ca8d4947f2d11fd136cbe2a5aaece2622fa84bdd305281818c7f695"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "_exact_service_stop_receipt_covers_start",
+      "path": "control/src/vonk_control/agent_jobs/evidence.py",
+      "reason": "This exact Stop observer returns False for unreadable accepted Start evidence, retaining the issued old effect. AgentJobService.assess_superseded_agent_effects_in_session returns typed UNCERTAIN_EFFECT with persisted observation due, so FleetProfileService re-observes the same journal; the AgentJobService claim gate retains the old active mutation and each next AgentClaim re-reads the healed receipt. The connected PostgreSQL pending-effect proof exercises partial and nine damaged receipts, repair, the same profile continuation and a fresh native Start claim without changing the old attempt."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/evidence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/evidence.py"
+    ]
+  }
+}

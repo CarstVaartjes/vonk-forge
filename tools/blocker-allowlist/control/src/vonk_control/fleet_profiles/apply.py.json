@@ -1,0 +1,110 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/apply.py": {
+      "<module>": "46a757177cdadf17f81dfb1f122db2deaf4bc9086c464fbebdb1a64a8dbc8962",
+      "FleetProfileService": "642a3aa10df74169b72ef94d86ce2b1ab073c4c8fe7a67271d757e05c704e3d7",
+      "FleetProfileService._prepare_pending_admission": "936ac7ca45bef86c924f62cf825ed94891eec86b0cfd11e236b9d4e123c1fe24",
+      "FleetProfileService.apply": "3129bfcdbd7169395062b1102fffd3efcff6bb2c68454c401011039f310e6588"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.apply",
+          "fleet-profile-intent-contains-a-security-or-contract-blocker",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "FleetProfileReviewStale",
+          "FleetProfileService.apply",
+          "the-profile-plan-changed-since-it-was-reviewed-review-the-c",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "MissingRecord",
+          "FleetProfileService._prepare_pending_admission",
+          "not-found",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "profile.already-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "FleetProfileAdmissionEffectBusy",
+          "FleetProfileService._prepare_pending_admission",
+          "profile-admission-is-waiting-for-the-active-workload-owner-t",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "profile.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "FleetProfileStalePlanConflict",
+          "FleetProfileService._prepare_pending_admission",
+          "pending-profile-workload-scope-changed-before-fencing",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "_FleetProfileSupersededIntentConflict",
+          "FleetProfileService._prepare_pending_admission",
+          "a-later-accepted-profile-intent-owns-the-workload-scope",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "_FleetProfileSupersededIntentConflict",
+          "FleetProfileService._prepare_pending_admission",
+          "pending-profile-intent-was-superseded-by-a-later-accepted-re",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "_FleetProfileSupersededIntentConflict",
+          "FleetProfileService._prepare_pending_admission",
+          "pending-profile-workload-intent-was-superseded-before-recove",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/apply.py",
+          "_FleetProfileSupersededIntentConflict",
+          "FleetProfileService._prepare_pending_admission",
+          "selected-fleet-profile-was-replaced-before-admission-resumed",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "FleetProfileAdmissionBusy",
+        "FleetProfileAdmissionEffectBusy",
+        "FleetProfileAdmissionStorageError"
+      ],
+      "function": "FleetProfileService.apply",
+      "path": "control/src/vonk_control/fleet_profiles/apply.py",
+      "reason": "A busy or storage-blocked admission is not raised to the caller: the request is stored as a pending application with a retry delay and the observation pass retries it automatically; the caller sees the queued application."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/apply.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/apply.py"
+    ]
+  }
+}

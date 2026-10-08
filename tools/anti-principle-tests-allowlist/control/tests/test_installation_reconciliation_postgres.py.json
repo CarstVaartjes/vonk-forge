@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/tests/test_installation_reconciliation_postgres.py": {
+      "_record_original_install_attempts": "4af6072884e7fd51a0932c8cf17ef459fb6668d60ac868eeab699819787f2dd3",
+      "test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank": "42748c04da2b24e43f77f724f5721497965bde83defe28271690c7d570e1a10c",
+      "test_postgres_reconcile_lock_excludes_concurrent_group_start": "d322d8d2a2a414491220206329241cf8d2ed7c96a965661c50d41eed2267adac",
+      "test_postgres_reconcile_lock_excludes_concurrent_group_start.hold_cleanup_rows": "b7c88f023a4dbb1a40877ae113634bd7de43d563100674dee7986269a4d1047b"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "function": "test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_installation_reconciliation_postgres.py"
+    }
+  ]
+}

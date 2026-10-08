@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "visit_map",
+      "justification": "Pure finite decoding of one immutable RawValue object: each successful MapAccess next_entry consumes a complete key/value, closing brace ends iteration and malformed/EOF errors propagate. The owning original_value refuses depth >=128. This is not polling or an external wait; parse_strict has no universal byte ceiling and caller-specific HTTP/checkpoint byte budgets remain separate.",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent-protocol/src/wire_schema.rs",
+      "reason": "resource-bound"
+    }
+  ]
+}

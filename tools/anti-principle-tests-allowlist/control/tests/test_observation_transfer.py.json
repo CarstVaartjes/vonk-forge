@@ -1,0 +1,44 @@
+{
+  "content_identities": {
+    "control/tests/test_observation_transfer.py": {
+      "<module>": "8c9bd58312d8f627be2d01d50f29c550f3a3469d681ef41de45f14077c43bd71",
+      "Projection": "9d2972c13e1411f6db561c66e300d5c8f78d268ea0e350ed118f1a808f5b0378",
+      "Projection.__init__": "77bec1bc4ebf5674c9f31ce0d31fbbf22bbf67c1e04eba52a8cef8088ccc4432",
+      "Projection.read": "49590115a6a0d0a2125fbb908c07d6cdca9c7568449a7890c431f6750f6c0722",
+      "_app_peer": "77744739e4e8c1dc4b59df1d584f5a7140fdeab5807e77b1328543af6681156a",
+      "_client": "da5ea87bebdf7d8005536ed1c726695066dcab06cf2784ee2142713c728ccd7b",
+      "_large_snapshot": "5af63fb792d520c051780ce7ca0a3ef318ef60e0785aefa4f2ad69332e8f1424",
+      "_peer": "10f07d555cf6802089cf7210eca5fb550698f466d8119e353e63ba5a0e7d8ac3",
+      "test_base64_lexical_and_padding_constraints_are_canonical_schema_rules": "123f9c18a2dc48c42b4c225b2fbd57e22844ece5e3d92d69acb1fed58f805b95",
+      "test_capture_is_frozen_before_first_network_suspension": "2146a42be17680a2e0c17528d62a1d14390f50b06edae9d2d056d9f8cd65bb32",
+      "test_capture_is_frozen_before_first_network_suspension.collect": "23a0f68c87e6a6ea4f16c4f7f00a1a5d3d3323c32f0ed62b9d311e57a6b8bc43",
+      "test_global_validation_error_bytes_match_streamed_route_and_cli_contract": "0c4bff1a2af70ea6c33e38fafe22fc857e850d8f94960b237462d8661fdfdf88",
+      "test_large_indivisible_fleet_roundtrips_full_canonical_membership": "4de7a354f04abd2f29daf16ff38cdeed380a3f9e1288bf10ab5bf01f4a86f757",
+      "test_partial_or_corrupt_transfer_cannot_be_a_complete_snapshot_and_retry_recovers": "1c520ceaabd024a8d53e88a20ade1a1b826669c75063a7c949742179bcb05fd9",
+      "test_platform_capture_failure_bytes_preserve_retry_through_cli": "1c125cad64c0886c80f4b96e23d6178ccd79f506f7660df813ed637cae9ae4d1",
+      "test_platform_capture_failure_bytes_preserve_retry_through_cli.unreadable_capture": "ee5310a95171a36deedde5f2a509be5914c48d81a63f3f2bfdfa70543b627730",
+      "test_stream_authentication_error_retains_declared_json_media": "11e7d0ea8ee03f8a6b25ae3d5309c0251d330ede0f86bbf6ba5b2ab3a1ab7990",
+      "test_stream_response_schema_validates_its_actual_canonical_record": "e9d6f0434b8f295656439f943a4ebd28c05d8197ed26d10f0bc67461cc5f541d",
+      "test_transfer_identity_and_hash_owner_and_export_reject_terminal_newline": "212b92f1b030436f55eb1d69291fa093f9b1bf3428fbb5ff93bed7ce5984aa5a",
+      "test_whole_membership_has_no_observation_only_512_group_cap": "ac2ae80cb6582005e08780aa9c8d19943a5e5ae295958e0c728f82773bcdeae7"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_platform_capture_failure_bytes_preserve_retry_through_cli",
+      "justification": "Mock capture raises canonical retry503; proves exact API schema/RetryAfter and CLI ControlUnavailable. Real SQL restoration proof is separate index4.",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_observation_transfer.py",
+      "reason": "dependency-unavailable"
+    },
+    {
+      "count": 2,
+      "function": "test_global_validation_error_bytes_match_streamed_route_and_cli_contract",
+      "justification": "Invalid integer input deliberately422; validates actual global problem schema and CLI exception. No valid request is refused.",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_observation_transfer.py",
+      "reason": "input-validation"
+    }
+  ]
+}

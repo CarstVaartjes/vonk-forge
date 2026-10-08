@@ -1,0 +1,36 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/cluster_mappings.py": {
+      "<module>": "c85bbedfbe6877de5661431b19f0032a6dc0c84b3800c35eab14ee2895f1a1a8",
+      "ClusterMappingError": "08062d0020e81af2a02dbbbafa5747bf48611d3b1a816ac84206f299d473b0f4",
+      "ClusterMappingError.__init__": "c71e9b0000c0921c1f9159940785706090523d4fbd82289a7899ccb6ea9dbc26",
+      "ClusterMappingPlacement": "2a9114d0a3c0521c5d6bd8a4f5a07fd7dbd621703d5938f710fb47772602c2af",
+      "ClusterMappingPlan": "7861a28bfdd5ad1e083eb36be16850a3cf37e16b5dfde81d006e6f0d47b7c721",
+      "ClusterMappingService": "0a19aecaf6e6828b68f0faa3181ac74f0a89592686614e97f6500834d4c832ab",
+      "ClusterMappingService.__init__": "ea1cb2b50d09c82453df4407096eb1561c1d5df00534f41fb8c6b1ba5f5be93e",
+      "ClusterMappingService.materialize": "91578cbc11c8d2c900b04c1c82076d2151c79c8d8ce4abdb25114989e02fc8b5",
+      "ClusterMappingService.preview": "71635e15452344b6722fe6fc9d22093a7f65f516047f06c5d2f866d5b47dace6",
+      "MappingPlacementIdentity": "ffb7b3b4f35f87b7bb80e1c82c8dd8d0d469d643c6b2eda7c1aebefd34487b50",
+      "MappingPlanIdentity": "780586d168ca484daaf142a2651454761dcd37cf5c9c1a9938b42fdfd972fce6",
+      "_active_nodes": "c452dcacf66a92432ec16999a87c56bbd3ef2c10a99e6ed7ba3749c638734bed",
+      "_active_recipe_revision": "fac8cdf39409ff6f34da6c298adbe851aae78a5c523450b05e34a66f7f030fd4",
+      "_digest": "42923516d63fd6e8e3bb0884cc3d78a34e615dc9d407af10c3de2f727a94aecb",
+      "_effective_parameters": "b76db5a27c8f391bb54ecb3852036a2367a260532f81e4f552e46e6d94df3056",
+      "_effective_settings": "2be5520a0f13ad1af0bf277cf584bb865bf20dab864e24aa4b0bab9d98f8ea70",
+      "_mapping_actor": "6d495583fb730d2a374578e57292c34ada11730da5298fd26b105a743b3d75e6",
+      "_plan_identity": "3784dc21c59096f50d2a7d563735978c7796d4ee77818e34c3154710b7e198d0",
+      "_recipe_definition": "fd42303ae083345f1c5139109114ee16392ae4b12fdf5e594230513de0a05b92",
+      "_topology_capabilities": "ca7411b55ac4732c3a8cd32dd9a7857ac9ccd760a3910d995ae380daf4e07c34",
+      "candidate_placements": "a516cd91d13a021c2629f1fe002b20349a8027cf11d492f55fdf1dd1e13000e4",
+      "effective_option_choices": "e755ae69f2449c77f18554570c1cc31235f900e4a9077cbeec280c50de07f644",
+      "mapping_option_choices": "c1d24a2391c055e7da2cd70fc582c2e073ca0023a8060c363756b51656d15347",
+      "validate_mapping_parameters": "c4f876ec0897545e8a20c05c6b9b67e8f36840668e63479b97221e2545ca7aa8"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "control/src/vonk_control/cluster_mappings.py"
+    }
+  ]
+}

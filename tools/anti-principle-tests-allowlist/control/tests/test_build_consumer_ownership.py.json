@@ -1,0 +1,49 @@
+{
+  "content_identities": {
+    "control/tests/test_build_consumer_ownership.py": {
+      "_assert_observation_failure": "3c03da4a5be465e5c600891a0c25cf3079b86f1b8ff5d2301e9847c35db3a812",
+      "_availability": "5df0293eb38bf3f02c2df69c291c22acaf1665ecaa24bd329b6f8ff7091d99cc",
+      "_availability.failed_builder": "bdb2541e832f4779a81dc43e030784f5bf9083305cd25bf697157340811d0618",
+      "test_accepted_profile_consumer_protects_build_until_its_intent_is_cancelled": "3463e72f59d93a161af96a2e46d2c78bf1a32960f6c336aee000b618fbc42ba1",
+      "test_availability_acceptance_cannot_pass_a_busy_build_cancellation_boundary": "3cd1e66f345a628a28122b5ff51b007ccde2a3c4735121f683cb40c24df22946",
+      "test_build_cancellation_preserves_each_accepted_availability_consumer": "77a12af5729f2a14b60024738b72c8b7cb95dfb07e94ae24927391087ea61a46",
+      "test_existing_build_identity_mismatch_cannot_be_treated_as_an_unbound_consumer": "e95e97b17c15ebc8e2082a43d21eca11c6f3e304c449bcad838ff0b0eeb7e351",
+      "test_invalid_cleanup_evidence_refuses_consumer_acceptance_with_a_typed_error": "ae237b474e860364090328004474d6c8aa7ab050f9fe411b9c2f30562df52d7f",
+      "test_new_availability_consumer_cannot_join_after_cancellation_fences_shared_build": "1c58a642fbaca2cf511ebcfad4bb8d0f0e4dab6d8bb4c29b61748e0568cbe9b7",
+      "test_new_availability_consumer_cannot_join_after_cancellation_fences_shared_build.hold_cancelled_child": "70f556186cf5ec59a418fc1429f3cb142dbbab0392f19187766aff3ee23e8a47",
+      "test_new_availability_consumer_committing_before_cancellation_keeps_shared_build": "d4f9b7a82f055bd8744e6602ff50f690a22b3eb79b5050a8479289ff625070ec",
+      "test_new_availability_consumer_committing_before_cancellation_keeps_shared_build.hold_accepted_consumer": "0ccc7ddc53b96713a066454542a2236368ae29d0402b2dec16fc78a67445b135",
+      "test_profile_acceptance_joins_the_build_cancellation_boundary": "6939f4ac2759c6229744906776e799650b64b770d102eebb5c7a48b73d109883",
+      "test_profile_holds_build_dependency_until_its_acceptance_commits": "6a635320d3520d6882740eeb543b7bb8d802f20487e930cf287e145bf63a5aee",
+      "test_profile_holds_build_dependency_until_its_acceptance_commits.hold_acceptance": "61c5ec56977c247b75b807e052f44a1e314a23057ec567fe48038e540550d761",
+      "test_profile_protects_its_build_before_the_execution_child_exists": "6b27052eff2c924ae6b7f778d75b59a3fc00576e9ac7b7a4559d3457726dd9c8",
+      "test_recipe_parent_cancellation_detaches_one_shared_build_consumer": "f418b209eb1b43ce55a86761114dee584f8bfd9e5ab3cda2d5f2f752e2d83ba2"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_accepted_profile_consumer_protects_build_until_its_intent_is_cancelled",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_consumer_ownership.py"
+    },
+    {
+      "count": 1,
+      "function": "test_build_cancellation_preserves_each_accepted_availability_consumer",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_consumer_ownership.py"
+    },
+    {
+      "count": 1,
+      "function": "test_profile_protects_its_build_before_the_execution_child_exists",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_consumer_ownership.py"
+    },
+    {
+      "count": 1,
+      "function": "test_recipe_parent_cancellation_detaches_one_shared_build_consumer",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_consumer_ownership.py"
+    }
+  ]
+}

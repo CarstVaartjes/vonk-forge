@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "generate_es256_jwks",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-nas-setup/src/pki.rs"
+    }
+  ]
+}

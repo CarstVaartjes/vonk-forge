@@ -1,0 +1,46 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/catalog_sync.py": {
+      "<module>": "2c34fa9e0e2486ade20dc294cd01aefb93819b33ba6dec334c7efe92f6a506b4",
+      "CatalogSyncError.__init__": "0408c73804e73234c009d8657a2c059325d402b509333d12f047fda4de65cd78",
+      "CatalogSyncUnsettled.__init__": "9aac7944fd2029271087ab1d9c40d68899f4774be0866caff04a3e1e6cfe9015",
+      "ManagedRecipeCatalogSyncService.__init__": "3f0872a902a9f3c4dff3b2f292f2073af185dd723fed78f6cdbe90c636161922",
+      "ManagedRecipeCatalogSyncService._apply": "f16fe9ce8c839f6288b39b2e05419d93172db11ca2b78581a88693a25431d3dc",
+      "ManagedRecipeCatalogSyncService._by_request_key": "53d0c57b0b763fe86e76aba93e582f6a2e4724ca95e0f988a37604f784909e8f",
+      "ManagedRecipeCatalogSyncService._expire": "50bb71e669b9a75ed1531cc6397751af8d35a3476a663cbdc55e026d16249581",
+      "ManagedRecipeCatalogSyncService._expired": "de1f16295eb7bb8837ba66517be1d8c5b853ef67ec77f8a468262001c30ec17c",
+      "ManagedRecipeCatalogSyncService._fail": "d9f62142d793c2808a54083bb721b27c209a4c9893f9bbe397efb1a1a0f4ac6c",
+      "ManagedRecipeCatalogSyncService._finish": "3d3134cc45bfe9cc03e91bb5845ebcf091197aee06b3cb801fab6988eae33fc6",
+      "ManagedRecipeCatalogSyncService._initialize": "f8a2c9483a649fdb80d6e769ba00f31d20885a6cf72b68d648dc28ce0a914ef3",
+      "ManagedRecipeCatalogSyncService._progress": "2699a4e9ecff7dc5d44d33bc2d90199a407402d42b1579b5460d47fb23454c21",
+      "ManagedRecipeCatalogSyncService._record_problem": "7352504cc6e1c6a600159aad3e8bc292414b16e53c02350d62918e07a55101b8",
+      "ManagedRecipeCatalogSyncService._record_problem_values": "7be53f36db9c2f4757f3ee129ff132cf658b92083428a9679f7f3fbfe69cc19c",
+      "ManagedRecipeCatalogSyncService._record_read_failure": "2d3f71abfb233252f4bced5603e2324109eb165296d4a9c9f4aa6ae41086e0b3",
+      "ManagedRecipeCatalogSyncService._store_source_bundle": "db90b6733ccb3f14db4a3a50fbd3a516786d94d8a81c4dfc51542eb83f96951d",
+      "ManagedRecipeCatalogSyncService._validate_request": "61b5917325aa519caeec22ca1824f016b94a76dc6701090237c2ee962709fd9a",
+      "ManagedRecipeCatalogSyncService.automatic": "c406a7ba18e1e7ea255d98e2602a146f37c13284372742e3896eb6bc2d23c3e1",
+      "ManagedRecipeCatalogSyncService.get": "ff51a26f9e184cd94fe6a37b4287913942a6f18b3a13e918db03e23c69d910f1",
+      "ManagedRecipeCatalogSyncService.latest": "f63a9437ebb463214578ce75783f322f0c952f2a99e8e3e44295c3f641cb098a",
+      "ManagedRecipeCatalogSyncService.sync": "6621aa7fccb21c80e83392cefff921d07fdf65676976504840901a905553f8f0",
+      "RecipeLibrarySyncReader.fetch": "ff5312059e919f605684dd898ce9fa38f456cf98326d24bbeed2929ccb18b1b6",
+      "RecipeLibrarySyncReader.list": "cf8416e14738068be32c607cf44ac5e168cff95dcdc8ee0314266b86f26bd595",
+      "_controller_marker": "fac49c47d66d2d5657a7ebb737c994f6027b24834c9acaa0b39e51802b528dca",
+      "_empty_result": "a7fd189352179fd83598a936169041e59c4d824b74a9eba231cbcaf16ad6d11a",
+      "_log_automatic_failure": "ce46d140005c184d3f5c1560bb9b6eb92dd81303bb9db684e1038b04b1576328",
+      "_result": "11091f55c991778cd2a80b9d22f42e9baa9c57b3f31d1883e94f0cc0846763b4",
+      "_view": "490608617b3b2dfc232574c61c69b5c9809fad8898abf105d95d3fe6988b745b",
+      "catalog_sync_failure_reason": "798a0c56e7f8513070da5f608631bb580307737335b298ce638f3f2154ae194f",
+      "catalog_sync_retry_delay": "bd4c9313eae2ed2e986b7f440d9190d225e27d801b70d21ec9ad5e3d6ce591b5",
+      "run_automatic_sync": "4c4af719ee67659a93793fca11fa94f34f4e29f5c287586883907463319e5f3b"
+    }
+  },
+  "sites": [
+    {
+      "expression": "(previous.publisher, previous.slug) != (item.publisher, item.slug)",
+      "function": "ManagedRecipeCatalogSyncService._apply",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/metrics.py": {
+      "<module>": "9acb019e08f459e3d62268190580d7216e211b95d16afd2ec9f95ab3301d69b2",
+      "MetricsRegistry": "05705d47ceeba6e8ee4f3715be9ca058c93808588c153bbbc3983914df393df6",
+      "MetricsRegistry.__init__": "c7a7f7f18c608e48616a5179a8cdc1b3fb1b4b28fe6fb748274b6db972f846dd",
+      "MetricsRegistry._number": "f091f41a2acf3810f53246e0250e0eefaee512af366ab8bd1f3a1b111a255dda",
+      "MetricsRegistry._replace_agent_snapshot": "2415d6f7fe9fb8fe3125ccb465e9b3439a0f18b780650e8150abe2dd7d5c3163",
+      "MetricsRegistry.observe_api": "31ba9b4da3640f5ef75afc9da2eef4c7ee3210214c6e37032667ca4cc584f3a3",
+      "MetricsRegistry.render": "d35e2e3c18050f716d6638691525fb1126f0dba0c455d40cf90a0213614d287e",
+      "MetricsRegistry.replace_job_counts": "5a5b6ab7a631bc1959c2bb472fc5df996e4b61f5232773e784c80e10e56df13a",
+      "MetricsRegistry.replace_runnable_job_ages": "af7009f12431fe12b16120f110933083f997962d0f6b2bc4d77e77abdce3ad65",
+      "MetricsRegistry.set_backup_age": "7636ff2f23384b0d4597931212f64f4ef94a1f57b4b3e6f8c6675137e1734c70",
+      "MetricsRegistry.set_backup_restore_verification_age": "26cdf6a550d255a3aa680e7d0f9d6c606c9181514c679c52ffbe54b89803edf5",
+      "MetricsRegistry.set_backup_restore_verified": "d21798608a01508284462b59956c5f8dbb621c669ee2a7b2f04188658fc96756",
+      "MetricsRegistry.set_backup_successful": "f53e3c797c85012089929ed262ec951ff4e3dfcfb40ce28ad670d1e4a2262f17",
+      "MetricsRegistry.set_job_count": "c55acde2364e7716936265a49f780074df5e8a9aaa7fe34dadef531fc458f6e0",
+      "MetricsRegistry.set_route_state": "21fc2f6659a3d3edf8525ba1808e4bb41d50809bd23e6464ac1d38d8988e6840",
+      "MetricsRegistry.set_worker_memory": "de0335ad48a1b5a449da900900c693353862578ca3db48207876009b9e2914a5",
+      "MetricsRegistry.update_fleet": "4c2f0a553d8eae8faa0c610478fbebe9f0c6d1768fb909a1219601f959da8d53",
+      "OperationalMetricsCollector": "a145066a4c681ccd6842ad009fcfb8fa3d62444e0898608c999620716ca810e8",
+      "OperationalMetricsCollector.__init__": "4f41bed7095bd4026015289bc080491310309f110a1d9b595c665a22882e5567",
+      "OperationalMetricsCollector.refresh": "8f72b333c8b01d90bdb28c08872f0700ff6f00ee3f6bd06c9df3217f435f2773",
+      "_aware": "e3f863dd032191f03c6bc6cdd1d84a10cbae0188f0a6e678b74883dc6aedeaa0",
+      "_label_value": "54872708826e7922222c94556b6df2ae3802e33ae4f64fcaea5b3a3292df97e5",
+      "_worker_memory_lines": "7c17a70b0724921be9fe094e07301dc9fcbfaf0d7b847f963d2e86570d4e0672",
+      "protocol_version_bucket": "6c643046bcaf2012b1882a6db5fe3ebbbf07aa5cb43765eedf93bf14c8345d2a",
+      "runnable_job_ages": "34558f24bafdd528badd9807f9cf8bf44fdffae2647010ed4de8a6fefb005268"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/metrics.py": 4
+  }
+}

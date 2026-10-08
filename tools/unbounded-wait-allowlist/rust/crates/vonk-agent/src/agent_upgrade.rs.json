@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "download",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/agent_upgrade.rs"
+    },
+    {
+      "count": 1,
+      "function": "verified_file",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/agent_upgrade.rs"
+    }
+  ]
+}

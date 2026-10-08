@@ -1,0 +1,25 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/cache_removal.py": {
+      "<module>": "44975318ac8620f1d0e69ada506a394ea39848ea53d82c43203b0e424141c93e",
+      "_cache_operation_id": "0bc9245a79e5dc841fabaa20ba27fe676519d1e61dab8e89e8d6dac4e45a927e",
+      "_cache_removal_review": "643571e8423caef72a66a7e40732cafe0ac95aaaf9965565a0a065d2bae17552",
+      "_confirm_removal": "e7de8c7823f0a711116427bd5f1566667b26331438c38ad91d02740db3509e19",
+      "_existing_cache_removal": "90af2f989ed162cf2392959bbc2929edbf53faab5ebd96a810f2746b0f191fe3",
+      "_remove_model": "4f42245163c42708eefd74ab8ff6d601884c0f18509b0006aded873c0492575d",
+      "_remove_recipe": "c4bcb56c692deac23f193dbe365746dd3c7f8407d1376f3164ca31fdbd278c34",
+      "_security_blocker_codes": "de9c22bcc2830372c40b914e2de2a590012ffb1898db3f223786f9653158cf93",
+      "_submit_model_removal": "42c549c3db20b344df4140b849dd8529237c5bd93c317db21bc6910cf298a34a",
+      "_submit_model_removal.validate": "957803551877f38554b6870faa837fb108cc53450d205fb0bdf262a8b67458cf",
+      "_submit_recipe_removal": "ee20474128a087478291253632bbefa9ac4be30785334f3a4a0dee3d6f227633",
+      "_submit_recipe_removal.validate": "0ad002c064c4c1f75e40aa9e97191fa858960db1452e2b003364ab711a15ff87",
+      "_validate_cache_removal_receipt": "f53610461c218fa9701fbea1dc6cc1fb5c07f5f6c57211aa12c04807d795c99f"
+    }
+  },
+  "debt": [
+    {
+      "count": 10,
+      "path": "src/cluster_profiles/controller_cli/cache_removal.py"
+    }
+  ]
+}

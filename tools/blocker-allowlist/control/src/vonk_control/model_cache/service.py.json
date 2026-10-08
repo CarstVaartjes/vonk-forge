@@ -1,0 +1,66 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/service.py": {
+      "<module>": "e315e84ded0980b3fddf40c617f15e4c5f622ffac9bba24500417a1387132d80",
+      "ModelCacheService": "e315e84ded0980b3fddf40c617f15e4c5f622ffac9bba24500417a1387132d80",
+      "ModelCacheService.__init__": "864b31edf6d40761c3b8ab5194a963545f54acc742d13ca5fa0de97df0201ce6"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model_cache.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/service.py",
+          "InvalidValue",
+          "ModelCacheService.__init__",
+          "model-cache-download-streams-must-be-between-1-and-32",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/service.py",
+          "InvalidValue",
+          "ModelCacheService.__init__",
+          "model-cache-parallel-downloads-must-be-between-1-and-32",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/service.py",
+          "InvalidValue",
+          "ModelCacheService.__init__",
+          "model-cache-reserve-must-be-a-non-negative-integer",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/service.py",
+          "InvalidValue",
+          "ModelCacheService.__init__",
+          "model-cache-root-must-be-an-absolute-normalized-path",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/service.py",
+          "InvalidValue",
+          "ModelCacheService.__init__",
+          "model-cache-root-must-not-be-a-symlink",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/service.py",
+          "InvalidValue",
+          "ModelCacheService.__init__",
+          "model-cache-storage-directory-must-not-be-a-symlink",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/service.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/service.py"
+    ]
+  }
+}

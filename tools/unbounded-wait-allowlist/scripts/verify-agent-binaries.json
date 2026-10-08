@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "read_regular",
+      "kind": "loop-without-deadline",
+      "path": "scripts/verify-agent-binaries"
+    }
+  ]
+}

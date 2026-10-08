@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/constants.py": {
+      "<module>": "4472a054883b2973e5374f5baf81a8bf7762fadb4e2a393fcf6cf9aac295a537",
+      "_bounded_blocker_reason": "b4e055d8ded0f89607c51115da2f0f4fd66f298a5b288e28af6f5962c531d239"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/constants.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/constants.py"
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/build.py": {
+      "<module>": "8da6bffd4083840d6c33d0cd40360e7c4c7d289fafef72b82555d064543fc87d",
+      "BuildMixin._build_once": "d9435a54e8bb37aa4b1495301c1c84f1886c152c59a573e2ab2f2a9c633da76d",
+      "BuildMixin._queue_prebuilt_build_in_session": "4a507aa227e78c10d2ba30c53c9f5dc1b6a4bb6de07d44036e2141d0179a82bb",
+      "BuildMixin._start_build_in_session": "0c465d1884260d11138996de4d92f2f2ada9dd9f95c79a49fddac09498173dba",
+      "BuildMixin._successful_build_job_in_session": "8bcb9fc548951cce3eac3d8f841ee67ef369a3589a36dc4075f1ee13396faaa8",
+      "BuildMixin.build": "2c00bf41b56a4a0dbf9ef974a32b4fd2fcb366768d8013e3caf258db0e2b7167",
+      "BuildMixin.check_build_source": "1ce517b66aae4d8776de9f0624482e3da7004b97e7380d4e7f735cba8ad550d7",
+      "BuildMixin.preview_build": "23a5f7ffad8245ef62e81d49362e4e79bf3164e78393ff08fdad6cb9816ba8c1",
+      "BuildMixin.reusable_build_id": "71ebc653362e20d3f15bc0ca9762c310000a79ec114fc1ebd78c68b5958a83c6"
+    }
+  },
+  "sites": [
+    {
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "function": "BuildMixin._build_once",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "expression": "Job.payload['owner_id'].as_string() == build_id",
+      "function": "BuildMixin._successful_build_job_in_session",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "expression": "Job.payload['owner_id'].as_string() == plan.build_id",
+      "function": "BuildMixin._build_once",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "expression": "RecipeBuild.id == plan.build_id",
+      "function": "BuildMixin._build_once",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "expression": "previous_build.recipe_revision_id == plan.recipe_revision_id",
+      "function": "BuildMixin._build_once",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    }
+  ]
+}

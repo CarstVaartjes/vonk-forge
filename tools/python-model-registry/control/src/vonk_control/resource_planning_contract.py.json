@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/resource_planning_contract.py",
+      "reason": "Canonical recipe resource read surface using shared settings, topology, and model selection."
+    }
+  ]
+}

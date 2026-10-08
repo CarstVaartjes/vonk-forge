@@ -1,0 +1,85 @@
+{
+  "content_identities": {
+    "control/tests/test_route_withdrawal_before_dispatch.py": {
+      "<module>": "2c985a49a6de1ee4d429ee6ec850b613c68078e998a773899e078b7538cc3cbb",
+      "_Crash": "4d7750433707d5905cf4e8af2b5c9c4e2c6e3a193089955a8d5b96e84b0f4f67",
+      "_Gate": "214996f06cc6182b73ddba07ac95d9c04de965be4f1b2a7b30c1bdc16cf14fca",
+      "_Gate.__call__": "cf28bc25f4e0c039c1767407633dd93f9f850a9fbf0f69882ad21cb11f4a8aea",
+      "_Gate.__init__": "a63c7ccf79540abaf0b7d40bf826a3741ee25ca8b8a93efac537178eafd501fa",
+      "_Gate.arm": "d88e8dba48637cb60a787ee331306bcc38332ca6e04d5dfffeed544a19a1a0af",
+      "_aliases": "8efc62c4097d960aa3ab65b1227cf8d31b5faa26a627c79f39116f4d63c6e85e",
+      "_failed_rank_world": "71ce60765f95ebdb4dc0d96063f7e7fc2a64344913dfd56c8483897599b8a907",
+      "_owner_lock_is_free": "cbac85b4017b3d9ad053da21b1a6a809547e57d5adbfdb76ec99026ed450019c",
+      "_owner_lock_is_free.take": "18bd378be8acbbee5c7a7acbbd8d835926b209cdf5b668d97f286b77f78b492e",
+      "_recovery_waits_without_a_transaction": "082f05c8f4418dfe870bd8ef3f92fc2dcb3da9a83320a636251e1f097ffec83c",
+      "_routes": "4da40706c2feef529aaf842abc6009f96e0b5323c16af0267de24173ce929e04",
+      "_stop_jobs": "3074b3a03e0b6410d3780c194ca22422dfd0201c1b0e37fca1c23316e03010b9",
+      "_stop_waits_without_a_transaction": "4457606119d3ed136d11a31a7ed8d10fddde930afc5a8912285af5d9bcf0094a",
+      "_world": "2cb9de578503cbc6975a89e9f56e1b777ef118e20265899170618541741c09a3",
+      "test_a_refused_stop_withdraws_nothing": "6554cc728a3eea014665bf9885c6e06058006754af080dc468202f5947c4b9ca",
+      "test_a_stop_killed_while_withdrawing_resumes_from_the_claim": "cbc9bba5374447ed0fc7b02cb4d5c25f2e4906a20b1881d24c1d16ce3278876a",
+      "test_accepted_stop_continues_without_client_and_never_republishes": "29cea7cea4dc94365ecd6a0ecaf60994785d04c1fa201815df799a26fdf54643",
+      "test_postgres_recovery_withdraws_without_holding_the_owner_row_lock": "b9386cf06ad9f32db8630f724b8c989ff9f73d4bb4125c095f8fa1083bf79b94",
+      "test_postgres_stop_withdraws_without_holding_the_owner_row_lock": "45d4b2c70c539b63a853f60cd7db5a055510a08f909319274719258242a3883e",
+      "test_recovery_killed_while_withdrawing_resumes_from_the_claim": "aea711a43ed259942d2033b80a033137ec89be64df1bf3fd9d0a22a62eac7dd3",
+      "test_recovery_withdraws_without_a_transaction_then_continues": "6d314c4efa0e022e66f95a8027d343255640843fcd602b4465fcfc8f548686a1",
+      "test_stop_withdraws_again_when_a_competing_publication_lists_the_run": "f8b345b4541cfd73d4477a8e59e145284dbdef97003531544a5d878597d2e938",
+      "test_stop_withdraws_again_when_a_competing_publication_lists_the_run.withdraw_then_lose_the_race": "28a67d5576e1d4d5c0cdad241ddfc928b0ca653b85f4a3a1b11e560935994914",
+      "test_stop_withdraws_without_a_transaction_and_dispatches_only_afterwards": "fcaa6cf37b3d6b7ef6cc777596449626f5ad650fc319d5215b5faafed373e7a6"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "_recovery_waits_without_a_transaction",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py"
+    },
+    {
+      "count": 1,
+      "function": "_stop_waits_without_a_transaction",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_refused_stop_withdraws_nothing",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_stop_killed_while_withdrawing_resumes_from_the_claim",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_stop_withdraws_without_holding_the_owner_row_lock",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_withdraws_again_when_a_competing_publication_lists_the_run",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_withdraws_without_a_transaction_and_dispatches_only_afterwards",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py"
+    }
+  ],
+  "exceptions": [
+    {
+      "count": 4,
+      "function": "test_accepted_stop_continues_without_client_and_never_republishes",
+      "justification": "Withdrawal is bound to the explicit accepted exact Stop and retained root before the simulated publication process dies. The four assertions preserve that authorized withdrawal through grace expiry and same-owner worker dispatch; they do not withdraw a healthy route merely because an observation is missing or grant a new destructive scope.",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_route_withdrawal_before_dispatch.py",
+      "reason": "security-edge"
+    }
+  ]
+}

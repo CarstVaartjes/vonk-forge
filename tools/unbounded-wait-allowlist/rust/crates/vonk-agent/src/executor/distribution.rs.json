@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "execute_distribution",
+      "justification": "Progress observation is owned by the bounded object transfer and three-attempt retry; sender closure drains the snapshot and a heartbeat-sized join timeout aborts the reporter.",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/executor/distribution.rs",
+      "reason": "resource-bound"
+    }
+  ]
+}

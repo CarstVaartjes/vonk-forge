@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "tests/scripts/test_retry_dependency_fetch.py": {
+      "<module>": "95a144cbf54491586901d7001d3bef75902227390f924845823eba09e2b87b18",
+      "_fetcher": "dad74a639e5897b00fb11168d921bf7df50bb4d790f5d9808a98ba43e7f5a737",
+      "_locked_temporary_pip_command": "c5a592cff5f5f1e92caad1bd986b4e0e88600fd519564b983bd2a1e40e6f9c73",
+      "_module": "22bf3b5cc4957f73b423844ab918a64195c6fb7a65c49495577a3795f1b45c49",
+      "test_cannot_wrap_build_or_test_execution": "5f07c0c1073f0235bae510ea9bd9926714d5f2a97baa6de6922668df88e8945c",
+      "test_expired_fetch_reaps_child_and_resumes_without_partial_stdout": "82ad9b590835523ff6a18a22577f49cf6b29a105553ee2a5cb8adc2b79f5d2cf",
+      "test_locked_pip_integrity_and_authorization_faults_never_retry": "5c5e87b7295633a91705434efa253b57143c7f7f0f789ec57740852c81592765",
+      "test_locked_temporary_pip_acquisition_retries_real_child_without_partial_output": "16e191b772075ff7e6190c13d9d7f55ff3a98b566a1df8dd0720ce1e5187cbfa",
+      "test_permanent_fetch_failure_is_not_retried": "dbb43b1d3f5559aef9a9cfe7b9b37fc53f0f09969e4b7117e0ba38823fe9289c",
+      "test_transient_failure_stops_at_attempt_limit": "4a4a81264ab67c6761102f8b4b7e0ebfd5b2feae07fc320177b429a2f20f774a",
+      "test_transient_fetch_retries_without_publishing_partial_stdout": "9be6976d21aad5ac48f5748970b2459311e31ba58ca4af867a500155922d6dbb",
+      "test_unbounded_pip_install_is_refused_before_real_child": "9eafd5217370ce5d91946dbea125eb21adc711972e9b2ffd95ee3fd975396c5b"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_unbounded_pip_install_is_refused_before_real_child",
+      "justification": "Invalid pip locked-command provenance/hashes/cache/venv returns64 before any realchild; fetcher state unchanged. No resource/workload end.",
+      "kind": "ending-without-fresh-request",
+      "path": "tests/scripts/test_retry_dependency_fetch.py",
+      "reason": "security-edge"
+    }
+  ]
+}

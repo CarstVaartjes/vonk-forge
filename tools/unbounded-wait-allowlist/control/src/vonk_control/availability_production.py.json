@@ -1,0 +1,22 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "build_recipe_image_availability.builder",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/availability_production.py"
+    },
+    {
+      "count": 1,
+      "function": "run_availability_scheduler",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/availability_production.py"
+    },
+    {
+      "count": 1,
+      "function": "run_availability_scheduler",
+      "kind": "wait-without-timeout",
+      "path": "control/src/vonk_control/availability_production.py"
+    }
+  ]
+}

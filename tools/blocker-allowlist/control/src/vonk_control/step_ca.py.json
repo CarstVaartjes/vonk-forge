@@ -1,0 +1,330 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/step_ca.py": {
+      "<module>": "9d832368a8784f15089d6cebca415de118ac9414fab224bfd210fe030892d649",
+      "StepCAError": "2a5c4a32fe47f95cccbcc460560e59c004f76edd0e8cd3a4dc039dca7a29892c",
+      "StepCAError.__init__": "a3f0545b70866687dcf3e7bf68c9c7daf4d6bae0e4d10255e4d72c9184b0304e",
+      "StepCAIssuancePending": "7c361bfdd64a083a89ea08b2ae4bbbf3999e14f835e7b2895da28652bfa1a4a9",
+      "StepCAResponseCapacityRefused": "a654250444fe4dd7b181381382499cb5e88f086e58c71ebac69b2df62d002251",
+      "StepCAResponseCapacityRefused.__init__": "aa060dc5fd652d0a3a5589bcf33db5d7dbd77fdda5f53ccc9cc1e7d9812666e2",
+      "StepCertificateAuthority": "4efcf879eef59caf2a17f01c69278da3f059536e8d1a64dbfff5acc429c80b4e",
+      "StepCertificateAuthority.__init__": "9ccafaa60a089600330dd4b027dd5613660a515889d86de9138894ea5f77bf54",
+      "StepCertificateAuthority._json_request": "9dc14844c79aa008dfaaf16b6c5951514ae83323ffcc0f3fd8b7e70bc49d7a57",
+      "StepCertificateAuthority._request": "39f39a92930b0c9fd4047985bdd911bf7e71ed16f9f042ea3ffb79668a0e7a32",
+      "StepCertificateAuthority._sign": "f3185d9995bfe7f15cc2dd41e0ae439a12e2145053f15306d12a1fe6ddb9372f",
+      "StepCertificateAuthority._token": "ab8926f9d3d1327ceb494231514f93a418e8afbbd9edfde4cb9448fcc85ac6cb",
+      "StepCertificateAuthority._validate_leaf": "72ac22e31927e58ebaf6f6e6ec3ec0c2388a3040fd09092e5e1e981bf4eb09b7",
+      "StepCertificateAuthority._validate_sign_response_capacity": "8f1d0fdb6db6ac30615c6af42e167393f0be72ecbf6149f318820eae6d29f699",
+      "StepCertificateAuthority.check_health": "448d41de46deba1ffd510e19aee56ee492e5ec7179692d8dba9b8c314a72c6da",
+      "StepCertificateAuthority.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
+      "StepCertificateAuthority.issue_node": "ceedfb0601a723b607a4733724b6cf0a11b946f0af6b946ce638e76a655d8cf3",
+      "StepCertificateAuthority.observe_node": "f7904168dbd1581977062fc021076e3e18d30d736a412e4ffd3a7922e72f3257",
+      "StepCertificateAuthority.prepare_request": "41e6b112978621aa5d9ad66ec8887bc7441e0a7ac90b583465e623c3d36c8c5c",
+      "StepCertificateAuthority.renew_node": "d42904369682e550d0079136fce15f74f93e1a952cb7b746b158e2236d44419b",
+      "StepCertificateAuthority.revocation_bundle": "525a7ed5f10025694ae20280944f1122b6b82d4817e416c9e5bbba2fc553135d",
+      "StepCertificateAuthority.revoke_node": "06cf01c5c698632f2e7b2b3ccd4777eb6e66962def2fea249d96309ea743303b",
+      "_PublicJwk": "62c83008eedf951ce21f033983c5885dc55ef117aa02a309ea99c2ca025adc6e",
+      "_RevokeRequest": "533ea3273fef22d0c70f54a172e6db1363f4bedf652f0df63c3a637c46af6e92",
+      "_StatusReply": "76b9f2bba1f9b8f5dfe4bbdfa9f2e08c7209eada02b1c8208b61feb6fc2dc389",
+      "_StepWire": "169e73a65d362ddd0061b688fe0b2c7b0bf6a9d4296e130e351177d9ef88c067",
+      "_TokenClaims": "18d6ca483ed8e39bf67c0d95d4746c51d7450c71207a949e68d308a71680c89d",
+      "_is_ok": "be409a4b8538033101a130135a6f52fa1eba5f4ba1575d0a3ee5217c9f596525",
+      "_jwk_thumbprint": "980236714b705f091bb0749383d1be714be4e2773b638bd89d141341d6555811",
+      "_one_certificate": "5faa26381884724f154c00b066b2993580230a18910fba89190fc5d35118e634",
+      "_rfc3339": "f6460196c130c1e1f3bcaa605e9ef368ef96b335f1ab14e720ff4c029ee063e1",
+      "_signature_verifying_key": "ab4d2636b62a3dc6b59f6f0923ff9b23e1cd93f6762b4c286b2e971be0c64172",
+      "_validate_crl_freshness": "323f4d3c0b294161d33c92d56e4170ddeb967606d34b0ed968ada330426c927e",
+      "_verify_ca_chain": "02b432c891c3daf9a23794deeb4db4ca3fbe6db10cfa280742280ee4bd9ec7a4"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "step_ca.exact-journal-pending",
+      "sites": [
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAIssuancePending",
+          "StepCertificateAuthority._sign",
+          "certificate.issuance_in_progress",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "step_ca.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAResponseCapacityRefused",
+          "StepCertificateAuthority._validate_sign_response_capacity",
+          "configured-ca-sign-response-reader-cannot-accept-the",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAResponseCapacityRefused",
+          "StepCertificateAuthority._validate_sign_response_capacity",
+          "issued-response-cannot-fit",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAResponseCapacityRefused",
+          "StepCertificateAuthority._validate_sign_response_capacity",
+          "issued-response-metadata-cannot-fit-the-enrollment-contract",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "step_ca.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._json_request",
+          "step-ca-returned-malformed-json",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._request",
+          "ca-refused-exact-certificate-request",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._request",
+          "ca-returned-an-invalid-refusal-response",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._request",
+          "step-ca-redirects-are-forbidden",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._request",
+          "step-ca-request-failed",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._request",
+          "step-ca-request-failed-with-status",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._request",
+          "step-ca-response-is-too-large",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._sign",
+          "ca-certificate-differs-from-the-accepted-exact-effect",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._sign",
+          "step-ca-returned-an-invalid-certificate-chain",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._sign",
+          "step-ca-returned-an-invalid-sign-response",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._sign",
+          "step-ca-returned-an-unexpected-intermediate",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._sign",
+          "step-ca-returned-inconsistent-certificate-chain-fields",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-ca-certificate",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-certificate-for-another-public-key",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-certificate-outside-the-allowed-clock-ske",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-certificate-with-an-invalid-signature",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-certificate-with-the-wrong-key-type",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-mismatched-authority-key-identifier",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-mismatched-certificate-issuer",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-mismatched-certificate-subject",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-mismatched-node-uri-san",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-a-mismatched-subject-key-identifier",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-an-invalid-certificate-lifetime",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-an-unexpected-certificate-extension-profile",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-an-unverifiable-authority-key-identifier",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-invalid-certificate-extension-criticality",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-invalid-extended-key-usage",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority._validate_leaf",
+          "step-ca-returned-invalid-key-usage",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority.check_health",
+          "step-ca-health-response-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority.issue_node",
+          "ca-issue-returned-absence",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority.revocation_bundle",
+          "step-ca-returned-an-invalid-revocation-bundle",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority.revocation_bundle",
+          "step-ca-revocation-bundle-issuer-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority.revocation_bundle",
+          "step-ca-revocation-bundle-signature-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "StepCertificateAuthority.revoke_node",
+          "step-ca-returned-an-invalid-revocation-response",
+          1
+        ],
+        [
+          "control/src/vonk_control/step_ca.py",
+          "StepCAError",
+          "_validate_crl_freshness",
+          "step-ca-revocation-bundle-freshness-window-is-invalid",
+          1
+        ]
+      ]
+    }
+  ]
+}

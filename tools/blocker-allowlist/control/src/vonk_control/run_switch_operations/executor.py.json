@@ -1,0 +1,33 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/executor.py": {
+      "<module>": "a328376416ea272b7ab28581b017958dba59f55c23547094ecc73f3a6bdf0467",
+      "RecipeLifecyclePhaseExecutor": "fccaa993efb9025eddfd82f9dcd832a3a8c0e457ac93a8e87b972e04e71b01e0",
+      "RecipeLifecyclePhaseExecutor.__init__": "2e93122dafabf6f7bcbc163da50d44d52c8a9721009e5f66efb8db0464702803",
+      "RecipeLifecyclePhaseExecutor.abandon": "7d9267e71671256de72308011844400938c66b4597bedd3b7e7c89b9ac2f447d",
+      "RecipeLifecyclePhaseExecutor.get": "2f17efff1bdf2281461916e10fe2960501bdf0f4527c5c655afba2bc80e91b03"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/executor.py",
+          "MissingRecord",
+          "RecipeLifecyclePhaseExecutor.get",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/executor.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/executor.py"
+    ]
+  }
+}

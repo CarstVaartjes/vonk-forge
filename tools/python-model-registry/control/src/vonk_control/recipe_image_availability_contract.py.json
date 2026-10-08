@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/recipe_image_availability_contract.py",
+      "reason": "Shared recipe-image state, artifact and builder receipt identity."
+    }
+  ]
+}

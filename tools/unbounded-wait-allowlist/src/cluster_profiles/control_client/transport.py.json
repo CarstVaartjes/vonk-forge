@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/control_client/transport.py": {
+      "<module>": "57780ffd8d73e6112683b79de12648d0a3d119267fd19ae675df5a976c3406bd",
+      "_OpenerTransport": "083b788aa55ef3989376b2e0bb1983514846cdb44e28698a189660bcdb6e61a9",
+      "_OpenerTransport.__init__": "c5d61e8abde91e4b0b21f96aff65281f2b8f3bde14299a7fb03370dcf1faa6f8",
+      "_OpenerTransport.handle_request": "3da686a33c64ab94bd934e4d80a738e955eb261f6b13c09f605c9939885220b3",
+      "_RecordingTransport": "d0f645e0cc7386ad7490915f6436ec4c891f8c2e4830cabdd9eb2144e1038a75",
+      "_RecordingTransport.__init__": "9c6074f62d69663a802ec11c73059501fc2dfca5c584107596ba27af7d233ea7",
+      "_RecordingTransport.handle_request": "61833404395185ac94e1029a2e69e69c9980103a816bb4f09fbd7cf67ebb81c8",
+      "_observation_payload": "b93e86b3aadef2df6fbe67f4d0285e1536ac4d2a4cd5e18c7890281edd0aaa1d",
+      "_read_control_response": "ee503176979d82144a26ba2c53dc0162931b811f4abd4ff44e63c9d3a2a13e95",
+      "_read_token_file": "95855dc9667f01aa8ed5a2cffb937931654adf2f9ce56fca936fa2a9a14662d9"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "_read_token_file",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/control_client/transport.py"
+    }
+  ]
+}

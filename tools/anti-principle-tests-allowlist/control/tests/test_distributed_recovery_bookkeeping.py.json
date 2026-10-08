@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/tests/test_distributed_recovery_bookkeeping.py": {
+      "<module>": "6794ef38cc99bc75ae64e796166af230a9ead43d8add46c92dd750f3af2c5435",
+      "test_a_repeated_recovery_stop_request_is_answered_with_the_queued_job": "7e94c4cd2bf940f838e7b5e934c2ceb5f06855f02b81a023c02a6f5ce3426167",
+      "test_a_start_that_is_not_the_exact_accepted_authority_is_retired_with_its_reason": "736d7ee38e2aab0ddfaa1ef96486ade8d334a9d01cde8ef477a1f351bc15464a",
+      "test_damaged_stored_phases_decode_to_nothing_instead_of_raising": "c5f3b7adfed9f3c9019649eab4de4519485f98a395735280fb3c9e9c54186f61",
+      "test_the_recovery_derivation_does_not_raise_a_refusal_for_bookkeeping": "83a76bd4e7d873885b914dae94abb91eb90fbe031c05fead260d983831fef258"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_repeated_recovery_stop_request_is_answered_with_the_queued_job",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_distributed_recovery_bookkeeping.py"
+    }
+  ]
+}

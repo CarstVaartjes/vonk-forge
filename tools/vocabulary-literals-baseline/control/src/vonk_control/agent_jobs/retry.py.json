@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/retry.py": {
+      "_abandon_operation": "e08c487f0af6dde533893100d87e4e8f6833d032bcd5c06e9e361acb5c147372",
+      "_parked_retry_evidence": "46f318c8f943f2341d1d9aaba06b1a63d6e96eae0c9451b29ba2d5213e8e1062",
+      "_renew_distribution_grant": "7207e80b66dbe6bc980f67cf981bc1fda1d9de6a5c5a4a78dabb681c45ddd9c3",
+      "_retry_authorized_for_current_attempt": "22376fb3cd3995cbc7016935d30f0019cbbf2d982dd2042686e873249126a94d",
+      "_retry_not_authorized_for_current_attempt": "f3925ea30a630727977c089ce212783ffe9828974f5916ea7731f57309fed0fb",
+      "_safe_retry_failure": "edc49da0cea37ffd7f218e5455c4278c0be0b526e3f512e1d92644868a553709",
+      "abandon_idempotent_job_in_session": "cf652c2310e3c630ef990ad90fb241d2179645563ddb4a9b49152ba99ce1bc9f",
+      "agent_upgrade_in_flight": "ba4fab955036fd6c5e20cdd5ab4395a78d64f313c9ecbf993402eb1ac6786699",
+      "other_agent_upgrade_in_flight": "b5733129567174821102baf95d06a0f6a7695e33eb8f8e52c2453e25568366a4",
+      "schedule_agent_upgrade_retry": "7ba49bbc7bafb5b31088df62201ae6f8b46d1eff900f5e1fe747c0e134f33bb1",
+      "superseded_cancellation_deadline": "653d62cb565f186b4b7d129058f72b9cd456f3b7f013436c753ae75b675a760b"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_jobs/retry.py": 8
+  }
+}

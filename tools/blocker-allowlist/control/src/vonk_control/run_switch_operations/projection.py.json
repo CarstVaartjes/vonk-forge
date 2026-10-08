@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/projection.py": {
+      "<module>": "7e47d269a9d2e444fad99472cfd546e206aa8414892a8dadd471f25d754efac1",
+      "ProjectionMixin": "7e47d269a9d2e444fad99472cfd546e206aa8414892a8dadd471f25d754efac1",
+      "ProjectionMixin._operation_view": "e9b00486f4d57e148f521add9992177ca9aaa7fdbc93932852950380b311f458"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/projection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/projection.py"
+    ]
+  }
+}

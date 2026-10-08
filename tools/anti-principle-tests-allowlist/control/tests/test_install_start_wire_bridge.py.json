@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/tests/test_install_start_wire_bridge.py": {
+      "<module>": "26e7f043faac609de25145851b01e9c4d27517d68437b7de9f3a25001ae1ceb2",
+      "_bridge": "e86400892fb055420332b5ca87a63edfa12851e3d1cad57a41792690e7a4f9e0",
+      "_claim": "c9a3439538f832bff38aa6f11bd57b75616fd8bbf61b76a721f34520fe0cd597",
+      "_project": "25e36f77a5c8a72018a3961870d63f2cb903c2a726b91d6682276cec8705f338",
+      "_queued_children": "b6049d75412742d08d1550d391f838067c1382d23ff082ec9bddcdf052f8a00a",
+      "install_start_wire_probe": "d9a9ea7684434a5cad8d3ff60afbeb300a4c1313e538d1e387f7ca49c4a013ed",
+      "test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back": "315a408e002d06702a17a2e92c367e56cec22ab474eba12490b46a580fb8cd71",
+      "test_controller_distribution_http_response_round_trips_through_rust": "5c6a15053d39f902b1f66601ee1dbb8ccf39a4278d4e75965503fd7fd4aa71f3",
+      "test_controller_queued_install_and_start_payloads_cross_rust_and_back": "d7f37fb745707b50dcdbcf400237c3a261aba42c3aac65c981abd0ea753dd51e",
+      "test_controller_routine_uninstall_payload_crosses_rust_and_back": "7348cb19f3a1cc2bd41a044bdf31664e04107ee324ec9d46e4dca0c4b82ed233"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_controller_queued_install_and_start_payloads_cross_rust_and_back",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_install_start_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_controller_routine_uninstall_payload_crosses_rust_and_back",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_install_start_wire_bridge.py"
+    }
+  ]
+}

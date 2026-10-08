@@ -1,0 +1,22 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "forward",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/image_store.rs"
+    },
+    {
+      "count": 1,
+      "function": "read_request_head",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/image_store.rs"
+    },
+    {
+      "count": 1,
+      "function": "serve_while",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/image_store.rs"
+    }
+  ]
+}

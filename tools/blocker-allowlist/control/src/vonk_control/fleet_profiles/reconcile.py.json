@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/reconcile.py": {
+      "<module>": "27ead6c2ab3d05356a90068307194c5389b6a9b0e9cb4c197b13f126f9329e78",
+      "FleetProfileService": "dd5ca9d053d869323ec6cfdb7e780fe4031f4022c215c9f2a5b67c2e45e14777",
+      "FleetProfileService.tick": "694576b59bc7ccb7364891d31e214b4b150d5e153fcbbd44aca1b02c9dcd1881"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "FleetProfileChildPlanBlocked",
+        "FleetProfileConflict",
+        "UnknownOutcomeError",
+        "_FleetProfileRecoveryBindingConflict"
+      ],
+      "function": "FleetProfileService.tick",
+      "path": "control/src/vonk_control/fleet_profiles/reconcile.py",
+      "reason": "The tick preserves the accepted identity, records a typed blocker and schedules a bounded backoff for retryable conflicts; superseded intent ends and releases claims. Child dispatch failures are observed again under the same request identity."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/reconcile.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/reconcile.py"
+    ]
+  }
+}

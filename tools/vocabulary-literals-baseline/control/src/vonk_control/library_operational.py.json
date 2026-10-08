@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_operational.py": {
+      "<module>": "c58ecf5ae011b705348a81c9150cce540521a93f0c4f35f555e04efedb6e1d62",
+      "_InstallationCoverage": "ca3a4749f701b43a05f7df7137ea457b85aff8bc18a8fa9ba93f8e2742ac099c",
+      "_MemberEvidence": "a906c4ef392fb971aace20eff12bd3eb36a9de7100d0356a3427b107ddaa668e",
+      "_MemberEvidence.identity": "d8f696925cfb00c863b89d92cf53052c242d2faffdf758b33f82b17898deb011",
+      "_OperationalRows": "942510e98edbdd3aaba0a802fab592c47458f09b941615c563aa237188dc9139",
+      "_OperationalRows.collect": "4f84212d81aaa1ecc48db5a95ea5e32d36a4f4eeb404b68b09076374273965bb",
+      "_PlacementOperationalEvidence": "5c206626059bc0b56e4186820e1abe424d9a759fa94dfc86f22d3666d727bfc7",
+      "_PlacementOperationalEvidence.truncated": "360b62c44ff897e798eb333cec158a9a53751fda2be90346879f1166ebecf61b",
+      "_RunHealth": "619948a2e2708d305ab6435a57f257f4db472b5a135a6393fe8a98159819d656",
+      "_group_rows": "fa1fb103c91bdbc052a23ff649c400db8bbc223ff7f508e6843119fd7b1359ab",
+      "_installation_coverage": "724cdb7d7b488a32a2b38d45cf5e671bd9ea56a55f97921531c165fb325d69c5",
+      "_member_evidence": "d00f3f6a4d1283a54d36f284db1321ece8ceb9cd225f73a9060e8e2eaf22915e",
+      "_members_are_exact": "ed457de4bbdb1568cf07bef45cb3bf9b4da7d93caf10e80704861d31e056bc7b",
+      "_run_health": "c4626535e57484d03fe85b726e6737da2a5276ebf56df08b687c2ee3fa999fd9",
+      "load_placement_operational_evidence": "c8cd37790dfa5d30d3f1be90f01bd08e61459af905c71640a4f1af629e6d7b6d"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/library_operational.py": 2
+  }
+}

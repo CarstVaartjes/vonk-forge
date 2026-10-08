@@ -101,6 +101,7 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
             path,
             (
                 "control/",
+                "tools/blocker-allowlist/",
                 "agent_protocol/",
                 "tests/control/",
                 "src/cluster_profiles/",
@@ -112,7 +113,7 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
                 "rust/crates/vonk-agent-protocol/",
             ),
             (
-                "tools/blocker-allowlist.json",
+                "tools/blocker-allowlist",
                 "tests/acceptance/recipe-library-revision.txt",
                 "scripts/tests/run_agent_wire_contracts.py",
                 "scripts/export-agent-wire-schema",

@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_api/route_snapshot.py": {
+      "<module>": "fad1d55c21a74c60a5fc913613cda370e8457572e773839713f77f78aa437c63",
+      "_ActiveRouteSnapshot": "fad1d55c21a74c60a5fc913613cda370e8457572e773839713f77f78aa437c63",
+      "_stored_activation_marker": "e97cff50fdc53edf75f01310bdb86c451069912a4273a9af28e8a28f8d03013d"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/operation_api/route_snapshot.py"
+    ]
+  }
+}

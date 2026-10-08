@@ -1,0 +1,33 @@
+{
+  "content_identities": {
+    "agent_protocol/src/vonk_agent_protocol/distribution.py": {
+      "<module>": "3da27f9b940bfc118f6f78355dee16c391744cf71bfe2221b836f7872240cffe",
+      "DistributionAssignment": "5c0cc63bc212cf623f5173936c19f81e1c10e644942f13756b1d16d35ce87cde",
+      "DistributionAssignment.object_digests": "9f28ff7138a2c4d41d70aaa4f62e3f44618fdc00acbd52d90786b380993a738c",
+      "DistributionAssignment.object_set_is_complete": "733c6d6365d41e0d5935dedca831340df81fd640254ab6012870a0787fd5ea5a",
+      "DistributionAssignment.parse": "9c8b7c325447159277910652058bc208260a35b2d138efb5d89fd0641feb8913",
+      "DistributionAssignment.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
+      "DistributionObject": "6931b7ab8d3353004a0dfe84511b89ea9bab83fc8dcbb495feb6bde09eb4bf9f",
+      "DistributionObject.empty_only_for_model": "d7b5925829bd73d7cd603ce514b87f4f06a727bb73637c2fa3f49028f4d21f1f",
+      "DistributionObject.name_is_relative": "50b4a35b6cc0ae51405edfdcd45b90f018935a903cd7644ded802fafb5b83b85",
+      "DistributionObject.parse": "1f9bb25e89913314d2c5b718c58a285150beb20117339a0dd5f58e8530b5e06d",
+      "DistributionObject.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "DistributionAssignment.to_mapping",
+      "path": "agent_protocol/src/vonk_agent_protocol/distribution.py",
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "DistributionObject.to_mapping",
+      "path": "agent_protocol/src/vonk_agent_protocol/distribution.py",
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/administration.py": {
+      "_catalog_sync": "089ab09e8d299e09351fb4f6cfe315c2103c7275462d71b1fff172995e9b140e",
+      "_enrollment": "97ee9e8c670a3abe3935ea645e9eedf600515aad8741537dde9f3c808389b871",
+      "_error": "c049fb0942d36b42435a37f2f7413494dd6e78960fb648dd3067848e7628e9c4"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "src/cluster_profiles/cli_render/administration.py"
+    }
+  ]
+}

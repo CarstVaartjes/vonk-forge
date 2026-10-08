@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/tests/test_cache_request_recovery.py": {
+      "_collide_inserts": "b7dfd824ba66a9279c837163a1904292c8716855b03fc32feb848f16013f8100",
+      "_collide_inserts.before_insert": "0faf7258485c13bf09bfcddd662bd04174d498d8cfcc8ac0a9db71ebd97b92b3",
+      "_collide_inserts.capture": "8fbb4cae917b627777641e278363fde0c345534c9a710e21ac4d9bcb2a760479",
+      "_start_together": "03715ec1c8713a6bdf8977439d6d11b5c257cc792c8f898a3edf0713b680aa32",
+      "_start_together.capture": "67111b4ecb1dbcecca865421477ef725d26859e6f651f84890a45cb7f8443f79",
+      "test_model_duplicate_insert_adopts_only_identical_issuer_intent": "0f340986c97829dfd643a4a161674efc19bf12aceab69b55f976cc710a141a3e",
+      "test_model_duplicate_insert_adopts_only_identical_issuer_intent.submit": "d35f41a00b129a9107e66e1106ee504f4c68ebcfca6327a58a430d6a4881aa77",
+      "test_recipe_duplicate_insert_adopts_only_identical_original_intent": "80b668a13c43698e0776d30888b652a3a0eb0298ec3d0e6a0f04a85b1d474c53",
+      "test_recipe_duplicate_insert_adopts_only_identical_original_intent.submit": "816eb0af859d8f4fbe6ec3ddd13cc7705fbc23842642719b686d45e5c21f53c9",
+      "test_recipe_lookup_preserves_id_visibility_and_private_request_correlation": "785eb439d1b96566738d143b9f6100f982be3d2799eecf7d76e28d41eb02b788"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "function": "test_recipe_lookup_preserves_id_visibility_and_private_request_correlation",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_cache_request_recovery.py"
+    }
+  ]
+}

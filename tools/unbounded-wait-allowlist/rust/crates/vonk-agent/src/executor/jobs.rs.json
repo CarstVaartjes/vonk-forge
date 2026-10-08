@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "collect_job_outputs",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/executor/jobs.rs"
+    }
+  ]
+}

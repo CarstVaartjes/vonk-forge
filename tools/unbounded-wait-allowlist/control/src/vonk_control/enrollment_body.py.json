@@ -1,0 +1,22 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_json_string_end",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/enrollment_body.py"
+    },
+    {
+      "count": 1,
+      "function": "_scan_enrollment_grants",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/enrollment_body.py"
+    },
+    {
+      "count": 1,
+      "function": "_skip_json_whitespace",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/enrollment_body.py"
+    }
+  ]
+}

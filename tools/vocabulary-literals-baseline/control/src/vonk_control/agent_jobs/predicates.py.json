@@ -1,0 +1,34 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/predicates.py": {
+      "<module>": "00ee06e932384ffcf6e7e93500fcc80cb9fef95c5ff7cf8047db69c8d3d4f55c",
+      "_ClaimBranch": "95f98e8c7ab36b4494c48585508ffe62505ec1f3c5b84b9d9d02332f14731b2f",
+      "_ClaimBranch.expression": "e1f8ce817f85135f049d3a29cf61fd43b11bb120e091f7b6bf85ffd2251026ef",
+      "_ClaimCondition": "f1d9849d2969ed2fa0dae9e33ae643bd80970af3e9d318088d6c90436fbad957",
+      "_ClaimPredicate": "f2c9ce071de9d6dfbd4ee122d854474652f33fd43f9d38d7566f25a0519dce84",
+      "_ClaimPredicate.branch_for": "46042fbdbf952b2aaa0aece5aa3edfd7e04959c432875d0a04fc4601cd22d096",
+      "_ClaimPredicate.expression": "f676c3b7b257851df266b2e63fa32722d20aa7f86d2360cb24622a4b7ca70090",
+      "_JsonFlagIsBoolean": "a5754c32542a99f83f17410ddd14114658c87a5eb5359e980bf7f2b8bf6fd628",
+      "_JsonFlagIsTrue": "bc6d0847d47ba653fbc993f6f06308c5bbceb18501910b44fcdbfce2a8ee2a83",
+      "_anchor_start_budget": "aff04eee92b08d7c09e9331f2cb9eb989128bfd5aa056989f07361faa39ea1fb",
+      "_anchor_start_budget.rebound": "5328b4dd953dc278496fc8420b45d0819648b89a8e20481e411f555dbfac1247",
+      "_claim_condition_facts": "6f750dac1d70eddfcf51123749cac7cf25f1ae1ed3b907ee4e16c6093cc46279",
+      "_claim_note_reason": "d6aabc3499d0242ba5bc637de0c37637f2d3e37af7a03a27833e2983713b930e",
+      "_claim_predicate": "e43e7fff0e67dfac7836f3a08508844dcfbbcf0c7639b1cdd98d3bc85a7d01a6",
+      "_claim_refusal_reason": "80c7e32a7b2791feb6933e19dffd926f96dbc5f02a715e264b4062363da9e042",
+      "_compile_json_flag_is_boolean_postgresql": "d95d386f68c27538f885e8656f81dd4cb4c5c27530e0987db3a2482575d2703b",
+      "_compile_json_flag_is_boolean_sqlite": "b3a4d388ceb0c1f034b5f352fbcb9775ba0cca5aa17866cc69851ba9219070ca",
+      "_compile_json_flag_is_boolean_unsupported": "ed373192f622ee013db70d136326d7d9993c72b7d671fad604406691cd06b8bf",
+      "_compile_json_flag_is_true_postgresql": "41c92eb77f2d4ea90f851746bc969ec8c42987d21d39cacc1dc017ef6d8af291",
+      "_compile_json_flag_is_true_sqlite": "be5841ebdd7b03de8ae85d1e902ed59c84efff5b124451aaf7463ce59fa9557a",
+      "_compile_json_flag_is_true_unsupported": "ef715484334ea6291f68dc84b5f4f2f651d949e863ada77ef716752600ce8997",
+      "_document": "b5997b4774707325653437a972aa034dbb745039b0b4f96cdafd3376b20c9fd8",
+      "_held_claim_conditions": "152cace62fbd18f007cd41254739610176ea3f45e0eeaba61d436a8782254d51",
+      "_json_flag_parts": "be9f22dd84ae30c8e9b29e430e17b71ac27e307f6ffbe8ea002a05023ce4bb64",
+      "_refusal_reason": "ab689e95103aeb2b250300af872d3d23c4d30af5fbb94e1e37f127d8d8238abb"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_jobs/predicates.py": 1
+  }
+}

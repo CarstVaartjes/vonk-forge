@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/cli_update_contract.py": {
+      "<module>": "7424267c832515dd7344ef575649e46774be04e38a4331a912e9fbf3d236d64f",
+      "CliUpdateContract": "7424267c832515dd7344ef575649e46774be04e38a4331a912e9fbf3d236d64f",
+      "cli_update_contract_schema": "3c9309daac408b81ae806e454de327427a12995bbf01edb968e9894b8801ed03",
+      "install_cli_update_contract_routes": "ece30da83f821682be0ed0ad32469b460231e9c494547a321a4fe50555203965",
+      "install_cli_update_contract_routes.cli_update_contract": "85244be9a22e087626672496e4c9e4ac052dc7eb31866f6345ca3475742e9cf6",
+      "summarize_cli_update_contract": "32d0e2be5363d210529ec4a3937b551b9ec64ffb2bc0f5c9c79c2c430ff174ce"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "function": "cli_update_contract_schema",
+      "path": "control/src/vonk_control/cli_update_contract.py",
+      "reason": "The canonical CliUpdateContract Pydantic model emits an external JSON Schema document; this mapping is the schema format, not an untyped observation payload."
+    }
+  ]
+}

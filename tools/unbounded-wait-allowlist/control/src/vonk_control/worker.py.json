@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "<module>",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/worker.py"
+    },
+    {
+      "count": 1,
+      "function": "monitor_worker_loop",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/worker.py"
+    }
+  ]
+}

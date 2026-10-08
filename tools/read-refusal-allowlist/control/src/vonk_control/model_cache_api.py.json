@@ -1,0 +1,41 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache_api.py": {
+      "<module>": "aa464280a5d2d443092583c3ce38495f05710978d11383a18c7a5e162ebc9cce",
+      "ModelCacheOperationProvider": "8baa5a27bce45bdeafd6d35980e8179781665305318fc945f5b1f5c74c7ec14e",
+      "ModelCacheOperationProvider.__init__": "814f582d8574eb9c9f8d604762403f981ab651ef7b8d47d1a710f3357a932358",
+      "ModelCacheOperationProvider._next_cursor": "a3c1d25800e97ff531b0e3517a15d29b876341dc6f4e3aa96a75fa642d20f3aa",
+      "ModelCacheOperationProvider._progress": "5f8019106fd1fb64ddc2d03c7180c0834e32c731ce9b8d89371f8f4c18d6ae75",
+      "ModelCacheOperationProvider._summary": "3b81ea90ae9172673ddd118d4604d714bd98ff22b3ac182b0faab4f32387fc56",
+      "ModelCacheOperationProvider.get_operation": "6f41ab65e52adfdb9162739faf075298e3ec242b8fd44c6dd42300cad9c1b2af",
+      "ModelCacheOperationProvider.list_operations": "547e2f31ef5305105b10240a2a2b20e61cc261f58c1a4926d849cc85790db43f",
+      "_model_operator_response": "a71804a26c62bc937b770acdf5731806baa4127df9f46f280bf943678797677f",
+      "install_model_operator_routes": "a2fe0769aa26c182172748c197b877cebd7acdea65590bde59c5dc3f0820111c",
+      "install_model_operator_routes.cache": "f8c8b2aa0008b7c84681298430a1ecfa53a43f5fcdd9bcc4369259e556128b57",
+      "install_model_operator_routes.cancel_operation": "ea8636ee483d7d9668351943d9abaea72c8d31e2488338e687a869de0e49fa90",
+      "install_model_operator_routes.download": "f110a83d5be13f5bca65b96e626527ef899fd472cbaf08b48e9815127b214a87",
+      "install_model_operator_routes.failure": "da13a9646fbbd4e15f73952018c56133cf539d9f897f3bf9f067682af254930a",
+      "install_model_operator_routes.get_operation": "34bfdb7ff5bb8a0bf8b822e0f20041468cc0b1700601072e7b6291aae2039347",
+      "install_model_operator_routes.get_request": "923bfbd1a21995c5d5c8aebb8a97d6f0e75b795f27216906a1290c29bf9adc95",
+      "install_model_operator_routes.remove": "4ea2bb6055220b70e06cc7e840f1b92b2045f0ae02dfeff9c0dc40eba5a7dc44",
+      "install_model_operator_routes.require_operator": "5a9ab99b19284149a0ae73feb7ea34fc61ccb06380e47765ef68c7d7c7b13079",
+      "install_model_operator_routes.review_removal": "8f6b0168c9d0f8534390a93e2bc6cc595c6cf5902fb02bfaec4413ada6eaa933",
+      "model_cache_operation_provider": "7d3452c6c89b65a0e32207964e01d7bbfcc7eecbe8d7dd5e8e940b7dea478b00",
+      "register_model_cache_operation_provider": "5977cdfff7b887e0ef9c4421676a2cf2b59b89946e48d31bd452cfb0e646ef47"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "get_request",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/model_cache_api.py"
+    },
+    {
+      "count": 1,
+      "function": "review_removal",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/model_cache_api.py"
+    }
+  ]
+}

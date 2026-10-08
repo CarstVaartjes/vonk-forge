@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/disk_reservations.py": {
+      "<module>": "f87af347552150d2116fe5055218605de241ca89e27703f81ef91330310f1eb1",
+      "_aware": "e3f863dd032191f03c6bc6cdd1d84a10cbae0188f0a6e678b74883dc6aedeaa0",
+      "describe_disk_charges": "064a496a2adb2af2eb45021d8124291a1f775dbd011bdb2d3397a44f604d8d95",
+      "models_stored_on_node": "66aaf8c4aa2aa888d1d6e02b961894d280b92bbf6d9121f7f5c380bf8f690a66",
+      "outstanding_disk_charges": "e9c1e452e6366d2b45521a2f1c98a918cc931de58c6627a3af609180fdf1cc2c",
+      "outstanding_disk_reservation_bytes": "419aaac94efd0b395bba6001016254719992cefe73a75219feda3a591f9a4b9a"
+    }
+  },
+  "sites": [
+    {
+      "expression": "plan.recipe_revision_id == installation.recipe_revision_id",
+      "function": "outstanding_disk_charges",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/disk_reservations.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    }
+  ]
+}

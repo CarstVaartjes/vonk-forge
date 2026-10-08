@@ -1,0 +1,47 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/gateway_keys.py": {
+      "<module>": "7be464ddecabfd5d7e005f69c9e76ebef073160951d9b6ce706c1f1bb97f0b99",
+      "GatewayKeyService.__init__": "2a45607eec979636c36c75a25342c296e9150474df3601ec67d1b8718466dc32",
+      "GatewayKeyService._create_under": "4f4aa4747463e22c3a8702d6a918f851d757fdc80dc90ce002557cf727298326",
+      "GatewayKeyService._delete_alias": "ab36a2a93869b7263d72ee4a5d1f8642710e64bc6f589816b3e1658a40f41e52",
+      "GatewayKeyService._exists": "d9d46cb1c2880815a01d92dccb74e89d7f3e11be57bfad9c237df18784ae9785",
+      "GatewayKeyService._raw_keys": "28794f37e9f1ca0a2baea1c08b2a44f2a2f3d44f01d4b34ac22c4fbf857496c6",
+      "GatewayKeyService._request": "89b6f4e4ac83aa8f5951f1cee68644bd4a4b0442dbaa9ff0817369954244bb83",
+      "GatewayKeyService.create": "f0f175e87f46f594c5cc0db4aee1c39b0cf9a85a6b31b9305c28a86e6406b2c1",
+      "GatewayKeyService.ensure_default": "75816f743520ca5ce92c9272caf8ce1659be22e3d1b094ba0629ad140d6fac6f",
+      "GatewayKeyService.list_keys": "5a8c28b97d04cddcc792e6ed9c16443321a329bce3198f988628ffaeddd5ba8a",
+      "GatewayKeyService.revoke": "562c4541e8930502bb5336e469c0df84e63ecb64e41e7e4d2ac88f4658f44117",
+      "GatewayKeyService.roll": "5982a9997f9a10e9c50ea1931d57b8fdaf6551700e6c27adbe0b594388d49a04",
+      "_KeyInfoReply._only_an_object": "96751fc4b514c4692e81e585a473099f5139a8d54b721c0dc957860b39f68dc3",
+      "_KeyListReply._only_objects": "4bb21ce9e1f5fdf254c1e2914fb67a8b490d40479e129fcbd5dfab8285172c21",
+      "_loose_count": "b3b324cf79f41d5c3b76b0988189a1ad774557f4aac77d5251dc5fa84a924d32",
+      "_loose_keys": "9e0cda38379fb7af3d7c2bfba59a824d19e4d4721fddfce87bc30d8806b690fb",
+      "_loose_strings": "ceea5a86b8dfd503c2030b3665ff242638db6adf7051c8d9555069180496fd78",
+      "_loose_text": "6327b5863a8b8cb9a7d7ce942d48564681e506b407e3d27a9d14ef5d6154989f",
+      "_read_key": "2e898d94ed8980af3930950387d6f16ca00820ee48abe52dec00c827010c55f5",
+      "_remaining": "eb4d399677046f3c3f01b0a4751cb3576800c90c169ff5ad82e0a0d879928153",
+      "_rolling_alias": "6cfbbb4b20d3ed64ce9d0c7c0bdfb80c27cb47fb8933cbbd3e2eabf43e3a5ed1",
+      "_text": "3eb589bad4f42a9b56c543cd368c771a4607ed29bf57cd6cdcb307a6c37ba74c",
+      "_view": "b497541e9bae8b616c67f60069bc9d8541634899a60e0fdb447b50285db3af6f",
+      "_write_private": "cbab0c3851a129ac57570770a0578355ddec786b26ea99c34c168aaed55680be",
+      "install_gateway_key_routes": "812dfa38cf1221440db426cc3fa648b59524d3b92e6708e78f5dfb23b50dff59",
+      "install_gateway_key_routes.authorize": "6ebff86b34855e4007017a85584b418401836eb1db113bdab3fa8bc1637d762c",
+      "install_gateway_key_routes.available": "bf06b6f24aa9ee165f3616ca490346f8f08273dd2b943cc88871745ef1645844",
+      "install_gateway_key_routes.create_gateway_key": "8cfbacaa542271ccac33308858282793813a5594e415f0bf17e03fe483f535e0",
+      "install_gateway_key_routes.list_gateway_keys": "171e1534c1005cfc4f6ed49fecac9eab8449900ea52d1d47336d90cad34de441",
+      "install_gateway_key_routes.revoke_gateway_key": "6c65afc6d2e3420229ed57c5d5662ec60d29f36b5bf58e68a1f4431177e42302",
+      "install_gateway_key_routes.roll_gateway_key": "00a8a592639396a97c5e63c708b708dbe132a0be2e230622052acdfc365596a5",
+      "install_gateway_key_routes.unavailable": "8fe3546cea98b4cfc71fa5d5d85084b0b08b5878d36509b9c5b3567fcb27c3c8",
+      "keep_default_key": "0f121ef4c1cb7dbf473057f6ed362cbc9448a7233313fcdfd419fcfa336bc9b2"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "keep_default_key",
+      "kind": "imperative-remedy",
+      "path": "control/src/vonk_control/gateway_keys.py"
+    }
+  ]
+}

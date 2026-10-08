@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import ast
 import copy
-import json
 from textwrap import dedent
 
 import pytest
@@ -27,7 +26,6 @@ from .blocker_boundaries import (
     WaitSite,
     audited_paths,
     categorized_classes,
-    dump_document,
     evaluate_guard_gate,
     evaluate_raise_gate,
     evaluate_wait_gate,
@@ -45,6 +43,7 @@ from .blocker_boundaries import (
     scan_waits,
     write_counts,
 )
+from .registry_storage import write_registry
 
 #: The repository parse is shared setup, not the first test's own time.
 pytestmark = pytest.mark.usefixtures("parsed_repository")
@@ -480,7 +479,7 @@ def test_a_keep_entry_without_an_effect_or_action_is_refused(tmp_path) -> None: 
         entry = next(e for e in broken["operator_waits"] if e["verdict"] == "KEEP")  # type: ignore[attr-defined]
         entry[field] = value
         target = tmp_path / "broken.json"
-        target.write_text(json.dumps(broken), encoding="utf-8")
+        write_registry(target, broken)
         with pytest.raises(ValueError, match="KEEP needs"):
             load_allowlist(target)
 
@@ -493,7 +492,7 @@ def test_a_category_or_verdict_outside_the_vocabulary_is_refused(tmp_path) -> No
     bad_verdict["operator_waits"][0]["verdict"] = "LATER"  # type: ignore[index]
     for broken, message in ((bad_category, "category"), (bad_verdict, "verdict")):
         target = tmp_path / "broken.json"
-        target.write_text(json.dumps(broken), encoding="utf-8")
+        write_registry(target, broken)
         with pytest.raises(ValueError, match=message):
             load_allowlist(target)
 
@@ -522,9 +521,16 @@ def test_write_counts_lowers_and_never_adds() -> None:
     assert evaluate_raise_gate(raises[:-5], fewer) == []
 
 
-def test_the_committed_file_is_what_the_writer_produces() -> None:
-    text = ALLOWLIST_PATH.read_text(encoding="utf-8")
-    assert dump_document(json.loads(text)) == text
+def test_the_committed_shards_are_what_the_writer_produces(tmp_path) -> None:
+    write_registry(tmp_path, load_allowlist())
+    committed = {
+        p.relative_to(ALLOWLIST_PATH): p.read_bytes()
+        for p in ALLOWLIST_PATH.rglob("*.json")
+    }
+    generated = {
+        p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*.json")
+    }
+    assert generated == committed
 
 
 def test_existing_error_types_that_joined_a_category_keep_their_handlers() -> None:

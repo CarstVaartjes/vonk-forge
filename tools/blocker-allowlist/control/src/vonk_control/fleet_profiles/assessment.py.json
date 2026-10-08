@@ -1,0 +1,52 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/assessment.py": {
+      "<module>": "3adb49c80b18490687025726f320a0a6f937c5f64d7f5dccd9194e1a89f343bc",
+      "FleetProfileService": "65d33a70bd0d6c3a6b8b80aa3615c6150eb59b1834070bea0dce69977e5db3c1",
+      "FleetProfileService.preview": "88e765507027311d22d218a786902fbf4dd1d5d022ea54a5b49c262d4515f0ec"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/assessment.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.preview",
+          "recovery-review-owner-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/assessment.py",
+          "InvalidType",
+          "FleetProfileService.preview",
+          "malformed",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/assessment.py",
+          "InvalidValue",
+          "FleetProfileService.preview",
+          "the-planner-assessment-does-not-cover-the-exact-assignment-s",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/assessment.py",
+          "MissingRecord",
+          "FleetProfileService.preview",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/assessment.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/assessment.py"
+    ]
+  }
+}

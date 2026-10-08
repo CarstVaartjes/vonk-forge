@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/checkpoints.py": {
+      "<module>": "094b9eabc13a35b1ee16b1af19614f27623b881b2e9a263ba14df9c1e7488f93",
+      "CheckpointsMixin": "aed345bed61443915036ff48bea4a95d71167bab3003d7de3cdcd7c1629f0853",
+      "CheckpointsMixin._checkpoint_artifact": "b1accd92a7a3a00c9b40aba48b6a7bbb77275d21d16488d03ba6685c320a7c61",
+      "CheckpointsMixin._defer_artifact_writer": "514401ad0eac63084178578f940f235645ae9334d60717119da5da0f31f0d3b7",
+      "CheckpointsMixin._finish_partial": "ec5c905fec1d916cad1d346fa30f6df14d8a07396e12b5498da6cb88298fa2bd",
+      "CheckpointsMixin._mark_artifact_verified": "17b803663bcdd903625b0cac92b5394629bd0ff17453e8947e9f71368a8e805d",
+      "CheckpointsMixin._stored_object": "dc74a52c565630e0e50ad34bc28179752f97bd31046bf29e5c7cd79f68865fb7",
+      "CheckpointsMixin._verified_bytes": "cee070c97d1c2057612a00b50a8784b9b9e7bc6ba4f38b7e974f76ffe8b499e9"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/checkpoints.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/checkpoints.py"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_disk_claims.py": {
+      "test_busy_disk_handoff_releases_transaction_and_resumes_original_claim": "5418174638e9e1b37ba2342211a01f5ea037fb690d754088f52f18a03c93c60b",
+      "test_install_admission_reschedules_contended_dependencies_without_partial_claims": "6fc4647fe7866d1ec64c7b9e900c7d82e2ac66388c66b20adffb9d0ee0284a1c",
+      "test_profile_disk_claim_blocks_competing_install_and_is_inherited": "332424ad9dfa758aed36d0f5d23cd89a891d435f65b1871b8ea67ca584fe12db",
+      "test_profile_disk_handoff_preserves_materialized_install_headroom": "24c9965e5a6fb69a667544fcbe2efa4e47decb7a33db019a1f2583d692609125",
+      "test_supersession_and_failed_dispatch_release_only_unassigned_claims": "75e83c5a0a5b946cbc4fb6f9da09e3929b9c38d3bf4692b46d77b7b5f45b26ee",
+      "test_supersession_and_failed_dispatch_release_only_unassigned_claims.failed_dispatch": "fa2e3012e9f4aff37c5419c5c84b085306686925f802d3109363cee36ba16a35",
+      "test_supersession_and_failed_dispatch_release_only_unassigned_claims.load": "32e137bf81ffdf4f9013145db0cb11d7959d360767649a918787f3f9c63f28fb"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_supersession_and_failed_dispatch_release_only_unassigned_claims",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_profile_disk_claims.py"
+    }
+  ]
+}

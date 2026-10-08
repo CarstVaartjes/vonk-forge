@@ -1,0 +1,83 @@
+{
+  "content_identities": {
+    "control/tests/test_agent_operation_lifecycle.py": {
+      "<module>": "bf018d99e1a5db2cdab130c09ae6c6aa48b4ce08a695283e7b863f3e6b7a765e",
+      "_after_the_observation_budget": "13f47e0ca3d6c86562aa2f09923051ef8cb765def4757b53309bbb315c4a1313",
+      "_bound_adapter": "6c497912296b44524bd1921c9c367e30e035feaf478c20ad1a82268427411ab5",
+      "_decision_for": "c9d54d8e5a7dd5a95ded048c8d11278d3ed0073c091f7b4aee5e69f448db94eb",
+      "_flag_cancel": "ac6a614d0a6e1925417b8221b0421e23b7e0ee135e541bca9761a84091d6dc2b",
+      "_job_run_payload": "50ed2902c68d2e27501a269f519c8f121fe6ff2e07424f2d08f806db77a7958b",
+      "_park_like_a_legacy_wait": "1af3422256c04c8bc0e894df47a2e7e5d43bbcc0b0adae8e728cb1ef5644a234",
+      "_stored": "58d1698d25565feb08a4ac61e07145c1caf9ca8b05b6473baa9e7023ef7c1518",
+      "test_a_cancel_completes_past_dead_work": "36612e497c064e7ee7ea735f88a6f6e43037c87ec5428b48478d229e7709333c",
+      "test_a_cancelled_irreversible_order_ends_with_its_effect_unknown": "5bc0f034599b62184d3fa63837e60e1a1663efa52b4e061fd8ba7c66c363600e",
+      "test_a_lapsed_attempt_is_observed_with_its_cause_and_an_old_one_reads_the_same": "8d5d5c282d2baa24a01ef004d35893528ae7995788a04e859147348656648f18",
+      "test_a_lapsed_running_order_is_decided_without_the_node_polling": "544d43be2bea716fc53f55dd0e816adf157912cc56e86beb51ca07399d06d4e6",
+      "test_a_legacy_parked_order_is_found_by_every_selection_and_a_new_one_too": "57dbd1f3064f257832c778a25b1824936cd4cb76a0d4aaf072d8192054060e2c",
+      "test_a_never_executed_order_parked_for_an_operator_is_queued_again": "7fabb1cd1047ab60c8c1dd57513d6e001e03f8390abdb8696c23d4df7083bb30",
+      "test_a_never_executed_start_parked_for_an_operator_is_queued_again": "cc877967370092f7d591ed8884ae6972ba0aa27cfabcf6aa1b252bb6f37fcbf3",
+      "test_a_pass_that_lost_a_race_leaves_the_row_to_the_next_pass": "b20974935954a4abc8faa6f3024e471cad0757431edd9194b694e140493caae8",
+      "test_a_restart_in_the_middle_of_an_operation_is_harmless": "ff82f918fae09f1447d0cd9dd3247c94cbc9e1bca8bcb100aa880b15106a5ac1",
+      "test_a_restart_safe_order_parked_for_an_operator_is_retried": "a6726c52c6425567aab30681e0b65ba51df1e03ed3b485ca7799ef9a821f5ce1",
+      "test_a_row_written_before_the_core_adopts_its_retry_schedule": "dae68c6987bfa889cbf6c4c5e9e62deb4c5744245afe22934c0c9f3d25d56cfa",
+      "test_a_stored_order_maps_onto_the_core_states": "c8b1e968abb40e0160d0a42427f8f2bdd04a68f6a39c0ed44d89fba1035b1d7b",
+      "test_actions_are_advertised_exactly_when_the_job_endpoints_accept_them": "df75628e86ea3b016ad8e0b740440482ac507984845160f9ce80b686c2b486cf",
+      "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists": "2bd7b0ace12124fe6c25039a0bf19d8f19e5c42251168c090297fa4df4126d7e",
+      "test_an_order_whose_job_ended_ends_with_it": "2eab0355e23f597d5f7e334aa0242ed22fbacadf4655fd63defd09de22baf687",
+      "test_many_legacy_parked_orders_heal_in_one_pass": "d07d53f77ebb6763e135f89bdb81d99415b46cdca32b12237beda8cbd7950365",
+      "test_nodes_never_polled_are_still_reconciled": "d97f6f8f8ae4057f245cc7c1e93196ec9326a1446dd4489c680c869139d757c6",
+      "test_nodes_never_polled_are_still_reconciled.end": "49298ea489ac17c6ca0cb6de45c7046f3dd607346d7d332c0c4a23e148a69972",
+      "test_nodes_never_polled_are_still_reconciled.fresh": "26a779d9825166543f2b0f095681c832947f57d017b0ed129a54cee6e72dd905",
+      "test_startup_adoption_moves_the_legacy_schedule_onto_next_action_at": "90f5ad94c51bc100658db176fe0832c080048d4deeb4b39d128b858d35dfbb06",
+      "test_the_agent_word_for_unknown_is_mapped_at_ingress_to_an_observed_attempt": "0d0509af938e1631bd59d30b122e80e3a83275cadf8180f05df88748c10499cb",
+      "test_the_dead_entry_points_are_gone": "5c5f5e36afa8d7653d8f893071e523972c5be25435965f1d80bc6bc53676f79e",
+      "test_the_irreversible_kinds_are_exactly_the_ones_a_repeat_could_not_undo": "5c92a8e794767145d1ade5f093ceeae1d23a58b0cd6d366c5e80e87ea2d05597",
+      "test_the_parent_aggregate": "0738ac701bc4acdcd0c24e944f599e35ae4701e64e54a7a9e2e6f9b7e6db99a3",
+      "test_unknown_build_effect_retries_after_the_observation_budget": "4c5d36b09f71701015ba850cae6478d91574121c9111bc2d783b17b050dd616f"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_cancel_completes_past_dead_work",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_agent_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancelled_irreversible_order_ends_with_its_effect_unknown",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_agent_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_row_written_before_the_core_adopts_its_retry_schedule",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_agent_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_stored_order_maps_onto_the_core_states",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_agent_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_actions_are_advertised_exactly_when_the_job_endpoints_accept_them",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_agent_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_agent_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_agent_operation_lifecycle.py"
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_profile_recovery_current.py": {
+      "_conflict_types": "00509e5c8778e0fb187dfdb4218add3f98ae22ecbc751afcb5e5feee55ed16f4",
+      "_crash_rounds": "df7d1014785cc9205ec0efa34c032e0477b7154f300d34517ac9bc9aa8b5beb9",
+      "_expire_backoff": "2cb86c2587c8d2189cab613ec6dac04f3da0dd8e440b5fac9c6e976ccfe02311",
+      "_fail_pending_children": "4e9cbae512efb6045bd5e6db3791c41d658f97c0672649e62ce79dde7cb94c47",
+      "_failed_profile": "33b2853fce2f5490a78fd2a875e6c2e1b87095efbf84897f332e946d96a19440",
+      "_park_exhausted_application": "4eea61a10d7e390d1f1ba9dc1e3b80ff80aaf7054212fc073cb6d983dc47c846",
+      "_row_and_progress": "379e8b00959ebfeecc4adc965cb3eb7f6a8515a67078ef7396a889cdeb004df7",
+      "test_a_changed_saved_draft_does_not_cancel_accepted_parked_application": "2d338807b3d44b4c1b785e29678f313b5caaed418976b5a89a627ba809e81dbe",
+      "test_a_child_start_waits_for_busy_admission_and_resumes_its_accepted_intent": "2cd84c720ab325783c588ef382c39a8a02634a171f8fecd9f238399cfa9fa797",
+      "test_a_child_start_waits_for_busy_admission_and_resumes_its_accepted_intent.busy": "3c79c0f00dfa5d6481eee181eef197219959797f1c5917fdbc54b7d9eadbbda6",
+      "test_a_child_start_with_a_stale_review_ends_superseded_not_failed": "e3405a148ef9d28d5a16c2b041cf179d48240dc8e55e710582ddcc646a9adecd",
+      "test_a_child_start_with_a_stale_review_ends_superseded_not_failed.stale": "6c3d5c5ea26a5600cd43083e1cc7a9e50d4345176a7b9ef5b5ecb5c243e87509",
+      "test_a_deterministic_crash_ends_after_the_failure_budget": "497fcdf84a56a33d0c65c60f3921fb7e30542267a4e6b9d9cdd8418db669a305",
+      "test_a_failed_application_shown_as_queued_can_be_cancelled": "a32bbb6c0c054b5d96659728f8a0430b470d667c6dc7b74c17c071739580ffc5",
+      "test_a_failure_that_changes_keeps_being_retried": "15879ae018c767142fa4020b4568fdc82531720b578b6bc0e617d89720731164",
+      "test_a_failure_that_differs_only_in_numbers_is_the_same_failure": "1a3f91a43b2e8a7a5c947af79c119570f552898dc7dee1d4f5c77f8bb0b0d5d0",
+      "test_a_legacy_failed_retry_parent_is_relabelled_superseded": "115f2eb363d12fbe4eb29cd155bc3ab433e96eb11e6f3f85a685be82f67fce00",
+      "test_a_retry_that_lost_its_selection_ends_superseded_not_parked_forever": "1912b3d348e0bafc7e5b2f4f3e3499402b936ce3152a9202e1ef301b89cb763b",
+      "test_a_retrying_application_reports_waiting_with_its_blockers": "0b4d902261d16815fd1cb1c8c4f4fb4428cb3f6409f4700cc08b08ab624bfa1b",
+      "test_a_row_parked_by_the_old_retry_conflict_heals_to_superseded": "ee426e5c886ba86575313faeea29264fcd475e8dc9919747812c924f9757a403",
+      "test_a_row_parked_by_the_old_retry_conflict_heals_to_superseded.lost": "ce74f50084ff26d050dc018effa1d061a744a52037cb7a8bf71510f666fc116e",
+      "test_a_saved_choice_the_recipe_no_longer_offers_never_blocks_the_load": "e2cf5d24aef3b335d087e79533fef745e8296dcdc34effe2d970d6e5674f1d49",
+      "test_a_stale_review_ends_superseded_instead_of_retrying_forever": "a7410b1bdb06a5255ae68015ad532f24cb2d4764da63e247094ee5d2ab0647fe",
+      "test_a_stale_review_ends_superseded_instead_of_retrying_forever.stale": "7462bcbfa2c99f972d45e6c3dfd019baea43622d20dc9b353ae39932474dfa27",
+      "test_a_transient_conflict_still_parks_with_backoff": "d8d9886c0419e9bc4f42193fa8d9db2ce2078ebff1cf65ec0b44ecf0ffc9326b",
+      "test_a_transient_conflict_still_parks_with_backoff.busy": "0da5811a78c82561df27191ea3a2fe0662086aea8454ca3c22f4ff1e2c3234fd",
+      "test_an_automatic_retry_supersedes_its_predecessor_instead_of_failing_it": "6127fba284e3cae3746fec1641afa8ac242203b5d500d029778c632d87e79027",
+      "test_an_untyped_conflict_supersedes_instead_of_parking": "e4230717b6cc09bb35e333c5f9892e62f0dee9b8d3dac7ddb4c7415fa0f21b42",
+      "test_an_untyped_conflict_supersedes_instead_of_parking.conflict": "a0819f8272f425ef1a7dfddfaa68bdb93f34c341bab4aecac4f7ae23a18a4b8c",
+      "test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_child": "e37cd3c86c75da50eded7da33e5f893c573db6a7729fbb50d62bd00cc7ac46d8",
+      "test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds": "330dd8dff1cc104a9b5e10c8c7593d22e04a056d1f5d6a467595a9aa49151867",
+      "test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds.cancel_preparation": "cd2da94e404bb2984cb28f70390ae6d1b14480ae1f5a89f4fc002db3152b06ca",
+      "test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds.workload_state": "2fd91a61a24fc9606f08dad64e411206c6de7876ca84ec5a4c7ea682503f288b",
+      "test_every_conflict_type_declares_what_a_retry_does_with_it": "79c6d1d537066e5bdcaa85720cb77073f52a8e61849d14d356edd479930500ce",
+      "test_exhausted_profile_retry_keeps_an_automatic_due_time": "7071b2c1f0692670530d8ebd37dabc96ef7c8d6d61f124d57d47fd3e3eddb894",
+      "test_explicit_retry_preserves_failed_child_recovery_and_replay": "6ba100be5143b8df9743cf459d675503c36ff5c8e23f55100284cfe516f310ef",
+      "test_intent_checks_do_not_resolve_storage_inside_coordination": "9ea0c80de91c85e16a6cf6a20aa1d0ed783e383d90bff83d4cfc066fe3a76cfc",
+      "test_intent_checks_do_not_resolve_storage_inside_coordination.unavailable_cache": "96b042c9d8710b409a2bd37482837553521747d4caaa403cc9d43c3f3db18402",
+      "test_load_with_a_missing_image_requests_preparation_and_continues_when_ready": "fc1be9989d32c8a5f15c1a732c12ccaf8623f6171214943da9a8812a7ee75b30",
+      "test_load_with_a_missing_image_requests_preparation_and_continues_when_ready.prepare": "9b5b7026fef2b80d13df8421b5d13a638b9004c1d317ca1997a853645a12a9af",
+      "test_new_intent_supersedes_a_parked_exhausted_application": "b485d49aeb5d877b5bf64a35df3f83db0a1844574c212117aa148481060f8e86",
+      "test_parking_refuses_an_error_that_waiting_cannot_resolve": "05cbd9e6a2f89de3efe14e8822778032048c72317713678a46e65e44b728e196",
+      "test_pending_admission_is_not_cancelled_by_parked_child_observer": "b487b37554bbf9a990dca2f28d94cf2be0e80553a2135b6d574d4346172b82f3",
+      "test_profile_load_of_an_editorial_successor_accepts_the_reused_build": "bca509e31c364efc29c63920942493ddf2e721c28388b3b4392fcb9f84e10bec",
+      "test_recovery_reconciles_active_or_missing_child_without_operator_gate": "a148c1a3ea8cc9f7543e6e03566ed22411c2f37135ddf62a47907c3d92211f1e",
+      "test_recovery_reconciles_active_or_missing_child_without_operator_gate.recover": "085f67d6ac13d1a8593e0006061b8eeedb2afa9ff2f9c2d7aedf96557424bedd",
+      "test_repeated_idle_loads_preserve_distinct_noop_receipts": "ccb968070205b8f8d24c8698173d5fdd573300715bbd37fde0babddad5a12e17",
+      "test_retry_of_a_failed_order_with_a_live_child_resumes_it": "8f270c2332efae73b9e86f8b8ee3615fd53af00ecdb04c90657d2e710e04c5e7",
+      "test_retry_rejects_revoked_scope_but_uses_accepted_profile_snapshot": "77ba0016bd7c12691b65fb9bc5f3acd2763abcf453883f91d20dc73970ded472",
+      "test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing": "78e565c883d0f80563a972f58a7b90e5a9e8fe4d78231cdc0760c706598507a4",
+      "test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing.prepare": "9b5b7026fef2b80d13df8421b5d13a638b9004c1d317ca1997a853645a12a9af"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_failed_application_shown_as_queued_can_be_cancelled",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_recovery_current.py"
+    },
+    {
+      "count": 1,
+      "function": "test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_child",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_recovery_current.py"
+    },
+    {
+      "count": 1,
+      "function": "test_cancelling_a_failed_order_that_still_owns_a_live_child_cancels_the_child",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_fleet_profile_recovery_current.py"
+    },
+    {
+      "count": 1,
+      "function": "test_cancelling_a_queued_load_waiting_for_preparation_always_succeeds",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_recovery_current.py"
+    },
+    {
+      "count": 1,
+      "function": "test_exhausted_profile_retry_keeps_an_automatic_due_time",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_fleet_profile_recovery_current.py"
+    },
+    {
+      "count": 1,
+      "function": "test_explicit_retry_preserves_failed_child_recovery_and_replay",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_fleet_profile_recovery_current.py"
+    }
+  ]
+}

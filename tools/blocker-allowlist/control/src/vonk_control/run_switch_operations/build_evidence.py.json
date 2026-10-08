@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/build_evidence.py": {
+      "<module>": "63a809185ce9364978245292d3a57b4ecf001693eca9c1d876f761ddfe602f7e",
+      "BuildEvidenceMixin": "63a809185ce9364978245292d3a57b4ecf001693eca9c1d876f761ddfe602f7e",
+      "BuildEvidenceMixin._build_evidence": "398fba28b46ebf5c7d0f89b8e2dbae2d800792e0fa6bc901e8214740830712e4"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/build_evidence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/build_evidence.py"
+    ]
+  }
+}

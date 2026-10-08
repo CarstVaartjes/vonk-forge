@@ -1,0 +1,56 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/image_availability.py": {
+      "<module>": "f9752b4ec305085a4180a8dd654883293609024152ba2067a8b596232bc9acca",
+      "ImageAvailabilityAdapter.__init__": "71f5ec0ba7cc4f1e3a7d9573dc03f81cc0749c230ed3907bc18d77d47171a68f",
+      "ImageAvailabilityAdapter._drive": "d54b282f8b8de2603ebd947f1c123cb9a90e593390b016bcad13ca023aaba75a",
+      "ImageAvailabilityAdapter.actions": "2a4339764d54ce7aaa252f73c42e32adce97919e0f2f38cef320c586e13ef17d",
+      "ImageAvailabilityAdapter.adopt": "01a77c5e63a4c8f8a45c61717fbb67cd89eb4bda6c0dab32aaf89eb4164794a8",
+      "ImageAvailabilityAdapter.advance_removal": "df3cf6b814eacfe22f640375124ebc6cbaba9bbaa072ba7d4d2b506df5c3fc95",
+      "ImageAvailabilityAdapter.apply": "e1f51344a68babc29a47e64e56124d11b1e8b8bd810577299b3e5af56bd18f43",
+      "ImageAvailabilityAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "ImageAvailabilityAdapter.claim": "4da035748cc7d5efe595f544c5ad020e3d7803ac8ed3a5256a7c39f68998d3fc",
+      "ImageAvailabilityAdapter.commit": "40b857e5762ccc1135cd402f9a805ecf3bc3da57bc021f27e07c649baba15946",
+      "ImageAvailabilityAdapter.defer": "45ac902697b2f3ce04a2fd987aa8a554ab5ed899c4a3917f1e03eecd3509b32b",
+      "ImageAvailabilityAdapter.execute": "2eb03b92a884a678d14b779affc30d9be0c8913d73ce134a380dfd227bedeca7",
+      "ImageAvailabilityAdapter.fail": "456a76dbb91cc9ea3f1880a679b5b64548173fc9f92bc6cf03e3332b0ddfa753",
+      "ImageAvailabilityAdapter.irreversible": "103a241b7621bc3a6f99ff03eb1dd34f4507e7d73c9130a4823697f6e58c7d12",
+      "ImageAvailabilityAdapter.lifecycle": "551f339d51f5633054861eb47b5dec5b94c2629d7be5433b289c039cd36879df",
+      "ImageAvailabilityAdapter.new_job": "2e452c0c55ac68c89bde19c904db0e58e9bb18516bf3c121a1f8f73cc72236af",
+      "ImageAvailabilityAdapter.now": "0565c3db5fb3147ed7226126ab761c52b6b1ebe1dc76c7cf69f08d57a76ded95",
+      "ImageAvailabilityAdapter.observe": "a7a962b022c522541645f3586aea886d80b630fbe6d4f860a9eacfe26987b6f6",
+      "ImageAvailabilityAdapter.plan_failure": "06ba13a1d2c92d4c2c68f6a6fface845a32fa04790912913b9d8ac66fe0ac246",
+      "ImageAvailabilityAdapter.request_cancel": "85d9ea763cd76416584a6ce4701c01f4875590255cf3398a647eba6481eb9302",
+      "ImageAvailabilityAdapter.retry_not_before": "b44b940ce07854e720fe4db639b99915d3439138008f5c5c760051a7032df7bb",
+      "ImageAvailabilityAdapter.settle_cancel": "09e5d3854f30df960b56f23c8c0b3bf891309319f0b9a5eab19761560b266f6c",
+      "ImageAvailabilityAdapter.stop": "b420eced2d0abab4f6a0b2cc855d8351782309257da70f60e01642eeaec7d57f",
+      "ImageAvailabilityAdapter.succeed": "e32f068eb313b535f624dd05ae59ae076159a6693f8d9bfb3d6e71c754f9eb0d",
+      "ImageAvailabilityAdapter.supersede": "1fbb533eebfb796f05609002d264eea0114031b0b112a9c3d6dae4442d82f77d",
+      "ImageAvailabilityAdapter.supersede_removal": "3827e5549adcd4c7e4ed03e18db77c169074e3cc27c4e7a73b245222d79ccecd",
+      "PrebuiltImageAdapter.__init__": "71f5ec0ba7cc4f1e3a7d9573dc03f81cc0749c230ed3907bc18d77d47171a68f",
+      "PrebuiltImageAdapter.actions": "2a4339764d54ce7aaa252f73c42e32adce97919e0f2f38cef320c586e13ef17d",
+      "PrebuiltImageAdapter.adopt": "b52a4d4c564fb6ea4c8160f29e5c87e81a90fda90e33ae2ffec0ed1435c05ad3",
+      "PrebuiltImageAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "PrebuiltImageAdapter.execute": "2eb03b92a884a678d14b779affc30d9be0c8913d73ce134a380dfd227bedeca7",
+      "PrebuiltImageAdapter.finish": "75760880fcdd9d1d2c275183682dd40325768d29420685d65b0a50952666cca4",
+      "PrebuiltImageAdapter.irreversible": "103a241b7621bc3a6f99ff03eb1dd34f4507e7d73c9130a4823697f6e58c7d12",
+      "PrebuiltImageAdapter.observe": "a7a962b022c522541645f3586aea886d80b630fbe6d4f860a9eacfe26987b6f6",
+      "PrebuiltImageAdapter.retry_not_before": "b44b940ce07854e720fe4db639b99915d3439138008f5c5c760051a7032df7bb",
+      "PrebuiltImageAdapter.stop": "b420eced2d0abab4f6a0b2cc855d8351782309257da70f60e01642eeaec7d57f"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "<module>",
+      "kind": "imperative-remedy",
+      "path": "control/src/vonk_control/lifecycle/image_availability.py"
+    },
+    {
+      "count": 1,
+      "function": "ImageAvailabilityAdapter.plan_failure",
+      "kind": "imperative-remedy",
+      "path": "control/src/vonk_control/lifecycle/image_availability.py"
+    }
+  ]
+}

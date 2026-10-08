@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/endings.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "end_unobserved_order": "be62f43e84d9d4e0c4c60b2aa70f692e1b4c7ce6a9a0054a763dcde82ad1ff14"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/endings.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/endings.py"
+    ]
+  }
+}

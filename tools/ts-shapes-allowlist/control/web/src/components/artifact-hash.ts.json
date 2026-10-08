@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/artifact-hash.ts",
+      "reason": "browser-local upload hashing progress and worker messages; not API data",
+      "type": "ArtifactHashProgress"
+    },
+    {
+      "file": "control/web/src/components/artifact-hash.ts",
+      "reason": "browser-local upload hashing progress and worker messages; not API data",
+      "type": "HashWorker"
+    },
+    {
+      "file": "control/web/src/components/artifact-hash.ts",
+      "reason": "browser-local upload hashing progress and worker messages; not API data",
+      "type": "WorkerMessage"
+    }
+  ]
+}

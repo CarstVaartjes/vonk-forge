@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/results.py": {
+      "_stored_result": "ed468332696436f07f6538e4720664526bf6d621ee39e8e878f8bc9a61aacfbe"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/results.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/results.py"
+    ]
+  }
+}

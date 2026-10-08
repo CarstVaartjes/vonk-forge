@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/serializers.py": {
+      "<module>": "311b5f94dcdeb7c647098dcbc0a0093f53fe157a14ec60ca7e5fdd4f4fd01965",
+      "_ordered": "eed22f9c6be46c0048e5ab66427c1588d4e9d99426f110638cc200349005f839",
+      "serialize_document": "81482a10b43c1e8645c736c875342ff05b55649f6873a062b65ef8549dc855a5"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/serializers.py"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/resolution.py": {
+      "<module>": "4dff244c5341ae7f5826f978971b725222850f06f030507ce697be5f4141093d",
+      "ResolutionMixin._build_is_available": "600da820a4f9040ba8534e95151feda710bd07470826e292ae75df14b55b0fbd",
+      "ResolutionMixin._latest_build": "43360ce4bb05dcfc45139ea40a4825e9fba894343a5176793dedb5fb0e4f4c44",
+      "ResolutionMixin._matching_build": "18e96822838be92d39556ac72c2ba9082b978ead4b829f2dd97c6d7cef1a95e3",
+      "ResolutionMixin._matching_installation": "1f52c8601b1ef52fc502b821bf710bf471da7f9854f263d943a5e8f91c9e6f3e",
+      "ResolutionMixin._resolve_documents": "35e69d301dc5def9fdb4e04e1e741097daa44de7a3306f6fd67b228b7529f6fb",
+      "ResolutionMixin._resolve_mapping": "350c3dd17960fd5a9df8694d6b1949b4217d0f529bd0d779aa282e8f68498c87"
+    }
+  },
+  "sites": [
+    {
+      "expression": "ClusterMapping.recipe_revision_id == revision.id",
+      "function": "ResolutionMixin._resolve_mapping",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/resolution.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeBuild.recipe_revision_id == revision_id",
+      "function": "ResolutionMixin._latest_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/resolution.py",
+      "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
+    },
+    {
+      "expression": "RecipeBuild.recipe_revision_id == revision_id",
+      "function": "ResolutionMixin._matching_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/resolution.py",
+      "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
+    },
+    {
+      "expression": "RecipeInstallation.recipe_revision_id == revision_id",
+      "function": "ResolutionMixin._matching_installation",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/resolution.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

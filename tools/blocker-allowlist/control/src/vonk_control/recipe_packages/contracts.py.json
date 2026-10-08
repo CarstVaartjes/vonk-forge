@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_packages/contracts.py": {
+      "<module>": "174515d245a170966e57be75382f0cd3da2eea70d9bdba8264a1a868ae1fd2e5",
+      "RecipePackageError": "740acb0bccc71bfd073fadd2c0ad323ba5f24aafcc0a9bec5ab8a6eeb7d709a7",
+      "RecipePackageRequestInvalid": "88a37c0f79c28b8dfce27f4c3f8e1c3f00b2cef265df45407d83dd00a7f4cdd3",
+      "RecipePackageRequestInvalid.__init__": "e18c2e00ba5a13a7f8ae9cb01a0bef0d767e08fc60d4e51298c297eee12074ff",
+      "RecipePackageUnsettled": "34840033086736f1d3299b70065494f18527546ff693a29f8c4dd9838b996460",
+      "RecipePackageUnsettled.__init__": "de58d242a62e3d7f44cd961c667d371b0f7d457d7943411f0e129c94d5740eff",
+      "_ReleaseAsset": "98fc8c92eea4b253155006e16db6d37003fec56ea88958c5721be1dcb5cc109d",
+      "_ReleaseResponse": "8dfdfee7909da79582151509501c31e317c88aadf7c97a4900e234b55575555d",
+      "_VerifiedRelease": "ad96a6025b644d4a53647058cf9d7b286f5b00913a8a3db15a78dc06a93bed25",
+      "_select_release": "b005492cd677be9ca46434128b6b01c29accbefe49e764597cf214fb4c8ce5f6",
+      "_snapshot_content": "2348b3b42867d092e0fb7f0530fa9717f9ea5256543b51d81d580b43118d997c"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_packages/contracts.py"
+    ]
+  }
+}

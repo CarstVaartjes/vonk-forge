@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/retirement.py": {
+      "<module>": "864ddb82faf88598dba12cf980c972403ddccb8f15fb751e6a7a3347c554e870",
+      "RetirementMixin": "9d1a5731c7b674e7bcc8dc723a866e505880500be7b00979c2393a3ec495aaca",
+      "RetirementMixin._retirement_cleanup": "1941b2c00b289b33516fabc84061bc46aee53efb082fd7763e2bd50952d17091",
+      "RetirementMixin.reconcile_retired_operations": "86d28c1145b353b90d3920355de63272efddceb2a72464f4c0d1728c57d4f13f"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "RecipeOperationConflict",
+        "RecipeRouteError"
+      ],
+      "function": "RetirementMixin.reconcile_retired_operations",
+      "path": "control/src/vonk_control/recipe_operations/retirement.py",
+      "reason": "A retired operation whose owner is unavailable or in conflict is kept: the handler records the blocked cleanup and the next reconciliation time on the operation, and the worker tick reconciles it again on the next pass."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/retirement.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/retirement.py"
+    ]
+  }
+}

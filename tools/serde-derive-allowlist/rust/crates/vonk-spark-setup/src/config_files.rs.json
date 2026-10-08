@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-spark-setup/src/config_files.rs",
+      "reason": "TOML agent configuration written by this setup program and read back for validation; TOML is not a generated JSON wire document, and the agent's tolerant reader of the same file is allowlisted for the same reason",
+      "type": "WrittenConfig"
+    }
+  ]
+}

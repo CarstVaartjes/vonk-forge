@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/installation.py": {
+      "_follow_installation_reconciliation": "ae05d34d022b951483282218174e9f5e26d0d2a95dcdc7d35c7c71e47dfe3c26",
+      "_follow_installation_reconciliation.same_operation": "e193a6160bbfaf42f93bf9232b4b74b0512c83e56b6ea5abdc901ff510979c05",
+      "_recipe_installation_reconcile": "eeba54b6c3eef8901f8b771c24edd025945fdd50d1a7e323d171571c62498c20",
+      "_recipe_installation_reconcile.request": "ea892baa115eab63352593b414d579f51ab9d45ca75cb26bcf112b36a4b96973",
+      "_run_switch_request_operation": "eab7f66f688220e95a8c3f4c504ea4a4acf997ad39663b48d9e38b3929de1e81",
+      "_validate_installation_reconcile_operation": "fc6f4ea5eca05b5a6b9ccb52ddb655344cb09fc1c5069c1a49d7339f9a6a3142"
+    }
+  },
+  "debt": [
+    {
+      "count": 11,
+      "path": "src/cluster_profiles/controller_cli/installation.py"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/constants.py": {
+      "<module>": "187d53f90ec1e8391222d2fdd01b82c14b81b5f4a17d7d7473c927cee5fa1cee",
+      "_active_recipe_revision": "aecb5767e8fadfb4a6e906fa960e733f13dc5b718b3cd8436d3d4cafee408b61"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/constants.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/constants.py"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/failure.py": {
+      "<module>": "b9324815b9454dfb52db5a2f1faa7e2272ae3f99f4e384ca4cc69e78e6ae1b59",
+      "FailureMixin": "98877d7ad6515250686e34a3bd8f19bc64019944532117d403528af7e27ffea9",
+      "FailureMixin._finish_failed": "5ab22011d464d4ec1f3661f0a1dac52b6c596d0b0aacd670d9a93681b0310767",
+      "FailureMixin._source_gone_detail": "20f1c5069fd2ab841ca1585bb506a9149fff91d0fbe2861b0d250377d0e16588"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/model_cache/failure.py": 4
+  }
+}

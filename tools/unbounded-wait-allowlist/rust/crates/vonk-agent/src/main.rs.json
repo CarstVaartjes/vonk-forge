@@ -1,0 +1,52 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "collect_inventory_until_ready",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/main.rs"
+    },
+    {
+      "count": 1,
+      "function": "rotate_until_settled",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/main.rs"
+    },
+    {
+      "count": 1,
+      "function": "run_agent",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/main.rs"
+    },
+    {
+      "count": 1,
+      "function": "run_control_lane",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/main.rs"
+    },
+    {
+      "count": 1,
+      "function": "run_rotation_lane",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/main.rs"
+    },
+    {
+      "count": 1,
+      "function": "spawned_rotation_progresses_while_control_thread_blocks",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/main.rs"
+    },
+    {
+      "count": 1,
+      "function": "supervise_lanes_with_rotation",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/main.rs"
+    },
+    {
+      "count": 4,
+      "function": "spawned_rotation_progresses_while_control_thread_blocks",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent/src/main.rs"
+    }
+  ]
+}

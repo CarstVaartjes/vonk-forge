@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "atomic_output",
+      "kind": "loop-without-deadline",
+      "path": "scripts/build-agent-deb"
+    }
+  ]
+}

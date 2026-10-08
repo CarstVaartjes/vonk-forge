@@ -1,0 +1,78 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distributed_recovery/common.py": {
+      "<module>": "61f01894b3c702ad81f066d46335e463db87f86709a9bbb3df1c0be71558751e",
+      "_RecoveryAuthority": "4e819161aef1d8e39414cfe34f34dcf05f0fc0607d2ce871a88254d8937f1e0a",
+      "_RecoveryDependencyPending": "a4ea0e3a4d508644ca3f68f516715b30f6065f4707d9dc02775a058b2458e66a",
+      "_RecoveryJobQueue": "3a4a4a6475a78b69adbc64966e1dad3ef3f2ccb034fc83d5f3de1f39523f57a4",
+      "_RecoveryJobQueue.enqueue_in_session": "f598b46531e57e6a96bea18696a74e0c7baf87e3bdc7b3d092f5bc8557899311",
+      "_RecoveryJobQueue.notify_available": "cd9ff09c539b579bf45a04971aaf38ad7f19b267e2305547648b1f23d7b9829a",
+      "_RecoveryRoutes": "29f4b448fe143edf458bc00f1126ca463475be84d6f16c3b117029cc40c4d855",
+      "_RecoveryRoutes.publication_transaction": "f740716c3a4ac88a18eef505f4cf42ecee2f0924646ab7a453afc8a67fc65e29",
+      "_RecoveryRoutes.withdraw_runs": "6a1d738384884be08aa1b011393d097a30d2bebec16491003e74782a1afd9cd6",
+      "_RecoveryRoutes.withdrawal_complete_in_session": "8f416cb96dfab0e7421f79975599d3f0be19c29f83742a492e2a99c079fe9106",
+      "_RecoveryRunStops": "35aba19709fb024805faeb7278942bfba2594d01a8a6c58ada255b0d0d1b26fe",
+      "_RecoveryRunStops.queue_recovery_stop_in_session": "e839fbf6e01d6f1006429bbfd49a805a2ccfc779066e9792e3ab87890247347e",
+      "_active_recipe_revision": "402d780f772421fb1c2100daa507613f18a911652f7088ca809b1c9efaebea40",
+      "_advance_recovery_check": "b9bbf2c5a7ea44d2ac8a2ec39a36dd3d172d757dce7a5f00ae02cec3519cc1bf",
+      "_aware": "1877666505e1deb8c90e258421147c6548cffc9637d3dcc6172c19297f1a064f",
+      "_cancelled": "28afc64fd56f27125100b696a18e1eb6507d6d4d55bd92d664a6026e011dafdd",
+      "_decode_phases": "3bedacc8490633f435912b3d43757949b26d83d9aff81dd6223d9b793cc51841",
+      "_encode_phases": "470938c54efa46f72ca99d0499cb9404994efe894546de343be2be505da6ab57",
+      "_parent": "987a4e5e850e73a13c97298aa68b432553254b51579cb8d1c5e21bfe9f32f949",
+      "_proves_fresh_absence": "757e189d1ce19d81df314490bf71eea7835e38c315fbb8a58313f231baccda8d",
+      "_recovery_marker": "8bf002a04258456e280d3c92f25aa2f5bbcfbae41beb3b6fd081cb948c7913a1",
+      "_schedule_recovery_wait": "1fbb4e9c5537085de89309415eda6e10efa36994ed4d0ac6d09727b44624fa8a",
+      "_settle_unrecoverable": "1538ef9c4182e9579bf09fc001e88c1fb432e6c90a92628d3e9a3ef8c558cecc",
+      "_superseded": "0d84e97b26953b548e71f962a219ca6b9a81fa3c99440fadd7473101403126c3",
+      "_unproven": "2aed4ead507cf6c0307e3f6ae475cda8784ac63988db2e0e8b34c44a8c097593",
+      "_unreadable_run_ids": "4051040dd211303fd1e92655bda31ca2b34eba98b462a0806cabe112309aa0d5",
+      "enforce_recovery_deadline": "e26fbb37c30d6e6e9358eb962575465ec4aff21a13f1461b6a3dc4e2074d96df",
+      "recovery_start_plan": "4bb6c7662de9582473491e7c1077f404c9f6168c0ac28b61c54c3645923fa5fc",
+      "release_inactive_run_claims_in_session": "015509a59040803e8010831a37b368fac8bcb762ffe1b8fa956e23a5e76dc36e",
+      "run_node_reports_absent": "cf18aa07561eeac703677be006c69d45336210cf1013d79787fd44a8238c27a2",
+      "settle_absent_run_in_session": "7de1d42144f32564eadf86e2a4f1246af56c978df760695a9456faa3c127a5e5",
+      "settle_observed_absent_runs_in_session": "5f30d1efa4e4b4a3a4aaca550b7911f8b5d83a3fdcf3797da8c532784fc612bc"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "distributed_recovery.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/distributed_recovery/common.py",
+          "DistributedRecoveryInvalid",
+          "_aware",
+          "distributed-recovery-clock-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/distributed_recovery/common.py",
+          "DistributedRecoveryInvalid",
+          "_recovery_marker",
+          "distributed-recovery-authority-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/distributed_recovery/common.py",
+          "DistributedRecoveryInvalid",
+          "enforce_recovery_deadline",
+          "distributed-recovery-deadline-elapsed",
+          1
+        ],
+        [
+          "control/src/vonk_control/distributed_recovery/common.py",
+          "DistributedRecoveryInvalid",
+          "recovery_start_plan",
+          "distributed-recovery-phases-are-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "guard_paths": [
+      "control/src/vonk_control/distributed_recovery/common.py"
+    ]
+  }
+}

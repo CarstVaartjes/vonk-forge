@@ -1,0 +1,39 @@
+{
+  "content_identities": {
+    "control/tests/test_shared_build_cancellation.py": {
+      "test_last_consumer_retains_issued_capacity_until_exact_cleanup_receipt": "e5bc0f3196b0fc5949b5099859aab2aee78fefe49444cc723e2c5094b81d5896",
+      "test_malformed_ownership_cannot_starve_an_unneeded_valid_build": "4840b731375e75e85f2ae1d738fc58cc70ce83b6dcb0098648aa3b899f512b31",
+      "test_new_consumer_cannot_join_across_last_consumer_cleanup": "8b8277511eca00ee1d404524789e7429ada356fa301820bd5e8374dfa7fd7217",
+      "test_new_consumer_cannot_join_across_last_consumer_cleanup.paused_consumers": "510047bd78f1fa99f301c62507a5a8877cc6b8989eb59aadd765aea496a07108",
+      "test_parent_detaches_without_cancelling_an_independent_producer": "cb654bf1463513e88a4882a537a440d94af9454a029f1307ccc002de0ec686ee",
+      "test_parent_detachment_refuses_a_busy_build_boundary_without_partial_changes": "133dbef6e29066583bf0d1b84a92ca8516b32e5b8468b6f4310eaa25f1ab5b25",
+      "test_shared_build_survives_one_detachment_then_stops_after_last_consumer": "42f3ffc4fc0bc6c9d4d054c99ae2a36f17e80a04c232b378f1b417c9dc38747a"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_last_consumer_retains_issued_capacity_until_exact_cleanup_receipt",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_shared_build_cancellation.py"
+    },
+    {
+      "count": 1,
+      "function": "test_malformed_ownership_cannot_starve_an_unneeded_valid_build",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_shared_build_cancellation.py"
+    },
+    {
+      "count": 1,
+      "function": "test_parent_detaches_without_cancelling_an_independent_producer",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_shared_build_cancellation.py"
+    },
+    {
+      "count": 1,
+      "function": "test_shared_build_survives_one_detachment_then_stops_after_last_consumer",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_shared_build_cancellation.py"
+    }
+  ]
+}

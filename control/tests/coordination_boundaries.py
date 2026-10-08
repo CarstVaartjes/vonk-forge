@@ -25,7 +25,7 @@ memory, canonical JSON encoding, Pydantic validation, and value-object
 that reaches it: ``open``, ``read_bytes``, ``stat``, ``verify_path``, and the
 project helpers this module lists explicitly.
 
-``tools/coordination-baseline.json`` records every site the current revision
+``tools/coordination-baseline`` records every site the current revision
 still violates. The gate fails on a site the baseline does not name and on a
 baseline entry whose site is gone, so the baseline can only shrink. A site is
 matched on its full identity -- path, line, kind, function, and detail -- so
@@ -47,10 +47,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .parsed_sources import memoized_scan, parsed_tree
+from .registry_storage import read_registry, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
-BASELINE_PATH = REPO_ROOT / "tools" / "coordination-baseline.json"
+BASELINE_PATH = REPO_ROOT / "tools" / "coordination-baseline"
 
 # One site kind per provable rule. The kind is part of the site identity, so a
 # site cannot change kind and keep its baseline entry.
@@ -765,7 +766,7 @@ def _baseline_identity(entry: object, where: str) -> dict[str, object]:
 def load_baseline(path: Path = BASELINE_PATH) -> list[dict[str, object]]:
     """Read the reviewed baseline. A malformed baseline is a hard failure."""
 
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = read_registry(path)
     if not isinstance(document, dict):
         raise TypeError(f"{path}: baseline must be a schema-1 object")
     if document.get("schema") != 1:
@@ -831,7 +832,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if BASELINE_PATH.exists():
             for entry in load_baseline(BASELINE_PATH):
                 reasons.setdefault(str(entry["kind"]), str(entry.get("reason", "")))
-        BASELINE_PATH.write_text(render_baseline(sites, reasons), encoding="utf-8")
+        write_registry(BASELINE_PATH, json.loads(render_baseline(sites, reasons)))
         print(f"wrote {len(sites)} sites to {BASELINE_PATH}")
         return 0
     messages = evaluate_coordination_gate(sites, load_baseline())

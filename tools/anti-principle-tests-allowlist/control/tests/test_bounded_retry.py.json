@@ -1,0 +1,33 @@
+{
+  "content_identities": {
+    "control/tests/test_bounded_retry.py": {
+      "<module>": "f6d2f421f0b1f6c5fb4b50fab1135b4a172a5671f7e068858200fd999a781f24",
+      "_Flaky": "f6d2f421f0b1f6c5fb4b50fab1135b4a172a5671f7e068858200fd999a781f24",
+      "_Flaky.__call__": "be13612beccb96e983a27c07e421c40f1f253c75f5fedfef1de6fc7fbfe5cf12",
+      "_Flaky.__init__": "1d1e73879407c7988959eb6074698237b63d0d99562896ed3e5b0a2ddf16fda9",
+      "_service": "677288f3b1014ca54808abfd098ad38a90d6709b83c51a440a1689f2f1462951",
+      "no_pauses": "27c41769a0191e1b5bce2fcf7ed64b159aaeb9351fd54584b11e86b6721accb8",
+      "test_a_build_cancellation_repeats_a_lock_another_writer_holds": "31b337c5866de69ae3b2870276d6a87a7dbda45730073f1940387f92c01397f1",
+      "test_a_readable_document_is_returned_as_is": "c13f7a86314a4f9cfda5829de7c4cc9982cbc2923bf175632a9225cfdc5847f6",
+      "test_a_returned_damaged_document_is_rebuilt_from_evidence": "f00a5b32f1d9298186c4b3c44e1244dccb7b5dab5c738ffb4e198fd2a7f7b0a5",
+      "test_a_returned_damaged_document_without_evidence_is_retired_as_unknown": "2d3656187d4e191238eddcc46d504c1963e6be477d1365e6d952ce95748f82fd",
+      "test_bounded_attempts_pause_between_repeats_only": "9110475f2139f502a91c55422fa1cda318f3db9e3eaf64076e21db0d92e567d7",
+      "test_immediate_nowait_refusal_keeps_its_request_retry": "02f05807e43b48e4a4b28cf3c65c98bc4b0f1df3835d2bb52f8d444fe45fcbe6",
+      "test_install_repeats_a_busy_admission_until_it_is_accepted": "c3cb16f57f93113ea79e7fa7f7c17c3e8f88342d22fdef80fcee2970daced198",
+      "test_install_reports_the_last_busy_admission_after_the_attempts": "c7e55dba3c481c85547b4fee139ebbda18673e6a45bd3bfdaa94f023865468be",
+      "test_other_refusals_are_not_repeated": "7ff997252008d0c7c19522864251f93c91409d31d32349d1d7337dda89a72f4a",
+      "test_start_repeats_a_busy_run_capacity_writer": "a35d08d960a261f9c19fcbf1bf3bc6649e3b98304b89a8ebed3fa29c1e538e95",
+      "test_start_returns_after_the_implicit_sql_wait_budget_is_spent": "f9d526b653e25af9efc0ee44083b0751e5a384a6d1e3208ac39d3f32a94183ca",
+      "test_start_returns_after_the_implicit_sql_wait_budget_is_spent.LockTimeout": "f7facc40c9f48b5c5ef49decf84dad5a51b13c2dc5c6104ef0072a23a4082d1b",
+      "test_the_request_schedule_is_short": "6eeebbb3d5e8388bc022df061f417f47e2a599e133d5eeb747f4a8bf76dc428a"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_build_cancellation_repeats_a_lock_another_writer_holds",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_bounded_retry.py"
+    }
+  ]
+}

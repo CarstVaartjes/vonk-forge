@@ -1,0 +1,13 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/__init__.py": {}
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/__init__.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/__init__.py"
+    ]
+  }
+}

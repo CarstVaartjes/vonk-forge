@@ -1,0 +1,81 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/projection_support.py": {
+      "<module>": "5fda13bbfd9b3b125fb2b7219c6007eea71c466f78276a1b05f5d96ba43cb3d4",
+      "_application_cancellation_view": "662119b32acf1dec46d821d5ad8a9d874758e3312524db2d63fae54bf70750e8",
+      "_aware": "7c41a2d9211ab4919de503e57aab859d99fcc49d090a3c21d205a70cba41f34a",
+      "_choice_id": "2f7cbd9a679ce31d1dc5827d18897b5a9144f7ee3a9789a69a3456408cc543e0",
+      "_digest": "4ca7c2c06e32e152e2b698607b5c80a99e403209d502804b78078249cc2c067a",
+      "_effective_option_choices": "4018f3001c6f67efbfc312311b028914cb6fd3f4c55b9abe677448e1b164d27e",
+      "_expanded_roles": "9ff58248253935c20311ea7b645e57ba42c5acc00582902491f955d7497cc524",
+      "_installation_member_ids": "8e5e9fd9764f9f81af5db2dcf406cafb0ef2efc1e0a45f78568725d36709da5b",
+      "_profile_definition": "e069ab0c626a1c0be9cc727a444623cc2bbd74b815eb77e10024816f25071374",
+      "_profile_document": "088cd96b6ba66053f76c65ff35fcf2e9af6da7b23459aafc5c629f132fc626e5",
+      "_replace_selected_profile_application": "a5385f20d3d098c9a3f97515736c02df63f3b67c30763ebc0db0ce25b4f18e1e",
+      "_replace_selected_profile_roster": "bc0cd321536af73414df5f92ffca83c55baadfbd83cfc6ecffb39cb041d85cc3",
+      "_review_effects_digest": "af6b83f6bd65fc5bcb9c9b29bc8cd7d8b63712d9cc83ebd25b032052323bf813",
+      "_roster_digest": "829fb4f46b8927a9b7e8e1f82d13b7b8c3da73298413f77858457db2e414d917",
+      "_set_selected_profile": "c8a92eb40298a45555480d70eba907b4592a1a5e80c6098feab922d7074fd0c9",
+      "_state_receipt": "f73beb97dcb94ffc4cc7c03247937792ccb3b3bb8ceea000feca885fefb58001",
+      "_switch_queue": "a412ba85118c2ea62da8575d05a7a28607ab8a8b6335f520f5bdeb5f67f82aad",
+      "_switch_queue.stop": "3381bbe6321c72958a5f6e72c779f9815b6540bd089575e5715c271620073d78",
+      "_validate_remaining_effects": "407eeb6005bfd57d76eb0afc775d6752ca6d57bdd7d9d3fd290191f5323ef2b2",
+      "_with_save_notes": "c1396aa8da5e6dc39010576d602f9c7bb95d3639de58f36e8c3080fbd56fb997"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/projection_support.py",
+          "FleetProfileUnsupportedStore",
+          "_set_selected_profile",
+          "fleet-profile-selection-requires-postgresql-or-sqlite",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "profile.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/projection_support.py",
+          "FleetProfileReviewStale",
+          "_validate_remaining_effects",
+          "recovery-would-remove-an-unreviewed-installation-review-and",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/projection_support.py",
+          "FleetProfileReviewStale",
+          "_validate_remaining_effects",
+          "recovery-would-stop-an-unreviewed-workload-review-and-load",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/projection_support.py",
+          "FleetProfileStalePlanConflict",
+          "_replace_selected_profile_application",
+          "selected-profile-changed-before-its-retry-was-admitted",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/projection_support.py",
+          "FleetProfileStalePlanConflict",
+          "_replace_selected_profile_roster",
+          "selected-profile-or-fleet-membership-changed-during-reconcil",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/projection_support.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/projection_support.py"
+    ]
+  }
+}

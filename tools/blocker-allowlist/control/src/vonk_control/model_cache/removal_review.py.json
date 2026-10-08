@@ -1,0 +1,100 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/removal_review.py": {
+      "<module>": "c20afabee48a92cea7a38c52129d9f18d1c80cd05e540fa60cd174f7ce846e95",
+      "RemovalReviewMixin": "b0ffbba530cfd088552cf1a45c0ec1286bd389e997794dc1d59ca6695100761a",
+      "RemovalReviewMixin._cancel_superseded_downloads": "d119196552e24c6954603c79863f50553533efa9f937514f9338d38def55e2d3",
+      "RemovalReviewMixin._model_removal_scope_for_sets": "d2ba4f1016ae3307703297abea0b48ac36b28721796d944ac78f85c6399c9901",
+      "RemovalReviewMixin.accept_recipe_removal_child_in_session": "bda823ad047a40d8c533b70368706b9e2eb3ee46ae069a97bb4bcdde0d4c2a08",
+      "RemovalReviewMixin.accept_removal_for_sets_in_session": "3dbd8addcd1dba95e56f9c979d53d8416397e817dcfe494f7bd6292260766607",
+      "RemovalReviewMixin.accept_unused_removal": "8552162e0971b024b6308bfcc9689ca409bcc3f5c7dd2c394ff0cdd87fce7502",
+      "RemovalReviewMixin.accept_unused_set_removal": "efdc9854b21c3f931a691f31890e9edcd73e0ae8e8cf6e22abbde7aff5ade3ef",
+      "RemovalReviewMixin.download_model_selector": "07deb7170b8ea35c5b86d1e7381da2830929e1fabdd683b0f0205dd78e34a0f6",
+      "RemovalReviewMixin.recipe_removal_scope_in_session": "edca8a8112399ec464d724e4dd8d9cdd8e89b71e21a18626f8b6d24bc4ad7365",
+      "RemovalReviewMixin.removal_owner_findings_in_session": "8f0b6861a1846b69dd85972d7a7a5de7b908d01c33577be36b32d5d8cfd60973",
+      "RemovalReviewMixin.remove_model_selector": "01d60d5d8cfe8bc624c9155775a133ffe0e701c25a82e7548f3b484112b9fa81",
+      "RemovalReviewMixin.retained_model_object_findings": "67377f393dff319a72cd77221bb8bed9452adebfa57bdb3a6976f0d6c2a36462",
+      "RemovalReviewMixin.review_model_removal": "c7533bbc8cfbdff3a5270b28f13f1963335997d0efea07e29f497d0c785c3ac3",
+      "RemovalReviewMixin.unused_set_bytes": "c24e37faeee6708ddd6e1f5b9ad6a351a1eb0a11556e934e093b32e43ed3fe40"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model_cache.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_review.py",
+          "InvalidValue",
+          "RemovalReviewMixin.accept_removal_for_sets_in_session",
+          "model-removal-child-requires-an-exact-non-empty-scope",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/removal_review.py",
+          "InvalidValue",
+          "RemovalReviewMixin.accept_removal_for_sets_in_session",
+          "model-removal-child-scope-contains-duplicate-sets",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "removal.admission-observation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_review.py",
+          "ModelCacheConflictRefused",
+          "RemovalReviewMixin.remove_model_selector",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "removal.local-observation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_review.py",
+          "ModelCacheRemovalOwnerInvalid",
+          "RemovalReviewMixin.removal_owner_findings_in_session",
+          "artifact.removal_owner_invalid",
+          4
+        ],
+        [
+          "control/src/vonk_control/model_cache/removal_review.py",
+          "ModelCacheRemovalOwnerInvalid",
+          "RemovalReviewMixin.removal_owner_findings_in_session",
+          "artifact.removal_owner_unresolved",
+          3
+        ]
+      ]
+    },
+    {
+      "family": "removal_review.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_review.py",
+          "ModelCacheConflictUnknown",
+          "RemovalReviewMixin.remove_model_selector",
+          "retry",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/removal_review.py",
+          "ModelCacheStorageUnknown",
+          "RemovalReviewMixin.accept_recipe_removal_child_in_session",
+          "model_cache.removal_plan_invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/removal_review.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/removal_review.py"
+    ]
+  }
+}

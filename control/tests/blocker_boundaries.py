@@ -2,7 +2,7 @@
 
 Two scans guard the rule of the blocker audit (section 6): *no operator wait
 without an action, no fail-closed raise for plain bookkeeping*.  Both read
-``tools/blocker-allowlist.json`` and are ratchets, like the content-identity
+``tools/blocker-allowlist`` and are ratchets, like the content-identity
 scanner: an unlisted site fails, a listed site that no longer occurs fails as
 stale, a count that moved fails (up: a second site hid behind a listed one;
 down: lower the recorded number), and the debt ceilings only go down.
@@ -81,11 +81,12 @@ from vonk_agent_protocol import (
 )
 
 from .parsed_sources import memoized_scan, parsed_tree
+from .registry_storage import read_registry, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
 RUST_SOURCE_ROOT = REPO_ROOT / "rust" / "crates" / "vonk-agent" / "src"
-ALLOWLIST_PATH = REPO_ROOT / "tools" / "blocker-allowlist.json"
+ALLOWLIST_PATH = REPO_ROOT / "tools" / "blocker-allowlist"
 
 WAIT_STATE = LEGACY_WAIT_STATE
 CONTROL_STATE_ASSIGNMENT = "control-state-assignment"
@@ -877,7 +878,7 @@ def relocate_document(document, moves=None):
 def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, object]:
     """Read and validate the allowlist. A malformed entry is a hard failure."""
 
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = read_registry(path)
     if not isinstance(document, dict) or document.get("schema") != 1:
         raise ValueError(f"{path}: allowlist must be a schema-1 object")
     for required in ("max_debt", "debt_ceiling", "scope", "categorized_raises"):
@@ -1196,8 +1197,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if arguments and arguments[0] == "--write-baseline":
         updated = write_counts(document, waits, raises, guard)
-        ALLOWLIST_PATH.write_text(
-            dump_document(updated, record_content=True), encoding="utf-8"
+        write_registry(
+            ALLOWLIST_PATH, json.loads(dump_document(updated, record_content=True))
         )
         print("lowered the recorded counts; new sites are never written")
         return 0

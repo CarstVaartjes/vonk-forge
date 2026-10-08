@@ -1,0 +1,63 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_events.py": {
+      "<module>": "ae2f2af046a4b969eca36111c2ad4bfc760c08ec4b6dced3d1ba400a79a0fb07",
+      "_draft": "0a4a698b4e380bf74c38b392f0fed789570a5c85d898fa80067496eb59775d6a",
+      "_event_rows": "28b71ceb698b4195e9adbbbb2463f37e4b85d5b39c2bef4474aec5b7c0c9ba7b",
+      "_installation": "b9a8b6fd94f0ba88d4bc80a27dbff05e1bc7ea801c83fb10c07354179430da4f",
+      "_installation_node": "8337c2e6dd244f3f3f0b95b1f6400f1f7b1a5f718784e2fda469c50bc20d758f",
+      "_job": "eca128b0e9f40e374deede3ee9e15e362abd7e600dec4f6d259d5792e853aa1b",
+      "_operation": "f3314d6231bae9ccd8162accd91df67c491980479feb1efb721d9ff60044813e",
+      "_rows_carry_private_values_on_purpose": "8d801d7ed00778774063df78945486837d268a09c3e4fb4da2e0ff1080f02cea",
+      "_run": "566bb598d6569426f41dce95fa65aa67ef27232e734882643043021588e74e18",
+      "_run_node": "fc0a89806f1eb809b12ee825264bb82336c5a3654cc96679abca835b3c1dc91d",
+      "_telemetry_sample": "0e1a093e96b8ff96a70fe3beee9e4b8551454560440295a772ff0e710a7b23a8",
+      "sessions": "2d89ba6cdea63eab53eb355f2034dbccb82680f91259ccd914fe17991483e34d",
+      "test_a_typed_change_payload_rejects_unknown_fields": "92322b026626fd22114677f8c51ef1da9d49b22a9cef227bbfb27be63d6a30ff",
+      "test_cursor_allocator_compiles_to_a_postgresql_row_lock": "c44c0d30446fc36e0a826cee5df36310fe7591d3083fc6c22b6942cbde4d9b1f",
+      "test_database_rejects_payload_over_8192_utf8_bytes": "38d472f27060e3334769e56c6b9fcda0fec15cca587b5fd2103383a434bcd78a",
+      "test_durable_operation_projection_resume_records_waiting_then_queued": "aff4b6c6b10ddd54163d47ed074e3d50a29f4be8a3e214e00ab1fade0d9ffa87",
+      "test_fleet_event_models_match_the_current_schema_contract": "fc142fa4b7e85b1795ceb2917a255c00cbcb5b4354f653a527e506dd6023d963",
+      "test_invalid_draft_fails_the_source_transaction": "195f531bbb5091062de82fdb832a065296e02d673cc501c509d3f110bd4dd4fb",
+      "test_no_payload_contract_can_carry_a_forbidden_field": "163840d241238280639dd131b551770162bea70afab68025d2c88bcb6d8c52d0",
+      "test_outbox_preserves_current_values_without_field_presence": "a4655936a74e2a279f58198e1abc70d4ab8aa553410e16c8f50df7320d94c350",
+      "test_payload_constraint_compiles_to_postgresql_utf8_byte_length": "be2d5155f0cf14991c8e97e8dbe3704a6396d8d3b01ac06c81cf4e18f38f1e80",
+      "test_production_session_factory_installs_the_recorder": "2fea9345ba1ce634f0fd4e4f4391028072d2412dedb30e28df94fd3207356128",
+      "test_recorder_captures_every_authoritative_insert_with_public_payloads": "f5b026bc8fc0f794b3987cc268cb79bde7cc5a82a9bce3f81558862ad37455d9",
+      "test_recorder_clears_failed_and_closed_session_state": "1fd6d171a35abd6afdbd854468f7292bfd26028276e6ae23c8abc28efc07dd80",
+      "test_recorder_emits_bounded_profile_events_when_agent_hostname_changes": "49751cf8bf13410ea7d49abb73c26172bc949f1b5a1c2935a9f5f62adec3d4a0",
+      "test_recorder_emits_nothing_for_irrelevant_writes_or_exact_telemetry_replay": "ccce025d1d64559ff777aa5525938ec487e40dc8582c4387ae5495b402351087",
+      "test_recorder_installation_is_idempotent_and_uninstall_removes_listeners": "73da431372b4be8e6ab0456a63df8ed2bf4923c07cdfee64b99176449859e9c9",
+      "test_recorder_orders_same_transaction_entities_deterministically": "f590b166bb081616cad72a3db1f1548249f23552fcd6374599e35384dbefb99b",
+      "test_recorder_source_flush_and_event_are_rolled_back_together": "96123a437375003b7e4d9497344a57abdc1a274ba5edf0c58b2c760d7e498abd",
+      "test_recorder_uses_attribute_history_for_every_authoritative_transition": "2a1b453f9882042a7f0fa31d84a0915b835620f0bff1844db8912912c8c98c95",
+      "test_replay_batch_reads_events_and_retention_metadata_from_one_snapshot": "11f200183a206c228973a4e16d5ebe8dd52ffc80ab87c4ad581ff69f5edd9752",
+      "test_replay_batch_reads_events_and_retention_metadata_from_one_snapshot.observe": "ee2170f9caf5f83a4746cc302ecbfc45d3bfa9c4a6db90d1a6053eb868c344bc",
+      "test_repository_allocates_increasing_ids_and_exact_semantic_expiry": "e1175bbd7810dc59b31068fc573c4cb9188ddf03050aa2099495c733087bad3f",
+      "test_repository_reads_are_bounded_ordered_and_semantically_unexpired": "9c0373f063bfc9dd699101cdae92fcffd5b5f4e94e9d5639788ad6c4f17b4157",
+      "test_repository_rejects_unbounded_read_limits": "681482fd0bf712b93daa1bae0df73e06b1feca01919f6ebf5ba3bc656137bd92",
+      "test_repository_rollback_removes_source_event_and_cursor_advance": "cafea0a83357e76b906ab6212050688558ffbd967fc320301604ead8022a7bc8",
+      "test_retention_window_reads_one_database_snapshot": "3ae41e7703619bf172c027776cebbad94fada47f24e2c385f732d8830cb849ed",
+      "test_retention_window_reads_one_database_snapshot.observe": "ee2170f9caf5f83a4746cc302ecbfc45d3bfa9c4a6db90d1a6053eb868c344bc",
+      "test_sqlite_concurrent_allocations_are_unique_and_monotonic": "cecfcf7415263042ee5e910dfe5d62b17c8af024447cd1c49a808cb5dbc1d9bd",
+      "test_sqlite_concurrent_allocations_are_unique_and_monotonic.first_writer": "a4241b7c3e140e0eeff114ba61466dadb1f2fbcde577d326e5835a93bfb8a4f9",
+      "test_sqlite_concurrent_allocations_are_unique_and_monotonic.observe_second_update": "3ae3759e8f7f2fe8910842ff81217cc0eb98a7880ffd848092b18f53bce21880",
+      "test_sqlite_concurrent_allocations_are_unique_and_monotonic.second_writer": "8fb030b3c0e1badefd809b472ef8abc9ab249777fbc3da12fdb17cb82e9aaea1",
+      "test_telemetry_repository_emits_only_when_latest_pointer_advances": "205a8bbc55cd407f5da856eb5b500d0a5deb8cbbae7f6e54da814852961c99b6"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_durable_operation_projection_resume_records_waiting_then_queued",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_fleet_events.py"
+    },
+    {
+      "count": 1,
+      "function": "test_recorder_installation_is_idempotent_and_uninstall_removes_listeners",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_events.py"
+    }
+  ]
+}

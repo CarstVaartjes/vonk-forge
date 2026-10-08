@@ -2,7 +2,7 @@
 """Fail when a Python type error appears outside the reviewed exception list.
 
 The repository does not type-check cleanly yet, but every surviving error is a
-deliberate one. `tools/pyright-baseline.json` lists each of them by file and
+deliberate one. `tools/pyright-baseline` lists each of them by file and
 pyright rule, with the count and the reason it is accepted, so the check is a
 reviewed allowlist rather than a per-file budget:
 
@@ -28,8 +28,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # checks never create authored-tree cache files
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = ROOT / "tools/pyright-baseline.json"
+sys.path.insert(0, str(ROOT))
+
+from control.tests.registry_storage import read_registry, write_registry
+
+BASELINE = ROOT / "tools/pyright-baseline"
 TYPECHECK_TIMEOUT_SECONDS = 600
 
 
@@ -37,39 +42,54 @@ def _diagnostics(files: list[str] | None = None) -> list[dict[str, object]]:
     # pyright is locked in the control dev group and resolves imports from
     # this same interpreter; its version check is the only network access it
     # would otherwise attempt.
-    try:
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pyright",
-                "--outputjson",
-                "--pythonpath",
-                sys.executable,
-                *[str((ROOT / file).resolve()) for file in files or []],
-            ],
-            cwd=ROOT,
-            env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=TYPECHECK_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        raise SystemExit(
-            f"pyright exceeded its {TYPECHECK_TIMEOUT_SECONDS}-second execution timeout; "
-            "type-check diagnostics are unavailable"
-        ) from None
-    try:
-        payload = json.loads(completed.stdout)
-    except json.JSONDecodeError:
-        print(completed.stdout[-4000:], file=sys.stderr)
-        print(completed.stderr[-4000:], file=sys.stderr)
-        raise SystemExit("pyright did not return a JSON report")
+    # An unreadable checker outcome is observed once more; no result is cached.
+    for attempt in range(2):
+        try:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pyright",
+                    "--outputjson",
+                    "--pythonpath",
+                    sys.executable,
+                    *[str((ROOT / file).resolve()) for file in files or []],
+                ],
+                cwd=ROOT,
+                env={**os.environ, "PYRIGHT_PYTHON_IGNORE_WARNINGS": "1"},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=TYPECHECK_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            if attempt == 0:
+                continue
+            raise SystemExit(
+                f"pyright exceeded its {TYPECHECK_TIMEOUT_SECONDS}-second execution timeout; "
+                "type-check diagnostics are unavailable"
+            ) from None
+        try:
+            payload = json.loads(completed.stdout)
+        except json.JSONDecodeError:
+            if attempt == 0:
+                continue
+            print(completed.stdout[-4000:], file=sys.stderr)
+            print(completed.stderr[-4000:], file=sys.stderr)
+            raise SystemExit("pyright did not return a JSON report")
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("generalDiagnostics"), list
+        ):
+            if attempt == 0:
+                continue
+            raise SystemExit("pyright did not return a JSON report")
+        if completed.returncode not in (0, 1):
+            if attempt == 0:
+                continue
+            print(completed.stderr[-4000:], file=sys.stderr)
+            raise SystemExit(f"pyright failed with exit status {completed.returncode}")
+        break
     diagnostics = []
-    if completed.returncode not in (0, 1):
-        print(completed.stderr[-4000:], file=sys.stderr)
-        raise SystemExit(f"pyright failed with exit status {completed.returncode}")
     for diagnostic in payload.get("generalDiagnostics", []):
         if diagnostic.get("severity") != "error":
             continue
@@ -94,7 +114,7 @@ def _counts(diagnostics: list[dict[str, object]]) -> dict[tuple[str, str], int]:
 
 
 def _load(path: Path) -> list[dict[str, object]]:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = read_registry(path)
     if not isinstance(document, dict) or document.get("schema_version") != 1:
         raise SystemExit(f"{path} is not a schema_version 1 exception list")
     exceptions = document.get("exceptions")
@@ -160,7 +180,7 @@ def _write(
             for (file, rule), count in sorted(counts.items())
         ],
     }
-    BASELINE.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    write_registry(BASELINE, document)
     missing = sorted(
         f"{entry['file']} {entry['rule']}"
         for entry in document["exceptions"]

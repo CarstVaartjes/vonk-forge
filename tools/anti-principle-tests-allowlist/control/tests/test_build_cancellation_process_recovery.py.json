@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/tests/test_build_cancellation_process_recovery.py": {
+      "<module>": "cf8cfb7f9d6a89a374e19f5004781427f43a3b333e596d95363707767656c531",
+      "_Routes": "cabd31ee940c5b55702e1b6805d4752f7a3291d651571a3ea7dde9d0947dbe03",
+      "_Routes.maintain": "f33663505b9525b11c97355ae87d49fe624b193b9acc5d51e09c50e10db29277",
+      "_Routes.publish_run": "bd737ed0f8c41ea52237a11a9786a7990692d3bf1c1eab61cef95ae7362a24b1",
+      "_process": "dc41926b55cf09b65340d86da9b7fedf98b8e2a6348a4eced64d129c9a56f9df",
+      "_reconstructed_services": "c150e708aa7f7446ccab4c1878e546ce7ddfff18c41c39a0084f36b138b15445",
+      "test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_death": "4b4f5184d4a9a226ebce2aa8e838cc058b4d2f8f7c78fbd012d08edc4f63807f",
+      "test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_death.run": "91bce5a8726495a744473e3e7f7fe59c9db3764bb6e0a31470afd298a65f7a75"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "function": "test_issued_build_cancellation_reconstructs_exact_cleanup_after_process_death",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_build_cancellation_process_recovery.py"
+    }
+  ]
+}

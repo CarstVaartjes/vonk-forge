@@ -1,0 +1,40 @@
+{
+  "content_identities": {
+    "tests/control/test_openapi_clients.py": {
+      "<module>": "1df4aac1c6c0f0543ec3b70aff12d1a079a24c686a5f8b00cab1df3aef6ebac6",
+      "_JSONObject": "0b15456a20f66013d3f40084ff144c0eee98fe7b57b9258558664617099f772b",
+      "_JSONObject.__getitem__": "0cf6267d04e05a7b02a8f89ad6f2e70f23b63a7fcd8a338eccf640a51cda462e",
+      "_JSONObject.items": "74efb7c62c23f356378b98319cef3a14aed641399e5d36ea634a89352e17089c",
+      "_JSONObject.values": "aa5a867498798edbc0793667605a2c57026815b98601987c539e271e3edddf66",
+      "_operations": "18af2a6f147552f0568950a5f7c43283f08aef1d9663c4a2e5bb15de2cbdaf00",
+      "test_admin_schema_is_secret_free": "2bbc34c53c270a82823aebb2a040628ea003450b4cc1bd84a462716c4eefe066",
+      "test_browser_auth_contract_declares_cookie_security_and_fixed_validation": "6366f115c11f179767a50b8458ee7e1255641ed99859d1584e41919f81bb2e6b",
+      "test_cli_packages_the_generated_admin_openapi_contract": "8f8566079466334e53c7c8bdee026db64eaa9036b9dc5c68099b1129a8e75c92",
+      "test_generated_fleet_projection_vocabulary_is_finite": "217c6e0a4a6ebb205c26495a9054cf250373453425653b74a79ec40cb250bddc",
+      "test_generated_library_contract_drops_legacy_visual_artifact_identity": "d906d8561a90dd8b1592620bf524380fd99cb109ecaddb065d794d01c9bcb7f0",
+      "test_generated_library_schema_uses_shared_authority_documents": "738abad209ea7ada1014a874b35eed661524c3d584b8c68dc4253303b08797a8",
+      "test_generated_openapi_removes_retired_catalog_recipe_operations": "4716eb32ad704a913fcc3430992de0caeacb9d784ef62cfbd8be2831351df191",
+      "test_generated_profile_authoring_is_logical_and_transport_neutral": "4bfb21b043dcea63643691995d461b17be0a8f0e1db1256141e00605d3466ff1",
+      "test_generated_python_client_imports_in_the_root_locked_environment": "cbcbd63e7f0f00e8894ae1bce12c90cd8aed61f45cd1a4578e5a04bd4f6b2e62",
+      "test_generated_python_client_parses_documented_operation_errors": "e5b8c110f0977c13477396fc751399a0e8a54d0aaea0870bedddcc32f302f3e8",
+      "test_generated_python_models_compile": "a4d3748b52a76c3fc9dd1686e842a7b68708f686718e0bac7e5c7c8872b72727",
+      "test_generated_recipe_detail_has_one_canonical_topology": "09389056d133e2b162e28f8be1a05be56bc46f0e0c7a5134653e3056dff50868",
+      "test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait": "8741d939957fb449595ef9275a1cb5d0950d17c041faa1448b2d65b54b36ee60",
+      "test_generated_telemetry_contract_is_concrete": "4a45c1fcabe148cf905ae5d7457b901596438cd4bb98bf2e851a454a61339cbf",
+      "test_library_contract_uses_direct_canonical_model_and_recipe_facts": "c2d9b28d5be834ddd038ef40085a25d37dd04c8d8158502a926242e964a44867",
+      "test_operator_cache_and_profile_requests_have_current_document_schema": "98bef6e9235a8c15c147d6ab28e619965a4e2e2d3e550055e76d6029d8df2193",
+      "test_packaged_profile_load_requires_a_request_key_and_refuses_overrides": "1d7058ccfa9536b87151ceaf72f87029ea90dde33187e856df387148c0a3d137",
+      "test_stream_resume_header_is_in_openapi_custom_transport_contract": "21525acb40d8a4e9ad4e2a6ac9af3dea4778444a4e1a110b0c9ff83621b52e31",
+      "test_streaming_artifact_transfers_are_not_generated_as_typed_clients": "e3f5084a5e366215f2ab440c41939ed39fe10b5a1bdacfc05189ce88676c4d16",
+      "test_tracked_admin_contract_has_direct_enrollment_and_typed_errors": "942fdde9f612ddd8278102eabe09b359ab7c5906c83f343993281814a038535a"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "function": "test_generated_run_switch_clients_accept_auto_wait_and_preserve_manual_wait",
+      "kind": "operator-wait-assertion",
+      "path": "tests/control/test_openapi_clients.py"
+    }
+  ]
+}

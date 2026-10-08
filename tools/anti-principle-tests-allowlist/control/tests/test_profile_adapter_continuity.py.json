@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_adapter_continuity.py": {
+      "_running_child": "d5d7035623a45763188ca6707107c4e91ef9fb792c38c2e4a841883c090a810c",
+      "test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane": "a2be4ed84cabe9b406ecb4164ce10967586f06c229f09f23640c012f5243e311",
+      "test_partial_adoption_keeps_active_identity_and_skips_changed_queued_lane.start": "3bb1d82a161c8b9cdd4961f52a2127a35e71208482bbd39ac00d072791284ad3",
+      "test_selected_cancel_observes_borrowed_agent_receipt_before_completion": "cda9f3c2997d568d085676adc7ad2bf726edf67b71c5f74418cf45405aa0b1b7",
+      "test_selected_cancel_observes_borrowed_agent_receipt_before_completion.assess": "9b72c7c111408ad48ecfc016e9faa957ebf9c49f6e7eb2316748d225ada73d58"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_selected_cancel_observes_borrowed_agent_receipt_before_completion",
+      "justification": "Tests exact cancellation acknowledgement while a borrowed effect remains live; its mocked observation seam cannot prove fresh product admission.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_adapter_continuity.py",
+      "reason": "security-edge"
+    }
+  ]
+}

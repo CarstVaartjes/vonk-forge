@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/fleet_qualification.py": {
+      "<module>": "bcf2385c4c1f89491181182a04f0bf3ae75e455a3a99abd593766cc325a4f847",
+      "ArtifactJobSmokeAdapter": "f8f33e85ab03f1ee01c50270a11419bb6568289ea70287aa1177b3c352fb101c",
+      "ArtifactJobSmokeAdapter.__init__": "1c301192f475a6aba747ea5bfaf6f9fd90709d41c9e2d9eac28bb3baf70bb5b4",
+      "ArtifactJobSmokeAdapter._run_case": "fce4029abc0f3c4f479284cec94e6e9dd2dd82ce6e0613708e3b57130a301eb5",
+      "ArtifactJobSmokeAdapter.run": "c6e1e5dd34ae8a91642c6a6604306c9bbdfe49dd0818426b90fc0783df62a9a6",
+      "QualificationError": "9141b1e61953e77294daef37000ad181ea94b353894ff2da1d03368f1271eb8f",
+      "ServiceSmokeAdapter": "054ab6ef4ee27aa8221ab4ab8d25c38dbabb10ec6e2a16479e70abd1336cd895",
+      "ServiceSmokeAdapter.__init__": "43b9170e25594214f7b4f9f54309be6a76ff99c237b62c8c8e8eab45202438a4",
+      "ServiceSmokeAdapter.run": "a49a79c0c0e3aa07da4b1852dfedf22e8e9aeb9d0d27bdcef213e0133ba5fa43",
+      "_assert_service_response": "7d315ee0f247acec79e8eefb376a4087722cd385a5bd6ed77ec16186cdeef9da",
+      "_canonical": "211061861edd0e0e841b77edcee01b8c7a3fb8ebfbe432e3f7bedb6a473ec6cd",
+      "_object": "7ab8e4f71388e20da4af5510000c2b4929bef74e381f3eba67d5cd2f6964f4d1",
+      "_quote": "fe1a27940dc14e434bb4ffcf051bf4a2dbd20d9c1fd3639d16309594e38d8187",
+      "_service_path": "aeefd73a2e479e045ef4b8bbdbc7c52d50b417a15ac06706d2991d86cee036b4",
+      "_strict_json_loads": "c0bb316c235c296b41130c145068fc83cbfa349fec7dae584c54ca7c0f050ffa",
+      "_strict_json_loads.reject_constant": "1cc0ff908005c6776d784e137971240590470e0d46c202be9dffec0c16df8f92",
+      "_strict_json_loads.unique_object": "9bfeb27d9c64a8d616f7840ffb7b52991facdc4e7b0745015506c36c3a4bccad"
+    }
+  },
+  "debt": [
+    {
+      "count": 8,
+      "path": "src/cluster_profiles/fleet_qualification.py"
+    }
+  ]
+}

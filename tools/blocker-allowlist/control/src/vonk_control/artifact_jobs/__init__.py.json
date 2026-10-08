@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_jobs/__init__.py": {
+      "<module>": "c917b75f126ca987a3f8369c905ae2337fa69c6dfc68b07db671be1027256e41"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/artifact_jobs/__init__.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/artifact_jobs/__init__.py"
+    ]
+  }
+}

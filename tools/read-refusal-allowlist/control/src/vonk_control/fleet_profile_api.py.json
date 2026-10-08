@@ -1,0 +1,100 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profile_api.py": {
+      "<module>": "e8b9ce2fff85ba7c82d292c51b4964f146bb7e10d0ab329587e3ee171998b681",
+      "install_fleet_profile_routes": "a3edf11e444be72a30f23a9588398feb64fb04a516cb800cbc4511bb89540942",
+      "install_fleet_profile_routes.autosave_profile": "af1da8c3efbec68f8eb872c233922877d2357a86518b54c6814abc2c0e882687",
+      "install_fleet_profile_routes.get_profile": "a7a33247117317f6312b1f1425b9d2024811c19472028d13831c45a5bfd0042c",
+      "install_fleet_profile_routes.get_profile_definition": "4ea3292b34e0585f5dbb71fca5b8993ba5f1dae2400d85138163eca1cc7fd516",
+      "install_fleet_profile_routes.list_profiles": "6eca01d357f0975544536c80a9c2ec610014d757075ba73af648a780d1981518",
+      "install_fleet_profile_routes.load_profile": "350622cc9578013faf69c3d39602a441fef950d19b39f784f4268da378bb9a1b",
+      "install_fleet_profile_routes.preview_profile": "41e4a609983b970335dd9040fd6004eb8e3f7b341680e35dfaf8b0820b632236",
+      "install_fleet_profile_routes.profile_application": "3eae29cfb05d1ff7ccbd3eefde2becb2ad512e21dabe69a6277e18e1fd508a67",
+      "install_fleet_profile_routes.profile_application_by_request": "c8bd5b26e4730fd7ad3322329bc240b02cbd862f7d5d820408db031720ebf33c",
+      "install_fleet_profile_routes.profile_endpoints": "cfcd5f8a38ae27c742776163e8b869e62a39fd5cfeda34598c1c2400c1c5e06c",
+      "install_fleet_profile_routes.profile_progress": "2ca5016b8115cfecb0c898769f825ecd85c8464e2f80178224422f86d7f0dca3",
+      "install_fleet_profile_routes.require_mutation": "5185bed49984b3085fa3c0a34e5a2090143ac96083c8868a8dddd87454b36000",
+      "install_fleet_profile_routes.service": "39fea378c550704febdc9dd1f1424993a21a5d620b4f1425d662e0c5e79c9c20"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "get_profile",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "get_profile_definition",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_fleet_profile_routes.get_profile",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_fleet_profile_routes.get_profile_definition",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_fleet_profile_routes.list_profiles",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_fleet_profile_routes.profile_application",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_fleet_profile_routes.profile_application_by_request",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_fleet_profile_routes.profile_progress",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "list_profiles",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "profile_application",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "profile_application_by_request",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "profile_progress",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    },
+    {
+      "count": 2,
+      "function": "install_fleet_profile_routes.profile_endpoints",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/fleet_profile_api.py"
+    }
+  ]
+}

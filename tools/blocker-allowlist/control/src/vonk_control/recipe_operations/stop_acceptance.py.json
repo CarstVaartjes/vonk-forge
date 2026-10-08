@@ -1,0 +1,100 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/stop_acceptance.py": {
+      "<module>": "5a822e656b96dd528bc34edf20345327b0a1c6afe5cb5945ea960704406a530b",
+      "StopAcceptanceMixin": "fec424c1a36f21a93d958f5f372cc8a8ff3c7ea831f55d82d975053ba9969f85",
+      "StopAcceptanceMixin._accept_service_stop": "0f872bc2ef900c3766729a287f507c6d47dcc81594097d4a1b9f24e00214829f",
+      "StopAcceptanceMixin._service_profile_stop_owner": "5d0632e8cbfa0b4b9795b315f1f15301aa0356f3f3e4680c53c9ada76b6e427f"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_operations.service-stop-review-input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeRequestInvalid",
+          "StopAcceptanceMixin._accept_service_stop",
+          "stop-plan-is-stale-or-blocked",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.service-stop-review-security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-authority-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-authority-is-unreadable",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-child-action-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-child-is-ambiguous",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-installation-disappeared",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-owner-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-parent-binding-changed",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-phase-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_acceptance.py",
+          "RecipeStopAuthorityRefused",
+          "StopAcceptanceMixin._service_profile_stop_owner",
+          "accepted-profile-stop-request-does-not-name-its-exact-phase",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/stop_acceptance.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/stop_acceptance.py"
+    ]
+  }
+}

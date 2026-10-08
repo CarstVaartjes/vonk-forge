@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/supersession.py": {
+      "abandon_superseded_idempotent_operations_in_session": "5ff7e765e9e8738c16045fcc4e690eeb23a0bdb42ef8d08d341939dfd6c584f1",
+      "assess_superseded_agent_effects_in_session": "9c0a1414b114b415dc56282d36184b822da95d1393e799764823702ec2767424",
+      "request_superseded_workload_cancellation_in_session": "92a720cbf8ccd55a1aff5f8de88d4eb112b96a7d742efbaf7c508263061b4592"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "agent_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/agent_jobs/supersession.py",
+          "InvalidValue",
+          "assess_superseded_agent_effects_in_session",
+          "workload-observation-scope-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/supersession.py",
+          "InvalidValue",
+          "request_superseded_workload_cancellation_in_session",
+          "workload-cancellation-scope-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/supersession.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/supersession.py"
+    ]
+  }
+}

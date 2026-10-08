@@ -1,0 +1,40 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/artifacts.py": {
+      "<module>": "bb6b7978947982d22b21955f14f8412414eccde837a95a17685f387b76466fb9",
+      "ArtifactPart": "d56cf3094fa17ac70f4a2a3b37b11e3db9b46ecdbe253639c68172cdb139fef5",
+      "ArtifactSetManifest": "70ed6957b62fa1af1b20638f84c789ac92aa4d1a7337821983ff3e6a92d51861",
+      "ArtifactSetManifest.contract": "c7c22017837a770554fc4ff9876ae926384e87c336faf951399a68c9e31950fe",
+      "ArtifactSetManifest.digest": "dd6b6044d86b999d21a3b9f9a8414dedac6b717f629092c7121e82d067e0d8fd",
+      "ArtifactSetManifest.document": "7a0f3942a054641de5e23f72d2e3f56c93e01f0d75bb12bb20241b39d97cb612",
+      "ArtifactSetManifest.expected_bytes": "c0e0c6aa7d51841a81163a44e2c721a8ddf1d06394f217f85af1b5abfcc93ab9",
+      "ArtifactSetManifest.from_contract": "a50ffee60611b9ec90a3da1852368514d4a0e1534b2a74dfd63127d1c0a975de",
+      "ArtifactSetManifest.from_document": "53b5ac1d1fdc459274928c8f126100d7335debd641811929061c9abf9d9c8416",
+      "ArtifactSetManifest.identity": "ed883e32cc3a8a60d1375696d7d4b5fccca5b95e311c2f13d16c7ed4e310eb85",
+      "ArtifactSpec": "5d5bce35406212048bac4e9cd8bc1f9d7b599736b15ecde8a41209e35b352240",
+      "ArtifactSpec._from_wire": "f59caaad2d7685c6b0422a0b5dc28a79ffb93897abd07e0575cd4f6d56564d65",
+      "ArtifactSpec.cache_identity": "888b7d6ee973426150f4390b977c9b210d208e4a5052c4eed407a1eb0a8ede49",
+      "ArtifactSpec.contract": "30ebd22322d24c62878ded1ce9dc105b7cd817a709fae5df92ed995eb733227c",
+      "ArtifactSpec.from_manifest": "b14d9074e702fc5b5d61b1ee3927019022417382e7e9278fc00fad9b0881c28c",
+      "ArtifactSpec.part_spec": "6d1bed5d755a9609054b5f958fc4a582c47c3138e645143c8341ac52e3026628",
+      "_composed_artifacts": "c688965f357a499ea616b16a6fcba223840601623ea8dab7d6aac3435b876853",
+      "_has_python_tuple": "e85a61d0ac8d6c77f3c594163e5b7ebd74defdd9b60d20c6e8e431389b497ee5",
+      "_is_digest": "0e5d18e895827f1ac393ec21b3b00e72871847e64971d9ef6d73c498868b1a0d",
+      "_is_hex": "adee390c73c7cbeb4c34aea5c8ec35a3e993c9dcf105106ed7803e359e6c82ff",
+      "_optional_digest": "81ff74940146fd3b9a49efffd1c6c4e3735937d1471ab38a6ab141a802a0977a",
+      "_part_from_input": "ee775b89c924a4e13210506059b6d5183432b3cdf62b42d335157a98f6886359",
+      "_sha256_json": "b292bac354b7ff35c242ac5f61c28d20c56c2d5d08a1408728c899397de205a3",
+      "_split_transient_bytes": "f24596f41547358aac5061e73da7692828436006e7c058261e63974a135ee8b8",
+      "_unique_artifacts": "d6cc848318812c85daa2f7136850219628b4e2ef42e24a86a8b1063ebb12ec76",
+      "_validate_artifact": "b029107a1afc858d4397e9b243795ef86d560cb3bc8e1dd4c121ea900c5268d5",
+      "_validate_manifest": "cdccb08d114d01042d8fb2a6fb5db3680cceaa23e4966cf3faa0f7b95593932e",
+      "_validate_parts": "8a7c0e722b855892c37141060caa6e4efc6240b54710edaf47b3ce391d2e7fa0"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/model_cache/artifacts.py"
+    }
+  ]
+}

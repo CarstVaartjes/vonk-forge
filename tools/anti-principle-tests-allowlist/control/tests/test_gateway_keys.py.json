@@ -1,0 +1,41 @@
+{
+  "content_identities": {
+    "control/tests/test_gateway_keys.py": {
+      "<module>": "5ea09a10507878cec32930a143ab1c2a841e98dd06c813521a172f75c1d78dd7",
+      "FakeLiteLlm": "cf60f4f468ad0af90a09ab8d93811487b7923e9f1a452ef1d57e3c27d4df65a7",
+      "FakeLiteLlm.__init__": "84eeffafe2eddc3dd91f1bd830a14e8a48cc1ffb07f164b3afb4048d8e0cad92",
+      "FakeLiteLlm.handle": "8ad23929e010484918500d252fd6d38905939960e1631adcec36fc21daf756c9",
+      "_client": "d31ea9f8f2905f96e5fa22456de90d01036d08d055985304e97240020bcd7a98",
+      "_service": "6a51e5ec9460af4ef92fe4c27563c254dbb82dbfbcba8ffc040ad90f82413834",
+      "test_create_list_and_revoke_client_keys": "6cd031df1001c72472e8204940101c5ccab420e8925b34b1b85ae2cbd064668a",
+      "test_default_key_is_created_once_and_heals": "5304d97d626150166715723ed7e75d6ee6e2bc0d44e904e91b3382d950d96838",
+      "test_gateway_denial_is_not_softened_to_bookkeeping_unknown": "3323fdf5fdf7aaa8ca7693d0d174a0ce5566e59a9acca466c569d72bdec3647f",
+      "test_gateway_denial_is_not_softened_to_bookkeeping_unknown.handle": "5aa8ae1933fad9bd58969b762ad6e87cd280b1cbe0c6e83de283f42afbb7adaa",
+      "test_lost_create_reply_reconciles_exact_secret_without_replaying_effect": "e5f8afa530e06e8381d986ba3ff063ed7ab5bb45894666b176a7ed3ca0f8fcd1",
+      "test_lost_create_reply_reconciles_exact_secret_without_replaying_effect.lost_reply": "17e31f5647bdfb29abbd79196ac32219e92a1fe0a18ea8853fdfc28998b41e3a",
+      "test_only_administrators_create_or_revoke_keys": "649a557dcfba231083d636a8a9b97c47c64759ae21ada1b9520cbcf4b9f7fef0",
+      "test_roll_replaces_the_secret_and_keeps_name_and_models": "3a12eff24fc2535fded9c449749b99d9604733f4bd64e353dee2613fcfce8bb7",
+      "test_roll_that_fails_to_create_keeps_the_old_key_working": "30f2c5eafa7eb1a562566fcb6016be1df2696034486a94a7a0dd02b28b405134",
+      "test_the_default_key_is_asked_for_again_until_the_gateway_answers": "53bf7555170430c287f3a603bf3686f6c802a7095d71792e6b74d4befda974a0",
+      "test_the_default_key_is_asked_for_again_until_the_gateway_answers._Service": "1f033d826756aa28cb4ee03fc5e4e98aff3f17c37250bbf8bceb78c6a632f38a",
+      "test_the_default_key_is_asked_for_again_until_the_gateway_answers._Service.__init__": "641be20eccce23896350b5bb541307fd7b2c5f4af6e1974183db37b42ee819ee",
+      "test_the_default_key_is_asked_for_again_until_the_gateway_answers._Service.ensure_default": "c772c0a8c6e5d7e471a47c7d4b266782059f6cfd892c260ffe015f393d9134f8",
+      "test_the_default_key_is_asked_for_again_until_the_gateway_answers.run": "981bfcffdb95f694a67eac213a391e1c4b2cd7a2f4604a19549455ceea3773d3",
+      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted": "442ef7d329eeb4304d0123162ee6c1e487282713f234912f4eb21901babcd3ff",
+      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted.assert_reason": "89fbae53681be192db136fba6e61018624e582324487f00e5e6f1ebd4f7ce428",
+      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted.assert_released": "e7f5643f09d5af9ea21f01d65276e7a66251ed2f3031a62542e02761a5bcd169",
+      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted.end": "6fc507f507a3e9236ee5ef08fcffab52ea0169f0796a250d9c67c51c02bba4f4",
+      "test_unknown_create_ends_without_gate_and_a_fresh_create_is_admitted.fresh": "1c7e346cd9d52681e5837e715e77db75e3160a334e9efeb9c70bb3743491ea34",
+      "test_unreachable_litellm_returns_bounded_typed_observation": "503a4788a0d753135ebde94be51cefb8433caab501bb3458a368fd6eaf868df2",
+      "test_unreachable_litellm_returns_bounded_typed_observation.refuse": "e591f36854fe28b157eccf64a6aed279bdf771074d6df4ab987d407e10513c09"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_create_list_and_revoke_client_keys",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_gateway_keys.py"
+    }
+  ]
+}

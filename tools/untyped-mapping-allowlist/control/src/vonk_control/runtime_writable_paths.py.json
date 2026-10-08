@@ -1,0 +1,33 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/runtime_writable_paths.py": {
+      "<module>": "bd34347757e9edbef7f0fc615628eafe1e97d21257202ba0608fefd6a83ab9f7",
+      "EngineTelemetryContract": "28e1d86cb5889d49867935c65a86980bb8cf395b85d56443d49a3b111d054a72",
+      "RuntimeRequirement": "6090bc9dcd459170e15b208c9352dd2e0726c79bdcd1ceb0d29c1fc5ea033279",
+      "RuntimeWritablePath": "5e8b10f3c3ac9352c4335ce638233bbfcb231e688d4bcaea56ca1bedc7a9ecda",
+      "_compile_error": "7eeb06b234c576c9beb16297581005d5702890d35fa089021ac991187952ee80",
+      "_environment_defaults": "21b1bc9006064a63d092800016441cf12d31724ff8cc5569e7b9074e95875104",
+      "_merge_environment": "12162f22e8e72a536bd44c163c0f7e63d5bcd9b73643c2bf6e88e8c68c63742f",
+      "_requirement_resolution": "d4ba582b986289ef0e906b1a5d7f21e45dcee621bac862cae9fbe6a0f3922175",
+      "_validate_requirement_paths": "4e73de8165e3f47156702a67eb4cfaaee1d0fd5db3c7cc9162fef6563268d683",
+      "compile_environment": "b52a717ff427d5d0de0003e78ce37d6ad949c7dc4114640ccc1ac51b3e2ce43e",
+      "document": "73520196b41acadc4e0f76070ddaa91cd608b4198d80b52646abdfc06f91aabe",
+      "effective_environment": "f0437d1f65f4445bf67e5299cb6bd6f80e54e49e74c0b5ab659e1d4e67d47773",
+      "environment": "37d8ab4f26784e77dc9326322c0ae91d2e62ef45dead40e9ab89a1b9ca5aee18",
+      "materialize_environment": "37e0bd6e688738817cfbc8c06dbc777d4a227da4f01e4bfa3fa9c8f14599bc95",
+      "reject_recipe_environment": "ff514a5494bcfe8763619da9e644d26625805f3e706c2b460249ba6771e4da64",
+      "resolve_requirements": "4b3d970e35a1fae4488726307f4c0db448696513ac8b0330be33ad9896363b1a",
+      "split_requirements": "2137d3b4704b1574490ccb0c8396de80fdaefcdb4f1c89bd65f7c3ac4ac0c07f",
+      "telemetry_contract": "8bed0663dcff9cd9a7b77e70c06a83ec397af4b05e5dce6ec5c329993beea0be",
+      "validate_paths": "9ccdf3952ec518e1b7df6a85586ef4a437b366929b694d99b87bf15ce08e698c",
+      "validate_telemetry": "b981dfad8944866ed738a8f896eeec1a485584d4fa153cb4d17da1a8243e63bf",
+      "writable_paths": "e022a37e6d5dfe8dd0b87af4f6c2fc02a9c763aa97bb8d37d0c78fe5209ff005"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/runtime_writable_paths.py"
+    }
+  ]
+}

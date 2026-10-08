@@ -1,0 +1,58 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/updates.py": {
+      "<module>": "c400de21f647ee7bac2f7feabf3c0d889571c59deda0ffed9285cba6f0302a75",
+      "UpdatesMixin": "a6f217fc6db5942043a892c31b2ca3e9d2ac5592dd86c4c7cbeacd574d8c66dc",
+      "UpdatesMixin._check_upstream_revision": "f1ae79a2cfa104420e04c3221d0a3246fed52e8875c8e1eddf1952c136efd47f",
+      "UpdatesMixin._check_upstream_revisions": "110a90cd29d99291396d8d864c1822edddbaf2d703d5ebaeae5e99286571912a",
+      "UpdatesMixin._latest_recipe_digest": "d7902ec4ae6fd446f0c7e864488bfbc9bdd2862125b47321015ebaae6fe9c3ab",
+      "UpdatesMixin._model_update_candidate": "17298d23b2a761c39a89b360121b824ec9f4bb845760a0077027501b4427863b",
+      "UpdatesMixin._model_update_candidates": "74e937b09682ce1bd16b45f2ad3b8a0f240d6c80e3c032999e271e12a572f666",
+      "UpdatesMixin.discover_updates": "8627838bdceaab744864b9a50178b7b912ba495fac2cad555b8180a1221f3161"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/updates.py",
+          "ModelCacheConflictInvalid",
+          "UpdatesMixin.discover_updates",
+          "model_cache.cursor_invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model_cache.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/updates.py",
+          "InvalidValue",
+          "UpdatesMixin.discover_updates",
+          "cache-update-limit-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "ModelCacheError"
+      ],
+      "function": "UpdatesMixin._check_upstream_revision",
+      "path": "control/src/vonk_control/model_cache/updates.py",
+      "reason": "A provider failure ends this bounded metadata observation with check-failed and a typed code, without changing catalog state or holding a claim; subsequent requested or periodic checks observe it again."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/updates.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/updates.py"
+    ]
+  }
+}

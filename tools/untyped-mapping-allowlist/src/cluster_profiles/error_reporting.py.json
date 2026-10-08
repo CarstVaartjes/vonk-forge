@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/error_reporting.py": {
+      "<module>": "31684b3764bcbd78f15d2b75f20290852de0c72289c7dcd1656c67cc46151501",
+      "ErrorContext": "adfac37c6a73b8e9efad1f52348fd4127831e7163c54d725bb8665198fbeecfa",
+      "ErrorContext.__post_init__": "7c542f518a3067ef55d04ad85c564ce8a9519059582b03f1f0cff6c047ec5e10",
+      "ErrorContext.as_dict": "c901c034b3c646186b9760f26463b10d48db0acf81f419604eeda872d9ca9f7e",
+      "ErrorContext.render": "fbe8dbccd29eb1ec5456c7f424329c38596780f0eee0c30bca192622aa0ad312",
+      "classify_transport_error": "16cd2173ef9fc61986d0d300c6de137e6ec1960e12aed4453a021c4e2a15dcc2",
+      "decision_for": "26c8a6667c9b114de4703f610134dadd2d1366b50fa55e5426b665da3aec5461",
+      "local_io_context": "3c57031d85f7b35a61341b2a70db44aa3664a60c59e233a90e22c274d76f82aa",
+      "protocol_context": "6bb7c1cd768616838f048b3313d4a01257f484130b380c5f45bf60b4b013874c",
+      "safe_code": "685d4f1667df24d3c54a4de05a9ee7b3c13b1f45f2018ea24d8472c542752622",
+      "safe_endpoint": "cee69a71bc8376cd8cb2e141022e1c7719d0ce8939a400d3cf2d88fb3e4afd40",
+      "safe_path": "fe500f6b1c644f0f52dfde7504740fa4214477823250f070b0c0b7ff26b18aaa",
+      "safe_request_id": "a12924b4f92b4a5c92c2b0bff13e1e92905620483559972edd89ba031c673e04",
+      "transport_context": "e98199edb85ece1c5db529a3211f7c9bfb6a5ba7ac74ef26a3a797841a11abaf"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "src/cluster_profiles/error_reporting.py"
+    }
+  ]
+}

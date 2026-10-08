@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/recipe_image_availability_reader_contract.py",
+      "reason": "Typed adoption and exact-catalog recovery of damaged availability bookkeeping."
+    }
+  ]
+}

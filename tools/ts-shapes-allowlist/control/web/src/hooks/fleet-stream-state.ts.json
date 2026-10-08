@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/hooks/fleet-stream-state.ts",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "FleetStreamState"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_update.py": {
+      "<module>": "47700860cd4ec9b536f326cdfa81acbfc7e124840f81ac7a39fd669d9bb43e72",
+      "CliUpdateError": "46d4f49bec4db7488f0bc483b98064fabe703f3439df21a1c2ac8a4d25238d61",
+      "_NoRedirect": "48f7a1ab6c5f618d86c22cc63567a73f6e4ebe18da4b76f8d64f794f33527f61",
+      "_NoRedirect.redirect_request": "a1ac9cad20584fd4e6d29a39e9140686f49b153d1c67f9d4e8c9cee8799a9949",
+      "_background_main": "da0f15ba3d62efa8b61fce83e4f07becaeddb94152c976a28813b27dfbfc6113",
+      "_download": "d8844ffa6355de3df5fef728eb95890b86e62350bbaaf9db3f3b785b00ef4931",
+      "_embedded_public_key": "7f5ca4e484ec8c7e125e04fbe7122ca7d1e8e95c12d7db7f1ddfea0bc14170a2",
+      "_fresh_notice": "7b46f5e9a337538571f224fdb97148a5f3236a60f13585689d5ab9c3edb0e814",
+      "_notice_context": "47fb2665d2aed0c6316fac89a4e7910cf528160b92a1402967ca0a0294c98b5e",
+      "_notice_record": "3a67b3ab5a054b93a09a2bb443b94ccf15d9974f2321b52527ed31d128546eb0",
+      "_notice_timeout": "d389abaf9d6080c267a24e2e0bd3aee6770a6b45fd7d8b4232e5802f241b53f8",
+      "_read_notice": "e6ae36e83e7a7025c3098de9676d0204533fe3a3fb9e3e9617382e47e0277509",
+      "_signed_release": "257498a3e564789ec61e621baa3506d5cd7f31a755a4bc72f0c48e483cf3e22e",
+      "_validate_release": "367f5fe603cba6bb0286a90e6e95bd35793c695b36520440d31c2de64ac9509b",
+      "_verify": "426826c374dc1fdf2ccd2ced0bfd8c06528dc0d0494595919a68abcf4d5674e7",
+      "_write_notice": "49bab603e2c998c177ca6f30d24a6ff0fa14ac754cb6c28fc51845c10a43f560",
+      "background_notice_check": "54215e3242ae801bb0fee237cd3c018a15f346a9b3ff563c49354ea3faae1aad",
+      "begin_interactive_update_check": "668595407b45659449b6f71120b297239b6b99b0d54761de47923aa40a858610",
+      "cache_update_notice": "dadae7331a776382802e3231d785fe31949dc119a8fe09579b0766d8e37e6033",
+      "configured_update_channel": "e3f49403e49b583a590d3eb378ef7f5e000c8f77d9b8cc3233e20178eef99527",
+      "interactive_notice": "db73adb021a89c89ae62a8a9a5c83b275f18a2dabd500c9d809a637bde88eab9",
+      "run_update": "37aef325494d05a2e45cc6aa2bddc5a72021e7d46ff6f399831c1a3caaf6c164"
+    }
+  },
+  "debt": [
+    {
+      "count": 11,
+      "path": "src/cluster_profiles/cli_update.py"
+    }
+  ]
+}

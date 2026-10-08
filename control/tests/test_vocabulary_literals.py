@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from pathlib import Path
 
@@ -175,7 +174,7 @@ def test_the_web_app_spells_no_vocabulary_word_by_hand() -> None:
 
 
 def test_every_baselined_file_exists() -> None:
-    baseline = json.loads(scan.BASELINE_PATH.read_text(encoding="utf-8"))
+    baseline = scan.load_baseline()
     for tier in scan.TIERS:
         for relative in baseline[tier]:
             assert (scan.REPO_ROOT / relative).is_file(), relative

@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/persistence.py": {
+      "<module>": "93e4e97a44e0918e784d2216d1c627239f48ba44b9b865b1f39db96cd261619c",
+      "PersistenceMixin._admit_workload_intent": "2240b7325b9c5dd2dc78496a4d54649125433e5ad5790f69386b5b4928b55449",
+      "PersistenceMixin._idempotent": "848f648b50e1c559f591eafe91d30edf19db8cfad35e09371e22dfce76fc9700",
+      "PersistenceMixin._idempotent_in_session": "7801e2a29a0970574161f9f6353027d9e491eb41994b7c5dbd6581d4ab7cf039",
+      "PersistenceMixin._idempotent_job_in_session": "f98eaee01f6f71b90ab3342f8791197d9e3d9268ab4209cfc01ca14b59548cec",
+      "PersistenceMixin._queue_in_session": "b45a62676de56c6121984108c66d5fdaf3b9cb1a57ae3e1f4d8d0e331da306f8",
+      "PersistenceMixin._release": "569856a3e5badd481ed7557f7502310e24f32def99409a81ea397830c2cc0732",
+      "PersistenceMixin._release_node_reservations": "2f0fd3e775eaecdbcb377e6604fe80689416e5bea9d9635f1ccddb6fae98afd4",
+      "PersistenceMixin._view": "1da0deb7d92f71eba1e04aad080398ea0804aaf16a4dd5753f31fee864c91d36"
+    }
+  },
+  "sites": [
+    {
+      "expression": "(installation.mapping_id, installation.recipe_build_id) != install_identity",
+      "function": "PersistenceMixin._idempotent_job_in_session",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/persistence.py",
+      "reason": "Request-key idempotency: a replayed install request is accepted only for the mapping and build it named the first time."
+    }
+  ]
+}

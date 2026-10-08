@@ -1,0 +1,147 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/service.py": {
+      "<module>": "ce96b2a145537f786f966d28266fdb807fec4312394eaceebf72d52bb9ee40d1",
+      "AgentJobService": "ce96b2a145537f786f966d28266fdb807fec4312394eaceebf72d52bb9ee40d1",
+      "AgentJobService.__init__": "24232af992842d7543081b610a7558fcbf7ec3d8d92a8e41f05e47ec37c59183",
+      "AgentJobService._active": "cde46f735c8828f09f5fa34766cadf1c11b51892ca0689cca7929e2aacb40492",
+      "AgentJobService._aggregate_parent": "91660daf6343c8c3482591d28c4f9fe856e9443f2236182380db7bc61dad7a88",
+      "AgentJobService._aggregate_parent_state": "b189061bd77257cd4c805bfca51befaae4982d892dddfe1c48a7463dc2800349",
+      "AgentJobService._cancel_superseded_operation": "9dff853cc597a558fa66b55c6c25dba3270dcba6b41d82bab9ec1c8f6e3073f3",
+      "AgentJobService._claim_has_authority": "39f1ba5ddc3026b3c26f6e5a82f40c090310d04cd371a62d767d4ce65b0578c6",
+      "AgentJobService._claim_once": "7a84ffd0b4db03446a600eddbb6278b8f57a96915ca2b552fd5a0b31b17470da",
+      "AgentJobService._claimable_operations": "0d7ebf21cf64541b75ec6fa5a0460928574a19ec535c93486fa5c0aeb2f80c5f",
+      "AgentJobService._consume_contact": "08c3a8430da246b6f3dbda3a6cf0bface581e03181575474dd1d94fefa292095",
+      "AgentJobService._excluded_work_refusal": "2c982f9c540034940897c0f79aa7b0872d9de86788bdded3baf5d27a22998bee",
+      "AgentJobService._fail_spent_start_budgets": "509da5424a408947ccea93b6054a2b4ec2fe7f4886b0013c2cdd189e8c7c83c3",
+      "AgentJobService._fence_token": "cff68e6164af0b0c9e91ee4974053749bc3b75dcb44acdc6dbed32760458702c",
+      "AgentJobService._finish": "63d6fbff6e73427d81d00dd685ac72a0aef170fde1946c36e083cb4fde522942",
+      "AgentJobService._identity_is_active": "43e8513e38c346f8b63165f9f7f41adad7dd5d92df9e4421f5cc292463e905b5",
+      "AgentJobService._lock_identity": "f54855121158f4b3e7a58d04d87012b06d9d71400f69e98bdebad6b41fb88eb6",
+      "AgentJobService._lock_operation_scopes": "60349556fb09cff0c7848666b3e9644499d6d80647dbbb7a17bd41e3ed00a87f",
+      "AgentJobService._lock_target_scopes": "49241b680f8faca9c788f17964ba4f8b8afc914d86de97f742580a5e6a2b924c",
+      "AgentJobService._mark_started": "7f01fbcc8f622cc8ee7643bd7fd10882d693ed5139ecca8825cbfa40f1d15a27",
+      "AgentJobService._note_malformed_cancel_flag": "b1cfb30cbe40fa339d6762e8d1279260ec419fd5e4faa76fa7598da55e8f602d",
+      "AgentJobService._order_reconciler": "2d718afdd753393d445742e224ecb7f9839b51694db1b6c7bb23caa5184b24cb",
+      "AgentJobService._reason": "01323e0d69f49a2c4f2e91fa9705177af1fa7cdd5dda5cebd111d923dca2f6d2",
+      "AgentJobService._recipe_build_runtime_matches": "59bd5e001c933bef1fdd45fc238553417957a675ca9ef59e06e9a3cbcd5670b2",
+      "AgentJobService._reconcile_agent_upgrade": "9425df1ac866850a2d67e5b0b133e0a057652e1a1f1136e7169a20532307be19",
+      "AgentJobService._reconcile_dead_running_operation": "0f9a0e32602edae328c938369f4ede8e75840e745f5b1b7d41ee16b571d9c545",
+      "AgentJobService._record_claim_refusal": "185ff257cc0cf788b9151e065ae8f3ec9a1c9382a7c2767f91263ed52c29e1c7",
+      "AgentJobService._record_contact": "e2b264d0f89064bb1fced6adaf44cdb72d650049b3af4a43d6cbe78669fe6d45",
+      "AgentJobService._refresh_parent_claim_refusal": "95f3801533731ffce57611bc445f4e8e2e7212385c346e94a824ac2d32e444d0",
+      "AgentJobService._reject_recipe_build_claim": "b446af8273598a2ed95c31c8c2c96f9f4d21417b652228d2d6d4cdfe8dab6fd1",
+      "AgentJobService._report_event": "e9befd1ec23d9728d9d5aaa5b453ca360c23dc353fe8489d85b644fd1495e3e0",
+      "AgentJobService._runtime_identity": "ca44e5b903a7467d2cd1dcf4d51f440278efcf4e0f93e1ea4773127d73943624",
+      "AgentJobService._settle_lapsed": "d32b72836787163147bfabb04c361921901017298267cc1f4935d24fb1d74f8c",
+      "AgentJobService._superseded_cancellation_state": "9b27a8fac97bbc7f27191e464f8cec32bf7e4399b19a1ded0c7e2f611741bd35",
+      "AgentJobService._sweep_lapsed_attempts": "a67610c23d8440f7655b141960c0e8916f3db88a211b1419a1a4dab67583dc6e",
+      "AgentJobService._sweep_would_act": "d673e856a889a3779ca9942bede0fab0d822b05c0e0a5430f96151b6b2b34588",
+      "AgentJobService._target_scope": "763c6c578317ae678913481f86536e3d7aac1482c544aeab87bf940e5fa4e389",
+      "AgentJobService._write_refusal_note": "b98d5c37a8ceeeeb523d839452b4af5f922707b2045030a1b6e033742ca95e0b",
+      "AgentJobService.abandon_superseded_idempotent_operations_in_session": "c00c8cd3514b9cb8f266c36fcdcdd0b06885469e64927946298d5d67222e6817",
+      "AgentJobService.assess_superseded_agent_effects_in_session": "79680f86d88931897a5c5ab0dd37c33836d1243017cd5a5489dd3b528015238c",
+      "AgentJobService.claim": "3a31ccc62289e97fce2e333f43b89bf27b57a80ecf220403a0071c89c1d38f19",
+      "AgentJobService.enqueue": "37770baa5a37fe1f9c00493966d423dcf8817389dfa40af072bd67555c9aa546",
+      "AgentJobService.enqueue_in_session": "bbc645959f838ee69b33b6b333b5b874c1511cd11436df9f815cd376d894c4f4",
+      "AgentJobService.fail": "a062d421ab9cf14ae39ceb5b2535ef44d8ee5cd13a4bce532a1bee56f9464f31",
+      "AgentJobService.heartbeat": "f7bf5e7f7b2da3222a2815837fb3f71707613e6f22d19671a0ac7fca6c9ab474",
+      "AgentJobService.known_superseded_cancellation": "181ec42847302dd4eb4f37213bedda4ad371efecb7aed025d1ccab280b388202",
+      "AgentJobService.notify_available": "fc159cd1acf45b0ead6655b1de8eb4ee0a67e4d038f22030a03c755d7895fdb3",
+      "AgentJobService.reconcile_orders": "42577d047b60d254dae015c05f9d1f9e9642eb854bda4b3817bf5764f47d80d9",
+      "AgentJobService.record_boundary_refusal": "a632ee0cec51313eba9969a25f697d0165d115bfef3bf0c24daa30ba41bdf9a5",
+      "AgentJobService.record_late_result": "8c09599894eca8ef1363e640691526e14d519d9b800a846249e68e8d8004f885",
+      "AgentJobService.record_result": "519b4fb12f2c3809b03d139dd922b2203e136854d91538c8b447fbd1d5a1f4ef",
+      "AgentJobService.request_superseded_workload_cancellation_in_session": "a7e448d1b854fc1dabb6dbc87fdd119047d7855385c68969db449a6837dd6883",
+      "AgentJobService.set_contact_consumer": "e1b53dd8a8fc4bb3cf8c1d7557a8cddda921cd466fbad3f04804b429f64a571d",
+      "AgentJobService.set_result_consumer": "b3c99eaecb868c2e1e0afa9d2aece3b497653ee8bd8689455a7f97f2c85d6d89",
+      "AgentJobService.set_rollout_owner": "161f70e9627d1e77591fad720554f9d24e094d175b95e8fe399e5159c8c2853e",
+      "AgentJobService.succeed": "cb6bf8d0630e4900c46dffc8a4384d09a44d069893c9beb3fae36bd0f3d920b4"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "agent_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "AgentConfigurationConflict",
+          "AgentJobService.set_contact_consumer",
+          "agent-contact-consumer-is-already-configured",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "AgentConfigurationConflict",
+          "AgentJobService.set_contact_consumer",
+          "agent-job-service-has-already-started",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "AgentConfigurationConflict",
+          "AgentJobService.set_result_consumer",
+          "agent-job-service-has-already-started",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "AgentConfigurationConflict",
+          "AgentJobService.set_result_consumer",
+          "agent-result-consumer-is-already-configured",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "InvalidType",
+          "AgentJobService.__init__",
+          "agent-contact-consumer-must-be-callable",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "InvalidType",
+          "AgentJobService.__init__",
+          "agent-result-consumer-must-be-callable",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "InvalidType",
+          "AgentJobService.set_contact_consumer",
+          "agent-contact-consumer-must-be-callable",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "InvalidType",
+          "AgentJobService.set_result_consumer",
+          "agent-result-consumer-must-be-callable",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "InvalidValue",
+          "AgentJobService._finish",
+          "agent-result-does-not-match-requested-completion",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/service.py",
+          "InvalidValue",
+          "AgentJobService._finish",
+          "operation-failure-evidence-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/service.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/service.py"
+    ]
+  }
+}

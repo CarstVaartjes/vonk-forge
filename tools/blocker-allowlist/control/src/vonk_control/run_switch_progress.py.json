@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_progress.py": {
+      "_complete_operation_progress": "62a8049679b51183cba4608dcc463a84e497173e50dc73205ed57cd47daa82bc",
+      "_complete_phase_progress": "61e2d04bf1375b0caee813af46054b108be699f5f3bab8709598505d98198224",
+      "_merge_progress_evidence": "18d15e65720f7964bc5df6be7491207df0da91f4c1dd3160bcdc313f996b6ff8",
+      "_progress_view": "13993abe4e0441f03db5303d1134d2b1bf1aecbb00d91cd1c469bc9cb07511a9"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_progress.py"
+    ]
+  }
+}

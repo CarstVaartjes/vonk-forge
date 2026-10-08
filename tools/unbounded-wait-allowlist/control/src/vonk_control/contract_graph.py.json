@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_declared_parameters",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/contract_graph.py"
+    }
+  ]
+}

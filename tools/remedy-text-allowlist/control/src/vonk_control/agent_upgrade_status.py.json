@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_upgrade_status.py": {
+      "<module>": "ab2a2c48c912da6bee2dc994c85936927382d92d24441aed2bdafb8a00bbe74d",
+      "_identity_label": "936f7ae7f0023433d468e4836069194ac25e3fcd2ff91beef1045e44ec8878e2",
+      "_short_digest": "b5f7866e6952674d82280ae8e55e418bc0637f5673aceb7e41ab0a328945cbf9",
+      "_string": "9a4e6e093a2909b8964959ccae3ca32065d2285640729978e23b194fbfc6ddf4",
+      "agent_upgrade_next_action": "fb2fb87fac983409e77cc74616359c8c375c6326be2feaf81069910d84fc6fe9",
+      "operator_agent_upgrade_reason": "4e197eb4929d55291d30d3fe54e2a10005cf7fac1e63b230ae2568fccb0b4508"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "agent_upgrade_next_action",
+      "kind": "imperative-remedy",
+      "path": "control/src/vonk_control/agent_upgrade_status.py"
+    }
+  ]
+}

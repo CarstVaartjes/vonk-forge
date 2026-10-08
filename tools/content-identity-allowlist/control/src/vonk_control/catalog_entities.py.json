@@ -1,0 +1,46 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/catalog_entities.py": {
+      "<module>": "bbf73923d32e19ae7c9ef04812e6a6fce6335d5393ba68189bdbe855f4297098",
+      "CatalogEntityService.__init__": "84edde6446406c53156e5de65c5f67dfddf2b8bf9fb71da112dc230025e77bae",
+      "CatalogEntityService._bind_recipe_models": "e79427692213f943dd93d23e2495ddbdbf9acc423067d973711e0a27bb1bb3b5",
+      "CatalogEntityService._read": "c25febc495f52c685122a2adc0bfae1ad46e0886af0c1d92aeaae0080c05df16",
+      "CatalogEntityService._write": "bd43d7ab29896c1d08413cb51db977cadf83573b913a2a5f9678d842b81a3030",
+      "CatalogEntityService.create_draft": "301181a595ad93b400074bce00eef59357c6bcd3b402a6bd0ba9d33be43d629a",
+      "CatalogEntityService.fail_candidate": "cd208aeca96d3b7ecfb986567ff113f7f5f3789480b13daa1a5bc9a007050897",
+      "CatalogEntityService.get_entity": "9e41eca083a43a9553a43b6ee5d8fa367aa6332fd0b4d7585923407536a173dc",
+      "CatalogEntityService.record_prebuilt_images": "618616aa2133e81fa98f0038e87bdb21008f5cd494ebda97e981d24d18fd9a44",
+      "CatalogEntityService.refresh_build_policy": "4e941c3492241c7453d28b456048b36ddddb294696d38d5075a35d15778d029a",
+      "CatalogEntityService.resolve": "372d6aec5a0add4ae13ac298a1ff54910d0d253e6e5b58f1976b17e64d000305",
+      "CatalogEntityService.resolve_reference": "e3e139fd62bd70056d99838358cfcde97d6592468e0ea23b7c666ba48517e6da",
+      "CatalogEntityService.revise": "8b318b551ae7254fa81f0ad80aec67c6d7716f124575c099cd87960db581eafc",
+      "CatalogError.__init__": "6ae38d33a7e6bfab7a9590933c0876f7eb8d5eeb178b0776a6a2765b44a8123f",
+      "_actor": "0cb1d3b23061e03f0495168e4c59c4143671a5872bbb0d22e885cb1cfc35ccf4",
+      "_digest": "dddffa40b7cc9cb190de28a2fdf01e6f87ec33c2f7ace443aa7a1d2c5b317012",
+      "_execution_projection": "79bf92da12878bb502ecb097602b3ab5bd590feecc30a6cdb9e215d55daa282d",
+      "_head": "a015010a6ec31745641ca09f6a98dd423db56d188ec9e932b59eb1014082398a",
+      "_model_artifact_files": "5d4df84e2870f547d701c698605b0c1dc95ab65bd12530cdb1200c6b1f778e0a",
+      "_parse": "d440a816ea340d99601b28461659a4c0dae482306d96d6f6a58663d040b319eb",
+      "_rederive_projection": "d77a8be79b8653cc27f9de6e6e33935f89257e1bec4aeeeacef98c672cea9120",
+      "_revision": "a173d54acfc183e636ccb0370c2051b2e9b9c694bff085f0ddcb4f73f571d314",
+      "build_policy_projection": "977fcb3e44563a3619ab35d96cdd934c6bd825d9487917ec18898d9d7a16744c",
+      "recipe_document_projection": "5a1d3f05992dbe4238fb7093306b47be419ec4eed5fca0d8a7a29f6f3f924869"
+    }
+  },
+  "sites": [
+    {
+      "expression": "(root.kind, root.publisher, root.slug) != (kind, publisher, slug)",
+      "function": "CatalogEntityService.revise",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/catalog_entities.py",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    },
+    {
+      "expression": "CatalogRecipeModelReference.recipe_revision_id == revision.id",
+      "function": "_rederive_projection",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/catalog_entities.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

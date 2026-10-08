@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_read_regular_secret_file",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/pki.py"
+    }
+  ]
+}

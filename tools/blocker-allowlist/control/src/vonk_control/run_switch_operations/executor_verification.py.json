@@ -1,0 +1,88 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/executor_verification.py": {
+      "<module>": "05bda32eb61b4f3375edcda43fa235b58033a8c42c70984ff24fc08ce7536641",
+      "ExecutorVerificationMixin": "160e295ad89855059a226e84d00b0f07a5fee08c4496a7571269a7f442d8c700",
+      "ExecutorVerificationMixin._bound_installation": "ad783f133b6b46c11eb04e1ec8c816454e678a4dcf0f4e0838ef2ba51c269813",
+      "ExecutorVerificationMixin._prepared_installation_result": "3412fd196891006f6eec9dd5203db2e0fd4835b12a30c04ac52b144e98ab9aaa",
+      "ExecutorVerificationMixin._verify_cleanup": "5d216d44f7983ed35e7ce3f89112cce1e86bf714ffbfa8159ec887ed6ddbd236",
+      "ExecutorVerificationMixin._verify_installation": "4f64c2274399a0b0e053707f88d1b706c812cc484dcd0850315b720510626643"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "executor_verification.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/executor_verification.py",
+          "RunSwitchRetryLater",
+          "ExecutorVerificationMixin._bound_installation",
+          "run-switch.installation-identity-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/executor_verification.py",
+          "RunSwitchRetryLater",
+          "ExecutorVerificationMixin._bound_installation",
+          "run-switch.installation-membership-changed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.phase-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/executor_verification.py",
+          "RunSwitchRetryLater",
+          "ExecutorVerificationMixin._verify_cleanup",
+          "run-switch.reconciliation-authority-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/executor_verification.py",
+          "RunSwitchRetryLater",
+          "ExecutorVerificationMixin._verify_cleanup",
+          "run-switch.reconciliation-state-verification-failed",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/executor_verification.py",
+          "RunSwitchRetryLater",
+          "ExecutorVerificationMixin._verify_cleanup",
+          "run-switch.reconciliation-verification-failed",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/executor_verification.py",
+          "RunSwitchRetryLater",
+          "ExecutorVerificationMixin._verify_cleanup",
+          "run-switch.uninstall_target_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/executor_verification.py",
+          "RunSwitchRetryLater",
+          "ExecutorVerificationMixin._verify_installation",
+          "run-switch.installation-verification-failed",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/executor_verification.py",
+          "RunSwitchRetryLater",
+          "ExecutorVerificationMixin._verify_installation",
+          "run-switch.installation-verification-unavailable",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/executor_verification.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/executor_verification.py"
+    ]
+  }
+}

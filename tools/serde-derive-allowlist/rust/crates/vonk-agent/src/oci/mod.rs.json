@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-agent/src/oci/mod.rs",
+      "reason": "external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here",
+      "type": "RuntimePolicy"
+    },
+    {
+      "file": "rust/crates/vonk-agent/src/oci/mod.rs",
+      "reason": "external format: the global container-runtime policy document owned by vonk-forge-web (schemas/global, pinned by contract.lock.json); Rust reads it as published, it is not defined here",
+      "type": "RuntimePolicyLabel"
+    }
+  ]
+}

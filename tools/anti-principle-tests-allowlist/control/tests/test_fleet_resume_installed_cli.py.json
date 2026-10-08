@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_resume_installed_cli.py": {
+      "<module>": "f6c4845f84e7274b4a133dfed966c313d61aa1d6a388b18a8f8ef624239751fb",
+      "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt": "e8b88a3be1465b6806cd2087bee53617812c88c22bf319e50131885982824423"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_fleet_resume_installed_cli.py"
+    },
+    {
+      "count": 1,
+      "function": "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt.request",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_fleet_resume_installed_cli.py"
+    },
+    {
+      "count": 2,
+      "function": "test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_fleet_resume_installed_cli.py"
+    }
+  ]
+}

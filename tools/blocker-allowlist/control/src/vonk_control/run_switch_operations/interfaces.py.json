@@ -1,0 +1,32 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/interfaces.py": {
+      "<module>": "992204f0bd1233ca0f16a1b39c21e403935c08caa2382c8aa6404b07191e7c37",
+      "ArtifactInspection": "27dd650df5edb329c5dc37f452c313d42c70a5a7d7c031f4aa237eed35992278",
+      "PhaseExecution": "d07c8f85e62ea9b8bdf24c90092a3634978216df027036bf0a13b12c6abc2833",
+      "RunSwitchArtifactInspector": "420afd2b56794a8ce93f066e1371d8ae0f00e2acddb72f86f7d7795046f38680",
+      "RunSwitchArtifactInspector.inspect": "0666be827d76aa4ede68971a24413c733e42b55169a6dad7823194790c666199",
+      "RunSwitchArtifactPhaseExecutor": "c4f53be9c3f70a51536e4be805fbc7a5f78bd6fe631022478403b937b874d7b7",
+      "RunSwitchArtifactPhaseExecutor.execute": "0fa958c85d289a060435081243ee89546508793247e4c8591f99cb6a368bb253",
+      "RunSwitchArtifactPhaseExecutor.get": "267ead62118fde56a9944379c9e7cf00d76463665d7ba3d721f4bc5985a585ea",
+      "RunSwitchPhaseExecutor": "5c7490ea8bd1bea573d8a8a16b272180a859c350970e168d372aaee04e806876",
+      "RunSwitchPhaseExecutor.execute": "0fa958c85d289a060435081243ee89546508793247e4c8591f99cb6a368bb253",
+      "_BuildSelection": "73afa18b7b53b776e03e20ca8b28e9960d0f7e25a5ca30667ecba7938c0b6c41",
+      "_ConflictRun": "022a93e633695708359c418a7ff71ae98c8941f5982b907f031eda8313f7833c",
+      "_PhasePreflightGate": "98c61343b29c6c7735b0dc6482cccce4f3ee47a80bd0d548a598faf9b7bad73e",
+      "_PhasePreflightGate.__call__": "ddb5ffb1aeb7fe6cf74efe1c67587aa8c9b6721cbabd85c744d8eec46011ff7a",
+      "_ResourceFits": "5341f099b95977bbc6953e5046ceb8cea10059ea68205e562175ff23e2e65962",
+      "_ResourceFits.requires_early_stop": "4cfb765770e6bd80bc3ad04ec0b415c1e3779abd2070356f843e312d775b2534",
+      "_ResourceFits.stop_before_prepare": "d939cc0e765dc0662c14f3cf3ece70d1413313203d37f473cf4d2e6560158924",
+      "_ResourceFits.stop_before_transfer": "89de86e4251e8f62ca1f5f6dfd93689c9976c12389434c2ce4967f2fa3e15b4b"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/interfaces.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/interfaces.py"
+    ]
+  }
+}

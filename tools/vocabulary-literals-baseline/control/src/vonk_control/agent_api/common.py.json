@@ -1,0 +1,52 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_api/common.py": {
+      "<module>": "1c9989969eac7ab367679af48db9e657cd79791184e82887ee7933ba7cafb74a",
+      "AgentApiServices": "7a417335112ce0a28c70ac6a30fb34164d18113b003c7969a1f4daee9e46ba72",
+      "AgentGrantRequest": "92a4dc3c187e150d0331460ac38de2ebd2e472fddc9a265dc2b57a79f3d971d5",
+      "AgentUpgradeGrantRequest": "23f94b338afcbad2342856715660a1ae11e828676afc5eefb0f325b31545bf8d",
+      "EnrollmentGrantResponse": "4dc439605eeef593d534904748385c0e7b18e6d4a20eeeeb7d2ac2d9c38b0bd8",
+      "EnrollmentRateLimiter": "52fe9e7b68fbe4c14b26c4388281f673747c652aa9814532ffc55ed55082a833",
+      "EnrollmentRateLimiter.__init__": "b3d557791aa0a4bbbb659728b5a75151e21a82814537c8bdef08038f0e1fd692",
+      "EnrollmentRateLimiter.admit": "2780575ed32724da9a2b3331b9edd6ea9f122627515eadfe1a95c8b0213d5558",
+      "HostHelperGrantResponse": "658c0694532349bf49db03a43fcc760e2aa6ad0146803792a99fd52698d016b4",
+      "HostRuntimeGrantRequest": "52a1d998844af929cf4911fd227af77778f264ce9912442c3bbc5f48d57060d8",
+      "HostRuntimeGrantRequest.runtime_binding": "35a6fd72a13a41042ef26f3d4c917f9ae098146ce3dac5f24ab54ba51d62b6c8",
+      "PackageActivationGrantRequest": "f63f4d5270f26315f196e3d7ac1cd88df86c9f7d021376dcc71ba6214d5910e3",
+      "RecipeImageUploadHeaders": "5485541cc1db8022b5917f719be61f8fdfa63a8ec58f2a964909b4905a1df0e9",
+      "RecipeImageUploadStatus": "bce22f41685c415c8cc8b660640c94687adb7deffecf0bd175a92ab4016dca9f",
+      "RecipeImageUploadStatus.response": "2301e49885d0f5039c6ce1dd99ac1863522556e3d412c49c6e22c4885f554dba",
+      "_EnrollmentGrantScan": "7f809ceaf10f98e98b33751f6953b10055c3b24468bf044e81140f74b12f9a7a",
+      "_agent_identity_state": "45fedb32f8530bb35a043c48a02e86eec14e6d8a28554f6e50415d1c68c76041",
+      "_authenticated_activation_identity": "39ea4e02c2b9d08fb7512b572430d1c11a958b9512eaa0a651b4353a38b7ac17",
+      "_authenticated_identity": "40f58f270c2556ad7f34f10ffd7330ce3448874dfffd1fd6ed40ade7bc1dda60",
+      "_body_node_matches": "bfff9a922bb34d304830508d65a80f52ee1cb9caf0bd0273f656bec236158469",
+      "_commit_recipe_image_upload": "1a440b928ae5652174433b7fea14c06c110c183e6e2e6ee3d4ba26aa24864a42",
+      "_flush_and_sync": "6bbc447a7685d1fcf85ed2653beb07cf2d5877997f2bc605999516525254243c",
+      "_host_grant_response": "9ca7d66b603ccbe7e136b6ff100af17edd135085fa543a03ff1517015c2c651f",
+      "_issued_response": "08a31e51182ef955851a3074c6128673f955a08cc15674ba8af9c91af70a999b",
+      "_json_response": "092d7c5ee5ac57997818d6ddfcb2ebf739565ef137c252ed1a48795db7309045",
+      "_log_evidence_dropped": "f29e4b35acb7907008e3d75500e2925b3bcba6969844f9af88e7e7cc947ba946",
+      "_log_evidence_warnings": "5ab77d387e76027051e35147864a66a77c9e6682fc901c60119a0b859593acf3",
+      "_now": "67dc007c5635ac1e8ab9e24f33e72c196795a809ce55c7ed4c5a18cffafdf419",
+      "_owned_artifact": "40500b94ec9f65e5ea34c113a8c3b62a210bbfba1b52b139e151c97680647550",
+      "_prepare_recipe_image_upload": "310e40241cc4396be9fd7dec9264fa9c85abcf65071d2a2b7a97f8c985d25b33",
+      "_range": "99fc96f6b1c58449414bb6c37b6af1d1763d1f5dd5a8feff697205d3bc3e6ce6",
+      "_references_digest": "87af9b7445ef99e481b57efa86b99ecd13bf17bd8d280873f2064cffa77983e0",
+      "_require_enrollment": "be833ffa26a020e9931969f9fb2ce24f7351235d664372ae24c26cdeebd6f99b",
+      "_require_services": "6ebe2a76b34d095a911e5ca2242360d24487b9fea40bc74d72022abca3f1cb6e",
+      "_scope_identity": "12cdb2b97797816259d9d8561e94e2102f4895b188374ed7de300e93a0fcd2b1",
+      "_served_from_edge": "2848f994f4197d39ee27cf6793b79a0468109bbb53594380be19c118d77e8ae2",
+      "_sha256_path": "b36317e29d9ba817218deeca021dee275d8ecc37ce346a56f673830c897f8f12",
+      "_strict_json_datetime": "91dfcc0b4a1e1b780f2da6df279a9894ceed934033d33cfe6dbbdd4f685c54fd",
+      "_unlink_if_present": "2a7aab7a0fc6f3441f648bb060f8500e792c7c657e6952d2d3727296585a4a4f",
+      "_validated_authenticated_source": "b42a3dc79b906c0946622e3ef3705e0aa99dea3fedd3c25dfcae8dae9765a1b6",
+      "_wire": "f0b0320dac12d86b105d006d714986df8881c8614ba403b9d6a5cb141ad6194f",
+      "activation_agent_identity": "1696aacbd6131a191f56d3b66c85a572c6ff2b055b49df37742d86ecdb7f963f",
+      "active_agent_identity": "a3c7238532a9a49744e31217f916070677a5a402a57c6204ad44d99ce8367267"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_api/common.py": 2
+  }
+}

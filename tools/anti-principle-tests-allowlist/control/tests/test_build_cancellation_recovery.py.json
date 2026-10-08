@@ -1,0 +1,55 @@
+{
+  "content_identities": {
+    "control/tests/test_build_cancellation_recovery.py": {
+      "_active_claims": "d2a1f24a73fce2619337fc91964cb498c380f41e6bcb2b7b197bf4f6b750d034",
+      "_evidence": "e6f14120d801c4ca95debde5158c4e82db1c2d33b01f62694e1654b19707d05c",
+      "_issue": "c990f8a58696aa742dad3530ee32e75e807171680c05d51f39c115743847f132",
+      "_services": "02bac84fe3c90fe7a395c492c0c6e892a91ed54e0b59ad3fe8bf709c45735139",
+      "_settle_cleanup": "7f584f6b13f2584019b56fb3d1567f82ad9cd3fb33795bce9c325efeb5a1c3da",
+      "test_cache_removal_preserves_an_accepted_build_and_its_claim": "35fbf945dea7e2f3067a4da25ed482cf1d994433a373ec84275590a0664803d5",
+      "test_cancelled_replacement_preserves_the_verified_image": "050068c8b77d81d52118013432ad97b1ee58c9a13be64e2715b0da7071d06e2c",
+      "test_explicit_cancellation_does_not_corrupt_the_canonical_build_request": "017473a5292f8eb1ba20cbe3cf16966613870ae62d2bbe5b45e4deda69f4e1c9",
+      "test_new_intent_after_cancellation_cannot_revive_or_release_the_old_attempt": "ff5075d9465fd570c597af23a08f49b95168d6f93feca19c9d8783a9bc815c71",
+      "test_removal_does_not_lock_or_mutate_an_accepted_build_owner": "330f60316cc9b2afda49b525854ea9efdf6c541995969e9b4556285bc56f4e89",
+      "test_removal_of_an_unissued_plan_does_not_invent_a_failed_attempt": "328b3126a6a3f0334314e2896b248ca9134a17500800e14430b219be90287afe"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_cache_removal_preserves_an_accepted_build_and_its_claim",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_cancellation_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_cancelled_replacement_preserves_the_verified_image",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_cancellation_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_explicit_cancellation_does_not_corrupt_the_canonical_build_request",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_cancellation_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_new_intent_after_cancellation_cannot_revive_or_release_the_old_attempt",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_cancellation_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_removal_does_not_lock_or_mutate_an_accepted_build_owner",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_cancellation_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_removal_of_an_unissued_plan_does_not_invent_a_failed_attempt",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_cancellation_recovery.py"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/plan_persistence.py": {
+      "_load_plan": "a38b90c36e2eb1dc1a988a54f58441eeda1b4777277288121e173b2404011ede",
+      "_reserve_run_switch_assets": "b9362a90e9543fe50d0d57ef2870cbd6f4d2a7ead7887816ee39fb28d382f89b",
+      "_view_identity": "7d84767c5d004f347b30cb6df68084e69a433efe94e158e7011d4925fe1acc61"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "runswitch.submit-time",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/plan_persistence.py",
+          "RunSwitchRequestInvalid",
+          "_reserve_run_switch_assets",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/plan_persistence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/plan_persistence.py"
+    ]
+  }
+}

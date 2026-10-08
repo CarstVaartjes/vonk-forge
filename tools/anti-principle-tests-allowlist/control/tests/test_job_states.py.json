@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/tests/test_job_states.py": {
+      "test_a_batch_that_ended_partial_is_failed_not_retrying": "e1fc76e35620b20c40e303682bc427b60dd2f941a0bf76b0a9deeee3a08e8a5c",
+      "test_a_selection_finds_old_and_new_spellings_of_a_state": "8a7757d97d48ea5dbf39d55667f5ff703ddf50a82b3b7cde31eea654c3fa830a",
+      "test_an_attempt_that_lapsed_was_interrupted_but_a_job_that_lapsed_is_over": "c3846a8db261120dc56ec980163077b6e8991d4f62aea6d261ed1bfde2438b6d"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_selection_finds_old_and_new_spellings_of_a_state",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_job_states.py"
+    },
+    {
+      "count": 1,
+      "function": "test_an_attempt_that_lapsed_was_interrupted_but_a_job_that_lapsed_is_over",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_job_states.py"
+    }
+  ]
+}

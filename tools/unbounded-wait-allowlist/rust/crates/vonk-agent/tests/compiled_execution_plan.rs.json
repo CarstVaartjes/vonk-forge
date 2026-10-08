@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "mount_projection_rejects_over_duplicate_or_unsafe_targets",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/compiled_execution_plan.rs"
+    }
+  ]
+}

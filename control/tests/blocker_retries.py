@@ -7,7 +7,7 @@ the raise stays reachable without a loop, it is still bookkeeping debt.
 
 The proof has two reviewed parts and one mechanical part:
 
-* ``retry_loops`` in ``tools/blocker-allowlist.json`` lists the known loops, each
+* ``retry_loops`` in ``tools/blocker-allowlist`` lists the known loops, each
   ``{"path", "function", "catches", "reason"}`` (``catches`` names the
   exceptions whose handler there retries or observes): the lifecycle tick, the
   observe pass or the claim loop that re-runs the work.  A loop is declared by a

@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/__init__.py": {
+      "<module>": "e9c222c99a627b4650ef4443caa766017a57d4ab5b854e8fdff526bd233dde3a"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/__init__.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/__init__.py"
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/completion.py": {
+      "_report_event": "69e8993ac93f03fc9bd60c2f050f74975e7d8ac2ca99cb0907fa56e1e5c0e124"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_jobs/completion.py": 1
+  }
+}

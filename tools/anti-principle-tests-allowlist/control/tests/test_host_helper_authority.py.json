@@ -1,0 +1,56 @@
+{
+  "content_identities": {
+    "control/tests/test_host_helper_authority.py": {
+      "<module>": "5ada228673608a6bc6355c893526bff7ad74272d9caef88d67c99a96c5957487",
+      "_CleanupGrantArguments": "72f4e3384172e926f118326b10000312d33b183cd469034b6ea838ce24718403",
+      "_ReconciliationGrantArguments": "4c8e49a70b73b1e5f688759484f809df895c71de6c6e41610572431a2e55b13b",
+      "_RuntimePlanBinding": "402fbdc08b3cf9d8be84173beebc9177fa1d66ccba0f50844e024086fc5071d7",
+      "cleanup_grant_arguments": "268ddbe4d2c68077ce9be40dfec9e143630714d7dab4b2307a35fc51e37bd8f7",
+      "issuer": "7d7902db84be4cc86cb27ef5bbd4d19623f60c8fd72bad7469af67123cfb2625",
+      "reconciliation_grant_arguments": "ee128da9447de0c8f2840ff174ef52fe1d0512b318963935385c292e28950f40",
+      "reconciliation_identity": "531850fe2ac9a6807d2d69c3daaf237e5f0155231c08eeb23ef7fc2bcd1ded6e",
+      "reconciliation_service": "775846eeeb05fd80b48e5836a0a431d2016c1474f0a5a8f224a217a792786976",
+      "runtime_plan_binding": "f310111ee545ec3e5e756c48d20c7ddc8ffabd1ff5ef9bd6956f827db22206dc",
+      "runtime_service": "f069eec0c0795398cf5f1b73c1776a3d332dc77efc6ee202e79c217801f8c9c1",
+      "service_stop_runtime_service": "6647bf9dc62433f4282bb28dfff7087c7f6a05ab10bcc857143f90f8b69912c9",
+      "test_activation_grant_is_bound_to_live_source_candidate_nonce_and_identity": "5f5e8304e75e6e5ec808660a5d9ae1e0434c26a0e9d8a81281b68c89bf2f0525",
+      "test_agent_upgrade_authority_binds_the_live_attempt_and_exact_signed_package": "54551b12deac99f4213bac0d5a887c1993158f818cd48abe0216d6a5174fb339",
+      "test_cancellation_permits_only_stop_under_the_original_live_fence": "7a0b72e1dd6cd1c2cdcc0b0caff898e617098502984871c0d7311979098c38c0",
+      "test_cleanup_authority_rejects_malformed_persisted_payload": "fdf8fd760d7a17eefa47d988c41f5cad23a044d3c0b1f3aaeef10fe96bad7d0a",
+      "test_cleanup_grants_bind_only_installations_in_canonical_operation_payload": "43f6fa20b16d92faaf90e2a78b212863c4db547051bb3eabc838c34ccc83edb8",
+      "test_collective_cancellation_can_stop_but_cannot_extend_old_work": "56108f4515800792853586dd623d6c42dcbc82f0bc7936799d50c7d3e72bd191",
+      "test_collective_readiness_grant_is_strictly_inspect_only": "0c7927d0fed3d8633efae51b3b889b1e33bec3b0483ef9615c99f8b2cd784cd1",
+      "test_controller_issues_exact_short_lived_host_grant": "69da4db92df3385b24760a4219655cce3bbb5e804aacd1299d2d9bd7bee29c76",
+      "test_controller_refuses_mapping_shaped_or_untyped_operations": "9038c713bebd5bd60cfa35cd2a28dd4044afcbbbad1e3151cdde9359fb2d074c",
+      "test_controller_refuses_unbounded_host_grants": "1d2ac89f9564d4b9d93a9df6b352e99d6288a6354a92bf41c4d264d349261cc1",
+      "test_controller_signs_exact_job_bound_container_runtime_request": "9dc771735e0a116cc36099c2807db59b8e3d5ea5347ce40b05e20850d7896f20",
+      "test_job_run_stop_grant_preserves_logical_and_runtime_target_identity": "24ef1d4ec0f1a0d481710be6b03046f99972beddc9549f5deeafc96c70af387d",
+      "test_job_run_stop_rejects_wrong_runtime_target": "4c92bbbace3a4cf958c5451674a658241c517707d62bcaea65d439647e857cc7",
+      "test_long_attempt_lease_does_not_extend_the_cancellation_deadline": "a20c466bcfc3379fa76cdf1a57c1f8a6e5f182cdb1798d8723b8cf970eba82ab",
+      "test_ordinary_uninstall_cannot_supply_reconciliation_authority": "8b4bdd5a0df0c6f23d6efa0dc3c5beba914dd7b1853c280524b043390db5c422",
+      "test_reconciliation_grant_refuses_cancelled_or_expired_authority": "a9299b9aebc90140c0d0e1c275fc01311f03b3f3cda5209c8ccab6bab7290ca1",
+      "test_reconciliation_grant_refuses_missing_identity_or_unbound_request": "c5270aa6c51c9d121806e519fc13bf8ce3346c0ac3ad8681ae8a25939babc8d3",
+      "test_reconciliation_grant_refuses_stale_attempt": "983a42128ec65701d41c01dd1a555ce00232a73c8049b044f2c9a525271556e2",
+      "test_reconciliation_grant_refuses_substituted_source_identity": "6e9c5da1692199d9deeb7b0cf42cd5ae5ee17977b9983f02923512e676d070a6",
+      "test_reconciliation_grant_refuses_superseded_node_intent": "29e6513fc2bdd57aad533d624845d2bbee8528ebf96c2d673a826c0b9b092782",
+      "test_reconciliation_grant_signs_the_exact_leased_cleanup_identity": "138926068b5f0296f0dc3a1577646ee0a6b6426a849ae2f6b1699d8075f4055a",
+      "test_runtime_authority_binds_active_attempt_action_and_request": "8fcb6f693fbd5849c38c10149e4de9cda8c735b8162ffba4097c05e3bba93914",
+      "test_runtime_authority_never_issues_a_grant_past_the_attempt_lease": "c4bd0d75247d8bbac32b12831d69bd8bafbb5008d94cf307cbfaa633f9478563",
+      "test_runtime_authority_rejects_action_not_owned_by_active_operation": "4e7869a7c88bf13c4311f9cde47b67fc5759faf9c6674eb73ab98237ca81f5a3",
+      "test_runtime_authority_rejects_installation_binding_on_noncleanup_action": "e521be86fa4b3eecc0dbd8ea3c8467b76c933fbc73047f948a79f3386e2682c9",
+      "test_runtime_grant_request_enforces_cleanup_identity_and_null_policy": "f81a377cb224745997140b39ce9e1a4a4ba0d1975ae7aa1cdc2c35c6c5a35e15",
+      "test_runtime_preflight_grant_is_bound_to_its_own_fenced_operation": "6bf32ace97a1230eb8d0cfa3703f42bd93bac7dafa2cf8032acb5e214e53a398",
+      "test_service_stop_grant_signs_exact_durable_prior_start": "d0e6415cc575767b0c015ab6cf8a868905e66056fbc6279eb706f22887654f69",
+      "test_superseded_attempt_needs_recorded_cancellation_even_for_stop": "31e090768f21c0c160bb36416b2ca0f46cd46bfffde472aa3287051b2acda805",
+      "upgrade_payload": "844f82c59fb52efd0cc2bc02092fb3183a82d067a1fc5f26fe0606dc940514c6"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_service_stop_grant_signs_exact_durable_prior_start",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_host_helper_authority.py"
+    }
+  ]
+}

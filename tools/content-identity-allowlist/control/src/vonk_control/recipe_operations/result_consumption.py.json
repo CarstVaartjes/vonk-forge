@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/result_consumption.py": {
+      "<module>": "92a3b86641fed2bffdcecc055a6ec1ddd4319a0c3686759dfd2342fda00fe6aa",
+      "ResultConsumptionMixin._apply_build_cleanup": "790b8c6f9c977cd7216271f451963a40c7395eda0f84538f4709e388578f37ef",
+      "ResultConsumptionMixin._reconciliation_job_complete": "2eeb8c7d03d479c9f071b066c4c96c2fbbba6b50f212ae6aaf1a765f08086952",
+      "ResultConsumptionMixin._record_node_result_once": "78999c0352deecb62b06bab9042ee2f685e1600dd3078ba14deb8174a9e50d99",
+      "ResultConsumptionMixin.consume_agent_result": "ee2d14de3fa8c75fb4f425fe13b4e8e365ed79355c4584360d8e4e262ccf2024",
+      "ResultConsumptionMixin.record_node_result": "7f74207577efa41a1f433f4d0ba1618d7eb97495060ec57a504f2858975d2104"
+    }
+  },
+  "sites": [
+    {
+      "expression": "expected.build_id != owner_id",
+      "function": "ResultConsumptionMixin._apply_build_cleanup",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/result_consumption.py",
+      "reason": "A Spark cleanup receipt completes a build's cancellation only when it names that build; a mismatch applies nothing and records the node unproven."
+    }
+  ]
+}

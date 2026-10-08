@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_help.py": {
+      "<module>": "62ce39ec7fd539f9d12e50804e5e0977c4be0327b6709a4e1bd488d9ffdd8923",
+      "_flag_summary": "4dd099a94a74b8afe3705797b479487d2acbd72ea870cb69ffe22355d412af54",
+      "_rows": "75d34a277595157ddcf2d4f3cc270bc1821e1c3c5db5ebb9aa14a969bbcd2179",
+      "_value": "f6bf1af63fbd3cde1c939c9f7444b20bc4de303d1dc36d594e25cc96e032f123",
+      "command_help": "2a87be310570903269effd6d23ba57cf901ad3fe2390913e7cf85e50c23a6bab",
+      "group_help": "f376e210788d539a7efcd70daa0f3067238e2766302b9d6ebaad3e040e5b6070",
+      "invocation": "12f550bb3207a2566e8d2bdcc046fde38206bbfd6361655483a9dd8f81d9e11c",
+      "subcommands": "88f9f9e18efda5516836d08405aa4600f317b810db7c647129a0068113de3d17",
+      "usage_error": "f3dcd49806cc7ddea0a279a47379d17c515c54a4bf3e28419c95ec3938535cce"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "<module>",
+      "kind": "imperative-remedy",
+      "path": "src/cluster_profiles/cli_help.py"
+    }
+  ]
+}

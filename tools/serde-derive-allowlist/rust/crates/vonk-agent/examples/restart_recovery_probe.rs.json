@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-agent/examples/restart_recovery_probe.rs",
+      "reason": "test harness: stdin request of the restart-recovery probe, not product data",
+      "type": "Request"
+    }
+  ]
+}

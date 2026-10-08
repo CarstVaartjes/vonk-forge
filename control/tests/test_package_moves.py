@@ -11,6 +11,7 @@ from . import principle_guards as principles
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
 from .package_moves import PackageMoves, identities, record_identities
+from .registry_storage import read_registry, write_registry
 
 OLD = "control/src/vonk_control/sample.py"
 NEW = "control/src/vonk_control/sample/worker.py"
@@ -160,15 +161,14 @@ def test_new_changed_copied_or_unproven_content_gets_no_credit(tmp_path, change)
 def test_untyped_writer_moves_entries_and_refuses_new_debt(tmp_path, monkeypatch):
     moves = moved_tree(tmp_path)
     path = tmp_path / "allowlist.json"
-    path.write_text(
-        json.dumps(
-            {
-                "schema": 1,
-                "permanent": [],
-                "debt": [{"path": OLD, "count": 1}],
-                "content_identities": {OLD: identities(SOURCE)},
-            }
-        )
+    write_registry(
+        path,
+        {
+            "schema": 1,
+            "permanent": [],
+            "debt": [{"path": OLD, "count": 1}],
+            "content_identities": {OLD: identities(SOURCE)},
+        },
     )
     sites = mappings.scan_source(SOURCE, path=NEW)
     monkeypatch.setattr(mappings, "scan_sites", lambda: sites)
@@ -177,12 +177,14 @@ def test_untyped_writer_moves_entries_and_refuses_new_debt(tmp_path, monkeypatch
         mappings, "relocated_allowlist", lambda sites, doc: original(sites, doc, moves)
     )
     assert mappings.update_debt(path) == 1
-    assert json.loads(path.read_text())["debt"] == [{"path": NEW, "count": 1}]
-    written = path.read_text()
+    assert read_registry(path)["debt"] == [{"path": NEW, "count": 1}]
+    written = {p.relative_to(path): p.read_bytes() for p in path.rglob("*.json")}
     sites.extend(mappings.scan_source(SOURCE.replace("work", "new_work"), path=NEW))
     with pytest.raises(ValueError, match="increase debt"):
         mappings.update_debt(path)
-    assert path.read_text() == written
+    assert {
+        p.relative_to(path): p.read_bytes() for p in path.rglob("*.json")
+    } == written
 
 
 def test_normalization_ignores_positions_comments_and_import_location(tmp_path):
@@ -283,19 +285,17 @@ def test_registry_writers_persist_identities_used_after_split(
         monkeypatch.setattr(
             mappings, "scan_sites", lambda: mappings.scan_source(SOURCE, path=OLD)
         )
-        path.write_text(
-            json.dumps(
-                {"schema": 1, "debt": [{"path": OLD, "count": 1}], "permanent": []}
-            )
+        write_registry(
+            path, {"schema": 1, "debt": [{"path": OLD, "count": 1}], "permanent": []}
         )
         mappings.update_debt(path)
-        document = json.loads(path.read_text())
+        document = read_registry(path)
     elif writer == "vocabulary":
         monkeypatch.setattr(vocabulary, "REPO_ROOT", tmp_path)
         monkeypatch.setattr(vocabulary, "BASELINE_PATH", path)
-        path.write_text(json.dumps({"schema": 1, "distinctive": {OLD: 1}}))
+        write_registry(path, {"schema": 1, "distinctive": {OLD: 1}})
         vocabulary.write_baseline(Counter({("distinctive", OLD): 1}))
-        document = json.loads(path.read_text())
+        document = read_registry(path)
     elif writer == "blockers":
         monkeypatch.setattr(blockers, "REPO_ROOT", tmp_path)
         document = json.loads(

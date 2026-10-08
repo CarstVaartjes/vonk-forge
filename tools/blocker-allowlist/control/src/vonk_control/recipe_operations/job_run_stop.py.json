@@ -1,0 +1,173 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/job_run_stop.py": {
+      "<module>": "5ef50d2e5104893b6653efb0d01bcfdef5cfea3cdeb1614fef55588334d2fb17",
+      "JobRunStopMixin": "cb1ea154c69ec64cb47c02f2df46bf7b15595763a9bc04009c308afa5fe8189a",
+      "JobRunStopMixin._one_shot_stop_is_pending": "14a817a3f53994d042efc0c69b4b33a695d7380dd5027aab2a4ddee220404057",
+      "JobRunStopMixin._profile_jobrun_stop_is_pending": "078c3ba84730faedfe2f1e8c40da321f9be386014b536e28ad91ab76f096df82",
+      "JobRunStopMixin._run_jobrun_stop_in_session": "ae8fc74d3c69fb7a63aac692e2022b25990d1c0ecb84f14e1c7a5d47e573beac",
+      "JobRunStopMixin._stop_logical_job_run": "0130012bdff7d99bac1786dc5d711642d810b8a3f68a43f4add38901b3b241c9"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "exact-ordinary-jobrun-stop-already-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRetryLater",
+          "JobRunStopMixin._run_jobrun_stop_in_session",
+          "accepted-jobrun-stop-source-disappeared",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRetryLater",
+          "JobRunStopMixin._run_jobrun_stop_in_session",
+          "exact-jobrun-installation-authority-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRetryLater",
+          "JobRunStopMixin._run_jobrun_stop_in_session",
+          "unknown-jobrun-exact-target-is-not-reachable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRetryLater",
+          "JobRunStopMixin._run_jobrun_stop_in_session",
+          "unknown-jobrun-has-no-exact-source-authority",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "exact-ordinary-jobrun-stop-security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "reviewed-stop-plan-digest-does-not-match-current-effects",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeStopAuthorityRefused",
+          "JobRunStopMixin._run_jobrun_stop_in_session",
+          "accepted-exact-jobrun-stop-targets-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeStopAuthorityRefused",
+          "JobRunStopMixin._run_jobrun_stop_in_session",
+          "new-jobrun-effect-escaped-the-accepted-stop-scope",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "logical-recipe-run-changed-while-stopping",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "profile-jobrun-stop-authority-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "profile-jobrun-stop-request-changed-its-owner",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "request-key-was-already-used-differently",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "artifact-workload-target-disappeared",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "partial-one-shot-stop-requires-current-profile-ownership",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "profile-jobrun-stop-request-identity-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "recipe-installation-does-not-exist",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "stop-plan-is-stale-or-blocked",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRequestInvalid",
+          "JobRunStopMixin._stop_logical_job_run",
+          "workload-intent-was-superseded",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/job_run_stop.py",
+          "RecipeRetryLater",
+          "JobRunStopMixin._stop_logical_job_run",
+          "the-accepted-profile-stop-is-not-readable-yet-it-is-recorde",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/job_run_stop.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/job_run_stop.py"
+    ]
+  }
+}

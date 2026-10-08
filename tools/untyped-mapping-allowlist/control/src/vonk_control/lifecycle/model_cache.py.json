@@ -1,0 +1,55 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/model_cache.py": {
+      "<module>": "ed991a3b5be8f1bb1be5df04afcd2f1d11b7748101a1a000b10760f3a6609f3d",
+      "CacheEffects": "6817ffe57ae587cdd29fab4a6e129f3e5feeaa8dd27ced8f1fffdb925ecf49f0",
+      "CacheEffects.cooldown_until": "5034cbdcd3c93fdccb3410fc1b57d063205bd77549209bf50d30533c846e49f2",
+      "CacheEffects.effects_settled": "e4f6985fa3444f9cff55494b2c00aa75d1e45c3424c08e9c0d183ae97fe93185",
+      "CacheEffects.objects_present": "99ef80600007b9afa48034991d200c2edd1e3208d7b6c115111fd5ae99bd40c9",
+      "CacheEffects.running_here": "799611a69c448d4b9e6f0647cd396a9f16147595bd625e1cb24b1322940cfa3b",
+      "CacheEffects.set_is_cached": "6e7c3580591fa8bd2626b324eb3b9077198ea8aca859e94861d7ff736308dfd8",
+      "ModelCacheAdapter": "df26486b718e697665d4e56bfd2b97e7ed13cc129cc3ea500b1ae5d253f802ab",
+      "ModelCacheAdapter.__init__": "74302cfb2202bc6d8b222643541a96ac44efdd4c27a6aaecad56eae4065fe596",
+      "ModelCacheAdapter._payload": "5b07e0475e918c9fbae18107a4be6afc7fa87432b404751f9e80d2000a402e7f",
+      "ModelCacheAdapter._tidy_payload": "b7e9edd897b3a61d4de6b2397f907131c93a1defb5f0399b44354cc66a397c70",
+      "ModelCacheAdapter.actions": "971acefdbe3722fc5706130705558e3f43ed677d818b5c4bf3c51ceb0ae69896",
+      "ModelCacheAdapter.adopt": "9937666d0ccb8657e04f1c4f40382bf123a160156cf315f9b80871a7bd531bc4",
+      "ModelCacheAdapter.apply": "36495bfc0fee87c3e2148c7969b89a95fdf41fa0b1264889ff00a3eaba3ba656",
+      "ModelCacheAdapter.apply.put": "82a9f4cff8ffdac3e2f678df2e5d32ade464a605108748fd509fcf84268c96f8",
+      "ModelCacheAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "ModelCacheAdapter.claim": "01a829ab352c368841a951e5444a2c747e8a6687a5b38c8a590b4db393455db2",
+      "ModelCacheAdapter.complete": "7ec40e372cbc5275381ae5bd3ef07f03f1ffcd0893f751a934616ed4bef2b2d5",
+      "ModelCacheAdapter.decide": "1c7169bda0fbb87afa2331357e78a704a75aef6c54ed8c98f780b7e160c8d4bf",
+      "ModelCacheAdapter.execute": "6854428a90b1188f1a927b81bbea4f63e2f7915af210aa1dff2dbb5fe493bb30",
+      "ModelCacheAdapter.fail_corrupt": "b68ee061241cdbf9aa9d50d4e7cb27cdd3e637c0d8b2452a822e17363303cd4d",
+      "ModelCacheAdapter.irreversible": "8023161eb03e918029a24fc45d853cc69ee7e9e45cc89cbfbb6d3c01143e02ef",
+      "ModelCacheAdapter.lapse": "0175fc85b5d76a89692035eab468cdcb652c4395f7d55767eb9ba15f8923532a",
+      "ModelCacheAdapter.lifecycle": "7c90ed348f10d6bfb3a115c925f2dbd1d3c3c0e50e3a6dbea152951b1a2552b4",
+      "ModelCacheAdapter.new_operation": "1588d9dd881bfc3b5782fdcf648d5810c1719bc72895d296c0f8ed68a64f7481",
+      "ModelCacheAdapter.now": "0565c3db5fb3147ed7226126ab761c52b6b1ebe1dc76c7cf69f08d57a76ded95",
+      "ModelCacheAdapter.observe": "1ed8d559ea25d5e53590797885b3d2d788faf3665791f7e4e952797258d5a5fa",
+      "ModelCacheAdapter.renew": "9016438859643069cc6232b51a679d6a6f0fa4332f57a4c9766fccebc428f4d6",
+      "ModelCacheAdapter.reopen": "ad062fa19152b4f8905ea559e5fd4d1d41bd1ca512cb76e119796de645a00656",
+      "ModelCacheAdapter.retry_not_before": "5bb618897e69503116b10bcc13faecadf5b28b6f759d353d7d984588c7debb72",
+      "ModelCacheAdapter.settle": "4886aa0b6684b204200fb2569bf703928f713e14546c645b2cbbe3a89a5fda7a",
+      "ModelCacheAdapter.settle.residue": "381793126d8fa765b373136a487ce0bb83b9d7efb3776952a195b7fcbe2fabf5",
+      "ModelCacheAdapter.settle.save": "a7016c7b2b8448869731d92df2469e5fa6d1f92f9fe7332f091c7dd42e23e108",
+      "ModelCacheAdapter.stop": "938c86dba34c5e35bd55786933183218a4752c6a82a94463a6002c26cf086d72",
+      "ModelCacheStore": "0e005bd99bcd88df20c6fd8a6a13cdac3176d7688e5aa0f1a24f0bfaef978072",
+      "ModelCacheStore.__init__": "eeba7fb8bea640d7c3736dbeb9183dd96bd9e50e3083e0ae9efbfceba179db38",
+      "ModelCacheStore.due": "25eefe00575573143a670d12d4e2126c40eb82d0508e7e5c009b6c894f32f921",
+      "ModelCacheStore.record_residue": "f4da5360618010e44f5d176d75696738e2561b621af311bad6b132dc4c78a3cf",
+      "ModelCacheStore.save": "006f67f03074d886430c9ff290dada99653b9d35442c54009e878a6feb7ca861",
+      "adopt_legacy_operations": "5d0ff373511011671461e45a196a0c114597eee481f3dc582d046fbd595ecb39",
+      "cancellation_of": "61693eab4c660c35d28d73d3ba37450b993e1baa1dfb11177ce1c4f9cbd8295f",
+      "legacy_claim": "8925697f8848b5ef2ef944281c9ffca85c591aa8dce096642acd38fed2805cbc",
+      "legacy_retry_due": "a3d6307c15a3e34736db8a40951fa22cb3b67f8be121bfa1aa0b777aaa333c87"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/lifecycle/model_cache.py"
+    }
+  ]
+}

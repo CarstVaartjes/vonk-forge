@@ -1,0 +1,191 @@
+{
+  "content_identities": {
+    "control/tests/test_operation_api.py": {
+      "<module>": "7ea1acdfbaf8ff241594f4060df078b031315b862a341e132709f92ecc459d29",
+      "EnqueuedJob": "44f6aaf7aec5b0b15724859527e35819b61ae97df3a5a5e4f6b7901f5cc21161",
+      "Jobs": "9fd2de32f52b00ebfd1ed8e8cd1940606ceff3cf12dfce92216cbbd3c228e43f",
+      "Jobs.__init__": "91c39a3b733120eacbde0339bb91eab70d05b23dcdef92b7bf2c81a49b88237a",
+      "Jobs.enqueue": "2d3d1e3e7368892316ea28ab913cb0c9f7a223dc3948d9d89da16e37a5d9a592",
+      "Jobs.get": "7750a34dd6a1de0f7d1465a2e711f88a4d15429dbe63b4b339657dc08facf86a",
+      "MutableClock": "2dd5bba729c921a256abca8354ff9f39232ad5f68ebe53da622cf388e10b2d3d",
+      "MutableClock.__call__": "368189f15349acc758f890e4948cbab3b016e7494384b3567cd33737f7861d39",
+      "MutableClock.__init__": "88cb3b08fb66f60294095df58b6b639ad187b9ad5feece27927fd0954041740f",
+      "ProjectedFleet": "4e68c36e365d5d65641144fcac69e17921dc51d1550dfd1999cb84a36c3ed9f4",
+      "ProjectedFleet.read": "e193ff0baec113b283c8385d224ed61e7246e1265f9d3318d805983481663827",
+      "_claim_parked": "fa6448671b2674c7cbc287e1fab55604bde1fe2d1b3200f0828e2505e8d1c958",
+      "_client": "e197d3ffd08f0ed8fc10390f2daaebdaa1d6da1e2e0d1b3d447647b8cb32a69b",
+      "_durable_client": "222f93b12bfc18dca8aba3d28747e4a3adcd13a3aef3ca61e82a6467fcbf6c9a",
+      "_encoded": "5dbbee665464dc06705ebf2a08f2d5600fdbef517c9f9a70b7906804038021ff",
+      "_first_diagnostic_target": "c4030174f2baadba68a9c6b985ef11e3506068e3db7ee45b9b3639bd5af4667e",
+      "_park_repeatedly": "192f0340eb71189282550c9553924cabd699543ee44429113a05912e005e3ae4",
+      "_parked_stop_services": "e379843517aa2adb6d896c92f8cd20f632a8e7db31ffd6dbf111dda669681ad3",
+      "_profile_operation_plan": "62ec9055c87912af8b73cfad2733d50a8197b455b432891c8cdbbc05c3d7acdd",
+      "_retire_parked": "947d437aa8448188dccb372c473fed9be79ef53151cab7e838667c6b515f9b1c",
+      "test_activity_page_survives_one_unreadable_profile_application": "4e824efb5b650d087da0ac9a751775482ea07437bb05e001667fcc8d9cfe5624",
+      "test_activity_sql_pages_equal_timestamps_and_binds_request_filter": "6108dab0dd3850ba0621f9174f392f99d05fe6fdb48a5f73f30cff71364de139",
+      "test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt": "6d103e69e6c0cbec91c84558480851e55efafa9447a417f13d80d3f41f18290d",
+      "test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt.diagnostics": "8291fecc7df6b1bc86a1ccd209b86d363653d75b6a7fd1eaee1f43a9da821b79",
+      "test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt.stored": "0b51ce868777c5401400a981e539e59176fa971f63d3bbf37f2f8768b69ebf4b",
+      "test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence": "2c1cda370fc5c91cd6a9c973e54db3b286b7f0168d38b895e4762f672ddab4fb",
+      "test_corrupt_stored_evidence_decoration_preserves_readable_identity": "de161506a5c7da2ecad292fca53b88164a12837d653e14afe548678aced4557c",
+      "test_durable_operation_cursor_rejects_cross_job_replay_and_tampering": "e42a56114bda55936b70f6f835bb49373acdc588351ee450cbe25c6015538388",
+      "test_durable_operation_keyset_pages_are_complete_and_aggregated": "536506e8963447cb4429e0fe2f8aba7141311de72a63ab0d974980ac73b62dc8",
+      "test_durable_resume_authorises_the_parked_operation_for_the_next_claim": "3895298dfc34a8ee1d92fa5b981ff8bf692df9c85a29abaccf04d44302d08ef6",
+      "test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue": "2e7f2fe136fcced6efa6c904d8762f10942332205efac5799ca24b8cdbb80515",
+      "test_durable_resume_has_one_atomic_winner": "4de23c24ece7298418c9da894548355a0386ed43b3ee7fd9a38be0533a955173",
+      "test_durable_resume_is_never_refused_for_earlier_failed_attempts": "7729859a8060df5188382fd723f1f8fdaee4cd531149d590a373ca48cda56a48",
+      "test_durable_resume_refuses_a_job_that_is_not_parked": "5a0517275a4b7f98bf6dc991e65df2b56f1cc9cf24bcdebca5baeb6c6cbdfff4",
+      "test_durable_retire_ends_a_parked_operation_without_a_budget_gate": "e1652f745e5fac593f3023cb7309c9915657d658dfad693fd7aa1d96fb6bf2fa",
+      "test_durable_retire_fails_the_order_but_retains_uncertain_capacity": "b499cf48a58698f64a22d43aa1d184b75b8c8b3bf2aa8abb2334addad1cc91b2",
+      "test_durable_retire_refuses_a_parked_operation_whose_lease_is_live": "d8779380a73bde79a5085a47ed4649c020b6378258f26d277ea3c9a58f178e82",
+      "test_durable_retire_refuses_live_current_attempt_without_transition": "c337bb1c0d788c1dfb50760ba933dab206678974e5f1a6ab58463ee34f905a1b",
+      "test_durable_retire_retains_uncertain_run_capacity": "38758d7ade592821a25a2d1e2ad2ced650242815d586f7c897b22e7afc36c9fb",
+      "test_fleet_exposes_typed_visual_state": "09aa3b3278114f4b89c9a2bb49147fa7e8bf6f7c75fd7b89a7568bc6f11c7f39",
+      "test_generic_operation_read_contract_is_unavailable_without_projection": "06de983ff525f570d4c7a068415b700f2c513dd9ce7c4fb43fa2a2f5a9756314",
+      "test_generic_operation_read_contract_projects_bounded_durable_state": "a2c5ca4dc6207d766a318ce710028c12b9ef5a718544e7b798a23419dbfbfab4",
+      "test_global_operation_projection_merges_typed_provider_families": "cc5151260d5db9b22320a5dbcaaceff89a9fbb2a95a7d4193e48bd487281d2c4",
+      "test_global_operation_projection_merges_typed_provider_families.provider_for": "4ee34a3e04d4d442d5309589566c061d13002c7d7cbb12999584f0806c972db8",
+      "test_global_operation_projection_merges_typed_provider_families.provider_for.get_row": "1aaa797a44571fb6fb4b99149c1c19aa2a828bed8e3e411a8d4b743be0a098fd",
+      "test_global_operation_projection_merges_typed_provider_families.provider_for.list_rows": "201f721c47d5fb21ce456d4c02b12842baf1a22258a614876521cfd0991c5292",
+      "test_job_status_has_typed_progress_fields_without_payloads": "a5e0b579ea42bfce13f8b4955b401c13203634826eacb2c9be5bc70e3b68f482",
+      "test_openapi_exposes_only_current_document_contract": "ab5dd64614d44a02982bcd809c97a4ed3f8f5f285a22bd71fb6d567aa19235c3",
+      "test_operation_read_surfaces_a_recorded_claim_refusal_reason": "81073f0c424afe3516076d2196a95c78b36072c3f33763e851bc6cebe4a666c4",
+      "test_operator_resume_is_rbac_guarded_and_strict": "82f9c86915b05b91993d9e788e91199d546f5454de60cf8fda87ec8fe362ccc6",
+      "test_operator_retire_is_a_distinct_disposition": "14ba88edb8215348933da017ebf188b0e350f43e01957f44b5881b790129d49c",
+      "test_operator_retire_reports_a_live_operation_refusal": "dc68e3a8cc14171546f235a5da04217dd93fe402f77d6d3a1a5c6a0144a38672",
+      "test_operator_retire_reports_a_live_operation_refusal.refused": "7434a3463c50cc5f566b0af59993b23e48eb848900ca500e678d9a0ea726360d",
+      "test_parallel_job_byte_aggregate_is_independent_of_operation_page": "51bdd02d746c229e35c2dc07c74b0422c405ff16c571f21493fd9d90575a6567",
+      "test_profile_operation_provider_is_registered_through_the_global_api": "57023828f67a54732920bcae612183352487a0b72bd021e26a9c74f822ff7e2d",
+      "test_progress_projection_accepts_phase_only_bytes_and_object_identity": "88d89d9798c2e596c406f0cf7d9bd04d61ea6252cac195751a4d88f8dcd2a295",
+      "test_resume_action_disappearing_after_preflight_is_refused": "a49017687c4a03b741b5a426d97829ffacf64cdb575a765bf214b14098c7310d",
+      "test_stored_evidence_projections_keep_absence_and_corruption_distinct": "794781265d09374d603bed3223cd6530daf3ae930149231073be9d1413ddd5cf",
+      "test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault": "3dc52ce1e3b10254deef70ed0b8f70fe5bb8d449804c9a7cb1fa4f02005708d6",
+      "test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault.read_job": "46d9af6e9a96a1824de17140d1bdda6090fd0436d84012e40dee65594bc9b795",
+      "test_stored_operation_state_failure_is_not_reported_as_a_cursor_fault.unavailable": "f1bee9b2a039e080e974fc391aeeae3b9389c678c8f81465b0a39bde284165e6",
+      "test_target_cursor_rejects_cross_job_and_cross_resource_replay": "fcabf197266272670653bd6e394ddbd9068268215c2a11116e5b5ff09290eae7",
+      "test_zero_target_upgrade_job_still_projects_a_valid_progress_object": "01e67ee19f6519e975061e4c97f2ecbfa1562e25818842c7c50f5b697157a5c5"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_activity_sql_pages_equal_timestamps_and_binds_request_filter",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_resume_authorises_the_parked_operation_for_the_next_claim",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_resume_has_one_atomic_winner",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_resume_is_never_refused_for_earlier_failed_attempts",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_retire_ends_a_parked_operation_without_a_budget_gate",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_retire_fails_the_order_but_retains_uncertain_capacity",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_retire_refuses_a_parked_operation_whose_lease_is_live",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_retire_refuses_a_parked_operation_whose_lease_is_live",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_retire_refuses_live_current_attempt_without_transition",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_retire_refuses_live_current_attempt_without_transition",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_retire_refuses_live_current_attempt_without_transition",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_durable_retire_retains_uncertain_run_capacity",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_resume_action_disappearing_after_preflight_is_refused",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_resume_action_disappearing_after_preflight_is_refused",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_resume_action_disappearing_after_preflight_is_refused",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_target_cursor_rejects_cross_job_and_cross_resource_replay",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 2,
+      "function": "test_generic_operation_read_contract_is_unavailable_without_projection",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_operation_api.py"
+    },
+    {
+      "count": 2,
+      "function": "test_profile_operation_provider_is_registered_through_the_global_api",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_operation_api.py"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distribution_executor/preparation.py": {
+      "<module>": "9f5ad4b76ce5d18c110a30270dedbd39a63e796529c0131132dc438e35a53489",
+      "CompositeDistributionPhaseExecutor": "4d2bbdb3158ae64621d41874bb509c4b538081425decbdf30b3a22668edc3d96",
+      "CompositeDistributionPhaseExecutor.__init__": "0a2ca4ae8caedd100668af236f590a182c815e5ab7bcce1389d8dd8d0d30f2d4",
+      "CompositeDistributionPhaseExecutor._cache_result": "9d8252f6294b9a1a28e97e2b3368819a96d52cc05fda91699e3e0fd2d876a060",
+      "CompositeDistributionPhaseExecutor._cache_state": "7a6f0e1d2e8dbc81099ee5bd4b4db87c774d59347212afaae713d6ce315ca667",
+      "CompositeDistributionPhaseExecutor._prepare_runtime_image": "6848e9b75ac92e2c4d33fdaf49c2ac97098ffc6790f9f80cc38a5809bb0c0c35",
+      "CompositeDistributionPhaseExecutor._prepare_runtime_image.before_publish": "c9b00e0448534b05701e876eb8bfd1c9b402628984159db3422fe40ff321d925",
+      "CompositeDistributionPhaseExecutor._prepare_runtime_image.persist_reference": "1f214ae4fc81d21fdfa5058399b8f56e34c5a7f8176b932859c01f065751bacc",
+      "CompositeDistributionPhaseExecutor.close": "7fe75185b69aa1ae560c9876c3b10d0a6171e30439f18c8cf78742a9046e1dd0",
+      "CompositeDistributionPhaseExecutor.execute": "ae5b6ca02dfd8ba14cd5016f1b34dad8f8bbb7350d27797c2e56b8acd11123a8",
+      "CompositeDistributionPhaseExecutor.get": "3925260150357e56c329665f7c3f87b73f48abafee316602ef5c7fb7dc5d8735",
+      "CompositeDistributionPhaseExecutor.memory_footprint": "ac93d09598e40ba98532886d65e00f66c982d13add5a24e557de3975428d325b"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "control/src/vonk_control/distribution_executor/preparation.py"
+    }
+  ]
+}

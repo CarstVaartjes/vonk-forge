@@ -1,0 +1,61 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/service.py": {
+      "<module>": "d37dfe859ee516d3cb8fe88547a311f6c678c01ec31f2d19288a4cb4ebdeb7ac",
+      "RunSwitchOperationService": "d37dfe859ee516d3cb8fe88547a311f6c678c01ec31f2d19288a4cb4ebdeb7ac",
+      "RunSwitchOperationService.__init__": "39a0c3d99fb7b78d76b850c29e636ef82676bbea3c7ffea42732acb13d485804",
+      "RunSwitchOperationService.inspect_candidate": "923c2fe3c598e73a2ebbf8b2185b58623df3183c526ed7eab206dc221c404cd0",
+      "RunSwitchOperationService.inspect_request": "f41213985d17cef77152a7f30eaa306b9ee0901f4004a1bb6932f5cca4ed58ec",
+      "RunSwitchOperationService.preview": "d18413e4ba37bfb0fcab9d040780ca893cd3a526edf62d8ebc1f61c2c76516e2",
+      "RunSwitchOperationService.preview_run": "3c82ae318bbd1c6f98460a7e5d6a9e3c6316770f194288dbff085a105cda6430"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/service.py",
+          "InvalidValue",
+          "RunSwitchOperationService.__init__",
+          "run-switch-inventory-age-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/service.py",
+          "InvalidValue",
+          "RunSwitchOperationService.__init__",
+          "run-switch-memory-floor-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/service.py",
+          "MissingRecord",
+          "RunSwitchOperationService.inspect_candidate",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/service.py",
+          "RunSwitchRuntimeSpecInvalid",
+          "RunSwitchOperationService.inspect_candidate",
+          "recipe-has-no-exact-primary-model",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/service.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/service.py"
+    ]
+  }
+}

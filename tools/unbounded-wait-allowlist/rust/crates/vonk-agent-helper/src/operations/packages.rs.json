@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "take_package_custody",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent-helper/src/operations/packages.rs"
+    }
+  ]
+}

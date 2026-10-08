@@ -1,0 +1,60 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/result_helpers.py": {
+      "<module>": "5ebcec478cfb929bf33d790825967c5d878c42c85dea712e94522375e6cb8375",
+      "_bound_workload_intent": "1c9ae3a05586976278682941aa5e3ddce1e0dfa3d42cf84f98de05604edc9873",
+      "_child_failure_code": "1b3d52c22042348dfa80affad5af2731f577e0196ccd15a63bac5b15797678cf",
+      "_child_failure_kind": "c66bad7519a38ae2bfdab53db3d790a387363b7f1e50bdee81863bdb2932a0ce",
+      "_child_progress_payload": "9d2f8aac4a64a085a63aa3bb4303efbb3b017adfa74f064b45ac319596814af3",
+      "_child_result": "63d08457443d746de3630aeaff37bd2f09056bb9af4ed7c0807eb9d449fa21a7",
+      "_observe_progress": "265191b8b75d57159d78a6f073e43e33cf4838a74ef47c9c0e87b8c8923abf9e",
+      "_parse_persisted_result": "30ada2032f82b177f9cd20ba5f8b71598b633cf1c2c057b387a34028910c9ddc",
+      "_persisted_result": "6522df6de4cc7538cef1b094283d9a6e824320141d07f87fee462e23f23e94fd",
+      "_phase_result": "15b12fff5eccd352fd6afd9aeacff21a30d8218a94c5d3e9de15f7173276f0d6",
+      "_progress_damaged": "b6d15bce22ca4a3e80acd7af71191e0022ac2b82e79dc614934fb36263ff8729",
+      "_progress_int": "2d5a561b0bc6567ef1603e4ecb580c266134029010ca1d750dbe250e9eaedc18",
+      "_progress_operation_state": "c397a14e3c448e49ed268015d9d23dcf2af0cf0273fd21e26f0389d1fa980755",
+      "_progress_phase": "a424ba9f345afc47dd77a9e084b00173e4d5ce0f07ec45894895fce4685247a1",
+      "_progress_state": "ad38384253df4d8460962375eac331661b6ad8d5da70655fa8fdecb0850c01f2",
+      "_progress_subphase": "eb77a080acc81dacd0e36d247e7f4dc939af03324195df518e796f62013d4fd6",
+      "_read_progress": "b72247a2319776506bc2ba8ef4d6b19217cae246c63f7cfdce99fe92e1fc5787",
+      "_wait_blockers": "71f0e39edf79d1383260e1caee99d76a7979602ef5f6fa4a53b1c59595bc3f83",
+      "_wait_code": "d5cec3fd5335a887bd5527e3039c2f5753dd9b4d3e65488fd236c0cf1e0d6a10",
+      "_without_observation_time": "5cc3ed67a5aec4f74cdbc1f6f82c18ff03cb6f0ca2647b5da477342e84bde94b"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "result_helpers.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/result_helpers.py",
+          "RunSwitchRetryLater",
+          "_phase_result",
+          "run-switch-phase-receipt-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "run_switch_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/result_helpers.py",
+          "RunSwitchRetryLater",
+          "_bound_workload_intent",
+          "run-switch-workload-intent-is-unbound",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/result_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/result_helpers.py"
+    ]
+  }
+}

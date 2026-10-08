@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/control_effects.py": {
+      "<module>": "7992e25ead35fe507675d0adb77995491a005bcd5e4327572184414340a5f376",
+      "FleetProfileService": "22239cc4dc05362b98647b2546f1c55ec06e962afd619e8446ba293b1a178477",
+      "FleetProfileService._control_effects": "efd13cca48990ceef508ff5d9acca0e28d4fd3300609b52603c8b021dbc5e0b6"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/control_effects.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/control_effects.py"
+    ]
+  }
+}

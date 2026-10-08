@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_journal_repair.py": {
+      "<module>": "26dd65006b82d82a9381d0f34fc74b35f80ae32762e7256b372773a9e8fbb3d3",
+      "_Discovery": "def32bd38fc0e615347f2ba26ef571d6719216061441f2b077d9be1bb58b18b7",
+      "_candidate": "641bfb6480cc0672f9c50b87db0953b3968c954042ea22ddf422ad30e72d17fb",
+      "_discover": "5e4fb7a716956f8a98ab3988581470701efad2e337ae300c6d9a892ed827e355",
+      "_end_unproven_journal": "eaf1044cabab77fbfe44d7e5e8c3a1dc9929aeafcd9fff6e502492db00c18659",
+      "_fingerprint": "eed5015356c6b93c31a918b6a4b63ae04e7f21e8da140f895e81fb06f58093e5",
+      "_lock_discovery": "91bd3b12878bc531e3316aaf9ae3dc0c5b43c8cd42584b40ae5c381fc6f05fb9",
+      "_pending": "7675bd1ac99ed27e060c9fbfa9d4484aae921502ab30af2b1f642f12cbe991c9",
+      "_plan_digest": "25fa3116bff2fa41ec1e3b5ac8a86f405a3965540e61fae7e46d681f5c37df10",
+      "_prove": "45c28f92ff427fcc77397c9c80a679a1a5f2c506422905a9ccec37482389f92b",
+      "_try_repair_once": "08c2a76bcc7e04849bfe168422683c6a27039b45b98140bb7e15e742bad8f116",
+      "is_zero_transfer_journal_fault": "6d47e122fa4351f8b32895525236eb2ee3518da3e62135017ecacec3110f28fd",
+      "journal_document": "3b945dc4de97f78ad268148a0fa68d6af3418a81c49a88d8c4155c394ce315ce",
+      "record_repair_cancellation": "7ebd089180ca8740add63e0320e47778831bf2f2a48e76481943c53e8c922c5a",
+      "try_repair_zero_transfer_journal": "59a6639e138b2fd977cd8b5f94dc59b1f3fbcf8e210d33fca7ad7b81b2d07819"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "_try_repair_once",
+      "path": "control/src/vonk_control/run_switch_journal_repair.py",
+      "reason": "Uncertain zero-transfer witnesses defer the same journal repair to the existing persisted two-minute REPAIR_BUDGET. _bounded_repair_turn ends the damaged parent at expiry without advancing unmatched effects."
+    }
+  ]
+}

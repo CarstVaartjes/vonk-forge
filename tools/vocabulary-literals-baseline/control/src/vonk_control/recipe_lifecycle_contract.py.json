@@ -1,0 +1,27 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_lifecycle_contract.py": {
+      "<module>": "b5cbbc5316bccf3ad246271d6b5e71e913a6a9b6a116b97f46282d2221e1db1e",
+      "LifecycleCodeFailureResult": "1755aea3f08bf8143d23747dbb8de2490c66bbec042e4dcb1b4a9ba16c888c2e",
+      "LifecycleModel": "98bca40638cecadf7b210cc801d8c68db08972ba10ecc99d8aea256fc9f9de75",
+      "RecipeOperationActivatedResult": "a4f6b87a7ccedb2164a8221445a75347d8c7f432970f52a047a77ec1430ff437",
+      "RecipeOperationCancellationResult": "5de8a9666074ac4dd2f6b3f15a56ac3f51ba82b6e4ad56b46d7759b97b02ed2a",
+      "RecipeOperationConflictResponse": "4d51324fa6f11b77b686701bf34f97c2daee8bc0b24bf5bdcccfb1546184a12f",
+      "RecipeOperationProgressResult": "27d757077324e210d0e99949e57dbaa40db3d6f38c107183606628573ba56812",
+      "RecipeOperationProgressResult.has_evidence": "ec3f103d817193f10633b4522d46030aa4796d2e378d0e6fd6787917838ef658",
+      "RecipeOperationResult": "f6b589fad5199ed4450cd78b340fc75f523ac3c9d64a90b08940b1f31aac29ed",
+      "RecipeOperationResult.nodes_are_disjoint": "862d5e6d147b955f7888626f630fd298f6120f85bffdcd643a815a766ffd785a",
+      "RecipeOperationStoppedResult": "de517872a8c213e09a2eefd2e780e35f181eb3b1227025dcf915c1a17922b4ed",
+      "RemovedRecipeNodeResult": "4d8d2d5f3705472997208af0bfc16095c2260ab01b9e1f7f93732a58cc842ff9",
+      "_model_accepts": "f8e0698d5a9e736369fda2db0110dd940f802258fb0f95e6476c3d4a108a1bef",
+      "_node_evidence_models": "f7798090de2174d9efec4cf1cc813524a7eb0cd1f5a91708785bd6f2abf4a45e",
+      "_typed_node_evidence": "4b5595492a8e3ad3dd9ca70137be0b17b128a73c8c23d6f37a994b0f92f11a27",
+      "_validate_evidence_for_kind": "8808b10ea3fe8e5bed932e83da7defeaa32dab9330cf629c6c0aa8cd15ee4a10",
+      "parse_recipe_lifecycle_result": "a2ecb9ceebc9917c7422818e64fcd664c16bce06a5383a1d994bfe88ff65d2e4",
+      "validate_recipe_lifecycle_terminal": "c8c9332732168a6cecf99e0321c25e1c6126027b7621a4a5a317a08403b945e4"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_lifecycle_contract.py": 4
+  }
+}

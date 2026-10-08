@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/selection.py": {
+      "_recipe_rows": "1355a63486b8b770bf6a85aeefb9633dd6b3f34c567b9725c5c601dc2d56393c",
+      "_resolve_recipe_selector": "2424624f3db49e916f5506ed066bf807fa8c7d2dd659c7a20ddb59874d7aca6f",
+      "_resolve_spark_selectors": "2b179a2aee58257fbc5af49cca29713106d433c360bf6ef46e60b4f1ea6b916a",
+      "_selection_remaining": "abe497c10816fc204cb9aaf5fd24895a36b736cf540f6389628f996922887af0"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "_selection_remaining",
+      "kind": "imperative-remedy",
+      "path": "src/cluster_profiles/controller_cli/selection.py"
+    }
+  ]
+}

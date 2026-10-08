@@ -1,0 +1,77 @@
+{
+  "content_identities": {
+    "control/tests/test_runtime_image_preparation.py": {
+      "<module>": "1891efddcdee22ce4f959ae09253e2e9782c6e27a52a9d7bbca756c54cb76ce6",
+      "TinyTransport": "1fb20feff8680ec7bad64b715220990119bb3d8fbb79b4762ca0f1fe8a6094f1",
+      "TinyTransport.__init__": "f5265319bc3b146f50941256ef8b9e02997c8d35499b397b3322fe501e523c55",
+      "TinyTransport.inspect_archive": "2e18b09695b03f43675525b412ee051bce88bfe705907502b2b0c2ad45904c79",
+      "_add_build": "100d2cb7c8bb4e300d13f8d51271ff9611c9c749c771d234670b4eac670a180b",
+      "_add_revision": "27a8c1160dae65c17a795750318cd23ba2629fa37e56550d8456740eee83d374",
+      "_build_receipt": "9b1d7f5865b165f4b82ec6fd132e8b699e35e48408007664f0872a0897597489",
+      "_document": "08f075addcf4e10e8102f265a4bae71b3d22e4863c01b594351cf58ccfe9abac",
+      "_prepare": "b4bff463ae257bbfd1c8faeeed6aef5f651ce1c886f3e38590657e5648e93bfb",
+      "_projection": "456791e2ab39f85a4521025c739643ddf9c1231acbb7ee6628414ccbf06e50a5",
+      "_recipe": "aed94a0beab15a1c2e3127d5cfe3287cacb1680e17deaa7f3863c2874b37245c",
+      "_runtime": "be0978f1365fcedbc706435387a92470b0cd852007380fdf1f8fb266ca81c8dd",
+      "test_an_unreadable_stored_receipt_names_the_rule_that_rejected_it": "c969a81b10d6decffc83cd9281edb2ee405e20bd9cf7bcb315bfed5d7d93faeb",
+      "test_build_archive_presence_checks_the_whole_image_by_name_and_size": "e8a32120104e3b81f84f424f573fd9fe4dc6ea6fa0c31265837313339cbda4b3",
+      "test_build_archive_receipt_is_verified_and_immediately_readable": "48e28515b9517b03589350c1d550c64dd04c553340dad9d8355308f47fe19457",
+      "test_build_archive_receipt_is_verified_and_immediately_readable.writer": "e814e6c117d180c9f12d7ac28dec415b176f785282d2854e27b5f3857a14cda0",
+      "test_build_receipt_requires_the_exact_stored_archive": "fda5b0692ed41c80a7df2b38d59d824042461d4ba6602c9fb89ce7ae111f12a9",
+      "test_controller_build_receipt_requires_its_adapter_identity": "71e61ff33834b7d4e0cb5cfc23501040e8de950cb371b7cf3ed01fd0aa1fd892",
+      "test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_identity": "8e8801c8b1936a0ce382546ac07b3230c6dbb15885eb6d04344078b8ddf8050b",
+      "test_current_receipt_parser_rejects_noncanonical_shape": "54035188b91291034dcd80afe41139057418990fd002a43558a06d6930c4047c",
+      "test_find_build_does_not_reuse_a_receipt_without_an_input_identity": "48371b24ff8e9e22ca9346e777aa9dba6918b9de5698eed1f3cc44a0aa45fb8f",
+      "test_find_build_matches_the_recorded_input_identity_only": "86d3b7336a69f934b770c0e41f41961783ce4ac10ead3cdce6ed58fe901f59b6",
+      "test_image_preparation_rejects_retired_runtime_interface_before_transport": "4ad7b63f077a456b37bf70cc3a952645e27b0628e57aab20479dc1957c259922",
+      "test_image_publication_lock_refuses_symlinked_lock_directory": "2e2587e7b9561a0d3c7e2213d9eba8bb4582575ad6883632f1678361211a1390",
+      "test_layout_transport_reads_platform_and_interface_from_the_stored_config": "5669260073f61ce0e56156c40ed9601a4828e59ca42183c33f7c89ed46b05873",
+      "test_layout_transport_rejects_an_image_that_is_not_the_runtime_platform": "1368163c5e27918627fbeeef50913ac2b00219b41bde796a3506ee974b6637fe",
+      "test_non_schema_two_receipt_is_discarded_by_scans_and_re_derived": "c02e821c9d51635c33c27b1684731534f80f4aa8bb6340d4bd1a7e7bbf4ece1c",
+      "test_preparation_backfills_a_missing_build_input_identity": "3ed552d973b69d861a7c9a334f09d2efb8c04eddaf254e1c8b3cce10a00d3300",
+      "test_publication_callback_and_commit_share_the_exact_archive_lock": "2cfc5f795e6bd9f7162ea8f60d50c89f145736b8295ffd37cc27245779c9d4d5",
+      "test_publication_callback_and_commit_share_the_exact_archive_lock.assert_locked": "5133823bdda149bd2b527d864427bcd3eb1a65eeaf3d4900a662bb048fb30c9a",
+      "test_publication_callback_and_commit_share_the_exact_archive_lock.callback_while_locked": "e75846b7e67d274465c11a2bf9dc36a5e479f0686bbae3fc193a665d119a6fcb",
+      "test_publication_callback_and_commit_share_the_exact_archive_lock.commit_while_locked": "700400ecc464d072ed4ecae1fd215166e8649625a09292eb6e82e3162332ffc6",
+      "test_receipt_content_is_the_identity_and_provenance_never_conflicts": "6f99e2ac681411e6883a6472f1eda199b2a41aa1496a2914631030ddff68f9a9",
+      "test_receipt_of_a_newer_contract_is_never_discarded_or_overwritten": "f7b3c6890bddb16cb99280e7767a566b778d5f0dcded1fd8aa482389e8b2af5c",
+      "test_receipt_permission_denial_remains_a_security_refusal": "11f2504fec92bb7472564f9d1da24e433a2b868da3a8f67e7c333d96c1ad965a",
+      "test_receipt_permission_denial_remains_a_security_refusal.read": "82d5219caf28e53765beb556b4539d058349b41d4529cc6f4fa8ee7695b45577",
+      "test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state": "6989275e1371586be20260cd3c9888e5b3448f5ae6e4960045d77e8d8103f31b",
+      "test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state.fail_once": "1322d290d2fe8a737d5bdd4906b49766f420e54f27fc376fcbadc674ad2b18bf",
+      "test_receipt_reader_requires_every_declared_field": "ad26cfb066aadeb0ca2a7c6e4f4c4a22e040dc1a9592968844b9650b8ad6d61b",
+      "test_receipt_with_retired_schema_two_fields_is_own_stale_and_replaced": "caf4094e04d8370bb3e26f843d1fd82f543cd50783100a153f13a20d5a4d3bb8",
+      "test_runtime_distribution_document_is_not_a_recipe_authority": "34aaff7d8a511e086b797da2f5c33009e1d3919f1c5f462d7c103e0670ef2883",
+      "test_runtime_image_storage_types_only_clean_absence_as_cache_missing": "fac74e2f186e0c3fbebcd04b0028f4ba2205f3e2b7a2920ad5bc8391f956523c",
+      "test_source_build_uses_same_normalized_receipt_and_preserves_provenance": "3ea13ad35ad9050c6039899d13b0be4576542859600a3df9691cfa5396d8f192",
+      "test_stale_receipt_is_discarded_once_by_scan": "3b002f8bd12273550404edd66f2c3edd66c5743870f8432261af49a708f1ab31",
+      "test_stale_receipt_that_cannot_be_discarded_is_reported_once_with_its_cause": "a07dbb2cf62ad656a819786653025c21d388b249df5f339718ba9a5c7bc421f1",
+      "test_stale_receipt_that_cannot_be_discarded_is_reported_once_with_its_cause.denied": "9b666bc22f1db7eadbedc421c2d251e643cf38e999aebcbe3345f6692ff5e41b",
+      "test_stale_receipt_that_cannot_be_discarded_is_reported_once_with_its_cause.scan": "fed9c643b0e3094c2b570d33cc5651b3ef876236d3c43dbf4990b0e4303dc658",
+      "test_temporary_unreadable_receipt_does_not_block_verified_reuse": "835b419394d66013ac3da23011ae8afcd78a647dd5994f99e2b2b69c5a7ba0c2",
+      "test_temporary_unreadable_receipt_does_not_block_verified_reuse.read": "665ea628a619b9bc30d96b74d84154e4004abe01206dbeab343ec10e8eb6ca11",
+      "test_unparseable_receipt_is_replaced_from_verified_bytes": "2908536569068fb211ec3952a8b8f3f12cc328fa7141701fd66a19219cc75102",
+      "test_verified_lookup_treats_a_vanished_archive_as_a_miss": "69c0965fec1b78d872ff0d5fafc9823a55470c70aa7a9aaae152164be5235119"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_find_build_matches_the_recorded_input_identity_only",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_runtime_image_preparation.py"
+    },
+    {
+      "count": 1,
+      "function": "test_runtime_image_storage_types_only_clean_absence_as_cache_missing",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_runtime_image_preparation.py"
+    },
+    {
+      "count": 1,
+      "function": "test_verified_lookup_treats_a_vanished_archive_as_a_miss",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_runtime_image_preparation.py"
+    }
+  ]
+}

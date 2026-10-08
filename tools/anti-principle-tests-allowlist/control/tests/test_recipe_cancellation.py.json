@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/tests/test_recipe_cancellation.py": {
+      "test_cancellation_reason_is_bounded_and_requires_text": "e3f18763b860e9cdab0eb9e7374b54a01f3a5f52d93aface444cb7014841f551"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_cancellation_reason_is_bounded_and_requires_text",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_cancellation.py"
+    }
+  ]
+}

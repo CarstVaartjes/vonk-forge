@@ -1,0 +1,64 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_load_submission.py": {
+      "_profile_api": "043be1cea40d37a2b3fb93aa9e775cab717a2762f2ba79d88493cea6c7f914b1",
+      "_running_profile_api": "499bb1d5d88ac4a94277aa821f7da4420a5e6868e5325dcf4996506bff9a5fba",
+      "test_accepted_profile_roster_maintenance_survives_actor_revocation": "de29715fd2cab39bfa601e1559ecbcbd7e9d8b583cfac7f80d5942f55ea2f396",
+      "test_admission_serializes_insertion_of_a_previously_unknown_spark": "75ccc808dfee8045d8488c775fde46d901ada6244ab07cfee6a446a53ba24974",
+      "test_admission_serializes_insertion_of_a_previously_unknown_spark.add_node": "31a7eeb2e9f82251a9922e4a88662f1e54764c9886ccc467802212733de607fb",
+      "test_admission_serializes_insertion_of_a_previously_unknown_spark.after_roster_read": "f819b959c39840910bb56a6e109b0ecc033df2bf38b7ffbb74e062b74502fc17",
+      "test_admission_serializes_run_replacement_until_acceptance_commits": "c273aefc3f035b24505df0e156d0ac20be6b15f5d0f09d8245bd11850b64a14a",
+      "test_admission_serializes_run_replacement_until_acceptance_commits.after_roster_read": "f819b959c39840910bb56a6e109b0ecc033df2bf38b7ffbb74e062b74502fc17",
+      "test_admission_serializes_run_replacement_until_acceptance_commits.change_run": "2450cc4928240ec59ba23032db1217c7a17a0e31016f67715771f7d0974f323a",
+      "test_change_between_fresh_review_and_admission_refuses_load": "6307c31f9e0f258850354152418a6ba7f6a2d79b98ae8da03707cbfcd5d6f6e6",
+      "test_change_between_fresh_review_and_admission_refuses_load.after_preview": "e3dbc9536a7aba1d297d8d9f09680abfa604993ea4a0f56fc3b0b48e8c8eea8b",
+      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit": "d703788d31a24e787c9d0805089f5e46fa235687dada4f5e35635ad24d4c9dc6",
+      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit.Response": "199680d5a68c72a86fcf24dc52b5c595ae0dc7e2b85686e841647a9f149321ef",
+      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit.Response.__exit__": "98f1141c2e76594d017dd5de8c1a9ed6267a54279be1a3a4358a645cf356525c",
+      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit.Response.__init__": "3520e38917c80bd64a608d60374562a6ee5cd6673090e73619d9c5f8c2aa70ca",
+      "test_cli_recovers_committed_load_after_lost_response_and_profile_edit.opener": "9bfc8d79c63460d1c04b95a8f336d681fa2333ba0e49ef9b7767444d0a70738e",
+      "test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review": "340cc0c04f2e9d95580aa88c6676f940e204a1d614e4d8eed577e91e2c35faa8",
+      "test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review.preview_after_lookup": "46f0ff111ca6b90c9b94747b815453b554b108d024f4ad9deb0d5e4fe44f9d05",
+      "test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_review.submit": "f66a4a4ac4c9e3fa80a970e6089751d5315e5c226e0e1af9cfd07569607988af",
+      "test_first_dispatch_cannot_adopt_a_replacement_run_after_acceptance": "c436239e6fc5631df6ada4255910827d3553c37b281210a8bf4fbf20be9e894a",
+      "test_load_precondition_and_original_replay_use_current_authority": "1f4ec95d9e34557203a83048657058d8e1ec75a455bc7f8ce5e9c2518548c0ed",
+      "test_load_retries_a_transient_admission_owner": "2ffa7a5fae047dfe0555498e4815f8a8a281300d383000c5d93072b6103ae225",
+      "test_load_retries_a_transient_admission_owner.busy_then_queue": "a25e6ae1a729742f3a1fc787e8ee8de4a4dc654ea22918c0258b8822f05f9066",
+      "test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent": "200f6ffbc2528112b224efd3d22494e0cb017b6cae84da7cee300a0373181728",
+      "test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent.change_head": "ad65d0b5cf0422322f51f5f140f2048214d08cfd3741293fe5624f55e67c42e0",
+      "test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation": "fe5fddb57b6b6beb80cd354bfe739a15e8b34c6901e18e2ce4d0fb2482dd7ba8",
+      "test_revoked_actor_cannot_submit_new_load": "328028a22b40f436bd426336200743070ca68b91331cd5d3a408dcfea341388a",
+      "test_superseded_child_contention_is_parked_without_holding_admission": "d3208bf6a90f2b0ea5ea369b46434d62cb8acfeabe219bc343cebf745742faee",
+      "test_superseded_child_contention_is_parked_without_holding_admission.before_lock": "e65e4b680a43fbabc26e88972605d58902f7a27802ea4749f3b52ad0ea871207",
+      "test_superseded_child_contention_is_parked_without_holding_admission.names_locked_owner": "1a3839eee1f5fd38f32977601737b05485e4c0495f9790aa777463dbd4a9e625",
+      "test_workload_change_between_review_and_acceptance_is_refused": "1b44d8db830292d4eb8cef6671813249f26fa7eb64c762fc9bb0c7caa9836d54",
+      "test_workload_change_between_review_and_acceptance_is_refused.change_effect": "0dd12a0f5c395eb6230d5695a4be01ad6cf1c1ff4c29d6fb1b2a82a11287c727"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_change_between_fresh_review_and_admission_refuses_load",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_profile_load_submission.py"
+    },
+    {
+      "count": 1,
+      "function": "test_recipe_head_changed_after_review_is_not_substituted_into_admitted_intent",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_profile_load_submission.py"
+    },
+    {
+      "count": 1,
+      "function": "test_workload_change_between_review_and_acceptance_is_refused",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_profile_load_submission.py"
+    },
+    {
+      "count": 2,
+      "function": "test_load_precondition_and_original_replay_use_current_authority",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_profile_load_submission.py"
+    }
+  ]
+}

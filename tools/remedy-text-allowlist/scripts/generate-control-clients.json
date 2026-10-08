@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_generated_client_schema",
+      "kind": "imperative-remedy",
+      "path": "scripts/generate-control-clients"
+    }
+  ]
+}

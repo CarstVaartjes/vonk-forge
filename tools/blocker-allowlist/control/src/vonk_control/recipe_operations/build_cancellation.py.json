@@ -1,0 +1,78 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/build_cancellation.py": {
+      "<module>": "971012918a19ea9ae92748c0ea642a5c1a34136c2f85769800f69af4c23f1e52",
+      "BuildCancellationMixin": "e45a545570288b005ade78c38df92b8ea6cd3369cdd9635fd25272ec6beb3603",
+      "BuildCancellationMixin._cancel_build": "8c9e239fc059b252b0995807e3265771280a3b16ee3f2baf10e3e3c3ec9b51a7",
+      "BuildCancellationMixin._cancel_current_build": "df692fa2dc53e49c0c0f98c63f900093c4a96c7483718b7e4443a32e712aadaa",
+      "BuildCancellationMixin._cancel_current_build_locked": "5886fa30f11b18e95089d563bdb64f4f6b5c3c86023c6c7bb021aae6453800ca",
+      "BuildCancellationMixin._cancel_prebuilt_build": "71a9b2701d1a2e229897c73081b7d0ed0dba394475d94dda7896777eb4b9bca3",
+      "BuildCancellationMixin._release_cancelled_build": "be79bbe9f0bbf39a37b98faeb52dbbbf6f9d9a5278c3cdc231ba46fc638e7c1a"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/build_cancellation.py",
+          "RecipeRequestInvalid",
+          "BuildCancellationMixin._cancel_current_build_locked",
+          "build.shared_consumers",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/build_cancellation.py",
+          "RecipeRequestInvalid",
+          "BuildCancellationMixin._cancel_current_build_locked",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/build_cancellation.py",
+          "RecipeRequestInvalid",
+          "BuildCancellationMixin._cancel_prebuilt_build",
+          "build.shared_consumers",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/build_cancellation.py",
+          "RecipeRequestInvalid",
+          "BuildCancellationMixin._cancel_prebuilt_build",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/build_cancellation.py",
+          "RecipeBuildOwnershipBusy",
+          "BuildCancellationMixin._cancel_current_build",
+          "build.consumer_busy",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "RecipeBuildOwnershipBusy"
+      ],
+      "function": "BuildCancellationMixin._cancel_build",
+      "path": "control/src/vonk_control/recipe_operations/build_cancellation.py",
+      "reason": "A build cancellation that meets a lock another writer holds repeats its transaction a bounded number of times with short jittered pauses; the cancellation request key makes a repeat idempotent."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/build_cancellation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/build_cancellation.py"
+    ]
+  }
+}

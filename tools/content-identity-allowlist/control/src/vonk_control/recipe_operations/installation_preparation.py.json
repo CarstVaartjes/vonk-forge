@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/installation_preparation.py": {
+      "<module>": "8991e6341613671f552166e70c9923924225e1961e2cda08388ef3e9e4f2bd2a",
+      "InstallationPreparationMixin._prepared_installation_id": "e3ae0b6a26b5fc7754c70de5effcf19af071ae878872c4d8f034975a115d7197",
+      "InstallationPreparationMixin._stored_compiled_plans": "d3759f1685fccceadfe12ad34e586101c3eaf05b4c619abb9fcb18684d4702ca",
+      "InstallationPreparationMixin._stored_compiled_plans.read": "3ca1e9b44bd507d4500b78e8be89300d8755b09fd25fd787dc98bb3b5afe131c",
+      "InstallationPreparationMixin._stored_compiled_plans.rebuild": "cb3f648ab85bf2ae9c19b832a2dd237ae59f3b49720e2497e9c717e207bd228f",
+      "InstallationPreparationMixin.prepare_installation": "6b2f5259d68b63f97b307de4f467ad6591c88b8f40fff7b49f4dfa35c72bb7c0",
+      "InstallationPreparationMixin.preview_install": "652d043361ce118c6ccdd9935c387ff5bce5a5ad5f6f2043888b83c0e55db57f",
+      "InstallationPreparationMixin.start_installation": "8ae6a86b1d1b7a69ed4e6919a6e82d69f5872929439fdbb680b6e7166f72c96d"
+    }
+  },
+  "sites": [
+    {
+      "expression": "RecipeInstallation.recipe_build_id == plan.recipe_build_id",
+      "function": "InstallationPreparationMixin._prepared_installation_id",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/installation_preparation.py",
+      "reason": "Idempotent lookup of the installation this exact reviewed install plan (mapping, generation, build, plan digest) already created."
+    }
+  ]
+}

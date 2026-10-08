@@ -1,0 +1,25 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distribution_executor/preparation.py": {
+      "CompositeDistributionPhaseExecutor.__init__": "0a2ca4ae8caedd100668af236f590a182c815e5ab7bcce1389d8dd8d0d30f2d4",
+      "CompositeDistributionPhaseExecutor._cache_result": "ddcdf2d1318a6d0e245b8f7533388a7848c2e71103af773022de376cf6d00f86",
+      "CompositeDistributionPhaseExecutor._cache_state": "67285a481816574b36d780a9f44023c2ac18d9a350abb0b8ffadf8f9c98b5087",
+      "CompositeDistributionPhaseExecutor._prepare_runtime_image": "ab5bb221163a05594ca5df708dbc1de993860b676e27bdb9e466929cf0dcf58c",
+      "CompositeDistributionPhaseExecutor._prepare_runtime_image.before_publish": "c9b00e0448534b05701e876eb8bfd1c9b402628984159db3422fe40ff321d925",
+      "CompositeDistributionPhaseExecutor._prepare_runtime_image.persist_reference": "1f214ae4fc81d21fdfa5058399b8f56e34c5a7f8176b932859c01f065751bacc",
+      "CompositeDistributionPhaseExecutor.close": "7fe75185b69aa1ae560c9876c3b10d0a6171e30439f18c8cf78742a9046e1dd0",
+      "CompositeDistributionPhaseExecutor.execute": "dc0485d89c0cd0f7f14c82d5c0b4c135f81aa040a16a37731c9e1618d50dcea6",
+      "CompositeDistributionPhaseExecutor.get": "3925260150357e56c329665f7c3f87b73f48abafee316602ef5c7fb7dc5d8735",
+      "CompositeDistributionPhaseExecutor.memory_footprint": "ac93d09598e40ba98532886d65e00f66c982d13add5a24e557de3975428d325b"
+    }
+  },
+  "sites": [
+    {
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "function": "CompositeDistributionPhaseExecutor._prepare_runtime_image",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/distribution_executor/preparation.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

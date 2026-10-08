@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/availability.py": {
+      "<module>": "55365dd466b4453d24a3f27cd70bd023f7ba30a8a2e539a9dfeb23747452be97",
+      "AvailabilityMixin": "4d912d692fec3b04a04e1f8dad053a28414f432c48b6679be1fcbe368bfa7c9b",
+      "AvailabilityMixin._require_managed_cache_coverage": "89bbf4258ab838c91715709a583ef58976a9a17f37eff5c9bb32e2ed37854582",
+      "AvailabilityMixin._reverify_set": "d62c860655b42b15fa7202bac0e9851386a4d3aae5655ed5a444dcb658e144fc",
+      "AvailabilityMixin.adopt_verified_set": "718ee13c796cc33e4eb88457e47ddb4af5f5c70442af71d39363569bad3e519b",
+      "AvailabilityMixin.cached_artifact_file": "038ab12b40a7bcdfc2f6029076de0ce8389679934a06c22e270c5e7f20280522",
+      "AvailabilityMixin.cached_artifact_file_once": "c36f16dbe2307cbfb267ccbb5452fd52c0a2e96e0be8e042efc8665ea26c8812",
+      "AvailabilityMixin.read_verified_artifact": "db0bb33ad787cc3bd0ffbf56df30a211366bf2f0992ff7563e99000c4da5cef7",
+      "AvailabilityMixin.resolve_verified_artifact_set": "6608150711e993f403b5330fa60c66020e3514c642e83efc0cda48c15aaeb4a8"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/model_cache/availability.py"
+    }
+  ]
+}

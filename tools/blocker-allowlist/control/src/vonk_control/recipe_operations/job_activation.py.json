@@ -1,0 +1,94 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/job_activation.py": {
+      "<module>": "9a79a9350791df5e6f9d8640286d0cf8e02eb6eb9a4458fb3722c3c4a3fdd6a5",
+      "JobActivationMixin": "bbfdfcd40000bd057268b600436c739f29d080a14848949e347de7f7b786284b",
+      "JobActivationMixin._activate_job_run_once": "067dfa6e946b776cc8a9a962a6cac01b94ba1cdf964884e03a15dc0c1b5f2e52",
+      "JobActivationMixin.activate_job_run": "1d89dabd0bd31a51b859c49e6101e45b56b39f3359d58b8bd8dd80c6e4c39989"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/job_activation.py",
+          "RecipeRequestInvalid",
+          "JobActivationMixin._activate_job_run_once",
+          "artifact-job-recipes-currently-require-a-single-node-topolog",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_activation.py",
+          "RecipeRequestInvalid",
+          "JobActivationMixin._activate_job_run_once",
+          "artifact-workload-target-disappeared",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_activation.py",
+          "RecipeRequestInvalid",
+          "JobActivationMixin._activate_job_run_once",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_activation.py",
+          "RecipeRequestInvalid",
+          "JobActivationMixin._activate_job_run_once",
+          "recipe-is-not-an-artifact-job-recipe",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/job_activation.py",
+          "RecipeRequestInvalid",
+          "JobActivationMixin._activate_job_run_once",
+          "stored-run-plan-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/job_activation.py",
+          "RecipeRequestInvalid",
+          "JobActivationMixin._activate_job_run_once",
+          "reviewed-plan-digest-does-not-match-the-submitted-plan",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/job_activation.py",
+          "RunAdmissionBusy",
+          "JobActivationMixin._activate_job_run_once",
+          "run-capacity-writer-is-busy",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "JobActivationMixin.activate_job_run",
+      "path": "control/src/vonk_control/recipe_operations/job_activation.py",
+      "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/job_activation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/job_activation.py"
+    ]
+  }
+}

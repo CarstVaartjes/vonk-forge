@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/endings.py": {
+      "<module>": "66fb80c07de2bd3e51a74239147c5e91c6d817577463f8888064a4cc3d01dc3c",
+      "EndingsMixin": "5fa88925371224cf7e73f422755b3c6f77b12900ef76f89e8ea13804d5aecc90",
+      "EndingsMixin._fail": "64e4b6014d867effcc7bfd0a9ccfcc7f79ff72aa0eaed1997ba6e28038e7c32c",
+      "EndingsMixin._get_child_operation": "c861efc9302bc9b5380925ef9580a3d62991eaff938b315919d0cc5bd6181f0f",
+      "EndingsMixin._mark_failed": "7de0f8b9781bc0b44e28ad044b7111ec53da35e1eac4a1d590d8780e9059b1cc",
+      "EndingsMixin._schedule_checkpoint_retry": "24b73ca9c25ec6ad3421aeca8b1d607638a04a1d91575408b63bc0bf91cf19c3",
+      "EndingsMixin._settle_invalid_receipt": "f6c609fdc97f5308c258bc28764dc9c200239e079061e8b5d5c6bb50d9857d18",
+      "EndingsMixin._settle_stop_observation": "04dbd9a49d584e31905da65a22f7102a8afe77ba395bb044f96453883ad0a8a9"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/endings.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/endings.py"
+    ]
+  }
+}

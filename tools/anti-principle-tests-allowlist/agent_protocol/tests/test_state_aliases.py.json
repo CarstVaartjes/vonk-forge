@@ -1,0 +1,59 @@
+{
+  "content_identities": {
+    "agent_protocol/tests/test_state_aliases.py": {
+      "<module>": "95a144cbf54491586901d7001d3bef75902227390f924845823eba09e2b87b18",
+      "test_a_core_word_is_adopted_as_itself_by_every_subject": "6bc69b57a1acefad0c670878d3fc67f580c7e07740a784f37b892a6b31d92f16",
+      "test_a_kind_of_the_job_table_may_spell_a_word_differently": "5292b39a313e7b1e47f061adda1d63a2dbc83ac595e52d2746e773ba4160056d",
+      "test_a_model_validates_an_old_row_as_the_word_it_means_now": "966042ead16ac2a5c4df215c4ca602e190f807ce84a01a856da2cce4494354bc",
+      "test_a_model_validates_an_old_row_as_the_word_it_means_now.View": "e9ce68c5f4548dd2fdf89b207cd8d6800ab6fcf1aa19b12ac981b74b743daa95",
+      "test_a_query_finds_old_and_new_rows_by_meaning": "f1c2c6193114241e3387bf59e5417db79543d682fb5faf1d093ec3efc747f0c2",
+      "test_a_word_the_subject_keeps_outside_the_vocabulary_is_left_to_its_owner": "a6dfc3c220444074d5834ef935d5daeb7f50cca6beab619693e1489dfb70a891",
+      "test_an_alias_is_never_a_core_word": "d00a552686203a30bb408c6f5e8a08132ca7fbfcc53313d993c56a47c2344625",
+      "test_an_old_attempt_word_also_yields_why_it_is_observed": "56ad640659517af59444a8d3e1cfb306bc48adc234ade44cacdf1420efbdab4b",
+      "test_callers_may_still_send_a_retired_word_as_input": "c5edc795dde9a6c0bd6a946b0af2ac8da2683281560a2ec43885f394e05a97df",
+      "test_draft_and_ready_are_preparation_not_lifecycle_state": "51628a11d6bf3c33558ad83e9593ed477d4efc8571c88d91bf18c09f8569edf4",
+      "test_every_retired_word_is_adopted_by_some_subject_and_means_a_core_state": "17ac3882c751432fcb358e7bab857b06ce28565ac31943d971951fff8a87218e",
+      "test_old_rows_are_adopted_on_read": "7f730d9c8d96f4db6d172969face8790d6a95077e744d38a944e3e54c4d00813",
+      "test_the_core_vocabulary_has_nine_states_and_superseded_is_terminal": "995473964e0f5f3e445f991942b4b9c0e2bb3cb9dd8345f162c9e53b916e7a9e",
+      "test_the_generated_typescript_carries_the_same_aliases": "f32af198d43845c57079c82344c489e690098bf0d7ab4f5252e4d23fcab280b3"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_an_old_attempt_word_also_yields_why_it_is_observed",
+      "kind": "operator-wait-assertion",
+      "path": "agent_protocol/tests/test_state_aliases.py"
+    },
+    {
+      "count": 1,
+      "function": "test_old_rows_are_adopted_on_read",
+      "kind": "transient-failed-assertion",
+      "path": "agent_protocol/tests/test_state_aliases.py"
+    },
+    {
+      "count": 1,
+      "function": "test_the_core_vocabulary_has_nine_states_and_superseded_is_terminal",
+      "kind": "operator-wait-assertion",
+      "path": "agent_protocol/tests/test_state_aliases.py"
+    },
+    {
+      "count": 1,
+      "function": "test_the_core_vocabulary_has_nine_states_and_superseded_is_terminal",
+      "kind": "transient-failed-assertion",
+      "path": "agent_protocol/tests/test_state_aliases.py"
+    },
+    {
+      "count": 2,
+      "function": "test_callers_may_still_send_a_retired_word_as_input",
+      "kind": "operator-wait-assertion",
+      "path": "agent_protocol/tests/test_state_aliases.py"
+    },
+    {
+      "count": 2,
+      "function": "test_old_rows_are_adopted_on_read",
+      "kind": "operator-wait-assertion",
+      "path": "agent_protocol/tests/test_state_aliases.py"
+    }
+  ]
+}

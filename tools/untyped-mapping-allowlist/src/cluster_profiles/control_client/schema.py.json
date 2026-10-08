@@ -1,0 +1,37 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/control_client/schema.py": {
+      "<module>": "66fcc584c37c5cf5227b733cd5a594d13110ca28480e3f8f25c79f5dd2a072e5",
+      "_control_openapi": "d517eda3b18b3562ec3bec412095902ab041181cd46837074b9a0c00f8a48ac3",
+      "_control_validator": "34a431a9ee172730f6aabdb23991accc6ba9814a0877a0fb42ae50cd0f1871ad",
+      "_operation": "0aeb46facf04f3b00bdbf898f69a508d55d2af8ae5e1dc50173b5bcf0a9a1114",
+      "_path_pattern": "55a50c45aa19a87bcaf329a638340591f24d8e748b00624ed78b277975626e55",
+      "_request_contract": "1d0dbbc3ad3d6babd9d29346350d226446fae62eff4d28df0cb1c5a818a3149e",
+      "_request_media_contract": "aa3ae0e5d75828aebf5556c81d76374709eb52a333b82a2933a2fe948a2777d9",
+      "_response_contract": "abceba5495663b4342eea54d963c5a847d67853b9d4c4ab7a7edab00976571f9",
+      "_response_definition": "7f68048713f3310001d0129c52227444c14fbd0ed992487a7d3f640b2e8564cc",
+      "_response_media_contract": "9f1405549ced2384595f48c60c02e8316b2df5f9a1d0c0f45ce6076f04117983",
+      "_schema_violation": "023925965e1ca91e1473ccaf0051f89b4360a338c183eb7af593e688c84c8c49",
+      "_validate_generated_request": "e2b9a3fe0cb831c6523bbdeb3bb66ad242a30c4fb2bc5ca4c0ce6316e35ca6b8",
+      "_validate_generated_response": "f4c033781215490610a115d5461a65edc7840924f015c844341a597c030580b3",
+      "_validate_schema": "1871bcbbc6ba77caf64645b69ed3fdd61f0bab0b082d5ffa4ae6ee27fe108f2c",
+      "source_schema_validator": "1c8c404f1e818a4d1fb2a06e06948fc63262d43769d75be482e332ba5e3b5aaf",
+      "validate_control_document": "b32e771ee8e692964883e859e84dcfb6ca94fb793b1ed489e8bc46d651e9ded1"
+    }
+  },
+  "debt": [
+    {
+      "count": 5,
+      "path": "src/cluster_profiles/control_client/schema.py"
+    }
+  ],
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "source_schema_validator",
+      "path": "src/cluster_profiles/control_client/schema.py",
+      "reason": "The generic JSON Schema validator receives the explicit external OpenAPI/JSON Schema graph selected by the caller, including a verified historical release graph. It does not invent or decode an application payload model, select another schema after refusal, or fall back to the current bundled graph."
+    }
+  ]
+}

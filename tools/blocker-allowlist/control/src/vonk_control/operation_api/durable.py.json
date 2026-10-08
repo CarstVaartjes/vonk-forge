@@ -1,0 +1,52 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_api/durable.py": {
+      "<module>": "84da4a06ac2c0ca344b1a4db220a32d5f69e6051080769125f117d3784217b10",
+      "_DurableOperationProjection": "84da4a06ac2c0ca344b1a4db220a32d5f69e6051080769125f117d3784217b10",
+      "_DurableOperationProjection.__init__": "979450dd2a4d5d6b2756afa0a491748f8a989b52d36d8390c79eeeb385484d2e",
+      "_DurableOperationProjection._activity_actions": "bd5afffa3a1ffcd0fb8f8e00b2a2301e4f80f5cd09747d13e27930f8c58e8e54",
+      "_DurableOperationProjection._activity_item": "bc284a00ebd9ec73b57899da6c47a5eb48669672cd456f2c16de7fd0de5c11bc",
+      "_DurableOperationProjection._endpoint_payload": "3bf74d1f8f0c7d609938b9b5d867cd0e258fa656cb1725b4df57bacc7256e222",
+      "_DurableOperationProjection._publication_snapshot": "0d0bad6ffbf8c411d72abfa4049822ffd88e2a031b2293e140802c5ce13ccccf",
+      "_DurableOperationProjection._route_run_id": "c3cf09f88eaf01ee87d724019392e8d2b1d07f9c856663e1c30d8e49507397d1",
+      "_DurableOperationProjection._verified_routes": "38f622bbd9945c84b347d6ebbcb2dcbc02f8995c1e5b45b4e39472258b222f1c",
+      "_DurableOperationProjection.agents": "84e9534f5bd2780591d82fb614076bfb8093e2f805e010680ea59021a5eabbc7",
+      "_DurableOperationProjection.get_operation": "964b5f3d0dc89cf0358465e2248c8fe930ab490c97fa4746643b0227da9521f5",
+      "_DurableOperationProjection.job_operations": "e7c271ccd6e5ffbc54282d0aaff81ba6bb33c3a293154d162f22254d5d6c477f",
+      "_DurableOperationProjection.list_operation_provider": "7e08eb8f407691969f8a757ec563137ff41a84d8af79e3e86a075fbb6f80ff22",
+      "_DurableOperationProjection.list_operations": "0a69ccf2be802b0a322a81c984efa4e620b616149b51a759fbee463c98793e7e",
+      "_DurableOperationProjection.profile_endpoint": "ccf57c33da098a2a5bb8ad53e9cc2a5854a50a2334f95ed869e1308543fb655c",
+      "_DurableOperationProjection.resume_job": "167aed5e3a9783886d101410f10e5bd23345c0c955264e4af55e5bb6be70131d",
+      "_DurableOperationProjection.retire_job": "4dafb6eb907c212b0b86d0cba9c0166b0965432ae1e783e16272bb4e1944b0ad",
+      "durable_operation_services": "469ca94e471e1f143cc7047935b04fb4c9b4daa561470beb045eac056c83a127",
+      "durable_operation_services.resume_job": "3395559588ebc9e31ba19de88ccfa38db4df8d6801eac1be9e971e1d21c5b507",
+      "durable_operation_services.retire_job": "7556cdebe075aed48f065bced9ea2ede954b03dd776583a5428a1788469fd749"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "operation_api.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/operation_api/durable.py",
+          "CursorError",
+          "_DurableOperationProjection.job_operations",
+          "operation-cursor-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/operation_api/durable.py",
+          "CursorError",
+          "_DurableOperationProjection.list_operations",
+          "operation-cursor-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/operation_api/durable.py"
+    ]
+  }
+}

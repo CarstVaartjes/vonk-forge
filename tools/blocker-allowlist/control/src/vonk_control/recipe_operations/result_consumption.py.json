@@ -1,0 +1,78 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/result_consumption.py": {
+      "<module>": "807421465571c9f0cd4fa5aca4d9b01612abe3682ac0fab7e3e4db6e9cb04b78",
+      "ResultConsumptionMixin": "0843db5fd46e27ebd69796f9ccc631fe774803188b46d3a4069e796a7fad0f17",
+      "ResultConsumptionMixin._apply_build_cleanup": "61a1cb617e48b4f8fc3538263b6950398a6cecb4f0c80fea569b9b621d5e7d89",
+      "ResultConsumptionMixin._reconciliation_job_complete": "34f4b7a962e2563468d998e5aa17d8de14f69404bd25f14f1752a27048b11fe9",
+      "ResultConsumptionMixin._record_node_result_once": "cf78daaed5edc3d13a080b6da32dc91a02e45c5c1081d8cf198dc30b28a4c720",
+      "ResultConsumptionMixin.consume_agent_result": "4bcd2645bbecc3e61918aa59a0c27843e6665785c0f130ad349769bcba06e700",
+      "ResultConsumptionMixin.record_node_result": "0fef451a4e193d62720a1dda2a1e088bd29bfbe4cf52c50f3cc557efb82bf0db"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/result_consumption.py",
+          "RecipeRequestInvalid",
+          "ResultConsumptionMixin.consume_agent_result",
+          "installation-cancellation-scope-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/result_consumption.py",
+          "RecipeRequestInvalid",
+          "ResultConsumptionMixin.consume_agent_result",
+          "recipe-cancellation-was-not-requested",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/result_consumption.py",
+          "RecipeRequestInvalid",
+          "ResultConsumptionMixin.consume_agent_result",
+          "run-cancellation-scope-changed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/result_consumption.py",
+          "MissingRecord",
+          "ResultConsumptionMixin._record_node_result_once",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/result_consumption.py",
+          "RecipeRequestInvalid",
+          "ResultConsumptionMixin._record_node_result_once",
+          "node-is-not-part-of-operation-group",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "ResultConsumptionMixin.record_node_result",
+      "path": "control/src/vonk_control/recipe_operations/result_consumption.py",
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/result_consumption.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/result_consumption.py"
+    ]
+  }
+}

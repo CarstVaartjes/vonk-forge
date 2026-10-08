@@ -25,6 +25,7 @@ first), so the allowlist says exactly what the proof says.
 from __future__ import annotations
 
 import ast
+import json
 import re
 import sys
 from collections import Counter, defaultdict
@@ -47,6 +48,7 @@ from .blocker_boundaries import (
     scan_raises,
 )
 from .blocker_retries import demote_unproven, promote_proven, proven, unknown_classes
+from .registry_storage import write_registry
 
 SECURITY = BlockerCategory.SECURITY_EDGE.value
 INPUT = BlockerCategory.INPUT_VALIDATION.value
@@ -518,31 +520,31 @@ def main(argv: Sequence[str] | None = None) -> int:
     if arguments == ["--classify-new"]:
         families = propose_families(scan_raises(), document)
         document["fail_closed"].extend(families)  # type: ignore[attr-defined]
-        ALLOWLIST_PATH.write_text(
-            dump_document(document, record_content=True), encoding="utf-8"
+        write_registry(
+            ALLOWLIST_PATH, json.loads(dump_document(document, record_content=True))
         )
         added = sum(len(family["sites"]) for family in families)  # type: ignore[arg-type]
         print(f"appended {len(families)} families covering {added} site keys")
         return 0
     if arguments == ["--demote-unproven"]:
         moved = demote_unproven(document)
-        ALLOWLIST_PATH.write_text(
-            dump_document(document, record_content=True), encoding="utf-8"
+        write_registry(
+            ALLOWLIST_PATH, json.loads(dump_document(document, record_content=True))
         )
         print(f"moved {moved} unproven already-retried sites to bookkeeping-debt")
         return 0
     if arguments == ["--promote-proven"]:
         moved = promote_proven(document)
-        ALLOWLIST_PATH.write_text(
-            dump_document(document, record_content=True), encoding="utf-8"
+        write_registry(
+            ALLOWLIST_PATH, json.loads(dump_document(document, record_content=True))
         )
         print(f"moved {moved} proven unknown-outcome sites out of bookkeeping-debt")
         return 0
     if arguments == ["--rebalance"]:
         demoted = demote_unproven(document)
         promoted = promote_proven(document)
-        ALLOWLIST_PATH.write_text(
-            dump_document(document, record_content=True), encoding="utf-8"
+        write_registry(
+            ALLOWLIST_PATH, json.loads(dump_document(document, record_content=True))
         )
         print(f"moved {demoted} sites to bookkeeping-debt and {promoted} out of it")
         return 0

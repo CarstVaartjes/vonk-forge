@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/cli_update_contract.py",
+      "reason": "Stable bounded authenticated CLI compatibility authority derived from one complete actual process observation; signed schema witness ships with the updater."
+    }
+  ]
+}

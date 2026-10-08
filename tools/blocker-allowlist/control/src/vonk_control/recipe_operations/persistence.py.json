@@ -1,0 +1,158 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/persistence.py": {
+      "<module>": "a31f00b0250de7f51a2d86679644ec3d59b617cdd9818493ea682d9b7df2a66e",
+      "PersistenceMixin": "d03839cb790c29c04de180ce6d88838f6320f150f6d69b49a7eb21fce439d442",
+      "PersistenceMixin._admit_workload_intent": "3539833e10286017dcaa19c75c868c0732970fea71a3d8922200cd6c9688b52d",
+      "PersistenceMixin._idempotent": "848f648b50e1c559f591eafe91d30edf19db8cfad35e09371e22dfce76fc9700",
+      "PersistenceMixin._idempotent_in_session": "7801e2a29a0970574161f9f6353027d9e491eb41994b7c5dbd6581d4ab7cf039",
+      "PersistenceMixin._idempotent_job_in_session": "f5d6552eee21eb6a3b2d21a74be6ea5c4dcafd89c8b534bf7b5ad18ae430786b",
+      "PersistenceMixin._queue_in_session": "8beaa3b2250d9ab6c938fee62572dfb668cccfee99dbbf13417a03f022892efc",
+      "PersistenceMixin._release": "569856a3e5badd481ed7557f7502310e24f32def99409a81ea397830c2cc0732",
+      "PersistenceMixin._release_node_reservations": "2f0fd3e775eaecdbcb377e6604fe80689416e5bea9d9635f1ccddb6fae98afd4",
+      "PersistenceMixin._view": "402ecb9394438cfde47a100e110ce9519190135a0eab635c974e68ee5b333e99"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "exact-ordinary-jobrun-stop-security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._queue_in_session",
+          "accepted-logical-stop-identity-changed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._idempotent_job_in_session",
+          "request-key-was-already-used-differently",
+          4
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._queue_in_session",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._admit_workload_intent",
+          "workload-intent-target-disappeared",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._admit_workload_intent",
+          "workload-intent-was-superseded",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._queue_in_session",
+          "compiled-execution-plan-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._queue_in_session",
+          "operation-group-has-no-target-nodes",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._queue_in_session",
+          "operation-phases-are-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._queue_in_session",
+          "operation-phases-do-not-match-target-nodes",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._queue_in_session",
+          "recipe-operation-job-payload-is-too-large",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RecipeRequestInvalid",
+          "PersistenceMixin._queue_in_session",
+          "workload-intent-ordinal-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "InstallAdmissionBusy",
+          "PersistenceMixin._admit_workload_intent",
+          "install.capacity_busy",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "InstallAdmissionBusy",
+          "PersistenceMixin._queue_in_session",
+          "install.capacity_busy",
+          3
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RunAdmissionBusy",
+          "PersistenceMixin._admit_workload_intent",
+          "run-capacity-writer-is-busy",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RunAdmissionBusy",
+          "PersistenceMixin._admit_workload_intent",
+          "workload-intent-differs-across-the-target-sparks",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/persistence.py",
+          "RunAdmissionBusy",
+          "PersistenceMixin._queue_in_session",
+          "run-capacity-writer-is-busy",
+          3
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/persistence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/persistence.py"
+    ]
+  }
+}

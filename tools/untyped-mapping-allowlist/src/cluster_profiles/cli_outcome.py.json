@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_outcome.py": {
+      "<module>": "086f99c311efd05257fadd5f3669a48002ae5aee4f10d96254d6ceb7dbd9a746",
+      "CommandOutcome": "f621975e5bcd5022995fbaf0bf9cb8ecffa8f233df5b5511aea5e96c3bc5ccd1",
+      "CommandOutcome.exit_code": "35953186b10f3ee8ee19d95dbd47bfff8cbf642e7c16841d88786c11ab8a9de8",
+      "CommandOutcome.from_command": "45db51a3ce7745c48164d52b738220aaf134a007b0a1d2176c998fe492fad6a0",
+      "CommandOutcome.output": "1c027624751e4acf4f71606b9454fdf09ac3d0ae038fee2305e1a1ea9073c877",
+      "EnrollmentDeliveryError": "4fb7f6b3850e8e5b63153dd74e461616500cf3892b434e21d60a97d156bdc571",
+      "Observation": "6c080bfadac2f3978776ddd53f625e498e043675a24a9577df6f943dc8fd00da",
+      "Observation.document": "37bca7ae4fe2c224145ea783d1b2a981cb90a389613983b446e72518904d3eaf",
+      "Observation.update": "f6b3177d61578a8de7c81155f5d3b455d31d835ac2a5494cd1ac675c9955fdb6",
+      "Submission": "ce2a4b134a341a8336137370863a3fc37a9d4f5e5cd868fdbd224e34d1fafe81",
+      "Submission.document": "4f2171c5086bcd0b68ed58765310aea18889107ccc8ef66ce57a69feb6dd50e3",
+      "operation_state": "9e592fe4a18b0474f25a90bfd839afc05839bc359ddfcbddf6e61b226257e46c"
+    }
+  },
+  "debt": [
+    {
+      "count": 10,
+      "path": "src/cluster_profiles/cli_outcome.py"
+    }
+  ]
+}

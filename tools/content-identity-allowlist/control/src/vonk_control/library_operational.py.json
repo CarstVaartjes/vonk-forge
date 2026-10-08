@@ -1,0 +1,39 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_operational.py": {
+      "<module>": "c58ecf5ae011b705348a81c9150cce540521a93f0c4f35f555e04efedb6e1d62",
+      "_MemberEvidence.identity": "d8f696925cfb00c863b89d92cf53052c242d2faffdf758b33f82b17898deb011",
+      "_OperationalRows.collect": "4f84212d81aaa1ecc48db5a95ea5e32d36a4f4eeb404b68b09076374273965bb",
+      "_PlacementOperationalEvidence.truncated": "360b62c44ff897e798eb333cec158a9a53751fda2be90346879f1166ebecf61b",
+      "_group_rows": "fa1fb103c91bdbc052a23ff649c400db8bbc223ff7f508e6843119fd7b1359ab",
+      "_installation_coverage": "724cdb7d7b488a32a2b38d45cf5e671bd9ea56a55f97921531c165fb325d69c5",
+      "_member_evidence": "d00f3f6a4d1283a54d36f284db1321ece8ceb9cd225f73a9060e8e2eaf22915e",
+      "_members_are_exact": "ed457de4bbdb1568cf07bef45cb3bf9b4da7d93caf10e80704861d31e056bc7b",
+      "_run_health": "c4626535e57484d03fe85b726e6737da2a5276ebf56df08b687c2ee3fa999fd9",
+      "load_placement_operational_evidence": "c8cd37790dfa5d30d3f1be90f01bd08e61459af905c71640a4f1af629e6d7b6d"
+    }
+  },
+  "sites": [
+    {
+      "expression": "ClusterMapping.recipe_revision_id == recipe_revision_id",
+      "function": "load_placement_operational_evidence",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/library_operational.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeBuild.recipe_revision_id == recipe_revision_id",
+      "function": "load_placement_operational_evidence",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/library_operational.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeInstallation.recipe_revision_id == recipe_revision_id",
+      "function": "load_placement_operational_evidence",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/library_operational.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

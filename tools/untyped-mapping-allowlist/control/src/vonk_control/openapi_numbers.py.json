@@ -1,0 +1,41 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/openapi_numbers.py": {
+      "<module>": "644f838ac2570992abf4e10ee6ff737eb4ddc27044d19a704e6f4d9fedb91024",
+      "_restore_numeric_keywords": "0bea4cf3521b4f595040481b44c1684abac3e5e46299e40e1ca2c49c385d9816",
+      "canonical_openapi": "481095d8e9be4a41a6e40e6cf43c170ef5edcfd29f82cbb72badbf07f67ee3ff",
+      "install_canonical_openapi": "bec5b3c23d3fff0d976f0e34291182a42300871036875e15558fcab64c5434aa",
+      "install_canonical_openapi.openapi": "1b00533261265cb2bc65d63b36c7fdd2f6eae1663555cafd7d9a600ec9a40b77"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "function": "install_canonical_openapi.openapi",
+      "path": "control/src/vonk_control/openapi_numbers.py",
+      "reason": "Pinned FastAPI OpenAPI assembler reads and emits the external OpenAPI/JSON Schema format; canonical Pydantic models still own every application payload, and this mapping preserves their authored numeric schema keywords."
+    },
+    {
+      "annotation": "dict[str, Any]",
+      "count": 5,
+      "function": "canonical_openapi",
+      "path": "control/src/vonk_control/openapi_numbers.py",
+      "reason": "Pinned FastAPI OpenAPI assembler reads and emits the external OpenAPI/JSON Schema format; canonical Pydantic models still own every application payload, and this mapping preserves their authored numeric schema keywords."
+    },
+    {
+      "annotation": "dict[str, dict[str, Any]]",
+      "count": 3,
+      "function": "canonical_openapi",
+      "path": "control/src/vonk_control/openapi_numbers.py",
+      "reason": "Pinned FastAPI OpenAPI assembler reads and emits the external OpenAPI/JSON Schema format; canonical Pydantic models still own every application payload, and this mapping preserves their authored numeric schema keywords."
+    },
+    {
+      "annotation": "dict[str, str | Any]",
+      "count": 3,
+      "function": "canonical_openapi",
+      "path": "control/src/vonk_control/openapi_numbers.py",
+      "reason": "Pinned FastAPI OpenAPI assembler reads and emits the external OpenAPI/JSON Schema format; canonical Pydantic models still own every application payload, and this mapping preserves their authored numeric schema keywords."
+    }
+  ]
+}

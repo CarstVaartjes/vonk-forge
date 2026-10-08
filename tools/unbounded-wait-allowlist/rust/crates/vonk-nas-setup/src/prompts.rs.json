@@ -1,0 +1,34 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "confirm",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs"
+    },
+    {
+      "count": 1,
+      "function": "install_mode",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs"
+    },
+    {
+      "count": 1,
+      "function": "optional_secret",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs"
+    },
+    {
+      "count": 1,
+      "function": "required_with_default",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs"
+    },
+    {
+      "count": 1,
+      "function": "secret",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-nas-setup/src/prompts.rs"
+    }
+  ]
+}

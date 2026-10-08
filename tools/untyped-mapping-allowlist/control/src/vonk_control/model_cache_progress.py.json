@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache_progress.py": {
+      "<module>": "8387c8c5bce2fac33b9723a5c98fc97ce8d19814b3dde9cf3f24ce0f275e4876",
+      "_member_as_progress": "0f724d772b20a00d6fd256642221449793a927998a9c962920f7254d14944846",
+      "_member_progress": "739ca1dde8d5063ec1c1a33e2957c382cd18ee38a4d90901c18dea0270d9c707",
+      "_sample": "277a3dac5c2adcacfa96ac51d0ed03114aaf440e99fcf4ce8b8b36a050e59a50",
+      "cache_phase": "8b72301413ff8fefde86ff84d6a1d509944148ed35f8f086c6a42f9435e5a766",
+      "cache_progress": "6b899be072baf8e78e72de7c708fe00a0fa43494d613e0c3c19df149a9b06fb2",
+      "progress_document": "fb65a1a6fc397c932ec9598c0cc0eddfee61d69ed1cf04cfe581d92f0ca22542",
+      "project_cache_progress": "81c9c566691338fd759790554a5f4e92858c833ba00333c9280013812a226cad"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/model_cache_progress.py"
+    }
+  ]
+}

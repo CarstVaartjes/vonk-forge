@@ -1,0 +1,74 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/operation_projection.py": {
+      "<module>": "f562c1ae0ea11cbf6a0fd9b63dbe6fe8258f41263b4227abed60ff4c13758df9",
+      "FleetProfileService": "6e64b0f6fa9cf086ffe730684c9ca0578b68e983fd69faafc0d247e0f3b87658",
+      "FleetProfileService._activity_item": "2d161eeca546a0f3e7b8011f730d00959b2c13d6c074aa6a28346b8efb072414",
+      "FleetProfileService._operation_item": "97923a880cb5d62f86d778f035ce981fefba55a695d8c857aab2b23b6a0056d8",
+      "FleetProfileService._operation_phase": "9bbe88fd9f8472a07a5e4695d282faacd0c4f3d55db7166e52eee1a77eb24e94",
+      "FleetProfileService._operation_scope": "d8180981d31537793d5abcf36a264cb0dc1a8e2e1d76fb09313535b4821a1f93",
+      "FleetProfileService._unreadable_operation_item": "512dde361bc12881e62b7588a8e4d62367130b60d58adbeadf2250de44c81e17",
+      "FleetProfileService.application": "4e0523b33844cfc549411b47bec28d639f55a263129615b9db0316486503dbc0",
+      "FleetProfileService.application_by_request_key": "6001660a50d4ee86f55b39e349cb1f39435213e577c31bced81e0fe7d3a4deb8",
+      "FleetProfileService.application_cancellation_by_request": "d95052e12cb3e36817ee0ff3d1f2ee237c7bc24034a1ac01fab3ed84ea1cf6fd",
+      "FleetProfileService.operation_provider": "e287839d3f3754ff9337ded4fab1bf1912ff1ba8b11a6bb34d7ee535f3320135",
+      "FleetProfileService.operation_provider.get_operation": "212815d83b73101d6ba4a91af33be33dd812454811aa6e01c6e7078cc1d8d3df",
+      "FleetProfileService.operation_provider.list_operations": "522e42657f733d7c36ecf4aa9176fa6d47e7b031b5708f53528b8903a660e0bb"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/operation_projection.py",
+          "MissingRecord",
+          "FleetProfileService.application",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/operation_projection.py",
+          "MissingRecord",
+          "FleetProfileService.application_by_request_key",
+          "not-found",
+          2
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/operation_projection.py",
+          "MissingRecord",
+          "FleetProfileService.application_cancellation_by_request",
+          "not-found",
+          2
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/operation_projection.py",
+          "MissingRecord",
+          "FleetProfileService.operation_provider.get_operation",
+          "not-found",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "fleet_profiles.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/operation_projection.py",
+          "FleetProfilePermissionDenied",
+          "FleetProfileService.application_cancellation_by_request",
+          "current-profile-cancellation-authority-is-unavailable",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/operation_projection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/operation_projection.py"
+    ]
+  }
+}

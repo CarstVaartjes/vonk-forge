@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/library.py": {
+      "_library_query": "a03f8aae24dd167d3b57c29877a816e503ad533d4e13f1eddfd0ae47c05bdbff",
+      "_model": "50996b2b89507047d71bd8d5079bdb5857dbd38ad769215099e6d78ca3c11b6d",
+      "_recipe": "c80362895e4b0354afd0bc7fc22f6e5b4644e71c195d32005ed2bbbd6f88bd7c"
+    }
+  },
+  "debt": [
+    {
+      "count": 4,
+      "path": "src/cluster_profiles/controller_cli/library.py"
+    }
+  ]
+}

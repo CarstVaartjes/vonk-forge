@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_jobrun_host_grant.py": {
+      "_selected_profile_stop_grant": "775633ca0e5d403947544fab0dd8d736820a83806af160c52ce9904a674c92b3",
+      "test_selected_profile_stop_issues_signed_exact_job_target_grant": "88f475a9cb65eb0e70a37064f4663a9dc19ae385ae309bd99faeb62095089a8b"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_selected_profile_stop_issues_signed_exact_job_target_grant",
+      "justification": "Tests the actual signed grant for an issued selected-profile exact JobRun target and refusal of a forged target. The Stop remains issued with uncertain work retained; this authority test does not acknowledge the effect, end the lifecycle or claim released capacity.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_jobrun_host_grant.py",
+      "reason": "security-edge"
+    }
+  ]
+}

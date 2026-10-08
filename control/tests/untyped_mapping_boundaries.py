@@ -7,7 +7,7 @@ describe an object whose keys the type checker cannot see, so a plan, progress
 document, evidence record, result, blocker or request body typed that way can
 drift from its contract unnoticed.
 
-Two kinds of annotation are allowed, both in ``tools/untyped-mapping-allowlist.json``:
+Two kinds of annotation are allowed, both in ``tools/untyped-mapping-allowlist``:
 
 * ``permanent``: a reviewed site keyed on path, enclosing function and the
   annotation text, with a count and a written reason. It is either genuinely
@@ -29,13 +29,14 @@ so ``dict[str, object | None]`` and ``dict[str, JsonValue]`` are the same debt a
 from __future__ import annotations
 
 import ast
-import json
 import re
 import sys
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from .registry_storage import read_registry, write_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOTS = (
@@ -44,7 +45,7 @@ SOURCE_ROOTS = (
     REPO_ROOT / "src" / "cluster_profiles",
     REPO_ROOT / "scripts",
 )
-ALLOWLIST_PATH = REPO_ROOT / "tools" / "untyped-mapping-allowlist.json"
+ALLOWLIST_PATH = REPO_ROOT / "tools" / "untyped-mapping-allowlist"
 
 _MAPPING_NAMES = frozenset({"Mapping", "MutableMapping", "dict", "Dict"})
 _UNTYPED_VALUES = frozenset({"object", "Any", "JsonValue"})
@@ -166,7 +167,7 @@ def scan_sites(roots: Sequence[Path] = SOURCE_ROOTS) -> list[Site]:
 
 
 def load_allowlist(path: Path = ALLOWLIST_PATH) -> dict[str, list[dict[str, object]]]:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = read_registry(path)
     if not isinstance(document, dict) or document.get("schema") != 1:
         raise ValueError(f"{path}: allowlist must be a schema-1 object")
     permanent = document.get("permanent")
@@ -303,7 +304,7 @@ def update_debt(path: Path = ALLOWLIST_PATH) -> int:
     from .package_moves import record_identities
 
     document = record_identities(document, REPO_ROOT)
-    path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    write_registry(path, document)
     return sum(remaining.values())
 
 

@@ -1,0 +1,35 @@
+{
+  "content_identities": {
+    "tests/scripts/test_qualify_recipe.py": {
+      "<module>": "760cc5e21bfc47c8bcaeb9f63ba1685d5ef5be074f4b675eeb96664200e7cd73",
+      "_library_root": "5aa31f17aedd2b0574e9d120819151b2d76a441aec18dd4a931ccc22e025ec86",
+      "_recipes": "f8c368470f0245c2932c1d764439235f560b242b24b457be71b29a1c1907177f",
+      "_run": "693b3aa30c2913e688f85e569ab7ae79436b460c5e9cdf38b2901276b3624629",
+      "test_archive_safety_rejects_traversal_and_reserved_payload_namespaces": "398b770f2f0f078eaa603ed513c421b45836b60d1ebd1abcd8df538a00508e4f",
+      "test_container_gate_refuses_without_production_launch_adapter": "6946c7b6b525f90ff2d9f6f34fd1780784d20de1fb4c011ea04b28671f7dff1e",
+      "test_container_gate_reports_environment_without_spark_claim": "6ff1b16833668bed65a9a66063f695625b095e9a187ed07c27f30503199adf52",
+      "test_qualifier_reports_a_failed_local_http_serving_check": "8e92dbe11cfc1e0c59b2348b14b32fc99ffc11a2184e9882a86f681c2d589397",
+      "test_qualifier_reports_a_failed_local_http_serving_check.FailureHandler": "0d95402ea3aee8671fc986635e0ba9057e27ccde85739072f9917232213175b2",
+      "test_qualifier_reports_a_failed_local_http_serving_check.FailureHandler._write": "c827f1d8af9d124306741608477c3ae011307ccb5bd2b8c6e50f054807ae9f83",
+      "test_qualifier_reports_a_failed_local_http_serving_check.FailureHandler.do_GET": "80a625e9edf71294aeef3df995cee52f3235d34a2e1e3063f6f001b236120a62",
+      "test_qualifier_reports_a_failed_local_http_serving_check.FailureHandler.do_POST": "ced598df11ab8d1f81f244b896054df0fdb7b1c6d083ce5d0e4b467360cdf7fe",
+      "test_qualifier_reports_a_failed_local_http_serving_check.FailureHandler.log_message": "453c08a39ddf48972cccb157ab72edd75fa11c8e4c4982a2608cb958fe069fdb",
+      "test_qualifier_runs_declared_local_http_serving_checks": "926c9cc93605440424f766987aa5e2453b13ffaa00f97d833163b9760519a4a1",
+      "test_qualifier_runs_declared_local_http_serving_checks.Handler": "6de713c93442bf0d9ecc8aedfcf6225469af1e53bdbbb666fcc17d60e4b906ee",
+      "test_qualifier_runs_declared_local_http_serving_checks.Handler._write": "c827f1d8af9d124306741608477c3ae011307ccb5bd2b8c6e50f054807ae9f83",
+      "test_qualifier_runs_declared_local_http_serving_checks.Handler.do_GET": "80a625e9edf71294aeef3df995cee52f3235d34a2e1e3063f6f001b236120a62",
+      "test_qualifier_runs_declared_local_http_serving_checks.Handler.do_POST": "c83bb85a543f23b78d64eb3f1decff52f8f1b88512d3b676da65c2559f624e2e",
+      "test_qualifier_runs_declared_local_http_serving_checks.Handler.log_message": "453c08a39ddf48972cccb157ab72edd75fa11c8e4c4982a2608cb958fe069fdb",
+      "test_structural_examples_cover_service_job_and_dual_contracts": "e40f085818d339ffa090e83bef4c5c45fd30fd88ab3925b1c4864f9a041bf314",
+      "test_structural_qualification_uses_dynamic_published_catalog": "79587c805629593e52ce951685338de98558cbd76cf52ce1feb10e0cd00d1c5a"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_qualifier_reports_a_failed_local_http_serving_check",
+      "kind": "transient-failed-assertion",
+      "path": "tests/scripts/test_qualify_recipe.py"
+    }
+  ]
+}

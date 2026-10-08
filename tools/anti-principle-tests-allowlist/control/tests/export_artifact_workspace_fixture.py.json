@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/tests/export_artifact_workspace_fixture.py": {
+      "<module>": "7bebef8ba6d052ed03521a2097e32c7e262cec0fa7766fcf7cb583f9cd597945",
+      "_recipe_transform": "a2ed18d400d11e0addffc0600aa1dedc0dd33d9959f9e240499db3f5c4b761a5",
+      "export": "4b55a479b98357c331fa5c87b07238458db5ab9805b3735b32534019f1038688",
+      "verify": "bd11a88b611f779e34451775385e162ab3fba55082cfecee481e1d456a9f0f48"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "export",
+      "justification": "GET Fleet succeeds; POST artifact create has no installed artifact service and deliberately returns503. No read refusal or lifecycle completion.",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/export_artifact_workspace_fixture.py",
+      "reason": "service-absent"
+    }
+  ]
+}

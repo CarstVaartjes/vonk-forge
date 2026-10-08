@@ -1,0 +1,51 @@
+{
+  "content_identities": {
+    "control/tests/test_retirement_recovery.py": {
+      "<module>": "73900c1f02e9e1d06ade08246676747494592acba8685dc5ead89e727ac516a8",
+      "QuietRoutes": "73900c1f02e9e1d06ade08246676747494592acba8685dc5ead89e727ac516a8",
+      "QuietRoutes.maintain": "1981962db2e001f43fa82d3f97b27a52a515d3bacc82847a14c7c7011af8251a",
+      "QuietRoutes.publish_run": "ef54bf79fac49f95b7c3c2894390f57400fb29aa86418c429fdcb2b81feda3ea",
+      "_parked_start": "70207be5fc3cdf7b67736b0dd8f2e0ae48edb14776b0ce9512567bb5925bc975",
+      "_result": "9b8882b5764665d00eeb8ecd24ece92323e1f31003c8176d3191c466f038d69d",
+      "test_retired_installation_requires_uninstall_receipt_and_preserves_denial": "b33497d2cfcc13982346c2ce0ee93080f02c0e1717b32faac9ea7bba56be4d19",
+      "test_retirement_cleanup_never_takes_newer_workload_authority": "40e48313ef84ffeb9ad1a9f348bc044fa80ee8a7d19ae3b1db80b8a076b11fa6",
+      "test_retirement_preserves_uncertain_capacity_until_exact_stop": "dd2310da0f23bc4505417f42da5f35dc8f3727d9110350cd8c3e54e5acbe655d",
+      "test_retirement_preserves_uncertain_capacity_until_exact_stop.assert_reason": "8b2d3872596d918050ad19869b10747a18ab558f3cfe7dfa18744c71ff25930a",
+      "test_retirement_preserves_uncertain_capacity_until_exact_stop.fresh": "f310b516a0578dee85f7e1da32474942d599d52acdba6b0eacc9b1a6da8a798e",
+      "test_retirement_preserves_uncertain_capacity_until_exact_stop.unavailable_once": "276121d17cc3cbf8c586f84e2a8208b14929a5d43084444b292402d6b77e0489",
+      "test_retirement_refuses_expired_lease_inside_issued_launch_budget": "a8637b698d94697fc29c914e008ceebdf03ac98dd1c3f90bbd4741d5a9870a67"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_retired_installation_requires_uninstall_receipt_and_preserves_denial",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_retirement_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_retirement_cleanup_never_takes_newer_workload_authority",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_retirement_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_retirement_preserves_uncertain_capacity_until_exact_stop",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_retirement_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_retirement_refuses_expired_lease_inside_issued_launch_budget",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_retirement_recovery.py"
+    },
+    {
+      "count": 1,
+      "function": "test_retirement_refuses_expired_lease_inside_issued_launch_budget",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_retirement_recovery.py"
+    }
+  ]
+}

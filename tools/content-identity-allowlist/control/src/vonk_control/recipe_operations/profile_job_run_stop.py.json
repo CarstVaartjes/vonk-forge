@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/profile_job_run_stop.py": {
+      "<module>": "1846985f2f91876cab18d101ae8242801a66071187e41e7762b008ced8cb6b73",
+      "ProfileJobRunStopMixin._artifact_job_targets": "32953ea18b9591114768ffbad05b3584e09f4497d44b3c5a0f1e23436612a2e6",
+      "ProfileJobRunStopMixin._one_shot_stop_prerequisite": "323921682c4e0b65d2eba407c822de798360e36b6925aa616c7a9f77a3ed0d8c",
+      "ProfileJobRunStopMixin._profile_jobrun_stop_in_session": "601a99a280cad28d3211264f81c6d131d9f5e607f43b301cdc7f84fa84c605c8"
+    }
+  },
+  "sites": [
+    {
+      "expression": "request.recipe_revision_id != installation.recipe_revision_id",
+      "function": "ProfileJobRunStopMixin._profile_jobrun_stop_in_session",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/profile_job_run_stop.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    }
+  ]
+}

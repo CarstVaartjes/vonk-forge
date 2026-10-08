@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/tests/test_find_prepare_installed_cli.py": {
+      "<module>": "d9812227ab8e4ba81f3458f8474019a084e8f1213b7887dc0031796ec2ce7d0f",
+      "_model_document": "01cae3bdfd0d64eb8ab15a8ac6dd77c8172f3ac8eefd689fe79065ae3f630b98",
+      "_run_cli": "439eb9040dc104e9877e3594d2a84a4fdfef007bbe28026f80bed2e62f6f9d80",
+      "test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_operation": "673f57443ac75b13c6abcdf7445c308b7f2c6b88782634c2999f93eeda1452c1"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_operation",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_find_prepare_installed_cli.py"
+    }
+  ]
+}

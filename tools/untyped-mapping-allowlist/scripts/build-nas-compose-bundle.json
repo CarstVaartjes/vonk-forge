@@ -1,0 +1,8 @@
+{
+  "debt": [
+    {
+      "count": 11,
+      "path": "scripts/build-nas-compose-bundle"
+    }
+  ]
+}

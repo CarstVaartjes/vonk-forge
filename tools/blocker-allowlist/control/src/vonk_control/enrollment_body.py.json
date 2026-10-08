@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/enrollment_body.py": {
+      "<module>": "6c1710028a11c3022d3eec244b6789007706607a012d83eae9f55fdb028b77cf",
+      "_bounded_enrollment_body": "e86ba7eff1620fe96b16f9eb84da0cbe01569bd648dbff99013351aeda0699a9",
+      "_consume_enrollment_denial": "a312bb679935dcfb8e321e40796a8ad83a492ae8d5c39eb1206367c07f2acd9d",
+      "_decode_bounded_json_string": "cb527d4cbf130d30c000f230a6761d15405393de74fa948843e3bc6b348910b1",
+      "_json_string_end": "0d0da8b0b4b8e99fbe61378842d742f7f1cac7c74ad5a16cf7705dd470b5bc5c",
+      "_scan_enrollment_grants": "974d92e7c4acbc7db77384c0c3ca53d94bb4ca4521fcdc11f6dd540219f1c35e",
+      "_skip_json_whitespace": "7a404a8e22726268286d3dd6a555cc76ebee1d085e7f441736bcb5026eab376e"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/enrollment_body.py"
+    ]
+  }
+}

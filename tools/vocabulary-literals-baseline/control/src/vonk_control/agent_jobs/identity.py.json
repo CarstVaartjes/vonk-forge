@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/identity.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "_active": "964beca278accb1e12800d2b12cbcd2a4a7e84f87faade21333fd975aea05cec",
+      "_consume_contact": "fe38613328d33b8288fdc572809874109cd9ff8cb1fa752aef8c75d38d842c42",
+      "_fence_token": "93ac1314407076888342c45e4596d21c604cbf17541a6117c5609dacd73f5be8",
+      "_identity_is_active": "b71ea418e2c8d68999a71449fc865cd605c63f907391fd106a4bc6d9a4c4d027",
+      "_lock_identity": "7fa411ee1bdc6763e336e3d99114bbb3571286661345a4ae0e24853afbc175fc",
+      "_reason": "2e97735343d70d185b61280a8118ac4d06d78a1e17b41a6ec1643092460435ef",
+      "_record_contact": "c994f76fe7cab1c7e926786bac16c7ce435ced9144e9f8d4f02dad916e4c8279",
+      "_runtime_identity": "8e8ef44004abc437d2e8cb753ab24c6311d705b680b2d4eed106875070d48c1d"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_jobs/identity.py": 4
+  }
+}

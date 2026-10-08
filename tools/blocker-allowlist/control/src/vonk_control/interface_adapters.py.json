@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/interface_adapters.py": {
+      "<module>": "c3bd984ab5aef5d9457b8341f0188d8c0986df127619b22677f3458035d44214",
+      "InterfaceAdapter": "80ee7b1496e327e02a1bf4422513dcfa5f5631b93d0fa3cbe597623ae30d8abc",
+      "InterfaceAdapterError": "922ba8d49d4c42d5de1c7556943c77af0928966d714c4908e03474be0e3e4d2d",
+      "interface_adapter": "e219ec065bcac983db7032aff40304e9e7d64740e9f9fcf8cdf41cfbef797a1e"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "interface_adapters.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/interface_adapters.py",
+          "InterfaceAdapterError",
+          "interface_adapter",
+          "unknown-interface-adapter",
+          2
+        ]
+      ]
+    }
+  ]
+}

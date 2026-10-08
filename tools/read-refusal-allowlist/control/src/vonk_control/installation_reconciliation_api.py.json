@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/installation_reconciliation_api.py": {
+      "<module>": "fd14980ccdd892e3bfa5ae86de5169e377566091a5572c93726eeea2185fa6e7",
+      "install_installation_reconciliation_routes": "32856540fc1a773d0723b86cfc5c75fb1fbfba05f23034ac4d1ff13bcee5f9a7",
+      "install_installation_reconciliation_routes.apply_installation_reconciliation": "08e505bf62b91a44c9cccf71cfb37f673e728fd7135de8d730ad7fdb45ce6138",
+      "install_installation_reconciliation_routes.preview_installation_reconciliation": "366a18b62c94b19ca4ca24264650d11623aafb8e5381f91bff9ad769af4a9261",
+      "install_installation_reconciliation_routes.refusal_detail": "07fc0f22b2d18a79c69d2e8473deeb4ec4e690b20765dfc6770c7bba4c3568c3",
+      "install_installation_reconciliation_routes.require_mutation": "d43d2fdbeeb2b73ab6d30055bb1000714cac4c06c8d7c7879e1671c7b39420b8",
+      "install_installation_reconciliation_routes.run_switch_operation": "f8fc1d460a315e96f2460028f2b8c9951216ec4db3a23bad4947627bb46493ac",
+      "install_installation_reconciliation_routes.service": "5bf5ce24590e3fb5cd6e765dfc6f1a624645c43152b71f00b5f150ddf7b42b84",
+      "install_installation_reconciliation_routes.validate_operation": "15265f5f4e5e5787645b570add554650f784c83c1fec788425978cb931d37d2d",
+      "install_installation_reconciliation_routes.validate_plan": "cd1da389066c55d140ab67aea554993a9dd9e939092b4c1676894475f292a3ce"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "install_installation_reconciliation_routes.run_switch_operation",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/installation_reconciliation_api.py"
+    },
+    {
+      "count": 1,
+      "function": "run_switch_operation",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/installation_reconciliation_api.py"
+    }
+  ]
+}

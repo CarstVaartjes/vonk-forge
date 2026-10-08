@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/host_helper_authority.py": {
+      "<module>": "f82c515f5eae4a0e32c41b283bdc5cbc754d6c3acc37233addbf0f8bed47d9a4",
+      "HostHelperAuthorityError": "6d022d682602d48a09bcec1714b113e397d5865007ba46146e75b6607ccfd5d6",
+      "HostHelperGrantIssuer": "2c94dcdc9860333ed5115f574fd2d0de7d5448ccd3ca2adcf46124d8ec3fe901",
+      "HostHelperGrantIssuer.__init__": "c9f9b63ec829b02424ad9eecfe960b1c49fc5ba20541347c1a5b048595918040",
+      "HostHelperGrantIssuer._now": "def9f87bcb6da9aa97c69682f6a11afb8a08003dd971a5efa120621e8d9619e5",
+      "HostHelperGrantIssuer.from_private_key_file": "7e8f598097ebb603bf33279757d7ee14a9788d2671eb1b6b2d0c9d3472ee6a36",
+      "HostHelperGrantIssuer.issue_grant": "f0e056d3127fcb6fa99242ba83ab6fbcb15ee8fc0ce7a7cfb26976ee8efd750c",
+      "HostHelperGrantIssuer.public_key_document": "c34da7b5326eec57dd444474d84a1b877326cec592f35da7ee3e43adf4a91277",
+      "HostRuntimeAuthorityService": "cb3033b96b3c43006c399ba129b604bc30ed9ecb9cb920fb987d17b57583e330",
+      "HostRuntimeAuthorityService.__init__": "951f4c08916ae8eb95016b227fc1edf160f6bf37765cf6d2df38fe7761eee218",
+      "HostRuntimeAuthorityService._check_attempt": "2d197ddc02e6c433367f63be3af1027ea80c57003478a9c7042358801243eb9f",
+      "HostRuntimeAuthorityService.issue_agent_upgrade_grant": "895daa59e90d82300446abafc8e0c5d00514a65bb1f960f4254ab721115c6486",
+      "HostRuntimeAuthorityService.issue_grant": "ad2a9a22d769097ab415b49d5b145d92f5e8376731bf04b4a3be1e21de8ff3f2",
+      "HostRuntimeAuthorityService.issue_package_activation_grant": "698e4c3994a2cd14948ddb40bf011b603aa3dcd48a8186b5fea0484baaf319b9",
+      "HostRuntimeAuthorityService.public_key_document": "6c3afecc4098963918d41a2e7790bb4dc4f0ebdc890a99ec4e0ae615637888bb",
+      "_aware": "e3f863dd032191f03c6bc6cdd1d84a10cbae0188f0a6e678b74883dc6aedeaa0",
+      "_load_private_key": "7bbfd390c910df8fdc015848da037f0888424b7bfa0049dee583bd0c5506185e"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/host_helper_authority.py": 6
+  }
+}

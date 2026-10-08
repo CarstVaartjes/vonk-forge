@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/app-shell.tsx",
+      "reason": "UI-only view model derived from generated API types for one screen; not an API document",
+      "type": "Operator"
+    },
+    {
+      "file": "control/web/src/components/app-shell.tsx",
+      "reason": "component props: UI-only, not API data",
+      "type": "AppShellProps"
+    }
+  ]
+}

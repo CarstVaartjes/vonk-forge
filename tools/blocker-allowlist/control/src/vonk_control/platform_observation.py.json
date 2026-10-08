@@ -1,0 +1,41 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/platform_observation.py": {
+      "<module>": "87a4cfed06410d178ad6640bcc27b1a735787d4f4ee4b45911540f4db8d6ac90",
+      "ApiRuntimeObservation": "298201ccb5b0b941c3ca572e0029dedc31e20af663e9c8010d050ab01ac5b0c4",
+      "CapturedPlatformObservation": "032bc073212ef49d758f833aac2ac594c27a4c2288e11b4866baf98c6d52dc27",
+      "PlatformObservation": "ff4bb79f82e4a41f81b818cba1cd1c06d7000b0ca8549ad1cf22861f3f1d8575",
+      "PlatformObserver": "203f79e2b8804aef6075e70ab50835b4426606d957d91f6944cf5cd01dc85d22",
+      "PlatformObserver.__init__": "432fef29feca94695daeffde45ff1f34a176f22c4cef7401361949bc60b04ef4",
+      "PlatformObserver._capture": "cc92fd68af6bb5b1de9e309699de2d108f1737a7b7650cb3ce9f4da69ab14b42",
+      "PlatformObserver.capture": "72687ec5b3198896ae695038b2dd79ecf26bc8ac306551e096b553e0527bcd93",
+      "PlatformObserver.read": "fb64c56070ebe9c821a98b3c4f2e463053586dd550a0986fd9dc8ff51609751a",
+      "WorkerRuntimeObservation": "7a043c6fe245e46e6a04bc69eca1cf3304ac03e31ae8735d973950698db73920",
+      "_readable_digest": "340599b23c51fc816cc55ed9ce2e4ac55f85d4cfd828140f15d11b3dd3ad5ca2",
+      "_readable_source": "809847b6c6aee4a210e7f5dbdd82076aedf6929596e28a8757fc5a4a550e3ac5",
+      "api_only_capture": "38f46430040a488417fde3002ead48d8f85ec152e2e06ab661cc377e6bdf002c",
+      "api_only_observation": "7ea3bbc337885a22a19df40bfcdd32847068b7bf9d44620fbd8614fc293cfdb1"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "platform_observation.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/platform_observation.py",
+          "ObservationCaptureUnavailable",
+          "PlatformObserver.capture",
+          "database-capture",
+          1
+        ],
+        [
+          "control/src/vonk_control/platform_observation.py",
+          "ObservationCaptureUnavailable",
+          "PlatformObserver.capture",
+          "stored-worker-validation",
+          1
+        ]
+      ]
+    }
+  ]
+}

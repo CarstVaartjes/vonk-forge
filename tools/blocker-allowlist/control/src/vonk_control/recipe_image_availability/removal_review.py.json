@@ -1,0 +1,74 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/removal_review.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_cache_removal_finding": "13b71bc6c26290fd369525cb9368dc3e372ac2096cd2b39961fe94353e116682",
+      "_model_removal_assets": "2e452b37c5b1cee5fff96d5f797ae031ed990c367df4c084190f2fbac3ef8a1f",
+      "_recipe_removal_impact_in_session": "c7911af7edd08a0eae8b657aa74da091ceec72a23d911283f195e5db6ea55dec",
+      "_review_assets_for_selection": "2571f78ad18910af580de8d1a393359672b7322c268b256d8afd88dc96541184",
+      "_runtime_image_removal_assets": "8b4572107abb758d37f05f4c26b8dea34c89df1ced67f1b7594f1ad2f69fd9b2",
+      "_sealed_recipe_removal_review": "f7087a95a86ddaf8e3b21a93e34f08d5f9b45add1cb9550f19aed68074acdeb4",
+      "review_removal": "da5e39e62c634a1863120f49af1c4ebe9baa491cece07230d22f5829939bc30b"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_image_availability.configuration",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_review.py",
+          "RecipeImageAvailabilityInvalid",
+          "_model_removal_assets",
+          "model_cache.unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_review.py",
+          "RecipeImageAvailabilityInvalid",
+          "review_removal",
+          "recipe_image.removal_choice_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_review.py",
+          "RecipeImageAvailabilityInvalid",
+          "review_removal",
+          "recipe_image.selector_invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "removal_review.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_review.py",
+          "RecipeImageAvailabilityUnknown",
+          "_model_removal_assets",
+          "model_cache.review_invalid",
+          4
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_review.py",
+          "RecipeImageAvailabilityUnknown",
+          "review_removal",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/removal_review.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/removal_review.py"
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "content_identities": {
+    "control/tests/test_artifact_job_api.py": {
+      "<module>": "8f005f7ce4276dcbc9f965418bc812752f7aa81bef9f148226c44d3b8e367d66",
+      "_ArtifactJobView": "92951046000ecab6319bdeb655ba826ecb7c4818226eb620354d42a5de6719d9",
+      "_TransferService": "4db87a53f9bee35e72301276111d874241f454d8d0dd2816aea9f033ea154d36",
+      "_TransferService.__init__": "ed305f6c5cdffe1f1a577317f4ff557c347f873edfa870fa1b3ca9dc9118a6b7",
+      "_TransferService.put_input_stream": "5c7b7a271dc41d29a34f4d64bbae2887357d14463861fed13c00fce4218d5e1e",
+      "_TransferService.result_blob": "60ef6c88af8930b66f13c105271839d0c32ff2dc16c3e344391e8952e2fa7f2c",
+      "_client": "72c43e1911294d7be8bbf847daf60cf421e385baaf1919b25bd0592c6bf154af",
+      "test_artifact_job_boundary_rejects_unknown_top_level_and_scalar_coercion": "d83932399d2f109a0ab0a855e6ca2273bd0074e43796c5750754e246337c8561",
+      "test_artifact_transfer_openapi_declares_binary_streams": "ce3cba1246095b822bd8a2436e78c912ef7345ce6f6dd0e96fb0e54618962e23",
+      "test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type": "1916b0151ed7e5bce782fd05eee235c33f0024ed96ebf7e4b2a13eecf5b0f9ca",
+      "test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes": "946879fd39d4903b72b1fd34fdf14537d855671c4277492a003ae38741eb2a6a",
+      "test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes.drop_first_create_receipt": "2860f39254ec1b62117c8574e5e1178f38657e888d46dd73d4db400966fad641",
+      "test_result_evidence_preserves_current_values_without_field_presence": "0a4399f112a263e764f5fc69cf6501d14ad0d6c4435c6da702c0542510040b8b"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_artifact_transfer_openapi_declares_binary_streams",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_artifact_job_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_artifact_job_api.py"
+    },
+    {
+      "count": 5,
+      "function": "test_real_artifact_service_recovers_lost_create_and_streams_declared_bytes",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_artifact_job_api.py"
+    }
+  ]
+}

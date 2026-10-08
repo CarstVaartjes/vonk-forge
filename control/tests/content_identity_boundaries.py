@@ -17,7 +17,7 @@ file. Anywhere else, a comparison (``==``, ``!=``, ``in``, ``not in``, ``is``,
 an ordering), a query filter (``.where(X == ...)``, ``.in_(...)``,
 ``.filter_by(field=...)``) or a call to ``build_input_for_builder`` that touches
 a provenance field is a site, and a site must be named in
-``tools/content-identity-allowlist.json`` with a written reason. Allowed
+``tools/content-identity-allowlist`` with a written reason. Allowed
 reasons are the real security and ownership edges:
 
 * ingress digest verification, build source policy, agent mTLS, the signed
@@ -45,10 +45,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .parsed_sources import memoized_scan, parsed_tree
+from .registry_storage import read_registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_SOURCE_ROOT = REPO_ROOT / "control" / "src"
-ALLOWLIST_PATH = REPO_ROOT / "tools" / "content-identity-allowlist.json"
+ALLOWLIST_PATH = REPO_ROOT / "tools" / "content-identity-allowlist"
 # The one module allowed to decide sameness from provenance-bearing records.
 OWNER_MODULE = "control/src/vonk_control/content_identity.py"
 
@@ -298,7 +299,7 @@ def _key(identity: dict[str, object]) -> tuple[object, ...]:
 def load_allowlist(path: Path = ALLOWLIST_PATH) -> list[dict[str, object]]:
     """Read the reviewed allowlist. A malformed entry is a hard failure."""
 
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = read_registry(path)
     if not isinstance(document, dict) or document.get("schema") != 1:
         raise ValueError(f"{path}: allowlist must be a schema-1 object")
     entries = document.get("sites")

@@ -1,0 +1,34 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/observation_helpers.py": {
+      "<module>": "cea69fb6fb1b6a721e633e8932a16cd8b444a00591bc701e301c89696c99cdfd",
+      "_active_recipe_revision": "a78d2083c357252b899d32c25712790ad6d1bab66b74a7e01d602fcc6145ef99",
+      "_aware": "9b2e980f441c7279ca2f128f28ba566eec71f96a641fea813cf292850730fa8c",
+      "_start_endpoint": "f5be02c884b1c88a39ea201f3df5d14a9b9c9e8e031245cb79465e0801173d5d",
+      "prepare_exact_recipe_run_observation_nodes": "8d7985c0aa1332e2a8558368c6d6d445f2c94a03ee7e6d267e9fd8c20e31c917",
+      "record_build_evidence": "d3a4b83f2b0cd1eb9d53db6ca923b32d5cb2a457735aa96a0c5aa2bb69054f3a"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/observation_helpers.py",
+          "InvalidValue",
+          "prepare_exact_recipe_run_observation_nodes",
+          "recipe-run-observation-is-not-assigned",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/observation_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/observation_helpers.py"
+    ]
+  }
+}

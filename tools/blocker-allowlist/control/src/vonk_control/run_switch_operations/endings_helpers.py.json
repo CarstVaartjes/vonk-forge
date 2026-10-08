@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/endings_helpers.py": {
+      "_reject_invalid_operation": "5509131ef88abf14a9f748e78aae0e34ca6140923c5a0d7bed6f6e9941a12c0b"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/endings_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/endings_helpers.py"
+    ]
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/fleet.py": {
+      "<module>": "422f766b3c868083eaf2a3bd30b0dce29601fec1ccb1c878b99f46acedf40c2e",
+      "AgentCertificate": "a3c179383c2628b699786f6abeb844111ee4de2402292d85860cb30d12099181",
+      "AgentCertificateRotation": "8c3ee37098b993f9a3c68f28756c89fe59c6a54d4ae431bb25269923042b7ed2",
+      "AgentEnrollment": "4d72b67902a228c1dbb618b526b082ba5d3d5de207d2cae83d50714a731dde0d",
+      "AgentEnrollmentGrant": "a242be07beafbb0fea85be24994ddad6162f0f54bacd7c542a35224e7411b8b5",
+      "AgentIssuedCertificateRevocation": "108f32b90d0a800b24c29dd70f793318b08ab8b1ffe7973f0ca55d33fc899fbb",
+      "AgentNode": "8414c20ee4c3c125d828d95f1877f4438c28ad17db0369e8af841a82ffe67703",
+      "AgentNodeProfile": "9f2a508db4925a854b3d0e9ad3966ede3bdb0191b5e910b99da22e8380565c10",
+      "AgentPresence": "35035af9fb6c96784682ec2ca0df8c0174af5e86567f4a208c156031387ea85e",
+      "FleetProfile": "2701640107ea10bef7d3ae8b0a640994416c23114fc2f3c958a7f54d90717cca",
+      "FleetProfileApplication": "1601bd4af6fe10bc13e85288589085d44c7e41bd8d5b4dd13fda9689089a0ca8",
+      "FleetProfileSelection": "ddbef9351b377fdbd007892a2f582b5b7da0f006896ed8763c79b33c1fbabe1e",
+      "LoginSession": "2c8ae8d45e8fb94444f7e32c2cf94e318e03bc1f055da21553a6daa1b048a8b7",
+      "User": "287e50524267a13985bc9a348e9a7646d8b583e5bd3f4bf00c1f3e938d56d815"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "AgentCertificate",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "AgentEnrollment",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "AgentEnrollmentGrant",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "AgentIssuedCertificateRevocation",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "AgentNode",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "AgentNodeProfile",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "AgentPresence",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "FleetProfile",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "FleetProfileSelection",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    },
+    {
+      "count": 1,
+      "function": "User",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/fleet.py"
+    }
+  ]
+}

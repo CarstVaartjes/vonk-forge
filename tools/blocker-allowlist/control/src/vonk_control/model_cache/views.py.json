@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/views.py": {
+      "<module>": "e3a25ad5fdfdb1b66c1e797ccb313b4c7d97df5dfbe2c2681faf1fc9dcc84b63",
+      "CacheOperationView": "028803c08dbc266c61ea5142052e2254ed395842ab1071a1f448fe608d226342",
+      "ModelCacheRemovalScope": "42bf1e2fbf57cac60388dce26bb2d1fd867bb68b4acdf574889c986e8a8997c6",
+      "StorageSummary": "b961d5d817479fd1903b1b8463f266c76e829c472c2405fcf4fea0b816ed6f89",
+      "StorageSummary.document": "5f745a40c4c8733c54329d4832504903348f10084e74d9cfca50ef6cc982ef5e",
+      "_BackgroundTransfer": "c7c346221ed59a63f7195d346244f07b004506a34336595a95f6d43e54b1455f",
+      "_BackgroundTransfer.pending": "f2d27a256acf7507c117ad4f151f54c20cd688e51f5c5875b07f599d809e8b16"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/views.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/views.py"
+    ]
+  }
+}

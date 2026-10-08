@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/preparation.py": {
+      "<module>": "a47cf2e172c0adf5a3d8ba933f600d5885e08a1ebc16e3b2b0f6327dde879170",
+      "PreparationMixin": "b5007188f14d34a77300812b38290916a3beb62fcc0077573848975ca235acde",
+      "PreparationMixin._conflicts": "b905d77fa284985d5c1d3d743722c2dcabd17aab93eb27b0d07452c758c86c7a",
+      "PreparationMixin._placement_fit": "b2272185792da9e781a2787068b421ba2cdb6438f94cdf80893d8d03c3e5f72d",
+      "PreparationMixin._preparation": "a8f0a163bb7c4d3e2ba0fe5acce1ce5ad69ee0101bd71abffc7a0261ad605491"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/preparation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/preparation.py"
+    ]
+  }
+}

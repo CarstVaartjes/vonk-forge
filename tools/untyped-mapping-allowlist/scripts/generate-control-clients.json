@@ -1,0 +1,8 @@
+{
+  "debt": [
+    {
+      "count": 4,
+      "path": "scripts/generate-control-clients"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_api/contracts.py": {
+      "<module>": "3eaaad187b23c072fc963f043930a4a5025662202412350bbf435269a4164e4c",
+      "AgentSummary": "72f08cfa83a54f2ecc0006f02ba8d478f62d8ff8287cc6380080268c734aa572",
+      "AgentUpgradeDiagnosticsResponse": "a91ff9ec82c702f71be77fe6b68fce88e03aef6874864e39c3f3a818c2ccd86d",
+      "AgentUpgradeIdentityResponse": "ae2b4a6dced079b439278bb731a86f2d142ecf4c4f2a3d11e3b6cba28774c420",
+      "AgentUpgradeTargetDiagnosticsResponse": "7ee478df18d818156326ab0e4d78c1bb0cdec157126f29aabaab397b34106918",
+      "AgentsResponse": "f03d013778a2e9da7a3a7ac601315deb8ed11ea25c2bb349078a4fc0f361a879",
+      "BoundedErrorResponse": "077982de6b0b122b702335ca5256d39f3a73e40c635d0e2baa0d5ec0b5164c19",
+      "EmptyBody": "3ff32d05eab384fcb919fe82c92953b50cb0977a82bf4d8463f31e9864669e92",
+      "ErrorContextResponse": "c4abd4fe4b10de08692deec69fb5967b1509b35e71ba8cf587a5026b080b87e2",
+      "HealthzResponse": "999348d8244c50378d1df0bd7d215d39154ab7e0fdec94074cf7506e400fec24",
+      "JobDetailResponse": "9eae95b7af5622e8bbb28e4d7946c09e47d2f4074e9c339c34fb31ab029b8f51",
+      "JobOperationResponse": "8037dd0079ecd1bbefead36a68a8d7fcef6be8a2d421adb86f9859070b643105",
+      "JobOperationResponse._serialize_without_unset_evidence": "d41c5c8580a47391e18543beb07664cd5812007afbb606acb15373b9416e9901",
+      "JobProgress": "e07cba2e0636e97a24a7c49f6d1d68ca5f4b7782721a12386b7c2ace030bd4c0",
+      "JobResponse": "c80c80576bcd2610bad5fd6cdbb708c9265b89bbf49a609e06b84d957b8bd969",
+      "JobResumeRequest": "b100d68f6c0633df0883ab857e625684ec567467b5026fe5dffbdc137b140662",
+      "JobResumeResponse": "7c8ea98a21915ed51be18c12d2ee7bf94bab1637509838f462dff0da7e36d214",
+      "OperationApiServices": "f2b45ec6618e32a98838725993496d3cf70d91f1d71c9378ebbba55f32918579",
+      "OperationDetailResponse": "02a8c3cf348937678ee38c9f906ca534d23c3db14864e4791eb43fc0343dd923",
+      "OperationDetailResponse._serialize_without_unset_evidence": "f7611a18c0f49639381349821d83af4262b6907af2ff2ea0aec82d4eb539ff29",
+      "OperationListPage": "5860d4dce0d706416f642a627059da38d4defed61e911f7e6e2ebb5528e41ce8",
+      "OperationPage": "0c40fea2eafe43a1cd29d1ac929b894a80649f72b5d8d13a3eb0e5a32d67d247",
+      "OperationProjectionError": "db7dd5a5fddc84c42ed53e23f4417efe3f2c8d9ae4cda128eeb758ead7d53063",
+      "OperationProjectionIssue": "b802981a0217e7b1e6a6e3e871db2c275720ece635c09fc07d094c132cd21c95",
+      "OperationProvider": "a9bd57e414bdca04ad4f1fba91a9e5d17a6349d63d75ea374f7c68231a96cb0b",
+      "OperationProviderProtocol": "42a1676ae397d88577150981590baac1a2e5049f5ed3eefdd42b15113e884fa2",
+      "OperationProviderProtocol.family": "7a576e1db17c4e5b624156fd450288f146c55875121341ed846e55a6870564d1",
+      "OperationProviderProtocol.get_operation": "2d2eff2981032e2fbbf97ce81617889ed6eb63f30450db8a0c12052dbb499cec",
+      "OperationProviderProtocol.list_operations": "a53fd89cd5db2bcef1bed9d7e119f5552ee4394e77febf3960c34d2c570cd61c",
+      "OperationProviderProtocol.represented_job_kinds": "579bc56e3cad0c2a4725de5e36eeb417386b0b14a63a950dac6b4de0338e096d",
+      "OperationQuery": "95782ef74c286d5579a454f27f3835eabdcc049870bb8cd6508125a81735e8f4",
+      "OperationsResponse": "4763bd2d82b44c950d18705f6db7679900d34ecb8f17a736bedda5cb75be9380",
+      "ReadyzResponse": "117760e169ec91429acb190ea504fb84c25b8113bea36dae5fe5bdb5bc703b64",
+      "RequestValidationIssue": "218dd7d7788c1302b1402f0222a478b9ebbcbb775d56c05d4044e20b03335845",
+      "RequestValidationProblem": "5831dfd96c2367fd7c50b29a0f044dc1e1043d64ccd1845e85acd0db847fa2f1",
+      "bounded_error_responses": "de11d094e4841c8176309e6f2203612d7ad6d97d62a984e67a03c90a011f058a"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/operation_api/contracts.py"
+    ]
+  }
+}

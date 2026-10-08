@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/execution.py": {
+      "<module>": "c4fbf311a2a3ab4db1bad87e8140a0681237838f076e12ff7a4b222b9fc22303",
+      "ArtifactJob": "c8fb90b118f82bf5b50a09885883e6d83b407086d53c2c2355f10ad51f3e8e2b",
+      "ArtifactJobBlob": "b42c99ee804a003960cefc87cec2fc0ef0446d752317120207f74476e18f1105",
+      "ArtifactJobFile": "5168c67a8991e42c2a9138d95935a17da116fac5c7027d047d1a59ba8cc08f74",
+      "InstallationNode": "a0daa524b0dd83a83c9732e3b8508beb956714d46d63366b8f1c316cb631803e",
+      "RecipeInstallation": "d9733b27ea1c5e18551225cfa3bd88825cb5e01f901c85d572aa39dee73c531a",
+      "RecipeRun": "ee4848150083491e949bac0542bd577d830d677c0e4ff62075a5554d26ea8e47",
+      "ResourceReservation": "509a10006dcedc44b3dc1320b41ff2743ac9e8416c61172130ed2d683d53e54f",
+      "RunNode": "ddc5b151cc8ed94a18e96bbe415a93122cb4e061fb4fdb93287a4ef7936d0eb9"
+    }
+  },
+  "debt": [
+    {
+      "count": 8,
+      "path": "control/src/vonk_control/models/execution.py"
+    }
+  ]
+}

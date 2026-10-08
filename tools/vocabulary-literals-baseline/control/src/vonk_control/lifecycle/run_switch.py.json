@@ -1,0 +1,45 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/run_switch.py": {
+      "<module>": "8a68e2d078a075cd4cfa7bdad86e446c2c579ca3774f49cb2a888a269d5746bd",
+      "RunSwitchAdapter": "4ab816f5aa4709aaa1b8a34b350000752d551de0ec5db2594462b2bed26a34a6",
+      "RunSwitchAdapter.__init__": "50dc4b160b8ff15c473d878dc9c2a852dc69c869e37aa7ca454dac716194ee09",
+      "RunSwitchAdapter._cancel_request": "b3cdbe6e96f2e1bf4ef8596cc2947ddd81c595832a8a520cfb2215bb373ba21b",
+      "RunSwitchAdapter._cancelled_reason": "b7979aece0bf148fb532b72a32bf2bbfe7fc3fc8ab1fe874b0054a97c594b988",
+      "RunSwitchAdapter._read": "9bb5a4d272162ef2353c5b171272c212381432d546bf7275c7456a502760c743",
+      "RunSwitchAdapter.actions": "13ba1ca58c1e6703a3b14de900e393a83b34022b5f553a1b1d74cd864b49919d",
+      "RunSwitchAdapter.adopt": "0e731241f7f98c600a2b05a1f7b1ce3b89fa84326e9231516c81e1dbe4fba2a8",
+      "RunSwitchAdapter.apply": "bdf3a042cf39e83733082e1547ad52c05348eb0eba21ef11ca93674187d53a89",
+      "RunSwitchAdapter.cancelled": "5aed58b6594010553ac8b0a6bba7e65f622068a829088a9ea3698ec1b47bd1a3",
+      "RunSwitchAdapter.children": "e2f1a5f5266e15ca670314a8d292c73c628f5c9b1558ed7a3ed6968c9fec93da",
+      "RunSwitchAdapter.decide": "5141e3c5c70dbef4fc254d36587324ddfaa9dd6e6edc393a79caf71ceb59d7c5",
+      "RunSwitchAdapter.execute": "4daf6a9699ff1c51f41a4b886118db7d29572880733c0cdbb7e55caa0eca3fe3",
+      "RunSwitchAdapter.fail": "0e210daacb64a24df927e47b9a923a5f1a2e1497c26bd050a3d0a2cd480a93ca",
+      "RunSwitchAdapter.heal": "444d97e4555844a02a0844454b466d1f992b18bcb3a81ed1191a730d022981ca",
+      "RunSwitchAdapter.irreversible": "25661eca863c2087f05201d5978d897cceac29dd00424de5d0e853ff89a17880",
+      "RunSwitchAdapter.lifecycle": "678bbd12532525b5e5548c572621deee072f64fe1cb1290632dc0145a33f0b08",
+      "RunSwitchAdapter.new_operation": "ee09feb386409a3265cdedb46d5b69533887dd332ecda3bd3ca3d08b36f38253",
+      "RunSwitchAdapter.now": "0565c3db5fb3147ed7226126ab761c52b6b1ebe1dc76c7cf69f08d57a76ded95",
+      "RunSwitchAdapter.observe": "ccc32bf023549c208e1dc87c24afbb64597a7865a31fee22b76b6e0f3677fd5a",
+      "RunSwitchAdapter.project": "c6ec7f296e92cc1fc2a4f80fe653fc78ac4c79859bbaac8899dc7ef0aa032c3c",
+      "RunSwitchAdapter.reject": "a0b71f0680f0000441b8da0d22124a702784bc9fdf8dad6b456c1a72fb65e5ef",
+      "RunSwitchAdapter.request_cancel": "a1fb9cb5028601dc89622df47f7bd42607a3a66b4f24bb2f615c38d691d3970a",
+      "RunSwitchAdapter.retry": "bee9fb0952a323807ac0865cb5c8906a53ecdc938fa8724cf75e4fd8784fc650",
+      "RunSwitchAdapter.retry_not_before": "b44b940ce07854e720fe4db639b99915d3439138008f5c5c760051a7032df7bb",
+      "RunSwitchAdapter.settle": "6a9809bcd8fec2c08df112e3bd99cf2b43b8f2f776808ff7dadbd02ee47345a2",
+      "RunSwitchAdapter.settled": "09efe867637cc944bbcbc900d974087476a23206f4782a1995b36295ed886c86",
+      "RunSwitchAdapter.settled.residue": "06377473ad6559ff6cb4b6325562b9c0e0b0627ff96858dd2d1d204037d8f3d7",
+      "RunSwitchAdapter.settled.save": "a22e39979bae2b651124b108593e69b79a5d0f7826d6b24edecaa0795379d17b",
+      "RunSwitchAdapter.stop": "63e9baa67a40daf55bfec7ef2ab17a7e0b4a16fec573bff86c02f05ff1452bb8",
+      "RunSwitchAdapter.succeed": "13ffb37772a51f08260b4983193fc81e4963de66c31abbe6655c162db75efebc",
+      "RunSwitchAdapter.tick_cancel": "846b958ab042ca82c5be3047f273d54bb4ba7de9c0b4a06e5201f86d635d5f24",
+      "_count": "1905b83739d5e1a85877089b8ba7138f9b7a0e4122556610a720bccb80d79708",
+      "_intent_ordinal": "265fc2d88a8c168db93b754a3d25283cde3621bbb5cc2782f66df4da6c0f9e7d",
+      "_stored_child": "9e791d99e5328d6d1a7ce80030d52d25c0f5f0929fa0797f06accdcef38dd4d6",
+      "set_member_state": "bc56d1ff4590b897b50ede4c31b22764c36fb0c0d3115653214b0fd5c7d6103d"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/lifecycle/run_switch.py": 12
+  }
+}

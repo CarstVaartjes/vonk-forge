@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "declared",
+      "module": "control/src/vonk_control/strict_json.py",
+      "reason": "base class of the Controller contract models, shared by every *_contract module"
+    }
+  ]
+}

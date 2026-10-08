@@ -1,0 +1,39 @@
+{
+  "content_identities": {
+    "control/tests/test_distributed_recovery_budget.py": {
+      "test_distributed_recovery_backoff_survives_restart_and_resumes": "72ff0f74b6e0caa645248ac869dd3f956395e3a5f38839ad4d3fce480b6fea89",
+      "test_distributed_recovery_waits_for_fresh_presence_then_resumes": "5ab48479825dd157c0847037c5db6e799fb3a31b929f143f9ee736d6f1bfb52e",
+      "test_one_shot_recovery_reports_why_replay_is_unsafe": "ee2e5ca16aff95e3421c8123caa012ce6c462da78989503c309a687c5937cc2d",
+      "test_recovery_marker_retains_timestamp_spelling_bound_to_request_identity": "0cc6c702f8e73746b9c1ad0b8c25fe8c2f4daeec1bdee6de0dc81935542c7e66",
+      "test_recovery_refuses_missing_or_invalid_original_start_authority": "ecaa79417d991aa41833bb50fa4e82a3259c894fd313d480ee2e3adf5c3c2683",
+      "test_singleton_recovery_cooldown_is_durable_and_resumes_after_expiry": "15e39081ce01a408334f8dc27c632216dfc44cf1026ae405422c4640056cbb7c",
+      "test_slow_distributed_restart_retains_accepted_startup_budget": "6bd1fed3697d1bcb1461b2bdc86512024048da5b92167aa146be66d69bbc087c"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_distributed_recovery_waits_for_fresh_presence_then_resumes",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_distributed_recovery_budget.py"
+    },
+    {
+      "count": 1,
+      "function": "test_recovery_refuses_missing_or_invalid_original_start_authority",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_distributed_recovery_budget.py"
+    },
+    {
+      "count": 2,
+      "function": "test_distributed_recovery_backoff_survives_restart_and_resumes",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_distributed_recovery_budget.py"
+    },
+    {
+      "count": 2,
+      "function": "test_recovery_refuses_missing_or_invalid_original_start_authority",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_distributed_recovery_budget.py"
+    }
+  ]
+}

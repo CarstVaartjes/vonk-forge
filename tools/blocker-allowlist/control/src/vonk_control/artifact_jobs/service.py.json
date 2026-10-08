@@ -1,0 +1,215 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_jobs/service.py": {
+      "<module>": "cb8500693677af1baacd5d66273bc30d1d2c9bf796ea3fe28e6fa526a09c45e4",
+      "ArtifactJobService": "cb8500693677af1baacd5d66273bc30d1d2c9bf796ea3fe28e6fa526a09c45e4",
+      "ArtifactJobService._create_in_session": "71ca1bc78f875e054bb00699bfafb2f4381bc1d35cf5abe67d1b4e9951af754c",
+      "ArtifactJobService._reconcile_storage_fenced": "86f568a4865455a0f394619dcc0f4354764b824416d011aca96f55892d76affa",
+      "ArtifactJobService.cancel": "a16f336c0e1f00dc9d4988d79a1390524d9999c6ce3f4833d8e768509f5e6b21",
+      "ArtifactJobService.capabilities": "95508cb294f804f5b92f8fc6c66aaf00f31a299f99452eb0852a5906fbe612c9",
+      "ArtifactJobService.create": "7aa3387e1b239e4d5aa72f66a059e5079563a17b1cbdc781b6c44f9411ae3f5d",
+      "ArtifactJobService.get": "978b7ab5cff845ceeb1ca7c1c1d64e2345fc40e4fdcaa6f13a1805f790288325",
+      "ArtifactJobService.get_by_request_id": "3149eb334ee9355d8908000906840353148a28a311c1a1ada0d421617f6f0a93",
+      "ArtifactJobService.list_for_run": "654bfea0a331dad844e517d29be24af45a64ecf90251354867cd7aabf45c6b52",
+      "ArtifactJobService.reconcile_storage": "4483ad163fa85bff9d0e6fa275e790cb9a410b4d3b6595c002897a25410a2681",
+      "ArtifactJobService.submit": "39fce50f985dde93afd9c7cb73f51492ece202be8a7744f55aab7897ebd60195"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "artifact_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._create_in_session",
+          "artifact-job-interface-does-not-match-the-run",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._create_in_session",
+          "artifact-job-timeout-exceeds-the-recipe-contract",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._create_in_session",
+          "recipe-revision-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._create_in_session",
+          "recipe-run-is-not-accepting-jobs",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._create_in_session",
+          "request-key-was-already-used-differently",
+          4
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._create_in_session",
+          "unsupported",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.cancel",
+          "artifact-job-is-not-cancellable",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.cancel",
+          "cancellation-request-key-was-already-used-differently",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.cancel",
+          "conflict",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.create",
+          "artifact-input-names-must-be-unique",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.create",
+          "artifact-job-has-too-many-input-files",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.create",
+          "artifact-job-input-bytes-exceed-the-limit",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.create",
+          "artifact-job-request-key-collision",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.create",
+          "artifact-job-timeout-is-invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.list_for_run",
+          "artifact-job-list-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.submit",
+          "another-artifact-job-already-owns-this-run-reservation",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.submit",
+          "artifact-job-is-not-ready",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.submit",
+          "artifact-job-was-submitted-under-another-request-identity",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.submit",
+          "recipe-job-workload-identity-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.submit",
+          "recipe-run-is-not-accepting-jobs",
+          2
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "InvalidValue",
+          "ArtifactJobService.reconcile_storage",
+          "artifact-reconciliation-batch-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "MissingRecord",
+          "ArtifactJobService.cancel",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "MissingRecord",
+          "ArtifactJobService.get",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "MissingRecord",
+          "ArtifactJobService.get_by_request_id",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "MissingRecord",
+          "ArtifactJobService.list_for_run",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/service.py",
+          "MissingRecord",
+          "ArtifactJobService.submit",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/artifact_jobs/service.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/artifact_jobs/service.py"
+    ]
+  }
+}

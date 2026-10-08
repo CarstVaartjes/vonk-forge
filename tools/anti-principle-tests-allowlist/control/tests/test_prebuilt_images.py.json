@@ -1,0 +1,40 @@
+{
+  "content_identities": {
+    "control/tests/test_prebuilt_images.py": {
+      "<module>": "c2ded6d8c56ba62f312e073736405bff018f7ebecf135cffd61a2eed5987a3b9",
+      "_Reader": "daef44bd10495879c13909bcdc3f6b24ccc02844956f053f1e80fc22ebcf2bbc",
+      "_Reader.__init__": "8ee9b3efb75f126cab0036fabcceaff3bc36796a081bdd5fe50a8846acc597ad",
+      "_Reader.fetch": "376080c5a5c26d41769c0a5571df58d58e0abe94e129321220095210fdc39774",
+      "_Reader.list": "12f45a56f7edeb47a4969ef8e559af43c1e90f3529a5ac24ed2a87d743e3eaaf",
+      "_Registry": "e33709d5e50700012bf581c1bb334605c5b9ec75192a45a4d34e5278d54f674c",
+      "_Registry.__init__": "eccee655d100a437bb6109726f88c2247159b7933fb109a7393ead5abaa923da",
+      "_Registry.import_archive": "e0d7797840a8c1ef9b4708d444ada8a8bf3c365917da3c12db21f7e1ec4ef70e",
+      "_Registry.import_reference": "e02c04e05c920f3d8b14a210fba4883fc7af952933ebbacbf0da53ccdcd396e3",
+      "_availability": "f632b321807c850b206f9bae4fc38d55fc6c298a7ec1101aa5cc46e6f3888d22",
+      "_published_library": "802f1c39fbfcf7f8f81dc2fdb05c38762a1a10c044c2a2c4d509584ccce92a89",
+      "_services": "4a4f4499461b6df98a62855783216a4d01b1f2161e589dffe0653f527f04f36a",
+      "_start": "fb40bf62df134e8a2f9b85507d41b4e7a99e3ce11ce4340ee436f6b18bb10e34",
+      "test_a_busy_store_hands_the_pull_back_instead_of_failing_it": "bffcd58505be60c86186a0b65fe2dfc79fa55c911c50322718c2e7cdb050467c",
+      "test_a_recipe_the_controller_refuses_gets_no_image_and_says_why": "0895fd5527cee90df4863877e7b7fddb620a5e75a355273a7b980a852c201d4a",
+      "test_a_recipe_the_controller_refuses_gets_no_image_and_says_why.refuse": "53d9315a65e377191d6dfbde1cc34dc25f46f6f700c15f945bab177ec180990d",
+      "test_a_spark_build_upload_is_converted_into_the_store_after_success": "24301df5ec2e118f6816c8285b09947f6823d28f63a4fae80286bd69802a7cad",
+      "test_cancelled_prebuilt_build_discards_a_late_pull": "f784bb0ec7ef977c218ffadb2326530d52d63153c1dc2937d81072213487cfe8",
+      "test_cancelled_prebuilt_build_discards_a_late_pull.cancel_during_pull": "0b4c75638c542f050ba175b8b6b35519d43f14319163cd780642331a02f0156a",
+      "test_catalog_prebuilt_image_is_pulled_instead_of_built_on_a_spark": "bd68324270429c024b9283314fb655b84a618b7676da83ce3f34fbcc9336ece8",
+      "test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry": "54e1d7ad9f6ceeba04aca03b3764a2aa7fb3dea7ebc6b1b98090fa84d065bfed",
+      "test_failed_pull_is_visible_and_the_next_plan_builds_on_a_spark": "069c20996435548c1eba8a25589d6d7fbea6f9d92a6053a1bfb92abb3d921b0d",
+      "test_image_preparation_pulls_the_prebuilt_image_without_a_spark_build": "0140219b39f92af7788428eea129a4c76e8ab449722ee0a180e52c00bbc58a59",
+      "test_off_target_build_runs_once_before_an_early_memory_stop": "c9248a8fed41fc971d583397351b9d8e1702199aeeab1d6767969489fc3e435b",
+      "test_prebuilt_image_from_other_inputs_falls_back_to_a_spark_build": "38e5aa32e2bae4915561ab904f83186b7ff1ccc5ed5d029e79c06171326a308e",
+      "test_spark_build_with_capacity_says_why_the_prebuilt_image_was_not_used": "51a7c44fcfc5f6ab0aebdc0e71d555d5d20d49fd29da58d9783205852a78a1d2"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_failed_prebuilt_pull_falls_back_to_a_spark_build_on_retry",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_prebuilt_images.py"
+    }
+  ]
+}

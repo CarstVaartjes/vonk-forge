@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/failure_projection.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_fail": "98ae1fca3b06f03e6a61d09a09fcc131ea2d22555e4fd2bcc90122bb2b01cd6f",
+      "_unknown_view": "73b84a017784059ece096b56acf547b6b09e72ed7bd126cbd15608c4146cd4c9",
+      "_view": "71ebfee8a4b34cd36754759c5033e6e984667b76d76ab4f601138fef66436d9c",
+      "note_waiting_for_worker": "89a45088f73e18bfd51331e8ce67365ac597bd971f9f6bbcb0afb20cc0aae8e1"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_image_availability/failure_projection.py": 5
+  }
+}

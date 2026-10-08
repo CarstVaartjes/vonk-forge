@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operation_worker.py": {
+      "<module>": "fefa03272e684b1e3b6ca3bc4cc482de0abc65cd7049a07fc9e3a3d3c9d42a30",
+      "RecipeOperationWorker": "51aa15d824bfc4db887bad7cb9584dfc3bd4e248396a4ba2d7bcc249f742b375",
+      "RecipeOperationWorker.__init__": "259dd62f553359422b5f00134f0c89143093c22fdb6e8e1941436249a46dcd5a",
+      "RecipeOperationWorker._defer_publication": "a5e234c9e1d113fc7f968e539e26ed734a388c8d44f34358e4ddd6c429ef63ee",
+      "RecipeOperationWorker._expire_initial_observation_deadline": "8d96ac49577ad0b206b31bc7c331136569180e52045d5433b65bcedfff25c21d",
+      "RecipeOperationWorker.tick": "a3d4c27cf2ec57b7c5101b95bbd4055d546c02630b61dc0c83b7033d51a6a131",
+      "_FleetProfileCoordinator": "6278d487e53f107305ef9491315b7e61da9fb8dd184e8b721011fb4f414a6534",
+      "_FleetProfileCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
+      "_RecoveryCoordinator": "d416655c8b0a547d3f5c223fde1113001dfdf648c3d27b02a2ea79ece7812907",
+      "_RecoveryCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
+      "_RoutePublisher": "b8768f7797dc900a4315b58e3417256b32d0a9d9aa39b13ff32fa995553312b6",
+      "_RoutePublisher.maintain": "a53c4e5790453916a9ef519a356d6c9c49445f672754c02fad989181485ea9c8",
+      "_RoutePublisher.publish_run": "315b00c8b5bf167ae441322f2bac0588e1e27ff343de79c0955995219dc9270f",
+      "_RunSwitchCoordinator": "02961d2c009383e9a3f87e48593ebb5638a0be212332ce43cba90184e95ac7db",
+      "_RunSwitchCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_operation_worker.py": 1
+  }
+}

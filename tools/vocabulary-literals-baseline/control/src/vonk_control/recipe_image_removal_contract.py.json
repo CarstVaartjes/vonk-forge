@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_removal_contract.py": {
+      "<module>": "f49361c60a6922fc674e0b4741b0e63566d48913e249a0028f3b9ae6cae43b9e",
+      "RecipeCacheRemovalCheckpoint": "0594e619f31c689e3fbe11613cf8daf8c06dfebb32006dda0c779696c9785ffc",
+      "RecipeCacheRemovalCheckpoint.retry_state_is_consistent": "610397a2baf354a8276e558d93859dc59ca939f8e358c1264a36b14c745f40ed",
+      "RecipeCacheRemovalIntent": "8fb08a8a7834ce692677fdbfcbec3080281ccd439ca8669b6c2c6392194f3c41",
+      "RecipeCacheRemovalModelChild": "4ee8690f271aa71aa8418cbebfcda4d4be6ccabf33f7b6e1fc5d633c7a6443a2",
+      "RecipeCacheRemovalOwner": "1622da075820c5268109c86b2aaf851660bfb55646d84b268346ed268d05f42b",
+      "RecipeCacheRemovalOwner.checkpoint_matches_plan": "03b40e01010f393375b25efdbd947d2ee9a5b28a01258a8814ef47a25523b63d",
+      "RecipeCacheRemovalPlan": "d29bc3f6ac2d6525a78addba47fda618c1325bb104c7fd18fd62ffcb0dbaa66b",
+      "RecipeCacheRemovalPlan.targets_are_unique": "9cc2172c164c03ed071c4dcc520f6d40966bf5029114bc3e71f0d68d67657c37",
+      "RecipeCacheRemovalResult": "6461fa598e4734521d7f432bdb5f3332f722cf18bf6f2b356122a060531a13f3",
+      "RecipeRemovalProjectionIssue": "035806439cb5d7cebc9f999662d3fdf8ebf50c0b63b1b366b417dfd94090cf97",
+      "RecipeRemovalUnavailableView": "1cc93dbc375bd762032dec7054f50a0533feac2cb3911c4ededf8cc342943b51"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_image_removal_contract.py": 1
+  }
+}

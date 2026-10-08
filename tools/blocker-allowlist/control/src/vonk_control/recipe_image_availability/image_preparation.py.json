@@ -1,0 +1,85 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/image_preparation.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_image_reference_intent_for_claim": "a7b30abcdeee2229ceae472199accc86d36e5dcbe785872719fdd1a7ce941efb",
+      "_persist_provisional_image_reference": "69100d7fd17f31aff0294a8570159a5f4a32fa90628ae93294795bc7324ebde1",
+      "_persist_receipt": "c2a20482c5e2b344e556ae608be4e4e93584c1a89ead5c787cc07453c43583ec",
+      "_prepare_claimed_image": "ac2f5d1b07a70304b2a59525aa3327250ee30fbbbce755968e552e7b9b2c7427",
+      "_prepare_claimed_image.persist_provisional_reference": "15194b9abdcf14b7ee6a04bc29fc52c9ccd610b078ed5785d6496596441ca60f",
+      "_prepare_claimed_image.report": "3394596aff91ca440eab95b1534a916c87af98b540185f762ac6c5a3cb1ed820",
+      "_record_blockers": "9633de35df37d9320ad7644f9a334c4d73b4574512f191aded28df18892b4256",
+      "_renew_claim": "d92b1c4fc96d1b75ac30a6f461465b563b9154e525e9fba36351193f8154e281",
+      "_renew_claim_loop": "237003b0d13a68a907aa21ca124908940e020cac3889fbb4757794790f1bb25a",
+      "_set_progress": "cc236d6c31ce5c9753b71b9d330078899acfee077fa27806afc5a3b0a2f7bcf6",
+      "_update_progress": "8dc95bf48cb64ae9996847f16970ed2b157731f28f4f4c87ed41a8fc3645da2a"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "image_preparation.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/image_preparation.py",
+          "RecipeImageAvailabilityUnknown",
+          "_prepare_claimed_image",
+          "recipe_image.build_input_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/image_preparation.py",
+          "RecipeImageAvailabilityUnknown",
+          "_prepare_claimed_image",
+          "recipe_image.build_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/image_preparation.py",
+          "_AvailabilityClaimLost",
+          "_persist_receipt",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.configuration",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/image_preparation.py",
+          "RecipeImageAvailabilityInvalid",
+          "_prepare_claimed_image",
+          "recipe_image.build_unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.removal-guard",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/image_preparation.py",
+          "RuntimeImagePreparationRefused",
+          "_persist_provisional_image_reference",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/image_preparation.py",
+          "RuntimeImagePreparationRefused",
+          "_persist_receipt",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/image_preparation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/image_preparation.py"
+    ]
+  }
+}

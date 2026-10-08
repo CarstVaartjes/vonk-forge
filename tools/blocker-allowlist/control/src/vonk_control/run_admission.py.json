@@ -1,0 +1,204 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_admission.py": {
+      "<module>": "47f9775202d1ac4d4885565a48242ecbc6ed4fd9ea6e76d34636a9f80d6810e2",
+      "RunAdmissionBusy": "fd396a61e752b757bee8b48fb0b7fc81b2b95fb6bb000d85229769c3e39ce94e",
+      "RunAdmissionBusy.__init__": "596dc1a1c74091d41bd711e5017fd866007678ad2ff05584d1598678a34dcf08",
+      "RunAdmissionBusy.detail": "610c02a6225f4e79c5d8923669d09c043a747898729626553c15c6d83a8c5a1c",
+      "RunAdmissionService": "f12d87a95420556514b82e316a5e429593c8ae7f9b0f5cf919557191fa01ffe1",
+      "RunAdmissionService.__init__": "790e5f582fb834ba8b0d8760f8c050a2ecb4dae34f157309e77459221eb5621d",
+      "RunAdmissionService._accept_run_locked_in_session": "edbe7963a9a9e0737b338c6416a8d4118b5467f7afa9b0a7292c51bd91e17350",
+      "RunAdmissionService.accept_run": "f0a86033a7d33e63e5c2b42fcb1c4e0bce84095e18561b167e921d9e80935b17",
+      "RunAdmissionService.accept_run_in_session": "b05eff90b8a2a0b114e24897fdf432f9367f9c97e1b3fca45a142f932fb174cf",
+      "RunAdmissionService.plan_run": "2c1baa97543917a60e9435883873aa9aed19318ffd2d985f1cd33e66558105e5",
+      "RunNodePlan": "155a80484c2f0d6d2f41381cb917de351e24e6cdd9db949627f4eb99e8b101c7",
+      "RunPlan": "3613e03a55051fe81b5b97401b689cd514e4cb9f4e4d39b8e0af04dd9ae74c38",
+      "RunPlanConflict": "c40344f4254e31c46fb99f253e0d0a6460e92f13f5b0490ae915a8698fa4b25f",
+      "RunPlanInvalid": "226a9425d6143481e478b9fb3cf026b18b3515f14dc7ad9c391fbe58bfea9305",
+      "RunPlanInvalid.__init__": "40af2fe9598b2ab51f9da38e3893fc5c02c8f60c900a7b456a0c35820f6a5ac5",
+      "RunPortDemand": "794d4e599d1cd19ea518bdb4d9f7ae9c445031fd1f9a8d0f30e88975aa578f5c",
+      "RunPortDemand.__post_init__": "07ce25a83d45ed17266e09ea3622c3345e4578ab19b4477d567bc6abd0370d53",
+      "RunPortDemand.logical_job": "2be0969d9dad135f2eed3db2a0a01a39ca9adf655b46b0680ba4104462c15152",
+      "RunPortDemand.plan_port": "31b9bd95430c4da59c60b30c2a221b35cc7abc8e76039901c6513cf15ae96e50",
+      "RunPortDemand.required_ports": "b09b66986b2f3ef4d9af4b2253c366cb7fd4aaab74fffbaaf99368cad34d7379",
+      "RunPortDemand.with_service_port": "c9df3b41b8611caf2abd1063d6f2894dfe5e76718b9db51c8ccc173a18c9d60f",
+      "_active_recipe_revision": "17778fb739435b84aebd8b5199325f9c4a3963e314c0b49a13f877abf6628b8d",
+      "_blocker_text": "22b96321d4c60407810c29f1ccf203bc5757c68c5c65359d1f278e3cd8c82011",
+      "_node_document": "64e918d94381c8384dcd7a4991aec2fd6080fed077ddafb97529837a04907d2a",
+      "_planned_port_demand": "0ab7b6fd29513642bf4ca8fd3c1a44a79147601968cfe69b04419e1248447e77",
+      "allocate_service_port": "dde6a27fcb07d6c1e565f9cba1f798da7b8c6466c33726f41b0276f2b5758de8",
+      "require_admissible": "09c83d17539db72074f250f1feceb6ed7a1f173cba80117009d07abb6a5f4026",
+      "require_same_execution": "0dab1cf8743e289e09ad585a75fcf9b4a6a611d04b69ee64f77fa0bf9b97b91d",
+      "require_same_execution.identity": "48675545a7ac57251640db2d63b2fdb40abf98df3b60d08061030e1f0008d8b7",
+      "run_port_blockers": "0e8008dc786a7a211f933cdbc2ea42b2f359b2c46f6555aa9064bbd8a40e352e",
+      "run_port_demand": "165bec78a7e6e2de218a78c0eb03ceb17357e2cebfffb8230fd15e58a8f50e55"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_admission.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidType",
+          "RunAdmissionService.plan_run",
+          "mapping-endpoint-owner-is-missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidType",
+          "RunAdmissionService.plan_run",
+          "topology-role-memory-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidType",
+          "run_port_demand",
+          "artifact-job-recipes-currently-require-one-node",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidType",
+          "run_port_demand",
+          "recipe-interface-port-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidType",
+          "run_port_demand",
+          "recipe-interfaces-are-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidValue",
+          "RunAdmissionService.plan_run",
+          "cluster-mapping-generation-changed-after-installation",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidValue",
+          "RunAdmissionService.plan_run",
+          "exact-recipe-dependencies-are-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidValue",
+          "RunAdmissionService.plan_run",
+          "recipe-installation-is-not-complete",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidValue",
+          "RunAdmissionService.plan_run",
+          "recipe-revision-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "InvalidValue",
+          "RunAdmissionService.plan_run",
+          "run-memory-demand-is-unavailable-for-the-selected-settings",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "MissingRecord",
+          "RunAdmissionService.plan_run",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunPlanInvalid",
+          "RunAdmissionService._accept_run_locked_in_session",
+          "run.dependencies_stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunPlanInvalid",
+          "RunAdmissionService._accept_run_locked_in_session",
+          "run.plan_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunPlanInvalid",
+          "RunAdmissionService._accept_run_locked_in_session",
+          "run.plan_stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunPlanInvalid",
+          "require_admissible",
+          "run.plan_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunPlanInvalid",
+          "require_same_execution",
+          "run.plan_stale",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "run_admission.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunAdmissionBusy",
+          "RunAdmissionService._accept_run_locked_in_session",
+          "run-mapping-is-waiting-to-become-ready",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunAdmissionBusy",
+          "RunAdmissionService._accept_run_locked_in_session",
+          "run-target-membership-changed-during-admission",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunAdmissionBusy",
+          "RunAdmissionService.accept_run_in_session",
+          "run-capacity-writer-is-busy",
+          2
+        ],
+        [
+          "control/src/vonk_control/run_admission.py",
+          "RunAdmissionBusy",
+          "require_admissible",
+          "run-is-waiting-for-current-inventory-or-capacity",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "RunAdmissionService.accept_run",
+      "path": "control/src/vonk_control/run_admission.py",
+      "reason": "Direct acceptance retries the exact run plan after the failed transaction releases its locks, with the bounded admission pause schedule."
+    }
+  ],
+  "scope": {
+    "guard_paths": [
+      "control/src/vonk_control/run_admission.py"
+    ]
+  }
+}

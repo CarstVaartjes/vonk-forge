@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_digest_regular_file",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/cli_artifact_jobs.py"
+    },
+    {
+      "count": 1,
+      "function": "_existing_verified_file",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/cli_artifact_jobs.py"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "allowed_duplicates": [],
+  "modules": [],
+  "note": "Modules allowed to define Pydantic data models; one model per name and field set across them.",
+  "schema": 1
+}

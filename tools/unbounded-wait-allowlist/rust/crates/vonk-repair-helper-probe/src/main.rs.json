@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "hash_reader",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-repair-helper-probe/src/main.rs"
+    }
+  ]
+}

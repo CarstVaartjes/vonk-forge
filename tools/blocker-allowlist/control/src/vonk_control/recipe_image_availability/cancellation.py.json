@@ -1,0 +1,99 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/cancellation.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_build_child_cancellation_pending": "357cdbd42dc40447d9ddf58c92a34ee4310d1eaeadffcaef590f3060f8ce23be",
+      "_cancel_update_child": "0c712a139ea06b31392c82ef43f0fbf2c4d2e71670aae67db98896d3fac739b0",
+      "_model_child_cancellation_pending": "b152957fec67dda1863b63fc5c7df324c1f7c890d2a47c9305a6d53044a04ee0",
+      "_request_cancellation": "5a05f99a9dbc8f1f888b2659cf1ac46280234473c721b4a4b65e01e1eb9b387a",
+      "_stored_cancellation": "fa94f94c31fe673840b7b8f970ba0ce680c084d556982b08198e0d519d7d4b76",
+      "cancel": "c0d2662d317bfd8540beab63eeae21868cbf8b2b8fbe4e72164a824c86993112",
+      "reconcile_cancellations": "3e6d01771137f4d11012d683751b46e4113afa925a1be875ea8d12e20de7243d",
+      "update": "70c31a691f710c22d1e2a9edd6d5cb72044b12087ac6170f5392a2e50e419112"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_image_availability.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/cancellation.py",
+          "InvalidValue",
+          "reconcile_cancellations",
+          "cancellation-reconciliation-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/cancellation.py",
+          "MissingRecord",
+          "cancel",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/cancellation.py",
+          "RecipeImageAvailabilityInvalid",
+          "_request_cancellation",
+          "recipe_image.cancel_request_key_reused",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/cancellation.py",
+          "RecipeImageAvailabilityInvalid",
+          "_request_cancellation",
+          "recipe_image.not_cancellable",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/cancellation.py",
+          "RecipeImageAvailabilityInvalid",
+          "cancel",
+          "recipe_image.not_cancellable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/cancellation.py",
+          "RecipeImageAvailabilityUnknown",
+          "cancel",
+          "recipe_image.cancel_busy",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.request-shape",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/cancellation.py",
+          "RecipeImageAvailabilityInvalid",
+          "_request_cancellation",
+          "recipe_image.cancellation_invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "BuildConsumerError"
+      ],
+      "function": "_build_child_cancellation_pending",
+      "path": "control/src/vonk_control/recipe_image_availability/cancellation.py",
+      "reason": "Unknown ownership of an issued build keeps the cancellation pending (the predicate answers True); reconcile_cancellations asks again on every pass until the ownership is known, and the build is never released on unknown ownership."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/cancellation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/cancellation.py"
+    ]
+  }
+}

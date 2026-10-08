@@ -1,0 +1,22 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "run_process",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-spark-setup/src/process.rs"
+    },
+    {
+      "count": 1,
+      "function": "terminate_process_group",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-spark-setup/src/process.rs"
+    },
+    {
+      "count": 3,
+      "function": "run_process",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-spark-setup/src/process.rs"
+    }
+  ]
+}

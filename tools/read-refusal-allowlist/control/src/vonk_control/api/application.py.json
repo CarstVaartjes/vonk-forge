@@ -1,0 +1,67 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/api/application.py": {
+      "create_app": "98776a56cfa5f3c8d4440eb1ae9869956ed23cfe8c12ceb9161ef094e3040b05",
+      "create_app.activity_detail": "8412f0f9369c7524c04523790e998674cc7d3770e6116372c3b70db0ebcedec7",
+      "create_app.actor": "5488b053a5e1eebf48dab66b7f73d4ca2cda976497e605bbd3e806ab22910196",
+      "create_app.canonical_agent_http_error": "a19386e56bb3020631ce156c0dca49d957ce44e8c05fc6a47ada0b92303a2ad6",
+      "create_app.canonical_agent_validation_error": "9370c6435fd37361b25ac47a3a87094fff645768302cff43fcce5776f18e7271",
+      "create_app.fleet_event_stream": "43d71b7a25aaab33528874a5632c5e5922b21b08371252b573cee60ee5977128",
+      "create_app.healthz": "a8ab9ad9addacd3baecdd415f5f74704ba0d9f5eeda083a8725fc061290c5360",
+      "create_app.job_view": "754d9f4c9f68c4126defc8680f2bdbd2e5c05a5459c4b2efc9c40b039222bbcc",
+      "create_app.operation_view": "4ec8e93665d6efa5fb7f3e559ac901eea65b63e2d78548f1c8983a231217b13b",
+      "create_app.operations_view": "43b82b31bc52f0215d3fc7332ff823479f55dbbb5f2475ac5394bb93fe56cd98",
+      "create_app.platform_metrics": "012e93e35ccdb0b943679f26b627032ae351abdf0dbb2f53900c8b7463f89971",
+      "create_app.platform_observation": "84f8724197ddc097cd942356b3d23604f69a1655f77656d7982af4582add7734",
+      "create_app.readyz": "284927f67077b87531be5e11f8ae017e9a147f1639d1b2f63925a3dc08c688b3",
+      "create_app.request_boundary": "dea0683672054081e08434f4d3057df9732017415a05a162d4f086f9dda3fcf6",
+      "create_app.require_mutation_role": "aa8e90f8ef2e82a18730ef9d5a194c84a8efd23551a0546f7a56a19c173b45c5",
+      "create_app.resume_job": "7f58e9155e4110534855ce1e7074124b65d339c0621845b27eca7d9063063bd5",
+      "create_app.telemetry_request_boundary": "4ad757859f145d52d4710b622a1da76bed1bd1f7ffd1ffe7986efafb79e1d0ba"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "create_app.job_view",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/api/application.py"
+    },
+    {
+      "count": 2,
+      "function": "create_app.fleet_event_stream",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/api/application.py"
+    },
+    {
+      "count": 3,
+      "function": "create_app.operations_view",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/api/application.py"
+    },
+    {
+      "count": 4,
+      "function": "create_app.operation_view",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/api/application.py"
+    }
+  ],
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "create_app.operation_view",
+      "justification": "The canonical OperationResponseTooLarge handler protects the installed reader 1MiB response allocation after optional progress/cancellation projections are replaced by explicit typed unavailable evidence. It measures UTF-8 bytes and reports observed/allowed bytes; identity, authority, durable operation state and continuation are preserved. List paging returns any fitting earlier prefix with its signed cursor, so only an indivisible remaining first row can refuse. Malformed stored observations are not this exception and remain separate read debt.",
+      "kind": "get-resource-refusal",
+      "path": "control/src/vonk_control/api/application.py",
+      "reason": "resource-bound"
+    },
+    {
+      "count": 1,
+      "function": "create_app.operations_view",
+      "justification": "The canonical OperationResponseTooLarge handler protects the installed reader 1MiB response allocation after optional progress/cancellation projections are replaced by explicit typed unavailable evidence. It measures UTF-8 bytes and reports observed/allowed bytes; identity, authority, durable operation state and continuation are preserved. List paging returns any fitting earlier prefix with its signed cursor, so only an indivisible remaining first row can refuse. Malformed stored observations are not this exception and remain separate read debt.",
+      "kind": "get-resource-refusal",
+      "path": "control/src/vonk_control/api/application.py",
+      "reason": "resource-bound"
+    }
+  ]
+}

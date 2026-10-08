@@ -1,0 +1,36 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/results.py": {
+      "<module>": "a9eef11f4aa7c950fa4ac1689ee9cb3a9316d6229304c963be8eda9b46c9112b",
+      "_evidence_is_acceptable": "79dce436335fc611d87d49ef698fa2f3435a3d2cfe3b8d41028047d939576d8c",
+      "_node_result": "48d215c946fcf53924c8c91d2a8b2279f542ebcc45b8c2772100a9754defd1b6",
+      "_recorded_result": "2b47f21d278f95f596a07e2f8e3df93d3b00a5d13fee395efc22a49a81a754d9",
+      "_recorded_result.read": "167c6145dced1f27808a738e823a2102b8687a730602963c9bd1ab669f72aa53",
+      "_recorded_result_document": "49b1b39d3a288d15bed794cc26e110391505e7d19bb461934d355d14f1e7ab92",
+      "_unproven_evidence": "165a9ac73d8d62fb948c9329adb76ef12c939eda2490ee9062600c2b7d59becf",
+      "_validated_result": "d297c40ac3b5fb0a3d8bda645e2dcd7a30a7e3af9a8166b69271979e090faa49"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/results.py",
+          "RecipeRequestInvalid",
+          "_validated_result",
+          "recipe-operation-result-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/results.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/results.py"
+    ]
+  }
+}

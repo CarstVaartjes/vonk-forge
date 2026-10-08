@@ -1,0 +1,43 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/bounded_json.py": {
+      "<module>": "e0788bfd7bb679c1c3cf26d2c1290180ccfa76bc396d96ce79d9c3df67b123b0",
+      "BoundedJSONError": "1933eb0c8820ab0bf84cac31630035908e78766586864979b6cb2a2719515d4a",
+      "integer": "201f508adebadac1ac0fcb4cc98724a65a9c2e925116a3a19d9f5782e46d9fa9",
+      "mapping": "99e02c69df6257d40a120212ae5fadf413ac4e681d4cbefb2c16140807f0cb91",
+      "require_integer": "5d4e27ce4020f4dc865b8e681774b55795f8b0972bdee9d21c437a4bfcc3a2ba",
+      "require_mapping": "468296870be048f820b3d14ca8f09c5be59598ecbff41311ebb63a90e90ae5e5",
+      "require_sequence": "c489432e8597257f798d7da754e00cad92c771ff56272e8b57d89a3bc1b767c9",
+      "sequence": "6f1bf6ed807dc37b78ac1acbc3d8f925ffba0d53c85a937c3867953f3fca3057",
+      "text": "dffdea78e2d8a3f7c16148ca5cebab7d4faf7b3127cb44b851cc04dfd9214674"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "bounded_json.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/bounded_json.py",
+          "BoundedJSONError",
+          "require_integer",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/bounded_json.py",
+          "BoundedJSONError",
+          "require_mapping",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/bounded_json.py",
+          "BoundedJSONError",
+          "require_sequence",
+          "message",
+          1
+        ]
+      ]
+    }
+  ]
+}

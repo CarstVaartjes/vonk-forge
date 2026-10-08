@@ -1,0 +1,22 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "brace_delta",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/protocol_literals.rs"
+    },
+    {
+      "count": 1,
+      "function": "strip_comment",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/protocol_literals.rs"
+    },
+    {
+      "count": 2,
+      "function": "production_code",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/protocol_literals.rs"
+    }
+  ]
+}

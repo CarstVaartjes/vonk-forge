@@ -1,0 +1,54 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/compiled_artifact_contract.py": {
+      "<module>": "718696aa84180e38ea564e98d94b9173dc3fe57b9e699835ae4a6e7200a6b260",
+      "ArtifactContractModel": "907d69541a44d76423bce2e77633a5139d6d13d916ef351897a532b193a5c641",
+      "ArtifactInputContract": "5caaf2ca13b88b16740af05ed872ab2cdf71e4059ddf9e1c3b090df59625fc14",
+      "ArtifactInputContract.arrays_are_immutable": "f6e4635cdb609e401affcfce8bf8eb316cd0fb5c640f60932d549bc1dcc4db0c",
+      "ArtifactInputContract.media_types_are_canonical": "2592302186353019476cccfe3a6198aca98175d844f9c07d2924c7c09adc2ca5",
+      "ArtifactInputContract.slots_are_consistent": "1d6dc630462c402cec681c425953096d0fe29152be2f7bd8b34a667ec287afe7",
+      "ArtifactOutputContract": "0047e12f825f08af40b737556759c7e08424d9babaaec48f369e7c39dc724aa9",
+      "ArtifactOutputContract.slots_are_consistent": "7ba05b0d38023e0a7fdc5cd07d6d63eddda9f445feb63497ce86282aaec950fe",
+      "ArtifactOutputContract.slots_are_immutable": "1466a977c1ab9861bbc69f6db957fd9f69bd7fe7182eb87a52ddc5bd2374140f",
+      "ArtifactOutputLimits": "9d985923ade9f7f350f60c314c2675ccf6069ed3690d927c7bc366bc60f2fd4f",
+      "ArtifactOutputLimits.limits_are_consistent": "f49528317c066d24006ad546b90cdf45d24571166828b942a8291605a8f18748",
+      "ArtifactOutputLimits.media_types_are_canonical": "746457a06034955079b43c685c6aa85fc6eb1eaf9ecccb49abe0672a292dd13b",
+      "ArtifactOutputLimits.media_types_are_immutable": "a9a28c18d32b75da8e7ec5a314823a3acd5be75eaa76121557ebb1597af68b2a",
+      "ArtifactSlotContract": "b82b7f73043445aec96e1f377d1aa261f0fa718d5ea0acd3b0950fac6f0526fd",
+      "ArtifactSlotContract.arrays_are_canonical": "957594d4119eeda3f877944879f7fc08bd84b478612b48e1a1ec810e87f7bc83",
+      "ArtifactSlotContract.arrays_are_immutable": "84f9e69db43921a7805210579633d2c828b6c1374e4dba7927a44b88bf8e5af1",
+      "ArtifactSlotContract.limits_are_consistent": "58240a8fde31c5f3ff77c22212fd7f06b349c05a72577ebab76e00b5e95ce5b1",
+      "BooleanParameter": "95ae3bbbd9bf5f11954a800659dda2f0141d44b59e4a1ef83a2f9a473f2d6a04",
+      "CompiledArtifactContract": "d006e4554100cdaecc1627968a6d7883dd250b33df0e862212f685feaf861d34",
+      "CompiledArtifactContract.parameters_are_canonical": "8ce9d7e129d020db44b29b3433708880d25c30e5ccfcc3624968884d3fb31554",
+      "CompiledArtifactContract.parameters_are_immutable": "b91113c9209dc21348bf557e8f4b6218c7361ea04b3887b869f369b240291caf",
+      "CompiledArtifactContract.parse": "65f1b1a480f6b27c9fefb129ce6e679532ab34acb1a724e3822643373f7fb9d5",
+      "CompiledArtifactContract.sha256": "d0f06e5263dd453444cd64090e0cb82a2f117ccf0923f240e79abbd8e1648633",
+      "CompiledArtifactContract.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
+      "EnumParameter": "d639aaaf1d52d229713284beb31c5f31e38f8885ac1de372a814734851fb34da",
+      "EnumParameter.default_is_allowed": "5ba9ce092f03a0bad8961d0724c891fd38b76a9dbfa84f3fdb6b0e6b527f0cf9",
+      "FloatParameter": "08eee45b774a46a53b4cf7ed88f2c098bf5a231a81adcb568980219ecbc3584a",
+      "FloatParameter.numbers_are_finite": "8a88fbe041040dc4b31ec420d58c3e5b4671ced9033751a13e719f4cc366a27f",
+      "IntegerParameter": "3b5857cf1435e083925ae26b3146456d55b85d5eefeb827ec6dab8ff7280bf78",
+      "StringParameter": "06e79674c70428f8ea7f393ce6079a260752791e0215102cc90b1aab2b094d00",
+      "StringParameter.default_is_safe": "a556164ed85a04edaa6e873fd2d530bfb3ad389016ca57dbb13b35f1ee39216c",
+      "_ArtifactParameterBase": "be2f033b8a60356e635d3296ab3b0a73f35eef8e4962f5c3681fcac07cfe82cb",
+      "_ArtifactParameterBase.allowed_values_are_immutable": "043bc4135a3ab69d4cf4ab5e3a12ea6011893656002c3b43f3bb288b3f543e5f",
+      "_ArtifactParameterBase.name_is_safe": "1704571346fa9ecf09ef217fc535122b128d9bb0d57cf87418cd0cef8e9c251d",
+      "_ArtifactParameterBase.pattern_is_safe": "bc316ae556a921fb20319089700143de5e6abb6e9a719778531c5c7b4b1b72cc",
+      "_finite": "d2847c9172d0e8dd08c637509d38504ff0266077818bbaf9293bcc228b831e4c",
+      "_input_contract": "5cc7bc7d1b86c901d95d3e64de4a6f03511ce2f4c43704c3107e69d9eb49362a",
+      "_parameter": "f082033fe094a74087e466a9eb067db1c5801a464344ac5eaaab2e10e0cd2cfb",
+      "_slot": "5895ff658397451984ba094803aac769491a20430cb9f089a53d45c594b5e09b",
+      "_tuple": "a1ea13f8eea69101c9581406d7e29003f87fd6be1df886ff7125bea1e0afd52c",
+      "compile_artifact_contract": "8c1a6a6f06e3773e745ec0803c9411c13b357edb319f8a9b888d594b7ffdb449",
+      "validate_parameter_definition": "7377c9abb20890cc4b2161fef1a49df85f962209aaec9dfd82ab2f9d5f140d7d"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/compiled_artifact_contract.py"
+    }
+  ]
+}

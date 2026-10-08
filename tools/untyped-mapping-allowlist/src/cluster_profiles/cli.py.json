@@ -1,0 +1,34 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli.py": {
+      "<module>": "3bd5914276d46d1050c86976d0578b24677ac0d07b0b99c6fac7bde16bd580ad",
+      "_CliParser": "72b3822d24362f152dfef5dfebdcca90f719559a0b275049e76338bb70220d6f",
+      "_CliParser.__init__": "493bbdd5b961d019aa1a6ad908fcfccd5d63a745fde77da2d454cb5192ef3c19",
+      "_CliParser.error": "e2aa10bf6a4e33a783c0236f116ef03b7743720dd1ed9adc6cf9d8dba8a1fb43",
+      "_CliParser.format_help": "a6a1cb12d7d6b4074c20fb87916bcdfb0267b13129120082be0a3e0572ceaab5",
+      "_Subcommands": "1475acb397b3eb129b9be8acbde67f3c68d63847c6420ac2fa733e606cf88e8a",
+      "_Subcommands.add_parser": "eeca229c7e61f8265819d9dc6a7e9d788a3cc584518f634e2874e93939c387f3",
+      "_UsageError": "d9cbd976db8a48330801c7c503eb517d2a716fccd24e51a6a310b29d3d057185",
+      "_UsageError.__init__": "f529a90eb51c11a04c872665b353ee08c88eba4e108a4875e057aad17f5ea8b9",
+      "_arguments_may_contain_secrets": "4dd3d1287f7240502f0cd9bf7edd53c82b7139b36ec1f46a35e2f16156606f52",
+      "_bare_group": "129af4eff383a724eb038c80ef1ef6413e974ef3f955e7b91200c6a50a05fc06",
+      "_control_error": "b8773e16ac7a5bd483c89b76167b34aea98b28a808cbc076ad779a7c97af4ded",
+      "_emit": "ce8150df56633206d4eda9bb106635a7f03b66ebb4c8a5a54d0f1d63c6116b3f",
+      "_json_text": "629e9fd37ced98d4daa54a1c3ed067928e90a9479b8c5cbd6d1ecf0b6ca7f731",
+      "_main": "694f688cd142370c904ff62fdac3d4db1c9a3317a87bd8e6411911fac6d0f199",
+      "_parser": "7841ec04c86edd9c39bc72c563413eeed902922b0f69fb5a1f2a64b2313b416a",
+      "_plain_language_document": "ccf01b4b0e84e52463b672dd24a5344d381d3f4162174ce33473ea9c55da2f79",
+      "_plain_language_error": "d27ff2e7040b99cfa823a9c7100b1c74277941f0e8f4a7c845e75e275e94581e",
+      "_report_usage_error": "57d086f5e67c9eb6aabfa055b560b549617f7dfb7cc6fcfbb2a6e3ae25ee9152",
+      "_sanitize": "5d391d8e89d9c5eb0f10a5278acec6fd2923edc076c819ff9d17bf1fb0a0435c",
+      "_sanitize_text": "c54b80311c6502c6521945924a67de37dcaa0f67cf04c5e64ff90d2e5b88b6e4",
+      "main": "a2ea82cfd1d1dfd4f166ecfbfbdf528f7eaa7b433e7bee51d6b17f924ec35106"
+    }
+  },
+  "debt": [
+    {
+      "count": 9,
+      "path": "src/cluster_profiles/cli.py"
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/cancellation.py": {
+      "<module>": "4910174906fe0da58f9e5f5d67404b436e4d570b04021d0ea29f8bdc308a4650",
+      "FleetProfileService": "4a4aac32f00132206687f61e40509e94423e4be2c7d81fdff34f7c16de748195",
+      "FleetProfileService._observe_pending_cancellation": "1a20acd9095b281e572707b7216800d9b1d15b75443c91db95cd4c8eac336a65",
+      "FleetProfileService._reconcile_selected_roster": "a45e9742259a8549707d210b5c319fe4b4271c208d2e3d1e7f5436d37fc13e43",
+      "FleetProfileService.cancel": "f88549cc6725c7654d3538849b7761ed06da8b46e11c7bf0d386aa624e2d6cb8"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.adoption-authority",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/cancellation.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.cancel",
+          "this-application-s-continuing-effects-now-belong-to-selected",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/cancellation.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.cancel",
+          "malformed",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/cancellation.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.cancel",
+          "profile-application-already-has-a-different-cancellation-req",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/cancellation.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.cancel",
+          "profile-application-is-not-cancellable",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/cancellation.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.cancel",
+          "profile-application-scope-changed-during-cancellation",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/cancellation.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.cancel",
+          "profile-cancellation-request-key-is-invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/cancellation.py",
+          "MissingRecord",
+          "FleetProfileService.cancel",
+          "not-found",
+          3
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "FleetProfileAdmissionBusy",
+        "FleetProfileAdmissionEffectBusy",
+        "FleetProfileAdmissionStorageError"
+      ],
+      "function": "FleetProfileService._reconcile_selected_roster",
+      "path": "control/src/vonk_control/fleet_profiles/cancellation.py",
+      "reason": "A busy admission during roster reconciliation defers the pending application with a retry delay; the reconcile pass runs again."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/cancellation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/cancellation.py"
+    ]
+  }
+}

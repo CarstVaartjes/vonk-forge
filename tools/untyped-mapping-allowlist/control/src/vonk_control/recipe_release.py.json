@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_release.py": {
+      "<module>": "93bfce343bd80e97ee1c26b2ad6def92feda931dc036bca3eb88e70377bcc4f3",
+      "RecipeReleaseError": "da3e16dc84b38265a8a546d32e1eed2afc02b998186be675a55461f30e653cfb",
+      "_invalid": "3225a030e758fca342257c273e5ca70519769c4ad30352177bb6d1fb911aa579",
+      "_source_commit": "4a97eb77d3da7b0814cb573a14db62f1014cc502a4c70118eb9e06b481996537",
+      "_verifier": "f8d2a2233e45f83a64e7d227312194b979cabd9d0dbca1a6afa34fea85552fe3",
+      "parse_release_checksums": "1cf10d2cfd912e0ceadbd0ad0108d8c2064f5f4bbee63a45a61415fb765ba68e",
+      "verify_release_checksums": "89ebcfddfc322e5d91eba6a595753416e0f2c09a17c0d8f7f9d4373a8aecd9c9"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/recipe_release.py"
+    }
+  ]
+}

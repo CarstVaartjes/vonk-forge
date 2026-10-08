@@ -1,0 +1,88 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/orchestration.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "enqueue": "0732c35be6d3a65b9294a3873e119d56cb26748a7491b9940b1871d20f79062f",
+      "enqueue_in_session": "e1790fce17c0472b5deab4e9ea8056ea38b7c50582761af695abd03808e6c2ca",
+      "notify_available": "e5c5e3386e45919a2a31f4bcd299f00f4630442d8b5798fe79eb9736b1a9170a"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "agent_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "InvalidValue",
+          "enqueue_in_session",
+          "agent-operation-authority-revision-must-match-its-parent",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "InvalidValue",
+          "enqueue_in_session",
+          "agent-operation-is-not-supported-by-the-control-plane",
+          2
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "InvalidValue",
+          "enqueue_in_session",
+          "agent-operation-node-must-be-a-parent-target",
+          2
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "InvalidValue",
+          "enqueue_in_session",
+          "agent-operation-node-must-be-active",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "InvalidValue",
+          "enqueue_in_session",
+          "agent-operation-parent-target-scope-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "InvalidValue",
+          "enqueue_in_session",
+          "agent-operation-workload-intent-was-superseded",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "InvalidValue",
+          "enqueue_in_session",
+          "cannot-enqueue-an-agent-operation-beneath-a-terminal-parent",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "InvalidValue",
+          "enqueue_in_session",
+          "workload-operation-requires-a-bound-intent",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/orchestration.py",
+          "MissingRecord",
+          "enqueue_in_session",
+          "not-found",
+          3
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/orchestration.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/orchestration.py"
+    ]
+  }
+}

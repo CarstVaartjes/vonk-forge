@@ -1,0 +1,98 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/run_switch_adapter.py": {
+      "<module>": "8c812d05ac71e54b543253c256e7017c6c636dfc44766f6a23a7b81c5230097f",
+      "RunSwitchFleetProfileAdapter": "8c812d05ac71e54b543253c256e7017c6c636dfc44766f6a23a7b81c5230097f",
+      "RunSwitchFleetProfileAdapter.__init__": "31d41aa6c5dc07438d3fc7d9150d7690df810a2aad9a35eaa15a6546413b3922",
+      "RunSwitchFleetProfileAdapter._assignment_intent": "71830fcd4c374d334173f183dceac7f2c3fbac24fe7215d1fb00aa8867ea4ec2",
+      "RunSwitchFleetProfileAdapter._assignment_request": "ec2e81960a3297419f630cfab069da41e5f4b5e23231f72f308addd7e2a21bc8",
+      "RunSwitchFleetProfileAdapter._failed_children": "5fe3b2722551c7470d9bdc0ed4d9a9a716ee04c68bfa1cc65ef1969eb8159fa6",
+      "RunSwitchFleetProfileAdapter.advance": "e37b9e676531d64f0e4543f437d9d590cdb08e84eb26f80d56055886aadc8d3f",
+      "RunSwitchFleetProfileAdapter.assess": "c2b79b84d8cab6187e79f01475686448badde7c20863b17c081bfe4ae3322293",
+      "RunSwitchFleetProfileAdapter.failure_signature": "52bc07fe98e3a912fcef4329b830cfa914c8325a8eb2681beb4fcc39ab19525f",
+      "RunSwitchFleetProfileAdapter.get": "cee11f11b4ddf79f07924fadea00e86d40dc14d029ec5cf4dd09600912af9079",
+      "RunSwitchFleetProfileAdapter.recoverable_cache_loss": "a7e5dd5f892f4da696a0bb6882bbc31ad18d279f034ae5c95dd2b45b4d06306a",
+      "RunSwitchFleetProfileAdapter.recovery_refused": "a45a49410af73ff817e0bde744fc3816f0e825b1e6bea5afb3099c067b5a6e93",
+      "RunSwitchFleetProfileAdapter.request_cancellation": "9c371b61a95db3eb9d39e254cbbe63031e28f686f5d67fc7f40b2c2de77282ad",
+      "RunSwitchFleetProfileAdapter.request_superseded_workload_cancellation_in_session": "0d942df6a4c4f419a21b4be8878323d8100914063862a38b197c73f0fbe9030e",
+      "RunSwitchFleetProfileAdapter.start": "dcf83c96289162350c56465be35dc6700295a04d3c72596c6ebff5e713f08a8f",
+      "RunSwitchFleetProfileAdapter.validate_resources_in_session": "d6eef4508d8a5968f83d0ea8f45b90f46ccb0816c578a727eaa71fca5fc412b1"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+          "FleetProfileInvalid",
+          "RunSwitchFleetProfileAdapter.start",
+          "profile-cancellation-prevents-dispatch-of-another-child",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+          "FleetProfileInvalid",
+          "RunSwitchFleetProfileAdapter.start",
+          "profile-switch-scope-must-be-the-complete-sorted-node-bounda",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+          "InvalidValue",
+          "RunSwitchFleetProfileAdapter.assess",
+          "profile-assignment-nodes-changed-during-preparation-projecti",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+          "MissingRecord",
+          "RunSwitchFleetProfileAdapter.advance",
+          "not-found",
+          4
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+          "MissingRecord",
+          "RunSwitchFleetProfileAdapter.get",
+          "not-found",
+          2
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+          "MissingRecord",
+          "RunSwitchFleetProfileAdapter.request_cancellation",
+          "not-found",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "run_switch_adapter.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+          "FleetProfileAdmissionEffectBusy",
+          "RunSwitchFleetProfileAdapter.validate_resources_in_session",
+          "profile-resource-admission-is-waiting-for-capacity",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/run_switch_adapter.py",
+          "FleetProfileResourceRecheckUnavailable",
+          "RunSwitchFleetProfileAdapter.validate_resources_in_session",
+          "profile-resource-admission-could-not-be-rechecked",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/run_switch_adapter.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/run_switch_adapter.py"
+    ]
+  }
+}

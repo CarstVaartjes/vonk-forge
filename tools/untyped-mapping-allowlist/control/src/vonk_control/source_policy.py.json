@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/source_policy.py": {
+      "<module>": "1c561f0383d9cc6cdbdabce9521d46ac4367d369b08b610c14be003ffa1c8ac1",
+      "SourcePolicyError": "7be09e9e6e78b6ddc15d61d2317eba2f732eb0d4ebbfec8dd0a4bda6561efafe",
+      "SourcePolicyError.__init__": "5dd4f43c8b64325b44af64b49f8a9258d9472f6f063664717725fd6b8ea39d84",
+      "SourcePolicyFinding": "c59487c747a511ec1504ea634237fade4e21d1440e125d6b408ef03c3a3c56fd",
+      "SourcePolicyReport": "d55c0ed7b6afb7faae50c9b66f1b212684d33520713cab7aee8e80abb4c2bf71",
+      "SourcePolicyReport.describe": "d3522877aaf904b4da51ec3195a8201d3a24b1a0a8ce2a3331ccafddc139fa30",
+      "_dockerfile_instructions": "04faa6e0eda5fa86556d8d942e577a33cb0975a8640370d2a593bdfe5216b946",
+      "_finding": "f10b97732fac686bcbd973cebe47ae3d29918183f6f0fe06fee6d4d34ea998e6",
+      "_has_heredoc": "a87546a80a55b6239dbc9b289095ab4b9892c71227d5f425aaa548ff3469f711",
+      "_inspect_compose": "7162402c0cd8531f6b77df27c624d79d5b41103b101b8fa4ebd7934fbd0385fe",
+      "_inspect_compose_volumes": "5ec7b07c55702f877da8f7582c0777810ff5812438e6de88c35fb84b5da50476",
+      "_inspect_copy": "9bcde4ddf5715bb86c7327a016b7a6bc3268d0dd0dd80614fe95cc282816a566",
+      "_inspect_dockerfile": "62765f71048f2ce35416e7e732a373389385a472ebf003e1a4d2fe578700b8ad",
+      "dockerfile_base_images": "2f5610caaa392f59dce50a04d67a43b8735d3da1e3174dca08801808f5120171",
+      "enforce_build_source_policy": "fcf4c0dbe714f6ec5c366d59934d542cb3b57180f8a391fe936aae60c97a770c",
+      "inspect_build_source_policy": "5372944b7548a5b4f370ba12e6336837ff32a7bae809cfcbc5a0332c8b4df863"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "control/src/vonk_control/source_policy.py"
+    }
+  ]
+}

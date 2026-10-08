@@ -1,0 +1,73 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/install.py": {
+      "<module>": "184d0c31939212f7ac253004432e1b7f59a211861feedb2f6bce9b8b67a888c0",
+      "InstallMixin": "271e5008e78a701e6210ee725937bf660b3fdfcf50f4484ffb454bf9ba707309",
+      "InstallMixin._install_once": "77b8c97b62a524a70c6c1b8cac1e3a4ef7820203e5a83d872b64e4e141c0caa9",
+      "InstallMixin.install": "1a2ff6b2c0b943146d9c793e61de8f4bc88157cdf1371603fde7026ec60cb218"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/install.py",
+          "RecipeRequestInvalid",
+          "InstallMixin._install_once",
+          "compiled-execution-plan-is-missing-for-one-or-more-mapped-no",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/install.py",
+          "RecipeRequestInvalid",
+          "InstallMixin._install_once",
+          "message",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/install.py",
+          "RecipeRequestInvalid",
+          "InstallMixin._install_once",
+          "reviewed-plan-digest-does-not-match-the-submitted-plan",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/install.py",
+          "InstallAdmissionBusy",
+          "InstallMixin._install_once",
+          "install.capacity_busy",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "InstallMixin.install",
+      "path": "control/src/vonk_control/recipe_operations/install.py",
+      "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/install.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/install.py"
+    ]
+  }
+}

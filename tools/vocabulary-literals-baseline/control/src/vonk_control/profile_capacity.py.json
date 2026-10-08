@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/profile_capacity.py": {
+      "_disk_claim_id": "810a3f957604059b96a6fb67f903ad8c6894ff0742b2f3e379af5ee42c17a6f3",
+      "_memory_claim_id": "afc063ddff4fde628e16ff492dfaf87c42698bee8e37658250b489179064f39e",
+      "_port_claim_id": "93dc7a7870390717fc38e0df026480500e7266c3a645f648ae253c1ddb0a2513",
+      "_profile_assignment": "a1f10cef0836726a321d17557b7f4c1ed060cd0d476e1269adc89cf84b054c42",
+      "_profile_build_memory_claim": "20964c0d26cbf9b292fed345819901349df8fe83b508f50d4cc478c2023fb514",
+      "_profile_disk_binding": "28ee3b213d96bf59f1359b450ff876dab5a645e9418606cdbf1f8fd5484ad351",
+      "_validate_memory_claim": "bc04d6552a2faf015c8078e1f20594474c77d409d6f6ea6a3b6ea8a18061a38b",
+      "accepted_profile_runtime_image": "e0e953b1525df51714583bc9cf774abc5423bcd2b522bd73d854017b7f0443e8",
+      "inherited_profile_disk": "1a3bfc4eee1b15028b5435391d11c1efa2f5c35b09684b532502f1d8bde353c2",
+      "inherited_profile_memory": "149b66710f652df39c2ba6c31bc832d4c93c776293954a9578c359a3f9bf863f",
+      "inherited_profile_ports": "777b65c1016ea6b0e5bed02dc150703d2e3dd0a71fdf59a53e84bba161a3d62b",
+      "prepared_profile_installation": "5c33f561d16c4f91c68e1a274734693b634313191ee47af63a2d8629c5ca5d9e",
+      "profile_build_memory_claims": "80e1104982ad092939e2606ea49e1bf4032a156953416d4272ed871fce2bf1c3",
+      "profile_memory_floor": "39d57cdde61cc2ad48106143574d745c1cf86aa860c458ba2d1cc980eea08d90",
+      "profile_memory_replacements": "41953c5b74a2235a7ab705af8e26a5d45bfff9886c027b1ce0c1708638a35a50",
+      "release_replaced_profile_claims": "9bc488838ee07c72ba56bb5eeef84d776467ae746257ec0396544bce209b196c",
+      "release_unassigned_profile_claims": "dcd271bf9e6019bc79a33e8789d05522cd8c0d9139f366e39bcc6377d1f1c060",
+      "reservation_visible": "6e99d6e9172270916575de0a751ac357d5a40ca067233e26c065e722bc382ba1",
+      "reserve_profile_disk": "f3725b0e82d6b3e056dbf7386265ca1f0c46012c507522e8d074f90b3a45936a",
+      "reserve_profile_memory": "2583727eb769ec0e576ab598457b7e70dd2e77def636844f7027778770310b85",
+      "reserve_profile_ports": "8f8ecbfe91f5c1d8f792f7e983258003efe1363359b1e93a95b7ee89ad1673af",
+      "restore_released_profile_claims": "d6ecef81036a7eb88898726f6d68e0ee127ad1a3dca15f84530cbea18f7590b4"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/profile_capacity.py": 4
+  }
+}

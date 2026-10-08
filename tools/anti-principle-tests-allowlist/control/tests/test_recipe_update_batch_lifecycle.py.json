@@ -1,0 +1,58 @@
+{
+  "content_identities": {
+    "control/tests/test_recipe_update_batch_lifecycle.py": {
+      "<module>": "cf92c61c8ccaa2ce86845f34f51dba17cbdbd665e4fa19540b01c52f3866a67d",
+      "_child": "91349879cf1b574feb9b49eb6e3560a4871047bbf088974da97bdf3397211664",
+      "_document": "99680ca52bfb86e0cd85eeabde19ef329f8f59b0a034a849eede76df07464150",
+      "_job": "4996c401a851690ad1866b89629645478043336c9b7599e63525a25e7ef3d424",
+      "test_a_batch_with_a_child_that_has_not_settled_does_not_end": "2dcde04dd51a50f18481e778f21c289163697c3d861068eebb5a9480b38d67b8",
+      "test_a_cancel_ends_when_every_child_settled": "95acdd45239682135bd5d98c0e1fb625b7842a9b771a67f83530cce8dcb7cbae",
+      "test_a_cancel_that_a_child_will_not_confirm_completes": "d247db30965b6b29f4c688da3f54e537a850352cabd14139ffe76266c83b9104",
+      "test_a_cancel_that_a_child_will_not_confirm_completes.refuse": "dd762cac0cd46ab966628988fff3757b9d38b70c8bce157d31e6a25b14e93ea2",
+      "test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget": "8852a91f3ed7da8968400aeb66402a0842a9ff5f8a013d84edc9181cb1d7edd4",
+      "test_a_cancelled_batch_is_not_claimed": "ed50c282b1499a5ffffb687c32d195d8255ed6c1dbcbdad15931d931b2373a43",
+      "test_a_legacy_running_batch_with_no_claim_is_claimed_and_a_live_one_is_not": "49b7b032ede0f8965c02efba04c48439708f9c8a89433ab795394acdd23f5d30",
+      "test_an_unreadable_cancel_document_still_completes": "c72f7964f75d93cd2d30f7063704faec7b4ae892367be09c472a35299b8a67c3",
+      "test_no_event_leaves_a_batch_waiting_for_an_operator": "9d2e46fc5c617cfecfe64860a151d2bcc2a7204b7b5bf0ee2b51943bd8895b8f",
+      "test_the_worst_child_outcome_ends_the_batch": "5820271ff794808d5ce658dbf54d4f9e24ea293d0a94da5c6666c8ba52f3e502"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_cancel_ends_when_every_child_settled",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_that_a_child_will_not_confirm_completes",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancelled_batch_is_not_claimed",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_an_unreadable_cancel_document_still_completes",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_no_event_leaves_a_batch_waiting_for_an_operator",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_recipe_update_batch_lifecycle.py"
+    }
+  ]
+}

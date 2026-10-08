@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "observation_response.records",
+      "justification": "Pure fragment encoding of an immutable finite UTF-8 JSON token, not polling or an external wait. offset starts at zero and advances by min(available - len(pending), len(raw) - offset); pending is strictly below available on entry, and a full fragment yields then clears pending before the next iteration. Nonpositive available fails closed. allocation derives the actual 2 MiB per-record envelope including ordinal; no total snapshot byte/time cap is implied. The real large FleetSnapshot roundtrip checks every record bound and original full document, and the PostgreSQL slow-ASGI proof checks SQL release and threadpool encoding. Each emitted fragment yields to the transport; this classification does not claim CPU preemption or physical-worker coverage.",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/observation_transfer.py",
+      "reason": "resource-bound"
+    }
+  ]
+}

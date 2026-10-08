@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/service_cases.py": {
+      "_parse_service_case": "70bb869d7ddffa361d533e152e5e1b170f3f2df30e44e88c1a465ab4e2d84765",
+      "_parse_service_recipe": "cab773e0cb7077404677b2c0a1b8b625b6f7b8f656bd1089f78bd1e7b43170b0"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "src/cluster_profiles/qualification_fixtures/service_cases.py"
+    }
+  ]
+}

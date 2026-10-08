@@ -1,0 +1,25 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/retry_holds.py": {
+      "<module>": "7fa387846e34e216601caf119935a2366249b9735a5a38931999a1724228ebf2",
+      "RetryHoldsMixin": "fb5cdcfdade0663885dfaa12525e2da23a07d5f7c7278177e3c3e11d597b2e76",
+      "RetryHoldsMixin._abandon_idempotent_child": "8f31e43d2a1a19f978b5357f1775dd5e6a83dcc306172377cd507c3608d256c0",
+      "RetryHoldsMixin._cancel_with_session": "56e92f816f561a779cbc30c152c85c485d5fc5dae35f1be9f9c15467eba3beac",
+      "RetryHoldsMixin._hold_capacity_writer": "6460ce8aff57203f7e84f3436b6cf9d4b9d58a7afa62f5bf9df8c518c655a2e4",
+      "RetryHoldsMixin._hold_for_preflight_refresh": "5830e399ea6bd95efa96be419319aab053b03e10b06d904793f5750af0a41452",
+      "RetryHoldsMixin._hold_issued_observation": "63d71284d08011d6be2a8d07ab64199bf4ab26c00f9a4455bf3021fd5d129548",
+      "RetryHoldsMixin._hold_start_observation": "308ee20abdb4b9f4a3abe3c4c22e0296f80bb873448b4e377b44049198991361",
+      "RetryHoldsMixin._never_installed": "b6ee13d46d43bfc1797d07a23cf6f523403abbc772cfb72473793b1456dafbee",
+      "RetryHoldsMixin._scope_intent_status": "bba9f3a331996ef88c81666f6da23e83c0665b07bcaaea0f52f651ec1e983c3a",
+      "RetryHoldsMixin._stop_child": "51d2bbf4a1d51ec4ceca59eded9fdd9e0b51c52d75ca5a595543f1657d191ac4"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/retry_holds.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/retry_holds.py"
+    ]
+  }
+}

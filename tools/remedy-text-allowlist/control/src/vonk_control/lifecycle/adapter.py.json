@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/adapter.py": {
+      "<module>": "f18a5523751435181e5c9114ba807d9d41e12dc6de72246a641b6a27aae7fa30",
+      "KindAdapter.actions": "c93731b30bb76144c4ee4d942adaa5ec5d53ab35eb14ca685e1fd5797e0cd33c",
+      "KindAdapter.adopt": "4a8f8767e6d61f1ae2cd07ccbbca27b725b0e4c08f948f792f06526b8d1f39e9",
+      "KindAdapter.children": "a044ecac5c49a9170a8689c60c7740bc8d76ded3e2f083635d49da1993c1a92c",
+      "KindAdapter.execute": "e7e9cc625e3ee874781a19629a09c834dc764e38c2c6aaa9418284fa83f1cf71",
+      "KindAdapter.irreversible": "115b8d0ecff1b186acbee24363fcaba733137e2b9e611f4e0cb334cc8d154289",
+      "KindAdapter.observe": "cf8065b0502fceaea65963edd6a5ce97884da8f423337f9f89918fcff57ba4ee",
+      "KindAdapter.retry_not_before": "3284dac3c436033a9b8a0153027fb2db96da6d99c87a2d6fcaaffc8591c960fd",
+      "KindAdapter.stop": "dc075c46557d0f3de443c60455445df46a8732327dbe47e06e5c232bb8edc5de"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "KindAdapter.retry_not_before",
+      "kind": "imperative-remedy",
+      "path": "control/src/vonk_control/lifecycle/adapter.py"
+    }
+  ]
+}

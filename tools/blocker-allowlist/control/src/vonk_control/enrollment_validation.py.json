@@ -1,0 +1,89 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/enrollment_validation.py": {
+      "_decode_token": "72cf4fcd6326f4d0b75aabd7693765143a7b3ab1d19aaf7d23f24bb493e89500",
+      "_digest": "37f2adf851ec13af26947e6266389b3f16a7f274c1b4dbda0bed3d9ae8f32ab3",
+      "_load_csr": "2f3582b2acee234d0fb0aac2ccfb61ffabddac5e10495f193922a0080665f27a",
+      "_stored_utc": "122222353094a447206fa308e8ab72dba1ed06aaa7be7e4b0deef4063fd7f72f",
+      "_utc": "06ddff70eb005275e44e16d52f909c679334193a17061a327a6959752e4293e8",
+      "_validate_actor": "193783e2f7958b6cbedf7fdd0fc51f4e29f4d6796f58701a1f1e12cb4a2c088e",
+      "_validate_evidence": "1a46f5edea7999b4e759526b3ae15adbf8a530782c82c9517d9fc8c509dd7555",
+      "_validate_node_id": "1e5c0819cab00a8f6e740bae0774026d2c0ad1d3ec5568685ef62fcbb2c1357f"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "enrollment.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_decode_token",
+          "invalid-enrollment-grant",
+          3
+        ],
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_load_csr",
+          "csr-must-be-valid-pem",
+          1
+        ],
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_load_csr",
+          "csr-must-contain-only-the-node-uri-san-extension",
+          1
+        ],
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_load_csr",
+          "csr-node-uri-san-does-not-match-enrollment-node",
+          1
+        ],
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_load_csr",
+          "csr-node-uri-san-is-required",
+          1
+        ],
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_load_csr",
+          "csr-public-key-must-be-ed25519",
+          1
+        ],
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_load_csr",
+          "csr-signature-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_load_csr",
+          "csr-subject-does-not-match-enrollment-node",
+          1
+        ],
+        [
+          "control/src/vonk_control/enrollment_validation.py",
+          "EnrollmentDenied",
+          "_load_csr",
+          "csr-subject-must-contain-a-canonical-node-id",
+          2
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/enrollment_validation.py"
+    ]
+  }
+}

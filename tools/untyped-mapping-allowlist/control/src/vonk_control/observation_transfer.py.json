@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/observation_transfer.py": {
+      "<module>": "67b24f3c859bf888f41c1eef7f0b6c5714a9de644f7e009846b66aca35d8f33c",
+      "ObservationTransferChunk": "6417e648fea3624e067f5d7d2b797ca715fe08e51a402ea069c9dcd25f305a8c",
+      "ObservationTransferChunk.canonical_base64": "0d4fcc16f73ce44c58b3750de149e3e59ec72db96806af866ef495f18394f78f",
+      "ObservationTransferComplete": "cc53ad73d393148df696f13bea6e512ec2b83c75bdc8cafb0a2bbf756dc78a3b",
+      "ObservationTransferError": "4b717565ea28641a05224245ad5a78608f8d625e724e85f1f0f387b8f66fbf83",
+      "ObservationTransferRecord": "303d4d5f2db23e0e7edadd108c84430004cc436c0361ab030da680464df20566",
+      "ObservationTransferResponse": "4b4ba64476b13f383583f2e340c08194a0a85944f85d07bcc4c79e09f6ea8381",
+      "ObservationTransferStart": "58e206a7cab0b3bd013c40949813a4b84f75c5c83adcc754ef10563bd59cd027",
+      "_record": "e44cb0d8db8526fc3e8792c05ac9d12f5b3d99bf5ef800fdf33ca205cb79ea06",
+      "observation_openapi": "71ff281dc3d95e2860c80cd849cb935335baad174760f1368c993d3edf1ff6f1",
+      "observation_response": "ecc1d7978270a2c94e04f02944345b4ea170a1068ab90f35bbf6f52ebae1ed61",
+      "observation_response.records": "f41e040dc23e2273024a1234c3e684e61a89ef6806a05d4fbe60959bd09c5c9d",
+      "observation_response.records.fragment": "b632b6db33321a7e2ff819245dfdb681ceb37d6d15f5437534b068aba3584d10"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "observation_openapi",
+      "path": "control/src/vonk_control/observation_transfer.py",
+      "reason": "External OpenAPI route-extension metadata names canonical stream-record and full-observation model components; application observations remain their separately owned typed models."
+    }
+  ]
+}

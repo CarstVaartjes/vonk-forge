@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "agent_protocol/src/vonk_agent_protocol/optional_evidence.py": {
+      "<module>": "cc4b282ae2f6cd154dcea02d5cbecbe6b3b4a702ec5d6530f7e55898f4be5bba",
+      "EvidenceGroup": "6859d856092ac19909108b9ca36b655d4e732041bc109df2b62d7700d2f1012a",
+      "OptionalEvidenceModel": "6cef434663e24f936a1a54b9a536a226168eab69e3367413a55499795bbf0a26",
+      "OptionalEvidenceModel.__pydantic_init_subclass__": "16e35c8b17a57d2d173dac4dea2c5e235993c951683d55f55de3a871c3be4597",
+      "OptionalEvidenceModel.evidence_warnings": "baa421a3b5f3992df00b577b6440d864f555fbae445b608c07291aefd21d6ec1",
+      "_drop_invalid_optional_evidence": "3f0abfba5a074b42e97a6c0b93ee187b118d266ceff9bea0bfbb3c7b9167a1c0",
+      "_present": "9f636e53a17ce674b6959ea13dfe899f08d56d82558888376dec9f11a2126d12",
+      "_without": "53204d7bde24d9fda3478a67507a2757deed6a1dd8d8cdf521c8e9aa55ab50a9",
+      "fail_open_on_optional_evidence": "666d8a5b26d8bd7ae764c677e76786f3aa454498fbb54f5b464af0283e747eb8"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "agent_protocol/src/vonk_agent_protocol/optional_evidence.py"
+    }
+  ]
+}

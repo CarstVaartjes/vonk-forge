@@ -1,0 +1,131 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_lifecycle.py": {
+      "<module>": "2303615496e19430850a9137343ccc71b2eabeb6650fa39d66f5e2c7e3a9ce34",
+      "ArtifactIdentity": "acd11051f9ebd4b3570f4ec88b6c8c1eef3d9ef2b590c1bc3e8ff8ec218cabca",
+      "ArtifactIdentity.__post_init__": "2e868434c434be558f883fca2ff7ec0e40b5d7befbd608360326ffe63bf0050a",
+      "ArtifactLifecycleError": "25fbd04f37f7decc611c069cf36e2773769a67d4a02ba507cdf94d535a9a3176",
+      "ArtifactLifecycleError.__init__": "a8d98a30f241e6764ada3a7a5dfdcc86c82468a48be769a84052b27c87142199",
+      "ArtifactReferenceIdentityStale": "b92ba650226f2a25f278c83504d01ea0d5bc6ca1a022218a46f6efc8eac9132f",
+      "ArtifactReferenceIdentityStale.__init__": "76032866f497c35b75ffb97c4b0da650bd550bfa951500377b33579a7b3e68ef",
+      "ArtifactReferenceUnsettled": "f517659badd4349ae4be9f54d5940ed6a848764e88a1bdf90ed7a8207e29838f",
+      "ArtifactReferenceUnsettled.__init__": "417924a764ee6979e8d9ddad051b41b757f53215fdb282410affc67f69627127",
+      "ArtifactReferenceUnverified": "bce70522eecc5abe91c28e02b87115e505b10ba88b55f30de4033217b6cf952f",
+      "ArtifactReferenceUnverified.__init__": "7ef2d20226c1b95cf8eac16d332402bbba8054532fe4a4532f8de01d048502be",
+      "ArtifactRemovalFenceLost": "db11f70c4f9f5ec4f6d42398c93dd6286002eac1bcc7c339f38cb4c3dfe7a9f7",
+      "ArtifactRemovalFenceLost.__init__": "489645b814dcebe32698d13caa755c7b2bafb3fa1af511ef3da181a99b64b9aa",
+      "_identity_order": "f1157ae872599dd3c3686ec689ea2dcdd5e7862da05a9dc0653bb79098acf274",
+      "_reference_sql": "da21b44bf493813be8edd652aa6855d9587f3435c2a4ce8e864cbb9526433f55",
+      "_sqlstate": "62f37969af0b5bf97f40bdc54a96cd914021cc1c40942a6f091f6881447cb54b",
+      "check_removal_fence_nowait": "538f9a5b16f586f6e43f76695e3f757142bdb8e927a1f84161913ddca540df29",
+      "clear_removal": "3f7dc3023a9910b837ec68775a726acb1e3e498e881fb8f1ab23e559ea45c0f5",
+      "dead_removal_identities": "71c3d2d3269af66f35198861f26313c148875470573ecf8510d80df9971f713f",
+      "has_pending_removal": "82db1f6d09ae17142222a19a7c4e43d2184984e2590f1ee0468e03accf732543",
+      "lock_reference_gates": "e70b0de041fb21c7912b998272f3f68e4e9774fdb39a96f7154d6208ffd774b3",
+      "lock_removal_fences": "77b1f1b9b7c33fbbfc47e2977b02f9fa16f15be372bc1450794ebd9b587db00e",
+      "reference_gate_is_open_nowait": "706a3e679ff80ef4d2ffbb24608bf1939b9e118ac833ac090a8105cc9ad0e1fc",
+      "release_dead_removal_nowait": "b4de564ddfafb93a4c816d1591a4218768de52826f80d8d79eacf1cd1680985e",
+      "removal_fences_match": "2e74d0da3add686035521c488ca6c046d022dba1ca2eb5fd5cdb523dc80653d1",
+      "require_reference_open": "a9836804cbb699a9db74e18564a7aa4e99c68e5eeaffd777ea1f04a91c094f94",
+      "reserve_removal": "1f6cf7843ff00abec5dbec1b75a996ab167cafb59d378a2971266e72f2c8e039",
+      "reserve_removal_owners": "35fa169d36ccf2ef6f3f49ef69caad9047eac34eeeb7b20df75d371e03f1bb64",
+      "retryable_artifact_database_error": "0a51424c0415aa3925ae3f60de1c10d165d6472927f9e2fcfacb7468a4ab3a44",
+      "supersede_removal_nowait": "3e4151bcef2b062fb6311d05efdf4b7574064c7b6558a98147e3a1d59982aeac"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "artifact_lifecycle.bookkeeping-debt",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "ArtifactReferenceUnsettled",
+          "lock_reference_gates",
+          "artifact.reference_busy",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "ArtifactReferenceUnsettled",
+          "lock_reference_gates",
+          "artifact.reference_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "ArtifactReferenceUnsettled",
+          "require_reference_open",
+          "artifact.deletion_in_progress",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "ArtifactReferenceUnsettled",
+          "reserve_removal_owners",
+          "artifact.deletion_busy",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "artifact_lifecycle.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "InvalidValue",
+          "ArtifactIdentity.__post_init__",
+          "artifact-lifecycle-digest-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "InvalidValue",
+          "ArtifactIdentity.__post_init__",
+          "artifact-lifecycle-kind-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "InvalidValue",
+          "reserve_removal_owners",
+          "artifact-removal-owner-identity-is-incomplete",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "InvalidValue",
+          "reserve_removal_owners",
+          "artifact-removal-owner-kind-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "InvalidValue",
+          "reserve_removal_owners",
+          "one-artifact-identity-has-multiple-removal-owners",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "artifact_lifecycle.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_lifecycle.py",
+          "ArtifactRemovalFenceLost",
+          "clear_removal",
+          "artifact.deletion_fence_lost",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/artifact_lifecycle.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/artifact_lifecycle.py"
+    ]
+  }
+}

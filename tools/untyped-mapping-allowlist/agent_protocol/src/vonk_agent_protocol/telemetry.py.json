@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "agent_protocol/src/vonk_agent_protocol/telemetry.py": {
+      "<module>": "bb11c01ea232664a466f3449d739b3c9efdafe8a55c5a639dc4227c9187f39b1",
+      "GpuUnavailableReason": "a36c32cbb37fa7363c3feeb0570eab9729a0e905cc331a247f24b58c526872b3",
+      "TelemetryRequest": "d25aac6a54ecb4fd6a19da4600888a9128e734021dc449c6abfd4c8fc05c2210",
+      "TelemetryRequest.document": "39daf08f0aa9692aba48564746bd838489ef9564c8b297e9cfe5f852097acff8",
+      "TelemetryRequest.ordered_unique_samples": "b56fc9d4e934f85bc86c3a9dbe325a8f7eac45416a1e88f72352e1c0fb85767d",
+      "TelemetryRequest.parse": "e7d3db43890d402b9dc05d0acde18644c278235875ff929992bfb259c028aa0b",
+      "TelemetrySample": "e616f579fab1d721fac66d42f31bbe31bbfc9a4e8be1150f4264591f39793833",
+      "TelemetrySample.internally_consistent": "e2b18221b809cc7bfee07750d1bf173deb440918584f79217fe56c570ebab1b5",
+      "TelemetrySample.nonzero_boot_id": "9575f734ae29af9deb3ce19f88846c06923ac47ce20e4215f22c6973307c2cd9",
+      "TelemetryWireModel": "4cbdb6882b0a95d1c0aca951ed9fcb7d453519bd28b075db30b4e55bc517a32e",
+      "_rfc3339_datetime": "d67352e15e823caa3c6012306b66001055898eb4f8af22d5b63a2f3030f2d95d"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, Any]",
+      "count": 1,
+      "function": "TelemetryRequest.document",
+      "path": "agent_protocol/src/vonk_agent_protocol/telemetry.py",
+      "reason": "JSON serialization of the typed telemetry model for the wire."
+    }
+  ]
+}

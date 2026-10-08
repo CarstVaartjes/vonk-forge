@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/storage.py": {
+      "<module>": "b1779e29dbb7b1821643d5d72fd5b07d2533b059cf59ffa2a7cb04d8be919e06",
+      "StorageMixin": "47d93c060d0310bca350b5e667fb6a19d4d9825266995d9282a80cdb3549edb2",
+      "StorageMixin._object_is_available": "8d707533f114be34da9e0409fd4714afa3fc13eb318c198bbf923a3405842328",
+      "StorageMixin._object_key": "7a2c31c45ae223fb4898d735cc00d1f0ed1b6e93b5a96894be3eccf24c214ddd",
+      "StorageMixin._object_path": "d25b9a903cb2bd4c813739054a1886ab65f8d7c9f302e1d837dcae6ad2582f42",
+      "StorageMixin._partial_path": "f8356f5e3bef9095a176173f4a9b350bb970631786b307abc5f40408d26d0821",
+      "StorageMixin._read_object_receipt": "19bd252c2bdba3845713ef5a5e1a29500db42ba6f691e302ebd85893c1f1c582",
+      "StorageMixin._receipt_path": "abc7a8935526e7eb195d6ff9aaca02255f0cb40ca9d177a83981a14139c33241",
+      "StorageMixin._refresh_entry_state": "e97afb2a2f43b064e0eb5ca8d9733630390dac86fbf1a1718ede10f376c628ac",
+      "StorageMixin._request_storage": "3671542a0cfed398b3913b98378427736f2a82cb2f7ad8084c34c05499864016",
+      "StorageMixin._write_object_receipt": "a75d4093ae3ed14349bb522e44558ddec0ad41c99fa5c992d9d9eed859a1ece6",
+      "StorageMixin.bind_storage_demands": "f7008b34c38155b41e5b06e5dc399dacff36b623b1fa63db849d8eb4ffc3e7b7",
+      "StorageMixin.free_bytes": "9e750316c4397ca232273ad32668f61a97c3af55a3bc94db5663641477a5c44b",
+      "StorageMixin.storage_summary": "57f5315075aa4c1d74260eb9bd27c2a5af7bd63f78dbb10640113d90f626eaf7"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/storage.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/storage.py"
+    ]
+  }
+}

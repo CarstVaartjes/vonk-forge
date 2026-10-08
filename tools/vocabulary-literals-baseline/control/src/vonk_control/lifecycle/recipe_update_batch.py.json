@@ -1,0 +1,33 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/recipe_update_batch.py": {
+      "<module>": "d3e55f769be940fd68a3630812cee9bf5c2f22cc81a548f671d115f51de2eb01",
+      "RecipeUpdateBatchAdapter": "f5bae999c149d54a73b7f33d1776fb1ce5d5a78279f4566c89b0e382c1f50912",
+      "RecipeUpdateBatchAdapter.actions": "89f763f14be893eb2b9fd6ccbe85b27d8f1e51f09bbfacad3b25ded81934f261",
+      "RecipeUpdateBatchAdapter.adopt": "59bcc68387c11cb4120ecd19d6510e691bb821ddcd1c11d421a5c24447a06733",
+      "RecipeUpdateBatchAdapter.apply": "b9911aa1139cf2bcacc737af61551e080ad095e23b3e98770d23118de1870357",
+      "RecipeUpdateBatchAdapter.cancel_progress": "b93579484ba3742bea2bf0ef7bba6e048fecefd6d244085a354dbe96757196fa",
+      "RecipeUpdateBatchAdapter.cancel_unreadable": "2f7d830e2bffd6522043bf41ca3324873c5f59c5d4d6426e0ce9ae09b4d1db82",
+      "RecipeUpdateBatchAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "RecipeUpdateBatchAdapter.children_of": "04e4045d307a4addbe432274e8e0657782b0926c0630f39434f4960e5a13ac38",
+      "RecipeUpdateBatchAdapter.claimed": "6c5c4ff7af86a389eaf571a7e118f9ba0c7ee77f1275aa84b5a0cde24ce7221b",
+      "RecipeUpdateBatchAdapter.conclude": "5eaf866c82dc8450c2c4e06ab480fe29ac2cd5fcc010928ebb8eb423c1f428bb",
+      "RecipeUpdateBatchAdapter.decide": "6c1998067bb4e8377ac078efe5ae8a0eaf966783cfb754a3f1abfabc20891760",
+      "RecipeUpdateBatchAdapter.execute": "3ac23643183367f6b19d427f619e4569a64cc7f0b9d64a921040a723cc4c2681",
+      "RecipeUpdateBatchAdapter.irreversible": "25661eca863c2087f05201d5978d897cceac29dd00424de5d0e853ff89a17880",
+      "RecipeUpdateBatchAdapter.lifecycle": "5e8e77cd3b37fdce5df8567476b56674c5f99c2ed8fdbe2a504cd99236c7ac79",
+      "RecipeUpdateBatchAdapter.new_batch": "4720e015c3c0fd8c4c7bf562f0212552e23ad1608e6516a46d11b4499507d6b0",
+      "RecipeUpdateBatchAdapter.observe": "1ed7a39d56441c1110139c8b6ccee0be5d4b081ec2b39dfbeb1b7df3b0a5f9aa",
+      "RecipeUpdateBatchAdapter.project": "7e40f710cf3baf90f15c50a690d5e2bf0c3b3f49d72ad52d2ccbaa1ddf6da2ba",
+      "RecipeUpdateBatchAdapter.reject": "fabb14a18fdf431b06498918756e1f5a4c87e4313491445bf4021ffab4223c13",
+      "RecipeUpdateBatchAdapter.retry_not_before": "b44b940ce07854e720fe4db639b99915d3439138008f5c5c760051a7032df7bb",
+      "RecipeUpdateBatchAdapter.settled": "ea4850d90930d85e4ddf6c1140d9499872b1d3499589cb96e5fa071a23ebdfb7",
+      "RecipeUpdateBatchAdapter.settled.save": "91e33ac94e53d93a8443206b8e0c20a50d7fb30ab768d9d5d34ec0a1e5a95f54",
+      "RecipeUpdateBatchAdapter.stop": "17b36d8b55ba5e4f69cc03155a5d44610a5765af93f0add6d36ed675d2cd77f3",
+      "child_lifecycle": "ca82d938761e4ab030225c9ccbf8c799fcafacd493777492c6af0864af74c1c6"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/lifecycle/recipe_update_batch.py": 16
+  }
+}

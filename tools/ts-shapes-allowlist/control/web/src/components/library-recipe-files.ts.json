@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/library-recipe-files.ts",
+      "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document",
+      "type": "SelectedRecipeFiles"
+    }
+  ]
+}

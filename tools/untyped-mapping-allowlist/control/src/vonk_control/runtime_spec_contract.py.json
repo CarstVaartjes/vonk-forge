@@ -1,0 +1,53 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/runtime_spec_contract.py": {
+      "<module>": "bf61330cbfce7953f2eec706439650dda5824d08f05f1e2548b5c2d1aa980a72",
+      "RuntimeSpec": "c484ff85743c2dc87221ff710640854c15d0d0119696586f04b65ce2d09286f1",
+      "RuntimeSpec.compile_identity_sha256": "ca2f0b1a20a47156ddc17da5c22d108d4e23d576067fbe4011351262dead4aa6",
+      "RuntimeSpec.document": "93905a523afa5bf0a6264dbd21ded92708dd26ac0d58c09a171d08eba2cb78e3",
+      "RuntimeSpec.launch_identity_sha256": "e4ea04b70bcbce2ab107741869e17ad3a25f08ab11c246d0b03a6d1bf2099881",
+      "SpecArgument": "b8022ef910836c141946d4a591c64ccd69cc4e7dd80cddf4da7efb03868f6c67",
+      "SpecArtifact": "8fd756657f4254ad8f301e9d6ae8384bc03b92bb69446463d2833f28e63c6fca",
+      "SpecEndpoint": "7a180cffd838177a7726b0dba9b570ad8a275362e81ac41716158fdac5f08c1e",
+      "SpecEnvironmentEntry": "d0cb1c8d19e547289db11c7f438b60cc32c1e4c70958f87fcea4794daa533401",
+      "SpecIdentity": "d3772ba3501c0f69fb9962b9ea6522641b6adaef22ac351622e3ef40b871af0b",
+      "SpecJob": "30b1e6ce02027ed18957276dd99ffcecaa1252b69a99beadbd18fa1e2e53f384",
+      "SpecLifecycle": "47c084aff1536ec6c1916f5f981c8bff14e3a4d484457842fb51e3410eca9b23",
+      "SpecModelDependency": "bfcb8fc2c38ee66c6f80ec4eccea346b9499cd9ea1cca468963aef6c20a8f21a",
+      "SpecModelIdentity": "e694db8b892c0899140d90dd239f773f4e2c354864fe975c34f0129eacf67089",
+      "SpecModelMount": "5dc6be5fdc0f73e650dcb038b357d33eed1a041adfb91d90d3689c4b277eea10",
+      "SpecPlacementEnvironment": "cca6d5ce95ca2311d4435e45ee9a268d78e8528f7cf64a3faa9ef4edcf5be964",
+      "SpecRuntime": "3a49d9651a74b41e9eabdcabc811c39d549057a1c9d8574b14ba10a998c882ff",
+      "SpecRuntime.document": "eb0730417c6ee57176e33a17fef26666f9ca83a978472319a023c089429d6f0e",
+      "SpecSecurity": "3099a84475e28e7cf8a174950b8c18a64a1dc736d87fb3eadf0128b51d594dff",
+      "SpecTelemetry": "bbdedae26668036ceeb86c812f06f858713302c19a0cb7d2aed02bb153a24b83",
+      "SpecTopology": "3fad38182bfc5807e18be675322c1d8f89c63d849171ffbd6380c69047014a6d",
+      "SpecWritablePath": "dc9e94582df27e5d4a4517fdb4d25d5d3f97a28544cadb2c8feb33d4d0259fbb",
+      "_SpecModel": "b530072c66af67343b2eebf538f9ca7e33cf6a79e35ee6725a275dd05ad400c9",
+      "_digest": "a47b60e7cf5395b5d615e65d1c6debd202f27a89734377f026ce41105673ae16"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "RuntimeSpec.document",
+      "path": "control/src/vonk_control/runtime_spec_contract.py",
+      "reason": "JSON serialization of the typed runtime spec for tests and the digest; the exact JSON shape those digests were computed over is the contract."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "SpecRuntime.document",
+      "path": "control/src/vonk_control/runtime_spec_contract.py",
+      "reason": "JSON serialization of the typed runtime for the execution-identity digest; the exact JSON shape those digests were computed over is the contract."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "_digest",
+      "path": "control/src/vonk_control/runtime_spec_contract.py",
+      "reason": "Generic canonical-JSON digest utility over a document the caller built from typed values."
+    }
+  ]
+}

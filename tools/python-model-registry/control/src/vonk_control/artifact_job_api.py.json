@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "declared",
+      "module": "control/src/vonk_control/artifact_job_api.py",
+      "reason": "API or persisted-record models colocated with their owner; named contract modules do not exist for this owner yet"
+    }
+  ]
+}

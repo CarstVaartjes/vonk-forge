@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/run_planning.py": {
+      "<module>": "4711792a94d8f3b9c03922abbfe5c0092bc717203b70040b3f10fab682dcee5d",
+      "RunPlanningMixin._preview_run": "29bfd40599c7a5c4c874af464c600099cb1427271549b0fc8370d6f2a31247c7"
+    }
+  },
+  "sites": [
+    {
+      "expression": "installation.recipe_build_id == build_candidate.id == expected_image.build_id",
+      "function": "RunPlanningMixin._preview_run",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/run_planning.py",
+      "reason": "Operator-reviewed image of a profile load (the _require_profile_runtime_image edge): the accepted image's reviewed build is compared with the build the preview selected, and a restored installation must be the one the review named; a change asks for a new review."
+    },
+    {
+      "expression": "recipe_build_id != expected_image.build_id",
+      "function": "RunPlanningMixin._preview_run",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/run_planning.py",
+      "reason": "Operator-reviewed image of a profile load (the _require_profile_runtime_image edge): the accepted image's reviewed build is compared with the build the preview selected, and a restored installation must be the one the review named; a change asks for a new review."
+    }
+  ]
+}

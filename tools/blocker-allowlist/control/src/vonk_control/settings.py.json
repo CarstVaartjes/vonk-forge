@@ -1,0 +1,107 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/settings.py": {
+      "<module>": "0e547d88faf7b4f4acc756867da7aac3e750af9883441c2950aca426845d8847",
+      "DatabaseWaitBudgets": "892cc9a991129ead7fce133ee2ed9aef019b0ba3f7e7a175101777447af74506",
+      "Settings": "5bd5e55ffc18e4af140196a0128bb82be0034c6906bd407aae77456e2e96174c",
+      "Settings._validated_control_hostname": "1c0d8383ebc0095739b01018100cab1c53ef4b5390e0b165df3207201a67ef8f",
+      "Settings.agent_ca_certificate_lifetime_seconds": "1c1c1a270009801f4a74c727de579364e00fbac37f903ecf134394e46dc3a13e",
+      "Settings.agent_ca_credential_path": "66160be2429d47278c1d973633d5a7f0b7e4c3672335a3aa9b40f70cec5a7a71",
+      "Settings.agent_ca_provisioner_kid": "806284a295b428ef585302c58728eabf9f2d0f0fe1930e3eb7bbb8df9dc8c178",
+      "Settings.agent_ca_provisioner_public_jwk_path": "72d9e80aad9049d7b9bea1320b52214b69f09f45a3cb649242ba036efcf6c7e7",
+      "Settings.agent_ca_root_path": "05504345802a8a1fe2e8e5d79bbe5b1cef691d998a4b7ba89d9ea2534b8379c2",
+      "Settings.agent_controller_origin": "32c80e1223ca38ba582e37230a9ba856ea8721236e9f5a1017b342668facb12f",
+      "Settings.agent_enrollment_origin": "37c59a9ca6caf2b84beafd2a9c96999e02717a84856b2c4ed99e1bd565f8a2c8",
+      "Settings.agent_intermediate_certificate_path": "1f014597ada5bad4a31c7b1271e75ef5e6fd597f229948a63d1e443df120e90e",
+      "Settings.agent_proxy_auth": "7f53952ccb59e9651e694eacf7da03fd9685da4d37bd0efe82361c833c4c9a17",
+      "Settings.agent_runtime_enabled": "6e7cdd40002c667b26870638b3f7f83eb1a44a5f5b893c2eeb1fdc5817036a3f",
+      "Settings.agent_service_hostnames": "a01c9cf0c6ce9319589c70620712130906b49ce6fd97907018209b134086d5b9",
+      "Settings.controller_ca_path": "465b0a7df7b2962d88b65713767b63695e1da10be10087f9dc36152fecce7cd2",
+      "Settings.database_host": "9accf7c6ccbb988ddd3240d3ae334d79add82ee4a06afc8d3ce71b325961b413",
+      "Settings.from_env_and_secrets": "d49d44fa3fc80a879c147efbff5a41629458a3329ad186eae2146e076a64c228",
+      "Settings.host_runtime_grant_private_key_path": "666eac1c82b14cd635b60a43f92bf414350ea0360543ce667fd8d9cca2c88843",
+      "Settings.huggingface_token_path": "e1c8649a40c3d81b0957a66702cce11910faa2a0ca03d1eabdd3ebadcf36e8bd",
+      "Settings.metrics_token": "89fbdd60065eb6280e5dc272078b8dff8fc5d9a73207f8c46eb9aff2c0056891",
+      "Settings.token_signing_key": "2a49856b316be5d7800ce856602803ec44edfa9446f3d88f38e95e571bfefb14",
+      "SettingsError": "a001b6f28538621bfe2027a2214f1410cb133a0643c074937f5a7115ec8ddf4e",
+      "_control_hostname": "9272398b9d9c7e0f6483adac656f8080a97ee6bcc2a6201ae1069a8584d677c5",
+      "_nas_lan_ip": "222ac494084bd115543d70b992043390a29b761d76cf16674893922adfa265a5",
+      "_network_for_address": "b2df640426292db4338abdbd0abbcc86c91773881f1ff4b50c1b4c61cccbe1dc",
+      "_normalize_networks": "50a67f0fce62ef396d21fa59683f694a6b7242d2b4e189cbaf7bbf98a868e635",
+      "_overlaps": "35e30b4282d5af485cf8104df718a5b22b6fa5c9a615520b7cc073e2be6c896e",
+      "_parse_networks": "b696b6cf21b3cca2422b5bd33011865c1a48858c7b30112d7e86719459370ffb",
+      "_read_secret": "fc061daebf3735333e2e641e025f0313ee2f6d0497b3d33978e87ef0eef4aae8",
+      "_regular_file": "b75bd38bb830d502a720061dbd5dd9fc443c9a884e42b45525c44f179f110941",
+      "certificate_lifetime_from_step_ca_config": "5cf06598bd64cfccd36cc0c2f20a597a0a6ea9818b07572a3b7b0184714da3f9",
+      "parse_go_duration_seconds": "f28189d2504d3a3a9053bfeb2e7f062adf2b3b79529ed2a9f9a9097cef6f29fb"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "settings.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/settings.py",
+          "SettingsError",
+          "Settings._validated_control_hostname",
+          "vonk-control-hostname-is-required-for-enrollment",
+          1
+        ],
+        [
+          "control/src/vonk_control/settings.py",
+          "SettingsError",
+          "Settings.agent_ca_provisioner_kid",
+          "agent-ca-provisioner-public-jwk-has-no-kid",
+          2
+        ],
+        [
+          "control/src/vonk_control/settings.py",
+          "SettingsError",
+          "Settings.from_env_and_secrets",
+          "database-url-must-use-postgresql",
+          1
+        ],
+        [
+          "control/src/vonk_control/settings.py",
+          "SettingsError",
+          "_control_hostname",
+          "vonk-control-hostname-must-be-a-dns-hostname",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "settings.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/settings.py",
+          "SettingsError",
+          "Settings.agent_proxy_auth",
+          "agent-proxy-auth-must-contain-one-base64url-like-token-of-at",
+          1
+        ],
+        [
+          "control/src/vonk_control/settings.py",
+          "SettingsError",
+          "Settings.metrics_token",
+          "metrics-token-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/settings.py",
+          "SettingsError",
+          "Settings.token_signing_key",
+          "token-signing-key-must-contain-at-least-32-bytes",
+          1
+        ],
+        [
+          "control/src/vonk_control/settings.py",
+          "SettingsError",
+          "_read_secret",
+          "secret",
+          4
+        ]
+      ]
+    }
+  ]
+}

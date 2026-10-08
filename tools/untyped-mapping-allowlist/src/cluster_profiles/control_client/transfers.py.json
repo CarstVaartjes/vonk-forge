@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/control_client/transfers.py": {
+      "<module>": "e5c5eb3e12060e768fe776c66324ac3b9ce47c9fdf0c974be5d3c8b5386af7ae",
+      "ControlClient": "e5c5eb3e12060e768fe776c66324ac3b9ce47c9fdf0c974be5d3c8b5386af7ae",
+      "ControlClient.download_file": "78644019425daa47c6d2d976f12ee87b7a4033259704c81ebc000f9ee1766549",
+      "ControlClient.upload_file": "1ee65565cbea21db113d67f77e8fb858b976cdbfe90a1e29f15a72955b67aea1"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "src/cluster_profiles/control_client/transfers.py"
+    }
+  ]
+}

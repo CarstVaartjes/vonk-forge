@@ -1,0 +1,37 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/unused_storage_collection/references.py": {
+      "<module>": "2b754a64e6fe253d82a839a08e6276887ee1d5a6142386360e37b75ea3d29dde",
+      "_applied_revision_ids": "aa30d91fc729e48bf4e3cc5e00a587fed6f06f89025054dd726ad85a002c7080",
+      "_code": "b2486f5b86056b3c8a7c0a3ff171cb365d4ed20612e26ed3e0d2d3b59950d92d",
+      "_image_kept": "a2066f66c4249c2af03657d8370480ab84dc69916d96028bee231aa61b63a108",
+      "_installation_kept": "2d23b668ba78e13975586f52d31a1abc630f276d1f848910c4c1e4ebfe9c15b3",
+      "_installation_last_used": "2cbbf0a3f9bdbc45af8e6f80d4931b14904dae60291c89baaba933edf87e9136",
+      "_installation_pointing": "1f1e7c5401ad175d1ca34a5f0b4d1b298007e9610fd96afb7080d87d45e95d1c",
+      "_latest_snapshots": "c7a0f69fb8a83cda0b8923302cd85c711afc9b05c6155251b6fdd7f6eed0ff7a",
+      "_model_kept": "88ed6262ed01a89b2e33976832795ead22263d83c5019eec6ba9c4c62bd3709d",
+      "_model_removal_in_flight": "e94dea1a120b883f57e3f1bf8795f5effb37ef07dafc46aae237400d8fe69c69",
+      "_mtime": "0ac538a9601eea7e2aa1b65d6a6389af0531b2b530c43645a325cf10bd3ba8fd",
+      "_points_at": "b0a401e1b7525aae26ad8ade34286ab10eb44b8b24d8e146048cde7b3329f5b0",
+      "_profile_pointers": "440a502f4a325eef3bd683528990c027bc75d7f2c23787d466746960a7c2a9cb",
+      "_spark_settling": "5d3e2d2b6b95233e51b589835ab8605d1a3e41cffb68f4137b8ebc9045a0d97b",
+      "_utc": "9e25fc48452b46805ba4b789f09e9695d425d77d1755508846d9b824a8533ec0"
+    }
+  },
+  "sites": [
+    {
+      "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
+      "function": "_installation_kept",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/unused_storage_collection/references.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "newest[0] == installation.recipe_revision_id",
+      "function": "_installation_kept",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/unused_storage_collection/references.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/__init__.py": {
+      "<module>": "0561f1130bcc9b4ca48a51746ec5cd702f8f07bd764916a90bba28eb9aec801a"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/__init__.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/__init__.py"
+    ]
+  }
+}

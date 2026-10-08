@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "ArtifactBlobStore.iter_file",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/artifact_blob_store.py"
+    }
+  ]
+}

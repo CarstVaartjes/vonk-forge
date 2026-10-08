@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/library-profiles-view.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "AssignmentDraft"
+    },
+    {
+      "file": "control/web/src/components/library-profiles-view.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "PendingProfileLoad"
+    },
+    {
+      "file": "control/web/src/components/library-profiles-view.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "ProfileDraft"
+    },
+    {
+      "file": "control/web/src/components/library-profiles-view.tsx",
+      "reason": "UI-only view model derived from generated API types for one screen; not an API document",
+      "type": "FleetEntry"
+    }
+  ]
+}

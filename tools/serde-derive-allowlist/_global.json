@@ -1,0 +1,5 @@
+{
+  "entries": [],
+  "note": "Hand-written serde types outside generated.rs. Each entry needs a reason; the list only shrinks toward zero by generating the type from its Pydantic contract.",
+  "schema": 1
+}

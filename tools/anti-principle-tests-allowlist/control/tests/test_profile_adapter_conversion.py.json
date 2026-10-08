@@ -1,0 +1,56 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_adapter_conversion.py": {
+      "_persist_retained": "330d34a8163a261bc4fb47745bce278d36806dcf472bdc6eb9b769504f4f767d",
+      "_retained_stop": "b415c7a5060c1426564120f341a25504983198ad04d1c504de09622967aad3fe",
+      "test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retries": "5212a55c3b72759ce240b55965efb00b3ec286b869d688ce7f32f50b8cd9e828",
+      "test_postgres_future_deferred_journals_do_not_starve_an_untouched_valid_row": "71f0db4a14fea590c95bdc7ca02c9c804bb268f564737d1fbba00645b4c3a9c6",
+      "test_postgres_startup_converts_real_stop_and_continuation_is_idempotent": "d2577355bb4e66893effb5511d17b2d76b7593761ad64ea28a93c624e335d396",
+      "test_retained_closed_stop_maps_by_accepted_request_and_preserves_receipt": "71c3c68fb759c52d69633862ae5595e8b180cf51a99df35e324068dc844f8784",
+      "test_retained_exact_stop_conversion_reconnects_without_another_request": "56a9fa674b7b0fd0c6206b26ba0553c19b0ec9b695776ff6ef3f9052989d1fe1",
+      "test_retained_unknown_projection_preserves_outer_metadata_and_original_journal": "1abd2e421be23d83ab58ae65953ff634a892124910c232f41355d4c88a726ac7"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_ambiguous_retained_stop_preserves_raw_evidence_and_automatically_retries",
+      "justification": "Setup helper _retained_stop triggers lexical ending regex; test retains live owner/rawjournal/reservations on7 ambiguous authority damages and retries due conversion without invented terminal state. No workload ended.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_future_deferred_journals_do_not_starve_an_untouched_valid_row",
+      "justification": "Setup helper _retained_stop triggers regex;20 future-deferred journals do not starve untouched valid conversion. Valid owner remains live; no Stop result consumed.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "reason": "legacy-alias-read"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_startup_converts_real_stop_and_continuation_is_idempotent",
+      "justification": "Startup converts existing journal; restarted adapter observes same original Stop/request/claims, no dispatch/result or workload end.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "reason": "legacy-alias-read"
+    },
+    {
+      "count": 1,
+      "function": "test_retained_exact_stop_conversion_reconnects_without_another_request",
+      "justification": "Converts live exact Stop checkpoint and repeats converter/read, preserves child request/id/reservations. No Stop result or capacity release occurs.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "reason": "legacy-alias-read"
+    },
+    {
+      "count": 1,
+      "function": "test_retained_unknown_projection_preserves_outer_metadata_and_original_journal",
+      "justification": "Read-only projection of legacy/malformed journal retains rawbytes and unknown; setup helper causes lexical ending finding. No workload end.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_adapter_conversion.py",
+      "reason": "legacy-alias-read"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/contracts.py": {
+      "<module>": "0112f7694d0016788888eb77ad838605cfa9a0a2ec74bbbff91838e726dd71dd",
+      "ArtifactTransferClient": "a281777be617cb18caa5eac8031bed39ec256cb6f8c556278959543fcef5892d",
+      "ArtifactTransferClient.download_file": "eebd882e2dc0112d864964168eb386a0bf888b712cf11cb938a32eeb1ec8abae",
+      "Fixture": "9a95aa84645443ba684fb48b102f914de640035ec80eef04608139f7d5bae36d",
+      "Fixture.declaration": "dd340189e96b6b1ca9db843b80dc96edae9f58071c8aac4b6dd749fbfc613299",
+      "FixtureError": "a36e967a8322d545f4e0d29caa5f06f787f93e80d38c464998cbe2bcbd2ca9d3",
+      "RecipeFixture": "7fd144bb1e7df387d5e9e1ffc2f80abd5e09591303dc63a0da456579c8aee968",
+      "RecipeFixture.all_cases": "3032bcc501bb7a82a31a83b391d13edbd033882748fb0f562c1e4e0d53a688cf",
+      "RecipeFixture.materialize": "6737fbfa57ab0f8f517fc327754e95d829717d5ed609bea552a70623142eaa5b",
+      "ServiceCase": "cd5bd54f6e7fe54088453ddf696c529702479bfd96bfec9263b583e10b4f607c",
+      "ServiceCase.render": "a18137c49f58f12455e758b08f0e65bbb4643b0aafa0af1ec125b3cbd8aa835c",
+      "ServiceCase.render.substitute": "f581efbdaba5e2508c1222e9bdfb7105f98d069db4c7f7a8161c78287676a085",
+      "ServiceRecipe": "50999e64c320e70ed06dfc1f28cfc76a68c92fb3a4179ed3d54ca9d000bbff29",
+      "_OutputLimits": "81f4e5830859b2f857ccbcce497688e32cb0ba89767060cf2822f42db819bc68",
+      "_validate_manifest_contract": "3fd420eb6aba0a6dad69f3a79ca3d7b0861bc8d8a625cc5fbd40b845ecc8b6db"
+    }
+  },
+  "debt": [
+    {
+      "count": 9,
+      "path": "src/cluster_profiles/qualification_fixtures/contracts.py"
+    }
+  ]
+}

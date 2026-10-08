@@ -1,0 +1,22 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/installation_reconciliation.rs"
+    },
+    {
+      "count": 1,
+      "function": "prepared_checkpoint_survives_process_exit_and_resumes_in_a_new_process",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/installation_reconciliation.rs"
+    },
+    {
+      "count": 1,
+      "function": "separate_process_lock_contention_is_retryable_after_the_owner_exits",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/installation_reconciliation.rs"
+    }
+  ]
+}

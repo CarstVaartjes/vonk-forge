@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs",
+      "reason": "test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones",
+      "type": "PersistBindingInput"
+    },
+    {
+      "file": "rust/crates/vonk-agent/examples/recipe_observation_wire_probe.rs",
+      "reason": "test harness: stdin envelope of the Python wire-bridge test; the contract types inside it are the generated ones",
+      "type": "SerializeInput"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_jobrun_host_wire_bridge.py": {
+      "test_selected_profile_job_target_grant_is_accepted_by_rust_helper": "743c43f78d7fe828930426b5b651a551daaaeeba213a1019636c85a3cac31633"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_selected_profile_job_target_grant_is_accepted_by_rust_helper",
+      "justification": "Tests the native Rust verifier accepting the unchanged signed grant produced for an issued selected-profile exact JobRun Stop. Verification authorizes only that target; it does not execute or acknowledge Stop, end the lifecycle or claim released capacity.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_jobrun_host_wire_bridge.py",
+      "reason": "security-edge"
+    }
+  ]
+}

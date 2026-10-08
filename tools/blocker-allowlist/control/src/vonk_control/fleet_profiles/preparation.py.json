@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/preparation.py": {
+      "<module>": "473f22d3d53d3a220756076d46e85b4b6ba5cf9ac824e8f007437e0a6f8411f0",
+      "FleetProfileService": "9b8d26c385970ab68da0414045406c630c41789d2b19507f8598e5ac58fd8d9c",
+      "FleetProfileService._ask_storage_relief": "2d1f6d2fa73e6e62ebc4186506f21a0f57cac8ef72e8accf6da8cd23f9fd79b9",
+      "FleetProfileService._cancel_owned_preparations": "fa89e0f4811c7b4168a8c5abba7f359e90f691e1e1c0000b33d8384cab186d56",
+      "FleetProfileService._end_exhausted_preparation": "e0960accd6a6b98957e22d3d11bfab78baf38064baceafe3155013615a87ec63",
+      "FleetProfileService._request_preparations": "f858765e2a60bbb2cb719b983400477495f0a21d96c84713d53809ce03616d37",
+      "FleetProfileService._request_recovery_preparations": "5c6d1026b8c3aa28ea651e1854e6a74a1df66fec9b23df18251104c7a8821126",
+      "FleetProfileService._request_storage": "061700600613b1b90ca88ca2317bf3becfc72669446fdccb2162143589570e35",
+      "FleetProfileService._resume_live_child": "e7161d707adf31b4b5859292b3eb0577e73a4e2e040188e74a708d1e31e04eb2",
+      "FleetProfileService._retry_eligible": "3771854c949c03a72ee8fece0221c2a1b4bb87304c6c6daa47d42a2f6e4e4280",
+      "FleetProfileService.bind_preparation_canceller": "3fa587428326e11c13141d57cee3f292d0e53a27d0f66b2b4ff236744767fd01",
+      "FleetProfileService.bind_preparation_starter": "6bcdc600fb2516ee38dd3b4117054b16ff083146321b6d7924c3c2e60e373834",
+      "FleetProfileService.bind_storage_relief": "0e3736cb7c3a0441cb53599c500e2d80a9025e5d8ed1e44f2377a65f446ef780",
+      "FleetProfileService.retry_eligible": "d2617fd113161e8455e976d58c9b43a01eafd45e6fa831f625df3f03522c4355"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/preparation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/preparation.py"
+    ]
+  }
+}

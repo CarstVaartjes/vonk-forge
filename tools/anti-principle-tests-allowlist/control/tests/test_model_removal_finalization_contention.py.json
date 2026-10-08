@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/tests/test_model_removal_finalization_contention.py": {
+      "_seed_unrelated_model": "e4aaeaeac3336ae9fc6a6ab2c55f99f9a851b4ff7cd2ef419252ac0f357726c1",
+      "test_finalization_gate_contention_defers_without_blocking_unrelated_removal": "72ceb6585ad76166b51ec27838f327c12005585e1975110d2811b82d168bc327"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_finalization_gate_contention_defers_without_blocking_unrelated_removal",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_model_removal_finalization_contention.py"
+    }
+  ]
+}

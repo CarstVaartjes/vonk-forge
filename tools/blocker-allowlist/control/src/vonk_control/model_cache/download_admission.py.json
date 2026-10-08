@@ -1,0 +1,66 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/download_admission.py": {
+      "<module>": "0ffb7b7e771269e30fe0466e65e7b7e0c9fde1e9197ac2f1b661504ed83484e6",
+      "DownloadAdmissionMixin": "d30b9ab8216fc1bfd97d47c6534747cff89b891145bf9d6b0a150030cc406589",
+      "DownloadAdmissionMixin._download_preview_for_manifest": "8f33bf91d375f72680b93c3610774005230aa981f94ffda7e0dd2f42c78dc3c9",
+      "DownloadAdmissionMixin._download_replay": "cc8abf78d195dd0ffa5fc04dd8401c9a0d269bd0005132d3ec8c5db61b40a906",
+      "DownloadAdmissionMixin._resolve_requested_manifest": "aff5e082c0e6038ff133974d1b7a4fa170f4f1381c048d456f539e0a08779808",
+      "DownloadAdmissionMixin.download_preview": "227609d9216aa7d8d1aa50d8d51a51e43164a9c4741bcb746d889f43241413ac",
+      "DownloadAdmissionMixin.start_download": "436b31021305ed34a198804a1e49a14d9aaccf2876763091b96bc40d9ce2144d"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/download_admission.py",
+          "ModelCacheConflictInvalid",
+          "DownloadAdmissionMixin._download_replay",
+          "model_cache.request_key_reused",
+          2
+        ],
+        [
+          "control/src/vonk_control/model_cache/download_admission.py",
+          "ModelCacheConflictInvalid",
+          "DownloadAdmissionMixin.start_download",
+          "model_cache.stale_plan",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.request-shape",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/download_admission.py",
+          "ModelCacheConflictInvalid",
+          "DownloadAdmissionMixin._resolve_requested_manifest",
+          "model_cache.pin_mismatch",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/download_admission.py",
+          "ModelCacheConflictRefused",
+          "DownloadAdmissionMixin.start_download",
+          "model_cache.plan_invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/download_admission.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/download_admission.py"
+    ]
+  }
+}

@@ -13,6 +13,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from control.tests.principle_guards import ALLOWLISTS, history_gate, load_allowlist
+from control.tests.registry_storage import _merge
+
+
+def _observe_git(command, *, check, timeout, **kwargs):
+    try:
+        result = subprocess.run(command, check=check, timeout=timeout, **kwargs)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return subprocess.run(command, check=check, timeout=timeout, **kwargs)
+    if result.returncode:
+        return subprocess.run(command, check=check, timeout=timeout, **kwargs)
+    return result
 
 
 def main() -> int:
@@ -20,7 +31,7 @@ def main() -> int:
     parser.add_argument("--base", required=True)
     args = parser.parse_args()
     # Validate the ref first: a missing checkout must never disable the ratchet.
-    subprocess.run(
+    _observe_git(
         ["git", "rev-parse", "--verify", args.base],
         cwd=ROOT,
         check=True,
@@ -29,9 +40,35 @@ def main() -> int:
     )
     messages = []
     for stem in ALLOWLISTS.values():
-        relative = f"tools/{stem}-allowlist.json"
-        previous = subprocess.run(
-            ["git", "show", f"{args.base}:{relative}"],
+        relative = f"tools/{stem}-allowlist"
+        shards = _observe_git(
+            ["git", "ls-tree", "-r", "--name-only", args.base, "--", relative],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout.splitlines()
+        if shards:
+            document = {}
+            for shard in sorted(shards):
+                text = _observe_git(
+                    ["git", "show", f"{args.base}:{shard}"],
+                    cwd=ROOT,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=True,
+                ).stdout
+                document = _merge(document, json.loads(text))
+            messages.extend(
+                f"{relative}: {message}"
+                for message in history_gate(load_allowlist(ROOT / relative), document)
+            )
+            continue
+        historical = relative + ".json"
+        previous = _observe_git(
+            ["git", "show", f"{args.base}:{historical}"],
             cwd=ROOT,
             capture_output=True,
             text=True,
@@ -41,8 +78,8 @@ def main() -> int:
         if previous.returncode:
             # Only first introduction is exempt. An unreadable existing blob
             # (rather than a genuinely absent path) is a CI failure.
-            exists = subprocess.run(
-                ["git", "ls-tree", args.base, "--", relative],
+            exists = _observe_git(
+                ["git", "ls-tree", args.base, "--", historical],
                 cwd=ROOT,
                 capture_output=True,
                 text=True,

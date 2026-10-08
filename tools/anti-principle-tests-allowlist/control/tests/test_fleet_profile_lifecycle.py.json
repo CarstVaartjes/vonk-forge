@@ -1,0 +1,106 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_profile_lifecycle.py": {
+      "<module>": "db559d0754a7fed2abbadb3be1d813891138ff4789c3bb06d4103dda2df218a6",
+      "_World": "6406c498478645d141f2282b46a32436406a3546e286791b8798ccc8f8caa3c0",
+      "_World.__init__": "28e25f6a5e80e23569bfd1bebe37525ae836760584acf6c596b1df039a806830",
+      "_World._pin": "6e2cea27757c790de40bd64f2d5350a1b89e598fae74e37ddfaf7f69f57f3207",
+      "_World.cancel": "c153370fae6aaca7bb5d29444f04bcf28c3908640adb6767eb8f8eafd487fd9e",
+      "_World.child_id": "b1315c4ee5f29965d05c76a26b9c504b9bc6a467597fde78e6f85d73b28ecb1d",
+      "_World.edit": "347763572758f7afade4d5ec763c818b692aacb4b2fb0b82c2da29b1ad335648",
+      "_World.edit_progress": "5b60398f5ceaa582c881954aa9df6ecf2ed545d81a90ce046efdc1622727dfd0",
+      "_World.restart": "7d9bd29db006c6e66016749fa693826025ec8cac9d881bf0f1048e98102f5f35",
+      "_World.row": "ebad121fba17419628d4bbd56e256d63b4b4f53c03d00c7313e5f249ea57bedb",
+      "_application_row": "387f83170bd41c90ce7add2add74314f0c3bc617f26b1702302711db673d1bae",
+      "_json": "7b17d5b531df7d10769cfa8f187153b18906e7e4fa1230b0f2e5a79a52c28e9b",
+      "_legacy_cancel_parking": "deaef25a403f39ee9ff5267dd34b820eb8e2458a876681deacdfa3ade31a8426",
+      "_legacy_cancel_parking.legacy": "c2e58b436faafd4b5b3ff1965bf8f05e724e892cf120a17930eb459b91041932",
+      "_stuck_child": "14813188ed6def260d5d3a8f9cb5c1e3bc81c4766f7340e72738bdbf6d9d2f45",
+      "test_a_cancel_completes_for_a_child_issued_without_a_recorded_intent": "4656a28eb16df6da6c9a38087f7d99c1e66af77c5a9bdf12e90a6de0299ffcdf",
+      "test_a_cancel_completes_when_its_evidence_cannot_be_read": "c375a1164c8a777ccaae18cd54b2f9a469022a66a98dfeb5971d022e4f3c56e7",
+      "test_a_cancel_completes_when_the_stop_cannot_be_confirmed": "a9585160da2a7c6d3bcc3e194dc8e959c9e10f9080dbf25a3678950fdbb7e1f9",
+      "test_a_cancel_survives_a_restart_in_the_middle": "536b69cffd1c94bf7159aa84b61d3080464bed3f78186e4aabaa6376beea8621",
+      "test_a_child_record_that_is_gone_is_issued_again_not_failed": "9a6b9c547a23ce60a045ca84727a29824217428ff58b21978bb327a6622e1e80",
+      "test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait": "47c9e4d5d0dd218943f1d71e552bf7e04c150830a96b0491b89d2fa18007060b",
+      "test_a_legacy_child_state_is_mirrored_as_running_never_as_a_wait": "55f7364df7db8fe6a3373140c1f571bd3e74815e57fa948b078a659af4fddbbe",
+      "test_a_legacy_child_state_is_mirrored_as_running_never_as_a_wait.legacy": "1e794eef8e2a99634dc07f0152cc46284cbcda24d56cdf92af3a484599fac98d",
+      "test_a_legacy_operator_wait_is_healed_and_its_child_is_left_alone": "6c3b037e2f9098e707f0a4df13b7bb7e5b5226334567841b6683599fb2aa3fe1",
+      "test_a_legacy_parked_cancel_ends_as_soon_as_its_child_does": "c2350063be29c96283898d42975cd6ffa0eeb54e1e4c5915913839328d61dd04",
+      "test_a_legacy_parked_cancel_leaves_the_wait_and_completes": "d9eebb64bc12525e8482c177f6bbfe18fdce5f9ef5d1ba03b91a4f7c4e12f4a9",
+      "test_a_legacy_wait_still_being_admitted_retries_its_admission": "afdea1d83981ba919fea3301ce5f272ad2d9e4c580dec572a4bf0dc18fbf9b64",
+      "test_a_legacy_wait_still_being_admitted_retries_its_admission.pending": "112baf55037c0694bcdf3b80a3ded879fc4aef66118b6c76f28756531c37d739",
+      "test_a_legacy_wait_whose_child_already_ended_records_that_ending": "5b7657fb80de58d15c863e6dda3fe9e1742fdcef1b52ffd30bea4fcc281de28f",
+      "test_a_load_with_nothing_to_do_ends_by_its_children_not_by_a_label": "28a73d0570d113302ed86fe344000f6c5a5210fc03b2b4d881bdc53f3218275c",
+      "test_a_repeated_cancel_request_replays_and_a_different_one_is_refused": "209b09bd756482733dd21e7d688422cdf3631203c1195bf0067166b50918866c",
+      "test_a_restart_in_the_middle_of_a_load_is_safe": "92a1a0db7372b95c3b0cd048e199a482df0c04510c23af03dcbc80ac59a07bdb",
+      "test_an_application_row_is_written_only_through_the_adapter": "5717f08254854d9a759fc90461a13e54b508d970db7c045437795520547b8343",
+      "test_no_profile_state_can_wait_for_an_operator": "dbdeacb721ad8e93eda6dda9a2f795d7d9056f7c656301db1448768c80b5548f",
+      "test_profile_stop_selection_never_uses_the_active_run_set": "4f0e9e2290b4263fc534a05b46ffb0dda15b2fed774c666a4299f35a527e5d4b",
+      "test_the_cancel_budget_is_the_one_cancellation_authority_of_an_agent_order": "8013b7ee956388b4f2e9b43a3bada56d7dba0edae349ee4cf4853599cce605ed",
+      "test_the_legacy_wait_is_the_only_needs_operator_and_it_is_read_only": "1201441d81bd1ed8577d83c99f92c628887ccaeabd71b575078a890a85d4ae09",
+      "test_the_loads_state_is_the_aggregate_of_its_children": "d39a63ee189507fe4f60d9226bb207874a87fb9afe4cd80007366ef219ae3463"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_cancel_completes_for_a_child_issued_without_a_recorded_intent",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_completes_when_its_evidence_cannot_be_read",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_completes_when_the_stop_cannot_be_confirmed",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_survives_a_restart_in_the_middle",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_operator_wait_is_healed_and_its_child_is_left_alone",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_parked_cancel_ends_as_soon_as_its_child_does",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_parked_cancel_leaves_the_wait_and_completes",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_parked_cancel_leaves_the_wait_and_completes",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_repeated_cancel_request_replays_and_a_different_one_is_refused",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_the_legacy_wait_is_the_only_needs_operator_and_it_is_read_only",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_fleet_profile_lifecycle.py"
+    }
+  ]
+}

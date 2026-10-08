@@ -1,0 +1,5 @@
+{
+  "boundaries": [],
+  "note": "Reviewed constructors without external startup effects, plus required core configuration/database wiring. New direct constructors must be isolated; allowances only fall. See docs/controller-startup-inventory.md.",
+  "schema": 1
+}

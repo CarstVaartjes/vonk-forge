@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/catalog.py": {
+      "<module>": "648d99e8f06eef6bc546b9902f17302a7108c5d308069bfeac363d1ad1bad9b3",
+      "CatalogDocument": "721f0582b0614e23aeeee53954b22e698566ccf3a1f9fc81c457531eddc27487",
+      "CatalogDocumentHead": "2089159f99e5a6cdae1f17f2bf267a8c99280484a9ad98ddba377f15a2554ccc",
+      "CatalogDocumentRevision": "4613460e0b91868b717f257867432d179cbd975ffad255360f772d50eb5f8f83",
+      "CatalogDocumentRevision.entity_id": "e396417081c9895df85da3831c4a3afd7cbec7e0f2f849818cf60d186d9bde60",
+      "CatalogRecipeModelReference": "33a8a971e11095cab92388c7ada8d66971ba501f8abd1f50d2e094a31526dc81",
+      "RecipeSourceBundle": "535a2b5310942b16bbdba61c0989aa18f5e2493402ed5d6c1c6bcdd138d7ea5d",
+      "SourceBundleArchive": "ac696daf922a247c48a0e05e364ee3e24daed233800d2c5511f6dee398f6d9d5",
+      "_active_catalog_document_json_is_immutable": "9f9ac1014a25934f8c7b637142d0f5cd5a4fcf69d5815e2bd2b4821246016351",
+      "_active_catalog_document_revision_cannot_be_deleted": "c5f65980174d63c8d4e1b45790ea2488d89f0e7cfdc58c152005629aa104b990",
+      "_catalog_document_revision_is_immutable": "de7269214ff15c37917db1e0bfa59f4a197b7f1d30534e3a8456653be2abbb18"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "control/src/vonk_control/models/catalog.py"
+    }
+  ]
+}

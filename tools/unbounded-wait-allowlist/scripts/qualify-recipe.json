@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_resolve_models",
+      "kind": "loop-without-deadline",
+      "path": "scripts/qualify-recipe"
+    }
+  ]
+}

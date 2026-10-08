@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/model_preparation.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_ensure_model_child": "1bb33895a1fd110f609eef7f6a2725e638de777cbc16d910d79382bb170c80d0",
+      "_model_progress": "cd316397231903ac44d66625229c34e7dd0baf94ed58e96cdf9424dc7b5f26a6",
+      "_refresh_model_observation": "2d009197774cf3ee718435b9e55db8c0dd13e91fa9d9cf8e3eba422250bd8791",
+      "_resume_model_child": "722d6e0fb11620e0d89fd8de8695756981509fd6fd2f4d4224264ae1f19cae6e",
+      "_start_model_repair": "7a915a70cac14fc264144ddab3d8989d4c63f6b5792c5c08a79e4650b44fa715"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_image_availability/model_preparation.py": 13
+  }
+}

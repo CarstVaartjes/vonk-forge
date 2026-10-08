@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/unused_storage_collection/evidence.py": {
+      "<module>": "0200c46f43345d1736b769a1cdddc5e0b2542e97ca693283c7ff503596af22cd",
+      "_Evidence": "1cc5a0490b823cad83454d458cc6c92fe4fd511bb963783839a502be0a13d8f7",
+      "_Evidence.read": "d36cd9de6a11afa70f1c64702d4ea661e24f7b71342620c5ba16411cf06acea0",
+      "_Item": "d6525348f15641d0f02a28f950d77dfa2d5812fa12fb2e7216155ad6336f6014",
+      "_Outcome": "ac8ef4596c5c3f1520746c45d42a9bde59a2d1222a1dd7343d9e16fdb6a8702f",
+      "_Outcome.line": "a6f8a3367763dbcc73230ec367a46d2fd676109f9d4c205fe09d6eb9ba1810bd",
+      "_Pressure": "8094d87d57145313abdc93ab93793418298a86c0b538e312d5e098a384b6b184",
+      "_Round": "44edce9e12566d5719d110721364f092b7adda3e851687d2a8d16053d1040efd"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/unused_storage_collection/evidence.py": 2
+  }
+}

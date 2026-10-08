@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_stop_effect_adoption_postgres.py": {
+      "_claims": "c6f80a1407d31d79cef991922a6fcd230dc68fc45fac29ae0a2a9e5eb7ca9f3e",
+      "_pending_stop": "cdb99ac41dd7256d394be78e4c28124eb3528494ab9007e174c108f3e5bd373a",
+      "_pending_stop.dispatch": "4f9e964a2fa5ef8d6f7ccdcdf26d261f304950d315a89071f3740e996b4c9a9f",
+      "_pending_stop.profile": "fecc055981371607e848e94c66f2304640a051de547a9dcfe199d23bc552408f",
+      "pending_stop": "81ab36f334c443be1ed3a50b2dbb4565ae07123df2b14801a22d3c69caa26d76",
+      "test_postgres_original_stop_is_adopted_across_replacements_and_fresh_receipt": "b0d38d5c4b75a469788b58bd4a9ef414ba887dd00186673805933ecb6d1b67be",
+      "test_postgres_stop_adoption_loses_authority_on_exact_refusal": "a20c32d88654ef9dfadddca9061e30fe8136428965656541ae853c46b9d7bc48"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_postgres_stop_adoption_loses_authority_on_exact_refusal",
+      "justification": "Selected cancellation or exact child identity corruption must revoke inherited cleanup authority; original workload not ended. Wrong request/payload must never gain authority by retry/fresh dummy.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_stop_effect_adoption_postgres.py",
+      "reason": "security-edge"
+    }
+  ]
+}

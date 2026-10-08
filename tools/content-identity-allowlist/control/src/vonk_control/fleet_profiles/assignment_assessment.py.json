@@ -1,0 +1,35 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/assignment_assessment.py": {
+      "<module>": "9bc7ba3911f5778e11964490bc167ef05d7288bb1c12653e35fe3eb06043cb55",
+      "FleetProfileService._AssignmentState.__init__": "aee6fe7e118f0e4903bc8b948e14cb811868b3150a2e67f96b7a41e72ddde94e",
+      "FleetProfileService._assignment_state": "c5c5ea97109c71bbd7a509ea3d77400cb364b780522e20ee898aeaa22a4804b0",
+      "FleetProfileService._installation_node_ids": "8fb425f9cdc30ba75095a8bffc792f78099ab22113cd6872b7f94934480aae51",
+      "FleetProfileService._installation_nodes": "6af6d451223910bc435a338af1b9472fd99372e09f48f2b25e5ff15d0c5d7101",
+      "FleetProfileService._run_nodes": "b6cf268de3e88bb19fecf9a79dce6c0a2aa639f4a3f267d7fa25f41bf260f85e"
+    }
+  },
+  "sites": [
+    {
+      "expression": "ClusterMapping.recipe_revision_id == assignment.recipe_revision_id",
+      "function": "FleetProfileService._assignment_state",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/fleet_profiles/assignment_assessment.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeBuild.recipe_revision_id == assignment.recipe_revision_id",
+      "function": "FleetProfileService._assignment_state",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/fleet_profiles/assignment_assessment.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeInstallation.recipe_revision_id == assignment.recipe_revision_id",
+      "function": "FleetProfileService._assignment_state",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/fleet_profiles/assignment_assessment.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

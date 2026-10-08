@@ -1,0 +1,93 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_jobs/storage.py": {
+      "<module>": "1d73440a9c242cc8a8fb9b6c6bd9282acb81ab9e22b7dcf71804bbb5216741a0",
+      "ArtifactJobService": "1d73440a9c242cc8a8fb9b6c6bd9282acb81ab9e22b7dcf71804bbb5216741a0",
+      "ArtifactJobService.__init__": "0c2dd8eb9d47b393dff5b5bd53ddb09b902f477cca3e2541996928043a5869ae",
+      "ArtifactJobService._authorized_agent_job": "d2c195fca89858b4300b7c84e6d593471a5f723038d812190f8ddf08c50cbf1c",
+      "ArtifactJobService._file_in_session": "e483d9c522a5f430a68d5e7417f1c41e73a736ec6a95238b7742b1ba61ffbc74",
+      "ArtifactJobService._files_in_session": "0acead166bdde32baf6ce4b248135f702cc7d4e6cfebe4d0a85d2cfdf80a4ec7",
+      "ArtifactJobService._input_declaration": "cc63c18cb7351a29629d51ad5d35025dbadf0004e2c517ad11ace893d3c8aeeb",
+      "ArtifactJobService._input_files": "08d166b107d9e53b6a371c7e8e210b897ace89f08ac72796017290e2b995f617",
+      "ArtifactJobService._job_launch": "729792223267c957a96b0367cd0e6f47463e449a28072e4a4feae9518fcbcf44",
+      "ArtifactJobService._job_node_in_session": "533d0038840a6f804dad421cda6e15a9b299aac0ce7869db4af91e204cb113fa",
+      "ArtifactJobService._job_node_in_session.mapped_endpoints": "e9ca899d932752cd08230d1ceee1aa2898280f6cf3a2869b45050cc22135c17e",
+      "ArtifactJobService._job_node_in_session.planned_endpoints": "01f65fe8c8912dbcfeffc4044a17d12a695bf271ab57db95e5f2681c432a0374",
+      "ArtifactJobService._output_file": "b12b1dc9a199f6012755ec0377340239268d417015736e9b84378b97b979a782",
+      "ArtifactJobService._put_blob_in_session": "7f05690cdec803adee477ef61fea14838ac2fa47fefde2f1792f4df387124723",
+      "ArtifactJobService._reject_result": "d5a3e0ab84848b3abb2012f21b0b28f726249dbbf59a226275dcc5b29333d375",
+      "ArtifactJobService._stored_contract": "4e6ac3c7f849549a2789bbe3d16f452cba6fca4c752c5a238e04f2acdbfc674c",
+      "ArtifactJobService._stored_contract.rebuild": "389fbc87e226b4aff640331bd7d4ea9aa3c8c4f5890000aa2d3cfc295310aa1f",
+      "ArtifactJobService._stored_input_manifest": "7888ce8637cd57f15c8317a5621d9272ce83a736f9b84f7e80377945953157b8",
+      "ArtifactJobService._stored_input_manifest.rebuild": "b7cfb422214974a90f873e5bfb6d06cebba298d5eff4cf957cd6229a161d3cd7",
+      "ArtifactJobService._view_in_session": "df2c9c0485b0c58274250dfab49c9f393897d1a5a4f5508109a57a18103c6b57"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "artifact-job.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_jobs/storage.py",
+          "ArtifactJobTransferClosedError",
+          "ArtifactJobService._authorized_agent_job",
+          "artifact-job-transfer-is-closed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "artifact_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_jobs/storage.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._job_node_in_session",
+          "artifact-job-endpoint-owner-is-not-running",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/storage.py",
+          "InvalidValue",
+          "ArtifactJobService.__init__",
+          "artifact-job-retention-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/storage.py",
+          "MissingRecord",
+          "ArtifactJobService._authorized_agent_job",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/storage.py",
+          "MissingRecord",
+          "ArtifactJobService._view_in_session",
+          "not-found",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "artifact_jobs.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_jobs/storage.py",
+          "ArtifactJobRefused",
+          "ArtifactJobService._authorized_agent_job",
+          "agent-is-not-authorized-for-this-artifact-job",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/artifact_jobs/storage.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/artifact_jobs/storage.py"
+    ]
+  }
+}

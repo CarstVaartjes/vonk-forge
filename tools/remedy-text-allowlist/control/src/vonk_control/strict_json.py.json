@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/strict_json.py": {
+      "<module>": "da9f651b40821543c97a32b816c13b95e532ef9deaab4fdab1f9188a17733a59",
+      "ControllerAPIRoute.__init__": "68efeb7e7c53e6c7cae697c2cf12490c30ba402c7a6966f92ef19309f91e5227",
+      "_apply_nested_value": "798f4a634017193543c687e66b4ffa3af2392427e479877a81449a6a2158f56a",
+      "_drop_field": "06a6f7a2cbb7ed0169affd216840d7804209de1b8c779f231cd83467cc10fc73",
+      "_presence_policy_endpoint": "bc79beec1f3c9a8311c158cbc467a557f9256a89f241193f38a685340046c35e",
+      "_presence_policy_endpoint.policy_endpoint": "640520898c419179edc2a7b9054f8506570174f3c0494d8052d9e370a24b2c02",
+      "_retry_later_response": "8c89fa7303476eb081dbc6d9ac89b4fae7dd761fa0921819cd2998ff299547ea",
+      "_serialized_field_name": "151bb9bbaf2c39c68e75ee889a325d0fdca084f5e1bc21e865d8e49cf08cfe71",
+      "apply_optional_none_policy": "c09fbf9be0dac40fb265dfcb54dc86729853ae7b7e66f2296e67bdec3bd0a275",
+      "read_stored_document": "074934ee66d2c06722ceff26ae0cb49428b892a4b021a7e05577bdb91b4bac44",
+      "read_stored_model": "a324c807e9534031932a991b7c63b3b246034044013c4e15e6132b8c7907dc20",
+      "read_stored_model.validate": "b3df94519f48a3c5be0500dbef7c4b3e0d807d4b1280d4297d11ba574c1df129",
+      "route_endpoint": "38887842f5ca7dadeb71eaf55d306e3be018e9b275978621cede8ef5e7334ca2",
+      "serialize_json_value": "b3e55fb2b216c9dae7f10778a51acf2df4ceb043dc99bca8b127f0d588fa302a",
+      "stored_document_detail": "4118e929118f13efa76bd59730373ec5875f1745fa3c9ae69526fc683e59b1b0",
+      "warn_unreadable_once": "0edb2e9257e15188d42954c3a56364ea8476c22c09f8f34f1abb37d3ed46530f"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "function": "_retry_later_response",
+      "kind": "imperative-remedy",
+      "path": "control/src/vonk_control/strict_json.py"
+    }
+  ]
+}

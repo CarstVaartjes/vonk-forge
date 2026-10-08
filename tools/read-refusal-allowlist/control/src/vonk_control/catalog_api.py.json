@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/catalog_api.py": {
+      "<module>": "9680056305f0863881fed01dbe9b8c0e91bb57538356824ff9b2bcf5deb5f395",
+      "CatalogProblem": "ab42e9aa957bbde7f1375608181a2772cf2146cc2ba0bd1fb7849f6d269e6150",
+      "ManagedCatalogSyncFailure": "2893755b33707479bdeceb19a6d6f226dc94a41afb8b04859762ac38262b45d1",
+      "ManagedCatalogSyncResponse": "fdda475d9b5cb02f8bed053f813cad267b2498f327ae17d124f323e9fc581cec",
+      "ManagedRecipeCatalogSync": "0f10bb947afb095707a0d8c68c205fc9c305233d4bdc0da234f8f575196c0f23",
+      "ManagedRecipeCatalogSync.latest": "5f06d12da112ab1f1935dae8be7bc4df945cfc307aef315c33097ca792314cc7",
+      "_catalog_problem": "2c85b289cdaf9b6728aaabe75393890c8d06bac336e736c2da2a97a602e830da",
+      "_managed_sync": "438c5472072315c4476deab87be888d68bb3a83b9537a4369ac41fc1bbfdd60c",
+      "install_catalog_routes": "56147b07702b20e3f6d29b65d6b9cb42954355ce1f43d2a90c5fd5042c9c8982",
+      "install_catalog_routes.administrator": "de1259f7fd8f4291f9914638e0cda057165fe5b21f9a853ede3191175694b80e",
+      "install_catalog_routes.get_managed_recipe_catalog_sync_status": "75d191a212a5e59b7ec706c76a9adfb04511e47bb66242654658679af1755e87",
+      "install_catalog_routes.sync_service": "868e95d3409e957fa75e520f034265d1a948e927e79bdbba93b2034bf09d6f7f"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "get_managed_recipe_catalog_sync_status",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/catalog_api.py"
+    }
+  ]
+}

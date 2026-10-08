@@ -1,0 +1,13 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/artifact_jobs.py": {
+      "_artifact_job": "2403fe1c2548952233f7c76c8b5a538c22f0cdf712177add6a0a4c62ea888d00",
+      "_artifact_job_download": "f5b492fb71109452d7d51ec7a88d4bbfdbcd65a525f51fac00f45fdcd008f9d2",
+      "_artifact_job_list": "dc9c189a8bfedb3d8d2445052d275dec09f0369a90691a0278dd6e7032d93a2a",
+      "_artifact_job_record": "562d95fb9ce3060578e4edea65134ce1079ff6ef23d1a9f6b1a9e198620f7d44"
+    }
+  },
+  "stored_state": {
+    "src/cluster_profiles/cli_render/artifact_jobs.py": 3
+  }
+}

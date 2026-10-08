@@ -1,0 +1,168 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/presence.py": {
+      "<module>": "e32c00da74de2e1eb7dbea7427c22e8a9cfb041fe7ca6e672af84fe8b69387f4",
+      "AgentPresenceService": "88e5da346e4566aa43d7ee1c05894b2e1d5b71cb49e7032245f1cce5fb82dbc6",
+      "AgentPresenceService.__init__": "5e3c580362ae8f70380fcc019ad4add9d690d7745fd14f76592a3dbbbb87fc8f",
+      "AgentPresenceService._lock_active_certificate": "e81198ab007a842e436369b6e5b24a0e3d8d1b8d66c5df0d4af20e43bdd35b28",
+      "AgentPresenceService._lock_active_node": "14948f603bbab90551d652b36ed7f450bf31faee9bab5ca8a372946922da49a9",
+      "AgentPresenceService.latest": "ca0323fc2b123605634d08b68561277729fbc974df8f78adc44e0dfb81030404",
+      "AgentPresenceService.latest_in_session": "9754908ee593dcdcf34632411ae54fba18516ea25e9c69769219e0e3dcc76520",
+      "AgentPresenceService.observe": "fccc3008bb9ba5a2ea2e2f75a6645caf2c0201c769a143202366d84a5c909e09",
+      "AgentPresenceService.observe_in_session": "cdaef0e66418430762240cc000eef2a9a8aa83fbffad92feb64838bfdcf85fa2",
+      "AgentPresenceService.validate": "756d77a4c7ef584c13f0a835c47a94988edafbe3ff369ce6f5979c7b917df90c",
+      "ManagementAddressObservation": "d3cc97f58061e3323b3fd683c936d5a1ffaed3968518ee2871ab6542d75cbbe6",
+      "ManagementAddressPolicy": "31cfcc815fe2a529f94d468a3195629fe31f7fb4b8cd89e1227a7108b4b4c785",
+      "ManagementAddressPolicy.parse": "7aa5301062a9b14a697493c6cf6ab99770a57fdbe55a8fcc39428a43c72fcaeb",
+      "ManagementAddressPolicy.validate": "19bc85949fb00e63d8aa549d06ef32a864c55bfa4dda06720975531cc88bb67d",
+      "PresenceError": "058d62ddf5b313263f14b72f80de95b87af6e1c465925c82e227f260c46e1b8a",
+      "_parse_networks": "47a0d5b41138267841f0967c998c6f1df2366cf6cc48c06795752e1e5463161a",
+      "_stored_utc": "9e5655d53f59b0aba255aedc837b582531cfb474c9e07b7a62e1eadbddd34282",
+      "_subnet_of": "4b888da99940d1a95f7283fbc591c761d97d621e221c82685acd69a7d91e9030",
+      "_utc": "df29b79ece577335c5ad5dd680d50ffed8baf706d27301bc053eb5e2bc5dac25"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "presence.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.latest_in_session",
+          "agent-node-is-not-active",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.latest_in_session",
+          "management-address-presence-is-in-the-future",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.latest_in_session",
+          "management-address-presence-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.latest_in_session",
+          "maximum-age-must-be-positive",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.latest_in_session",
+          "node-id-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.observe_in_session",
+          "agent-node-is-not-active",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "ManagementAddressPolicy.parse",
+          "management-cidr",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "ManagementAddressPolicy.validate",
+          "management-address-belongs-to-a-prohibited-address-class",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "ManagementAddressPolicy.validate",
+          "management-address-cannot-be-a-network-or-broadcast-address",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "ManagementAddressPolicy.validate",
+          "management-address-is-outside-configured-management-cidrs",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "ManagementAddressPolicy.validate",
+          "management-address-must-be-a-canonical-ip-literal",
+          2
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "_parse_networks",
+          "message",
+          5
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "_utc",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "presence.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.latest_in_session",
+          "presence-certificate-binding-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.latest_in_session",
+          "presence-certificate-changed-during-read",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.latest_in_session",
+          "presence-certificate-is-not-active",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "AgentPresenceService.observe_in_session",
+          "agent-certificate-is-not-active",
+          1
+        ],
+        [
+          "control/src/vonk_control/presence.py",
+          "PresenceError",
+          "ManagementAddressPolicy.validate",
+          "management-address-belongs-to-a-forbidden-cidr",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/presence.py"
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_update_batches.py": {
+      "<module>": "1f345907d43acf5c2dcc014412ab85027d479be6ba2982fb332952e4fa5e3a17",
+      "RecipeUpdateBatches": "addb52b904ada13908efb7706c17af655fc9e694f295fbde2332f96f751eac9c",
+      "RecipeUpdateBatches.__init__": "0a72a965672908fc1c53c4c83839537f6e174f930bdcfdfd3ea449c847cfb31b",
+      "RecipeUpdateBatches._activity_get": "5144d1b9ae5cabd1e85442ea29c1d1004becf1b23e9829af66cbc9885238720e",
+      "RecipeUpdateBatches._activity_item": "7007da7514959dd8ea37b18a5f1ce263b4fbc20e8166ce13a22228baaa83a9a6",
+      "RecipeUpdateBatches._activity_list": "d7effd680fffee83df020f809ef77bb46fa66e8ee2c8ec6bd2ced1cca5364dfb",
+      "RecipeUpdateBatches._authorize": "81d5477ad15940d412c0e5fc05a04d80e370cc892cf3600a040d33c586f71f68",
+      "RecipeUpdateBatches._cached_revisions": "7d0ddae7c843a81266973321d5b36bb1562cfc6808ffb992fcd569673ef40bad",
+      "RecipeUpdateBatches._cancel_unreadable": "4e2fe9d3629f3079a98311bc76f5a3c4ee4dc362b221128f53563ae890e71bbf",
+      "RecipeUpdateBatches._document": "07c4cd908821eefc0a481a1094df03f98f41624d8d56d2ea316c2f0419acccff",
+      "RecipeUpdateBatches._intent": "e90d07449a48f237877d3c57470d87e592ec6b72139a192328c64bb888a4c56c",
+      "RecipeUpdateBatches._matching": "5fe16aff4549c83fabb248d27e09844dc21efc681bc6d351faf8875dfd55554f",
+      "RecipeUpdateBatches._owned": "213f58edcb79fc21b4f4921c23f49a3eae52363c651f18d2440d56d35f365805",
+      "RecipeUpdateBatches._replay": "147296a6d3947fd458824f490f3a318d43812ba888b1118d40f1ec34b509cbdf",
+      "RecipeUpdateBatches._reserve_document_budget": "a05522ef02d2ea2c5ce63f1cc71d5c09241b32c69f438612d3fdcf3bd2d9483e",
+      "RecipeUpdateBatches._run_once": "d86664646e6e2c608b9974d25e1b3aadaea9ddd504d36083d0ee4c373e602fb8",
+      "RecipeUpdateBatches._view": "ebc3b06712b43b7393ecff32e250a57617ed1027d47f5b83c3c1300122f0bdb1",
+      "RecipeUpdateBatches.activity_provider": "d58b026356f1924d2cd06325403d7e8ad0bca8637ef94f2a9f910ef4d7d98df7",
+      "RecipeUpdateBatches.authorize_child": "ee49a2ac50c8e9fae0a05c9708294909ab655f256b8ddb9b7c66105dbdc4eb61",
+      "RecipeUpdateBatches.cancel": "2adf7c1150adad41fb886794e0eeedb055cdba262dcd392fb1b3c2adc2261466",
+      "RecipeUpdateBatches.claim": "fd7b63b4935192a63e3878a3fd9b18c40f9f8157bf2f8e1a84ae18150319a72c",
+      "RecipeUpdateBatches.get": "0f15c4fc091b6152df681b681b17493de92a4bd7293d968d6d7069b6605141e9",
+      "RecipeUpdateBatches.reconcile_cancellations": "27a9f623b85bdbd689111b02cb70cf9a29ed5b5f6be446c13bd9d86ad0eb0a2a",
+      "RecipeUpdateBatches.run": "e80878cbdccb9f0fa62c1bd919b3d103c5f398a28a5b8d22197c961ccaff0586",
+      "RecipeUpdateBatches.start": "b86393f21f794e739d758ad272e96ee0ccfea1e478d7c960e497ca3150d10017",
+      "RecipeUpdateClaim": "13df89d23bfb4ccc8dd5f2b7ff12e68068b1aa61eeabacd3051d45c262a0b37f",
+      "RecipeUpdateClaimLost": "ddf8a3b0f4e1b7b3addcd3a28df0ee24fbaca43dd229e1be1c9a128c4744c380",
+      "_binding_digest": "6b2980efe127a3282e3f1637f3c32b09306034ddef8a0fbb7af03dabffaf3428",
+      "_encoded": "8c3fb7da620071ca14b69dd3b695af8541b512ac51556d00a1c1428d13efb710",
+      "_now": "67dc007c5635ac1e8ab9e24f33e72c196795a809ce55c7ed4c5a18cffafdf419"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_update_batches.py": 13
+  }
+}

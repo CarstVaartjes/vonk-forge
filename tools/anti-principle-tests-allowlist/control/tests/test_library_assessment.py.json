@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/tests/test_library_assessment.py": {
+      "_publish_model_fixture": "b7a2abf80fae587e67f7af912559a275d6ec19b86784f48b80bdd5f280e74add",
+      "assessed_library": "80642928d65537c57c968764d0947f7fb9933d898523ce35cec25e08f9d086bd",
+      "assessed_library.bind_model": "46ed202de9935e89ca66f9bbf7e77abc7c0e8cfd68f84e63d99a0ed792b3b113",
+      "test_fit_search_continues_after_an_ineligible_first_group": "752f392149459328743c0cd1b0df56ed42096e577b6ba7b62cf735b9f72222d3",
+      "test_fleet_filter_assesses_later_candidates_before_pagination": "638a40a0b117498033d17cc4b750fd4f8418d322fc4e10ad11e3d77983963105",
+      "test_late_assessment_is_discarded_and_selector_scan_does_not_assess": "71894d553dc4ae99365604dc8e636105c3792590f3ee861b7d61dcdae784ac99",
+      "test_late_assessment_is_discarded_and_selector_scan_does_not_assess.slow_inspect": "c161f9df49cd4150c103a0727845fac2876a6a7bfa3498baa2ad86f9dd9ec872",
+      "test_missing_nas_assets_do_not_hide_a_fitting_recipe_or_create_work": "9759c2b98081328b30d67c6a094ef5ec856946eabaf7641a27eefc181bee5db9",
+      "test_ready_uses_actual_nas_files_and_does_not_require_spark_copies": "49908d389ea192841e200eb1002cf3fdf5ff9566f78e27c0db1c3e0f1e8172a0",
+      "test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success": "ab314b77f31e1a3cdab93e3cebda7a5b544fab315e0e090beeb20cce5afafe6f"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_ready_uses_actual_nas_files_and_does_not_require_spark_copies",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_library_assessment.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stale_capacity_is_unavailable_and_filter_cannot_report_empty_success",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_library_assessment.py"
+    }
+  ]
+}

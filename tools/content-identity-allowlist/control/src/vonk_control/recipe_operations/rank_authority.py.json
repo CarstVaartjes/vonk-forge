@@ -1,0 +1,43 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/rank_authority.py": {
+      "<module>": "487efc9826c7a439181bbdaf326479eae79defad50b9efaa6b21bff92cec7aea",
+      "_installation_accepted_ranks": "e99ba27d8dafc11b437bb7a764d676e6c9dc847ef212c75d1a06b10d305963ae",
+      "_installation_accepted_ranks.read": "4db875331b99eece11fe12079badb79a8504f50c0fd00f4a51150b8e84c84612",
+      "_plan_ranks": "af8181aed145e2c4d1b654d14199fd4ae83e1c5a00b8053f0bc150d5a7a8d0ee",
+      "_profile_jobrun_parent": "e9d7301796644a49968b3003605ad755a27910c0552b5c4b4c696c93a3ff269e",
+      "_ranks_from_mapping": "f4b7319fa9525b35f6f693e826c9051a9603e7fc58fa3165afa9e48d6a1aef9d",
+      "_run_accepted_ranks": "69b2d3ddda692cddb393a73f1c951790858d6c3b3123a8c227aa90238f0d356f",
+      "_run_accepted_ranks.read": "486f1b0176b5962152b72d7a6378b6e64448cf9ec1ef705cec0b44caa599e7a8",
+      "_run_is_one_shot": "61c54473f41400ebdb9328331a555d7c6b7677d3b325f134ea24efdf0822a015",
+      "_run_is_one_shot.read": "e567e3289955a575ada9b966779c27e0c8f6aaa9cb54f169b72b9f4b3eb7ab02",
+      "_run_is_one_shot.rebuild": "6a0ecab379bc5a2af47d4dfbf3531445c14951714f78732fe488876e886fc54f",
+      "_run_observes_per_generation": "f4f15c17446f866dbda377666afa74d8c79c66afd38ae203cd0c4ea02b7d12a6",
+      "_run_observes_per_generation.read": "585434651dd40c6869c8d6d276a4f22e8578d467db9aed3fbee82ad61e5be196",
+      "_uninstall_recipe": "50501d9070ba515a05db5b55aeab8a15249399844694ce0cde0b53fb052ffe7e"
+    }
+  },
+  "sites": [
+    {
+      "expression": "document.recipe_revision_id == revision.id",
+      "function": "_installation_accepted_ranks.read",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/rank_authority.py",
+      "reason": "Reads the stored installation plan's own identity against the installation's relational revision; disagreement reports the membership not exact, never trusted."
+    },
+    {
+      "expression": "document.recipe_revision_id == revision_id",
+      "function": "_run_accepted_ranks.read",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/rank_authority.py",
+      "reason": "Reads the stored run plan's own identity against the run's relational revision; disagreement reports the membership not exact, never trusted."
+    },
+    {
+      "expression": "mapping.recipe_revision_id == revision_id",
+      "function": "_ranks_from_mapping",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/rank_authority.py",
+      "reason": "Rebuilding the accepted ranks from the saved mapping: the mapping is evidence only for the revision it was made for; otherwise the membership is reported not exact."
+    }
+  ]
+}

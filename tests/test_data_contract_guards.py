@@ -8,17 +8,17 @@ or that lets an allowlist rot.
 
 from __future__ import annotations
 
-import json
 import textwrap
 from pathlib import Path
 
+from control.tests.registry_storage import read_registry
 from tools import contract_scans as scans
 
 ROOT = scans.ROOT
 
 
 def _entries(path: Path) -> list[dict[str, str]]:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    document = read_registry(path)
     return document["entries"]
 
 
@@ -49,7 +49,7 @@ def test_python_models_live_in_the_registry_once() -> None:
 
 def test_the_inventory_document_names_every_registered_module_and_exception() -> None:
     document = (ROOT / "docs/data-contracts.md").read_text(encoding="utf-8")
-    registry = json.loads(scans.PY_REGISTRY.read_text(encoding="utf-8"))
+    registry = read_registry(scans.PY_REGISTRY)
     missing = [
         item
         for item in [

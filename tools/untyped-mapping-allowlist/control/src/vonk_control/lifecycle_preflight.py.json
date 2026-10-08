@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle_preflight.py": {
+      "<module>": "12d7f591fcd8222a0fa006bf5aa4a7c702a92d7046777b6894c6361fdb0fff07",
+      "LifecyclePreflight": "79b625f5e1d04948939f30295532f09a10f37250893bf366039c583e5543dd59",
+      "LifecyclePreflight.__init__": "e44386038f8bb322ea7be74272f9709b24d2d50d8e3e7ee105e52dc59730ca22",
+      "LifecyclePreflight.ensure": "69f52a86a20cbb9ae49499f9f2a5411bc9104eb12c3812bdbc710cb2daf78de0",
+      "LifecyclePreflight.ensure.retry_probe": "6cdfee4c0ea1d8c734f79da220d30721525e3155e61f02bb2d700a74b83b2e53",
+      "LifecyclePreflightCheckpoint": "bac9ee95a39c8318bfc17b0fef664e030ea133891a93cbb02645b08842bd342d",
+      "LifecyclePreflightCheckpoint.pending_identity_is_complete": "134a4155ea67192aac91567a34f7e5a43fd4c07a7d4c92169816a2ee4113ff7f",
+      "_child_error_code": "1d12360b4e2de58006259fc156dd876e385523cdfbae8858367da19dc3c12c46"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/lifecycle_preflight.py"
+    }
+  ]
+}

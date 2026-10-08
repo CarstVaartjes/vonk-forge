@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "atomic_install",
+      "kind": "loop-without-deadline",
+      "path": "scripts/materialize-agent-tools"
+    },
+    {
+      "count": 1,
+      "function": "download",
+      "kind": "loop-without-deadline",
+      "path": "scripts/materialize-agent-tools"
+    }
+  ]
+}

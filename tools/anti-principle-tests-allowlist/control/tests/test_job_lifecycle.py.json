@@ -1,0 +1,36 @@
+{
+  "content_identities": {
+    "control/tests/test_job_lifecycle.py": {
+      "<module>": "16355c4e488cdb3339cd85add32cd67ade829c29d279097d9f5d2bb862ab2ab5",
+      "Clock": "c36e32479ef3228e1e0c61d1090933dec942a120aec862b0cec74eb24e7b95c5",
+      "Clock.__call__": "368189f15349acc758f890e4948cbab3b016e7494384b3567cd33737f7861d39",
+      "Clock.__init__": "654e3c5d24e29971dc5dc44fca7e3ec1dd5c4aee65eadf1c0ddb6f4f9938cbe1",
+      "_park": "7718eaf51bf42de6a0c468743545a3589fdc68da6c9ae3278320b1d31218a164",
+      "env": "fbf1dedde3124ddce83cbea4a119a42a52de1f3f077616ada073543aac68b0f7",
+      "test_a_lapsed_lease_is_claimed_again_and_the_old_attempt_expires": "96d2ccb9cfc6dd96816f139cf37262067a51e6eb94dadde98415cd749c39cf83",
+      "test_a_legacy_waiting_job_adopts_as_a_wait_that_advertises_resume": "e164527ea4d1c1863427021dea2e33e4fadce512c37bebf8f96d7a11bbd92438",
+      "test_a_parked_job_with_a_lapsed_attempt_heals_by_resume_then_claim": "e282f8726452466bc975934a4397a60b921616e5969eef3114dd4f71c3fb8c6b",
+      "test_a_running_job_with_a_live_lease_is_left_alone": "946d9f93d7e97308881e3a68af9063a06a465548919a2f1811137ea0bd2e5052",
+      "test_evidence_can_fail_an_ended_job_but_nothing_else_is_rewritten": "2a376f851a31e49b75a0b73cf0eaa2e8bcfe73d447bddd2d6e88c8a69a52ecf2",
+      "test_finish_ends_the_job_and_its_attempt_once": "0def78521a7ac42574d1a76d11ad4848f727789d02e8ef03fb0be40b289c63e9",
+      "test_heartbeat_extends_only_the_current_fence": "bb72759e376e43bd679a5381258eb3a2d3c7c4d8769e0684d494ce4955b3b874",
+      "test_new_job_is_the_one_constructor": "4688bf2b4e201a067b83a6cd97278564ecad0a8ba9aa1e4fb287dd2f091edffc",
+      "test_no_event_leaves_a_generic_job_waiting_for_an_operator": "86e097ae730ba572488d6169fdd2674feeb70cfc48815297638af00c90f549b3",
+      "test_resume_queues_a_waiting_job_and_refuses_anything_else": "4c73f1e643bc80a0a1ff6719b7ef3baaeeb7127d8abad26ccc79ab5982a0458e"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_legacy_waiting_job_adopts_as_a_wait_that_advertises_resume",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_job_lifecycle.py"
+    },
+    {
+      "count": 3,
+      "function": "test_finish_ends_the_job_and_its_attempt_once",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_job_lifecycle.py"
+    }
+  ]
+}

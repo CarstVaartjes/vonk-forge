@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/artifact_inspection.py": {
+      "<module>": "1d7e5cb890a68d6b5a42b6465cddb032e62188ed5f78d46ee7346452e8d8ed45",
+      "DatabaseRunSwitchArtifactInspector": "1d7e5cb890a68d6b5a42b6465cddb032e62188ed5f78d46ee7346452e8d8ed45",
+      "DatabaseRunSwitchArtifactInspector.__init__": "bb96ea950353324c2bf052be212d78e0cf897d4470e7b47be0a90749bd7bf4ba",
+      "DatabaseRunSwitchArtifactInspector._inspect_model_cache": "6bf9b2fe19c08c0014c93bfd7a99a826900392775d1e3f549c1dbe6143f2e80b",
+      "DatabaseRunSwitchArtifactInspector.bind_model_cache": "5bea4629e296c3523ff38fcc45b8b6a660298e0afcb9cfcceb53d95feed54fb6",
+      "DatabaseRunSwitchArtifactInspector.inspect": "db04ae0a861ba8037dd9a41fdd6f994b3e5229d881bf0a4dbe1013857dc6c253"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/artifact_inspection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/artifact_inspection.py"
+    ]
+  }
+}

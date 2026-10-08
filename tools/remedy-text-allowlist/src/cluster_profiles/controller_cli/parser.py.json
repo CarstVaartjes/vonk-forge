@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/parser.py": {
+      "add_controller_commands": "55eeff83a69015bd76614b59190c6fbd1039c670dd310265ef7f04bf97773e37"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "function": "add_controller_commands",
+      "kind": "imperative-remedy",
+      "path": "src/cluster_profiles/controller_cli/parser.py"
+    }
+  ]
+}

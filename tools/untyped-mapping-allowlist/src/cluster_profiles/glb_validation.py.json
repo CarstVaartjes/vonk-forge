@@ -1,0 +1,41 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/glb_validation.py": {
+      "<module>": "0352a53df9f01265a48fa74f685ba9cabab2ae19f686ac7ff3a4cbfa4bc822ca",
+      "Accessor": "ca26286f3defa4f5a556795816e9ab86db90d0987d4213be6b11b2e7b2570c78",
+      "Accessor.value": "f9e14dd744f9061260316fd14eae87165aea346a07c2c1f528af2d8ebef553f9",
+      "Accessor.values": "33c5671ad3bdcbc7e573e83e579cd79f6530f65350ff365fcb89a0e47e7583d0",
+      "_accessors": "2b962e33d6f5901afbefe82a705dfd8d84e99290d295af86a2fbba34788f560d",
+      "_array": "c88c4f182d2d29c754ae859f02da8be61e2fdd692d9768b1cf71540c9c90ba5d",
+      "_bound": "449d6c6110e08ca8e4581047b00334c1c83a6017512e1534c67a88985f1704f4",
+      "_finite": "bf128a81390ecbcf792479f0e556082635fb4690cb67961c2740a0adcffbec33",
+      "_finite_numbers": "4806020d9448961ddd285329cddc9880b9db27406a755ba7b320ad22d0567030",
+      "_image_bytes": "aeae97d717e962bcd0ced362ad85d92d6263497cac3d1b75de296068a143a613",
+      "_index": "cbe934bcf438269f83de638da8abbcefb617722b5acbadd12b49fd846ab92ba6",
+      "_object": "497c0d99e8a3198cc30a37c772d2d5b2dac68b48c841b8ceda48cee204e78927",
+      "_parse": "d13c504098e61e31bbbfb654ce694fc7458f554760636ba0856006daea7e608d",
+      "_parse.invalid_constant": "d37efcbe804ca459e3e7eb5e7718075e294acc203ac28eb22073d91b31789983",
+      "_parse.unique_object": "27a2817f92ffcdc8a60110938c80eaff5bed829418339f348f773444bc9cad73",
+      "_reachable_meshes": "05b813e414eb67fbcce8b61896de42804f8ecf4a8a1d6bb8a292e42d87a66133",
+      "_reachable_meshes.visit": "cff231ad5d2213e8cac9e35b5d5f6a9be703d860f435ed178387965b0040c2e9",
+      "_reject_nonfinite_json": "4e98c3654560a6d3efda82e64f79d15c35c1975b43fff79b45677143d2a36cdf",
+      "_texture_index": "e84ae69d78f6abfe66071d8b09f12b717478da50ac223d6f563d667ed96ecf9a",
+      "_texture_source": "cf8c3023c984edf866f92af292d883ef6f7ab8c48cb7283c53f8df6479cfdcf6",
+      "_textures": "6ef3c44bfcde6313bc9f0ab8c45a343a8576b80e3e9adec579c7a6fdbbcaedbe",
+      "_triangle_primitive": "2249d25062aec58d907b64b015d237ce837a53393f90d5458ae61a142caf6ef6",
+      "_valid_jpeg": "9aff48ca9911360867b0d9229b97945602b949e32097bd225c735719539c7025",
+      "_valid_png": "1d5558607f1fd660e89c7c41ab74a97f3b721b81c2b2de7746fab55118a305d4",
+      "_valid_webp": "8dbd7cff9ffb7ec20b8f25ea0d3b4920d75e5dfc972fcf6bf853d57e6f9285e5",
+      "_validate_materials": "57ae27664e02636ec9f98f341a8a4b818727b74b233b21edc844aae96fb44531",
+      "normalize_glb_json_padding": "124cdf7ac40e9a23ca2fe3b384488f4e0d6829b1a68bb4f7a2e284ab9f891b0b",
+      "validate_mesh_glb": "3bc5853410c8bffe7021e1158d715eb7d4c54340f1b9442c4195927b38fdbd11",
+      "validate_mesh_glb_bytes": "6af95e0842276182227882eb2eb7dacec2eee51a6ee37322200cd511f7133bc0"
+    }
+  },
+  "debt": [
+    {
+      "count": 19,
+      "path": "src/cluster_profiles/glb_validation.py"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "content_identities": {
+    "control/tests/test_lifecycle_core.py": {
+      "<module>": "59597774dc0584dcfdcc3b93664ae7e3eeb0a04d0ed9889b5d345df3aeb4d0c5",
+      "FakeAdapter": "9eb1f1ff5285fd843aa04c66653efc9f5b5e9c52ed3fe3b1faac25706839258e",
+      "FakeAdapter.actions": "542c7ceae6779af8713f0b8032960e46c6b7ef0cd00f7983fef6ab3537652180",
+      "FakeAdapter.adopt": "2396e9391a2dd9a9f35486ec981a6ad4ffd5af9614614dccbb2f0b7121d69746",
+      "FakeAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "FakeAdapter.execute": "cb8cdea938f8867b090c52f1fb91a06e51dde2153506dd3d5213480ede39e3bf",
+      "FakeAdapter.irreversible": "e7562e04665779d56c4dd78c822be60ba9ead76c48b570ed0768217944f40bde",
+      "FakeAdapter.observe": "fa44f4b6f134c6acefbb8bdf10139356ae5f4955d4d89a6572cc11dba8380fe0",
+      "FakeAdapter.retry_not_before": "7fecb846b18104adcc90872eb8072d18231ca87546b2bbd6507414278b30f0be",
+      "FakeAdapter.stop": "e2240a3a8e4d6387702f01fd4f9dd9e2270e20f67da3711fd0bc2a9d305e5b33",
+      "MemoryStore": "5c0b298a4f40d5f19b2203343b84b151d577b9cb587da28170e779af308e1460",
+      "MemoryStore.__init__": "bccada5c0799082520c5743d9364e81634075f359324435ad520630175f343f9",
+      "MemoryStore.due": "7a94f5a50cdb559ef5d12fb3aa26e694810106efd3f263f6bacd89f6be67fd78",
+      "MemoryStore.record_residue": "40046dca10a8bcc2352755bf5b8dcf047601b9db49bce322083fcd68c93ac4c3",
+      "MemoryStore.save": "52fe7b8a9520f9dcf9d695714b11107e6447834dfb98bf12a5c6c1e3af252c42",
+      "_describe": "90f27b91fca9918c519d8d90b7d95e28b91a13380f2141f3a5f523fe83b620df",
+      "_row": "92bbf9f06837061f1890b259ae3d25ed26c4a706b936f5fe0ad19224902a7fc6",
+      "_rows": "dbf1a3fad2f37f748b09176f5d8a7fac68e5a58d2f4f78687cdf06f285bd4899",
+      "_table": "f4f9e58533d3428e08b0eb0331f5367e7e1f53e0b8278337c6156428fcdbf18f",
+      "_tick_until": "0ab54733ce377afc39e7a1d90f41bb212213b16879653bf1c553acc20cba4468",
+      "test_a_cancel_gives_up_with_a_residue_after_the_budget": "f032fb1bd9cf3a0d85a7e3facca45596caf94b89348694ccae7cbeba4f7b89d7",
+      "test_a_cancel_of_never_executed_work_is_immediate_and_repeats_are_harmless": "a9e6cd79f77763df3ac43e6d638a690d3495f21f68d77ec1da7593e1e6405d3c",
+      "test_a_cancel_reaches_a_terminal_state_within_the_stop_budget": "4259c45353499b59b2cbad8ff30d90352268e5e87a7d68cea63288717212fd0a",
+      "test_a_claim_starts_an_attempt_only_for_claimable_work": "ccf39193e9cda3339f75e13675a98c05dda5c215a9c9cfc2ef22438d8d2823dd",
+      "test_a_definite_report_ends_the_row_even_when_a_cancel_is_pending": "f026c57e568dab90fcf55b907bcbdfad7a87b87c7dfb4171eb608a31cfe39580",
+      "test_a_retry_never_starts_before_the_kinds_safety_fence": "afc24ed0a6fd1d7ab73da713d63b85bbc8392fa9b30493a90cd325239f2e7dbe",
+      "test_a_stale_fence_is_dropped_and_the_current_one_is_accepted": "d3487adf0c9c6c53d2e0dfa36ee4d190c15a917c69699e2f06bda6c00266cc9a",
+      "test_a_tick_that_is_not_due_changes_nothing": "ae398a5f2b51f8e16f2e55ab99725c61cdd63ba0cf08357436b26e9932017336",
+      "test_an_executor_failure_is_an_unknown_not_an_exception": "6a5e79163603ed9485cf5af0e8a7b02f8b35aa3b783340ea0337d43a5b7ea46a",
+      "test_an_executor_failure_is_an_unknown_not_an_exception.Broken": "5a35a243d16491ae93e95b1152b781b251a44518a3ff4cdd932e97c742266e7a",
+      "test_an_executor_failure_is_an_unknown_not_an_exception.Broken.observe": "df9a03586b7d00ba074e17274e09d22291a9ddf7447c728d719d4ef9ee2b9b63",
+      "test_an_irreversible_uncertain_effect_is_observed_first": "5d5a374d7443b5a127f3c3b705eb87b35df254ce68acfdeb3788d5f00b2ec21d",
+      "test_an_operator_chooses_among_the_advertised_actions": "37c9e0a96321e85f5483e8b96a88176fca339e8727cc209d336d7a62ffd89f82",
+      "test_an_unadvertised_operator_action_changes_nothing": "a76a43276a5f7dce51f6b3cc88f43f3f66b9a3c6acedea91d5137ec6ed9d34a7",
+      "test_an_unknown_effect_waits_for_an_operator_only_with_an_action": "261fa80aaff11ca7c32d5fc9043562d6ed47c012e534a352aae6b2d38055242a",
+      "test_never_executed_or_idempotent_work_is_always_retried": "4d34048ce81b6e3ee8ad03d78438047393089ad98465f98420f8618269e4de2b",
+      "test_never_needs_operator_without_an_advertised_action": "ba0a2280d26cb8e163a9c62c545772e7afca917e62f0cfb911f80f065cbc2d9d",
+      "test_parked_legacy_rows_are_reevaluated_on_their_first_tick": "650c20a6a1ba8b942ef637a039771aecb51bbdbb069db38520b58aee519e6610",
+      "test_terminal_rows_never_move_and_a_cancel_flag_never_clears": "c903da12519bfd290f0e537ff3c919ce8add565e2a6e3bf542a8edd21763a727",
+      "test_the_reconciler_heals_a_parked_row_and_ignores_unknown_kinds": "f4f2f5cd9ba3fa35ff76ab393425ba8c165c879c29bcc795a7469859dd59f173",
+      "test_the_reconciler_is_disabled_by_default": "f283a15c69887f51b2a5fab83acff3520e84ff30db4ceebc2ef0c5b53256a503",
+      "test_the_reconciler_runs_observations_and_feeds_the_answer_back": "7a7a1639125c5682c5f563aa21ad1215a37c3c1eff5d9ce8753e9527411548f8",
+      "test_transition_is_total_and_keeps_identity": "d69358fdc03bfca74be64b344b40235f118ea6c8b310961b61be6b0aef79f334"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_parked_legacy_rows_are_reevaluated_on_their_first_tick",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_lifecycle_core.py"
+    },
+    {
+      "count": 2,
+      "function": "test_an_unknown_effect_waits_for_an_operator_only_with_an_action",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_lifecycle_core.py"
+    }
+  ]
+}

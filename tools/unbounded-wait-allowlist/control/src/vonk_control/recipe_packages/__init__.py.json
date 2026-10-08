@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "RecipePackageClient._store_package",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/recipe_packages/__init__.py"
+    }
+  ]
+}

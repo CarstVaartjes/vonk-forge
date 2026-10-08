@@ -1,0 +1,56 @@
+{
+  "content_identities": {
+    "agent_protocol/src/vonk_agent_protocol/host_helper.py": {
+      "<module>": "61c45bf4de485074cec785e58aac7a5eb38915c247635626e6c04533f8b40de9",
+      "ConfirmPackageActivationOperation": "43d973cc6df195085f8e62e868e00e5eb2acc77c3c555ef60de2781c4bba09fb",
+      "ContainerRuntimeAction": "8654ecafc1d3bb104d2694eb0af8d2951cdc88ae789e9dadfeceed5daf7daa5c",
+      "ExecuteContainerRuntimeRequestOperation": "ffc466af6209cab3d60283eacb707db54494dc76aece108325978122a1150062",
+      "ExecuteContainerRuntimeRequestOperation.bind_action_authority": "02827d1188e7f3e7f2c5eb7ffb232204d52e6bc28d90f488d029e04ae3ff8cdc",
+      "HostHelperGrantClaims": "1cbc71c75cd8bd85566b8e491ca361952bab81616b1030423e22fae69438331a",
+      "HostHelperGrantClaims.bounded_expiry": "bfade15e63e44a0dbf415b0106326755cc9c50246eba62d35799b25b2a47a2dd",
+      "HostHelperGrantClaims.parse": "7e0461f5d573d757ada51231d7eca52580e1695850a382a52c8d8e86c8d5ac8e",
+      "HostHelperGrantClaims.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
+      "HostHelperSignature": "8d0330e17237b8447f72741f8cb14cebe4316fb72aaf6420b4d544db8dfa6531",
+      "HostHelperSignature.parse": "7fa755a7b20a0e0c7bb0e312a2dbc051c1b818c3f85415b8b11a54f28612c40a",
+      "HostHelperSignature.to_mapping": "3a793ff71a977decb89d8aaa0b407de98e5b91245506efaf9fc8c76e4594a99c",
+      "HostOperationKind": "2e2b19c986ea90dfc9e0371a43961020d19c321c36e6750d0f8c5da4f9f37dbb",
+      "HostRuntimeRequest": "c2860b0272673638576ab1c2779448df27486980ba5b7fcb7672e6b4f1427f5b",
+      "HostRuntimeRequest.bind_runtime_inspection": "af973dfe9e30a493aaf3242d0c9305026504ffda863e1e7a272043fa14a7c725",
+      "InstallVonkDebOperation": "69e940e9cd6854b0442d6bfe4f869804682498c8183c7aefe5c45a9cf8c862de",
+      "RecipeReconciliationIdentity": "bd1cd1ae1b2a490dee9b71d985705da1311e35eb68c8afbfdac4d198d9f191fb",
+      "RecipeRunInspectionRequest": "a3627368a9c2254fa3b8eea6f45b69d8708f572f9804a968d15a51c7c81c04fb",
+      "RestartUnit": "573c8c7157d07e56557519487678a13a33d3c293026ee72400472b42e8782730",
+      "SignedHostHelperGrant": "50cec8531de3029f3c68bc260287d56da983e0bc8dda2e906776c5142fa8b3bf",
+      "SignedHostHelperGrant.parse": "96a6fb3ddd28c2d74f971d0939cbe50db56dcd055dbb5753f7cf10df4b46ec1a",
+      "SignedHostHelperGrant.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
+      "_HostOperation": "b0331b758f7b15a4f4bc50569849b4c1902cca1ca30001080f9c86dfd8d3db3e",
+      "_HostOperation.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
+      "_parse_model": "478f2674fb9ae057a7df2cea40ad0ea3a39265e8b5ad50c79868b3f2d92f4bed",
+      "host_helper_grant_signing_bytes": "755dbc2cfda4d1e7f5f06e8cafe4495090b08e6c36a8773a87f450e41a556056",
+      "parse_host_operation": "475dc3016aeaaa115ba11e84a98ee4eed116dcac8ac44b2a019266b0dbf9dd92"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "HostHelperGrantClaims.to_mapping",
+      "path": "agent_protocol/src/vonk_agent_protocol/host_helper.py",
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "SignedHostHelperGrant.to_mapping",
+      "path": "agent_protocol/src/vonk_agent_protocol/host_helper.py",
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "_HostOperation.to_mapping",
+      "path": "agent_protocol/src/vonk_agent_protocol/host_helper.py",
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    }
+  ]
+}

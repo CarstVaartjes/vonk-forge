@@ -1,0 +1,109 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operator_projection_api.py": {
+      "<module>": "9b169683b706278acf4e21af467c97c93070db1c0ddf439ee4c94efdf929d5eb",
+      "AgentFailureLogProvider": "c6cbe7c2c0980d63192cd11c6992525aae89dd32c85d396691e07198c3300dd7",
+      "AgentFailureLogProvider.__init__": "a682ce9569ad7ead6e6bbd4625deca9bfccad33278781332f45fcb8bb4772ff4",
+      "AgentFailureLogProvider._agent_failure_entries": "629a03a77a83f0514a0cec6327d756aac86b536884d247489fc105e465d5e00a",
+      "AgentFailureLogProvider.list": "27c16ed8c7f9aadd35ce670baebd25ca3e0d4c08f372b4e8a6cd6c2aa2e43e45",
+      "FleetActionResponse": "a4621aa967c43140f8750f96b47b95f4bbdc1ae835caea2378550762b0de0845",
+      "FleetActionResponse._omit_unused_request_key": "60d18520bf08e48fe6606ad0b38c0530b83045a5c0327d7be2f676430e6cbe9c",
+      "FleetEnrollRequest": "0ab14a50318dac745aceadc673298ec383bd7e57d0f864c90754bc0e5c2129f6",
+      "FleetEnrollmentProvider": "e0361f2f93d3f686e97c0f1896f335ea6201e88f3fe9b9273fc8538e29b46f1f",
+      "FleetEnrollmentProvider.create_named": "06a17d55c139907ded669335c5f7214932a103e1767613b25951933e0247002e",
+      "FleetEnrollmentProvider.create_reenrollment": "b315357560ded752d1d19b106280782ff1e85d037466a5d3121b67ebf1ca2c13",
+      "FleetEnrollmentProvider.grant_status": "3b0a38252947b9f7557016134fd8e95e0fedc34c40818434016efb416085bd1b",
+      "FleetEnrollmentProvider.revoke_grant": "8cea7930e84409e418d2d25736cda9ac3ec1018bff85252878aa752936cfcd9f",
+      "FleetEnrollmentProvider.revoke_node": "e554f33e79d23c3e00045947c160f511372782b575345d4bf98a805c2dec91f3",
+      "FleetLockHolder": "07f047958b133aed145cde5cb157b6c0c3fe03a092dcff7fcee56e6b2b319ebc",
+      "FleetLocksResponse": "bb11125a3c60f62578c9bc763ecd73a07c19233cf4f32813fb0ce90330ffab86",
+      "FleetLogEntry": "a999211f3f742ab8e2baf737b5e99b751e9491e735e7571824ed0a8827d42e6a",
+      "FleetLogProvider": "7089a288f89f19bef5f315ca23ac9c6beb644b57ed408d848c9e184981d61800",
+      "FleetLogProvider.list": "baca04831c034b6473f10673bbdcaaae9d28498466855e0c2370add9390181eb",
+      "FleetLogResponse": "608e97b5e7056e1c1ff7ca5290aff088a779309b8ba09e0f7f3ba51b7afff4bc",
+      "FleetOpenTransaction": "55fe35a827b1310c9c392ab44c94820778633e4cbae75061a91a880570d322b9",
+      "FleetOperatorServices": "59a5ccc5050c38645bc841f3752eb8eb0f15b0689e8fbab00182384e24e0e74d",
+      "FleetOperatorServices.__init__": "6477f3b5e6d0196d013209f45d2357b530dd8ff7ebde4dbcd1638b2d6f881ed1",
+      "FleetReenrollRequest": "b828f5ff5d5b899407ba1b27ed97ec08a9d0a75da76c51602283a7926685c493",
+      "FleetRenameRequest": "f2e72589415ee5e7744d16a007fb8c998186168d6483b186e81bb53b065340c2",
+      "FleetUpgradeProvider": "64bdcc4a7c2c70c0435928298ab99bdd439220f8746a99b14d7a54858c55fbe0",
+      "FleetUpgradeProvider.apply": "c742e859712e8d5b1b05d635c25274b6e1ccce8f8d273c8896b8406647a0265a",
+      "FleetUpgradeProvider.current_package": "fd15a22dbb5e6e6fd39863a16e91d678ab703842740cd0cc65e16e2d5a5917b9",
+      "FleetUpgradeProvider.get_request": "af49da963ae3cdaf75695dac0a36fd5c2c2265913e83e3d9dfe838cc42cf2cc3",
+      "FleetUpgradeProvider.preview": "ef3aebc9127792ed63e7bd8135ac735f42c2991c5add8cdfdfd5bdaa81b20df5",
+      "FleetUpgradeRequest": "70a5dfdd71ba1d22ffb4152bbe1524635489b0e197a336fff84933991e4a29d6",
+      "_AgentEnrollmentAdapter": "fdc052a26f49a3268a1ec41c1d3143c4f0c40e4f3edccfd63a18f50c72fff2ef",
+      "_AgentEnrollmentAdapter.__init__": "574a3bb25b4411aad51e31dd6d3bdcfe7a8f41c6ec6183c603ce4afc3871742d",
+      "_AgentEnrollmentAdapter._required": "46870ae836a41085387553b04690c14eb139a658a0295222a92b359027d26642",
+      "_AgentEnrollmentAdapter._response": "9f27d004c26fe62f5190a572df9ea9a16e21208163e8db8f2e1707e19a62b73b",
+      "_AgentEnrollmentAdapter.create_named": "67ea83fe3d523d449e6ca914ec852c6a8ea81db1437c6eb0c7516c4271449fc0",
+      "_AgentEnrollmentAdapter.create_reenrollment": "1e05267154537690a43e9d824762a0bdcf368d21052cd66a2c19814a77081513",
+      "_AgentEnrollmentAdapter.grant_status": "98ed1c53da3a8d00de1fd7de02d267d65ca76cff8ecf5b0408ff3e8cbecf1a60",
+      "_AgentEnrollmentAdapter.revoke_grant": "3dd69e69ceca3f9a1c4efffa9b66f78d7518ad36d31aa395a393a325a3f7b44e",
+      "_AgentEnrollmentAdapter.revoke_node": "d9cec709fc47e0c3734d11b9fcd5b390c1bd495fd66ec31798b6a3c76ea699a8",
+      "_agent_log_source": "b03b77527b4982a82c7d761326dc51e2bc0db7c99c12949a05ecf0092f41a1b5",
+      "_attempt_is_parked": "5c34e2371c67d950f68c34418eec223e1d021ef2f612b2ef6db5a0dd27896f06",
+      "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",
+      "_domain_refusal_detail": "0736b3a999cbaf58971f98a22fe6c04dd5e1ca3ca8948acd0217847c4f6b2120",
+      "_failure_log_entries": "b6957c937df0ece7a7091647199ee1aed04619069d8ab4265981ba674941029d",
+      "_failure_log_entries.add": "b594f12f240b3a1a7f99be306294cd27623d6dfc55cfd755c596fedaed20cdc8",
+      "_lease_clock": "f8a1fedc3d054ddf0be394aa1c10ad274ea88de1d7432af7bc0a7bd4016b45c5",
+      "_node": "3d24ce1ff3d32007f22f17b0589fd8a000b63b1b155c93be7ff574d3b4166f85",
+      "_operator_error": "120eda13feb897e918d3b9351e052f83df24c7dbf289f17ed5aacb65fff3931f",
+      "_phase_start_deadline": "59542ebd709fdad723562e34f25e1d87c1c3d03e07442d020e8ba022d9d38cd2",
+      "_require_mutation": "6964700409889ca511bcf38153dd9699d51cc5a6806a802f4849b967802d6bc6",
+      "build_fleet_operator_services": "1fde27707cf718b5a196a47657349add05758e356eead16ef3910427bb1f1940",
+      "install_operator_projection_routes": "11774396ad5a54ef3a75fb6e019e4f2ce205e1e20e2bd4d2be3154017c717f22",
+      "install_operator_projection_routes.fleet": "b482a7459232d1f723d47bb3b9ddfaa9433a3adbf67bceafc4a3d748fd04a81e",
+      "install_operator_projection_routes.fleet_detail": "b48ebe9072e3e4c56e0712c028b6b28d84481e7427da8ed54a9c5981cb29fe07",
+      "install_operator_projection_routes.fleet_enroll": "db148c3e57ec29e8473db3ac5d807829f6f08da5d6bc0ab235f90bef343082e4",
+      "install_operator_projection_routes.fleet_locks": "15f56bdf4193fbc875599793f56ebc5937e3294d68e0dde0ac79f918788b3c5f",
+      "install_operator_projection_routes.fleet_loginfo": "61c800a28a14bbf6f653994ca927b16a2661ed3a081427a8c19e4c0f46ef13eb",
+      "install_operator_projection_routes.fleet_reenroll": "942b9473d7c8cb6bf532e3293d2fa3f5ab358cb3d5d4cdd72d2e3a2a0e17a55f",
+      "install_operator_projection_routes.fleet_remove": "1d1ccb6528a46c76e76e5020c147ab1ebb05d817c8d98b9f3611386117089141",
+      "install_operator_projection_routes.fleet_rename": "d70c7fda7eaa78ceea88bc1644a78dacd1c194a7a89d151f9975b5de0a9c7c9d",
+      "install_operator_projection_routes.fleet_status": "7c8db1aed2d04e1b08831a8e0e83d1653358f52758aca735fc35a6f1a39ed89f",
+      "install_operator_projection_routes.fleet_upgrade": "7c07abd4fb0e6b9ba6e2c6c9f31bb361f7d637c03c51af63c20ce91d929b20bf",
+      "install_operator_projection_routes.get_enrollment": "3d74f9bf1c8e65c68a5f76ef7d042492b8bb105769cacce11a40d3d18d964a9d",
+      "install_operator_projection_routes.revoke_enrollment": "05c99485eec50554f0ff96080fb096075482a1ee00c92ca8a161af4400f80de7",
+      "install_operator_projection_routes.selected": "9206305a31143209a53999a58d308b26c4e19900290a73e484d3e847687afee1",
+      "install_operator_projection_routes.snapshot": "2f6c9c4f94cbcaf65895f14ddded5e61a50b9c540c0eee857f260c057266facb"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "operator_projection_api.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/operator_projection_api.py",
+          "LibrarySelectorAmbiguous",
+          "_node",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "platform_observation.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/operator_projection_api.py",
+          "ObservationCaptureUnavailable",
+          "install_operator_projection_routes.snapshot",
+          "database-capture",
+          1
+        ]
+      ]
+    }
+  ],
+  "route_guards": [
+    {
+      "catches": [
+        "ObservationCaptureUnavailable"
+      ],
+      "function": "install_operator_projection_routes.fleet_status",
+      "path": "control/src/vonk_control/operator_projection_api.py",
+      "reason": "The owning authenticated read catches a whole-capture observation failure and returns the canonical bounded retryable 503 with Retry-After and no-store. No membership, effect, or durable state is fabricated; the same read re-captures after repair."
+    }
+  ]
+}

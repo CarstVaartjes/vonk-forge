@@ -1,0 +1,272 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_packages/__init__.py": {
+      "<module>": "b3427e5d711d3f184d20a9ab63a29f8daa95be6020c4a1d9b63a7b6713de61da",
+      "RecipePackageClient": "e946aa930ea98cc5f625df68c1f3b71d2e50ce9e00eef2cdda9aa17bc509c6a9",
+      "RecipePackageClient.__init__": "f27f96108fe99a029ec419c228ea0558d73613498d75e9e1d255aeeb4d99e9e7",
+      "RecipePackageClient._asset_redirect": "13c00f5a42bfe4a89f9a30d23ef0ddc84dfd59edca1ed2e3e70144b1d5b4f2f6",
+      "RecipePackageClient._cached_package": "5c0abdd6bacf20b49ec75e07784e8aa1d9afdcba670ce8fd9025c6e914ecfbff",
+      "RecipePackageClient._decode_package": "9898699322d88ebb2b7e88759b6d456f285323d9f06afd2cc504d09cd5656934",
+      "RecipePackageClient._download_library": "56ed449a4fba5fa9d4373ed2b67c709713c582ad6a7d3de659dcf181f91615dc",
+      "RecipePackageClient._fetch_release": "2960dd4d914650b657301c6d3b38c1416a390dd56cc365f864657e8eb52adcbe",
+      "RecipePackageClient._ingest_library": "e7da13db50ecaf672c6969e397c70e9134a18de274cce8aa70f902ff03f51fd4",
+      "RecipePackageClient._materialize_closure": "d61c916d30483148536b4c922ccb00653830278d8d37a3de9d3875b1ccdd4aab",
+      "RecipePackageClient._package_path": "dcd668217db6fdcc332fbb25a2c876931b5714d11503b740637d36debfdd0483",
+      "RecipePackageClient._parse_index": "8702b5019ce2b56ff05716cb3ed66a7939441e59d83b17d412aab0115dc54df8",
+      "RecipePackageClient._persist_index": "667a32116586312a6ca46262a6606ce5bf9814613125f7676e739c8f78f3185c",
+      "RecipePackageClient._persisted_library_digest": "b639f6a0f0131c13f31076ecb6e283a691c75b21bd056232aaac46eaa0d7bbd0",
+      "RecipePackageClient._promote_candidate": "a35ab47d035a372e05ec9c06a2037c3efeff7cc8c4bb9083c1cd44276c30d31f",
+      "RecipePackageClient._read_persisted_snapshot": "10219fff0f23db7dc5a9541e5d8d15710e479c846fd5770f6ce1787edab6a03e",
+      "RecipePackageClient._resolve_release": "0b963dfaeda1b04916482541d68d27898b91e52d91b929d8eae911a9e031b81a",
+      "RecipePackageClient._same_package": "47a6b4fd0acf369762cf3c47a7d444d8714aa91694a6e2ac085fb89a46bb52ea",
+      "RecipePackageClient._store_package": "ac690cf3c62f7413839aad395258a356b400493be4c6314a450de5f27840fd0b",
+      "RecipePackageClient.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
+      "RecipePackageClient.fetch": "cbb38bede4623b4ce3decdd18b7ce3dd18c2454f41746aadb068ba0b6b6e112d",
+      "RecipePackageClient.list": "e71f6b02d8453a5294137893fa7b9d3a275354a1c6fb44a6901158fbc5585873",
+      "RecipePackageClient.prepare": "b8348a01620571ead6a236c274433cf9e775987f023250a4aec5724b2fae0c04",
+      "RecipePackageHandle": "ca3233fb75f05a7781e8ac992a1d7a008649f0003281f5b478dc653b6e4fb4e3",
+      "RecipePackageHandle.model_identities": "2e0740dd7138848b2da1ec33440dfd9972ae4c9f760bdc8e33024f0ede8c9f44",
+      "RecipePackageHandle.recipe_identity": "d85ca395b109aed44948b5a11635e4016d5907be34018b5dd028296dc98266f3",
+      "_asset_label": "7c643c948edd86de4faf5285b7d7c2234c4aef2ea1a9d7d325ac2af2cefde723",
+      "_bind_release": "201421dcc16c19285eb6e3cbb0e108f0f3c6688f4c24b57dbec17aa4b380edce",
+      "_entry_uri": "34afc8c2c43fd23ee2d6bf03518348b67b4b660595de0042b95207b6b5b3d811",
+      "_incompatible_detail": "a534fb492fbaf93a342ebe971e784f60e649ab71771839d19bb6f1638e86e922",
+      "_index_problem": "105949436f48ea07a97c0972e9e3b5cbc216fafa9f5e23425df2f32ef1fb10d3",
+      "_json": "e9283fdc483c3444d8bff9adbb03ba525fdf48e249c58b1beed38061cc7f2c1c",
+      "_library_release": "3a43e7958d13da2e807bc940608d0db05c57a5740d9f18f0cd5f283c8f71c91f",
+      "_persisted_release": "286c9a23d9a17925e3dfeee1ab459705115f992f7d217c9acf3336d9d2fcae6c",
+      "_safe_path": "c623d92687c1a909c4f95b52679f60466585317045bb94cedcbd2c3ecd8614b3",
+      "_sha256": "2b5505cbbd3ed21d6ee3e193095558422545ce41f0f1494b49ba4187254832a0",
+      "_validate_package_paths": "8f7db6ac4f85cd62e8cb6864e358672ce4ab9b4e0237ce8e9836104740969b8d",
+      "load_recipe_package": "3a2b510e079d9d6022aa853d6395d37a8428f70965517e609134ff263ceb6dfc"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "__init__.bookkeeping-debt",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageUnsettled",
+          "RecipePackageClient._download_library",
+          "recipe_package.unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_packages.already-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageUnsettled",
+          "RecipePackageClient._promote_candidate",
+          "recipe_package.cache_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageUnsettled",
+          "load_recipe_package",
+          "recipe_package.unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_packages.bookkeeping-debt",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageUnsettled",
+          "RecipePackageClient._cached_package",
+          "recipe_package.unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageUnsettled",
+          "RecipePackageClient._fetch_release",
+          "recipe_package.unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageUnsettled",
+          "RecipePackageClient._resolve_release",
+          "recipe_package.unavailable",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageUnsettled",
+          "RecipePackageClient.list",
+          "recipe_package.unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_packages.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageRequestInvalid",
+          "RecipePackageClient.fetch",
+          "recipe_package.not_found",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageRequestInvalid",
+          "RecipePackageClient.prepare",
+          "recipe_package.snapshot_changed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_packages.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient.__init__",
+          "recipe_package.release_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient.__init__",
+          "recipe_package.url_insecure",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient.__init__",
+          "recipe_package.url_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._asset_redirect",
+          "recipe_package.response_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._decode_package",
+          "recipe_package.document_incompatible",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._decode_package",
+          "recipe_package.extract_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._decode_package",
+          "recipe_package.package_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._download_library",
+          "recipe_package.response_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._ingest_library",
+          "recipe_package.digest_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._ingest_library",
+          "recipe_package.response_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._ingest_library.read",
+          "recipe_package.response_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._parse_index",
+          "recipe_package.response_invalid",
+          7
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._parse_index",
+          "recipe_package.schema_incompatible",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient._resolve_release",
+          "recipe_package.response_invalid",
+          3
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "RecipePackageClient.fetch",
+          "recipe_package.uri_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "_bind_release",
+          "recipe_package.response_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "_library_release",
+          "recipe_package.response_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "_library_release",
+          "recipe_package.schema_incompatible",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_packages/__init__.py",
+          "RecipePackageError",
+          "load_recipe_package",
+          "recipe_package.digest_mismatch",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_packages/__init__.py"
+    ]
+  }
+}

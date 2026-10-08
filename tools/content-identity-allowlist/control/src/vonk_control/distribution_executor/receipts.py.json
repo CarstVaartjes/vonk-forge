@@ -1,0 +1,11 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distribution_executor/receipts.py": {
+      "_ChildView.progress": "2080a1f42adacfdd081bb36fdc44016cfd5a4537a46471868787d068c6c48958",
+      "_child_receipt": "88edff8ff7e7d8e1cef0b35fc6f9525bf80eecd5ab8013876fee17103b488910",
+      "_evidence_projection": "32e1414057fe560be9cd3c46d0ccd7667d78e1f64895bce73b8c1aaddd33465c",
+      "_phase_receipt": "da3fef88dc994840c9dedfc3e3f66705c7c3a2a6f554f123eb7957e5a9e4fbc2",
+      "_typed_failure": "cc9e487f8ceded968908107806b604c02ff6cb7987d8957b29d6c658b57e3870"
+    }
+  }
+}

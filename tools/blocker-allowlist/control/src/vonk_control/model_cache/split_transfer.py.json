@@ -1,0 +1,120 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/split_transfer.py": {
+      "<module>": "a54c79059264447fb655cb5b8914170efc0f6597d4825a4857fbbbcaa6718339",
+      "SplitTransferMixin": "08a4de562aa39269d6a8c7290d93bb71b7357907c59b00b25f548ea8e5bf04d3",
+      "SplitTransferMixin._append_part": "0fa3f32122b5d9d14109dda0ffd95ae8dceaa8c527c630fbe8adeead00646b02",
+      "SplitTransferMixin._download_artifact": "d3f45c182b8fad43289d36fcc3c8a8d50c7fc36dd9e269c9dd7a3fad6e14c149",
+      "SplitTransferMixin._download_split": "1748de964b1cbba35df712cecdc442554eb4024d37b1f774eb8e7b0ce9681017",
+      "SplitTransferMixin._operation_cancellation_pending": "70f017c5b688799b7e0d971e980c2164f76332ff7dc4443a635f84aa67a7180a",
+      "SplitTransferMixin._partial_owner": "0ad0e72fdd699b245a69b7c49771ae86d63cdc97db5a8c268a5de8ead818394a",
+      "SplitTransferMixin._rehash_prefix": "a9fbd5fa9ce800a1533f2e71e5f64f3e80fdc92c2a43f757a9637389bdc5a88d",
+      "SplitTransferMixin._sample_transfer": "32446a4d52f3b1b604f81b84198d30864a1485390f5b6f1d511397f244577bcb",
+      "SplitTransferMixin._sample_transfer.observe": "76ca8162fd20a799614d5d32e93d5e0b5909c5b173ed66246f79300265d2e295",
+      "SplitTransferMixin._sample_transfer.observe_once": "4ca374b3fe7a0e90df969696072178266db72898957763e39b9c19f27ecfa677",
+      "SplitTransferMixin._sample_transfer.sample": "2d4c168dd35e5b188c1c3342412bec0bf97dec39de7d5a5e8051eabb74539eef",
+      "SplitTransferMixin._transfer_stop": "627e7b3bba37366d47a6231d902eb0a894bb16cba023e7588165b91491f8bb4d",
+      "SplitTransferMixin.memory_footprint": "7bb6e5ffb7b0d5eff91e5ff98b4b1dee0eb1839b275c17658a21bd102f65a01d"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "ModelCacheStorageRefused",
+          "SplitTransferMixin._append_part",
+          "model_cache.digest_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "ModelCacheStorageRefused",
+          "SplitTransferMixin._append_part",
+          "model_cache.source_size_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "ModelCacheStorageRefused",
+          "SplitTransferMixin._append_part",
+          "model_cache.source_truncated",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "ModelCacheStorageRefused",
+          "SplitTransferMixin._download_split",
+          "model_cache.digest_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "ModelCacheStorageRefused",
+          "SplitTransferMixin._rehash_prefix",
+          "model_cache.source_truncated",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "split_transfer.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "OperationInterrupted",
+          "SplitTransferMixin._append_part",
+          "model-download-stopped-partial-files-preserved",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "OperationInterrupted",
+          "SplitTransferMixin._download_artifact",
+          "model-download-was-removed-during-verification",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "OperationInterrupted",
+          "SplitTransferMixin._download_split",
+          "model-download-cancelled-during-assembly",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "OperationInterrupted",
+          "SplitTransferMixin._download_split",
+          "model-download-was-removed-during-assembly",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/split_transfer.py",
+          "OperationInterrupted",
+          "SplitTransferMixin._sample_transfer.observe_once",
+          "model-download-stopped-partial-files-preserved",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "OperationInterrupted"
+      ],
+      "function": "SplitTransferMixin._sample_transfer.observe",
+      "path": "control/src/vonk_control/model_cache/split_transfer.py",
+      "reason": "A stopped transfer hands its typed end to the lifecycle owner after preserving partial bytes. Cancellation and shutdown break the bounded observation immediately; no callback can retain a lease or busy writer after the owner settles it."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/split_transfer.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/split_transfer.py"
+    ]
+  }
+}

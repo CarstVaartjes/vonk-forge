@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/job_run_completion.py": {
+      "<module>": "353e2236d0577f0a555e0a5fa83f93b43adf0041555d837aee367d94e120fd42",
+      "JobRunCompletionMixin": "e97e5fbd5a2192856bc513e7f766b90852c69490e642ed4200ef75fa2c8ff40a",
+      "JobRunCompletionMixin._complete_jobrun_stop_in_session": "9f22692ab7aa612d922cbdec66d08187228151902f54b0644b619a757076a9ce",
+      "JobRunCompletionMixin._complete_jobrun_stop_in_session.unproven": "8cc9d8dbe3d1224e680ee80ffdd6ddc0baa4e48c13fea7086e9112fd4007c79f",
+      "JobRunCompletionMixin._validate_profile_jobrun_stop_child": "38f13012ed6ceb9c0bc82fd075fcc50b1d4d3834aeb6e4985cd4ac47b5b2d60b",
+      "JobRunCompletionMixin._validate_profile_jobrun_stop_child.unproven": "a92305fc5ba4ee116c535a63d45410467a4b8d08d37dced11bf1d09a8942bcda"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/job_run_completion.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/job_run_completion.py"
+    ]
+  }
+}

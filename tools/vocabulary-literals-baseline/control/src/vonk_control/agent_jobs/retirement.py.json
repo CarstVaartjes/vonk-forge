@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/retirement.py": {
+      "_release_retired_owner_in_session": "13270c3269fc5ee6aba6aea13f051815d471a00032921b786b88e7b0f777ad91",
+      "authorize_operator_resume_in_session": "22975c0d810134bb97e3078e5808b2b6bf5ea136947736875deb71a42bfde8b7",
+      "operator_resume_candidates_in_session": "78fa434182f446d1c0413ab91824e1cfc0643c04ac33b8e3b64512269b046b6e",
+      "operator_resume_eligible_operations_in_session": "ca37fee981d0c7a200aaa228d8dac85c7949481f6f205f268ae1c9d7f477a790",
+      "release_owned_reservations_in_session": "c0d0059f91bb3f02228968dd74e45f2424bb00c375bd79cb1365c7faddbdfb39",
+      "retire_exhausted_operations_in_session": "b0ae512a0b449753d74e497cdc6dd5d149cdc39e0fddd4d67474f00c4742c1bb"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_jobs/retirement.py": 6
+  }
+}

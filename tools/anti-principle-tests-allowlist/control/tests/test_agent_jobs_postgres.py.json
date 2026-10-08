@@ -1,0 +1,74 @@
+{
+  "content_identities": {
+    "control/tests/test_agent_jobs_postgres.py": {
+      "<module>": "8ec1fa6fb5d5a13fdcb900bf6cb7143941747957f3158887dce1934834058817",
+      "Clock": "b309e297fe61d09d7ea8f7700bec62fb11959b192b8ddf8a8695fc7bfabfdcde",
+      "Clock.__call__": "368189f15349acc758f890e4948cbab3b016e7494384b3567cd33737f7861d39",
+      "Clock.__init__": "f2039c807e90c8dbd8208f63d4ce2662c55a4a5c6d8b1bc200234f77e118b854",
+      "Clock.advance": "7a411f8a1320ee6e902de88a606a59cd0578b378219c42d166d596127f1e60b8",
+      "RevokingAuthority": "70eef883d94aa712c2decf425d391c265f08599dc214fbd3ef0cb661bb865aa1",
+      "RevokingAuthority.issue_node": "0a3145dfbfd94a579ed2b2630983c4967843fa6a6b13677d04f2d55e9d17d825",
+      "RevokingAuthority.renew_node": "c066c66b4b44f83e3c66a8b7f615cfe77cce0b99f235521af19851ca5a1dbecd",
+      "RevokingAuthority.revocation_bundle": "b6f9e384a81c8b43e4878c0c947d2fea7582ccf0f8a38116029515d69155a3a1",
+      "RevokingAuthority.revoke_node": "ca7e1911e3fbd3040d204c381bc1c5ff2f77070178ed9160575e7134ce624a4b",
+      "parent": "c6ae2afb144acda1fcd186e6911589e09773af26d99b9d73ba0a049ac5741256",
+      "service": "ca5c32310274291b0a7bab5256b3430d54662b014f5e02ce9d8e0e3f6d91d96b",
+      "state": "9fe8468cc595b89dbaa068bca1c33c764a96f7cfcfe899708c7673f2cae7e03f",
+      "test_postgres_boolean_cancel_request_is_named": "0b22d200ddc60dd9a4b588e963e01593f89d05d95a4e11da3f6dd6c179f58c27",
+      "test_postgres_claim_locks_only_operations_without_nullable_join": "5c7824e678bb711e2964dd4d1bd268683850ffb1794b7c4f0124b263631e7f02",
+      "test_postgres_claim_locks_only_operations_without_nullable_join.record": "dfe3003d5a3afb648092fc6c64545d2f70dc0e6fff1a5b25de42adefe4aac0c3",
+      "test_postgres_complete_serializes_expiry_gate_with_identity_lock": "d16ce4781c926a10710741cf74a741f4f522a8e00cf74d407b070e263c8a1cc9",
+      "test_postgres_complete_serializes_expiry_gate_with_identity_lock.pause_after_operation_lock": "60534ae353d8acf59d33ba0e9cac4fb1237c726cad236a3a28c85fd9d82fbcfa",
+      "test_postgres_concurrent_final_completions_aggregate_parent_once": "546dc0d4b0fad7811c4b0ec48088c4df3bc8bb739ec5dc085ca78be7ed4dd9ae",
+      "test_postgres_concurrent_final_completions_aggregate_parent_once.complete": "a552d75aa822060078b4e540002a3c33609726f372c00330b7f5b674b077567a",
+      "test_postgres_concurrent_final_completions_aggregate_parent_once.pause_before_aggregation_reads_siblings": "6097676c8034f6c0e346ce414c7642de1dfb9239b9b1f01e5cc75498fb7c5a74",
+      "test_postgres_enqueue_cannot_race_parent_finalization": "a8a93dd1a4561a9db6edadd680bd33bdfeeb215717504e2b1c712aa10ceef6cf",
+      "test_postgres_enqueue_cannot_race_parent_finalization.enqueue": "75f54b4d6db991a8754b8f181ab2f2a2044de2f70846fcbd0c4d837bcd9bca68",
+      "test_postgres_enqueue_cannot_race_parent_finalization.finish": "f7e42c6de32f59c1336d6aa3163ead2d416438f57cc66513e907330db4bb6c7e",
+      "test_postgres_enqueue_cannot_race_parent_finalization.pause_after_aggregation_read": "1a36cc1c37b2fe6d5331cba429beb9f9491b8882088fbb6b18bce616078789e6",
+      "test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation": "fb6ecaef2d46d329da7423284a1dd43239111c8ed1fffa45164ea956d5e4d2e3",
+      "test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation.enqueue": "db8889e68a11e1cdeadc85bb69e0959a7f2c2cc3edebd43084130557d2b422ec",
+      "test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation.finish": "bb708e536c5b9ef9943a1f4d90fff7351abf02ebce8c1fa01f1dd16fd949b7ff",
+      "test_postgres_enqueue_locks_node_before_completion_and_parent_aggregation.pause_after_enqueue_node_lock": "5f8c8f755598dbbf251834df9a0775aad875e940acff24dd9fe958da69a1f988",
+      "test_postgres_enqueue_rejects_node_outside_parent_targets": "c299e5a3f08168b41cdc289befc2dc6ff4a52490a2760a368a74df8dd3beda3a",
+      "test_postgres_enqueue_rejects_parent_commit_mismatch": "84fe74d17e8b02ac90a03296245c84a58eb7e39e203bde59de05f7d61f158e08",
+      "test_postgres_enqueue_rejects_terminal_parent": "7ec2c5ab23ca0d00819e37a31dd1893d640788baeae40ce3a586fb7ab9ad80da",
+      "test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner": "c4a545e38f35d187a0fdadf064486dfa55e244cd492bf1cddcfb92627ef71dad",
+      "test_postgres_exhausted_exact_retry_rearms_once_and_has_one_claim_winner.claim_from": "5423a53f08572a46cec732e91988beb042b989ca9e18f809fc28c24f8b4855e7",
+      "test_postgres_expired_mutating_operation_schedules_bounded_exact_retry": "1097987e25b2e3d4814717831796c73c6f582b2b5e9e9fb5338b6ce023077649",
+      "test_postgres_new_stop_supersedes_parked_old_retry_without_starvation": "b0d740d9d8918038b75643ff004576b73e63384804ce272c918e7438fe4d0f92",
+      "test_postgres_non_boolean_cancel_flag_does_not_cancel": "eaa672a393b4d5c5d33597b084bf90d0cd804dfb172fdf4cba1da98766389e4d",
+      "test_postgres_restart_receipt_retries_only_exact_safe_operation": "2e7f8b2ab5e146257f6262b3d4292cafe29fce5272fb88dd21c21444614fea56",
+      "test_postgres_restart_receipt_retries_only_exact_safe_operation.restart_receipt": "164f5c5486bbd565791e32028d0bcc3ebcdcd7e834855dd004b14c67e1c49e04",
+      "test_postgres_resume_transition_has_one_concurrent_winner": "714845c38a665a1b7fe486c76e48b3a30a526d73fc43e517765fd144789fef5b",
+      "test_postgres_resume_transition_has_one_concurrent_winner.resume": "242cc81085eb8c4fc6a3f063649cbaa967beddd231c3b1fb8925c002e5eccc0c",
+      "test_postgres_revocation_serializes_agent_work_and_contact": "6fc12b11b792eae438596d10ffca8715197aa00ead43196f340ad60f2533417f",
+      "test_postgres_revocation_serializes_agent_work_and_contact.act": "33bb6f69112b285dd98af850416abc7033396d74d5e9841dba8de29857834a50",
+      "test_postgres_revocation_serializes_agent_work_and_contact.pause_after_node_lock": "248a26922f5e2b1c7f6275214fb72cfe89f5c6de53314cf1cd16f71406ba52a2",
+      "test_postgres_revocation_serializes_agent_work_and_contact.revoke": "5b798559d814c97424cd677de16e0f8ce5332b6ab14ed986560409e1a2576997",
+      "test_postgres_separate_services_cannot_claim_the_same_operation": "2b2fa8dd69f38a80570eb80be1a0d1c8fe1d17642a9a4b8716dc9e53f6a38e3d",
+      "test_postgres_separate_services_cannot_claim_the_same_operation.claim": "9c70ef340584d21896951413b9ce1fb230ef77a096f0d7b43252fc7a7cd41a30",
+      "test_postgres_upgrade_bypasses_unsupported_work_then_resumes_it": "60a560530ddad08e227e736e326349771bbdcfd0e253fd90747229d58e6f7f13"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_postgres_enqueue_cannot_race_parent_finalization",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_agent_jobs_postgres.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_enqueue_rejects_node_outside_parent_targets",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_agent_jobs_postgres.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_restart_receipt_retries_only_exact_safe_operation",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_agent_jobs_postgres.py"
+    }
+  ]
+}

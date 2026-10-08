@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "require_safe_model_path",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent-helper/src/operations/model_paths.rs"
+    }
+  ]
+}

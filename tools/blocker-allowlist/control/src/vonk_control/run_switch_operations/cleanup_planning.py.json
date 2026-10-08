@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/cleanup_planning.py": {
+      "<module>": "7ca561c5f08de2548314e098c034a5998b6427d6fe9af91fd1bfae0f27bc111c",
+      "CleanupPlanningMixin": "7facf9f317bde2598005f0b82277b7a5a5a9819899e0b1d1e4e0248624fe96a6",
+      "CleanupPlanningMixin._preview_cleanup_once": "4e782e7bc8efaace334a3a20a4eee9060066542ceda1f45ba2f313fd9e0c5715"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/cleanup_planning.py",
+          "MissingRecord",
+          "CleanupPlanningMixin._preview_cleanup_once",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/cleanup_planning.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/cleanup_planning.py"
+    ]
+  }
+}

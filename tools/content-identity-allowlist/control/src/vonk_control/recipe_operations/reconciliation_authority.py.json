@@ -1,0 +1,36 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/reconciliation_authority.py": {
+      "<module>": "6bad9c862aae5db248368558025a98fe1e0b3352b1ec39b54c806554bde93b65",
+      "ReconciliationAuthorityMixin._lock_reconciliation_rows_in_session": "cfba0bc0a65fa1e863ae569bf379498d3f87d90b217097b99b18a9308bbae629",
+      "ReconciliationAuthorityMixin._reconciliation_authority_in_session": "6aa3f0b5abed43460d57502887559db339e6c8aa5e3855ec16554534e6457b96",
+      "ReconciliationAuthorityMixin._reconciliation_authority_in_session.blocked": "af0794fb5ec6d41c320568c14baac72779c09e303083bd8a0178367a8cb7a9c7",
+      "ReconciliationAuthorityMixin.preview_reconciliation_authority": "dbdf45351772d18d46181ef6685a75d8ee760c867dcb36ffc6dc6257fbe8fd76",
+      "ReconciliationAuthorityMixin.preview_uninstall": "5e5ed8d7050e21a1d2418afc1a15ecb33e1ebb3c45dc60abf322d505c939836b",
+      "ReconciliationAuthorityMixin.reconciliation_complete": "76e3d518471aff914b0627d8ab6796626a94587c09dcbfff78048e9ad57ccce3"
+    }
+  },
+  "sites": [
+    {
+      "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
+      "function": "ReconciliationAuthorityMixin._lock_reconciliation_rows_in_session",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
+      "function": "ReconciliationAuthorityMixin._reconciliation_authority_in_session",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "mapping.recipe_revision_id != revision.id",
+      "function": "ReconciliationAuthorityMixin._reconciliation_authority_in_session",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/reconciliation_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    }
+  ]
+}

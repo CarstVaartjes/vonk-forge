@@ -1,0 +1,124 @@
+{
+  "content_identities": {
+    "control/tests/test_artifact_job_lifecycle.py": {
+      "<module>": "d6120c22ec50c7d3dbefb439646a45046bbe7e1ad1f46ba5094256b21a76972c",
+      "_adopted": "b7859d96dd76fdffe8df85904cc4752587bde1539d5e087501ec65b925fe7827",
+      "_cancelling": "efca6aeb06e2b20e81e04ec8596c1dd17d59f7c580a1337a0293ab1532fefb83",
+      "_drive": "5d1eab14f4ad40891c54f98e75760924ada5538c6d6f83bcfd363bab47326be8",
+      "_issued_job": "f72ecafa2a793ba27cc574b78dbd88ebb28f837a26d66925be8d75f67404da66",
+      "_issued_job.consume": "1200bebe0ce95d6a83f715376d149848b6746c7b1a0378d4bb178c4dce2752fb",
+      "_write_legacy_wait": "ee93cf46f9ed644332c4548e5907d5ac1d4ae69e16202a84c687a06a73465874",
+      "test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it": "5704075afdb6cbfd6d0338999db65a5c8048329bd671c68d0fa248569ef133bc",
+      "test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled": "7a8e3bb346434574a84b15dbf40dd8f1583aa5121481ab0bf5123c511838b62d",
+      "test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action": "451babfae370aa9a1fab479ae39750fdf8b106632468b0bcf65e346c3e85836e",
+      "test_a_new_job_is_born_preparing_with_no_state": "475147010b08304a3dcd4efa0aba85ec17ceb7be71d4663890a6ee1ff2f2383c",
+      "test_a_restart_in_the_middle_of_a_cancel_is_harmless": "89dbb5be196558bfc59eee311399e9abaffb4cdf03d1ea430fbb11f745d501a5",
+      "test_a_running_job_with_a_live_lease_is_left_alone": "022984c314ae45d7fa2afe39eb221654baefbd378b094997feaa342067a9b012",
+      "test_an_exact_stop_receipt_resolves_a_recorded_residue": "1b945323b56845f9fd9748ffede67a35d223a4d91c54021ed6e283fba426e2df",
+      "test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim": "744604a2a2c8c0091dc943874161805aadc87ec092ef6fc531068d732c431139",
+      "test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim.assert_released": "68ce3a8847bbb0ca8f321e02b5140a171b70115194dcc1cc2dfceaa90968c69c",
+      "test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim.consume": "6e89af5e08f3f14cb0912ef0ae1bd210a6d860b5a5cf65776f3ef7916fda7acb",
+      "test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim.stored_request_key": "418f4cad645f611c5b4b41cc77f1482283d5107e0bf8d6542a56625e75cfa47e",
+      "test_no_stored_job_state_waits_without_an_action": "0224d59ead36f814d4a4393dbf77aee47d77ddcd8c09dc826092ba4fb4c8b85a",
+      "test_rows_written_before_the_rename_read_as_preparation_state_and_cancel": "ce3f06ddf1cf77e95e2521bc869776e808d958f1d543e4273b902f78abe9e65e",
+      "test_stored_jobs_map_onto_the_core": "a51939149b813e75729e3587fb42f98b52fae0eb178ad46c217543106838b8b5",
+      "test_the_job_follows_its_order_without_a_second_state": "df532567cf8ff3958670d2efe4aeecb29e55eaa48502a0952c538b019ace678f",
+      "test_the_startup_adoption_rewrites_old_rows_once": "bd00649ead6aae1cfd21f322ccecac123b919924937574326a367696b88f5877",
+      "test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt": "11fecf3e36144312529bdbcaed87ae0b8dc7c19be27be4a97f0198def36cb7b0",
+      "test_unsubmitted_jobs_have_nothing_to_stop": "da31dd4563b6c156985572a9843b1d22caf216407fb5ffaffd7fc736ad37f1ec",
+      "test_waiting_for_operator_must_advertise_stop": "9974bdcf53a54dd16bd349a0d66bce3ca984cbec511521ec2e32808c33fde2a3"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_waiting_job_without_a_cancel_gets_the_stop_action",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_restart_in_the_middle_of_a_cancel_is_harmless",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_an_exact_stop_receipt_resolves_a_recorded_residue",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_no_stored_job_state_waits_without_an_action",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_rows_written_before_the_rename_read_as_preparation_state_and_cancel",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_rows_written_before_the_rename_read_as_preparation_state_and_cancel",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_the_job_follows_its_order_without_a_second_state",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_unsubmitted_jobs_have_nothing_to_stop",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_artifact_job_lifecycle.py"
+    }
+  ],
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_typed_lease_expiry_does_not_claim_absence_without_exact_stop_receipt",
+      "justification": "Tests that a stored typed lease-expiry failure with no explicit active-scope flag remains unknown and issues only a running exact-target Stop, retaining physical authority until acknowledgement. The fixture deliberately supplies failed stored rows and never proves absence or release; the connected real-producer exact-Stop-to-fresh-admission test separately proves recovery.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 2,
+      "function": "test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim",
+      "justification": "An issued irreversible artifact job has an unobserved effect after lease expiry; replaying it or releasing its reservation would duplicate user work. The connected test retains ownership across Controller restart until the superseding Stop receives the exact old fenced cancellation acknowledgement, then proves same-key Stop replay, SQL hold release, fresh inventory, and fresh same-scope run/job admission with an actual agent claim.",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_artifact_job_lifecycle.py",
+      "reason": "security-edge"
+    }
+  ]
+}

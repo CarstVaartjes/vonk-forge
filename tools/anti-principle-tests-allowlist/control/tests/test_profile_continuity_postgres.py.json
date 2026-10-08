@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_continuity_postgres.py": {
+      "<module>": "f8d8f5c851941543ddea539f9169fba4ca382b22f6cdbfe508ad216f9493ec34",
+      "_SQLCancellationAdapter": "f8d8f5c851941543ddea539f9169fba4ca382b22f6cdbfe508ad216f9493ec34",
+      "_SQLCancellationAdapter.request_superseded_workload_cancellation_in_session": "7cf08a9e5ef7332d257643e4041ab6bad666d5ffe097929b0632d3ac2e51192a",
+      "_assessment_with_promises": "49ec075255f691cc0ed8f6650eec71f2d511d4af7c275f4d16df36d82a176cc7",
+      "test_postgres_new_profile_never_adopts_half_of_a_dual_spark_effect": "16f5f2f7f1728f2ec0212b8915cedd11fa1313d32a616c8ec2947d934711f1c2",
+      "test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cleanup": "0c01e33c7c699f9ac621e34658aefcade42e7ede6863068fe5606b7a3261a019",
+      "test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cleanup.dispatch": "d1f5b91d7134c3155491f2ed99449fc32ca504b0d7ed89108d26bb86b50dd964"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cleanup",
+      "justification": "Tests retaining live authorized adopted work across aggregate failure and releasing only replaced exact effects; the final lost-child observation intentionally preserves adopted authority.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_continuity_postgres.py",
+      "reason": "security-edge"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_safe_bytes",
+      "kind": "loop-without-deadline",
+      "path": "scripts/install-release-publication"
+    },
+    {
+      "count": 1,
+      "function": "_write",
+      "kind": "loop-without-deadline",
+      "path": "scripts/install-release-publication"
+    }
+  ]
+}

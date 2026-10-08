@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/provider_contracts.py": {
+      "<module>": "57ae20a420ba8f5ea7ab96940a169f00a111b2322aa206012040a9c44d8f2e7f",
+      "_GitHubErrorMetadata": "f770b40039fac49717c16f498216f00f833f2fe2d0250fcaad97ebe9f8fa783d",
+      "_GitHubReleaseAssetMetadata": "561e0e9f76579139715a616623eebf1faacf6c5237f00e01dd5c91a13cbbe980",
+      "_GitHubReleaseMetadata": "b9d3a9f5460010e995d645c473eed8bc4350dada77628231e478f813ed1f8263"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/provider_contracts.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/provider_contracts.py"
+    ]
+  }
+}

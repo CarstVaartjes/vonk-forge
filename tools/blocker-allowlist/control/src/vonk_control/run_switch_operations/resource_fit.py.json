@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/resource_fit.py": {
+      "<module>": "5363357dddc1ca1575c21c42f34dd36ca92c0374788247a15d66a2eb80032904",
+      "ResourceFitMixin": "79d77e2d59a2ac07826b3264e1641c2341134b6160e21866fd36e84787ec92ec",
+      "ResourceFitMixin._active_reservation_bytes": "02993ed4395dd639e31b394113feb1865b6052eb3702c19fd232d6aa2522ad9a",
+      "ResourceFitMixin._fit": "61900b393c66830ac438b2b5665d855f08547b4cff6adeb18515c41d63180789"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/resource_fit.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/resource_fit.py"
+    ]
+  }
+}

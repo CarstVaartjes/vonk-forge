@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "StreamGovernor.stream",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/model_cache_streams.py"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_builds/common.py": {
+      "<module>": "71f6cdc7963e612e8a328cd62b44992ff79a58a37fcfcdd1980e143ad9b93052",
+      "RecipeBuildAdmissionBusy": "bd63d0204bba24f612ab17b367d08543af026ee24a0144b9c76072f7da3d6b1c",
+      "RecipeBuildAdmissionBusy.__init__": "90bd65f856fb7024ef68dfa245139c15fb0a63999c0844d7ac7e2569765ebb63",
+      "RecipeBuildError": "623ea2fdfa2c1d80c9f02fa94109271e1863e173f34f07c4397db6fbd3ccc580",
+      "RecipeBuildError.__init__": "3fc69271001b4ea25d07c8f7013ffb9b85e643eb74ebb229333c803cbef059ba",
+      "RecipeBuildInvalid": "67f20c84a9af15faed5c357c993f498633f7cae02fcae28df989cc5a18be9ad4",
+      "RecipeBuildInvalid.__init__": "fb0ab9996d39e1fefc6abe1749e3bb7019af27005c610eda122f8bf48a01a136",
+      "RecipeBuildPlan": "66c1bc554f12ebb628c1029f9659e5f70da052f6c132de8f33d2ea31ebdd9e19",
+      "RecipeBuildRefused": "d6abe043398fbbcee6578906b4321827bc8774dcd553fcc2ba9083497c32ed25",
+      "RecipeBuildRefused.__init__": "0af59a03d29772dc7c6429a77ba385aba93beee028053034b3b2f5b645b0cbd3",
+      "RecipeBuildResolution": "336145f35ddda03d4a774d710f9c5d3eb3fbbc4852fb9266a1cc21897826b0e4",
+      "RecipeBuildResolution.build_input_for_builder": "131cf7af1d9e5af74ed760ccb21d62cc400a66675e3717705cf60d98cca5a6ed",
+      "RecipeBuildResolution.cached": "f842f76c6f6223e59507167e1279a416eb244f9996988b63c606ace0ec2dff55",
+      "RecipeBuildUnknown": "8a7360272c08b5706dea544ff8201553cc53375688f7c1ca318ab56fca10a8d6",
+      "RecipeBuildUnknown.__init__": "c04aac78235e2466bf55d776a4a17b4f42ccb57fe43048ed091f4ce7fe9a0bb9",
+      "RecipeSourcePolicyError": "8fce225ff1a8160d57782c349836e7f8e768a47fe447d7e2d9efd102bf4342ce",
+      "RecipeSourcePolicyError.__init__": "8d9327ff7afc2ea389ff3c64714aa743c31eb2902800e8e43445a49a33ee704c",
+      "SourceBundleRederiver": "20471c78b2e909ebcda97c08137ea77710f01543bc89abc918ca8b3718feab69",
+      "SourceBundleRederiver.__call__": "d59b4c65acb0925b66894f7cdf8cccc6c7b55b2e47398a9bdab825358fb475db",
+      "_available_build_memory": "7d503f5cd08f3263e4d5dd7a514d42756b2b1f5884c98dec45f5d5f041c318b3",
+      "_build_disk_envelope": "69036c413ce694cb477ba9c45e21c63b684cf4d2bc1b75fd78ff04529b48fff1",
+      "_build_disk_reserve": "2a0c0468528b32ed788e81bd6bcf07316990c2f24c503490536485bd0f6dfdf6",
+      "_build_effective_settings": "99b54dccb0485e57d3041581a1c9778fdec6065303993aa2ced6ccc58e397aa5",
+      "_bundle_dockerfile_path": "e0c46e24768ca85837c0d333dfca0494bffa44da8a402e0fcda5fbe73fd37462",
+      "_canonical_build": "1a791ddb5b2b5b0bb1a15ae4b1df6bf774f7fe95595f1e5d5e33278cb84f8d65",
+      "_canonical_build_resources": "d9c424ad597afe89ad2a45f24d08b294133e658172f763e4a5d4bcabb9536e94",
+      "_canonical_model_build_inputs": "2cdf605a1120447b18daa59d16b4190eb30c3bb2912c7875cf3a59b86172e6cf",
+      "_canonical_recipe_document": "919b214003a42633c35d7e45d1f350953a3d6fff2b1f1f6890be6c01d8e23c05",
+      "_declared_image_bytes": "fca54e6ee2b60667e01f28c4f34d3d91257644c0a8bf0327b900cd52aa95a04c",
+      "_digest": "6073c487755ee8fff97be9c815bfb4b393de66792aa9e00a7c279356ccc2cee4",
+      "_has_build_receipt": "a24bd7e531123889316c0bdeb20bf3c89c6ab944b4bb7e9f40185be889dc44bd",
+      "_public_build_network": "3a1416761dc1234017818821db8fe6dc267462c545e76e6eedaf908c2e62f909",
+      "_read_recipe_projection": "5cb0a98d09e66f56835a8ee5ce30d18dfc6a89e51449dfbebac30eeb0fc6c67f",
+      "_reopen_build_attempt": "40a27eacecc9e3837ff642c0c46659092456f974f8fc2e8f285ce608336d3c4d",
+      "_resolved_adapter": "2f15430702fcf65c05ca2d816211d408a1764be915cb9a8f1eec2b57fcb7bef7",
+      "_source_bundle_handle": "3bc0b2a9df42e028411b7cbd7e61f44a2dba3c38b8c3dc522fedb6d05831d691",
+      "_source_policy_document": "d7a6b47c356a47ca395564dbc3e7cfc11a729264d4cfe1757b441c6f98618c51",
+      "_valid_succeeded_receipt": "de221d70ebd442155fbe507560e983b61ce5167a2b8e2e5fafd293b72fcc4fe8",
+      "_validate_builder": "802a3f78fede4fa9bf6236be1da8d356c76f7fd4264f3ad5e92a6628ea6a2d01",
+      "canonical_build": "d98706168907de0d0d071a3f2e085e3d377bb35c1540f3f750f64f19d80c70e1",
+      "derive_build_input_identity": "a838512d59d3626ef8273c1fff389dd870c5bfced5fae871b691979a438efada",
+      "inspect_package_source_policy": "956b1cff1d056a3dcb537faf05f1a8c7d6531a1ccd930dd9437cf2442fb15b01",
+      "rederive_source_bundle_from_closure": "cda69a2cff296f0ea098bd73a23c41e9841e752380fd7a33d935cb9ee995e1ec"
+    }
+  },
+  "debt": [
+    {
+      "count": 22,
+      "path": "control/src/vonk_control/recipe_builds/common.py"
+    }
+  ]
+}

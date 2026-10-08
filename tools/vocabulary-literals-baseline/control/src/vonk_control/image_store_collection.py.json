@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/image_store_collection.py": {
+      "<module>": "547c681eb61c34decd80ebf61bd2a23c10396fa1a8c77f086037a941e97d9905",
+      "ImageStoreCollector": "712beb0eccce5406f3348d4d488e53a4511ddffe09003c95e6ca1cb9b7025908",
+      "ImageStoreCollector.__init__": "52e200ca9cc1a66d892c5fb9fac7df37e9cf67e223900d18892b93b87041df63",
+      "ImageStoreCollector._collect_uploads": "25b3a03284093a340fdaa87a1231b0b4246ec1d5c63ad3cac8e4f99c02d19845",
+      "ImageStoreCollector._evict_damaged_receipt": "fe411f3a9f839dc2ceb061feb0c29c3b00ccef1b166eb60e5c4d879443468a08",
+      "ImageStoreCollector._receipt_addresses": "2c48a25a07bfc81501286b0cd84cceb12329de6ad6bbc26dfbc8e4faaa3d295a",
+      "ImageStoreCollector._referenced_images": "8d07a9665e03264bec394c6419770abc4597c8f6d026f71884084e13184108fd",
+      "ImageStoreCollector._waiting_builds": "95c44430e099a27b924a2738ff6838ded6b0ca26fed77d70a06394be02e7b5e0",
+      "ImageStoreCollector.collect": "6fb3511b8a9c3b9e07f06c216fde2499f42d6c5be5c75ab45462ecc863c4fd73",
+      "ImageStoreCollector.tick": "6874358549533c7252744d7dbff413b7e1dbd1804b489a84c1eca03e0c8f89a5",
+      "_aware": "47943ba2641bbf829747d9b7fb65d824a7528541f1192f5cafdad8cb6e21f5fe",
+      "_log_deferred": "95d2fb37b16e3b508f3cbf3d4809a8de9992d717967b64dcea055c7d904c641e"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/image_store_collection.py": 2
+  }
+}

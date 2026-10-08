@@ -30,6 +30,7 @@ from .coordination_boundaries import (
     scan_coordination_sites,
     scan_source,
 )
+from .registry_storage import write_registry
 
 #: The repository parse is shared setup, not the first test's own time.
 pytestmark = pytest.mark.usefixtures("parsed_repository")
@@ -351,9 +352,9 @@ def test_gate_rejects_a_new_site_and_a_stale_entry() -> None:
 def test_baseline_loader_rejects_an_unexplained_or_unknown_entry(
     tmp_path: Path,
 ) -> None:
-    def write(document: object) -> Path:
+    def write(document: dict) -> Path:
         path = tmp_path / "baseline.json"
-        path.write_text(json.dumps(document), encoding="utf-8")
+        write_registry(path, document)
         return path
 
     entry = {

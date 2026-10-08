@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
+from .registry_storage import write_registry
 from .untyped_mapping_boundaries import (
     Site,
     evaluate_gate,
@@ -98,9 +98,7 @@ def test_permanent_entries_are_keyed_on_function_and_annotation() -> None:
 def test_loader_requires_a_reason(tmp_path: Path) -> None:
     entry = {"path": PATH, "function": "f", "annotation": "x", "count": 1}
     path = tmp_path / "a.json"
-    path.write_text(
-        json.dumps({"schema": 1, "permanent": [entry], "debt": []}), encoding="utf-8"
-    )
+    write_registry(path, {"schema": 1, "permanent": [entry], "debt": []})
     with pytest.raises(ValueError, match="written reason"):
         load_allowlist(path)
 

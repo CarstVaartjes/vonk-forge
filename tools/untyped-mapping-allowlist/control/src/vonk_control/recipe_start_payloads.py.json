@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_start_payloads.py": {
+      "<module>": "f98c8bea0dc91ce58f660d961e6b2f526eeafa924e45567a0d752bcc8d334ee9",
+      "RecipeStartPayloadError": "a22538d8edd39a38b79fbb4bb72291b3177eef0a2c08f6e754beb2933864a6de",
+      "RecipeStartPlacement": "1c899b344030d6cf5052227499ec34de00ddd84e65300d33548a1527d30e585e",
+      "_bind_compiled_execution_plan": "fe5e31d8578dc54b5506feda4466a095bae0b887ac7d7fcc5dd3f3668b39b36b",
+      "build_recipe_start_payload": "315512cfd34f38e3a7f10fcee14881e3c64125a09286e905db4123e2a3d532ba",
+      "validate_distributed_start_timeout_seconds": "89a074bbc3e81519e9eb1ff7d7cc5027eea0460fcd171da084a67f130d581f94"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "control/src/vonk_control/recipe_start_payloads.py"
+    }
+  ]
+}

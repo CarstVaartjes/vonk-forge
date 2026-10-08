@@ -1,0 +1,55 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/stop_planning.py": {
+      "<module>": "f04860ef2caebd7f9c133939b7ada4c0f01e46ac1b80932b1d82a8b42706c344",
+      "StopPlanningMixin": "72d67971fff02d6aaa192728510c29b252db7836a6e2daf9970ee0510f0b76ff",
+      "StopPlanningMixin.preview_cleanup": "4ed6f10877fdcf7f1c48629be3817a0e4833a30795b1ae1d42b51d96a75f64ec",
+      "StopPlanningMixin.preview_profile_stop": "84a1c4b364996f73482fe8eda938c5847eb5d74cbe6dfda424427e0645411aab",
+      "StopPlanningMixin.preview_stop": "382df9cbd2e946a7e64064f4488b1da91045b86ba590a9e07948613c7584aadd"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/stop_planning.py",
+          "MissingRecord",
+          "StopPlanningMixin.preview_stop",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.submit-time",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/stop_planning.py",
+          "RunSwitchRequestInvalid",
+          "StopPlanningMixin.preview_stop",
+          "run-switch.profile_stop_scope_changed",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "StopPlanningMixin.preview_cleanup",
+      "path": "control/src/vonk_control/run_switch_operations/stop_planning.py",
+      "reason": "Cleanup preview retries unknown authority from a fresh read transaction on the bounded admission schedule instead of returning a permanently blocked cleanup plan."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/stop_planning.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/stop_planning.py"
+    ]
+  }
+}

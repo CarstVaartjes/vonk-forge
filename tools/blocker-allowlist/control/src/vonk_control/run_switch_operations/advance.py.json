@@ -1,0 +1,41 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/advance.py": {
+      "<module>": "a215aa62c6d37f85a21d723dbfa32c7bd554e913523382eef004a1dfb0a84546",
+      "AdvanceMixin": "26802e760d35e4777b58361bece4e5ae0cd50f3ffc22655d8ef6738e0c2cea47",
+      "AdvanceMixin._advance": "29de151d436b1834ab2d42572bebaa9dfafbd15d255f1f05d34110c5bb40adc7",
+      "AdvanceMixin._advance.checkpoint_job": "4768cbca5c2b679bda8c5f89cbd49af35a3e82f2e5c086474890a514ba8b50ee",
+      "AdvanceMixin._advance.fail": "c25baf10f1f6245ecd3d6356a0a01ff92b2bba30530d2c924ab992310c0f57ba"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "RecipeBuildAdmissionBusy",
+        "RunSwitchOperationConflict",
+        "RunSwitchRetryLater",
+        "_RunSwitchBuildParentChanged"
+      ],
+      "function": "AdvanceMixin._advance",
+      "path": "control/src/vonk_control/run_switch_operations/advance.py",
+      "reason": "The run-switch advance loop holds the phase for a busy writer, changed build parent or pending evidence, and an unknown outcome from any phase dependency is recorded as a retry with the core's bounded backoff; it enters the same idempotent phase again on its next advance; test_run_switch_lifecycle raises every phase-path conflict and observes the operation retrying."
+    },
+    {
+      "catches": [
+        "RecipeBuildAdmissionBusy",
+        "_RunSwitchBuildParentChanged"
+      ],
+      "function": "AdvanceMixin._advance.checkpoint_job",
+      "path": "control/src/vonk_control/run_switch_operations/advance.py",
+      "reason": "A changed build parent or a busy build admission leaves the checkpoint untaken; every caller returns without writing and the operation enters the same idempotent phase on its next advance."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/advance.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/advance.py"
+    ]
+  }
+}

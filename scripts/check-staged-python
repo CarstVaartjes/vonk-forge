@@ -21,7 +21,7 @@ TYPE_INPUTS = {
     "control/uv.lock",
     "uv.lock",
     "pyrightconfig.json",
-    "tools/pyright-baseline.json",
+    "tools/pyright-baseline",
     "scripts/check-python-types",
     "scripts/check-staged-python",
     "scripts/check-staged-code",
@@ -29,15 +29,28 @@ TYPE_INPUTS = {
 }
 
 
-def main() -> int:
-    staged = subprocess.check_output(
+def _staged_paths_once() -> bytes:
+    return subprocess.check_output(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z"],
         cwd=ROOT,
         timeout=30,
     )
+
+
+def _staged_paths() -> bytes:
+    try:
+        return _staged_paths_once()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return _staged_paths_once()
+
+
+def main() -> int:
+    staged = _staged_paths()
     paths = [os.fsdecode(path) for path in staged.split(b"\0") if path]
     files = [path for path in paths if path.endswith(".py") and (ROOT / path).is_file()]
-    full_types = bool(TYPE_INPUTS.intersection(paths))
+    full_types = bool(TYPE_INPUTS.intersection(paths)) or any(
+        path.startswith("tools/pyright-baseline/") for path in paths
+    )
     if not files and not full_types:
         return 0
     environment = Path(os.environ.get("UV_PROJECT_ENVIRONMENT", "control/.venv"))

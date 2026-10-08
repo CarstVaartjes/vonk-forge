@@ -1,0 +1,25 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/runtime_image_preparation/preparation.py": {
+      "<module>": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091",
+      "RuntimeImagePreparer": "0260a387181f808b371e7ce054a8b1025ac9d9ed6c19cec4891e534fdb066091",
+      "RuntimeImagePreparer.__call__": "623028fdbb49b6b503f2532e8f2e419319ddc2739bbe76696970715c2b0c37b6",
+      "_canonical_recipe": "eac35d6ea02ac912c3d946431c1fa95f9486ef67906e0fd39d778585e983c53e",
+      "_object_mapping": "0e6a072414e4e091d7e20135e909ea5ba4d95a9f607d57df9763601d92a33518",
+      "_prepare_from_build": "24a45debdef4c76612d837b224dcecfe1a939310261baf127e17358ee319b6fb",
+      "_receipt_runtime_identity": "d75295c3f0786d6e263d43c5bbf0579758df172b6c3b141daf66ba1f9d88360d",
+      "_recipe_digest": "777c7fa0aa1ec9c00093ee6e26c87333b3c303df9b1f2a496415117a00ab0697",
+      "_string": "d4a2b392f73c2478f23d739dd10fadc00bd718ec9605871f0b63a146763b0a27",
+      "_timestamp": "76ae5ce281add20e8f0b89d98dc62b77dc824748e3f98bfe4b34863ab8cb6962",
+      "make_runtime_image_receipt_preparer": "bc1d8554ffcf68ac821bfe4bbd9b56f30f0c80701410ab2819840ca590de01be",
+      "make_runtime_image_receipt_preparer.prepare": "7b191902d061461aac674f0d4aa83c9dc606285e39c38f7ebd86aab96e8768b6",
+      "prepare_runtime_image": "7c20094084d6ea074bfddb303f56461420a777dacab2586aeadc003f9efd90ad",
+      "runtime_image_expectations": "db199f316850896cbf30e3f78630f64703d20db85b81d418d677042b5a6513db",
+      "stored_runtime_image_resolver": "c4f53d9e5a45523576d1d177604c5b27a46fbfa430e7e967883ec378132d4efb",
+      "stored_runtime_image_resolver.resolve": "52066d4797e30226c7bc9e0b2cff3f07903dcc2f1d0f3f3f362ef31ac733797f"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/runtime_image_preparation/preparation.py": 1
+  }
+}

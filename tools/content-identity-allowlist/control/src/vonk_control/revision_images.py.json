@@ -1,0 +1,27 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/revision_images.py": {
+      "<module>": "0a03c93916f6ce93b714d43907f9048fdf73b7eea4e6478f71ebac198016c554",
+      "_source_bundle": "bfa76db24a904cfcd5c51efc8631eef4163a121c8832a6c984c56a4846301409",
+      "revision_archives": "0358b9a789dc0a95d5199a10f18ab9e7bbaa8a9049ff54942b78fa82e1636857",
+      "revision_images": "7f7925524993476262d4d133be4c8200f16239c7f9320e867d15adee224d2aaa",
+      "revisions_running_archives": "446327e46fd39f7339a3a7ab00439643cf518dbe2f2a5e3b8acb641fe0248377"
+    }
+  },
+  "sites": [
+    {
+      "expression": "CatalogDocumentRevision.id == RecipeBuild.recipe_revision_id",
+      "function": "revision_images",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/revision_images.py",
+      "reason": "Joins a recipe's build rows to their revision to find the recipe document they belong to: the images a recipe can run are the builds of its document (an editorial successor reuses its predecessor's build by content), not the builds that name one revision id."
+    },
+    {
+      "expression": "CatalogDocumentRevision.id == RecipeBuild.recipe_revision_id",
+      "function": "revisions_running_archives",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/revision_images.py",
+      "reason": "Joins a recipe's build rows to their revision to find the recipe document they belong to: the images a recipe can run are the builds of its document (an editorial successor reuses its predecessor's build by content), not the builds that name one revision id."
+    }
+  ]
+}

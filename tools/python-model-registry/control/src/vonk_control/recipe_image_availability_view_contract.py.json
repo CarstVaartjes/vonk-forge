@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/recipe_image_availability_view_contract.py",
+      "reason": "Typed availability and removal read projections with canonical JSON egress."
+    }
+  ]
+}

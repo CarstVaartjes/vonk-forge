@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -52,7 +53,10 @@ def test_the_recorded_counts_equal_what_the_scanners_find() -> None:
 
 def test_only_lifecycle_raise_and_allowlist_files_need_a_report() -> None:
     module = _module()
-    assert module.is_covered("tools/blocker-allowlist.json")
+    assert module.is_covered("tools/blocker-allowlist")
+    assert module.is_covered(
+        "tools/blocker-allowlist/control/src/vonk_control/step_ca.py.json"
+    )
     assert module.is_covered("control/src/vonk_control/lifecycle/job.py")
     assert module.is_covered("rust/crates/vonk-agent/src/executor/mod.rs")
     assert not module.is_covered("control/src/vonk_control/api.py")
@@ -142,3 +146,23 @@ def test_incomplete_report_is_a_diagnostic_instead_of_a_key_error() -> None:
         "before: writers=5\nafter: writers=5", REAL, REAL, ["scripts/lifecycle-counts"]
     )
     assert len(messages) == 2
+
+
+def test_history_observation_retries_once_and_does_not_poison_a_fresh_read(monkeypatch):
+    module = _module()
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if len(calls) <= 2:
+            raise subprocess.CalledProcessError(1, command)
+        return subprocess.CompletedProcess(command, 0, "observed", "")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    import pytest
+
+    with pytest.raises(subprocess.CalledProcessError):
+        module._git("show", "fixture")
+    assert len(calls) == 2
+    assert module._git("show", "fixture") == "observed"
+    assert len(calls) == 3

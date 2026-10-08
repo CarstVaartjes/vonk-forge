@@ -1,0 +1,44 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/install_admission.py": {
+      "<module>": "bb5db55f5aaae93fb77fce7eb6bd714212fc74ccbc170b5bb7311fcae371749e",
+      "InstallAdmissionBusy.__init__": "06773c0b5d1b17fc87d081e98823aaf7201c9f428ea6a8cd577cefc5a5e34622",
+      "InstallAdmissionService.__init__": "203e548cea4190e7fda1d1f6699f5a8654f158dd10a542e67207e1a95eea11ee",
+      "InstallAdmissionService._accept_install_in_session": "e388999152f28f6574d83caa21e9e4703d8726e46e22c2a2ae24b4f11587f191",
+      "InstallAdmissionService.accept_install": "9f3dd6004aac7a62419b18fa8aea41d2a62f671562f30f367710228fda64f74d",
+      "InstallAdmissionService.accept_install_in_session": "bc9ddca8c43c34e1373dfe0a27213738ccdfc06bd5e2f9ace0683f91cac49888",
+      "InstallAdmissionService.plan_install": "75d13c9c2da7190a3bd516bde1f625aaf24fe8752a61471bec3d796e0e3f94a3",
+      "InstallAdmissionService.refresh_install_receipts": "2727076acaf331cda3ab12d00810ec5db36455ebac965ff3f0328f24c92a2c22",
+      "InstallPlan.compiled_plan_by_node": "68c2399f46ace96781cb36d85c8db601361c444f1f4bec72141ad862ed284ae0",
+      "InstallPreflightExpired.__init__": "1f236edce40ee6c9fdd24a881aac734db98de8c687fa7aefd05821b7154bf941",
+      "_active_recipe_revision": "ed6be39a8184cf89049190fbb13132e5ce38d3716feffcd9031d4b5ad948b804",
+      "_compiled_build_matches": "dfbe7e6906709748246f51f9795f7fc15f9ede06a6a4c7369b3cd3aba92d4681",
+      "_installation_plan_digest": "70be22ea00516eb02fe99d3e22ef078630df97bc106b757a510f7803da88f82c",
+      "_installation_plan_identity": "70e862b98d53479361246b999fa7091f4d51a9743cc5348be6ad4acb76373196",
+      "_is_nonnegative_json_int": "98fcbed4f05b088026e6dd95bcad63b6a95774939422d7e87bd413121edcdefa",
+      "_node_digest_document": "ed7e9dcab2271f14c3e673b47be006567288694f512025d1711601f9c5321dd3",
+      "_node_document": "7421fd3cfbef476392f0ebd9da07d57eecc31adc70eaea581cc688671a7b5c9f",
+      "_primary_model_sha256": "eed49187b523b64ae5809dcc4b342efcf4c55cf91846bf76bf3f7f84dec672b0",
+      "installation_plan_digest_from_stored_document": "85304e801df8c139ba8f9a981e17743eec3b9af07d8a3ccacc7c4f970fd95696",
+      "require_admissible": "a0910be45cdd61bae79f9af65c2ff50b843b21e148b4201de7cc6a8c5e5770aa",
+      "require_same_execution": "6a67bd02b37dbcd6eb5a62be0501be5824bc9593b4bee53a88622f5ece336fed",
+      "require_same_execution.identity": "d89c4edb0e26a931ae3671d1835b07dfc86a4af8d28cffb995e783dfebfbbf57"
+    }
+  },
+  "sites": [
+    {
+      "expression": "CatalogDocumentRevision.id == plan.recipe_revision_id",
+      "function": "InstallAdmissionService._accept_install_in_session",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/install_admission.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeBuild.id == plan.recipe_build_id",
+      "function": "InstallAdmissionService._accept_install_in_session",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/install_admission.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/host_runtime_plan_authority.py": {
+      "<module>": "4e729000f925d7bda71a04f61debc237f7069df8414f83a731a5c7b98befbf3b",
+      "_check_operation_target": "c1578bc05aa58a63d5a107649b1a20b973480193f40c3956012849b15c8f03ef",
+      "_job_run_authority": "02580373dc8538c1e919b1942dc29c4952c676b088d4fda6368a9d1eb4f41106",
+      "_load_run_authority": "97df55a0d62d0af602713d0caeffb1ed66f118bab2d7cff5d98cdc813f6575f8",
+      "_parse_job_run": "5498b307a9b457643c5ab2b4dd99b159cfe16209beee879d2d5feb54cf75e968",
+      "_parse_start": "7498c12c1ce4ce126926b2bcd39f359ddbd9094aa7123f712b8d55c1550a5ac7",
+      "_parse_stop": "97eebddd2051a317c7776c4df66a0601830984ad618c7e4a1710f16e103805af",
+      "_payload_sha256": "845c408d859e394c7a3f24d1d0eb899ac5a9fd89c58666794b994f6110ddb4b3",
+      "_placement": "874036ee1724bf8e00b0d7ed5c4640291f94e0822eb40d4c2f73421499fae71e",
+      "_placement_key": "d23a2ce488086aab37a4b2f46b26f2f765cb751f6c3a965db0f2727c860d3783",
+      "_service_run_authority": "13716f2fccfadc2a723f443bd3d3a9ed121ffd94caf113af1203b46a688f16dc",
+      "_service_stop_authority": "f0ea9265e6e2c29f928d065007f918eb629d0151a6b189df1f47f297cbed944d",
+      "_validate_child_record": "204355c4ebb077863d9eefb239e428798424cd4ffc108ca713381755191af9c0",
+      "_validate_recovery_start_generation": "2156bc87354f5b558913a3e9ad99dad4452ed7fcb6e85e28aa6b4afe5bf2f107",
+      "derive_runtime_plan_binding": "18854fd474b0011885e791cbcc53e118a976255889b1a43460f0a7b1f4de9244"
+    }
+  },
+  "sites": [
+    {
+      "expression": "mapping.recipe_revision_id != installation.recipe_revision_id",
+      "function": "_load_run_authority",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "expression": "request.recipe_revision_id != authority.revision.id",
+      "function": "_job_run_authority",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "expression": "start.recipe_revision_id != authority.revision.id",
+      "function": "_service_run_authority",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "expression": "start.recipe_revision_id != authority.revision.id",
+      "function": "_validate_recovery_start_generation",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "expression": "stop.recipe_revision_id != authority.revision.id",
+      "function": "_service_stop_authority",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "expression": "stored.recipe_revision_id != authority.revision.id",
+      "function": "_service_run_authority",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "expression": "stored.recipe_revision_id != installation.recipe_revision_id",
+      "function": "_load_run_authority",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/host_runtime_plan_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    }
+  ]
+}

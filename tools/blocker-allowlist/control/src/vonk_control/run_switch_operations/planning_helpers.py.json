@@ -1,0 +1,53 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/planning_helpers.py": {
+      "<module>": "c5df9709954694076afb36e966a51008a5cf47075bc5f4f1327a8c669884223c",
+      "_as_reason": "308e15768b5a48bb92c63e2632e58a51da2e1efa0dd81f49507333d1521f5e6b",
+      "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",
+      "_conditional_post_stop_memory_check": "ae3ca2d75e9e2f10c4691b0f99f3e6e727bb824c16292812a3562a0e0c4617b1",
+      "_digest": "4ca7c2c06e32e152e2b698607b5c80a99e403209d502804b78078249cc2c067a",
+      "_inspection_unavailable": "27eb76940960f40ccea825a398be9d0cbb652b07694887eb41fdd4c08ae18c1d",
+      "_is_memory_reservation_kind": "81340be4f77d9c07e03dbe0a6c4f2d4d50e97d9d548514e16a570af312b94049",
+      "_latest_inventory": "5ab15cec45c1e2dce0fd2e9f7119a53bfc7083ae368fc2b7181e9ea5dd5014a0",
+      "_now": "73ad6c0851e12f5060ab59598de37edab48d0862fa60de95ee6ca5e50c1ac16f",
+      "_plan_identity": "9681b91028fcd583ec5656769d39eabf6d1375dcb50b3e8d68a16d33ef811b91",
+      "_refused_retries": "d316e4bcfe8a33dbb09eb33e5ae588a4597909070dd5f35b0e5a747c44e4d517",
+      "_required_int": "ca5c36360797fdbb7138d45aa2f51439d70c550996237355b2341c0fd663fc36",
+      "_resource_evidence_digest": "43d6e55204590e331a363e10475f2dea0a0a0cddbb8535c792287ad814005179",
+      "_resource_reason": "acfd9fa574ee761176da3ecf2752c5c74b6bdadb643003cf4378c5f03a0a7092",
+      "_run_switch_payload": "685d3f7d1454f7bffd63ebcb193f42354fd060bb71352c175635aea34a0119ab",
+      "_settings_view": "8dee859aba479482866394cc4b317a62ad7fc37452ef5887ef84399958b7a323",
+      "_start_parent": "c61e032bd71d337096768d139aa15c8956b4a38eaa969a945a1674ead4b8c10f",
+      "_stored_job_plan": "7ceadef2b782915de0585340ead644715f9715d9b2d82733d570f264ab160b60"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/planning_helpers.py",
+          "InvalidValue",
+          "_now",
+          "run-switch-clock-must-be-timezone-aware",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/planning_helpers.py",
+          "InvalidValue",
+          "_settings_view",
+          "effective-settings-are-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/planning_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/planning_helpers.py"
+    ]
+  }
+}

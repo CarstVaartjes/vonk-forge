@@ -1,0 +1,45 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/pending_admission.py": {
+      "<module>": "820ee3bf75907af6c080d827b96062e03e6036a21f07e2fffecd431d5cd8e564",
+      "FleetProfileService": "e587ac2f4243c24f69fad2f30bd4a8be9b7e9c975e04f29480f33b07e2863ab1",
+      "FleetProfileService._finish_pending_admission": "dabbb855608800bde431fda07e7161e2f1513bf808762b55197f6c8d9877e066",
+      "FleetProfileService._heal_legacy_applications": "b5cf7f5e5a3c5e6e19dc72e27be574de7ec89c22a0d9f39b7c9386c756c9080c",
+      "FleetProfileService._observe_pending_admissions": "71cf81f0fe793082f42584cb61b85aa94c2cc6e16b6b4d7d081d5d81c11e4dd8"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/pending_admission.py",
+          "InvalidType",
+          "FleetProfileService._observe_pending_admissions",
+          "profile-admission-retry-cutoff-is-not-a-string",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "FleetProfileAdmissionBusy",
+        "FleetProfileAdmissionEffectBusy",
+        "FleetProfileAdmissionStorageError"
+      ],
+      "function": "FleetProfileService._observe_pending_admissions",
+      "path": "control/src/vonk_control/fleet_profiles/pending_admission.py",
+      "reason": "A busy or storage-blocked pending admission is deferred with a next attempt and resumed by the following observation pass."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/pending_admission.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/pending_admission.py"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/profile_projection.py": {
+      "<module>": "2e9e0199cbb4c3c4b6a16a5fafb92e47aa8563d8175b80b28a6d9da696453aef",
+      "FleetProfileService": "95abf751b4ff62ec74312e510796ac9734887623a6167c6186bf290148243738",
+      "FleetProfileService._attention_assignment": "b3a2e90922c69905eff427a3977475ea61c210915657ef4330480ba37342d96b",
+      "FleetProfileService._loaded_recipe_update": "2880ba3581ce7f26b5528b064d7cd25157283892e4b69f857cbbbd24a430230f",
+      "FleetProfileService._model_title": "85713157186e0cdfbaa6465cdf2de1f489a784d508f00bb683fac3b56e8f9035",
+      "FleetProfileService._observed_assignment_state": "e532e033e6d7808c7634c2e76fa6afba9e7101d00df0e7925f7449ad6e80fc90",
+      "FleetProfileService._view": "3ab8ebdbd7f4442ed2f4f7b470afb70cebbd6c4f54fe225c5cb783914708c70b"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/profile_projection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/profile_projection.py"
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "entries": [],
+  "note": "Hand-written object shapes in control/web/src. API data is an alias of the generated schema; only UI-only shapes are listed, each with a reason.",
+  "schema": 1
+}

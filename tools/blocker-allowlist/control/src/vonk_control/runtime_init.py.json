@@ -1,0 +1,99 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/runtime_init.py": {
+      "<module>": "b591c7d06a718724264d3f1591a5e22fc59c1c5c825ebe25cfa1d3d0d20580e3",
+      "RuntimeSecretError": "3092c0af89cd8a7ffe3e5b0e621ff63607a8adb0fac5f3955337b4ccd611e682",
+      "SharedRuntimePaths": "60743ff79bf0587cfad36743f8f07637c3bdd95dc0646e57b5389f627e069634",
+      "_directory": "e969fd7bdf2417fadb539463503fa793d7d573e91a8d46bf2c966c93e59e1872",
+      "_disable_copy_on_write": "69057e49d1f8f4521316cc55caf8ee49432ae4d21d7fcd53c344e5e1901c619f",
+      "_disable_copy_on_write_below": "41c618e406c08a39f9290400fdc4c4081634ddefb484764a6b4f09e4c6dae9c9",
+      "_identity": "7ded66e2b3603406db92e18b600e670433654eb6f80586c4f3b10d5307563b05",
+      "_is_null_device": "37bafe525b242107afe8918b8e0aade4e551d20e2d6efda07d471df56b0ccaee",
+      "_read_runtime_file": "53c484d80f3b7fb8cedfdab4522872ee4758bca0ff966911afad507129f51e33",
+      "_stage_optional_private_key": "10787e87a5ee0c39e34f40a918f78bde014dd7887cd898fd32401b8a3f516d87",
+      "prepare_shared_volumes": "a69465b7fdb7af1900e975f66476fb06023f83b8828c1dc03dc6f69ae2c8f593",
+      "read_runtime_secret": "1621d8c2d2bcaa1a42be549bfff4d93b6787d3c4ecb167ebbffbe2dc5a444338",
+      "stage_compose_secrets": "66d2ee93cc089a393e6c2c5cf609ba922aff318b8bd2e76752b9d062107eafb3",
+      "stage_private_key": "1f5535a824c31f23dc4cba6cb1548c8f031f7829f8944115d013b036a12cfae0",
+      "stage_runtime_assets": "0f1e534d333cf1874cefe53f56533214c66152656922110199c53ec031a3f8d3",
+      "stage_runtime_file": "24c294c69a95ee4836acd238a785032735987f992988a8087f2162ec7f242bed"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "runtime_init.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "_directory",
+          "shared-runtime-directory-is-unsafe",
+          3
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "_read_runtime_file",
+          "runtime-file-size-bound-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "_read_runtime_file",
+          "runtime-secret-cannot-be-read",
+          1
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "_read_runtime_file",
+          "runtime-secret-changed-while-read",
+          1
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "_read_runtime_file",
+          "runtime-secret-source-is-unsafe",
+          2
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "_stage_optional_private_key",
+          "optional-runtime-secret-destination-is-unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "_stage_optional_private_key",
+          "optional-runtime-secret-source-is-unsafe",
+          2
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "read_runtime_secret",
+          "runtime-secret-size-bound-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "stage_runtime_assets",
+          "runtime-assets-are-missing-from-the-image",
+          1
+        ],
+        [
+          "control/src/vonk_control/runtime_init.py",
+          "RuntimeSecretError",
+          "stage_runtime_file",
+          "runtime-secret-staging-failed",
+          1
+        ]
+      ]
+    }
+  ]
+}

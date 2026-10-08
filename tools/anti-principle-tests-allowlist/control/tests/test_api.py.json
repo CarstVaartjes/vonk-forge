@@ -1,0 +1,62 @@
+{
+  "content_identities": {
+    "control/tests/test_api.py": {
+      "<module>": "f0dc4de66d6738cc4180fb3c84a8303757cd9c5beb3c40fb083f9964238bff4c",
+      "Clock": "9a441e7b441f1e2ac3c955830cd0a7ae9c28aaa87dd3665b5ec076e5a5d864ea",
+      "Clock.__call__": "cdaca335a9e694f30df4024cd6869bc7ba81faa591088df56a5fce894feb6502",
+      "Enqueued": "6e9af54b80a6318208bb0c06c3a6836d39649ed8cc4cf3f85e2387aad59dbae2",
+      "Jobs": "3b5620eb3a1a6712e6b520d9fbca3f2ca4970291d0f5c8deae06b83b46ac0afd",
+      "Jobs.__init__": "783eb349d551d9d5cd61ead567024a7e64448ef536d5bc23a7e0d3da6389c376",
+      "Jobs._get": "01df0f2d246bb0d30bef0879bef38670676fba330bd72512e0c693508c2e1389",
+      "Jobs.enqueue": "f16db12f8d6f71d602793392196842b83663ecc5964785b5228d9a8bb6320a7a",
+      "_RejectedPlan": "82c216485a04b0137ba9387ea2df87644b06798b96a22e99b36501e62a8976b2",
+      "_browser_client": "9b23f92a740035ae99ce984512a6ba8211be3c6a3e9462c7c83c0763ad3ca5b9",
+      "_client": "06a3fea8b04d56d5f1808d7b0881c11fe805cf6edbeb6f33161126e90753816c",
+      "_opaque": "6328c07a0c03c19ec4dbbce09b86b1f1bdf1f026ff4aa29a6effdc6d76af6b5e",
+      "test_bounded_error_detail_never_echoes_the_rejected_value": "ebebe0ab2a6b075c91c84e54b5871491eff835c9ccfb57cd4d24346cd3e8c5d0",
+      "test_central_api_forbidden_error_has_distinct_safe_code": "1238329cbba1e69b82b06f6c45f9b65cb9267f9cedc0f7b98f37ff7f90bf154d",
+      "test_central_api_http_errors_are_serialized_by_the_declared_models": "59b804c4352e95accb478df172d4ffce9df5682214b7b590955baa3adcefa10c",
+      "test_central_catalog_http_errors_are_serialized_by_catalog_problem": "0cc9044e3d1d3fa8cd0614deccbb0bc8f175dce564f07e838b276dafc94bb465",
+      "test_cookie_authenticated_mutation_requires_matching_csrf": "7f4fb2a95e8f474232afa6d14bf57c05383dc74bce0e24fb2aff2e3ffddc8c30",
+      "test_cookie_authentication_is_unavailable_without_browser_service": "235a675fc7ddd2ae7791b1462c86d5c491be918c07965e6c831648b71e59f2ae",
+      "test_cookie_authentication_resolves_only_through_browser_sessions": "36a75ad0c06f18c61648b213726dc5d4f02bef2d7b5a8d5453b2bccf1608c163",
+      "test_cookie_sessions_reflect_revocation_disablement_and_expiry": "73bfafeec93ec7f0730fb5f03305a8d70492e7d45c92eb2d0f04ca351c6c81ed",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli": "a963a3060b3c06d97385918616b247f1028a174cd5a2f7bcc71e20bf2b80f74a",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli.Projection": "63aacb1ff05029eaf3de06944c060214112b70b45bedd8183a6d3bbef6aa0a77",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli.Projection.read": "f642d56a855c44329a5b9652fb1435daf95d1f713eb01388745d86f180d5a4ea",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli.Response": "a11e615f98968d4f345a9ae8bb5bba71880fdafb4c18ab28f32d87f4cd8d81e4",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli.Response.__enter__": "70e03b017ed3cb2f9eb91d84e20510a9d07fa4d553d24cd47ce59a951586c3d8",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli.Response.__exit__": "fc5abca07ef057a2bd552ba99560474706ba4049f505843ce77779cf7e3c631e",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli.Response.__init__": "3372a20c3ab849216212b0051f55120595870b983910b3e565531c2d2792a0f2",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli.Response.read": "a6e85f1abf888d08c46520c37a4282cc3ad89de5cdf07c5658e5abf99a46c49f",
+      "test_fleet_ambiguity_preserves_every_candidate_through_the_cli.opener": "2ee921358d408715290c49fdd60abd6d54fd9024e9d1845c1cde489b2544d4c1",
+      "test_generic_job_submission_route_is_retired": "cebabcafa3aa62b767b4c0f3e17dd4cef8551ebe8a22d4f94e0741f5d293132d",
+      "test_health_is_public_but_fleet_requires_authentication": "bfabcd7e67457f8df2d05aafb130ece964c6491afdf3f2d8f563570342a782c6",
+      "test_removed_package_and_deployment_routes_are_not_registered": "af3a894efa4c7122b9216dc06974396f11775cb0a709d98da571bd9d40b30a28",
+      "test_request_boundary_admits_large_recipe_images_only_on_exact_put_route": "1f6b282833075882b44d2bd2331b4d6fdad366c9dce7e873cc7cb3cc7869ee20",
+      "test_signed_bearer_authentication_remains_unchanged_and_takes_precedence": "2ed645dbcef389ca32a2a0716bd8e49726a68a2cb149010ac0073f70267ac8ab",
+      "test_unexpected_route_errors_use_bounded_context_and_request_id": "cca697a4b25456ca5984a46e6a9fe833bfc3c030286b7b1e1900435806e3f456",
+      "test_unexpected_route_errors_use_bounded_context_and_request_id.fail": "baf9ea6fd5d8cc4c4b0fe5a5a6bbbcdae155f378c3d888e500007f75eb140809"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_cookie_authentication_resolves_only_through_browser_sessions",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_signed_bearer_authentication_remains_unchanged_and_takes_precedence",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_unexpected_route_errors_use_bounded_context_and_request_id",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_api.py"
+    }
+  ]
+}

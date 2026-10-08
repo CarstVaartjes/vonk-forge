@@ -1,0 +1,13 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/outputs.py": {
+      "validate_outputs": "6b8a5fed2d6d3b2eb5eb5f95c6a6b5e8db4b38286df79a504d8f548b3a6c4932"
+    }
+  },
+  "debt": [
+    {
+      "count": 4,
+      "path": "src/cluster_profiles/qualification_fixtures/outputs.py"
+    }
+  ]
+}

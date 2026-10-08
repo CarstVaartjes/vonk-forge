@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distribution_executor/identity.py": {
+      "<module>": "fd3a830001e1eeb44e19543e3e9f53b35f4c5a9b7186722d92b3070188943e26",
+      "DistributionIdentity": "fd3a830001e1eeb44e19543e3e9f53b35f4c5a9b7186722d92b3070188943e26",
+      "DistributionIdentity.__init__": "26f5c704678602f9f0c62d0d511f6cb04fadcafb69e715cdec1cc23e873254a7",
+      "DistributionIdentity._archive": "a0320e6497a048af80232d73f00068adb92a511f33dc2c046bf68e3f83e39a79",
+      "DistributionIdentity._assignment": "8a5075cd9baa429f4d2344283863bef5d4ddad1f36cc9a04d7b1d126cd90242f",
+      "DistributionIdentity._cached_targets": "236f6bf07d8af9ea08fb48512482b10f9668289238ae7f57bd54c930de0293d7",
+      "DistributionIdentity._digest": "026fc484cd30b8648c047b41bd09118ea764c40fc7fa3db4fed897f60bbe2370",
+      "DistributionIdentity._int": "23f785a8220b8ddd3323d2f4d0bc8373fc842103b85483a1404e3d705a667f9b",
+      "DistributionIdentity._member_state": "3288c4b3387eb6c07616242777670fcce8b8950657a0065fc94b68ca2363bfea",
+      "DistributionIdentity._model_objects": "7f329ff1f097dcc1e51d893ff704ab8cb6d93faf7b3fb2e88cb71db89eaf5fbe",
+      "DistributionIdentity._runtime_identity": "35485d049089a21e72206448dc9e1a76d4f7a9c36084d6a716839bb70f158ae8",
+      "DistributionIdentity._source_runtime_storage": "7a1856b4a9c400c18c454bfcc2db753ae08bfe4b64a58be49b142fa2cb938ac0",
+      "DistributionIdentity._stored_config_digest": "0d2c3d3be5982faa6d0b00977d6026bda88daf46b76efb9343aa875147ce27b6",
+      "DistributionIdentity._target_bytes": "febfe369902c560320c09bf4dea5ccb8b9a67795d86c410462b220abb0e09ada"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/distribution_executor/identity.py"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_api/providers.py": {
+      "<module>": "98c7a4129106b118a226c6e732cca92ae012dd27169ea7f69e47ada3cd87df2e",
+      "_StandaloneJobActivityProjection": "7fb1752a9764ba3ec3ba478db6efcfc900996680e591fcc164893d78e2d24b76",
+      "_StandaloneJobActivityProjection.__init__": "8dd271c5ce85db776a448b4ff103b4eeeb009f0285d10b4ed6ce8e2179641edb",
+      "_StandaloneJobActivityProjection._base_filters": "92afc414877d3bdbc4c8f09b7bf650ecb02be9cc989cc5b7fba622cc14165687",
+      "_StandaloneJobActivityProjection._is_standalone": "780feaf902f879a173c66c9a412ab7f34e42532e904f842db1b1fe94efa4f866",
+      "_StandaloneJobActivityProjection._item": "8fecb886c993bd518401bfc16102903fd3b69871e39ba1176deaaa5d9b23fa4b",
+      "_StandaloneJobActivityProjection._unreadable_item": "0cb583a9ccd23d04a2462edb44af0d6ddc3b81aeb75543749589b27c83db02f8",
+      "_StandaloneJobActivityProjection.get_operation": "dbca75761c4989932670878f36542dce5d2c44f034ca1a8b7a0fb513514a8a23",
+      "_StandaloneJobActivityProjection.list_operations": "df34b3ad4d312b7349f5ccfe3c0ed567fd01ee5128a252521ebf9956ed9ecb78",
+      "_activity_keyset_filter": "a2b70c2acaf139b82e85ebf7c1a8f3b4abc25d1429f40a52be60070d9f0156b7",
+      "_activity_node_ids": "302fa6f2cebc833dd0ba15d2de1dd8db0576d3fad3177e54dbe3f2c400d6e6dd",
+      "_activity_owner_request_id": "71058d373ef9ccdc4083d7d4b281857cf9ab05e5435b6330bcdb7e3664bae291",
+      "_global_get_operation": "33c328f2cd09819e3252647a6c15934e433af37408c217e651bce4c3e83bd2c2",
+      "_global_list_operations": "2ab3dca0b0f1275e4514fa5c157ab1a0c338eb67942da3df488c18bdab22d1ab",
+      "_operation_boundary": "740c0904332ec64e159f66fad0218b301a2f19a562ee16ad8ade515e093392cc",
+      "_text_or_none": "d8ba9de64a95ad94756bec6089f1e8cc4ccd39bb8244973e89a5edd2cb2b3da6",
+      "get_operation_from_providers": "483b54f885d3af91e52e71fcf267c0fa358af074d06fc2b7172b566f9ae308c7",
+      "merge_operation_providers": "d6988453771dc15ece606ca81feabfed8503088c13a7bfadf7770bc76ee0d1cc",
+      "observation_cursors": "c6bc1ef245c9f138b8dc012d09af82feb036bfe9789061a5bed6595fe630b357"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/operation_api/providers.py": 1
+  }
+}

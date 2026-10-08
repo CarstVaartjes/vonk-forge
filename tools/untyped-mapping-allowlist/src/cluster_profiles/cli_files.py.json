@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_files.py": {
+      "<module>": "1895d24ddb726b50de6d82a0139ef2ed7d54d384ded6e6a487db3c731a6af9f2",
+      "PrivateOutput": "1895d24ddb726b50de6d82a0139ef2ed7d54d384ded6e6a487db3c731a6af9f2",
+      "PrivateOutput.__enter__": "70e03b017ed3cb2f9eb91d84e20510a9d07fa4d553d24cd47ce59a951586c3d8",
+      "PrivateOutput.__exit__": "7b3a72039d2e29f51f334144cac5441ec426c03afd6db352cc1df1b9e92ad431",
+      "PrivateOutput.__init__": "58d395f9ee4ce17e0244890d3713e5673ca048697d89d50e47eaaa58786d79aa",
+      "PrivateOutput._owns_path": "e9a3c66bd390d951846da7334dcaf1d2422ddd0ca138c8fd1956ae79850a5496",
+      "PrivateOutput.write": "af6f2d7dab82d6ff3c394ec2a1ab3f91bd6607bb45a4e0b7d87454b093323b3d",
+      "PrivateOutput.write_bytes": "0179300bbfe4741fdd68ac9e1b09eebbd361d0b2c8a8c87a39da9abb2f0ab151",
+      "read_json_document": "8b6f57821b15b354c733bac109273cfaab04b9941a162a260bdd4c5b20ceb4f6",
+      "read_json_document.reject_constant": "e70e90548999b7d12f5a95f87912e089e0fd57faa161575768490f9c5cb5f499",
+      "read_json_document.unique_members": "9611c7715e1ebf2ad93567b6da9b1d7ca64f1322a7a71fbe96e08b49feb8e341",
+      "write_private_document": "b246747788e008b5c4a98ba60c2fd1e7c11da28208a96e64ab0d510409afc2d4"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "src/cluster_profiles/cli_files.py"
+    }
+  ]
+}

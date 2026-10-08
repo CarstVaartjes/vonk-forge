@@ -1,11 +1,12 @@
 """Ratchet direct startup construction: new optional dependencies need a guard."""
 
 import ast
-import json
 from pathlib import Path
 
+from control.tests.registry_storage import read_registry
+
 ROOT = Path(__file__).resolve().parents[1]
-REGISTRY = ROOT / "tools/controller-startup-allowlist.json"
+REGISTRY = ROOT / "tools/controller-startup-allowlist"
 
 
 class DirectConstruction(ast.NodeVisitor):
@@ -41,7 +42,7 @@ class DirectConstruction(ast.NodeVisitor):
 
 
 def test_new_startup_construction_requires_explicit_isolation():
-    for entry in json.loads(REGISTRY.read_text())["boundaries"]:
+    for entry in read_registry(REGISTRY)["boundaries"]:
         tree = ast.parse((ROOT / entry["path"]).read_text())
         if entry["scope"] == "__main__":
             scope = next(node for node in tree.body if isinstance(node, ast.If))

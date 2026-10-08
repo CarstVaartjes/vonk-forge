@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_projection/catalog.py": {
+      "<module>": "d24fcd46f22e2f4d56a433b4d83d7be8582b9bf1e54e90b2661f5d8fb4674572",
+      "_catalog_documents": "6d479d5f703060f7076aa4090f71142a57eee0877d673d4190ac64de0565bbac",
+      "_documents_for_snapshot": "26452018a5cfbfcffc54a6b52705caa13374e88e119430b49c5a816eb9ccf340",
+      "_library_release": "f94b3344781ca6a9a1f45f282d0562f22514d83d6a907d277f7538cff2a7eb21",
+      "_model_projection": "e50023b5b434a5db8bc087414ce91078e5264bd66e412ebe18fea69e1acb4a7e",
+      "_recipe_facet_values": "3ef9b261fcd244524476d723da665301fb08705fc9b3cb17fbd48141e1e70a39",
+      "_recipe_projection": "750702cf09ebf990be512cd592fb2daaf34b5b9c87664a1401f5d9198995eb22"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/library_projection/catalog.py"
+    ]
+  }
+}

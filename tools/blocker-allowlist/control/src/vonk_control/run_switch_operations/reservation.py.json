@@ -1,0 +1,77 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/reservation.py": {
+      "<module>": "d53788ff0d782dc2b409a8664fdea75062a0f62e2c3b99f610dd244741abaa4e",
+      "ReservationMixin": "0e73407db13965f12c711921e2efd5e9521ca96ec51259ed2dffb53e2f98f1e1",
+      "ReservationMixin._apply_plan": "876e1d841155f88562db01ddae0e0922251aa3ad1e1f22bf414f0e30e7a08cce",
+      "ReservationMixin._existing_request_operation": "c0ac361d92fd1b77cc89f0591ddddd3064eb800cabf7cd5eec49d2a80a986a45",
+      "ReservationMixin._refresh_blocked_plan": "18f04209d90895fdb3d86da2b0692e80cbf27b54f1d95bf27b4d69108163c63b",
+      "ReservationMixin.request_superseded_workload_cancellation_in_session": "a1ec93dc3179732333544ca06ea8df73fd7c65b4e94598dc06be8392e1974281"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "runswitch.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/reservation.py",
+          "RunSwitchRequestInvalid",
+          "ReservationMixin._apply_plan",
+          "run-switch.request_key_reused_differently",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/reservation.py",
+          "RunSwitchRequestInvalid",
+          "ReservationMixin._apply_plan",
+          "run-switch.superseded",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/reservation.py",
+          "RunSwitchRequestInvalid",
+          "ReservationMixin._existing_request_operation",
+          "run-switch.request_key_reused_differently",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.submit-time",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/reservation.py",
+          "RunSwitchRequestInvalid",
+          "ReservationMixin._apply_plan",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/reservation.py",
+          "RunSwitchRequestInvalid",
+          "ReservationMixin._apply_plan",
+          "run-switch-target-spark-scope-changed",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "ReservationMixin._refresh_blocked_plan",
+      "path": "control/src/vonk_control/run_switch_operations/reservation.py",
+      "reason": "Unknown build or cleanup evidence retains the accepted plan and records bounded lifecycle backoff; the next worker tick refreshes the same authorized intent when due."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/reservation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/reservation.py"
+    ]
+  }
+}

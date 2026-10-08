@@ -1,0 +1,60 @@
+{
+  "content_identities": {
+    "tests/test_fresh_nas_acceptance.py": {
+      "<module>": "bad601cac8cda77fadf1b4a0b0a1b32e916f77fc0499781dc953d4419c1e5e3d",
+      "_RequestKwargs": "2b78ebe13cec73c2f4ada8a52dd9e08aa73c95ca5fe7a93510e1c3cee7d6bd8c",
+      "_TailscaleStatus": "8d0ae66f250bbcd6650167977a81dd6626628d66fea89cbccaa3f7082239bd6b",
+      "_acceptance_module": "89073b4fd4c39f2d415c53fa53687f6dc23c360185c9da7692398be16ac9aa64",
+      "_script_module": "86d8c90865e89ab7e3a8dc3016291cfc4822e7f20b7cce74a5bcd6fc54624515",
+      "_serve_configuration": "82c825d1c10cb01f07942b9f2eaa98b8625ed73bf414e6c57fd638c697bc8052",
+      "_serve_status": "c45940bec5b7b7aca9bbffd17be238bccb1745e7cbd87721e9d760ef9677c0d8",
+      "_tailscale_status": "0dc21f130d9793b7130a398d391fee13980885bcd5179d2db0738a2e6ffd411a",
+      "test_acceptance_service_override_edits_only_the_bundle_compose": "b56289ef9851a495ff7fe9e9a80cce5aac36260aaa7e07441ba26dbc83eed91c",
+      "test_candidate_overlay_checks_exact_roles_and_pinned_upstream": "fcda1a5268403ae794876f42a6b154c4ba136def4f2d2b9ea69f55e6c1cd3147",
+      "test_canonical_hermes_topology_includes_the_key_provisioner": "3bb3478893ef2d4f07f583623fbdfea51da3cf3520a01f73631b271beb02fcd6",
+      "test_controller_provenance_waits_only_for_missing_completed_worker_loop": "8a192229485052410676b02b34dde4848c1d0263a60df6ba2685e64afe120de7",
+      "test_controller_provenance_waits_only_for_missing_completed_worker_loop.run": "a3b923c2238d4278d48c8a261f4a7808fd7987b0ac3eff24b3a3ab80164f345e",
+      "test_direct_entrypoint_resolves_repository_imports": "ba231ed5ba2f0bc2ecbf8233a6d5107bd343019897f8b99cc1e06f9f243a8151",
+      "test_full_tailscale_acceptance_requires_isolated_disposable_tailnet": "f3d1efbc625a5fa908666ba0484e0816290c1dfb5b4e81242e2392b6eded98ea",
+      "test_generate_bundle_allows_the_installer_to_reuse_its_target": "dfef21a76dde8ac144940790143c01f1c8bb103557d3e5b7f8427d54d4a5a33a",
+      "test_generate_bundle_allows_the_installer_to_reuse_its_target.install": "91f3d195a87b3d961d1c0614207d2e729407cf25d6855e31c374d7b9f3de0e95",
+      "test_host_commands_preserve_only_explicit_docker_connection": "8cf2d16d12734d664efd83c4745ac79bfc54bdd3b7d85e2c28eb0e5398c69fdd",
+      "test_immutable_image_check_distinguishes_versioned_dev_tags": "5aa4491887c02a28190823885460748a04f8e2cc9d58f9266441c52b759765c2",
+      "test_installer_output_detects_permuted_secret_answers": "0355807a6180dab48d678654d9c3ad429cc2c9e781b6ffb77edf5bcb47588e25",
+      "test_nas_bind_address_can_differ_from_the_reachable_address": "eda12202675a14175ae660f132364e4dae4eb953b2ac361666db1abb50bc84d0",
+      "test_nas_responses_answer_only_the_remaining_installer_prompts": "51917fbd672010f0f11f4364760bd7057b4334d949a3fc3f918f1c1baf2a2d88",
+      "test_nas_startup_diagnostics_identify_unhealthy_service_and_redact_secret": "a9be5f34f0c64d12402d1487a7f68175c468ea8a434e292acf8c263c47e63984",
+      "test_no_client_accepts_only_exact_pending_ephemeral_advertisement": "7f72c4a22e0e1bef2c6cdfe10a3101da33fa546238976ec5704b8b25a2633c54",
+      "test_no_client_accepts_only_exact_pending_ephemeral_advertisement.run": "3266d7101b8c277e20a187cc0fb2d5050ee7b7771274df7471baa7a556f85b02",
+      "test_only_hermes_bundle_receives_the_expensive_reference_rollout": "f861ecc277385a9d4ed389f3284977a0d46c226e77e064a7e616dd09cf975781",
+      "test_operator_tailscale_assets_have_no_acceptance_service_or_policy": "35108921842176d46a220be0f1891ed263508ca2c9b11615eea93e6c17c1ed83",
+      "test_routed_service_checks_require_authentication_and_expected_data": "08cbe779809b1e11ce598fb2080e8bcb74f70263216026f69bd11520f89ff44a",
+      "test_routed_service_checks_require_authentication_and_expected_data.request": "d7d667626587697f7f71ddfa2bf5b761e86e4a83ce3178906cb7bda5ae2df0ba",
+      "test_tailnet_client_requirement_is_explicit_and_fail_closed": "0786cd5cbac5e975356a48a52228a0f15952488b72fe49f852122b1ea067f6e0",
+      "test_tailnet_serve_configuration_requires_exact_selected_upstreams": "b48f3d8b977983da48d45fb6790fabe0263254a1c493ffeb8cf3ab7d51c71e05",
+      "test_tailnet_serve_status_requires_the_exact_selected_routes": "fb1b23ea2a803aee42c95d9d3e9fbfbb03dfed20743d12d850312f6ff2bba5db",
+      "test_tailnet_service_mapping_does_not_require_primary_routes": "7106c06cee96a71878a0bf802cbc6ea1219c86219ce66dfd4ac6c30fa3a4ef15",
+      "test_tailnet_service_probe_uses_an_independent_host_client": "aae6e336f617028353b399e30bee3361775fc2b29af7f1f837db97199ef98d73",
+      "test_tailnet_service_probe_uses_an_independent_host_client.probe": "09ce86c49ff7c1c8b5a0a9719a98bf0168ce7a1db1afb9ac7774e3a0ecefb629",
+      "test_tailnet_service_probe_uses_an_independent_host_client.run": "4fc292c33b4dcaad8dc0840c6e22e827f4fd7d3c21900a9ed64e266ecd6d451d",
+      "test_tailnet_service_route_ownership_is_bound_to_the_current_gateway": "0a77b841b0665b1db2fa1d31422cdfbfc843ecbbe406c2f656e9d875093550f3",
+      "test_tailscale_disabled_mode_refuses_credentials_and_gateway_ownership": "64f3fc07c1f5eeded9a0139ae37a373e6ddfe1f9d248b39d83c8c75002dcf53f",
+      "test_tailscale_disabled_ps_contract_rejects_either_owner": "3c9ef868bd5717a7d7559754638998ee6dda55cc0dbe39df0957b8c571f619e6",
+      "test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist": "c1a4ef4db362593a01a055d04aba1304e3db7630111b8ec4e6d2761c1d8bec9a",
+      "test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist.run": "6e41bb6c45cb6a426ee5c1de34e560f554d40a14acbf7a30de633bf365702a9c",
+      "test_tailscale_disabled_service_set_excludes_both_owners": "6ead1e151e2ae7e945e53fd24ed75760d2580acc6c00596bbeccf27600d45ffc",
+      "test_wait_for_tailnet_https_retries_with_service_hostname": "370c72c9d4adc76529b1547e3f3d7b8bc35a71c1ca785d3ebc5341bbaee12ce2",
+      "test_wait_for_tailnet_https_retries_with_service_hostname.request": "085b7525d34cf7623b13a47c49671a34555dffdb210fa054986753a8926b000d",
+      "test_wait_for_tailnet_services_polls_until_all_are_visible": "eb53857c0c18946c913a11f4853976642f998735a93c1eac1dd23fe8f7ed87af",
+      "test_wait_for_tailnet_services_polls_until_all_are_visible.resolve": "91382bdfa0df5c4745ebbfba43842f7f7ee2f7bda8d96d83c719b3477a7f67d2"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_tailnet_service_route_ownership_is_bound_to_the_current_gateway",
+      "kind": "ending-without-fresh-request",
+      "path": "tests/test_fresh_nas_acceptance.py"
+    }
+  ]
+}

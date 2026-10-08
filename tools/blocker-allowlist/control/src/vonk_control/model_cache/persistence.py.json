@@ -1,0 +1,47 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/persistence.py": {
+      "_cache_failure": "e989099155028c658bb7f23aa560dc2072ad1a08e68f49ca2476920a28fe5298",
+      "_derived_result": "80d57bd0663b8a3ee17f591ad93b56dfe14ea7d4d25468e7e43690f20e221735",
+      "_fresh_progress": "116f9fea77e0530ba419af5f91bae669083838132dfe5341b51c5d9aa3760b98",
+      "_manifest_of": "13d08ea62ca4c366db7f04d3328e3fe5b2b521a1a8b2bbf0f6debf56f998e0c7",
+      "_model_removal_intent_digest": "00546c387f85a47ffec8e8e114fd8bce1f93869fd6668cb6e0e431715949b4f5",
+      "_operation_cancellation": "d4e55b3ee7880a919355a36f90659f83dd21c5e9cafa0d09dc3df9de78836147",
+      "_operation_payload": "8eacb42d27ea2368fd5d716db280da91517b686f67749ca75ce17ca94a29d4ed",
+      "_operation_progress": "b78a310f699d7c706f278fd9722d6bcd0d8a833fc0447eced5874621f4b4bf4b",
+      "_operation_removal": "f31882c26921e22b5fe28a2d5d9d9781ff3019a0fe433176e0669e4b2df523f1",
+      "_parse_operation_envelope": "87864274212284d1e788efa7adf34b38ce8b1b165c5d5b3aa7af9686b433325d",
+      "_read_manifest_document": "7032b7768f597efbe3b7f439b010ef13bf09b00ea3dc66e2f5e565abc6209d59",
+      "_read_operation_payload": "f946751ed5dc093af247aa373a20825228058d01c86ebf666a01a944c4c43467",
+      "_read_operation_progress": "942e1dbcb25a9b6d0e8b207d39f7b7b978fcf4d3c88ee43d7a2f734c588d65e0",
+      "_rebuild_operation_payload": "91d0ea04307f793797b0965da135b1cc1123067a6deeb81dbe74665b97f17ffb",
+      "_removal_checkpoint": "22538083b3e268d3ec9a5cd795b1b05317f7b4fba7729fecda5e4b933947ad47",
+      "_store_operation_payload": "923bba1b94b58b15204fe288d45879206474321a3e2a8fc4bf0880f4807b0ba8",
+      "_updated": "091903a5e99843da4df22300edf053fc69093d0c9948f7789c077c6f62475695",
+      "_wait_blockers": "bb4d7d2dafa2f13708d99d5fdfb37b401dce036fe34d2cb7af2738ae17b01633",
+      "_write_operation_payload": "b1fa15b48fe4fd030971f7b0c0695bf12b4791380a643c7a6f6db4e09c3555d3"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.request-shape",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/persistence.py",
+          "ModelCacheStorageInvalid",
+          "_write_operation_payload",
+          "model_cache.payload_invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/persistence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/persistence.py"
+    ]
+  }
+}

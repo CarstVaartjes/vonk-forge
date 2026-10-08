@@ -1,0 +1,54 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/supersession.py": {
+      "<module>": "9e0189c6105b079d7018a85663a606e0aa9d098cdd5d590400403e77c54729ed",
+      "SupersessionMixin": "43dc051b92f25ca6b8e06183c28af4ad4c10dc441a9193dcd6d637b227ec08f9",
+      "SupersessionMixin.assess_superseded_issued": "3f3aa0531f4377fb390f8266e231d1b65a2396e828f9900a4258d4703f46e00e",
+      "SupersessionMixin.assess_superseded_unissued": "3c3d2320d7d47d975eef576bebfef543477462e66ad5c288b45e63b8cd48fd7d",
+      "SupersessionMixin.reconcile_superseded_unissued": "6505a8ed271a88c3e2ca0c48600f39ce057c6b62c2fba09c4d33aed70385e956"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/supersession.py",
+          "RecipeRequestInvalid",
+          "SupersessionMixin.assess_superseded_issued",
+          "workload-intent-ordinal-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/supersession.py",
+          "RecipeRequestInvalid",
+          "SupersessionMixin.assess_superseded_issued",
+          "workload-intent-was-superseded",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/supersession.py",
+          "RecipeRequestInvalid",
+          "SupersessionMixin.reconcile_superseded_unissued",
+          "workload-intent-ordinal-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/supersession.py",
+          "RecipeRequestInvalid",
+          "SupersessionMixin.reconcile_superseded_unissued",
+          "workload-intent-was-superseded",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/supersession.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/supersession.py"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "DistributionService.authorize",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/distribution.py"
+    },
+    {
+      "count": 1,
+      "function": "DistributionService.locate_object",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/distribution.py"
+    }
+  ]
+}

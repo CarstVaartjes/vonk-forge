@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/download_admission.py": {
+      "<module>": "419d369b3ea2f30c1ab14e4dde7e9cfa67ee37c786916591b69bf78566cce7f8",
+      "DownloadAdmissionMixin": "42d2f0528aff6ca6602b621873ccb1364280ea01476bf742e5ffa7912fc09f16",
+      "DownloadAdmissionMixin._download_preview_for_manifest": "8f33bf91d375f72680b93c3610774005230aa981f94ffda7e0dd2f42c78dc3c9",
+      "DownloadAdmissionMixin._download_replay": "cc8abf78d195dd0ffa5fc04dd8401c9a0d269bd0005132d3ec8c5db61b40a906",
+      "DownloadAdmissionMixin._resolve_requested_manifest": "aff5e082c0e6038ff133974d1b7a4fa170f4f1381c048d456f539e0a08779808",
+      "DownloadAdmissionMixin.download_preview": "227609d9216aa7d8d1aa50d8d51a51e43164a9c4741bcb746d889f43241413ac",
+      "DownloadAdmissionMixin.start_download": "0eed79bd4c8bae7749d6b4f6d893d94f5a46e8e45345a0502a7d655e6945c9b4"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/model_cache/download_admission.py": 1
+  }
+}

@@ -1,0 +1,195 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/download.py": {
+      "<module>": "1d1b03fe114494d7eb9a1107123f145ff0fe9f80636bd90af1075ec29afdd450",
+      "DownloadMixin": "077696289a21959cae73281f13431dad98c7bcb9e95d0742b4a38b3ac078fa79",
+      "DownloadMixin._complete_download": "be491fc7d3c3bcb3309daba7b145c528c0cd65281899f14cf07d9ce3fda9e3bf",
+      "DownloadMixin._download_parallel_ranges": "7bb754973522c0b64643c84fa922d674f4a7a328b6a1c0585af68bcfaf8e4f83",
+      "DownloadMixin._download_sequential": "b5cf1beaa60a8b3d799dc488da3efeaceec7865728c9b01aa21e89256bf7bb76",
+      "DownloadMixin._open_source": "fc2f99dd8aaac4a53a9d1c8a4998fe0be13a3ca400d08d9d7aeb3d2fec2f84b2",
+      "DownloadMixin._publication_allowed": "99d0c006addc8a52a5d1925adbac6c083a2528d0462f8844bda888c05fa7a621",
+      "DownloadMixin._reference_unknown": "bf576b55f93ed789f3ecb7a424fce48d91c1259d6b812b6938d85d07a5b97518",
+      "DownloadMixin._require_model_sets_open": "88eef9f677fb187af48d2ef3f13f33f90bef131402f4372b2e8909f3ee1c370c",
+      "DownloadMixin._require_transfer_running": "d3693dca5163956729db3e68661a35d6ae095c2558ca57cf8b6daafd0999a246",
+      "DownloadMixin._stream_gate": "d8d592951cc4b693bbcb5c693f36eb908cb8e57c4cd620f8b373ee1fc0a6afc1",
+      "DownloadMixin._validate_http_download": "773f47e5e15c277b46dbe7e9ea0f7827aae23c78c1f5042b6a2037b22c3a924a"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "download.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageUnknown",
+          "DownloadMixin._download_parallel_ranges",
+          "model_cache.source_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageUnknown",
+          "DownloadMixin._download_sequential",
+          "model_cache.source_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageUnknown",
+          "DownloadMixin._open_source",
+          "model_cache.source_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "OperationInterrupted",
+          "DownloadMixin._complete_download",
+          "model-download-cancelled-during-verification",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "OperationInterrupted",
+          "DownloadMixin._complete_download",
+          "model-download-stopped-partial-files-preserved",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "OperationInterrupted",
+          "DownloadMixin._complete_download",
+          "model-download-was-removed-during-verification",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "OperationInterrupted",
+          "DownloadMixin._download_sequential",
+          "download-interrupted-at-a-durable-checkpoint",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "OperationInterrupted",
+          "DownloadMixin._require_transfer_running",
+          "model-download-stopped-partial-files-preserved",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "_ArtifactWriterBusy",
+          "DownloadMixin._publication_allowed",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.artifact-identity",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._open_source",
+          "model_cache.source_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._validate_http_download",
+          "model_cache.source_invalid",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "model.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._complete_download",
+          "model_cache.digest_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._download_parallel_ranges",
+          "model_cache.redirect_forbidden",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._download_sequential",
+          "model_cache.source_size_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._download_sequential",
+          "model_cache.source_truncated",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._open_source",
+          "model_cache.range_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._open_source",
+          "model_cache.redirect_forbidden",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._open_source",
+          "model_cache.source_size_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._open_source",
+          "model_cache.source_untrusted",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheStorageRefused",
+          "DownloadMixin._validate_http_download",
+          "model_cache.source_untrusted",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "removal.local-observation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/download.py",
+          "ModelCacheConflictUnknown",
+          "DownloadMixin._reference_unknown",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/download.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/download.py"
+    ]
+  }
+}

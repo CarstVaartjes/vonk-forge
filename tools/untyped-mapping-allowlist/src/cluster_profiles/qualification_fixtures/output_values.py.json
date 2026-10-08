@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/output_values.py": {
+      "_assert_number_range": "944f1e0f2bf867f992b80469296ef19dcf5f8e346f6725e03ca7eeceaec0fde0",
+      "_assert_required_keys": "1897d97c18e5c09a9b5cf44cd6af674e8b018b2306f56e1c7463319995e4fb9e",
+      "_parse_fraction": "b5b7cc2e579bdcfd4fa64c318d4e081607683897365dbad9d416d29240d90a4a",
+      "_parse_json_object": "be528ce7813b1d0b8d0972c98074a7b33b99ab59885d31685a8cd28567317241"
+    }
+  },
+  "debt": [
+    {
+      "count": 5,
+      "path": "src/cluster_profiles/qualification_fixtures/output_values.py"
+    }
+  ]
+}

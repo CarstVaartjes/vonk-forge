@@ -1,0 +1,273 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distribution.py": {
+      "<module>": "f2a084030b92bc396ab446c275b3d528dcb87f06b53b14fbcc6e159ef43a4877",
+      "CompositeObjectSource": "775a7997a0fb17c014b5f5d38a80cfb72b46f8c5c062f668a3d1f297a59ac518",
+      "CompositeObjectSource.__init__": "0a1e6acc9c994ab8477d2b2f5f098a655a2f46dd513139efd34871018af07fca",
+      "CompositeObjectSource.open_object": "f6efb227e5241a14f4aefc439886494631673cb1f883edae63d6b9265dde5f51",
+      "CompositeObjectSource.verified_model_objects_for_set": "889169ab58460535e040a47f99989f9c2449d94f4cf2873870417da773b698b1",
+      "CompositeObjectSource.verify_artifact_set": "f165c3dbc3eaaf9fe26ca912cee2295c14a7e397761ffdfa98c82fc4cb3d8792",
+      "CompositeObjectSource.verify_runtime_image": "763532bbe7c6c0e09054193d4ed136f511c625af0047dd1beb44ab3da1fd1b7d",
+      "DistributionError": "75ad18fa0293f0e4930136d8ca0273e4ca5236718f40198bbd310240c33e44f5",
+      "DistributionError.__init__": "c58da4fea52607536a83acc163cbfbf81e53311ca94511e38a3290a53170791b",
+      "DistributionInputError": "d7099a520afa1889ee8f7aacae7c18b92e120bb45ff8851e76956ffbd783add5",
+      "DistributionInputError.__init__": "546146a4cd33cdb9e526fd672b7477e8c5850872818efd12c901fb33a75571f1",
+      "DistributionIntegrityError": "791565ebe1aa03e7073e768f9db10145c6d3c7ada1df6d4d6aead85bb7d6a290",
+      "DistributionIntegrityError.__init__": "6d2e6ccc82134ae881ef3e4773c5a29d222b461bb89c837e428beabf684b4282",
+      "DistributionRefused": "3ac07d2926458ec3486e62d6bbb201fe043b8af34dc254aa36446984ed0722da",
+      "DistributionRefused.__init__": "69cb7d56af0fedb7293d7194b90312aa485b13a4b47459e4f68a3f6d22c47779",
+      "DistributionService": "2f56f0978ce947185e3a4beb4a23bf98daf490e83625b9d07699fef6585cb708",
+      "DistributionService.__init__": "8896ae50844172f1de6745dddf2108a6855fdd9417eaf4e44c5549a130599dd9",
+      "DistributionService._authorize_uncached": "a47b6c307cea275c4a6ebbfd28ec912fda60dbc629402ab56eef91eabde1f430",
+      "DistributionService._from_row": "82876d0778eabb9510e565cfe60616bb8ddd39d385056f107105a440e30faa45",
+      "DistributionService._register_row": "cf29bb549deed58623b996d7ab0cf06eded4c65fd16dba18775617660615744e",
+      "DistributionService.attach_sessions": "ce7416c53ea1b730694d0026a652eca7b8afb551dc9740f1d1ff0dd16af0523b",
+      "DistributionService.authorize": "73538bd0b15b782ef8aa005d99b4f13b68b3689b5b4cce819c13b646e4480f43",
+      "DistributionService.locate_object": "b4d473a2a0cb304610529a018010a4e72fde24039541f2ff1f7d2c3bc820e983",
+      "DistributionService.open_object": "94b1c84441a23dff917206d55139d4211149850f8794b2c5c1b5e5508444631c",
+      "DistributionService.register": "42781085f4bbce824115e0be82e8d0c94dc2137042e3c7872e6145723e829149",
+      "DistributionService.revoke": "3f7810ef9d529c98ee8f005ff712e61bd0a210e281c98177e8f4673067a41976",
+      "DistributionUnknown": "c7a6580f575d38fe5ac5f505d59372a5fc7ab08c91846900442a145824ed53f0",
+      "DistributionUnknown.__init__": "fce40a5b3a67eb42d9ccf97811bebc9021c11cb217d5a2e1c692d7e9a66726a0",
+      "FilesystemObjectSource": "cbe10e777bc324ecea9af68800b7000206f17c2582f314f4aac13c70a5c9c9e7",
+      "FilesystemObjectSource.__init__": "da41958c452818ab10f93ca2025010a0d3cad8899db0080dfd0cb61707aca934",
+      "FilesystemObjectSource.open_object": "07b4a4adbb969c102fc4119683c190c677e233d9f7d824264f7a282d0f804726",
+      "FilesystemObjectSource.verify_artifact_set": "32daf55b23395efb9d038adceb4fc5c679cff044f0521e4823901f53a67d27a7",
+      "FilesystemObjectSource.verify_runtime_image": "d1e797c0fd24329c4c79b5f9b14ad6d658cb5385a9fb7bb253de1d89393594f8",
+      "MemoryObjectSource": "442b048fad4740e7cb07fdefc2f9b83863583c27f2109874c39e81900199733c",
+      "MemoryObjectSource.__init__": "df2292de588cd62f1430b9714f0348cf440067621e323c1c8717883e888c9aa8",
+      "MemoryObjectSource.open_object": "ae82bdca56361c673c5d4e6f98cab3fc1bed81db8948a104838245637ac876ca",
+      "MemoryObjectSource.put": "a61edf9e3506812d69964bf5f74aebf89f0687e63cf74a2d08e0d337c26db30d",
+      "MemoryObjectSource.register_artifact_set": "a5dd0afa2d1192f597b1b1135e91c11072794693077265521a5a1bfa4961038a",
+      "MemoryObjectSource.register_runtime_image": "e90d6a583c62b8afbd658e1c38602ae3c308c2ef4c11e1aaf38110dde605a24a",
+      "MemoryObjectSource.verify_artifact_set": "2ebd706cd0cc75040aedb54cdac727f726b691dff8b063515b38eee2270f581d",
+      "MemoryObjectSource.verify_runtime_image": "d1e797c0fd24329c4c79b5f9b14ad6d658cb5385a9fb7bb253de1d89393594f8",
+      "ModelCacheObjectSource": "4914e5e1660066f80f1f004d6f7b78b0dcc35d9adabe7cd16252368443db50d4",
+      "ModelCacheObjectSource.__init__": "68d58bb8dd00bb6e56e1996cc40388685c17a2788a1da7459a07af82be636f3a",
+      "ModelCacheObjectSource._describe": "298bcfdfaa0ad14d5f24bf318a1a2abffc43b49db53dfd393ccb0f884b40cb71",
+      "ModelCacheObjectSource._from_cache_service": "7f85755506535e3f6871e536bbe93a7cf84f34cf1a84b67103c3ef8083202f39",
+      "ModelCacheObjectSource._load_manifest": "74d1af8db119dff90ee503cff98ad1659841fb60d21c0b769c59328b26dea3ee",
+      "ModelCacheObjectSource._open_cache_object": "0e5b6ac1e4ffa3e9c7d78b5ce23ff98f4531c8a137fe364ba1cceab6446a818a",
+      "ModelCacheObjectSource.from_service": "31d55ae58c88cc6957e991b4f92c9c5ac133ad686af7045c2d64e58b6659f193",
+      "ModelCacheObjectSource.objects_for_set": "807396e70f8ae961a0a0563ecbf8cf11c7eb3baf97f7cc6f454252e8c469f7e7",
+      "ModelCacheObjectSource.open_object": "691db78a193e01710d023297452b20b9de845739096c714c6d667bd6dfe6039e",
+      "ModelCacheObjectSource.verified_model_objects_for_set": "0a7cc3ba0372d45ebf66307fd622d029ab17e8cf8af1bd81ea6683730a0668b0",
+      "ModelCacheObjectSource.verify_artifact_set": "5cb72b9ca70966b894368dd9867f2ffc042c7a05e34539c784019329323dcbf7",
+      "ModelCacheObjectSource.verify_runtime_image": "660757c621d6f51a2b5703fd7e95582284ac556fddcadc8b9c5ab96aca8383fe",
+      "ObjectLocation": "4857e40534b2193b80fd09a5272094fbe502bf750653b2772c687e60e6606cf3",
+      "ObjectSource": "2f828a7c42e8fd04e86c76fd2fb0d58d25e552f78adef7d578f4a633d72525b6",
+      "ObjectSource.open_object": "3083592e22efd6376cf367c950c82ae67cb253523ef13c97cd2f8e3b456ddd27",
+      "ObjectSource.verify_artifact_set": "48ff44937dc1cf8f3d8b8732de39244605d614cdd22516becc3ead7006251ec7",
+      "ObjectSource.verify_runtime_image": "3f3478f0f2cc74df927eb05ab360a9e371f13865321c8b414df5a708dce1996d",
+      "OpenedObject": "af9dbef797dbe82694ff5e721ed74ad16f4f56f2a84f4192bc0b06cd39c5ed55",
+      "RecipeBuildObjectSource": "60ee5da1ba10c434cbd5df2d5ca414ddcf9a467acb83514036ea3a41a451317d",
+      "RecipeBuildObjectSource.__init__": "f2f1a61637ed1efce756d17409cc4b177939ab8712bb9a74f530f1ce49bcc177",
+      "RecipeBuildObjectSource.open_object": "da0709928a2bdf9820f3a09d3cfeb1c942236a458a03d2e23c69d7b2fb8ceb55",
+      "RecipeBuildObjectSource.verify_artifact_set": "797e35d909dbf406fdca0821645f47e2122797679fe5aecf9257322a9aae3043",
+      "RecipeBuildObjectSource.verify_runtime_image": "41897aa12f015fbac580e4134662963cb9fe749295b441de34cded576eae95f3",
+      "_may_replace": "95d947960468027caef976809148e74419ebc3b35d71c21f6ddfb558711faf71",
+      "_may_replace.grant": "112211900deb895b4a305ee7183eedb33223d74e39205d736e20305d534ab69c",
+      "_still_stored": "410dc4a0a2535d4a7f8e9534b847ce6f61ab6a354eb8b5d5bcf27a95aee7c99f",
+      "artifact_set_sha256": "cf7b574970aed5c3795264b50f74b6f9ef1bf6c8af71222fc459e38985bb5f8e",
+      "build_distribution_service": "90d71fa5561622844c14f716149298ade8a3dd91eb26ce66e64ddd667684da07",
+      "build_distribution_service_from_components": "cfe34867778564e9f3aa745892abd7d0cadd3713b5474b0a6617d4d6e4e5f5f7",
+      "record_distributed_runtime_image": "cd13be509addbbc48fb3a6ae09f0b2681f1e8ef318ae344818ed037d1f443552",
+      "verified_model_receipts": "83b1bfbe76f0da8ff8ea4f584aaaa6a6be10e61bc363fa6b0c0510b8be35a709"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "distribution.already-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "DistributionService._register_row",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "DistributionService.open_object",
+          "distribution.model_set_identity_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "DistributionService.open_object",
+          "distribution.object_unavailable",
+          2
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "DistributionService.register",
+          "distribution.model_set_identity_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "DistributionService.register",
+          "distribution.runtime_image_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "FilesystemObjectSource.open_object",
+          "distribution.object_unavailable",
+          2
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "MemoryObjectSource.open_object",
+          "distribution.object_unavailable",
+          2
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "ModelCacheObjectSource._describe",
+          "distribution.model_set_identity_unavailable",
+          2
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "ModelCacheObjectSource._open_cache_object",
+          "distribution.object_unavailable",
+          3
+        ]
+      ]
+    },
+    {
+      "family": "distribution.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionError",
+          "FilesystemObjectSource.open_object",
+          "distribution.object_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionError",
+          "RecipeBuildObjectSource.open_object",
+          "distribution.object_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionInputError",
+          "CompositeObjectSource.verified_model_objects_for_set",
+          "distribution.model_set_identity_unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "distribution.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionUnknown",
+          "ModelCacheObjectSource.verified_model_objects_for_set",
+          "distribution.model_set_identity_unavailable",
+          3
+        ]
+      ]
+    },
+    {
+      "family": "distribution.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionError",
+          "DistributionService._authorize_uncached",
+          "distribution.expired",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionError",
+          "DistributionService._authorize_uncached",
+          "distribution.unassigned",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionError",
+          "DistributionService._authorize_uncached",
+          "distribution.wrong_node",
+          2
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionError",
+          "DistributionService.open_object",
+          "distribution.unassigned",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionIntegrityError",
+          "DistributionService._register_row",
+          "distribution.assignment_conflict",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionIntegrityError",
+          "DistributionService.register",
+          "distribution.assignment_conflict",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionRefused",
+          "DistributionService._authorize_uncached",
+          "distribution.revoked",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionRefused",
+          "FilesystemObjectSource.open_object",
+          "forbidden",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionRefused",
+          "FilesystemObjectSource.open_object",
+          "permission-denied",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionRefused",
+          "ModelCacheObjectSource._open_cache_object",
+          "nas-cache-object-access-was-refused",
+          1
+        ],
+        [
+          "control/src/vonk_control/distribution.py",
+          "DistributionRefused",
+          "ModelCacheObjectSource._open_cache_object",
+          "permission-denied",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/distribution.py"
+    ]
+  }
+}

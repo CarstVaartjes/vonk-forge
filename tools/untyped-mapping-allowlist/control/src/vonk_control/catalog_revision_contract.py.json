@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/catalog_revision_contract.py": {
+      "<module>": "0bb58bdf25f3c4c7bc653ca5c1c92ece24b2a693e7d70035b5e20198c2768d53",
+      "ArtifactInputProjection": "7c51fbc9cb3aa4e3daf2d300ba5d54e75fee804ab6813247c2a62a56bf4e4566",
+      "BuildModelArtifactProjection": "7e8d50612d402d5bcdd25c14ce8fb188ecd7da47c5caed3b76630a985bf0994a",
+      "BuildResourcesProjection": "a67cf2a88cb42c0d4e7715a656144683a6f76396a49b49d90c33f4511ee9f178",
+      "BuildSecurityProjection": "08d26a8c0932d17f0c076f2645a5d753a3133dc319835d66398d72813fefbce1",
+      "CatalogRevisionContractError": "e8aeeb6cfccd08a44f7fe8d988d2e31991b53eed571b22417b0d7d0a7d59f282",
+      "ModelRevisionProjection": "876c62bcefbe8246eb35f98d57f9f1fcd7a48465221b858e577404602b139051",
+      "PrebuiltImage": "08ea5add19530927428569abaabaa5ed325ca9c293ab01f3a04a3f4fac029937",
+      "PrebuiltImage.digest": "bc4931d391ab5c88659df7d7e4beb3696b53ca9e509895850a7dfa8dfd86691c",
+      "RecipePackageHandleProjection": "2daffd856c6f6f2e88fc74fcf56026321bc4f3d395224415b840ea4247a9edf5",
+      "RecipeRevisionProjection": "2a185c67e92a06b00a9ee1a9fdb1c743a3ca80d33ea707d5979affb5f823e0dc",
+      "UnprojectedRevision": "b25568daff0efdb50ee665520cdb7f90dd8a9e3611fa995ce27709dde923b73f",
+      "_CatalogRevisionProjection": "c382044a313f6c0c545acac712063a3a6ca3ad3bb81e03f474aaff7de8131e4e",
+      "_json": "79c5110558c58d3e55b2cfca31bab664d22b95f095699e46d6ad5580ebe4d502",
+      "read_catalog_document": "91f6623b49419902593a26cf390153ecd99873bb0999cb7f9192fc4e29ebfad2",
+      "read_catalog_projection": "c328336a0c2269958e606968d7015cfa6724966918af48bf7fcac116ce208420",
+      "read_model_set": "be4d32395a4e5b505a3b3a6c24b707446a61ed368f1962114ef2f64a54226c1e",
+      "read_prebuilt_image": "14b3da9276522d588906651d27e2173b263a4009dc9b29e043fcd5f2fb7d2ca1",
+      "write_catalog_projection": "a30ac42553d6c625d12735f39e04e65f87b097b8815e999a7d065b09966c5d2e"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "control/src/vonk_control/catalog_revision_contract.py"
+    }
+  ]
+}

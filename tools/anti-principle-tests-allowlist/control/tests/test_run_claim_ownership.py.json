@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/tests/test_run_claim_ownership.py": {
+      "<module>": "e112a217faea85cd93714282a3e9c67ba2e21ca73bf2bf5eeb0034babc16a1f6",
+      "_cancelled_start_run": "9e57f7b67cea10164ec10bb773e18542ba2246bdb3975eaa9251b758052073d4",
+      "_claims": "fe9d9a39bfc160502ff47542d16d743c7951d6565fdca42d6e30a5f7c2596c81",
+      "_codes": "c59c0ccfbb1b65132b963027ad5ea9c8b3fb35a75cbcc20daccbe511f8944d35",
+      "_load_over": "4b6c66e8c298e76a00d0ab95f72452578705c46d38163b05985b4246ef31b54d",
+      "_lost_run_absence_releases_claims": "cd80d68abf5ce5452e64384712b8b16154587a66e715acb11b9d08b4e55b5bc4",
+      "_node_ids": "d3dbbbc79b45f2ace1cb6d7a28790027a1527dd962dd2c0632dcfc2cb5adbe56",
+      "_old_contract_run_does_not_block_a_new_load": "30bb3a1d9a6c3d80230f5c699da8abef616270f58ed017d6a6d311864551933b",
+      "_report_empty": "8021eb5112451e7889bef337e72e6f2be80dacb4a0dde6f30209aba21af7a89c",
+      "_selector": "e65996307d11881b2b7dafc58c70eb32154a572f49c2402d01472b6f6e86f740",
+      "test_a_lost_run_absence_releases_its_claims_on_postgres": "3feceb141a69b968a4c94d4e1cc3e7bd6958cbc6b08abb21da4817d81eda64c3",
+      "test_a_lost_run_every_spark_reports_absent_releases_its_claims": "7e06525ccdca36c9592af2391f6482d19848213e78d3a6a241ebb1bebef37a7f",
+      "test_a_lost_run_is_stopped_by_the_new_load_not_a_blocker": "d76c9a3d6d9e52f24f8e3fc92248e65292804e20ab3b8deedcc6ccdc4d4dc7e5",
+      "test_a_lost_run_still_reported_running_keeps_its_claims": "ee3ce7baed5d7c46280e455b3b4a2c02e9eb4c421b9fe44f0817e8fdca27dcd7",
+      "test_a_run_a_live_operation_owns_is_not_settled_by_absence": "99ff4cded999b6fa79e1e097441aa1810e7a75d30abbc5e47b1be63d1a59ac93",
+      "test_old_contract_run_does_not_block_a_new_load_on_postgres": "d5a2868b7621803fad1a569ee39aa94671cfb997f939977369154f721070aba3",
+      "test_old_contract_run_on_both_sparks_does_not_block_a_new_load": "a1d549b61d2a1ad6595d9152ef3857944a075c22acd02c63edfd42c2ee30c1b0"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "_old_contract_run_does_not_block_a_new_load",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_run_claim_ownership.py"
+    }
+  ]
+}

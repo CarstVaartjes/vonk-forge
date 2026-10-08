@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "next_tick_after",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-monitor/src/main.rs"
+    },
+    {
+      "count": 3,
+      "function": "run",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-monitor/src/main.rs"
+    }
+  ]
+}

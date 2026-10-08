@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/pages/activity.tsx",
+      "reason": "UI-only view model derived from generated API types for one screen; not an API document",
+      "type": "ActivitySummary"
+    }
+  ]
+}

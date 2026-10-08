@@ -1,0 +1,78 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_profile_cancel.py": {
+      "<module>": "e737ab5d402061c07617ca356010b2c9110a76849351753cff6a7e2922149bb3",
+      "_IdleRoutes": "e737ab5d402061c07617ca356010b2c9110a76849351753cff6a7e2922149bb3",
+      "_IdleRoutes.maintain": "f33663505b9525b11c97355ae87d49fe624b193b9acc5d51e09c50e10db29277",
+      "_IdleRoutes.publish_run": "7e9bc564133cc13233a2767ab5f674fc80bbfb709dd1e25ec0d958b19ec57698",
+      "_agent_result": "45fb68df19bcad594389b4a8552678c501bc0362ddcfbd93407e72734ff999d1",
+      "_agent_service_and_target_claim": "1c5084916439870e1d55adb732df3559ef4ce4111810385b956f852675e99343",
+      "_application": "3007abb0309c6e2a3df5b82682b3e5212a131c42f5fcf8d05798d73141c25186",
+      "_profile_worker_process_dies_with_pending_cancel": "fdfafe23bf70b4acaf635d1e0bc07cebff4ace53f8709e3b3afba34f69525bf1",
+      "_resume_profile_cancel_process": "cde8b262db48e0f4e2780fc1d861d93c41ba390caea24aa7c8cb6c7cc1e45f31",
+      "_start_profile_stop_child": "53d246f714124986a215066483e97cce2d541a905cb091e99566457826862b31",
+      "_two_target_stop_case": "83721a83c036ef3a776a676db417b0a11770f5e6413a3d50543796124e1fb936",
+      "test_activity_preserves_issued_effect_while_profile_cancellation_waits": "0cca061a02fc659309962180a6405ef746cc58e7a9ec5da966c86ff3f7134add",
+      "test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profile": "c83c1a5a6851d427c4dae9b02fdd06856882f039c6c3bc4e08521ad5245bf86a",
+      "test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profile.delayed_start": "bba6355449aab2b0ab7bd4718795f64a5e3417360f94ee22dab0122c3da2c470",
+      "test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run": "14cff8090cda06c1a6e2871e8144ebc8e809a38be494712d7cb20bd8985f7333",
+      "test_latest_selected_profile_supersedes_parked_apps_before_cancellation": "211bf48036dc908cb5fc4c1964d73e31e9b2a4eee0e5b5639b3f0056c6211541",
+      "test_latest_selected_profile_supersedes_parked_apps_before_cancellation.first_node_mapping": "1e5af4005c37353da63b15c43d5d82ec1943f89732ecc6dea6f4c765afca5524",
+      "test_latest_selected_profile_supersedes_parked_apps_before_cancellation.observe_pending": "69245da57b8a2d994a52f143c520db3b7606cf52dfe76971185b45506dfd1ca4",
+      "test_latest_selected_profile_supersedes_parked_apps_before_cancellation.single_node_recipe": "b228fec3a7eca90e1a4ff7c6a2b33f20a17f025977443473e7222a5b3ba77858",
+      "test_newer_profile_load_replaces_pending_cancellation_without_losing_child_owner": "f995dd7b0c6de5b71ad1d3d9abffeac0afcc5f2e04c945f129789ed87aa54c24",
+      "test_pending_cancellation_observation_does_not_suppress_recovery": "f95e20f74496abbe8a494b976f379f89b229df6619a9c49c6b0090186acaf159",
+      "test_pending_cancellation_observation_does_not_suppress_recovery.pending_child": "439658d90594ae60f9f72616482d9ac54d71cd0e83295f749d4eb6f9f0a6e7a3",
+      "test_pending_profile_cancellation_is_visible_and_filterable_in_activity": "6e8e7c74b2387a15644e3ae7c4ef2e2f5f7b9f4a1d610856b374131148c8554b",
+      "test_profile_activity_cancellation_filter_compiles_on_postgres": "0c9f109b148401c6cff3465f4213ae67bba0aa6e9949ccbb39ac44b4d40db35c",
+      "test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_effects": "3a894482aafa45bbbefb9756cb765f3f163887433c8e8d3d0f0545d23dbd3ccb",
+      "test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch": "f2eb81893c1f59cf8385e2330dead1af8d264733f7b3d8023d209ac02563e353",
+      "test_profile_cancel_pending_child_survives_os_worker_death_and_restarts": "b19afe2b5b5ff91001462409c7724d743d69458bcca3e23d37c5c4390416a067",
+      "test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry": "ca42acdb222db645b41a8da8cc943c732419c79fa0e7647803dd5eb0d655ddce"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_cancel_during_child_start_keeps_late_start_receipt_from_resuming_profile",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_cancel.py"
+    },
+    {
+      "count": 1,
+      "function": "test_latest_selected_profile_supersedes_parked_apps_before_cancellation",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_cancel.py"
+    },
+    {
+      "count": 1,
+      "function": "test_pending_cancellation_observation_does_not_suppress_recovery",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_cancel.py"
+    },
+    {
+      "count": 1,
+      "function": "test_profile_cancel_after_one_of_two_stop_targets_preserves_exact_partial_effects",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_cancel.py"
+    },
+    {
+      "count": 1,
+      "function": "test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_cancel.py"
+    },
+    {
+      "count": 1,
+      "function": "test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_fleet_profile_cancel.py"
+    },
+    {
+      "count": 2,
+      "function": "test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_fleet_profile_cancel.py"
+    }
+  ]
+}

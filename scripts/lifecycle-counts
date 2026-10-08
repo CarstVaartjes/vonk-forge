@@ -11,9 +11,9 @@ without running its code:
   the file is gone since the last writer moved onto the core, and a commit
   without it counts zero, so a new writer fails the scanner instead);
 * ``operator_waits``: sites that produce an operator wait
-  (``tools/blocker-allowlist.json``, ``operator_waits``);
+  (``tools/blocker-allowlist``, ``operator_waits``);
 * ``raises``: fail-closed raises in the audited modules
-  (``tools/blocker-allowlist.json``, ``fail_closed``);
+  (``tools/blocker-allowlist``, ``fail_closed``);
 * ``debt``: operator-wait debt entries plus raises categorised
   ``bookkeeping-debt`` (``max_debt`` + ``debt_ceiling.total`` + ``debt_ceiling.unaudited``).
 
@@ -45,16 +45,20 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from control.tests.registry_storage import _derive, _merge, read_registry
+
 WRITERS = "tools/lifecycle-writers-allowlist.json"
-BLOCKERS = "tools/blocker-allowlist.json"
+BLOCKERS = "tools/blocker-allowlist"
 REPORT_KEYS = ("writers", "operator_waits", "raises", "debt")
 INVENTORIES = {
-    "untyped": "tools/untyped-mapping-allowlist.json",
-    "read_refusals": "tools/read-refusal-allowlist.json",
-    "unbounded_waits": "tools/unbounded-wait-allowlist.json",
-    "remedy_text": "tools/remedy-text-allowlist.json",
-    "ungated_tables": "tools/retention-allowlist.json",
-    "anti_principle_tests": "tools/anti-principle-tests-allowlist.json",
+    "untyped": "tools/untyped-mapping-allowlist",
+    "read_refusals": "tools/read-refusal-allowlist",
+    "unbounded_waits": "tools/unbounded-wait-allowlist",
+    "remedy_text": "tools/remedy-text-allowlist",
+    "ungated_tables": "tools/retention-allowlist",
+    "anti_principle_tests": "tools/anti-principle-tests-allowlist",
 }
 KEYS = (*REPORT_KEYS, *INVENTORIES)
 
@@ -67,7 +71,7 @@ COVERED_PREFIXES = (
 COVERED_EXACT = (
     WRITERS,
     BLOCKERS,
-    "tools/vocabulary-literals-baseline.json",
+    "tools/vocabulary-literals-baseline",
     "control/tests/lifecycle_writer_boundaries.py",
     "control/tests/blocker_boundaries.py",
     "control/tests/vocabulary_literals.py",
@@ -128,7 +132,7 @@ def counts_from(read: Reader) -> dict[str, int]:
     return counts
 
 
-def _git(*args: str) -> str:
+def _git_once(*args: str) -> str:
     return subprocess.run(
         ("git", *args),
         cwd=REPO_ROOT,
@@ -139,14 +143,48 @@ def _git(*args: str) -> str:
     ).stdout
 
 
+def _git(*args: str) -> str:
+    try:
+        return _git_once(*args)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return _git_once(*args)
+
+
 def reader_for(ref: str | None) -> Reader:
     if ref is None:
-        return lambda path: (REPO_ROOT / path).read_text(encoding="utf-8")
-    return lambda path: _git("show", f"{ref}:{path}")
+        return lambda path: (
+            json.dumps(read_registry(REPO_ROOT / path))
+            if (REPO_ROOT / path).is_dir()
+            else (REPO_ROOT / path).read_text(encoding="utf-8")
+        )
+
+    def read(path: str) -> str:
+        shards = _git("ls-tree", "-r", "--name-only", ref, "--", path).splitlines()
+        if shards and all(shard.endswith(".json") for shard in shards):
+            document = {}
+            for shard in sorted(shards):
+                document = _merge(document, json.loads(_git("show", f"{ref}:{shard}")))
+            return json.dumps(_derive(document))
+        # Historical reporting only: pre-split commits own the old document.
+        historical = path if path.endswith(".json") else path + ".json"
+        return _git("show", f"{ref}:{historical}")
+
+    return read
 
 
 def is_covered(path: str) -> bool:
-    return path in COVERED_EXACT or path.startswith(COVERED_PREFIXES)
+    return (
+        path in COVERED_EXACT
+        or path.startswith(COVERED_PREFIXES)
+        or any(
+            path.startswith(registry + "/")
+            for registry in (
+                BLOCKERS,
+                *INVENTORIES.values(),
+                "tools/vocabulary-literals-baseline",
+            )
+        )
+    )
 
 
 def covered_paths(paths: Iterable[str]) -> list[str]:

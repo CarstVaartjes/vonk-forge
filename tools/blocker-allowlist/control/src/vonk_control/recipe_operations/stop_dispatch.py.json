@@ -1,0 +1,91 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/stop_dispatch.py": {
+      "<module>": "5d58db22927e59e2151da12d109701047229cfe4f8911343b1afbf517b159678",
+      "StopDispatchMixin": "cb449676aa89f05669a51d4788e1f86762cde2765675ddacc2d53c1ff4cf9790",
+      "StopDispatchMixin._absent_stop_nodes": "8fa69c1f7e49e98848fca85ef5bcd5d73923606503190340f1b3d463593ede00",
+      "StopDispatchMixin._complete_absent_stop_in_session": "1b13bbf2c0e5600b6968621a1e6746fa5a87231e709740a7f8b3c84e9afbe68f",
+      "StopDispatchMixin._dispatch_stop_after_withdrawal": "9b43fba7ff4ca1668d71e11ea328a9a80fe1f77ff9fb13eb7b250393654b27fd",
+      "StopDispatchMixin._exact_stop_authority": "03fe05ddb13268cf4fe0408c3697fc0e2083b924d5dcc14f5a0151d88123b263",
+      "StopDispatchMixin._queue_stop_in_session": "5e73a61ed026392f9716877de0e63fe74666c41182d9e34f3f2352e8c5569601",
+      "StopDispatchMixin.queue_recovery_stop_in_session": "afd6c8021f28db0cc54b760d23d590c27cb267520c63c85aa7c1c15a929ecb56"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop_dispatch.py",
+          "RecipeRequestInvalid",
+          "StopDispatchMixin._dispatch_stop_after_withdrawal",
+          "request-key-was-already-used-differently",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.stop-authority",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop_dispatch.py",
+          "RecipeStopAuthorityRefused",
+          "StopDispatchMixin._exact_stop_authority",
+          "recipe-stop-exact-target-ownership-differs",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop_dispatch.py",
+          "RecipeStopAuthorityRefused",
+          "StopDispatchMixin._exact_stop_authority",
+          "recipe-stop-target-lacks-its-exact-durable-start-authority",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop_dispatch.py",
+          "DistributedRecoveryInvalid",
+          "StopDispatchMixin.queue_recovery_stop_in_session",
+          "singleton-recovery-was-superseded-by-a-newer-workload-intent",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop_dispatch.py",
+          "_RouteNotWithdrawn",
+          "StopDispatchMixin._dispatch_stop_after_withdrawal",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.service-stop-review-security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop_dispatch.py",
+          "RecipeStopAuthorityRefused",
+          "StopDispatchMixin._dispatch_stop_after_withdrawal",
+          "accepted-stop-disappeared",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/stop_dispatch.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/stop_dispatch.py"
+    ]
+  }
+}

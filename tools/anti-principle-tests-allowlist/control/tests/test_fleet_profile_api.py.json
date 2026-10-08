@@ -1,0 +1,47 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_profile_api.py": {
+      "_client": "31532a9f112d44dadfcc4d20fe5f2f0766ecb68d86e8e2d3b9e37a128f5f9a51",
+      "_headers": "2855ea18c04a3a2f5d3ef3d4e685105337c35612ad50e39512a7e1a4145af49d",
+      "test_a_rejected_profile_save_names_the_field_and_the_reason": "07b8483320b53fc84456c26773263691ebf17ba9dd041f44ef2428af860bb535",
+      "test_cli_edits_and_exports_the_persisted_definition_through_real_api": "b2d2079e019eac29cd6127f976fd188ff3e5d6afec59f055169f64f9ba24e0a7",
+      "test_cli_edits_and_exports_the_persisted_definition_through_real_api.Response": "26a7f50f62b667df261704df02dc2d4ccfec452cc123838eb4bd51cabcd4daa5",
+      "test_cli_edits_and_exports_the_persisted_definition_through_real_api.Response.__exit__": "98f1141c2e76594d017dd5de8c1a9ed6267a54279be1a3a4358a645cf356525c",
+      "test_cli_edits_and_exports_the_persisted_definition_through_real_api.Response.__init__": "c33eed9b576f9768d79d1cb6dd2f3b27c456dbe4894f26f36dbecd774a020afe",
+      "test_cli_edits_and_exports_the_persisted_definition_through_real_api.opener": "1900dc31875dfe307930bbecc1b2bf775db184f6150b7f58feff4366d3b72e0f",
+      "test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision": "106c06d05a51503d06cb2bb891563e26ba0ed204477bbc5894c437803ef54c0e",
+      "test_non_admin_cannot_change_an_accepted_profile": "656b274bab4ad42e6dc7aa2a458af5956ad355076a1bb7c9ac06db9a49df79c7",
+      "test_production_app_composes_fleet_profiles_with_preparation_authority": "87552c12a701f541f3c13f037178555028593de09030fa4e5b971fd61e150249",
+      "test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope": "3c38830a2ef0656d155ad5a628455d489fdf4eb1c08d03c3321b691a8a706868",
+      "test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope.profile_endpoint": "4b3c6567329988823c55b990b5ad9a12868a555dedac3b5bcc827b3a3c4e788c",
+      "test_profile_load_applies_the_current_saved_profile": "42ab9c7c04c44b5988cc227853845069c35ea11d725ca28fa1501331a27297e2",
+      "test_profile_load_bound_to_a_review_refuses_a_plan_that_changed": "8e7731b0cbfadf165da3649057beacc68f4d4b6540cfbe186d0353bd8172bd31",
+      "test_profile_mutation_role_is_declared_for_final_route": "cc171a806f8e6185b2ec6d179d77847958d368e9bb7f5017d52c22cd96ee3421",
+      "test_profile_operator_routes_are_singular_and_unversioned": "3552566837e08c532524e4692c10f669fe8ef8eec20eb80439e555d41b71ac25",
+      "test_profile_preview_requires_administrator_before_reading_profile": "5bd531eefa6c53553508d1741cb7c74b16a0dd734207c9cf989e3523955d3b40",
+      "test_profile_request_lookup_is_authenticated_and_reports_missing_key": "ebff594bdba4835062d2bbca88e0e7db07ebeac04e588430ba11635e443b7772",
+      "test_saving_a_profile_fills_option_defaults_and_replaces_stale_choices": "57ae172cdc9503ba891cd56d562e6f8ae73cf52356b81a85185aadc823ea3c8c",
+      "test_saving_a_profile_fills_option_defaults_and_replaces_stale_choices.body": "b2aca8bed87b5205bfa2f359eba36777b343ca5828719c255afb80e9c0ab5ab0"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_rejected_profile_save_names_the_field_and_the_reason",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_fleet_profile_api.py"
+    },
+    {
+      "count": 1,
+      "function": "test_profile_load_bound_to_a_review_refuses_a_plan_that_changed",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_fleet_profile_api.py"
+    },
+    {
+      "count": 3,
+      "function": "test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_fleet_profile_api.py"
+    }
+  ]
+}

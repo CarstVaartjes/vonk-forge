@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_claim_selfheal.py": {
+      "_application": "b00cf9ac5f6008de2dbb78640ba6886cedfbdb4b3e44536861914b7623637ab2",
+      "_claims": "344503a2c5cb2e6f6065a6bee97bcf8b6934931d52549e21872f9b0f824333d9",
+      "_follow_due": "b2ce21f54102f6916dd6b20112ed54cd6bc181607987827b427c1cbac8f14afc",
+      "_installed": "92ae7679217d40c91384b669bf41248f3f67c97c5af86f353af211651b245457",
+      "_settle": "b1a40bc7d9a05c924b829bf22a6dcb7d5c8bcb4500a7220cb5080b18e6ab3d6a",
+      "_the_switch": "0e4d4a527277ea3904cf0c7c436bd4181fcceb695f76b5211a45421e9ef6035b",
+      "test_a_load_reserves_disk_again_when_its_claim_is_gone_or_stale": "128bd5c4494c71dac1c38c54638094093faad136df1d555a1b12b469c1941e3a",
+      "test_a_load_survives_the_release_of_the_installation_that_held_its_claim": "b86f60e481397070bfd782d350eb512f69fbf338148a9bc212b7f00fcfb0b700",
+      "test_a_resumed_load_reserves_what_its_transient_failure_released": "2ed590e804968e47b64f123da7b71b4d62336707089830ec1b222ba3045211e2",
+      "test_a_resumed_load_reserves_what_its_transient_failure_released.advance_once_flaky": "0b4e51b37fa22bdd6003bce3485af1073da71a61276ef50a6dd2b9c588e6f56c",
+      "test_active_claims_with_different_owners_are_named_not_adopted": "a94bf178170096c7274348935d435d79c1e27184df3c68de9b26a20cf2dfd124",
+      "test_without_room_a_lost_claim_waits_visibly_and_resumes": "a10b7f3320787252f3ee0d414d6c6d1d1fd05d09a316846a444d4cdadd21d73d",
+      "test_without_room_a_lost_claim_waits_visibly_and_resumes.blockers": "190c36cafdb509fa3d19c575d091d5115914afc5911dfebf36575e94a396e792",
+      "test_without_room_a_lost_claim_waits_visibly_and_resumes.stalled": "f02f026d752c08c8b13314f062a9f592d7a8b19a16535c16d2cb13cf832ef26a"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_resumed_load_reserves_what_its_transient_failure_released",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_profile_claim_selfheal.py"
+    }
+  ]
+}

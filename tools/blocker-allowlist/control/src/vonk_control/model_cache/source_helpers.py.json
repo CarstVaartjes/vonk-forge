@@ -1,0 +1,45 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/source_helpers.py": {
+      "_contains_digest": "79d7ef6be7192c9b82184097951024590e96012053c9ca7c2c1c294eaa58e69d",
+      "_fsync_directory": "a1788d4760fefe9f9067af239f8d9841309d80553e431a3e8343e0b04c4d4ee9",
+      "_is_allowed_github_release_redirect": "5b234a9e892b65cc92828d01abb6a92a8e14f6227a5cc939f1be47c80a4261c6",
+      "_is_allowed_huggingface_redirect": "aa287be600af63f0c1d84dcff7af291b940e100ade31d7558878c59ec6ca9b06",
+      "_is_hf_authority": "0d84279c26a466f78044c83b409429117918efce8f95aae89beb66f6600e31f1",
+      "_is_hf_canonical_url": "adc227730a44214080938a51a4dafc9091d0bb170610ed74366decac192a5684",
+      "_is_private_host": "0c33bcfdbb8950f9983a982f5c28d749836612a8b83eee215ced33750bba1ac8",
+      "_model_selector": "f6318959a69436217e2004fe390e6c4520d25b7a55a1e6de5f2754d35dd1d4db",
+      "_request_key": "a4115ab8ec412e115093e4f941b64ef0649166f4c699031aa994976d3b3f857d",
+      "_valid_relative_path": "1b0c42f7775213add0feb7a7ca69278141cd567a8ecf85da1b1e95423508d11f"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/source_helpers.py",
+          "ModelCacheConflictInvalid",
+          "_request_key",
+          "model_cache.request_key_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/source_helpers.py",
+          "ModelCacheResolutionInvalid",
+          "_model_selector",
+          "model_cache.selector_invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/source_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/source_helpers.py"
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "content_identities": {
+    "control/tests/test_distribution_executor.py": {
+      "_call_argument": "30c73b70a72ca01eaaa8e37cda5db2293a60e41029d4a18480554b409d59aca5",
+      "_member_totals": "f113225845dc00d302c9b875610a4fb56167ede588e14d768fe189fd985e7e7f",
+      "_operation_progress": "1454b3fd2509d03e43bb63312c4de915e8dbbeddebfe90c78b26f0ca81576839",
+      "_phase": "181430dbc7088de1a7ceea773e0dfe2d49875c33304ab05d61a67b72a750df8a",
+      "_plan": "ed7fd37e97743c68aff340483c7e12ec9700f1ccc0e3521ab7987a73834f7157",
+      "_receipt_json": "b2e0be821e1d46aae01f8f715e4da659b32a0a216988e6acb2d8637756528429",
+      "_target": "0f7aac161ae53a1f253382fc0edcf45116268b8ecc62bb97050b816645fdbbcb",
+      "_unused_executor_services": "9ba6c64e078e49ecbf9d9c0d3e2d8bf54b31e2deb732999c79090ea998a62ae6",
+      "test_abandon_closes_only_a_parked_distribution_child": "de9f77bde4e467463490734a4c1bf29e20280ff07a8fea1bfa995f1ebdfbf230",
+      "test_build_verify_handoff_emits_and_validates_exact_build_id": "0aa156a24f4013e6990d4374513022dabef2315f942db17ff8369700a3907c77",
+      "test_child_persistence_retains_in_place_default_members": "80de13a9e5dc214ee568fc45c13ec0d86dc016996e58c8c011f22cc6df370e2c",
+      "test_child_persistence_retains_in_place_default_members.check_written_receipt": "3d07142b44b62d94a9f7ce67410a50bc93c33192ead2e87af4dc9259d184dc34",
+      "test_child_persistence_retains_in_place_default_members.mutated_receipt": "11dc07d145235e05f2d4b18619bc218f8bf0c31d136c1ebfdccbcdc0ff297541",
+      "test_complete_two_node_distribution_is_a_verified_skip": "1004d0e8f10a5d7f3244d65f5e87b44b452aa015c86130f0892971087329ed7a",
+      "test_member_failure_kind_and_diagnostic_survive_aggregation": "3471d6091067dec98182663ed3422a05ac7c4bfd11a6a554d6178f73e8b19c4c",
+      "test_model_download_is_a_durable_cache_child_with_exact_pins": "93249b61698ec6c3ca8966889d11cfc9e65452de0d5bb0faa966fe5fc3d0aab3",
+      "test_model_download_is_a_durable_cache_child_with_exact_pins.Cache": "3389f3d8e051e3fdd9cb6fbbbd6fe99a3f30ebda8202f4406f7ba93a74ef149f",
+      "test_model_download_is_a_durable_cache_child_with_exact_pins.Cache.download_preview": "23fcc02b43cbeab5b403a17969496ec32efebfdaac377dfbdfb8d59bd2666487",
+      "test_model_download_is_a_durable_cache_child_with_exact_pins.Cache.get_operation": "be7318d03a99950fcb97968bbe99f05d313b999a8c9415a524171f8ae66215c6",
+      "test_model_download_is_a_durable_cache_child_with_exact_pins.Cache.manifest_for_artifact_set": "0ede40a8c8cbb1e13b592f732b7c263f9d96665c103e2912ba90021fa76f3a04",
+      "test_model_download_is_a_durable_cache_child_with_exact_pins.Cache.start_download": "0b9728c6993db652dd272cedd0f15039b6f4d2fc2a502ff44b53e16dc7ed3d20",
+      "test_model_download_uses_real_cache_manifest_and_reports_complete_coverage": "8a95871c9f79494eeb79207934a46eb6263a01b419ecf150782c2775fc9c9f62",
+      "test_partial_child_failure_is_projected_after_aggregation": "13a155e0ac201c477d1eafdeb5a9fb45680d137a60d63881ac54d9664511ec45",
+      "test_partial_child_replays_and_aggregates_cached_target": "5a10ab5577d1e79306aaf203bd272b5ca5a6114a7069bd86c1598dda57f4c303",
+      "test_partial_child_replays_and_aggregates_cached_target.StubExecutor": "832b4bb1711930ac74cb4aefdcb25f36c6a3aafea16f7fd1ca7e7bc694cab0ce",
+      "test_partial_child_replays_and_aggregates_cached_target.StubExecutor._archive": "5ed134c1dc89d16631fd0f61690e6cc335184c4dfc48c179029208e1c9aa1fb5",
+      "test_partial_child_replays_and_aggregates_cached_target.StubExecutor._model_objects": "6f3d7c7355c13ada85633c91e617eda019335510676452da62d529ba643dcad9",
+      "test_phase_receipt_rejects_explicit_cross_phase_receipt": "3258c8b8a125a728399a9f17e7260c2f5d3b10d79c806b3bc1a09adf84d552c1",
+      "test_production_composite_uncached_cache_then_two_target_distribution": "aba7e0b1b8ef7cb824b449393f4a208162e041119c14641094f723c97ee27bf0",
+      "test_runtime_image_phase_hands_preparation_to_background_executor": "7bf9dec8b879d8aaf2c7358665016da2d0f90440606b433814b89baaa6554b7b",
+      "test_runtime_image_phase_hands_preparation_to_background_executor.prepare": "c84b9c2e1057bb8698273806210cf7d5d1d9a5edb453085c61bb3d0405c5c4e4",
+      "test_zero_byte_model_download_records_the_already_verified_set": "b6a72a3846036b3e934ded814b0bb2b228ff9b72bfe56084a5640f6988b188bd",
+      "test_zero_byte_model_download_records_the_already_verified_set.Cache": "ce2404c178ac73c3f6f7913cc2a08b43407af81e30735b7749a45fe6530bbc6d",
+      "test_zero_byte_model_download_records_the_already_verified_set.Cache.adopt_verified_set": "26f2a27c55dbded3306cbc1e3c0fab1cab093efdfc7d6a793595210bb16f767b",
+      "test_zero_byte_model_download_records_the_already_verified_set.Cache.download_preview": "82248dd1c183509b1e9c31ce085792e542fded7843cb7037154ea925c087169d",
+      "test_zero_byte_model_download_records_the_already_verified_set.Cache.start_download": "1f223d5d392235cfa0aa1dbae45a077769113709fc82ca813b68ab02762e2937"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_abandon_closes_only_a_parked_distribution_child",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_distribution_executor.py"
+    },
+    {
+      "count": 1,
+      "function": "test_model_download_is_a_durable_cache_child_with_exact_pins",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_distribution_executor.py"
+    },
+    {
+      "count": 1,
+      "function": "test_partial_child_replays_and_aggregates_cached_target",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_distribution_executor.py"
+    }
+  ]
+}

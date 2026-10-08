@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/tests/export_observation_transfer_fixtures.py": {
+      "<module>": "bf83e74b9c50f230e6dfb35b2f3cdb84b9365e82308880c3ef03105e475bd886",
+      "_collect": "40135c0cd9c9651686a95e7737bab806f551f86388e1e4dbba2200c559134ac5",
+      "_export_peer_response_errors": "804619ed0e2ea179a73c18a2022299b5deadee2104d6200b7f3cc8daa3eb4863",
+      "_export_peer_response_errors.validation_fixture": "20a60fe3abfba130ca9d301b5e3e16c51360f0cdb60a1efb2a8dc9a9b0ff87aa",
+      "_export_response_errors": "6977b458c9c2f332b2bc13f80ad0dcf9a3d2d802efd89ac4624e7673e161871e",
+      "_export_saved_event_recovery": "a48337ede79c21fba9930239dbc5bbede69420a909e69e7037b5d489ee2171de",
+      "export": "949ec2507a278df1a49608922e7413fca4532d10d7e8a8e92b8c59076f5b5383"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 2,
+      "function": "_export_peer_response_errors",
+      "justification": "Exports auth401, invalidinteger422 and mocked dependency503 exactbytes for other language consumers; no durable effect or read-recovery claim.",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/export_observation_transfer_fixtures.py",
+      "reason": "input-validation"
+    }
+  ]
+}

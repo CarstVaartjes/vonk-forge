@@ -1,0 +1,25 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/removal_acceptance.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "reconcile_requested_removals": "241504f07b8b3dc92721f3fb604bf2b58ca41f7416d8337f624c22680ada58f5",
+      "remove_selector": "9be13aed1370d5581148d48f3b67ab225141bdbfbee65596fff631c74e056edb"
+    }
+  },
+  "sites": [
+    {
+      "expression": "requester.authority_revision == payload.recipe_revision_id",
+      "function": "reconcile_requested_removals.validate",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+      "reason": "Security and ownership edge: before cancelling an older remover, prove the durable accepted request row names the same exact authority and target as its canonical stored payload. This does not decide image reuse or content equivalence; a damaged request leaves the removal fence intact."
+    },
+    {
+      "expression": "requester.targets == [payload.recipe_revision_id]",
+      "function": "reconcile_requested_removals.validate",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+      "reason": "Security and ownership edge: before cancelling an older remover, prove the durable accepted request row names the same exact authority and target as its canonical stored payload. This does not decide image reuse or content equivalence; a damaged request leaves the removal fence intact."
+    }
+  ]
+}

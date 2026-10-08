@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/scheduling.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_cancel_older_preparations": "ce5d14b8095766ac471ac893c1356b4193c72a474ad619cffb6527b6b855b325",
+      "_cancel_superseded_by_active_head": "f4f952f86fbbcf66bf5af4a36c1bda6b65b9870f564c8acf6febf0114eb3af90",
+      "_cancel_superseded_operation": "5a8ec5b4f2d1331cd23e32d642e47050187549df43aedc0b11d635311a0eddf4",
+      "_holds_live_lease": "ba63eee8a03d32140804c0f617b38da5cf6ccc1d2b9c7a31c6e27637918a4460",
+      "_park_for_model": "fb06491a6207f6bbaa2fe6c4702316067018fad19e989a8dd29e576e2af5ea76",
+      "claim_pending": "f098f7717cb16a2f1d81496db6b0ffcea65f9d2a520d03a2fb7b54eda4c37de8",
+      "resume_operations": "5bbe5d64f18a6d11325fd9347b6173238dacbfd6483a0fee9562a44cfb6a5719",
+      "run_pending": "4494b15549af16b636bb88dfbbfeb63fcf1292e5b432487b21442ab67e5fe9b7"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_image_availability/scheduling.py": 4
+  }
+}

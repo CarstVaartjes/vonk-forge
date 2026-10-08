@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent-helper/src/operations/access/tests.rs"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "CancelRecovery"
+    },
+    {
+      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "InputPayload"
+    },
+    {
+      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "reason": "UI-only view model derived from generated API types for one screen; not an API document",
+      "type": "ActiveRun"
+    },
+    {
+      "file": "control/web/src/components/artifact-job-workspace.tsx",
+      "reason": "UI-only view model derived from generated API types for one screen; not an API document",
+      "type": "RecipeParameter"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-agent/examples/acceptance_certificate_renewal.rs",
+      "reason": "test harness: stdout provenance of the separately built hosted certificate-renewal acceptance peer, never installed or read as a production wire document; records the real native rotation clock, exact agent binary/build identity, certificate/key changes and fixed thirty-day lifetimes",
+      "type": "Evidence"
+    }
+  ]
+}

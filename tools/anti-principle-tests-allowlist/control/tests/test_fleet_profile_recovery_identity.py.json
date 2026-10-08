@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_profile_recovery_identity.py": {
+      "_complete_rebuild": "674830497676aa197cf8e554992d84afd6576bf3868501862c5903f550f6bb46",
+      "test_rebuilt_image_cannot_replace_persisted_profile_identity": "4b7070fff9eb2a504c81fb60640239f692fb81449fa136fe051de9a7ff33f0d4",
+      "test_restored_exact_bytes_recover_only_current_profile_intent": "3d28a8e97ce712e56d10a7d9996108aa9045a943b5c15eeab339ade514aaca37",
+      "test_restored_exact_bytes_recover_only_current_profile_intent.recovered_clock": "f4223f41cd1e4392f75197f6ac1c4c01b497e9ce33454e4bf37b35b5568e23a9",
+      "test_retry_requires_preparation_only_when_an_assignment_needs_work": "2976fdc9a3764213e52afa63b93a396ee9b480080c69e6bc6ef663cd553a3b27",
+      "test_retry_requires_preparation_only_when_an_assignment_needs_work.preparation": "e565595f8fb2103bf203f086cdb164ecd53990665e33a08b833dcd513ba51906"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_rebuilt_image_cannot_replace_persisted_profile_identity",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_recovery_identity.py"
+    },
+    {
+      "count": 1,
+      "function": "test_rebuilt_image_cannot_replace_persisted_profile_identity",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_fleet_profile_recovery_identity.py"
+    }
+  ]
+}

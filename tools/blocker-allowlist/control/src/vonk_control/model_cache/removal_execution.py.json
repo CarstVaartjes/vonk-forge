@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/removal_execution.py": {
+      "<module>": "aa2707aea178850567fe544dc056f2b0ed23e9f363d44ed01cbdc9bc2f5d34fd",
+      "RemovalExecutionMixin": "386326dc279ab0e0213f393871a94266ddcfc7b8eb3b8df6812a725eb4e41406",
+      "RemovalExecutionMixin._advance_model_removal": "058f48f03bce1be859190b4c52df7f83b1064ad325dd4fc27550c8ca08a50eee",
+      "RemovalExecutionMixin._advance_model_removal_step": "69199929641a8a67e0164a7632e9f9d05e4327d2273fbdd0b3bac6ef4dab6e7f",
+      "RemovalExecutionMixin._finish_model_removal_in_session": "94fae63958b35784806f5ff326b330a550974ac2541d37d8098ec8c2e17eaf3e",
+      "RemovalExecutionMixin._retire_removal": "58c581df1b31d1f3783f771669c64cc195acbea44dcd0066cccccb8653e9124e"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "function": "RemovalExecutionMixin._advance_model_removal_step",
+      "path": "control/src/vonk_control/model_cache/removal_execution.py",
+      "reason": "A busy artifact writer defers the model removal with a retry delay and the removal pass advances it again."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/removal_execution.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/removal_execution.py"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/recipe_image_availability_clocks_contract.py",
+      "reason": "Tolerant typed lifecycle clock projection independent of job-document imports."
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/tests/test_consumer_corpus_boundaries.py": {
+      "<module>": "f6c4845f84e7274b4a133dfed966c313d61aa1d6a388b18a8f8ef624239751fb",
+      "api_with_diagnostic": "e953d2455f6ad4909e62add15d759665f9eba032a681918ea8ac71682b474638",
+      "job_diagnostics": "8fc8f9d6110055b5e4dd271ea8f54ab4d61e362f95ab50708793ceb122aa3d11",
+      "probe": "3b2203271ef7c22974e35b07f23f1445f18173528c6612d2af16fc5904d59d78",
+      "rust": "bdb42bb449258a6293703b27a6a7358ef19941ead52a337a28fecd29805ba34f",
+      "test_actual_asgi_installed_cli_and_generated_http_preserve_same_leaf": "b2edaf9a1cb7cd14932170f2d335836adb791b288318333b0354c319b631b595",
+      "test_canonical_producers_and_resource_limits": "456edecf34e4b6003f3f844266bfbe974f754901294c83fbc9f8e51226dfbe2e",
+      "test_lossy_numeric_mutation_is_detected": "fbcbfe04b15b987fdc7792fc083403ba38e6904fc8c681ed04c42d31ff9c9e5c",
+      "test_real_agent_client_reads_bounded_422_and_preserves_503_status": "421df89838747910eb8ebadac8f42e700e5a651543b6d37244570ca5a9e42d82",
+      "test_real_agent_client_reads_bounded_422_and_preserves_503_status.Handler": "73379d4aaa9a011ce624abf8f9ad49d1b84cd1ee6b151e6eb253ce14b19f6bf0",
+      "test_real_agent_client_reads_bounded_422_and_preserves_503_status.Handler.do_POST": "d7204b0c1ef8535373568d2719e9df3177995230a7abfe3a03b1b0d8c1aa6b41",
+      "test_real_agent_client_reads_bounded_422_and_preserves_503_status.Handler.log_message": "d954ce3392c9da4c23d49554baf7113fe3e7d4da9a4bb19a309670511c05cacd",
+      "test_real_state_writer_restart_replay_shares_leaf_with_job_response": "3450cbaa87896d4b3b9f43854a14f18d1ec1b2de578338b64479058196e83100",
+      "test_shared_raw_document_has_same_acceptance_and_roundtrip": "b09202476e2f5b4b626db4e8758d06020920518b19cea1bbd1fea0b9bf9f16a7"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_real_state_writer_restart_replay_shares_leaf_with_job_response",
+      "justification": "recipe_stop_payload is construction only; Rust StateStore finish/reopen/replay preservesdiagnostics and actual job API200. It does not end a production workload.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_consumer_corpus_boundaries.py",
+      "reason": "input-validation"
+    }
+  ]
+}

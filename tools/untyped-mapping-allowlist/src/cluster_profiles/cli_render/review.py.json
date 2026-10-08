@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/review.py": {
+      "_cache_removal_review": "d321afc5581e2b9ff33a2d75facb5263bb0f48079dcba93ae3128e550c18a025",
+      "_preview": "1835417b63a0b8024b35133b52af7f076be6a992c27847ec1d2eb610319b731d"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "src/cluster_profiles/cli_render/review.py"
+    }
+  ]
+}

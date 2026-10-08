@@ -1,0 +1,53 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/switch_projection.py": {
+      "<module>": "daec7a68d135094550e710377e90a9c6fba4e63bfaa2f4266a892a6d59d005ad",
+      "RunSwitchFleetProfileAdapter": "629501f31bf624788ff214a33c6da5ae608c8a7d314951edeae9d45b6eedd039",
+      "RunSwitchFleetProfileAdapter._assignments_from_state": "e6c05ebded9fcc6624ee0af760e449236e36908bff349c2d4d6f436728f33473",
+      "RunSwitchFleetProfileAdapter._child_receipt": "c656028e395452454eeb3f78946d19be3342972dd8c76dfe47f612c3b35d6fcd",
+      "RunSwitchFleetProfileAdapter._failed_in_session": "152c4e9379100866d576c7fb5e672fbfe9992bfa8ea973c83c02f72f5697147d",
+      "RunSwitchFleetProfileAdapter._plan_queue": "88e42238709172100d680a6785b461a8cd2807f7c8377cd95e4cf9729d36e42a",
+      "RunSwitchFleetProfileAdapter._save_state": "7866dd2b99d90cbf75a7db1b5242249b73fc6279321f0d92f988aecfb8f7ac28",
+      "RunSwitchFleetProfileAdapter._state": "4efc47fb528793326bb828aaf9ad8babd675bca2f11fb53fa988d672760c2cdc",
+      "RunSwitchFleetProfileAdapter._view_from_child": "c3b769954931022968a6fd1d6eccda304d84f6389732e2a672351dc3108cdecb",
+      "RunSwitchFleetProfileAdapter._view_from_state": "540e8f73535af79755c9f1ab9eb6ac872e0925338321d7de5f045c14ba1e8a2c",
+      "RunSwitchFleetProfileAdapter._write_state": "c99bfacac74c415b757d17a910336b408b1317cb0412d95f17be65a6b32295c7"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/switch_projection.py",
+          "FleetProfileInvalid",
+          "RunSwitchFleetProfileAdapter._plan_queue",
+          "profile-workload-effects-can-no-longer-be-represented-safely",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/switch_projection.py",
+          "FleetProfileInvalid",
+          "RunSwitchFleetProfileAdapter._save_state",
+          "profile-cancellation-prevents-child-state-creation",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/switch_projection.py",
+          "MissingRecord",
+          "RunSwitchFleetProfileAdapter._save_state",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/switch_projection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/switch_projection.py"
+    ]
+  }
+}

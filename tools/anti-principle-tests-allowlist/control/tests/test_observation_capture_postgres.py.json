@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/tests/test_observation_capture_postgres.py": {
+      "<module>": "48926598c61fe0b2cf34b9162e0554033f5af11fc70d7139f264731953a51cbd",
+      "_app": "8291eaf43c315f5a280e9f1381613be61bacc335c08da247e121911520490163",
+      "_received": "a2b544acf74be877cff014d1653a1b382dce1600ae624cadb8506ff492d846be",
+      "_received.validate_payload": "bd74c3c6b54a3a20dc4c5bdaecb20e9a4c801bad2672f04288291d44e5ec0045",
+      "_received.validate_record": "46f18a9d56d9336a5d0e2fab81e1071e0129ac48bdabb00462af5a289c78af4e",
+      "_seed": "820935e5c665871922e83f7a19992421a758e3e43131a653f6ba712bfc6b595a",
+      "_worker_process": "0b98c60d28e45c02132e01bfea73a70d590fbf2f3f7a3b5c6c61c07c64e85da9",
+      "test_fleet_cursor_and_membership_are_one_real_sql_snapshot": "168dcc68b3f7c9283a15d257c5ded9a358abc7fd5770a12aab199829708f7bde",
+      "test_fleet_cursor_and_membership_are_one_real_sql_snapshot.commit_between_selects": "3b962fc6dc17518dbce7cb5c0e91e41cf6c25cd60b568c768c53a8ae442c1c83",
+      "test_real_sql_capture_timeout_is_retryable_and_same_read_repairs": "de982be3c09087696f314f5df52cb941d782bad01ea2defb030840c3b73232d2",
+      "test_slow_stream_releases_sql_and_keeps_original_observation": "d7d6b0a3c8b540af883dd01332f2fbf4f36c9b88f881cdc8dfc72d16383ba0fd",
+      "test_slow_stream_releases_sql_and_keeps_original_observation.exercise": "9cc3cda03eba738f176494b885c7e3a040c090615a41bb424c596d55fdeab355",
+      "test_slow_stream_releases_sql_and_keeps_original_observation.exercise.receive": "cbeb161b71e5cd9a14637655d0347a1e1b01d665acaceb9aa232f08c72bf6feb",
+      "test_slow_stream_releases_sql_and_keeps_original_observation.exercise.send": "8960a517cd72db7e1ec038b1eae6b3181ff549133272ff6541142ba486f46a7c",
+      "test_slow_stream_releases_sql_and_keeps_original_observation.observe_record": "55482bc16db8031f3e1e25c481c04e56752049f72c9ceffebdb89609bb3bf855"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_real_sql_capture_timeout_is_retryable_and_same_read_repairs",
+      "justification": "Real PG ACCESS EXCLUSIVE dependency lock causes retry503, unrelated read200, rollback then exact original authenticated read200 and typed complete identity.",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_observation_capture_postgres.py",
+      "reason": "dependency-unavailable"
+    }
+  ]
+}

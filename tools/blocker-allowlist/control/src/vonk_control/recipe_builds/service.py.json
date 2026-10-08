@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_builds/service.py": {
+      "<module>": "891195f2a8ef8e1326d3e120c42a97129d5732dc6c2cc8c4da35fb6a1b64014f",
+      "RecipeBuildService": "891195f2a8ef8e1326d3e120c42a97129d5732dc6c2cc8c4da35fb6a1b64014f",
+      "RecipeBuildService.__init__": "7e3be94c4565501ac4c82a926d2e13ae03159f2a7f9ce38ed623fca10728fbd1",
+      "RecipeBuildService._stored_archive_present": "868a8143694003f27dfe5683523a0f0be991dc493964eb94c9274a5096ad7d40",
+      "RecipeBuildService._succeeded_build_available": "4dd1344abe882a9171ffccf8f3bbf7174f9c3ff8b23d7bb114006d3e2d47806c",
+      "RecipeBuildService.bind_storage_demands": "2f2c792b05cb8b59dc724b2320a9f332aa385269a7d6ec9978ee43426038bc59"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_builds/service.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_builds/service.py"
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/catalog_service.py": {
+      "<module>": "c45751d48ec3bb5cf0ebd3493a36373532fdc1fbf0622710a3f5d6c9d17ef577",
+      "CatalogService": "c8a7960505b5daf9e8575cb8f1223fb5e386b6d21893b495146ce97c8fe02d18",
+      "CatalogService.__init__": "778e955cb50d683f69019d560ef38d127ad6d0674b0c7a1580519e6d87b52d77",
+      "CatalogService._select_imported_recipe_head": "6eee0c77fb655e3f3bd28f3d615271ccd277f4fd77a186283419ad1e2a58091c",
+      "CatalogService._upsert_canonical_document": "d8ef30c34c2ba053c795758596b007462fbbf376f8e69ed6a6510484378cdfbc",
+      "CatalogService.get_recipe": "e2b12f54ea50c22d3ca837ca588a834780a3a04e4cc573d5402e504db2f29235",
+      "CatalogService.import_catalog_models": "03e783af87caab212f01c56bbc391946aef1808a00fde76ea288c7d7aaed527d",
+      "CatalogService.import_recipe_library": "5d7bc15b4c934022f2aa49aae9398d9a81aa211f257d74a0ad6f0d121ca42220",
+      "CatalogService.recipe_catalog_local_revisions": "4ea275b58766d34073c3d748bfded58268d071d9c4c1dc0a46f63986a230cd5f",
+      "CatalogService.record_prebuilt_images": "d04ef21e53f42a2ae68125112fb16e7bb77d8b7ae430e07616c2956ef3640b45",
+      "CatalogService.refresh_build_policy": "0b32285b305b9b892cf31628bdf25a3b603b192cde9d263ff661cfe3bd3448a9",
+      "CatalogService.resolve_recipe_revision": "f79135c82694f4fe31cf284a80f3bcc63a5cb0933fdf2fd395351cb5ba34e9a3",
+      "CatalogService.retract_recipes_absent_from": "8e8c733675a94359685958eea332f61d6fde5aaa79370a02e97204658e988d83",
+      "CatalogService.store_source_bundle": "31b2b81b0ee49f67817c82ca9a2ae52b02a1315ab7188a1161f797cca9c9bf2f",
+      "RecipeCatalogLocalRevision": "ae49cbd59e6076b17a592ec02b5e065f68cc3bf225895e6991e9bc0c15bc1b32",
+      "RecipeRevisionView": "7ba5f33be873c1621924c52b1b59e873b3a5c32f75066364e35a792cade970c7",
+      "SourceBundleView": "0f651524cf61fa356e9fe6f9531c138e0d08d5c6c5488bd7bf17060bdfa9e933",
+      "_CatalogImportDocument": "2363976f91f5fdf06298b9d9a3ca9c46f2936f966d418dd2f5939bd29de22812",
+      "_actor": "4cd7a803231c3ba9ae9aecc2672ff2961362f434839937c847dfc0fb3db9e990",
+      "_capture_import_document": "d146da92b97cd114f41bb00c3eb0645af8203419551473a7d9c5a90e2a19a3c9",
+      "_get_active_recipe": "6592e19aef43dfdac0f032f6a1df1d5a561fc3667a4c3ddd294bd7a1e83d45e9",
+      "_node_count": "957e9134063d059b84298afd7fc60090c00b0fc9ee32f7d3c5fd4e2cae01ceb4",
+      "_package_handle_metadata": "a3b83fea8b2a2aacd4cccd4cfebd3724be75371b413fe8c6a42c8f8b3163a023",
+      "_projected_package_sha256": "c1f31392f9c088c4fde6dbeeed69a70dba410c2ac96c316d70838e61eecaf88b",
+      "_release_version": "25fae76e14508224df8918aac0093b8ddfa7bafdd260d918e5ffea54818b06d8",
+      "_resolve_recipe": "2b3ce6199dfb933c9b9e6ca1489a8bccb6346cb2d98c0bed89d797ed2690a93d",
+      "_view": "912e0f2e5c59d5c405a5fef8c5dca2727ffe2c65b34a79f7aac54201986659ee"
+    }
+  },
+  "debt": [
+    {
+      "count": 10,
+      "path": "control/src/vonk_control/catalog_service.py"
+    }
+  ]
+}

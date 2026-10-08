@@ -1,0 +1,94 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache_ranges.py": {
+      "<module>": "51fb1d5ca83e5f414e6de1cf2370b0566c3f73d98fdaf1cc7fefee55ed7eef14",
+      "RangeResponseError": "a6b015d3820f2ed675c0fb99dad9a949a4e55288033c65d54ee3ec003e0f3928",
+      "RangeTruncatedError": "13de0769170c2653a28eb6dbe68a632b0176ca5d6a436394b88c9eca04766b05",
+      "_RangeIgnored": "c0d49b54ae195f13c3ac777e92fc9d50fff68ef937157a70ed08bda49889bd51",
+      "_reject_symlink": "d9f630bdd805c8f67a895460080764e9a4dca69c7635bb58c2a31279764be767",
+      "_segments": "a9383302d91166bdb163364f371a5e83a0b57a51a2c65954643f10670f51cc0b",
+      "cleanup_ranges": "9824796effb5ef36326cfef6e84f8b6258b0bbb1e7ca3deb62404edf73a97238",
+      "download_ranges": "379dbff947cfb7fb1241bf11aa4c4660803fabff5fb1de404d237452ec4b6925",
+      "download_ranges._transfer_body": "7c978719692e530fa1f830fd13c8f17767ba5719e10b951633f6fc8a750f84d9",
+      "download_ranges.interrupted": "ce26bf1f36d820bd162c9785271fb553d6467824e1ff66fff48074899ea09d84",
+      "download_ranges.transfer": "e952c7dafa9d649d2284ec29ab8e70258c804d695fd8b8ee6984bc5c81da2b79",
+      "range_partial_bytes": "6e7cc5e2699d995bb52ad72b5c53b77808381b7b6270cb2c11773252777ac144"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model_cache_ranges.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache_ranges.py",
+          "RangeTruncatedError",
+          "download_ranges._transfer_body",
+          "range-response-ended-before-requested-bytes-arrived",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model_cache_ranges.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache_ranges.py",
+          "RangeResponseError",
+          "_reject_symlink",
+          "range-cache-path-must-not-be-a-symlink",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache_ranges.py",
+          "RangeResponseError",
+          "download_ranges",
+          "contiguous-partial-changed-while-seeding-ranges",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache_ranges.py",
+          "RangeResponseError",
+          "download_ranges",
+          "range-partial-has-unexpected-length",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache_ranges.py",
+          "RangeResponseError",
+          "download_ranges._transfer_body",
+          "range-response-exceeds-requested-bytes",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache_ranges.py",
+          "RangeResponseError",
+          "download_ranges._transfer_body",
+          "range-response-must-use-identity-content-encoding",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache_ranges.py",
+          "RangeResponseError",
+          "download_ranges._transfer_body",
+          "response-content-range-does-not-match-requested-bytes",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "RangeTruncatedError"
+      ],
+      "function": "download_ranges.transfer",
+      "path": "control/src/vonk_control/model_cache_ranges.py",
+      "reason": "Each range is observed at most three times with interruptible 50/100 ms backoff outside the stream gate. Every short response fsyncs and closes before retry resumes its exact offset. Exhaustion returns to the existing sequential downloader with reusable range prefixes retained; digest and Content-Range checks remain enforced."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache_ranges.py"
+    ]
+  }
+}

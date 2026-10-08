@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/artifact-hash.worker.ts",
+      "reason": "browser-local upload hashing progress and worker messages; not API data",
+      "type": "HashRequest"
+    },
+    {
+      "file": "control/web/src/components/artifact-hash.worker.ts",
+      "reason": "browser-local upload hashing progress and worker messages; not API data",
+      "type": "WorkerScope"
+    }
+  ]
+}

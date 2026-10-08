@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/tests/test_auth_api.py": {
+      "<module>": "5394bf44be8029e6ac735e7ee65bab6174f28616abfeb698ad02be59caececb9",
+      "Jobs": "7d3b689e080f58a32daed261e04785f2e41a0d335741585c18b612029af88d3f",
+      "Jobs.enqueue": "1e44071ec662df713fb05382e033c3eafc7f36f350a763ace6e0414a06e09399",
+      "Jobs.get": "a8c5ed3bc7d758b6bf5cb023395727db6a83f83f9d7f989e5b426c546c86eca2",
+      "_chunked_asgi_login": "17c94af4247f8ca93c324cbe363f0f635f73a79c11d303fd46eca1151fa0e480",
+      "_chunked_asgi_login.request": "3680057ef15c6bf2a40b2d28f8e9b1875ecd626232bfe339bf508aa2d35b5e6f",
+      "_chunked_asgi_login.request.receive": "c1485c894507afe334d224937de6a8292c458c586e71a9bf9778f198cb8f2654",
+      "_chunked_asgi_login.request.send": "86b640dc162c000431934a9316e8a7a22684355956d80dce5f6b55a6b19d0297",
+      "_client": "b56d2fe986523547d077405a65756c72b74938fe6a4a9d896385c8d3aeef0ee6",
+      "_login": "e4468a2c78c19b9a4ebf222a3037ebdf643ad8af122628c20da7def54b0c5d08",
+      "test_auth_openapi_documents_every_runtime_error_status": "372d0aed61d1fa8a68a873d27a44f80680d4d6f05634e42c1ccb7aa9fce1629c",
+      "test_cli_token_cannot_be_minted_with_a_bearer_or_without_csrf": "9fe3313395c5992c2028441879c7dfb743834532a65938c22cd95ad066706787",
+      "test_cli_token_checks_csrf_even_when_actor_dependency_already_authenticated": "85d3570af3c9d035016beba096d030bbf479de61827a7ba7c1546fb34ec3c321",
+      "test_cli_token_is_a_browser_session_only_download_with_expiry": "76154df49bfc9f02d20e532369a6b707049b698eef41558847c142bd99c54d1e",
+      "test_login_rejects_duplicate_or_malformed_json_without_echoing_it": "e26f30ee516ceb59fa6419aa91b1ae2e0520bac0ea8febf77024f963de639579",
+      "test_login_rejects_non_exact_or_unbounded_strict_documents": "75e5cb6c2d4b0a3e43a63d815c396229bef6dec08c4c23f2630726db587fb0c6",
+      "test_login_requires_the_exact_https_request_origin": "9f3978b58541675bd6f34a84cdc09f3f9e8e82652f994efc71e88f65ef84e349",
+      "test_login_returns_only_a_session_summary_and_exact_secure_cookies": "bc4f2b30b5ae76080082002f2966a08a0510b6cbd1b442de0958f5020078f306",
+      "test_login_stops_reading_asgi_chunks_at_the_actual_request_limit": "900b75425f57a780b2d512c3118ececeb9163a85671df72f44bb802fb0ad0611",
+      "test_login_uses_generic_credential_failure": "848ceabc9c66c46e2dd851058869fa0329f0934611d4059247565392d2e92aef",
+      "test_login_uses_generic_throttle_response": "8ed40615e34866c97b00174a4e75a57a0f9f995a3aa4afccb603d1e3642f3902",
+      "test_login_without_host_is_refused_before_password_verification": "0c7d8b6b88d19c235659ee65c47b3d068f270bca20eada02c5a8e02eaa575e19",
+      "test_login_without_host_is_refused_before_password_verification.without_host": "dab21314dd3c2e80b4a6b2b4d56b60d9aa080c81610531092d49c2a34d5ec313",
+      "test_session_status_and_logout_use_the_durable_cookie_session": "0c26290c54f5b370d88efbb98a52a36f2770b670a6b40cfc3aea964752dbfce7"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_login_rejects_non_exact_or_unbounded_strict_documents",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_auth_api.py"
+    }
+  ]
+}

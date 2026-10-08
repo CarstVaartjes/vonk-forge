@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_normalize_generated_text",
+      "kind": "loop-without-deadline",
+      "path": "scripts/generate-control-clients"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_reference_scan.py": {
+      "<module>": "7ed3a28a64581ec153a059fe5bbc0ba862461b9ea9afea6065be98d78a9beba0",
+      "_approved_images": "cc6fe9d4e74ac91302ee391791b76a1ca6928aafd9e451848fa15d4025417d51",
+      "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
+      "_profile_plan": "32f8a20e21bc91a775d0161a568917af8eef9eabf8d590afdeb6802ecd0d023d",
+      "_reason_projection": "e0a699c0788ea845ed78a90710c66e67389da9f008120a254923cdd4efbde9f6",
+      "_run_switch_kinds": "b0d724aa893828e9c1fd3c716a56044fe570bd707fb6559663461170da1919d5",
+      "_run_switch_plan": "33d5925118d8e75da1c7b727b45cf82b8a242084900614a40462a25e80c1efc7",
+      "_run_switch_runtime_image_intent": "f87d5d52872d21040b3d97b26bdb585f29585f479124443b858af0aa7a031650",
+      "_stated": "8940aad2e7963e3364e059cc7bd2f16977accb8175772896cd669201a59c02b2",
+      "model_set_objects": "b3f846270636729ad6febbaed69899eb1b6eafd11e8e2f31b900e31083f384e6",
+      "model_set_reference_findings": "2b36ecc43b37935876294fd1c9013e150d7e4c4325dfc2a84b3b624405b94c84",
+      "model_set_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
+      "model_set_reference_reasons": "8873ed7b1fc4d46fc3d0e5cf89d05bcfe552753b64a3118776d35d1212fbfd09",
+      "require_model_sets_open": "e5213082fba248642c9b6ff7955f1900e54e5417746976052c4b7252c7c3ec06",
+      "runtime_image_reference_findings": "adcf56d41c236640e378d01f09a17a40332e019cc1e3786c84257cbc998b80e5",
+      "runtime_image_reference_findings.account": "ffe3d9d171741dc9635291a1f4593b2025c93ae2acd0025884ef7a6fe62efb43",
+      "runtime_image_reference_reasons": "d6257e372269c4a0b0d0f994dc63dab9dd19628c1d80f0f08c5cfc22fb660fa0"
+    }
+  },
+  "sites": [
+    {
+      "expression": "intent.build_id == expected_build_id",
+      "function": "_run_switch_runtime_image_intent",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/artifact_reference_scan.py",
+      "reason": "Garbage-collection keep-guard: an active job's image reference must match its owner plan, and a mismatch defers removal (fails closed for deletion) instead of widening or deleting anything."
+    },
+    {
+      "expression": "intent.recipe_revision_id == plan.recipe_revision_id",
+      "function": "_run_switch_runtime_image_intent",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/artifact_reference_scan.py",
+      "reason": "Garbage-collection keep-guard: an active job's image reference must match its owner plan, and a mismatch defers removal (fails closed for deletion) instead of widening or deleting anything."
+    }
+  ]
+}

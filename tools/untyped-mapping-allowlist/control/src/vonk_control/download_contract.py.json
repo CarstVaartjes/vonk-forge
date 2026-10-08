@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/download_contract.py": {
+      "download_responses": "1b0e1404d9ccc8cf106673074487e1b95595a6bd02128775472e73eb9d46679a",
+      "upload_request_body": "cbee421b1b097802d3f58248831b50f49089c4d21330775f4baa5ef78c25bd4d"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "control/src/vonk_control/download_contract.py"
+    }
+  ]
+}

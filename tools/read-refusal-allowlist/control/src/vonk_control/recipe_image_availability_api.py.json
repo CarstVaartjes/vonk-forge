@@ -1,0 +1,61 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability_api.py": {
+      "<module>": "91a30ed42b3b8299c542bc2539104e844606e7cc39d4069e316b5b949abeaff3",
+      "RecipeCancellationRequest": "2fcaa367a939af9a9d74369315f4b86000c26357dd6cec2b8978235942f3562e",
+      "RecipeDownloadRequest": "8bc5a8ecb6df885da8253bf37f931d8c0efa67366984dc232cd6364d3156e05c",
+      "RecipeImageAvailabilityAction": "b5922d1b486184718528f0ac1916ea38aa0053a6a80837430353d13cabec5447",
+      "RecipeImageAvailabilityAction.parse_key": "51ab42a94bcb22495d292b14542e8a26072049169f38b034a1edd2f56e64ffd6",
+      "RecipeImageAvailabilityChild": "7ea7fc93a449910ce143933d326e5dc96c12d20699f83318499da11542d63f98",
+      "RecipeImageAvailabilityResponse": "f6baa7a686368acb6ffeea0d7161047adf9b53351420a87f0da199b00b104f71",
+      "RecipeImageAvailabilityResponse.terminal_evidence_is_consistent": "0ca44a918d4986dc6b0d87c71d115ed1888ab3bcc02b209fb520a2d696efbf9e",
+      "RecipeImageAvailabilityResult": "b53567e4e130fc323f4dd6142143ddd0d0fc14dc25cc1752cc0febfca0c4eedb",
+      "RecipeOperatorRequest": "e8825c5ac8cbbf0a6a5f186f20df20813d979726ca31613b8488b0ae1afceef6",
+      "RecipeOperatorResponse": "b914b3f932148ab5caedf188047da02ed56b443476f538ad9ec0587b19221bba",
+      "RecipeOperatorResponse.terminal_removal_evidence_is_consistent": "7c6b1ed5bf1b02c673814e897aa7af6c6520cd3976cf952bb963dfdb4f5f3064",
+      "_child": "130e32192b6b0af704c463f429f341fdb7048c4b32106a0895fafb173387cd52",
+      "_mutating": "cfb351d0f6dd896177c22e7c75a268a3bbce26c00766f8d5811de4f4a0fb88c1",
+      "_progress": "8be2fae1a2b185575c36dc633e110e8548ee9fe53ce678e27df5ce77f7e77a2c",
+      "_recipe_error": "7f3258f734cf599025d5aa44ee2c65c58363162dbcff744007d9a182c956705f",
+      "_refusal_detail": "728e343487605449b95673fc16124c170e91e530de6397759c0058a378f4ee86",
+      "_service": "420d123db92cff9e2569e9c9d9c5a5be724da23eccf9bf54d0957c42ffb8e92a",
+      "_view_document": "d2fd07b566e05cc7c19eb3c0feb480d570f5b922fb63fd463c7212c083715d9e",
+      "install_recipe_operator_routes": "74fcace0e623a43b10e075a0fff9f236393a6d247a08160c6f518bb90e43da90",
+      "install_recipe_operator_routes.cancel_operation": "f7d8c401f8a6fb1c685f00c91fe23f489cf59547e0065768bd4bb16b8ca1a637",
+      "install_recipe_operator_routes.download": "da207e3d696958e748f0d6409e1acb1634c6c7d15775b0b37192dd8e67014dc7",
+      "install_recipe_operator_routes.get_operation": "4d96f592ae5d27320c2f9ec209439f16f7f77fdc081183c5d3da6991d0489816",
+      "install_recipe_operator_routes.get_request": "23ede7517b443138e88f015f82e3d9ebb3fa58cbc7e5c05cbd8a45545afa5f26",
+      "install_recipe_operator_routes.removal_document": "fe72c4039ce2274be3f63bbad76c1321d071fcfb7bc0cf481f499efc2a1d6eb6",
+      "install_recipe_operator_routes.remove": "6c36dc64609b1cf6941faab3560de57100fb782709a8fecb795a2d323b854d45",
+      "install_recipe_operator_routes.retry_operation": "c7f1d0dc6406a0b47cd57ce2f1689dcdcd050989ba27dd9e03dfcf3237b336df",
+      "install_recipe_operator_routes.review_remove": "2fda6efa858e6ddbb0b70c128eb3d37513001e33bdb17e19b3d07bb4f3bc76bb",
+      "install_recipe_operator_routes.update": "a753365069100cba4770ce8f4023e4c87fdc1fba9dbc3fcd8356ff9e0cf5e49d"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "get_operation",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/recipe_image_availability_api.py"
+    },
+    {
+      "count": 1,
+      "function": "get_request",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/recipe_image_availability_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_recipe_operator_routes.review_remove",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/recipe_image_availability_api.py"
+    },
+    {
+      "count": 1,
+      "function": "review_remove",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/recipe_image_availability_api.py"
+    }
+  ]
+}

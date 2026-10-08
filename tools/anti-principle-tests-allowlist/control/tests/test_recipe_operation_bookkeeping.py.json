@@ -1,0 +1,136 @@
+{
+  "content_identities": {
+    "control/tests/test_recipe_operation_bookkeeping.py": {
+      "<module>": "6647438c60e2710d2dcfbd5f3e6ead07c39691d90817d5dba500fb64a6bd4f6e",
+      "_build_operations": "ef5c8e04e4b4275c07e9ca0ac066b505aff2ff5f1ff4452687134914baab3c20",
+      "_evidence": "1a3e982e8ff070fc77736e0fad0d29cbe445bdfe8441017375a00de18de54ff5",
+      "_running_recipe": "b9405a036472949b36541087b65d1cd538c667e7d1ff43bfda966700e6330658",
+      "test_a_build_cleanup_receipt_that_does_not_match_is_reported_unproven": "cb7006daabc72aa87059da943f0f26106ffa90d6b8b9b92e3dd555088cb4d4c7",
+      "test_a_busy_owner_is_a_retry_later_unknown_outcome": "6f46194c7fabe975543073f691fff8da7539506f4c7a072e911182fc25876300",
+      "test_a_damaged_installation_plan_is_skipped_and_prepared_afresh": "b512e2809ab6f39c19d2b8b1874e7805f764162a5bdf5814b24ca9e10f28f3d3",
+      "test_a_damaged_result_is_shown_without_it_and_never_refuses": "2e9ecab250b7f1db17cb424d75e4cb47775c0a2a0bebe53e9803e7e48fd3b052",
+      "test_a_damaged_run_plan_is_rebuilt_from_the_mapping_not_refused": "2db234c232b2d1966df8c768c72f2d4d3f63490368778ce0d05bad2ee93f9aa8",
+      "test_a_damaged_run_plan_still_finds_a_one_shot_run_by_its_activation": "a30ea530b982871f9066395831dc2b2fba1ab484896ceb74abc32c456fcf87f2",
+      "test_a_failed_build_with_no_failed_receipt_is_started_again": "c5095d518c8371ac0fa1d81fd8db4b69e7c4ef8b311e4505ebbc2904ff61cf6d",
+      "test_a_job_that_lost_its_intent_recovers_it_from_its_orders": "2b10c10ef7746b325d0249aea26ad911566f783fb1abdd38a4ebced2d3f20648",
+      "test_a_profile_stop_child_that_cannot_be_proven_is_retired_not_raised": "26c3088ddbc29550b71d5509b0cb5174beb56575ff33d467aa3dd6806fc05bec",
+      "test_a_profile_stop_whose_parent_is_damaged_retires_nothing_and_ends_failed": "dbe270969b7ef9d18473343c288f2f1e9ec8b0943ff5df246091df6f0da5fbca",
+      "test_a_recipe_without_a_model_identity_is_unknown_not_an_error": "6f4da92fccc36b11b42b0f9d452b1578d75d682d323ecb67730775b696a42a41",
+      "test_a_recovery_with_damaged_authority_is_retired_not_raised": "43cf56a9c2b73793b14ccecb427aed4ff5daac931f7d805361e3be9663320035",
+      "test_a_replayed_result_with_different_evidence_keeps_the_first_receipt": "9b1f6c423f48d54d098677303452d0e220642c2bd84d1c89d4a026268e63a771",
+      "test_a_retried_build_recovers_its_damaged_plan_from_the_previous_order": "6dabe68d0ec79974d4522673e180e13ab2c72f56740ea1b9f3f925c6af1e2f41",
+      "test_a_start_result_that_does_not_match_its_order_marks_the_rank_unproven": "d40b2b6770fa0e66637085dda71ac03a5f8efc034452863d15ae028128c30655",
+      "test_a_stop_without_start_history_uses_current_exact_run_ownership": "d7e9c083a73326a59c292526495ac926f4065ce028ba7628092c3a573ea28904",
+      "test_a_stored_state_read_never_raises_bare_in_the_operation_service": "81f0d8136ec8edf9aa86fc32843e129547f62f3f38a2151bbb049c4f7ed0ff61",
+      "test_a_stored_state_read_never_raises_bare_in_the_operation_service.Visitor": "201341477e3e684c7d8eb97e4de67aaecde3fbc57e0282264c5abd83f8f01117",
+      "test_a_stored_state_read_never_raises_bare_in_the_operation_service.Visitor.__init__": "55fcbf7ddbfbf6270d890fe8df3a0a702c11268c87e0cd2ca7249e34f2e43393",
+      "test_a_stored_state_read_never_raises_bare_in_the_operation_service.Visitor._enter": "aee9bbc8e9dd33a59acdabb585de0ebe11a99ba1ea7bbdea2006488bf4159c36",
+      "test_a_stored_state_read_never_raises_bare_in_the_operation_service.Visitor.visit_Call": "2d0ecda5c46c1b3b9f1ded30e2e272816e97bece6dc1d2913e7802193cc97913",
+      "test_a_stored_state_read_never_raises_bare_in_the_operation_service.Visitor.visit_FunctionDef": "1c56bedd27632c695adf8ccf26ec15ab5ca9d04845e9cda41d70311befd75652",
+      "test_a_succeeded_build_whose_receipt_is_gone_is_built_again": "ebb8dd44c43f8dbc38ac5269c91531bb2e1ad10dedda63561f2c6ded0a3447fa",
+      "test_an_unreadable_profile_stop_is_retried_and_never_guessed": "da3ab6317af654329d30690449fc8c53d18e0c13140326851f89cd690b662689",
+      "test_build_evidence_that_does_not_hold_is_reported_not_raised": "4fa9ee8988e9e677ce0b2ad322f316fad604ded2075951891349c8c4271eee12",
+      "test_cancelling_a_pull_whose_build_is_gone_completes_on_the_job": "d198b367ec03d8f7dcd590c7c0b7badbd5efca79838aadc001a0c4a683f628f9",
+      "test_companion_models_that_cannot_be_read_are_kept_not_refused": "476c3c15374e4178f95df5ef63f23cdec28e546d8c78e97b96fefec88a094657",
+      "test_damaged_phases_end_a_start_through_its_recovery_error": "d1f96d7cd85281e4459a96a875ae67ad67f858fe9cdddfa649d09c4213a6f43b",
+      "test_damaged_start_history_still_queues_exact_run_cleanup": "6eb5ddaff40a89267da868ae84404d3820888ce7ebed501939c58188b745096c",
+      "test_empty_rank_receipts_keep_their_parent_operation_kind": "fa63ef2e1894ff91411eb4823170dd02d93f6c23db21fcb9495af5cb4a7a4eaf",
+      "test_failed_exact_cleanup_reissues_once_then_frees_a_fresh_run": "7eb39f75ae999671f21252bab19a0e34cd3a1bfacce7fad4569d71724ab03cee",
+      "test_install_evidence_that_cannot_be_proven_fails_the_rank_for_a_retry": "4c9eafd7139fd6b576edcb36a31322658fd2ed43622f4de8e23a2bb5b0f0b91b",
+      "test_installation_cleanup_does_not_require_original_install_job": "a98b7c93d5525a36b4ae73e7e183cbc3c130c5986d17f22b036aa95209f18585",
+      "test_lost_install_history_completes_exact_cleanup_and_fresh_admission": "c3aace90c2403310831a215825d936c943d645602675f705f91fb950e028cd74",
+      "test_no_bookkeeping_class_is_raised_from_a_stored_read": "0f44d70c67ff27e7d51d1702565333519021cbd3a7a24c9c5f1472d54f6f45a3",
+      "test_request_refusals_are_typed_invalid_requests": "3860d03a159ae9e43cc06df288ac6126f58337324ce9e7e3ad3b3920958b6dcb",
+      "test_role_phases_report_a_mismatch_instead_of_raising": "1648c3cb30bacf6c67e41955629c3cd388f0e33190fbd4cfe71a99eb04539d77",
+      "test_role_phases_use_exact_stop_identity_without_launch_history": "910eaf6681d13cdf00e71b91ec47f4213aa9eeab665479c8214db833746f660e",
+      "test_run_membership_nobody_can_prove_is_retired_as_unknown": "e8071cae9f0418be4e8ddaec95a49c758a09ec88322b6bf22abc32743efc2ab6",
+      "test_start_installation_rebuilds_its_damaged_plan_or_asks_to_retry": "05907b91098e9d140d1f7328d107565a4c7b932cfd68c214cdfbbceecd4df626",
+      "test_stop_works_without_start_jobs_and_with_unreadable_launch_plan": "868bbd68083563aab87b18227b22cc1f7985cf62e39f0e77243cc2dc464babc8",
+      "test_stored_phases_are_retired_not_raised": "29ad8ab36226f20ffa335c367f1a77c8c99eb6a644ce48aa875a3cffe2ad7375",
+      "test_the_superseded_assessment_uses_the_jobs_own_sparks_when_scope_differs": "27e12b55413212eee174fe453dcc205c14bc81cb8d5489dc40f08f60d05492f1",
+      "test_uninstall_keeps_the_model_when_the_recipe_names_none": "3e6ba53a64e9744454b0035223baa373f3c3a2b144f25672df01b6a77949477d"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_damaged_run_plan_is_rebuilt_from_the_mapping_not_refused",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_profile_stop_child_that_cannot_be_proven_is_retired_not_raised",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_profile_stop_whose_parent_is_damaged_retires_nothing_and_ends_failed",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_recovery_with_damaged_authority_is_retired_not_raised",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_an_unreadable_profile_stop_is_retried_and_never_guessed",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_cancelling_a_pull_whose_build_is_gone_completes_on_the_job",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_request_refusals_are_typed_invalid_requests",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_run_membership_nobody_can_prove_is_retired_as_unknown",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uninstall_keeps_the_model_when_the_recipe_names_none",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py"
+    }
+  ],
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_a_stop_without_start_history_uses_current_exact_run_ownership",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_role_phases_use_exact_stop_identity_without_launch_history",
+      "justification": "Pure canonical Stop payload and role-order parser test; calls only payload construction and _role_phases, with no operation execution, ending, effect acknowledgement, capacity release or fresh-admission claim.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "reason": "input-validation"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_works_without_start_jobs_and_with_unreadable_launch_plan",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_bookkeeping.py",
+      "reason": "security-edge"
+    }
+  ]
+}

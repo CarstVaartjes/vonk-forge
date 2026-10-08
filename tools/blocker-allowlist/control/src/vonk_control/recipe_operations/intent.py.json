@@ -1,0 +1,99 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/intent.py": {
+      "_active_owned_workload_jobs": "cbe3a8ebb4e0bd2ed034e7f33ee2f0df64e57ca05da3a1a6297f3bd814bbcb0f",
+      "_bound_workload_intent": "0356f70a62abf451ada30959612e09e68be7ec680ac2d7d3a8376581bb95737c",
+      "_cancel_reason": "764b5bf7cac080d3e4b9a2a8bacff14f84ca233f51c33c89302dcf4d91535a02",
+      "_intent_is_current": "eecc7afabaeae20d903bd54fad3274842b01bc3ad304070822ef72ee803eef8c",
+      "_job_workload_intent": "dea656c7e8038509d16615adf5227c3bef97e699c43af66e01646b5d4a54ff97",
+      "_job_workload_intent.read": "1235c935a8ff01fc9489c122c19960d7197d964576a31980f677a23349a91225",
+      "_job_workload_intent.rebuild": "38560257fa006461893d2d113d9354d80dd18a7b24134ae6f833f63093285ec4",
+      "_profile_effect_scope": "70b7cdc82fac696f1f9c28adae51d3c543ceb84dd42e727bcfd34a686c7705d1",
+      "_run_start_intent": "f3e99d174fca8d25394b1a596ced86395d6feed9ddd342997ef1eea7f5750115",
+      "_shared_workload_intent": "5d61016cd43b53f2ed87d0b1a0d006ca1a4e6bebd3a7d95b959e33c14d4ac4bb",
+      "_unissued_workload_children": "ed21a8ee2f39b27e23b965c377d5edd1550f9fa95f6f42bace776ea112a567e1",
+      "_workload_owner_scope": "c29ccb4bf2372443eb44fcd6606d36267146e753cf9a34b2095fa0275b627d54"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/intent.py",
+          "RecipeRequestInvalid",
+          "_cancel_reason",
+          "cancellation-reason-is-required",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/intent.py",
+          "RecipeRequestInvalid",
+          "_profile_effect_scope",
+          "profile-stop-target-scope-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/intent.py",
+          "RecipeRequestInvalid",
+          "_run_start_intent",
+          "recipe-run-does-not-exist",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/intent.py",
+          "RecipeRequestInvalid",
+          "_workload_owner_scope",
+          "recipe-installation-does-not-exist",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/intent.py",
+          "RecipeRequestInvalid",
+          "_workload_owner_scope",
+          "recipe-run-does-not-exist",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/intent.py",
+          "RecipeRequestInvalid",
+          "_workload_owner_scope",
+          "workload-reconciliation-kind-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.stop-authority",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/intent.py",
+          "RecipeStopAuthorityRefused",
+          "_bound_workload_intent",
+          "workload-operation-lacks-its-admitted-intent",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/intent.py",
+          "RecipeStopAuthorityRefused",
+          "_run_start_intent",
+          "recipe-run-lacks-its-original-workload-authority",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/intent.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/intent.py"
+    ]
+  }
+}

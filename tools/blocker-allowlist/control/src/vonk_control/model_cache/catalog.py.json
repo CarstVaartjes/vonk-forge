@@ -1,0 +1,126 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/catalog.py": {
+      "<module>": "d292c4df1aabd314303822363afacc288cbfa30c140be4055004f0b1b040e064",
+      "CatalogMixin": "c33fcabc5e79b641b29deb07782eecee5ae44cec980708bda510bf2ad00c0c92",
+      "CatalogMixin._artifact_from_catalog": "7f8540259fc043094e94939dbea2c7e6f2c1990fa744b18cd964e36ed503433b",
+      "CatalogMixin._artifact_from_input": "f139ecf7432a5b8cdb43b53f4d0723227c0d0cb902366597e82f5249e8bf7b50",
+      "CatalogMixin._collect_model_definitions": "43b166e57dcc83fdef1ff179bd04beee638ffae99437634df31170887b4bd363",
+      "CatalogMixin._newest_readable_revision": "794b4ec58d13910c94edac3fa8eee2a7fc2a030bf4ea75115df3c5c844e05d4d",
+      "CatalogMixin._parts_from_catalog": "f65b2989e474414a4f038fac7dae8315cca002fe6316449bc1faf9beaa768945",
+      "CatalogMixin._recipe_document": "5f66cb8f5c65abd7f4d8ad52dd5edfa50658923970169c7f922c63e78e942e4b"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.artifact-identity",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionRefused",
+          "CatalogMixin._artifact_from_catalog",
+          "model_cache.artifact_invalid",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "model.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionInvalid",
+          "CatalogMixin._artifact_from_input",
+          "model_cache.artifact_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionInvalid",
+          "CatalogMixin._collect_model_definitions",
+          "model_cache.model_definition_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionInvalid",
+          "CatalogMixin._collect_model_definitions",
+          "model_cache.model_dependency_cycle",
+          2
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionInvalid",
+          "CatalogMixin._recipe_document",
+          "model_cache.recipe_invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.lookup-by-id",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionInvalid",
+          "CatalogMixin._collect_model_definitions",
+          "model_cache.model_definition_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionInvalid",
+          "CatalogMixin._collect_model_definitions",
+          "model_cache.model_pin_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionInvalid",
+          "CatalogMixin._recipe_document",
+          "model_cache.recipe_revision_missing",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "ModelCacheResolutionRefused",
+          "CatalogMixin._artifact_from_catalog",
+          "model_cache.source_untrusted",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model_cache.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "InvalidType",
+          "CatalogMixin._collect_model_definitions",
+          "catalog-revision-is-not-a-model",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/catalog.py",
+          "InvalidType",
+          "CatalogMixin._recipe_document",
+          "catalog-revision-is-not-a-recipe",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/catalog.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/catalog.py"
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/recovery.py": {
+      "<module>": "d0b763a1ce190eebdad2ce6b03b789c2aa41af5d462b595eaa80febd2c189986",
+      "FleetProfileService": "e99d9bc5e1f234ea1680522270b44bc6402f654040ce0c9778fda1aa4447d92a",
+      "FleetProfileService._automatic_profile_recovery": "f59377357cacd2e0c0f38239b40f74b110d9a6cf933062d9a6954f0e1b48c02a",
+      "FleetProfileService._end_repeated_failures": "20785b047ab027fe7257a553a2358562bcc594bdbc992f4d0c4d6567e26e705e",
+      "FleetProfileService._presented_state": "b88b845bca288287755b5b707236e1b860cd4d64bc4ac6143462351ea8142aff",
+      "FleetProfileService._recovery_possible": "ca8f684259416e877ea96628dc64c45461762b568305afd6549c3cce9b26040b",
+      "FleetProfileService._recovery_wanted": "96508902135750fe8bdff89cd49d7026a8bdc26011eee3ab3a97aa87ef4c2d34",
+      "FleetProfileService._repeated_failure": "3fceffda594c1bb0fd65b10841ed185d5a0a117c7907da745a74a61dbce2d80e",
+      "FleetProfileService._start_step": "f262b1b30c742d3ab2b8faa5ecb5fdfac3cb2843446369163e097216dc1fe127",
+      "FleetProfileService._superseding_intent": "65ade6fccde739fa1b0fee489f486fdcaae5a44c6942f84bdb67f64b153b7c1b"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/recovery.py",
+          "FleetProfileInvalid",
+          "FleetProfileService._start_step",
+          "fleet-profile-step-kind-is-unsupported",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/recovery.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/recovery.py"
+    ]
+  }
+}

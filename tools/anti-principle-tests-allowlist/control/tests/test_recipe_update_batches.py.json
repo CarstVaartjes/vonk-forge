@@ -1,0 +1,89 @@
+{
+  "content_identities": {
+    "control/tests/test_recipe_update_batches.py": {
+      "_start": "04ef8ce28cc68423a5c60f610400481bfe9ef9aee8ac90416ac47969ae18ad0c",
+      "postgres_multi_update_env": "ac3f8a185f052b18ee1056d9b4ef24fbfed6a0f7cc37ca0c6b784cfe6a3e428b",
+      "postgres_multi_update_env.build_own_image": "d804e4a10fb85b39f2a4347a10b0087f75b5fd4855a7436aa7bcd85916227155",
+      "postgres_multi_update_env.fresh": "73667cfbb229d2ef3374e03bb060bbe1161f7c11202285a42d9ef2a1449f1687",
+      "postgres_update_env": "3d93c9356636b2eb6088a0652f04582f380248705273b5bb80d47d8a11145fe2",
+      "postgres_update_env.fresh": "d0dfea1c6e23cb2764568dd3a15b74bd18a36bb48d38ca0ae61a5b15b1308095",
+      "test_activity_projects_parent_with_common_ordering_and_state_filter": "871350dc202439b5ff337de7d49b97ddb6aadcb3eb36efc8798a2add58dd6827",
+      "test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope": "526a7db16c1dd69722c96235dba6747526591050842146f8380f06db4d517dcc",
+      "test_cancelling_update_before_admission_settles_without_issuing_children": "04eb475c9d3603626766238cfe6d96079fc73ab4d7c99ecdecda606ae880cbd1",
+      "test_changed_frozen_revision_is_refused_before_child_commit": "7442fffab0002544fd7040ffefab9ae92735b979be12dded93532912582998f3",
+      "test_malformed_parent_does_not_block_other_eligible_updates": "a0c6ad5e7045c9ba9990d026b449938fb3099ab05da172c118bca806e8303a81",
+      "test_one_admission_failure_does_not_suppress_other_children": "6b7885e878ba59664edde8114e2b106296ba7574614128587c190c2620496e42",
+      "test_one_admission_failure_does_not_suppress_other_children.authority": "9e153ff8fc43a4b05e8c1b841c19ecfa0ddb8982f347798deb8575ab37350c86",
+      "test_postgres_author_revocation_does_not_revoke_accepted_child_scope": "c32df4b42fece27a951a7eb968bf04ff45c1438b0d11d73c4cdd145c6da11708",
+      "test_postgres_author_revocation_does_not_revoke_accepted_child_scope.paused": "c2e71e0fab4db4c00f9243f58fc37a3ead3b71488f0e3d4563bc18fbba4ea85a",
+      "test_postgres_concurrent_parent_acceptance_reconciles_original_key": "56f52c89469b7f38917bbe5cc32d4e714a1115a5af9199bac60c14ac680c4df6",
+      "test_postgres_concurrent_parent_acceptance_reconciles_original_key.submit": "bd3c5eddbd2b773bd847fa407e381ef3bcb0b66249ad3571941e9269072936c0",
+      "test_postgres_takeover_fences_old_parent_admission_and_result": "9dbff63f4517353cb5320fe1fd5271fa893c3b41dad1d5842f755d345272136d",
+      "test_postgres_takeover_fences_old_parent_admission_and_result.paused": "c2e71e0fab4db4c00f9243f58fc37a3ead3b71488f0e3d4563bc18fbba4ea85a",
+      "test_postgres_update_cancel_after_first_child_prevents_later_admission_after_restart": "135f73616a3d8eba681c66be0f698755fd97f609683ff53932d097640577e491",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer": "d0c378d648f3d6d306815016ae4dbfcba59427608408b457e1c9378e0e351694",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer.CacheAdapter": "eb895fd16b7abf2e62c12a072d466f6ecdc861851be46913e361e992273bab72",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer.CacheAdapter.cancel_operation_in_session": "8e73e79444621274b04d156249b397a71f63c208c3984085c2db6a4d18d546a6",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer.CacheAdapter.download_preview": "4361a8946b9c82ab86ad7ed5cca16ec325acaa4f2743f1b1c1efbf1649d4ad17",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer.CacheAdapter.get_operation": "2b8e0b98e34d76e1a35b64601a7fa819ca8cf4ee249f3f8b389d3afff1e186eb",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer.CacheAdapter.list_operations": "c3e97ef30ff0ec1517e30bb7c83abbc5f0f5f5f86194bab7370e0d05cfd333f1",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer.CacheAdapter.resolve_artifact_set": "5772b9b1b366289acc384cb2a62054dc0ae5b65de2f25629de255e48662a6e55",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer.CacheAdapter.signal_cancelled_operation": "89bea67bce33cdb8e0f5aca5fb732e4a4d4ecaa2719336fceff3a8c90314914f",
+      "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer.CacheAdapter.start_download": "7a4badb8e9a4b0315a88491efc8b50a035ba44769896376ae76715c7ec80e25e",
+      "test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_parent": "f3027889d98134ee744198d4cc89061f33f4da960a8c311cc15c0a0ddf865985",
+      "test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_parent.Response": "09e62bbd96133afc0e412d68faf88fd9d79db649f80beb4afccb58c2550300ae",
+      "test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_parent.Response.__exit__": "42d37f0f70e2240000bbf60676ed63eae22eba2be5a63ccc29ed4246f6f78c68",
+      "test_registered_update_route_cli_recovers_lost_receipt_and_follows_same_parent.Response.__init__": "3520e38917c80bd64a608d60374562a6ee5cd6673090e73619d9c5f8c2aa70ca",
+      "test_replay_binds_issuer_scope_and_frozen_current_head": "af94a05dd7f2f678ca20ca43d32056856ad3979590172f0728fe15be5347ddf7",
+      "test_restart_adopts_frozen_children_across_worker_process_death": "e78e1a6c9bc372493cf831e09ba2036700ff33ee7d26c9d0d7c7ff558070f546",
+      "test_revoked_authority_observes_issued_child_and_continues_accepted_children": "2dd02463f8e4ac9fb18ea680d865aea2e498c02d96b6725dc4468c9b8339fd86",
+      "test_scheduler_keeps_image_slot_available_while_parent_admits_another_child": "b54edb0ca47d2dfb02973c5404f7c7353aa450d0aeee5e5396ccfd8d2dde7f9a",
+      "test_scheduler_keeps_image_slot_available_while_parent_admits_another_child.image_run": "634162cc5a1c97b39a15b616f7d90c12ef53b6c3f208347eab985716c008d44b",
+      "test_scheduler_keeps_image_slot_available_while_parent_admits_another_child.slow_metadata": "122973f843cba5cf4e648aec5126abe125f650e75962f00287088935efec3fb9",
+      "test_scope_that_cannot_fit_future_failure_details_is_refused_before_acceptance": "1801448277a3448579aeb492eaa08efd91f3f4efbbaa1d23500b887d91764541",
+      "test_stale_batch_invocation_ends_without_overwriting_replacement": "cfbaa44c253e1c53ba8dcc8eda8d3de1b8cf0b0f2a098032e614ba17ffc71092",
+      "test_stale_batch_invocation_ends_without_overwriting_replacement.accepted_then_replaced": "1600e6ea25b45205a4846aa80b35350d05ab25ffde21c604c01f427cb8efa8e6",
+      "test_stale_batch_invocation_ends_without_overwriting_replacement.replace_owner": "0482f97ed5a0959aa6bdb63cbe98bac53484b9b5582454c088c05433fb9d8693",
+      "test_stale_parent_cannot_admit_or_replace_new_claim": "49f52233a8f283067981fa40743329e8da0f6f4e709e22cc5a6c62a3acc78d58",
+      "test_unknown_child_admission_retries_even_without_retryable_hint": "3bcd49e46995857476ea085d28b2db7a57a30e47cb9f95636b71a0a43b118045",
+      "test_unknown_child_admission_retries_even_without_retryable_hint.start": "53a7fb9cfdd088b019fd636c74113b7d5bf359a3b42d28426b5ab827a9350360",
+      "test_update_cancellation_recovers_child_committed_before_parent_checkpoint": "31c307cdb56e81f9f4882a01afa5c1da4e517ff68ef2f790be90c30f354a2968",
+      "test_update_commits_parent_and_exact_scope_before_any_child_admission": "405289480e56372f8b24fcdaeb5d9e1f4a5d2b8f1d291374249eeb42a4b80fce",
+      "test_update_commits_parent_and_exact_scope_before_any_child_admission.authority": "94da7c2961edb1553e79f38ff87f13d9cfc4e6803101edee4f6f6a0f8659db49",
+      "update_env": "df62498e7fd47e0e5b71dd682c0cff93248c7a8af4fd0196be0b20abf496954a",
+      "update_env.fresh": "89757789785836814d22f52a743d3fd42b943d6d1f96157c3d2b19b89436fbe0"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_cancelling_update_before_admission_settles_without_issuing_children",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batches.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_update_cancel_after_first_child_prevents_later_admission_after_restart",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batches.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consumer",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batches.py"
+    },
+    {
+      "count": 1,
+      "function": "test_update_cancellation_recovers_child_committed_before_parent_checkpoint",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_update_batches.py"
+    },
+    {
+      "count": 2,
+      "function": "test_one_admission_failure_does_not_suppress_other_children",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_update_batches.py"
+    }
+  ]
+}

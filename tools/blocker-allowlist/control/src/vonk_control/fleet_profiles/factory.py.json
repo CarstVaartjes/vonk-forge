@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/factory.py": {
+      "<module>": "ae04b3317c2d7578c4309af2a22a70ae6666d99b5e355b7f1830b98ca0ee9ced",
+      "build_production_fleet_profile_service": "1430f38c23ba24383c11123cc8343aef48e646b62b419f45962b4aa8113bfc16"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/factory.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/factory.py"
+    ]
+  }
+}

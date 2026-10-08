@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/sort-header.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "Sort"
+    }
+  ]
+}

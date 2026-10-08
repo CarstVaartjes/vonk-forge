@@ -1,0 +1,518 @@
+{
+  "content_identities": {
+    "control/tests/test_recipe_operations.py": {
+      "<module>": "c5e87709a954490eb9a9f5bb1361dd2ab84b5091afab447b279b2b704d12ba1a",
+      "ConcurrentPublisher": "eb190745c1eda18280b9ad57156c48950dfe9e72f263adc90127091275d2d46f",
+      "ConcurrentPublisher.__init__": "cf402b7f74d9b688aa4b12118930205f8569f30e923059d88172f85cf48607dc",
+      "ConcurrentPublisher.publish_empty": "d4537d9af3fe63893bb2abeeb358da7c134104929a5bdb12095b03fa3887110d",
+      "ConcurrentPublisher.publish_recipe": "e4518504228b29e97dc4898cf601945ed798bd9af89aae6eba3862a87ae456d9",
+      "FailingQueue": "9049032ae45b1a6a109a1924a3326739b9bd52b6447e52e12994bc9266989281",
+      "FailingQueue.enqueue_in_session": "79f2d8d46a64ebc0b1f69f6a9485de92bea5de2431e10826c6332dfabfb56170",
+      "RecordingQueue": "416cc1dc9fd88769edcffa59224c95d16c0f3c65176c8aa839486759065cb6a9",
+      "RecordingQueue.__init__": "791243290bf4513f18f8df4525c4e1b9b6e70baf1035d4ccb8309e4904f45914",
+      "RecordingQueue.enqueue_in_session": "f470ee797a396c23ae6af49aa868357c0f7c9b54f4f4fc9d9a1c65837e91fc06",
+      "RecordingQueue.notify_available": "a5d98b8af32e5bd95d0dce08c5e1d1c377ebacce450ffe5c6390e4c374bb8b01",
+      "RecordingQueue.request_superseded_workload_cancellation_in_session": "3238409f9b9abe72dac9c08d324a497472c6db001348ee3ac7273ee4e7a4a357",
+      "_CanonicalModelCache": "51b0fbf679e0a355de1cfb4a56a2f0a24a1ab96f3cafa47a2f4a2ee373ffefcf",
+      "_CanonicalModelCache.resolve_artifact_set": "3c65ebf0ee6231dc1c863f2ac3f3f4b760103ea2b94f73413645620435f3148f",
+      "_CanonicalModelCache.verified_model_objects_for_set": "9e600a3b0795b1b4035f8e7292020119bd9798679c57582a0947d51cd87b8d98",
+      "_blocked_install_plan": "4ac485ecc004c4d93a24a69055a0eed3b807a4be8da10711fd4b0b3a395dc971",
+      "_issue_exact_stop_grant": "3a7d662f011f3571fcbfebf16d0a96eb8410f0d8a852d7594f22be4d582b903b",
+      "_job_phases": "6824bb44b716bf2aafcc0bc39ad4f34cc2cad2b08b0a421c4d1bd82db3420788",
+      "_placement": "02fe32f700d685ba9a32083681de4e238c725887db660fc9d25ecbce071ba808",
+      "_postgres_backend_pid": "71d16deb8558963b6d72af959fc7046b750baf4653cbfea8c125f3a6714e6dbb",
+      "_queued_distributed_recovery_restart": "e72d1462d04bcd6a46b45f7341b19b0060e2e76d3640464e05cf79503101040a",
+      "_queued_distributed_recovery_stop": "6a8a90c7bf706523c93a00d069ae1b181ffc5163d857949de1220f76805bb158",
+      "_recovery_deadline": "48ab7c1594f8a49fc970350f1ff20a1b840a05d78226a9270403be5fb03328dd",
+      "_required": "e1db2e46a6780fa0153beb0e0961fdbb467572fa1e9fa2917bec21dd8038a67a",
+      "_synthetic_model_content_sha256": "d42096f29caf4046325e320771638a4f23f77357565cf725af6b2aafaac1f410",
+      "_typed_stop_payloads": "c6ee6c432d4f2b38facb49aea0cbff85c1fb7fbc56203870d5e44cffcb0800e0",
+      "_wait_for_postgres_block": "6dd882ab480bfd4c062922ce38dd9f6724f8294b08b78edc4fe833f0ecf4399c",
+      "bind_route_publications": "d9118534849736dc826f56a191c3de877d8857f35c8e3c8a9b7552637a5a68f5",
+      "clone_running_run": "745cfea457474728ebbfc3f8dc1d665bb6e575897424b4b153da8aed011b19cf",
+      "complete_collective_readiness": "5f3488847f2327c4e45490f41c74df495556d13613b3471801c8213ebb29eaa2",
+      "complete_started_recipe": "6d1d5ac28d6d79f2086cf1bc1ec1c6e249b1acf27d6a613a3a26f178d24947e5",
+      "installed_recipe": "d96cb2b8d5932eb3e17c07ec69fa5ff7aaeb19e001069b5f33a4c93304e6ccdc",
+      "mark_current_exact_observations": "acad91d7303b2547ec02a634c5f6483cbec21997bc8d63a6b41cc90715af887a",
+      "record_exact_empty_snapshot": "f40a45b8c0b4738e7ddeebd2375ea30ce2fbc33fdab8114d8a8b7524ac3ce499",
+      "setup_services": "582b6301a97464f072173ec4dc082cc276abb14996d8f0af86f1e51cb4533d9d",
+      "setup_services._CanonicalImageTransport": "e792f2bf1423530362517a18a8e1c0b1e889ed601b4cf8a9d7c0f501ae8fb177",
+      "setup_services._CanonicalImageTransport.inspect_archive": "f99d1eb8c5d2c81351d141741f859b10cddde5f669e6fe6b42af4ebed3640e3d",
+      "setup_services._CanonicalImageTransport.pull_and_export": "64aa3c61bf3558bb1b434b8d2dc1370d772d3c61d55d43b8e860c72551bf536f",
+      "setup_services.prepare_canonical_runtime_image": "f67e2d0fd73268d2d612bce37e38b520a91d0f686593f13a178a98bd8a6e3c55",
+      "start_evidence": "3313975efcce70c288600d652c73dc27a9908775a0b5fbaf2fb7b7130f973f49",
+      "started_recipe": "9f3634eff457738029a6ec4b0f9d940eb4c17754b2f6a44a5f740c1c9f1e25b4",
+      "test_a_bounded_install_blocker_keeps_the_specific_cause": "17be362ae258a58da90e17b78dba50edc28e9cf99efd28d578d1167442e52399",
+      "test_a_silent_collective_readiness_inside_its_budget_publishes_the_route": "c19667feec3a439af1bb037742b9278225406ad7032479ba8b090eb0b63584a9",
+      "test_a_silent_collective_readiness_inside_its_budget_publishes_the_route.children": "2dfe18011d8a2bfda7912ab1f9bf8574e516cb88f3a4fbf38d54f4d0332b75c3",
+      "test_a_silent_collective_readiness_inside_its_budget_publishes_the_route.claim": "b48e713d958fca5ad95203a831b098225dd59ef8505c02cd1bff8d6cf95785e8",
+      "test_a_silent_collective_readiness_inside_its_budget_publishes_the_route.complete": "4240cbaf8052567d49d4ef1ffe4fb259557cecab6c6603fc6977c0ff5a3b4767",
+      "test_a_silent_collective_readiness_inside_its_budget_publishes_the_route.success": "3ee77ff9d2d91a1e736a13cfa8b10614e1d35ba196bc969883693d3388576c8f",
+      "test_adopt_owned_operation_requires_the_exact_kind_and_owner": "bc35e62c4f69b7b932ad7cec4089e6242af14bd559c742e587202d89b3ec22cb",
+      "test_adopt_start_binds_the_durable_child_without_reproducing_its_digest": "cec6303a86132005a64d84d7dd27f9fe3ddfe9543a96f864e2043a29a4887110",
+      "test_canonical_recipe_revision_drives_install_and_payload": "ccdc5fac7afbe047129b66925b9d00a38d0046814be673819166432b68094d40",
+      "test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting": "1b8343cd98b28ebd4d8605c90e9408cd043dd149d9af0f6c1322584c1d97abe7",
+      "test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting.children": "2dfe18011d8a2bfda7912ab1f9bf8574e516cb88f3a4fbf38d54f4d0332b75c3",
+      "test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting.claim": "b48e713d958fca5ad95203a831b098225dd59ef8505c02cd1bff8d6cf95785e8",
+      "test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting.complete": "4240cbaf8052567d49d4ef1ffe4fb259557cecab6c6603fc6977c0ff5a3b4767",
+      "test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting.success": "3ee77ff9d2d91a1e736a13cfa8b10614e1d35ba196bc969883693d3388576c8f",
+      "test_collective_readiness_starts_distinct_observation_grace": "64e09f4efdcf22c7b37a87d03a0ed4a8fdf062c5db2d782978f85f5a9c2c0dce",
+      "test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite": "76bb439ad7b8fa09282487e4ec9d5b7912f2630cdf0f2d3e2d7fa6ac4565fd83",
+      "test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite.stop": "951c75e4cd970e9ea4901ac2732e4cdd49f725e96ef5c82e73a035f3688cda14",
+      "test_concurrent_final_rank_results_serialize_gang_cleanup": "761f8b4c8e1007654a746a3f51557a855e6fe0874ab3da1e1afe2f040e3e31b1",
+      "test_concurrent_final_rank_results_serialize_gang_cleanup.result": "c666df1101087a92e18da2526238f4d685a756c822e606e5af8620e194c2c662",
+      "test_different_uninstall_request_remains_blocked_by_active_operation": "1d020d7e781edd3d9e6542e02c6e7768251fa2fafd519f8adb9d367196501b8e",
+      "test_distributed_rank_loss_waits_for_fresh_presence_when_evidence_is_missing": "b8213ff9406e4d56cfc20a7b9a5d498d8c160b2fa688a8c3ced79dbf601c1fff",
+      "test_distributed_recovery_deadline_is_enforced_before_phase_advance": "6d1f02193d002039780d8c3da5ec49d9d514b455ca20d3f28eea65ca57245121",
+      "test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance": "046c61777704e951ba111394f8a9bf3f77ce2b616ca859f5cab59c5d9a24fb8b",
+      "test_distributed_recovery_deadline_is_rechecked_before_route_publication": "5ec30bcb662e014d8a25d85495b586f93f85faf0e325f2088743cf15aac9ddd5",
+      "test_distributed_recovery_launches_all_ranks_before_collective_readiness": "366bc720079df296ec3312544cba3f7258850ea27625ec6119b081c5186edc92",
+      "test_distributed_start_deadline_is_enforced_before_phase_advance": "3b5b03330c3f6918be41afe7f07413235d24ad4b1eaf3feb68dc8e09fcc8c7a3",
+      "test_distributed_start_launches_all_ranks_then_checks_collective": "98e2ac93496431c42b3b760c97fe7b239fcb6b24c72e98b7c000819866f11936",
+      "test_distributed_start_launches_all_ranks_then_checks_collective.children": "47dafa191a91773dd8beb9cf0c48eccebe2271de8596dfdeb26481aac7c0844a",
+      "test_distributed_start_with_missing_run_generation_records_the_rank_unproven": "933fec28050a43e4b559b46fa322f451efadcdd9020fa775c0cc14866ed3a0f8",
+      "test_duplicate_stop_replays_when_dispatch_wins_continuation_race": "a3bb216e67cb8212006e12eb3b0ca33717e68ddade1794d31ca642e874c85512",
+      "test_duplicate_stop_replays_when_dispatch_wins_continuation_race.duplicate": "276be75653962ed9db84f6539eacb7b3121928ee7663edb6903c3bcff3c94553",
+      "test_duplicate_stop_replays_when_dispatch_wins_continuation_race.raced_accept": "c84cdf1c8c8860cf99c273a85af206a383c9492e0f805ddf0161fc6ab894e08f",
+      "test_every_failed_start_leaves_what_it_launched_stoppable_or_queues_its_stop": "7d88abcdfb934cd79ade86f0eb78629e88fa208587b7b4bada6b62a0aea77cba",
+      "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails": "f78f87d19e680590645f582454e77ed90e2fbb953823b357d249888f33dfac90",
+      "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails.DeadlineCrossingWithdrawalFailure": "a7726febeb3335e861a50c1721da7078a5afd8f5f2709dacef735795a4bef492",
+      "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails.DeadlineCrossingWithdrawalFailure.__init__": "41ece397b1bd75db2562a59fddc97edb248cbf7990db0c594af92cf7cbcfec7d",
+      "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails.DeadlineCrossingWithdrawalFailure.publish_empty": "77b7f288ffb2d9f0a67e5f9bab972f357fb9b34489c685426a3ca2b4a5126485",
+      "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails.DeadlineCrossingWithdrawalFailure.publish_recipe": "93ffff7ff2102a67db69952738db5a08e591904ff689a8e5c622702608e6e960",
+      "test_failed_collective_readiness_is_recorded_and_fails_the_start": "923dfffafff26dd9cb7910007dc93567da3843e7255faff88cd752ed5d74bb80",
+      "test_failed_collective_readiness_is_recorded_and_fails_the_start.children": "2dfe18011d8a2bfda7912ab1f9bf8574e516cb88f3a4fbf38d54f4d0332b75c3",
+      "test_failed_collective_readiness_is_recorded_and_fails_the_start.claim": "b48e713d958fca5ad95203a831b098225dd59ef8505c02cd1bff8d6cf95785e8",
+      "test_failed_collective_readiness_is_recorded_and_fails_the_start.complete": "4240cbaf8052567d49d4ef1ffe4fb259557cecab6c6603fc6977c0ff5a3b4767",
+      "test_failed_collective_readiness_is_recorded_and_fails_the_start.success": "3ee77ff9d2d91a1e736a13cfa8b10614e1d35ba196bc969883693d3388576c8f",
+      "test_failed_install_retry_state_rolls_back_when_queue_write_fails": "0f34af3d4a1ebaa56de921596d79c72d36171f5c4b973e54a6565cb1d464caca",
+      "test_failed_multinode_start_queues_idempotent_stop_for_every_rank": "2c3df19795217205a3a2cc2c2f88a7f79d241c7fcf3cca9e6b338ebb7549bf2e",
+      "test_fresh_alembic_head_postgres_runs_canonical_recipe_lifecycle": "849f89db380fd218a5f816cb618e125613e0542e79380cb7bf4a8c26a23d845c",
+      "test_install_admission_and_queue_creation_roll_back_together": "2732fe396e2875f24383bbc9ea23911916bea99958686e413d7aa290e992ae9e",
+      "test_install_is_digest_bound_idempotent_and_gang_complete": "1a3f83aca471e9c26cf58d5313f4d0f1790e60f2238224895b49ed8af8425a08",
+      "test_install_replay_is_bound_to_mapping_and_build_identity": "3f505c35825449b57176a22725481fd389c2989a1dfaa30c97d07e4232f2973d",
+      "test_install_requires_reviewed_digest_and_request_keys_remain_scoped": "f4011c54311552420ed9d876d9de269a9b25f3b78fe5ed2a4de3b475bcdab688",
+      "test_installations_removed_together_do_not_keep_each_others_model_files": "b48cd64ad9870ae06287040be76992c867e745dd9ebe516e0f58ccef9ca4574e",
+      "test_issued_stop_is_not_retired_as_unissued": "8ea11d8ce786fa3b61ea27b10c6603ae9a186d573e71338a85765e80be2c6516",
+      "test_multinode_start_is_bound_to_authenticated_fabric_rendezvous": "a44eec1bcb8cac9a2cb601b11b0639c27b6cb017ba22f4737cbf74ad856587b3",
+      "test_multinode_worker_endpoint_is_never_published_on_management_lan": "7c16e7e7f063e85a1fa5accdd205f382ae5a12a1896cdcd9a83268a6b8294d64",
+      "test_multirank_role_phases_persist_recover_and_stop_in_reverse_order": "158322297b9451b195bfa2c44a9acf91bad6ec00a4b50ded3c6d85f504822de0",
+      "test_new_install_intent_retires_only_unissued_older_install": "564658746f32028a8894c4bf43ec3d82470ca9dedd7de7008e24cd6fc7bdcf8f",
+      "test_new_stop_intent_replans_after_unissued_old_stop": "385276d8247b92c2db5b6c664ecac4ae49fbd9b84dfaf5e806335f06b13e7b07",
+      "test_new_uninstall_intent_replans_after_unissued_old_uninstall": "3fe0d5f89cf85232d6c9dbcbdee3355b1ac7c7c2f18b679b547eeaf16af8f2b1",
+      "test_nonzero_endpoint_owner_controls_rendezvous_for_every_rank": "06b2f3c40cc9bceba3711f8839eff297085eaf489cf13f3e6e67c25ad4f121cc",
+      "test_partial_install_fails_as_a_group_and_can_retry": "55932d8309a4a44f609c6d8cf364b41cdd31bb7480d45a7a6d88f40092b2cc76",
+      "test_partial_multinode_stop_retains_every_active_capacity_reservation": "769a0ce1625bf269f4484814e20c0bf9b7acc75ce6ca6fdc5eb5d2be3b1e5631",
+      "test_postgres_disjoint_stops_serialize_one_route_candidate": "497c597052382267e2559d18bbfe92e03a755e88a6eb181762739584fa537c26",
+      "test_postgres_disjoint_stops_serialize_one_route_candidate.stop": "75c53b82482d57d53b74c6f430f9165422c17a11282bff750edec03ce6690260",
+      "test_postgres_dual_recovery_stop_grant_uses_the_queued_run_plan": "4ffad0dbcea91b62ffbb237e41f984d6c68e3bc6f38e91cf9bb0db4970d659c0",
+      "test_postgres_duplicate_stop_request_returns_same_operation": "a4ec0e0877543cda4647455b5187c421c6d17ca9b078c3656fae02aaef5dc6bf",
+      "test_postgres_duplicate_stop_request_returns_same_operation.stop": "951c75e4cd970e9ea4901ac2732e4cdd49f725e96ef5c82e73a035f3688cda14",
+      "test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock": "a80c7c1910fce7dbc26bb6472b22d26407d43438fc43549d14c2e14582287981",
+      "test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock.after_lock": "d50d9cdcb196c962461b8945c6e8e1287ee8103fec1ada8c1dfe2cc057fe8a88",
+      "test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock.before_lock": "d340bae338f2e979bb8779b1aceb949e3dcf8a16ceca6c7c120c54570a934124",
+      "test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock.uninstall": "4b43e8d2162c4a2f6f795c104f4513aab945c5a129303cd4a9181ad3ce1f5ee5",
+      "test_postgres_failed_start_cleanup_stop_grant_uses_the_queued_run_plan": "2852d75c82e13e6e7b1a92f1a161af6ecb6c89a3bcbea0d9337701fd4392fec1",
+      "test_postgres_ordinary_stop_grant_uses_the_queued_run_plan": "64557a88e7558d628129538e4283a2069a1952e8ac198ba6405557b47f6cad88",
+      "test_postgres_start_bounds_uncommitted_job_request_unique_wait": "76f2c20bf45d76d139373338cb24f6d7f1e4311e550ee1abf7993f082dc3a121",
+      "test_postgres_start_refuses_without_waiting_on_a_busy_agent_node": "da025ed9225147953bb53c94206a077ec79b721aa328cc6bd128ba8fd5cb0ae6",
+      "test_postgres_start_refuses_without_waiting_on_a_busy_agent_node.observe_start_node_lock": "a2e0d06147ecce371c1e48f6c5b4cd72495df1e85232cc63ecbf931c06ff5c34",
+      "test_postgres_start_refuses_without_waiting_on_a_busy_agent_node.start": "6929ddc07bcb9c55b16babee1fdc138e2148745b795cf3aca2dd34aac8ab15d3",
+      "test_postgres_start_waiting_on_accepted_uninstall_is_rejected": "d642d4edb5d4efb1097d91a84da1ad2e7971cfa5438b81bdc68d64cfdaceb1a9",
+      "test_postgres_start_waiting_on_accepted_uninstall_is_rejected.after_lock": "c1cea612fd59a60279a34fb6b5777cd7a25e30780bdf5599c1ef72517a22d4f2",
+      "test_postgres_start_waiting_on_accepted_uninstall_is_rejected.before_lock": "2a4e8fe402850ec3255df1379cb4ce2e888f399c68c6726078f7b192fd231ff2",
+      "test_postgres_start_waiting_on_accepted_uninstall_is_rejected.start": "a7941a9a26eea246d3366e8610d1f2ab2654c6493230e3617e5b663eefd35e40",
+      "test_postgres_start_waiting_on_accepted_uninstall_is_rejected.uninstall": "0996ca481e73c6d795f987d34b01b98580214389654a9cd030b4c2075a51bc3b",
+      "test_prepare_installation_classifies_preflight_as_retryable_wait": "6e6ead331450af7353b3c732ea4483e65fd259a76e29ef7a1359f17eb5962dfc",
+      "test_prepare_installation_keeps_a_real_blocker_terminal": "480dfd5c428461ebf4b7c519876b4cc50b1818236787f5f7ffd99c50dd654f1e",
+      "test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall": "6bd656c11b003873f404bc3d3f53fd1468b0a4184f2e8b9d7f1b49f1f2969862",
+      "test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall.run_switch": "2564f803b76921690754c0ed66b488dac9e221a6b7d5707576e77db1a99af2e5",
+      "test_recipe_model_identities_include_canonical_companion_dependencies": "dbd9c0713ad3794ad30bec03cd499f26ba0e48fa19ead29e1a9903ddbd6a1ab3",
+      "test_recipe_model_identities_include_canonical_companion_dependencies.RevisionSession": "2a6ba755d6ed12df68f7954c73aff457ca68b329071e71e7281455438d3426de",
+      "test_recipe_model_identities_include_canonical_companion_dependencies.RevisionSession.scalar": "fbf0353b4d5b303ee27f092e0e9356ccf07455bebb9763aeed74c4900e9193d1",
+      "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry": "ed8b1cc5acffee53846fdf0fb60bbf0b55568629701f272d57c3b830853d3758",
+      "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry.AcknowledgementCrossingWithdrawalFailure": "fb4ed9b23b008f056296ac15ca2f3c5730d6b32d03dff732a7658536da161974",
+      "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry.AcknowledgementCrossingWithdrawalFailure.__init__": "41ece397b1bd75db2562a59fddc97edb248cbf7990db0c594af92cf7cbcfec7d",
+      "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry.AcknowledgementCrossingWithdrawalFailure.publish_empty": "77b7f288ffb2d9f0a67e5f9bab972f357fb9b34489c685426a3ca2b4a5126485",
+      "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry.AcknowledgementCrossingWithdrawalFailure.publish_recipe": "05206116a09d43b6a18157699e53b130b15a6dc7ba595c70c19385ad512e67ee",
+      "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry.expire_while_waiting_for_ack": "61219d8d10d6e22e6691bda50900b911f6ffb8d82ef4f78f73e8848eb5f2eb98",
+      "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry.expire_while_waiting_for_ack.acknowledge_at_exact_deadline": "857694f73f614e5e46f4d5953c9e34b4cd1573379fd32f41dec9801f531145f6",
+      "test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock": "7f7618dc929807608c1576dfa675b3fb3b1fc93b2ef32f2bc2d8890b945f7009",
+      "test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock.before_lock": "8e4eea8ee45018c0ea6ca6f274099bc4f4a8add5a91308aed5596905d945e6e8",
+      "test_recovery_publication_crossing_deadline_is_immediately_withdrawn": "44e2d120c11c300aa5adcd3d21ed67536490644742859a15046286012a8c896d",
+      "test_recovery_publication_crossing_deadline_is_immediately_withdrawn.DeadlineCrossingPublisher": "58469ee56456e1e99da711c16a75c84fc06915daab38b0d41bbc683b60d4e570",
+      "test_recovery_publication_crossing_deadline_is_immediately_withdrawn.DeadlineCrossingPublisher.publish_recipe": "59a8da453d8ce8f70fc1c73b4b0f62fc7d7e03883f6b7374c8ea0fc5867753c5",
+      "test_restart_interrupted_install_result_keeps_lifecycle_pending_until_retry": "d49178ee7c5cccea830f6ca5ab4757710964ec3241b5840f1485111af30ff0b3",
+      "test_retry_scheduled_start_observation_failure_keeps_the_run_pending": "025136cebdbdc28fb5588ad048515cd3862e42746f877389206abc201fde7a28",
+      "test_run_admission_and_start_queue_roll_back_together": "d9c1da3ec8195b27ae2fcc56789e75f64a70d0c3a039722818b387e365de61d7",
+      "test_run_status_projects_exact_rank_health_without_agent_secrets": "15fb9373068c7ae4163b1655ec49cc11d8b9ffddd6c03f4d7327a351c1cb01cf",
+      "test_singleton_start_grants_time_for_first_exact_observation": "4521fb5346639c6bcab749d16591c236200d231d23895728e6b7f43922bef062",
+      "test_start_and_activate_replay_require_the_same_installation": "227e383f9840979ac32d3ac4af08ac59da71060880299e7561edc1bbb0a85d7e",
+      "test_start_fences_only_active_uninstall_operations_after_installation_lock": "cabcbbb703d32e55fddab19a3d6be7947be557d7e3362d4689417819862d8729",
+      "test_start_stop_and_uninstall_preserve_capacity_safely": "cde7e005b98a54ea3add6c13dd0e800ee0048b63b4f04b1e1b96e768406a5676",
+      "test_start_stop_and_uninstall_preserve_capacity_safely.declare_memory_floor": "5a5f06ed3d65ddba98f61934f0f3a26baf98d5faa0696480ed437b5c3b2f1594",
+      "test_start_uses_current_alias_and_replays_by_request_identity": "1da836528e40fe4778b999f50b0aef969ae1e294a99c18a83fd165fbd55462ee",
+      "test_stop_admission_commit_failure_prevents_publication": "ed5e8f2df4c790179886129d24cbded3591645aa6b3d393bdc2dd51188a0b995",
+      "test_stop_admission_commit_failure_prevents_publication.fail_commit": "ba29bf04b4a5a68298e18e9a6842c5c4ded430b220a2f8a86f7736cd1eb790e5",
+      "test_stop_preview_blocks_nonexact_reservation_authority": "d11b4a9c558468cbab91f82e7926cbd67c4ad17463aa575b615f2ba182baf905",
+      "test_stop_preview_is_stable_exact_and_defers_capacity_release": "3a55efaa1ae4063828e6e0b2a28e04452286a0fb8c1051039cbd9f54b3a61880",
+      "test_stop_refuses_changed_review_before_withdrawal_or_admission": "767f5f8f3f4e86850298f2b6d34e8dcd240749d3993a6969e2fa77c3b75e33af",
+      "test_stop_replay_is_bound_to_selected_run_kind_and_action_digest": "8974febfa0e72f7be1e4eca550faf2d3d19ecdea191c780037e48dc7eaf6064a",
+      "test_stop_state_and_queue_creation_roll_back_together": "e8dd3c136c5be0a53cfd5f83c887e6486c5a5f09cb1b1048a84f53cb681a98f9",
+      "test_stop_uses_run_ownership_when_start_history_has_changed": "9ba6c77383205fcd11e4041be4bba2eb96961ea1e2eda637b79a457217233ded",
+      "test_stop_withdrawal_failure_retains_accepted_job_and_run_state": "2991ba5f4282118614d396a1b49cee975639355cd119558094b01dcd919047b2",
+      "test_stop_withdrawal_failure_retains_accepted_job_and_run_state.fail_withdrawal": "34963fe611943b14405b764b60eb122cbada73356a2174f1a9f773dd5d658da4",
+      "test_tensor_parallel_start_with_missing_run_generation_records_the_rank_unproven": "388e5b93bd82c985855bf31bc30bd79be259ae9276f6e2706492398a122bc82a",
+      "test_uninstall_cleans_model_per_spark_when_dependency_is_node_local": "68f04edafdd07e81c52105bf7de0fef3743aa2d67d2d19898c5dfeb5e0b46a5f",
+      "test_uninstall_keeps_model_when_another_installed_recipe_uses_it": "ea63c063a3519fec3868868576518d885601acbceca5b97ad1c1ecbc35ba11b1",
+      "test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences": "a1fc4e587d30085ad314287626929b575440557c2d707cdb7d6de6ac5fbd218c",
+      "test_uninstall_queue_rollback_and_request_key_are_owner_bound": "23abfe1d4906fc87de494bbe1a4557773feb79db93e3e8076c4ebdde8c8bebf9",
+      "test_uninstall_replans_after_installation_observation_changes": "ebddc64213cdd9ec9ed7f0f06858f78577419d48ac2334d189ec5d8426b7cee7",
+      "test_uninstall_validates_stored_identity_without_requiring_launch_placement": "8a4a8da503e7b973c60e123cf3503cc97020c921bfd21107c3d697fe5285ca71",
+      "test_uninstall_warns_on_unknown_bytes_but_blocks_active_runs_without_implicit_stop": "01a691cb9501d419f6d1c70ab0c90c64e526b5fb105c0763e1fd99e7cca9a68d",
+      "test_worker_death_while_owner_is_healthy_never_publishes_route": "1ac540aaf9afcf00172390ecd507fb90bf0f0ac245af24d892f25d07e201c924"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_adopt_owned_operation_requires_the_exact_kind_and_owner",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_concurrent_duplicate_stop_maps_to_one_operation_on_sqlite",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_concurrent_final_rank_results_serialize_gang_cleanup",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_different_uninstall_request_remains_blocked_by_active_operation",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_distributed_recovery_deadline_is_enforced_before_phase_advance",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_distributed_recovery_deadline_is_rechecked_before_route_publication",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_distributed_recovery_deadline_is_rechecked_before_route_publication",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_distributed_start_deadline_is_enforced_before_phase_advance",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_distributed_start_deadline_is_enforced_before_phase_advance",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_distributed_start_launches_all_ranks_then_checks_collective",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_failed_multinode_start_queues_idempotent_stop_for_every_rank",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_install_requires_reviewed_digest_and_request_keys_remain_scoped",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_installations_removed_together_do_not_keep_each_others_model_files",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_issued_stop_is_not_retired_as_unissued",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_multirank_role_phases_persist_recover_and_stop_in_reverse_order",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_new_stop_intent_replans_after_unissued_old_stop",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_new_stop_intent_replans_after_unissued_old_stop",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_new_uninstall_intent_replans_after_unissued_old_uninstall",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_partial_install_fails_as_a_group_and_can_retry",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_partial_multinode_stop_retains_every_active_capacity_reservation",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_disjoint_stops_serialize_one_route_candidate",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_dual_recovery_stop_grant_uses_the_queued_run_plan",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_duplicate_stop_request_returns_same_operation",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_failed_start_cleanup_stop_grant_uses_the_queued_run_plan",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_postgres_ordinary_stop_grant_uses_the_queued_run_plan",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_recovery_publication_crossing_deadline_is_immediately_withdrawn",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_start_stop_and_uninstall_preserve_capacity_safely",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_preview_blocks_nonexact_reservation_authority",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_preview_is_stable_exact_and_defers_capacity_release",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_replay_is_bound_to_selected_run_kind_and_action_digest",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_state_and_queue_creation_roll_back_together",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uninstall_cleans_model_per_spark_when_dependency_is_node_local",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uninstall_keeps_model_when_another_installed_recipe_uses_it",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uninstall_queue_rollback_and_request_key_are_owner_bound",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uninstall_replans_after_installation_observation_changes",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uninstall_validates_stored_identity_without_requiring_launch_placement",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uninstall_warns_on_unknown_bytes_but_blocks_active_runs_without_implicit_stop",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 2,
+      "function": "test_distributed_rank_loss_waits_for_fresh_presence_when_evidence_is_missing",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 2,
+      "function": "test_distributed_recovery_deadline_is_enforced_before_phase_advance",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 2,
+      "function": "test_distributed_start_deadline_is_enforced_before_phase_advance",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 2,
+      "function": "test_expired_recovery_route_is_unusable_when_compensating_withdrawal_fails",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 2,
+      "function": "test_recovery_expiry_inside_real_supervisor_ack_commits_cleanup_retry",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 2,
+      "function": "test_recovery_phase_deadline_is_resampled_after_waiting_for_job_lock",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 2,
+      "function": "test_recovery_publication_crossing_deadline_is_immediately_withdrawn",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 3,
+      "function": "test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    },
+    {
+      "count": 3,
+      "function": "test_failed_collective_readiness_is_recorded_and_fails_the_start",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_operations.py"
+    }
+  ],
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_stop_admission_commit_failure_prevents_publication",
+      "justification": "Failure before exact native Stop dispatch must preserve the original runtime claims and reviewed owner, or roll back admission before publication. Neither test claims a terminal Stop or capacity release; hosted service Stop recovery separately proves exact receipt and fresh native Start.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_refuses_changed_review_before_withdrawal_or_admission",
+      "justification": "The caller supplies an unreviewed digest. The test proves refusal before withdrawal, a new Job, or any node ordinal change; the original run remains owned. No Stop effect occurs and no released capacity or finished lifecycle is claimed.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_uses_run_ownership_when_start_history_has_changed",
+      "justification": "Tests issuance of exact identity-bound Stop under damaged or absent launch history. Stop remains running/stopping with capacity held until exact agent acknowledgement; this test does not claim a terminal ending or released capacity. The connected cleanup-to-fresh-run regression separately verifies release and new admission.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py",
+      "reason": "security-edge"
+    },
+    {
+      "count": 1,
+      "function": "test_stop_withdrawal_failure_retains_accepted_job_and_run_state",
+      "justification": "Failure before exact native Stop dispatch must preserve the original runtime claims and reviewed owner, or roll back admission before publication. Neither test claims a terminal Stop or capacity release; hosted service Stop recovery separately proves exact receipt and fresh native Start.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operations.py",
+      "reason": "security-edge"
+    }
+  ]
+}

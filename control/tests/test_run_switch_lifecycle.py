@@ -50,6 +50,7 @@ from vonk_control.run_switch_operations import (
     _read_progress,
 )
 
+from .registry_storage import read_registry
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import (
     CompleteArtifactInspector,
@@ -62,7 +63,7 @@ from .test_run_switch_operations import (
     _service,
 )
 
-_ALLOWLIST = Path(__file__).resolve().parents[2] / "tools" / "blocker-allowlist.json"
+_ALLOWLIST = Path(__file__).resolve().parents[2] / "tools" / "blocker-allowlist"
 
 
 class _Harness:
@@ -485,7 +486,7 @@ def test_final_verification_that_cannot_be_observed_is_retried_not_failed(
 
 
 def _retried_codes() -> list[str]:
-    document = json.loads(_ALLOWLIST.read_text(encoding="utf-8"))
+    document = read_registry(_ALLOWLIST)
     family = next(
         item
         for item in document["fail_closed"]
@@ -614,7 +615,7 @@ def test_the_adapter_projects_children_through_the_composite_aggregate(
 def _phase_path_classes(family_name: str) -> set[str]:
     """The exception classes the allowlist lists for a family on the phase path."""
 
-    document = json.loads(_ALLOWLIST.read_text(encoding="utf-8"))
+    document = read_registry(_ALLOWLIST)
     family = next(
         item for item in document["fail_closed"] if item["family"] == family_name
     )

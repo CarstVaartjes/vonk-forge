@@ -1,0 +1,11 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/run.py": {
+      "_resolve_run_recipe": "0c0c436e7e1258bc837fba5f70b8a7a08884ca4530034065e5119b04925186a8",
+      "_run": "926fff936e453bd8dbcb82d5d11598252b121b3b8d32f038e36cff98ceaf6eee"
+    }
+  },
+  "stored_state": {
+    "src/cluster_profiles/controller_cli/run.py": 2
+  }
+}

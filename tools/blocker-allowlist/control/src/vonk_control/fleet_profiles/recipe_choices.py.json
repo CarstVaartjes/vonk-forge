@@ -1,0 +1,72 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/recipe_choices.py": {
+      "<module>": "f1b9f3d61701552f9b7138734235993587adda8a4b290a553b3959f6d38c4fb8",
+      "FleetProfileService": "6953890c892e9ac6c708daf1c0033cbd2ffb9eede7abd8b3adc63542e998c9d2",
+      "FleetProfileService._assignment_selector": "f4a7a1268deae42feb4d80f5c4a1f8a8c91fc7df4c1b320901fd289630043fe4",
+      "FleetProfileService._choices": "f05ffc30bbe2ccec1c292f43d6e23863f8e603663bb66314acbf25b330f16532",
+      "FleetProfileService._execution_assignments": "1c6beccfe48d2a970347fc6f9ff0057d1fc3cd780cd02e53d88ec65f34310995",
+      "FleetProfileService._next_profile_number": "61ca1edcc9fc1fba35f9bde8f921086ca443d77e6060d40a69ad288c679edfb4",
+      "FleetProfileService._recipe_document": "5053030644e3534e3b1d1da9c13f4dbf327d6f6b774396830add1eb4e3758f91",
+      "FleetProfileService._recipe_identity": "e72ccb76286922ba4d7e252fc2b97473ae62277c969cba897ce3d923e408675a",
+      "FleetProfileService._recipe_selector": "10edb679cedc71717fc823690f370dba0f69b6fbc2d1876b622b2124c8922d3f",
+      "FleetProfileService._resolve_choice": "b16608ac09d87f0e4a02258064e688cd64410c6ebe2d228810afaa69edcb2d17",
+      "FleetProfileService._validate_draft_review_identity": "8ba781cd4fabc9066d57b2103415a76d7f3d68faa34527db7c51d29672b4a944"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/recipe_choices.py",
+          "FleetProfileInvalid",
+          "FleetProfileService._recipe_identity",
+          "recipe-selector-is-not-an-exact-unique-active-recipe",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/recipe_choices.py",
+          "FleetProfileInvalid",
+          "FleetProfileService._recipe_identity",
+          "recipe-selector-must-use-canonical-publisher-slug-form",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "profile.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/recipe_choices.py",
+          "FleetProfileStalePlanConflict",
+          "FleetProfileService._validate_draft_review_identity",
+          "fleet-profile-changed-during-application-admission-review-a",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/recipe_choices.py",
+          "FleetProfileStalePlanConflict",
+          "FleetProfileService._validate_draft_review_identity",
+          "profile-assignment-set-changed-during-admission-review-agai",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/recipe_choices.py",
+          "FleetProfileStalePlanConflict",
+          "FleetProfileService._validate_draft_review_identity",
+          "profile-recipe-head-changed-during-admission-review-again",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/recipe_choices.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/recipe_choices.py"
+    ]
+  }
+}

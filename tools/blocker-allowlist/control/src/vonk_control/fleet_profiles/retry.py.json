@@ -1,0 +1,69 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/retry.py": {
+      "<module>": "90e7e2ac8f54f34d7e439453971a3b546ed3c28fe4812d41b5a30f8ef977e91e",
+      "FleetProfileService": "642efec6c5466de6067dfc2a99bdfde4281c5c13c2db8c921c69a67845ff30f5",
+      "FleetProfileService._decline_retry": "1a1433235313f2f78441facad1f80f518a6ae24d0037cd2b346bbbbfcd978ebb",
+      "FleetProfileService._decline_retry_application": "fc237dab6738367b49b2b209a9960af7aa054c549d59a8a86a4310363647c02a",
+      "FleetProfileService._park_for_retry": "0230c09805b801d344e310f30f799ceb4474a9e68faee343024f90a8ff6d9d8f",
+      "FleetProfileService.retry": "2eb0e5fe332714ac93921e639e588f7cde8e2cca2e5adc20ca9efe2efcc4de68"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/retry.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.retry",
+          "current-fleet-state-blocks-application-recovery",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/retry.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.retry",
+          "only-current-profile-loads-can-be-recovered",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/retry.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.retry",
+          "only-failed-or-waiting-applications-can-be-retried",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/retry.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.retry",
+          "recovery-request-identity-was-reused-for-another-application",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/retry.py",
+          "MissingRecord",
+          "FleetProfileService._decline_retry_application",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/retry.py",
+          "MissingRecord",
+          "FleetProfileService.retry",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/retry.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/retry.py"
+    ]
+  }
+}

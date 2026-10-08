@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/tests/test_latest_workload_intent_recovery.py": {
+      "_result": "f4d0a44eff3edfadb611802220b0599d7de4d757aa31481e8582dc278db53e6e",
+      "test_new_profile_cancels_issued_start_then_stops_before_replacement": "4fb3c62e3c7bb64111aea0173ee7b8e4950cf09d62d99eeee382dbb59f0cd4d9"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_new_profile_cancels_issued_start_then_stops_before_replacement",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_latest_workload_intent_recovery.py"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/tests/test_acceptance_preflight_evidence.py": {
+      "test_preflight_query_projects_only_comparison_fields": "9815e02dbef93d7896926b8c01a67b05e8579162d311cece4403467472c82b4a"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_preflight_query_projects_only_comparison_fields",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_acceptance_preflight_evidence.py"
+    }
+  ]
+}

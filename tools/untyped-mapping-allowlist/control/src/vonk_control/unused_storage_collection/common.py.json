@@ -1,0 +1,34 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/unused_storage_collection/common.py": {
+      "<module>": "fbef583bf497f146754551f23fc1c9fe4975199517549cfc24b3210341aee0f5",
+      "EvictionCapacity": "abaa93ca7d09ada20d8ed03b0a0f9857e59605a03e22765859c55b23a499a6f5",
+      "EvictionCapacity.plan": "f74cc5df25907cee8f6e2dc5791c68d82d4281d5ca5c279c90656c129a5a2491",
+      "ImageBlobReclaimer": "60663ebc8999440753536ae24d7c5535ea84e72fe721e4769be09ba44da5981f",
+      "ImageBlobReclaimer.collect": "674e79f2263ea03dcc3af80a1d36dfd69613970b5d02e1a3a3b870558972f18f",
+      "InstallationRemoval": "e0e49a38e98529b3e3652902b8703b9923bbb9c93b09368bdcde1c3c750930c1",
+      "InstallationRemoval.preview_uninstall": "0bd1872f0165955e96d5823ba4bc6ea74360a8180b1a34797520cedeb45bb9c8",
+      "InstallationRemoval.uninstall": "731c0d6de1b806844d520747923301ae06000786b2dd764eeeed19f702c5ac7c",
+      "Swept": "438063607c5f1e29f1497db107e7195f8a6db6121044e0efe45b0f624185e2f1",
+      "UnusedModelRemoval": "6e9cf6bdbc1265bfe1841d7a7dda317cd5162af84eaebbdf94aa1c69a3df15b2",
+      "UnusedModelRemoval.accept_unused_removal": "fb5e5ae95d82c156741324008ab9203667816bafb86bef8fae128b47e509956c",
+      "UnusedModelRemoval.accept_unused_set_removal": "848da7f185247b49bc4509647b7f52ef17695440ecb8127c2d43a0c16cf21f0c",
+      "UnusedModelRemoval.unused_set_bytes": "dfbb7d5c366d90a4c8a30f26e0ed9f8aaed5298aed01c4eaedb0f652a7c5c12c",
+      "_Kept": "54bd9c1d23a6df7348c457984cf65646c08a283ddde5d0a9f6ab5bd3cf41e36f",
+      "_disk_usage": "26f7ded8bfcf127505f960660eeda9992dff57c6160b6f1956920f765bacf764",
+      "_eviction_order": "5dc496194c581b71b87b0899aa14af551df7890faf9cca6c45126782a7b4a5db",
+      "_eviction_sentence": "ccccf2fcd0074b5193b8c8979975c5156d290ee6df128504ee249d122699ed16",
+      "_freeable_in_order": "947e54fd46e97c2cd369222938444a232f6028debe82ddf5420b98663daa4d5f",
+      "_kept_sentence": "ed107bf68dd453769ac84377ad0ca050c6aa33d8062039b7c4241c786ee9530b",
+      "_model_objects": "36af47c135b82577e48511aa4e2c64d0c2bac4f12d0674f8fb7332feb5021f76",
+      "_waits_for_storage": "557af0f3fda5ef61ac5cf153e151be3556ed75273f5adfed6a99158dae9dadd7",
+      "spark_eviction_capacity": "3619f1b08ccade231a4eafd6e3b51ed932c23cae6d4445cbaeed0829e92edbe4"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/unused_storage_collection/common.py"
+    }
+  ]
+}

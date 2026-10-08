@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/platform_observation.py",
+      "reason": "Canonical authenticated API and process-bound worker package provenance observations; nullable unavailable facts remain owned by their deployed producers."
+    }
+  ]
+}

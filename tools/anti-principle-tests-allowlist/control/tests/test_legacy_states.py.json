@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/tests/test_legacy_states.py": {
+      "<module>": "79a05aca996d5ae9a89266627d66c5d3df0c93eafd4bd13aa1bb16b7862c56ec",
+      "_row": "c163c506cf2dbe6a24d452cef36c7e45f6ebeb6006caecd66121dbbc5efbeb86",
+      "_rows_are_placeholders": "68210966e76c3cf5cf0dc9f6c91f682378c561e21ca3329567ed639dd87ee604",
+      "_states": "569c8c8d129ef585782fdd0c98e0eed3946cbb4aaabee89dccf490919c8e9be1",
+      "test_every_retired_word_is_rewritten_to_the_word_it_means_and_once": "5f1bbc93e452b3686560cff391203c45d4894a63eebb23b9b1fe336c12f271ed"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "function": "test_every_retired_word_is_rewritten_to_the_word_it_means_and_once",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_legacy_states.py"
+    }
+  ]
+}

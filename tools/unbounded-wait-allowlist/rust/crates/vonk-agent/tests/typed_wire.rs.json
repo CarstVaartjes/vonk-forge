@@ -1,0 +1,34 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "char_literal_end",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs"
+    },
+    {
+      "count": 1,
+      "function": "identifiers",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs"
+    },
+    {
+      "count": 1,
+      "function": "raw_string",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs"
+    },
+    {
+      "count": 1,
+      "function": "strip_test_items",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs"
+    },
+    {
+      "count": 3,
+      "function": "strip_comments_and_strings",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/tests/typed_wire.rs"
+    }
+  ]
+}

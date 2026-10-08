@@ -1,0 +1,77 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/litellm.py": {
+      "<module>": "d2d64ce6d87ef253ba2caa797e3aeb674ac50f4c6303a6b86809dd67bad62b1a",
+      "LiteLlmConfig": "0686b23181d0fd374904457230b9ca03dc39053d59dad8ef98f9a18aed712523",
+      "LiteLlmGeneralSettings": "1d38cce069c039761e5d350061a6e6e011309ee6656115e3178abfea02bf54a8",
+      "LiteLlmGeneration": "06bd16e4cecdcb9c72a46e767c6fea9f901ecd818b70da552208710caf67ebe5",
+      "LiteLlmModelEntry": "0e5006c812e86bfa339e0f3748a3ce7fd227e632144ed0ae7cb82b3b545850a9",
+      "LiteLlmPolicy": "acb9a3972c4fb42c633b582f6a679268190cee7a67d2e059bbc6a071c4cb172d",
+      "LiteLlmPolicyError": "cea53a6e8e7e94361fae85d786110b9ddfbd3429c0dd1510b3d46b0f2e2e3a58",
+      "LiteLlmRouterSettings": "23a2392969c67c291bb2c0c60faedbcfc01bca3c7f96f20bd8111a05f13f4eb6",
+      "LiteLlmSettings": "cb3d59e8d4ea07119c788cd222b1c077b80190dc4e5a9ed727ae78f17a448edd",
+      "LiteLlmUpstreamParams": "1739c37a155ace6cbd0af39af5df03b8da113f24efc1d260f72fa57de1c2bcc5",
+      "RouteState": "98ccee682e5067a4509b27c0bfa9cd27285ffcd865bbce2f5f5b8d580f949727",
+      "_ConfigModel": "84c814791c47449eb443020fc92de9964a3717318a003884d6b0af698ac4c252",
+      "_document": "e04ea119db490d7a80ce34d1009546faab75e4b15c5fd2429c25260e54e88c16",
+      "render_config": "75c0aa42cda77e230efbe2f7e2173fcefffac7bebc66c063e9f3259cf3240147",
+      "render_empty_config": "036c5f7e942e8e07bd076dac8cce9419128dafab90ce4e9230f4490ebab33243"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "litellm.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/litellm.py",
+          "LiteLlmPolicyError",
+          "render_config",
+          "litellm-model-quota-fields-are-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/litellm.py",
+          "LiteLlmPolicyError",
+          "render_config",
+          "litellm-model-quotas-are-outside-allowed-bounds",
+          1
+        ],
+        [
+          "control/src/vonk_control/litellm.py",
+          "LiteLlmPolicyError",
+          "render_config",
+          "litellm-models-require-a-published-route-snapshot",
+          1
+        ],
+        [
+          "control/src/vonk_control/litellm.py",
+          "LiteLlmPolicyError",
+          "render_config",
+          "litellm-policy-contains-models-outside-published-aliases",
+          1
+        ],
+        [
+          "control/src/vonk_control/litellm.py",
+          "LiteLlmPolicyError",
+          "render_config",
+          "litellm-policy-must-publish-at-least-one-model",
+          1
+        ],
+        [
+          "control/src/vonk_control/litellm.py",
+          "LiteLlmPolicyError",
+          "render_config",
+          "litellm-routes-must-be-already-rendered-strings",
+          1
+        ],
+        [
+          "control/src/vonk_control/litellm.py",
+          "LiteLlmPolicyError",
+          "render_config",
+          "litellm-upstream-model-is-invalid",
+          1
+        ]
+      ]
+    }
+  ]
+}

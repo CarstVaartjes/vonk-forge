@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/removal_scope.py": {
+      "<module>": "7fe5f4c6e5354177f78961ffec37efd117af3305cabe6ffc2b967f0d8faad7d0",
+      "RemovalScopeMixin": "15c9d041bbc8df883313378fe819212ac20b1da828027adee3ae83d44d462ae4",
+      "RemovalScopeMixin.removal_asset_status": "a3cbc5dfc482de588d8f0267bd58c4805a8587ab2f48b48e128216385cd4e017",
+      "RemovalScopeMixin.removal_asset_status.partial_status": "4eab3e261158f308afcf56695bbad20280afa348efcf75cefe3387c329aed323",
+      "_unknown_removal_assets": "de74b03fec2e1870d99b166346ca071ac0ee3c7d529de3acfede44d8e8efcca0"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/removal_scope.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/removal_scope.py"
+    ]
+  }
+}

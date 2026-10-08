@@ -1,0 +1,196 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/gateway_keys.py": {
+      "<module>": "fdb769f5ffc739be9ff35848eecb115cb1eebde3dcf1769b1b4028ffbe56a34b",
+      "GatewayKeyConflict": "6f14cf8f23e0608e72951bae9be1f385fba4464374cbc5202c6c3e2beb842a5e",
+      "GatewayKeyCreateRequest": "bbf33ca5199793c277958e2e6f1ed8712cda31024d7d77a3c572b89660cfcda0",
+      "GatewayKeyCreated": "acf0518f61b5a75394e77337374fc17de1f8551db18fb64ba090b9fccc0a04b9",
+      "GatewayKeyError": "3ac6e34bd1374f0ef5af9db6b0df2c745c2416e044ad8f91303631e49383361f",
+      "GatewayKeyList": "a270179e5ee961dae92a3582c2f1495f905ac9632d94d268f79f92e525ca1a06",
+      "GatewayKeyRevoked": "865d559201dedf986aec43bae4d784ba979c361f2657f62dd47f9b411430ef11",
+      "GatewayKeyService": "99f80d75d0f5051a66cd79d893d3f242cd9ea53f500110815caf5c9b4f939094",
+      "GatewayKeyService.__init__": "2a45607eec979636c36c75a25342c296e9150474df3601ec67d1b8718466dc32",
+      "GatewayKeyService._gateway_check_health": "59224477fb04e7ab5d2233762fbc1dd88a2914312df2aa41e43782a003308662",
+      "GatewayKeyService._gateway_create": "86ba5f8b745f599583600d362c4e86f160f88936b2b995a866c7c8e5ef789556",
+      "GatewayKeyService._gateway_create_under": "7be21949446e6058b19e231041f8f300590a76141bc1514faf1e636f10734c08",
+      "GatewayKeyService._gateway_delete_alias": "6da52bd2ce22ea0cada3a52874f6a9d171ca6d44dcb82c9c20f58645cb9509b1",
+      "GatewayKeyService._gateway_ensure_default": "235e3982b5135d52eb35dd0c0ad9ecf26581290e566a3147bbbe13b2726a0104",
+      "GatewayKeyService._gateway_exists": "1170dc8e7198849333377d2fc9fb5eae7b60a66b69e4cd8e54026236df95a2ea",
+      "GatewayKeyService._gateway_list_keys": "8ceb99b17b2aa3d674479b95e059d6ea9809d9b9d55ef08a84771f0aa02c8b44",
+      "GatewayKeyService._gateway_observe_created": "e8a68375df576265d164dec861017066eadcbac299284c4aa82b70ca4798135e",
+      "GatewayKeyService._gateway_raw_keys": "70f5b985ea70a114eaa50e01cf255802569838926c4738a1ef14694e7e46f6df",
+      "GatewayKeyService._gateway_request": "553f2bb33401df305176acb8650144e2b1c9b6579e765b1d5f87e69aabd5ee97",
+      "GatewayKeyService._gateway_revoke": "c1eba269f1aa3829be88fa848dc783c19d0ad77c4233d7c2dfaf1d637f060597",
+      "GatewayKeyService._gateway_roll": "d4b85e3f05312afbd276bafc6e35c5b0fe0f23aaf3f467bd23d959163fa37f38",
+      "GatewayKeyService.check_health": "e776afd511f6ec4a8a45ae292856a13f7cb53215782724c2e22ec2c07c16beeb",
+      "GatewayKeyService.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
+      "GatewayKeyService.create": "5cb2f77388e1d82765381245e4701a023037baeafad38a25f35b9b60680b8e92",
+      "GatewayKeyService.ensure_default": "ae8abf5a08f7ef811a53a433bd14a5cf9738a1984de5ed0bf223cf63379e626b",
+      "GatewayKeyService.list_keys": "bb62e6cb39f7bb1346e60394134ede8302583086630028f2c30eed31eb36f534",
+      "GatewayKeyService.revoke": "b5bcc19f17a76933bcb2bb77ecd90b0a2cf7e7a32cb1720833ac9722b9a92e98",
+      "GatewayKeyService.roll": "0ff8425a75b275aa436b0f3699ca3d636ef39b74bacd6e35099cd8a038292a66",
+      "GatewayKeyView": "18b22d38e0ebbb703ff0437cccdf006826716cd0b5a688c2224bf091547294c9",
+      "_KeyDeleteRequest": "43b26f9a65e1a95fb41a2ed4f96e75dbfe08cf8293e960421202d9cb0953dd1e",
+      "_KeyGenerateReply": "a2a17c43e4e90c063466f1f29bd989a087d4649f1197d531727bb765fcc6d3b3",
+      "_KeyGenerateRequest": "d01d86f11f3f935efae585e7fa5edab1f12fe278b41fde051c5485f46ebfba07",
+      "_KeyInfoParams": "c3ed0a2f9ad6adc69ac99f8440beefd3d6b0d8659a76ba7743702025d3d78f85",
+      "_KeyInfoReply": "02415a5b56e7e9d63feb6e5f297aebc608805cff987573c5dcc1e7336222a9ec",
+      "_KeyInfoReply._only_an_object": "96751fc4b514c4692e81e585a473099f5139a8d54b721c0dc957860b39f68dc3",
+      "_KeyListParams": "daba75a542dcdb1d71d706558476fa287d5e3a0b030d8d177e10b026e4c17173",
+      "_KeyListReply": "cc8c4da3bbc6d8a88f956b7322e3256c1221cb87a76ac9209342c64b0e6f80d7",
+      "_KeyListReply._only_objects": "4bb21ce9e1f5fdf254c1e2914fb67a8b490d40479e129fcbd5dfab8285172c21",
+      "_KeyMetadata": "8a5746cfd7eb8bb31c8d9b5a40211008462d3f2508b5e8c557f5a36d1574ed79",
+      "_KeyUpdateRequest": "ce33ed639950b5a42d180a5b73fc7888e2eec0e0357e104a44faf4a0417ef653",
+      "_LiteLlmKey": "3e8409414db7783b5e33221d76981e11a345bdbc7fc3e3c20f848957cf323eec",
+      "_LiteLlmReply": "32f837f790ccd976face2fb94c8a8906b5c9f59c026891a18e39d3545f0711eb",
+      "_LiteLlmRequest": "c28077aa273335894930aed3585cfc8de731c03f4665666b2218f34498868b87",
+      "_loose_count": "b3b324cf79f41d5c3b76b0988189a1ad774557f4aac77d5251dc5fa84a924d32",
+      "_loose_keys": "9e0cda38379fb7af3d7c2bfba59a824d19e4d4721fddfce87bc30d8806b690fb",
+      "_loose_strings": "ceea5a86b8dfd503c2030b3665ff242638db6adf7051c8d9555069180496fd78",
+      "_loose_text": "6327b5863a8b8cb9a7d7ce942d48564681e506b407e3d27a9d14ef5d6154989f",
+      "_observe_gateway": "dd4dbe3f6f6cf17dfc264c8655634b45fe50dbc7cda71a9528cedd7e836762ec",
+      "_read_key": "2e898d94ed8980af3930950387d6f16ca00820ee48abe52dec00c827010c55f5",
+      "_remaining": "eb4d399677046f3c3f01b0a4751cb3576800c90c169ff5ad82e0a0d879928153",
+      "_rolling_alias": "6cfbbb4b20d3ed64ce9d0c7c0bdfb80c27cb47fb8933cbbd3e2eabf43e3a5ed1",
+      "_text": "3eb589bad4f42a9b56c543cd368c771a4607ed29bf57cd6cdcb307a6c37ba74c",
+      "_view": "b497541e9bae8b616c67f60069bc9d8541634899a60e0fdb447b50285db3af6f",
+      "_write_private": "cbab0c3851a129ac57570770a0578355ddec786b26ea99c34c168aaed55680be",
+      "install_gateway_key_routes": "cf9887f07d5b4d135fb46e9f2bf2cc02a921345c60ef940ce3e3f2d53798874d",
+      "install_gateway_key_routes.authorize": "6ebff86b34855e4007017a85584b418401836eb1db113bdab3fa8bc1637d762c",
+      "install_gateway_key_routes.available": "bf06b6f24aa9ee165f3616ca490346f8f08273dd2b943cc88871745ef1645844",
+      "install_gateway_key_routes.create_gateway_key": "c329231911525a7314bebefa0eb7ab26d2b00dd169848eda102b47016f2ecb21",
+      "install_gateway_key_routes.list_gateway_keys": "e4026c42f024f7a34e430a5a4e9ddf9512c48a6f510fd46f2c7b101e9423ea1d",
+      "install_gateway_key_routes.revoke_gateway_key": "68d74f8590fcaa1140c6e4d4a16edfdeb6be237cc5148d1b3598c1e11f0183c4",
+      "install_gateway_key_routes.roll_gateway_key": "2e6e54dcee2c087999a8e691a0974f6358f1ab279992a82ad1f303b452fd2554",
+      "keep_default_key": "83f1661f2df61ff7be135e6ca46ee9507ce6648adecc72175682873593a7afb4"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "gateway_keys.already-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/gateway_keys.py",
+          "GatewayKeyError",
+          "GatewayKeyService._gateway_create_under",
+          "gateway-key-creation-effect-is-unconfirmed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "gateway_keys.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/gateway_keys.py",
+          "GatewayKeyConflict",
+          "GatewayKeyService._gateway_create",
+          "key",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "gateway_keys.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/gateway_keys.py",
+          "GatewayKeyError",
+          "GatewayKeyService._gateway_create_under",
+          "litellm-refused-to-create-the-key-http",
+          1
+        ],
+        [
+          "control/src/vonk_control/gateway_keys.py",
+          "GatewayKeyError",
+          "GatewayKeyService._gateway_delete_alias",
+          "litellm-refused-to-revoke-the-key-http",
+          1
+        ],
+        [
+          "control/src/vonk_control/gateway_keys.py",
+          "GatewayKeyError",
+          "GatewayKeyService._gateway_raw_keys",
+          "litellm-refused-to-list-keys-http",
+          1
+        ],
+        [
+          "control/src/vonk_control/gateway_keys.py",
+          "GatewayKeyError",
+          "GatewayKeyService._gateway_raw_keys",
+          "litellm-returned-a-malformed-key-list",
+          1
+        ],
+        [
+          "control/src/vonk_control/gateway_keys.py",
+          "GatewayKeyError",
+          "GatewayKeyService._gateway_request",
+          "litellm-gateway-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/gateway_keys.py",
+          "GatewayKeyError",
+          "GatewayKeyService._gateway_request",
+          "litellm-master-key-is-unavailable",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "function": "GatewayKeyService.create",
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
+    },
+    {
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "function": "GatewayKeyService.ensure_default",
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
+    },
+    {
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "function": "GatewayKeyService.revoke",
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
+    },
+    {
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "function": "GatewayKeyService.roll",
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
+    },
+    {
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "function": "_observe_gateway",
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "reason": "Public key operations observe gateway uncertainty here. Read-only listing and health retry three times with bounded backoff and per-request timeouts; mutation attempts are never replayed blindly and end with the shared typed UnknownError, without local claims or gates. Default-key maintenance reconciles the persisted secret on its next bounded-rate pass."
+    },
+    {
+      "catches": [
+        "GatewayKeyError"
+      ],
+      "function": "keep_default_key",
+      "path": "control/src/vonk_control/gateway_keys.py",
+      "reason": "The default client key is asked for again on a delay that doubles from 5 to 300 seconds until LiteLLM answers and the key matches its secrets file; an unreachable or unsettled gateway is unknown, never a refusal, and the loop ends only when the key is ready or the Controller stops."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/gateway_keys.py"
+    ]
+  }
+}

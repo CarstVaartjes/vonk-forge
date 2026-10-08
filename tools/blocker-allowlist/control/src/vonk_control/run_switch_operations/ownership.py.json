@@ -1,0 +1,56 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/ownership.py": {
+      "<module>": "7ac04cdda77ef8bfec8afcf1476e5638bf4410caf237f7a18719476c1727d9da",
+      "_checkpoint_matches": "2f1211fee8089dfcea264868f08a54071fba36a6b815092649ce1d3fc89e12e4",
+      "_complete_cancellation": "63b77581f57215885956281e9d79b251dadccf2473b092d1e8eebb7600fef330",
+      "_lock_current_build_parent": "da4b2d60a89c6a82f1cfee36043adcb277bdd968401c26bd4b9d08d03d3e1986",
+      "_lock_phase_owner": "48adda0fee9ec6bb632400c535fafaab102a9dcd2c82c69ea1f321a9e926b8e6",
+      "_lock_phase_owner.current_key": "688336c7153c9a6994937ed0e161d33225596318f2de8bde9dd4382d82f5bbdf",
+      "_lock_phase_owner.locked": "e62ffbb741033351a0d41469b8830586810d7444d475126a9dd818b720fdd9fd"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/ownership.py",
+          "RecipeBuildAdmissionBusy",
+          "_lock_current_build_parent",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/ownership.py",
+          "RunSwitchRetryLater",
+          "_lock_current_build_parent",
+          "run-switch.container-build-parent-invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/ownership.py",
+          "RunSwitchRetryLater",
+          "_lock_current_build_parent",
+          "run-switch.container-build-plan-invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/ownership.py",
+          "_RunSwitchBuildParentChanged",
+          "_lock_current_build_parent",
+          "run-switch.container-build-parent-changed",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/ownership.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/ownership.py"
+    ]
+  }
+}

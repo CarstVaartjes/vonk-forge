@@ -1,0 +1,42 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/executor_preflight.py": {
+      "<module>": "68208229749c6eaa7a1679fdf98b1fa8d8f9f30e106fb292d6236d7f0bc503b9",
+      "ExecutorPreflightMixin._execute_container_build": "cd1e2926cbfb35e438c8c0bed2eeb98d077e9844623214bc3687d460915463c7",
+      "ExecutorPreflightMixin._execute_container_build.admission_guard": "80147efb148e20602fd999fccbaaddc7ab76d08a871e67cad8fc7d73dbaa7f6f",
+      "ExecutorPreflightMixin._observe_older_issued": "f10a5c1f808681ea8092bd072ae18d1434408658c3241f338432ffd2a7b0615c",
+      "ExecutorPreflightMixin._require_post_stop_inventory": "3db75fe5cfe0c4629f64a00ea332b98c4afe4db22f91fe59c6a5b710efae9da3",
+      "ExecutorPreflightMixin.preflight": "68ca5ba115360cc72856117d489278de66ea2b63f80fd07e24647fc8de99db17"
+    }
+  },
+  "sites": [
+    {
+      "expression": "expected_build_id != build_id",
+      "function": "ExecutorPreflightMixin._execute_container_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/executor_preflight.py",
+      "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
+    },
+    {
+      "expression": "parsed_plan.build_id != build_id",
+      "function": "ExecutorPreflightMixin._execute_container_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/executor_preflight.py",
+      "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
+    },
+    {
+      "expression": "parsed_plan.recipe_revision_id != revision_id",
+      "function": "ExecutorPreflightMixin._execute_container_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/executor_preflight.py",
+      "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
+    },
+    {
+      "expression": "persisted.recipe_revision_id != revision_id",
+      "function": "ExecutorPreflightMixin._execute_container_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/executor_preflight.py",
+      "reason": "Container-build phase of a Run/Switch plan: the persisted build row, its stored plan and the plan being executed are the same operation's own records, compared so a replaced or swapped build fails closed before a builder is started."
+    }
+  ]
+}

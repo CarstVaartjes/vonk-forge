@@ -1,0 +1,54 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/failure_evidence.py": {
+      "<module>": "b51a62891f8f8e4d2232a2e3eb318396b77896b4c822ae6bf2a96b59c1b3462b",
+      "AttemptPhase": "0040b829946d1b60e1a20f764f2ff82d82b45db845991c9db588276ccfc90bc2",
+      "AttemptPhase._tolerate": "ac2472286de1bf339c073797188beb1b214beb6abd4b0cb0ec2107c461ee2734",
+      "EvidenceContext": "01080ad9a20e32967962a91345fa5e26f841cba4ea9efe5af2e1956e4616adb1",
+      "EvidenceModel": "e980258579b21d0b738940b76fcf850ddb6b730592b4bfe4795c338e119437f3",
+      "FailedAttempt": "3dd2c44649f987b4205bd949a7a7b58251e9db655bdc89659e68ee0fe0db998d",
+      "FailedAttempt._node_ids": "a2033f83fe8dc135912ff5aad6830a557847d9c4e54ae63ffe928d563bf4d662",
+      "FailedAttempt._readable_blockers": "66522a4d1e281af972c7587821cc9911e9c1f5ca2d1059aa78d9befc4188e87b",
+      "FailedAttempt._result": "30547ed4a3ba1b5c6422caab279035e6bb6d45afdcf7d49b35862b9d89e2188b",
+      "FailedAttempt.evidence_source": "b39f50d233ce616cf16e60f8e037fbaa6a86f473fbf628a5255b0379bcb106b9",
+      "FailureEvidenceBundle": "28654af80102ea2d5b9d5686b564918f07d2823b1e606d71c517361ade84e8d7",
+      "FailureEvidenceService": "391d01b980f0cdf46117c2555a9d100aef3316ad8d9b1b148289ff3f452d0423",
+      "FailureEvidenceService.__init__": "2bf9dd4fdd43b598b86c120d4322dd54193f0b240a7c0cf551ad79d04d853eb6",
+      "FailureEvidenceService._application_child_diagnostics": "bbdca656bd1dddcdc6a066caffc3975978a5ce0b0dec751d04914c7329f4a441",
+      "FailureEvidenceService._child_diagnostics": "657e5949af76aa19b57da513fffec3ecf842507c86cc39a07cb01265dce0803c",
+      "FailureEvidenceService._failed_item": "2e55779f2a8709d4d7893aaec57bca9ad9ed754cdd54484a54da50b6d45011dc",
+      "FailureEvidenceService._item": "ffbad7c5102d1ca2a745cfa314e57b40d1bcf7271e6a13d6a5b9778c2bd26532",
+      "FailureEvidenceService.decorate": "76958b6c9f9ce3e8d121637882dcbb50b5cd60f3f731345b495a0fb7f62a26bc",
+      "FailureEvidenceService.read": "aedf29cd037d84462d8aa8ceeb19e14faf52f42e7ca71e8300345c35a1aa497c",
+      "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",
+      "_fallback_bundle": "d78245f3455e93587dc792d0ec06ffa4439bb1da40a34a360bfc906bab45a48a",
+      "_keep_end": "1e93f0041de05a5e1afa75c9e80240868b91cd7d955e73603b03e7cf0ad5e562",
+      "_optional_int": "6177840395537a1080ac6486d6e4c79363bd1a72abb1f36c02c11ebd16c9f1bf",
+      "_plain_text": "b865a926be30dadb0e1041d12e6314b8038aa94a39ef2d98fd0ba1b5792bff2f",
+      "_required_node_ids": "86babba757a9a6032d38e4e2f13494716ff73666ad4158fba9d5b3287eb2d87d",
+      "_required_text": "518d302f482c611653ef511442fc267b5fe543f79a5503ad3fddbe7cd4836dd0",
+      "classification": "b1e05126447078b340c3d4c4d56ae32c4d870d6d5713af76701b33f29824e0ab",
+      "collect_failure": "a7fc5b71394d945b90c0ce8a81a10e646d0fd3cf7b104c9457328647e581b565",
+      "evidence_href": "ee46a9f36ae821a746fabe3a6ff3fccb7fed8e8d7964d3e68b5975fd9472a740",
+      "failed_attempt_condition": "487b8f074ab90ee211c0e0ff408c55570da971ff38412e7f6ace4558618bbfff",
+      "failure_code": "4a5564276d2a3e4ea9d2c517602c9def32ca0553fc835bfdde435d0bdee8b4d8",
+      "log_tail": "cdc0224a6b0f88888fade057cc1238e361a4eba897ef8910f3bfb19229fc6846",
+      "safe_text": "d9a830c64f97f780163bf52a50bc4152675878423e47d785e385da202aaceb5b",
+      "sanitize_diagnostics": "fbccefe6a0c07649f2798919906d603dee0dd6c5636c0b7325b13274ae6be9e2"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "failure_evidence.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/failure_evidence.py",
+          "BoundedJSONError",
+          "_required_text",
+          "message",
+          1
+        ]
+      ]
+    }
+  ]
+}

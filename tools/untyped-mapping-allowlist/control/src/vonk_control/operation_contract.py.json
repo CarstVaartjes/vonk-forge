@@ -1,0 +1,43 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_contract.py": {
+      "<module>": "e329d4642feecf72d2025ca5ef581007f69ce22b70e26a906fecd0ec85422f91",
+      "AvailabilityOperationFailure": "ac63a5568156fee7b9a7715644423a609b048d923fcc7aac2bcb2ebb5224036d",
+      "AvailabilityOperationFailure.parse_recovery_actions": "b9793726ae46919d5fb37a2d772a1d68040f25cde41cbf9dbc4371ee491b920f",
+      "AvailabilityOperationFailure.validate_retry_and_capacity": "91397513e602039e91e917b1907a5ee97ff131df47f63ddeeed6eae1ada2fbb0",
+      "AvailabilityRecoveryAction": "0098154d28c7a06d0dae580f1823ba4f14330d6fd09523b768d384cd3aa742f8",
+      "OperationEvidenceDownload": "3d0b2feaacd33046d729b2705995ee00e12cdaac54e7b501a3935190c6caf22d",
+      "OperationFailureEvidence": "a886487b8b8cb1070df8accea7be753068533c2ff8d6e259bab2127a4ad9bd89",
+      "OperationPhase": "7e2de6c087d54a7344df2de93c0fe29fa819604c7c9876a5e7c36fadbaefef2a",
+      "OperationRecovery": "4742a89ddace8de59b3a000b4ddc3211aca5c0f2a89c1e5a4556b2c5f7690dbe",
+      "OperationRecoveryAction": "21c81ae216da51fe6c62f08c49916b8da43dc0b228f471f66fb735ad8d4d4e17",
+      "recovery_for_operation": "4606c98d1e1c169ce66ff17a409482eda4df40e4164a340860b05edc4899b596",
+      "recovery_for_state": "5ef36d25628bb007a049c0bb4cb8616c19777f87695d3b37e283ca1a659e6c16",
+      "sanitize_failure_evidence": "2c41959ff42b5baae201e46b8fad4118fd35e85eb947ecc84ca8e2b7f866cb82",
+      "sanitize_failure_evidence.clean": "eba434a6a3dd93571bcf213abaa7b9d95e614030eb55cb9a0cfac332c8304869",
+      "validate_progress_update": "e4e8adfa29d2ee95276b1e1a8f74bc1da3875b27260385637f46abf59f1cef62"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "control/src/vonk_control/operation_contract.py"
+    }
+  ],
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "sanitize_failure_evidence",
+      "path": "control/src/vonk_control/operation_contract.py",
+      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 2,
+      "function": "sanitize_failure_evidence.candidates",
+      "path": "control/src/vonk_control/operation_contract.py",
+      "reason": "Generic JSON size sanitizer: recursively indexes writable dictionaries in arbitrary failure JSON to trim the longest encoded string while preserving bounded diagnostics; it declares no owned document shape."
+    }
+  ]
+}

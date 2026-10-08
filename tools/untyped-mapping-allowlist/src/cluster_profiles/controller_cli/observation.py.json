@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/observation.py": {
+      "<module>": "3e2753ae577176d0b7162a5ab910904d60d4ddcbc2caa87da1e6e5eb525a6668",
+      "_bounded_interval": "4cf8332df7229c3849015d95ea0d51691c8db1eab6d02574e8d78aada16bfe22",
+      "_bounded_timeout": "5bbe1bc6d8c611cf6b9e81108dc493433c7c07543363b3b6261b922f24a63d57",
+      "_cache_progress": "acef592f0e5ceba574b48e11a2c401f40e71381e2860e800ffef5d10157de465",
+      "_follow_cache_operation": "cc06f6065d8026224d2afb353111200a6d275020dea6c830b02e47e500905478",
+      "_follow_cache_operation.same_operation": "fed72c1e901924acbb9ea6b42a61dd138a946d1ebea2967ddfa746fcd088fe1c",
+      "_follow_loginfo": "71b03b4f03ad34f3b4f29585a6fe6a1cf808b331e8a7bfedf9a139d4265c1378",
+      "_follow_loginfo.same_node": "00b05bca62e5133e61484471c9244baf1de4f5d73571d9d6d09e399dfda3063e",
+      "_follow_mutation": "35eb28333e070d6817cba2bc18fbdff63155edf63fa2bfce6dc2e82574badceb",
+      "_log_follow_complete": "6d8080889d516d259b58006c5bd99de6793562308670475ffa74abebcbbe80c4",
+      "_observation_delay": "67c26ff212358c964427b555299903348edcb46d2461b3062753619baa1d04f0",
+      "_observation_reason": "e4b0214b6e707be454275ca9c5a3d37636a3ffed69928efa595653a3b1213d25",
+      "_poll_path": "7ceda4b3c5e184db38c5f59f5aa7baace642b68bb1ff69f8002d868fa7348702",
+      "_reconnect_command": "d19ed875b75168f16a45764055a98b4b5dd3c6049645dfb7f8c3f2df61ccbc00",
+      "_state": "c69fd913190701da1116fb9fd5854d49074d3b9a16636ea9601364da14a959e2",
+      "_watch_callback": "eace38736f5ada6366411923238dacca216cc8a096bf508c9efcaa55dc1709f5",
+      "_watch_resource": "01339e5e27a7c762b47b393cd5d7180cca0696507536654d89934424684ef21d"
+    }
+  },
+  "debt": [
+    {
+      "count": 20,
+      "path": "src/cluster_profiles/controller_cli/observation.py"
+    }
+  ]
+}

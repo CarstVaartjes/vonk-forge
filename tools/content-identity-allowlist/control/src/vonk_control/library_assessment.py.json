@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_assessment.py": {
+      "<module>": "7cdeb3d4dde9db5f4aab6a5ac64f39afb07a63a256728a1ead27f7eb63485d56",
+      "LibraryAssessment.__call__": "26a75268ffdd8dcf6da1705c53c499480803cec7b737221943a62f8de6e30a0f",
+      "LibraryAssessment.__call__.assess_in_order": "f12dee96a4f398a8df5f1762a521219ba6039f24840ab77af07f71dee3003733",
+      "LibraryAssessment.__init__": "3eb69b93fc5e854abc068c27ed217275a862bf8d9e72228c925cc6c65c6c34e1",
+      "LibraryAssessment._assess": "12500eab18509b85858a51d9dbdb12b2a72fcab221049b7c93c97fcc1bc8df8d",
+      "LibraryAssessment._cache": "73b6fc903975b59f62c2f433850806e54bcbd10b2dfd84ca04b3810c4d20047f",
+      "LibraryAssessment._fit": "450c2ef0d35f16c0550e8e950a60f424bc4d911aa091f60124c3f77d89a817ef",
+      "LibraryAssessment._ready": "68e37e3ed3f7e8b1db22994a6b4f2f6c1ac1b00a7c03c0647023426716e6b1b5",
+      "_reason": "a554a607dea23248c488aef321163b3f40bda52d3359977f669b73dbacf3654f",
+      "unassessed": "58f69ba7dd99bb92562f8ee0766b734fb821137b86a7c7a72b8f98c349b6e500",
+      "unavailable": "5dead578538798dea14222b791f051583c9affeed8c3915f98de7696b84a6c91"
+    }
+  },
+  "sites": [
+    {
+      "expression": "image.recipe_revision_id != recipe.identity.recipe_revision_id",
+      "function": "LibraryAssessment._cache",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/library_assessment.py",
+      "reason": "Request-response binding: the cache resolution answers for exactly the recipe revision that was asked, and an answer for another revision is refused; compares the asked identity with the answered one."
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distributed_recovery/__init__.py": {
+      "<module>": "11588fc1f8630a6fc3825900aef605bd86e5f1a45b44633b5d20ae3f694d5487"
+    }
+  },
+  "scope": {
+    "guard_paths": [
+      "control/src/vonk_control/distributed_recovery/__init__.py"
+    ]
+  }
+}

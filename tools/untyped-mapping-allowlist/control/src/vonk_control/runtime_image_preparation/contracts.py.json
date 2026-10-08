@@ -1,0 +1,50 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/runtime_image_preparation/contracts.py": {
+      "<module>": "fe27b9d9d10e8f7485431f569d29578cd391f1ed82d22e24d2b4acf916df1ac2",
+      "OCIImageTransport": "d4dfd45cb9efd5f8f8f2862f8123ad217cbd967b7659688da387ed8e2092675e",
+      "OCIImageTransport.inspect_archive": "b6d10b5dd391119d322152a755d696840d0a162d7802ceed24521c748d7062af",
+      "PulledImageEvidence": "a8a953a74e104e9a49436ddc2738249b5e9d35f4cc152a96340d43ea18a56ed4",
+      "RuntimeImagePreparationError": "1ee6fc3714198983dad3a498157af9e97d572cd5dcc406fbb2b3f011ad688707",
+      "RuntimeImagePreparationError.__init__": "30125364d3c106246e9646b1344c8c4216b3ef019a2f0526b77a0d0a26d52075",
+      "RuntimeImagePreparationInvalid": "9d54d9d2f6747e10eb0086bcd66a7277a55b2c8639685d43b7bb24be8b18bbc8",
+      "RuntimeImagePreparationInvalid.__init__": "82a21b8ef2f694611215c69c6a077086d7ac4d1eb5546bd295377d96f0babd32",
+      "RuntimeImagePreparationRefused": "6652d4c5de951a10e19dd7e6cbcd11bb510ed45b359fb7f31ec27abea263a2af",
+      "RuntimeImagePreparationRefused.__init__": "673ade916ef30fb92e50d7be9f74595a7982596786efda105060558de4ed6c86",
+      "RuntimeImagePreparationUnknown": "538d3fed882e410e9829b6bc3841eb4d4d159b9cba331c775a602f6c0a39ce4b",
+      "RuntimeImagePreparationUnknown.__init__": "ae98e3461e5a66cac3f104db52df308a18bd5ad92b5bd6ff63ad299ed593b5f6",
+      "RuntimeImageReceipt": "ef560dabcf79438643af6fd747d7e35285c8f51d75cf7b1d414f2a99bfa3e741",
+      "RuntimeImageReceipt.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
+      "RuntimeImageReferenceIntent": "bb11eb339f7c064b86fd5cb6dc494b30ca3477626c7c67a66febf9fd29173698",
+      "RuntimeImageReferenceIntent.belongs_to": "f92870f2984f3c41971e531ffc0ddeaad736581b62df1f155ff3e846319e248f",
+      "RuntimeImageStorage": "d38a76b72adfd644be5571f4eddd82ba5c5ca6f8a128b974af74c1fd3445992a",
+      "RuntimeImageStorage.commit": "49221ac996c26fd47f4878827006b6285ed7688f2a3f71335a5e65866516a386",
+      "RuntimeImageStorage.existing_archive": "bf997c1cdd959fdab0f111968affa18ec742bbb972fb758fc6a51eda4cc4afac",
+      "RuntimeImageStorage.find_build": "c63795aa72cad32ded3b58b5b1941c4a3fe9d4ba76d2b2aca0c7b3f570d1f0e9",
+      "RuntimeImageStorage.find_verified": "9046e59bb33fda441ddb050ae7e3e42800c63bd654415f64f72bbaa7e577ffc3",
+      "RuntimeImageStorage.publication_lock": "cb707a85b3dcf5f3a3cb1c511f8e976536252fe88473b16cd592302f6298c506",
+      "RuntimeImageStorage.published_archive_bytes": "0879ebd9d97a7f5f0c7c134c2fe6888998d1c8123170d0521a74c306553ef7f1",
+      "RuntimeImageStorage.read_receipt": "02a9b03ffe87bf3b17c47929ae3b49457b597099db453875ca603d808c574607",
+      "RuntimeImageStorage.remove_published": "bfc669c49f77f66e1320b95063e21c3b765dbd0c0e11f388382044d4a7f5f687",
+      "_ReceiptDocumentRejected": "ec5a764ba955d21be3d2477eb4e6a0dce5627542dbea3e75eeb7c4511c764c08",
+      "_ReceiptDocumentRejected.__init__": "0e11e142278fa9c05b0dcea2d1367893003c134307be1657f0312a7933f286fc",
+      "_atomic_json_replace": "44daa0ae0f73f598076f2b06f95c9a35f4a51f9e7f44daf2a13a1b4014dbb007",
+      "_load_receipt_document": "a7ee72f62c0965a5bb65d7234a9a4c5a264fccea2ead01f63a1bdd56a129d557",
+      "_log_rejected_receipt": "4bf59bc24d0ab5ef2efdcf3c6f71a68788ee4ffd8d8f8adcf7a54565951bed25",
+      "_parse_runtime_image_receipt": "72fef457373c54bf91d8a74f2d83f6d1a173d9377b6641f4d1055697bb8c456c",
+      "_receipt_may_be_newer": "8b1a1d17c06e0a81523dc19cd6152812dfba4e422fecbea81a50af2970e7b476",
+      "_runtime_interface_label": "0c0927c33618775355fd92d2294b55434be479c325215a099cfe707a477af2f7",
+      "_same_image": "4c58c5d9c45636e6aedf88f03391f3dee53e112360b54737ae3dbdee4c4b881c",
+      "_unlink_quietly": "5b0e3bfdb5c144fbab744dfc3ffa3237c7b2378df0acc2bb787a4eda2ca34ae2",
+      "_wire_architecture": "f3eda1a380617cc13855f69dfdc009e61652f647ce2c633b1452684d1d414b88",
+      "_with_provenance": "13c6f328fc101d85bfb5f43f203a325573e649ed608fb7b3913857c065a4b18a",
+      "read_runtime_image_reference_intent": "c66e6419faa1be2e59bea07860b0986c55a3a8cb8dce9198cb5b3ac1669cfa4b"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "control/src/vonk_control/runtime_image_preparation/contracts.py"
+    }
+  ]
+}

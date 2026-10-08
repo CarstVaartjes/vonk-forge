@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_memory_claims.py": {
+      "test_accepted_memory_blocks_competition_and_transfers_same_claim": "bf0065eb52d67fb6ce030b5a9588c9cddad31fa26e93d1cbad246bab57edcf7c",
+      "test_changed_memory_authority_cannot_be_reacquired_by_profile_child": "139eebcf9ee25f43c06aacbdb2ac02d48d6c93038ce092dff93c90947780bb7e",
+      "test_replacement_owns_memory_before_and_after_old_claim_is_released": "23b04198e350cb3a1872bca78315368b143c19a3a7c8a99c8a43023484195b4a",
+      "test_replacement_stop_retains_current_root_after_withdrawal_response_loss": "5717d6618a9a3c37924f7bd43b1f5df82c575df5985dd589d797c27251a0f212",
+      "test_replacement_stop_retains_current_root_after_withdrawal_response_loss.unavailable_withdrawal": "2beeeba3bfede18553494ce1bcc1fbb9cad08fdb18f8d7cd590f480280690cc1",
+      "test_stale_or_unrelated_work_cannot_supply_replacement_overlap": "a0c1f133774e843690879435b7cb554c67fc1fdaf7c4425af9107b2fdaf365c9",
+      "test_starting_and_running_claims_keep_the_full_unknown_residual_range": "109dfaddacb46fc07af749f4be0fd226b34c178791b89b64379febc047c2f4e7"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_replacement_stop_retains_current_root_after_withdrawal_response_loss",
+      "justification": "Checks the immutable accepted Root request, linked child, current phase and retry generation across withdrawal-response loss, and refusal of forged identity fields. The positive branch resumes only to issued native Stop phases; it consumes no Stop acknowledgement and claims no physical completion, released memory or admissible fresh run.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_profile_memory_claims.py",
+      "reason": "security-edge"
+    }
+  ]
+}

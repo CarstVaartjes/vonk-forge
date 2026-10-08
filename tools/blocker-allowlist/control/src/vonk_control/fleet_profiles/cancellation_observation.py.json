@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/cancellation_observation.py": {
+      "<module>": "ceaa24ea31f1c657d3e5144cdbd362590ae665d205fd9a4c11aef16fcbfcb821",
+      "FleetProfileService": "3d95bd92a7fcdc235e4eea3a46d899e5c1f891cbea2d25310924636e596587cc",
+      "FleetProfileService._advance_cancellation_in_session": "bd879a06ff80c9cd9530fab6579b0328fb7c59aad21ff8933a3dabf62402cd2f",
+      "FleetProfileService._defer_cancellation_observation": "b74acd389feb81972527e826a2fb2a6226311203fb83f89e97831cfda7a177d2",
+      "FleetProfileService._finish_cancel_records": "296e368a09490ce907de30af5a56718aa75a1ed0fda0f8036d0a035cc0f2caee",
+      "FleetProfileService._observe_children": "d24c160d457bcdc9825455300f9ae03adba08224870a7cef8e3fd9e8ae313782",
+      "FleetProfileService._stop_children": "9a55ddd9634e55d38b823f6a635668d4a5319c3ced6d8349ab2f2645b66a6db1"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "FleetProfileChildPlanBlocked"
+      ],
+      "function": "FleetProfileService._stop_children",
+      "path": "control/src/vonk_control/fleet_profiles/cancellation_observation.py",
+      "reason": "Child observation is rescheduled with a due time. The lifecycle stop budget ends cancellation after bounded attempts and releases profile claims even when the child outcome is unknown."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/cancellation_observation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/cancellation_observation.py"
+    ]
+  }
+}

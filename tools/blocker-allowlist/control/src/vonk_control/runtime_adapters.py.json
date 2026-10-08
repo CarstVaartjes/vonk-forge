@@ -1,0 +1,48 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/runtime_adapters.py": {
+      "<module>": "4acb3333aa9dd2a13f32db43c11d629120cb8df0138138912654c92408440238",
+      "RuntimeAdapter": "ba828fe45072b635128a6aab925328e16ae77e091e0819392442165d8c55b731",
+      "RuntimeAdapter.definition": "a106f095ebd4c5876541e3c760d85620463b91becc57a63f3c940d6385bd9380",
+      "RuntimeAdapter.digest": "19c97de20b1e16576e5f1583dd45bf7d1b2876ce8547cdf804d1a46c489c3598",
+      "RuntimeAdapter.document": "69ab9427d1265ed726552f2bc832d5978cb384013b95c09584b39297581fe3a9",
+      "RuntimeAdapter.labels": "69a7bb496a3f7b1f49afeca7ec05331a250c87eafde34ff5eda31eab6c93a674",
+      "RuntimeAdapter.to_wire": "c22741fddd61bfcad3d185d4fca0f2985fa9b0447773a153bed6bbb9f71ad5fe",
+      "RuntimeAdapterError": "9e98b802d69139766f4144516e20d8627c16e0fc2f995058ffdf5b4b957d5df5",
+      "_AdapterSpec": "bad2bcb6863ed777ee995aa5c0864fc781aa59b41dbc753f015eff71d7aa2a5d",
+      "_adapter_directories": "d88aac09951d666fbaa8839eb09fb5b0b54e4375cd60062d59db6842886a2bf8",
+      "_shared_adapter": "b49261a4745934850a8721e3822a17361df4bf0791f0f4421c0640690dbab878",
+      "_topology_mode": "cf089dc078f0bbdac22233356505167640ec37b8eb30a82c13f83aefd597f472",
+      "render_adaptation_stage": "1b5507d79c9c1177bad2dc254ba000d4e8a2babfd7e7175ac60a565dea6ce906",
+      "resolve_runtime_adapter": "cb0c0ad4c7af8d3dc85b7a85264f19f1d1cc3f4c420b97e64f7091edeff2d9ef"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "runtime_adapters.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/runtime_adapters.py",
+          "RuntimeAdapterError",
+          "render_adaptation_stage",
+          "runtime-adapter-engine-is-unsupported",
+          1
+        ],
+        [
+          "control/src/vonk_control/runtime_adapters.py",
+          "RuntimeAdapterError",
+          "resolve_runtime_adapter",
+          "runtime-adapter-engine-is-unsupported",
+          1
+        ],
+        [
+          "control/src/vonk_control/runtime_adapters.py",
+          "RuntimeAdapterError",
+          "resolve_runtime_adapter",
+          "runtime-adapter-topology-is-invalid",
+          1
+        ]
+      ]
+    }
+  ]
+}

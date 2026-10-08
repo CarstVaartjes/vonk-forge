@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "sanitize_failure_evidence",
+      "justification": "Bounded diagnostic normalization to the durable byte contract, not an external wait: each iteration removes an ancillary observation or halves a nontrivial text field. The finite item/text measure strictly decreases; when only structural/scalar fields remain it rejects an oversized document rather than repeating. Typed failure and exit facts remain explicit.",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/operation_contract.py",
+      "reason": "input-validation"
+    }
+  ]
+}

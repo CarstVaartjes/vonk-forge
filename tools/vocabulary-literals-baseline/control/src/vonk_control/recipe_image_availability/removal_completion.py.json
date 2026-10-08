@@ -1,0 +1,11 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/removal_completion.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_finish_recipe_removal": "1839087ff6e69940be6ad44470438b69121f9a5beb6e03fcd69d8635e9fe2662"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_image_availability/removal_completion.py": 1
+  }
+}

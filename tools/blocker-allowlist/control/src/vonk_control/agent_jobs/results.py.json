@@ -1,0 +1,91 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/results.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "fail": "4f2bb28d6daf519fad1f0db760e501a0ae0be03384c9412ceb818c8fe64e4fcd",
+      "record_late_result": "420c2b8d21c5ef9a8d165c540f6697fc9214cd2f1cf19532ab146ff9089912c8",
+      "record_result": "2671a7865c10b86a29f094570c13d4a64476b0fbd009388f570bc4feb231238b",
+      "succeed": "595b8dd8467cff5780f0e3eddd18b8cfa01bbfa4b5bfd19ec9aceac649e3bf0f"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "agent_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/agent_jobs/results.py",
+          "StaleAgentRequest",
+          "record_late_result",
+          "agent-operation-attempt-is-not-expired",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/results.py",
+          "StaleAgentRequest",
+          "record_late_result",
+          "expired-attempt-evidence-changed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "agent_jobs.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/agent_jobs/results.py",
+          "StaleAgentFence",
+          "record_late_result",
+          "agent-certificate-is-no-longer-active",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/results.py",
+          "StaleAgentFence",
+          "record_late_result",
+          "agent-operation-authority-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/results.py",
+          "StaleAgentFence",
+          "record_late_result",
+          "agent-operation-authority-or-expired-attempt-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/results.py",
+          "StaleAgentFence",
+          "record_late_result",
+          "agent-operation-lease-certificate-or-fence-is-stale",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "fail",
+      "path": "control/src/vonk_control/agent_jobs/results.py",
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    },
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "succeed",
+      "path": "control/src/vonk_control/agent_jobs/results.py",
+      "reason": "The result consumer retries the exact terminal receipt through bounded admission_attempts on canonical unknown outcomes; persisted fences and request identity prevent duplicate effects."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/results.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/results.py"
+    ]
+  }
+}

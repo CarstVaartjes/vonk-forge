@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/api/fleet-event-connection.ts",
+      "reason": "Browser-local event connection handle with listener/disposal methods and its route URL; never serialized as API data. Event payloads use the generated canonical route schema.",
+      "type": "FleetEventStream"
+    }
+  ]
+}

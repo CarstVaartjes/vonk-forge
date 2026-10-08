@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/core.py": {
+      "<module>": "015127e77b7397ab124e5e23c6c6b5e22ad4474c18f9cdf09629ea6bcaa60143",
+      "CoreMixin": "1c1eda04c45da851397c170526d52fcf1fe5d6b3403343c697fa09a00326f4b4",
+      "CoreMixin._objects_present": "283148d408109e94bd81e5d9fba95cfdc928258ed33b95ddec21bfddc3e0750d",
+      "CoreMixin._payload_or_none": "be64e8241d2af2bb99609b5eaf0b0cfc0e6de777ad2f9a13889e71a5c8bce6b9",
+      "CoreMixin._payload_or_retire": "8ca84ce3742c84d12e487dec4b473437006fd042cd30fb70f6739cb8c8708c11",
+      "CoreMixin._project_cancelled_set": "1d42a6d4fe18619495877e10790b3b8ff72066ea59ed90ba1c3681a37f9438a3",
+      "CoreMixin._project_end": "e9776b39835cd196baa2c94c07b24a8155dc306a7668baafdc7250541bec9cf2",
+      "CoreMixin._removal_or_none": "6f25d7ec42fdc47bb55a448e574b16e000144c5410416ef0bde4f424ec747ebc",
+      "CoreMixin._retire_unreadable": "759d310117fc4a059a691b7f22e7cbbdbd8ac2dbec337b2aca43d64d1cf98a28",
+      "CoreMixin._session": "b8b21c7946010fe487279f9aadf7f3523726f00819b59f800c322de7c720eddd",
+      "CoreMixin._store_failure": "70a626f45f08691afb6aff36b3638971786f529538be4c056f485a63dc3ac802",
+      "CoreMixin._stored_manifest": "41b2f0da438c92c302aeac897bbc705245b2208c794f1f020a5e126c15794ee5",
+      "CoreMixin._stored_manifest.read": "f14e408444e6102e968900cdec6bf7c66e8e66b156a421b4aa58a9b861dec549",
+      "CoreMixin._stored_manifest.rebuild": "dd834c56ded443818eacc8c4172bc7503e43a082f2d8350bde444b7829df8868",
+      "CoreMixin._transfer_or_none": "b43e3f38522393fc48db29e18b5a49caae632629b54a7deccaf68662fa308234",
+      "CoreMixin._transfer_or_retire": "482e4adfd560d0209fe364d7375b8e19dc877f4ec03a74296a64df11f52c8777",
+      "CoreMixin.close": "7b5a59316b767d79ef9ac403ccb74cc7670049d14fe679e11a398c66df87b3e4",
+      "CoreMixin.cooldown_until": "afdfb48420abf1710debf4a9c0bb85cf0c50f90e3a4174a4a873523b18410ac8",
+      "CoreMixin.effects_settled": "5ae99f8bb0d9d6f22563e958565dd70cee74180f289a8ab77a39f2d008f2d9ad",
+      "CoreMixin.objects_present": "61d9fca33502d8fc38dc45fdd18cd33d3e41ff6313cc1830169d57d1c7848863",
+      "CoreMixin.reserve_bytes": "4fa800e631dc08afe9b97c58a45f4eaa00cd2fe7fb49ded3902b4311ffe6f0f2",
+      "CoreMixin.root": "133a3fca9f083aa9fff4f23cf7b9ceb4e737867fa7419e4906d8bba0314e528d",
+      "CoreMixin.running_here": "951f254d7df7d6db4e3da878d0e583c21bf0a6de8bf2f293d1585f5faa586e17",
+      "CoreMixin.set_is_cached": "27bb28d94b29a8fc93a14796ce3f239e2ad28a0982ffbcb0671b90b5f5fbb62a"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/core.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/core.py"
+    ]
+  }
+}

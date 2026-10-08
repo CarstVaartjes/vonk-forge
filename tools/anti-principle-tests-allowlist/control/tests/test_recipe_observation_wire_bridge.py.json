@@ -1,0 +1,136 @@
+{
+  "content_identities": {
+    "control/tests/test_recipe_observation_wire_bridge.py": {
+      "<module>": "23b57984b35b4ae0621d13d68865e37deebf8baf7f8b28e4369b162f264488b3",
+      "_UnusedJobs": "23b57984b35b4ae0621d13d68865e37deebf8baf7f8b28e4369b162f264488b3",
+      "_UnusedJobs.enqueue": "7b12965f53b782a2e11a79577234f46765837dad465e213b6c91dd15ad6bee32",
+      "_UnusedJobs.get": "a8c5ed3bc7d758b6bf5cb023395727db6a83f83f9d7f989e5b426c546c86eca2",
+      "_absent_singleton": "ebdadf9273f115dd1cab60269ff1e373d76422e5a35dd73946c7a0d681c1aa09",
+      "_absent_singleton.persistent_lifecycle": "4f967a8b4e989a1fc90d48187ae81bcff53722e1c0ca549e670725a3df45778b",
+      "_persisted_recipe_start_evidence": "58ed29713dd186d218a6cab7b2038357e10703af513e6fabe3da80fcb2b804fc",
+      "_production_controller_app": "02eeef4a03c2d63c5865c3a4b1b4bb6589af79708ad020b6889c41e1cade60c4",
+      "_singleton_recovery_process_tick": "ad7070864f0eb99eb26d03508e66ce6f88f38270f223a25783d18cdecba5beff",
+      "_submit_observation": "f828ccf3b037e1238fe640358200e58bbd9da05f9278e4a7c751e723c9c53efb",
+      "recipe_observation_wire_probe": "bbdaccbdbe70e527b48322cca5c85d99f8dd004e7cde41a2321a4566fa437f9d",
+      "test_a_failing_readiness_probe_fails_the_rank_only_after_its_grace_period": "dc5410262da03ecfc8938420b2dcc79aabbce169b60ac191306940ef8d916ffc",
+      "test_a_failing_readiness_probe_fails_the_rank_only_after_its_grace_period.observe": "4b4d64b7f81c96c00f3cf6982a9b6de366fe5696a2a185073e5aebb6932459e8",
+      "test_newer_workload_intent_wins_over_singleton_reboot_recovery": "1bba938de4a31f3ce075dab9b19b861f7ccea45deb105e05fae4d26410a6656c",
+      "test_observation_deadline_applies_to_first_observation_not_renewal": "c476367e701a7cafdef0c196729aad45ae2d8ab1b1a92dc1379d6f623a268dc3",
+      "test_production_start_rust_observation_and_controller_consume": "7c4bbd37d3ff51d65994a69a57a3d6e0afcd43defd1d559224b01f1b2a2689a3",
+      "test_rust_observation_json_is_consumed_by_the_controller_wire_model": "55f5348aa4fb3686f3794f1cab71ee9bd12198ac5ec08553466effb74c031a53",
+      "test_singleton_absence_reboots_through_new_controller_processes": "ccf0fbbaa849ef5ccd4034e4725de0dad42be626ddd1c0fd4be7471d858f2acd",
+      "test_singleton_recovery_checks_compiled_lifecycle_authority": "10452995abffc7e93b34277e81dff84c406a032d35a6030fb629c74d2a925d64",
+      "test_singleton_recovery_enters_cooldown_then_resumes_automatically": "ca460728dd2dda23b249dd613f4ca1f1117a9dcbff06d9391ec239d11a4663b9",
+      "test_singleton_recovery_refuses_per_node_start_for_another_plan": "59356379d9f469369daf33023f09cd8671adfa9fe92ecde61f4830efd6f3f268",
+      "test_singleton_recovery_stop_grant_survives_start_deadline": "d61c86ad9bcd80a42b4e71d544fe2d667efb0ab2b2d55acf30ec1a6dc4deaec9",
+      "test_stale_presence_waits_then_recovery_resumes_without_new_run": "5749b1ea4ed089657d13608cd92c81b30026428e159441b66fdcaaa39ca06307",
+      "test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered": "ce944e553dcb4517869f48498ed16bb1c52e7b0d42a9b09ed736fbcc1d607b4e",
+      "test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop": "e2fb7cbd2a0fbc3a44480acd9733732f3a261e30ff2e74bb81f0cfcc0fc94e26",
+      "test_uncertain_singleton_recovery_stop_retains_run_claims": "71ccd94268b43303307ba06407e01c4fc76e7770b3585b8b98cd0d0c8a9c9582"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_newer_workload_intent_wins_over_singleton_reboot_recovery",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_observation_deadline_applies_to_first_observation_not_renewal",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_production_start_rust_observation_and_controller_consume",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_production_start_rust_observation_and_controller_consume",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_singleton_absence_reboots_through_new_controller_processes",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_singleton_recovery_checks_compiled_lifecycle_authority",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_singleton_recovery_refuses_per_node_start_for_another_plan",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_singleton_recovery_stop_grant_survives_start_deadline",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uncertain_singleton_recovery_stop_retains_run_claims",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 1,
+      "function": "test_uncertain_singleton_recovery_stop_retains_run_claims",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 2,
+      "function": "test_newer_workload_intent_wins_over_singleton_reboot_recovery",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 2,
+      "function": "test_singleton_recovery_checks_compiled_lifecycle_authority",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 2,
+      "function": "test_singleton_recovery_enters_cooldown_then_resumes_automatically",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 2,
+      "function": "test_stale_presence_waits_then_recovery_resumes_without_new_run",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    },
+    {
+      "count": 2,
+      "function": "test_stale_singleton_absence_can_be_refreshed_read_only_and_recovered",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_recipe_observation_wire_bridge.py"
+    }
+  ]
+}

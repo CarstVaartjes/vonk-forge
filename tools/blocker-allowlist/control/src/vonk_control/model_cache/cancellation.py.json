@@ -1,0 +1,53 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/cancellation.py": {
+      "<module>": "488943bc797f65dd496490513f0afb5addfe46c22b0cc57787f2bcb6a3605af7",
+      "CancellationMixin": "401e2d008dc4f64cbd04b304ad1cf3b3af33d28502eb76565c0638a37a11cc5c",
+      "CancellationMixin._artifact_effects_settled": "442b0b1a570624d4d27d1c1ac2e7972354ef64eb013202acb0c4a5ab39cd1573",
+      "CancellationMixin._cancellation_intent": "87821a15cc9cb1e85cb1dad0061893dcb250e12a74797f1148c83143657ed7c5",
+      "CancellationMixin._payload_of": "412b755d3293a50ed395c239834be7bd78dfb6a948ffb06110949d7e81543d96",
+      "CancellationMixin._persist_cancellation": "7a5bf6fa3f18122a638cf79276e0cc91b895ea5646779273458e035ff6d1f62d",
+      "CancellationMixin._reconcile_pending_cancellations": "3a2124ffe83418bd3f6581f09c96fcab6c57eefacb4cae6119fe053c8969e487",
+      "CancellationMixin._try_settle_cancellation": "134228b711b0bb29901a438d57061caed06bf97902edde692bc129eee349764f",
+      "CancellationMixin.cancel_operation": "a927fe6cd9390d9380728c35962f2907cb914ff961a491e77889788091be57a3",
+      "CancellationMixin.cancel_operation_in_session": "798f1b9ab503b688e438b848012ffb28d21df09485b6ebbd8d9fd55c6733310e",
+      "CancellationMixin.signal_cancelled_operation": "ce7605a3e0c6e39eaf603184d1df3770f8b30326c028b779de7c4be3aebcbb9a"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/cancellation.py",
+          "ModelCacheConflictInvalid",
+          "CancellationMixin._cancellation_intent",
+          "model_cache.cancellation_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/cancellation.py",
+          "ModelCacheConflictInvalid",
+          "CancellationMixin._persist_cancellation",
+          "model_cache.cancellation_key_reused",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/cancellation.py",
+          "ModelCacheConflictInvalid",
+          "CancellationMixin._persist_cancellation",
+          "model_cache.not_cancellable",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/cancellation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/cancellation.py"
+    ]
+  }
+}

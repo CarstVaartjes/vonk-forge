@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/assignment_assessment.py": {
+      "<module>": "9bc7ba3911f5778e11964490bc167ef05d7288bb1c12653e35fe3eb06043cb55",
+      "FleetProfileService": "53f4f1425cc1994e93ba2694e7528e3762107101fae9dcbcc77c052f79f9ebe3",
+      "FleetProfileService._AssignmentState": "a04c7c96e4b90a0c30e4895edcea078faa5d3eeaf10cd661829c7c69e0a946c6",
+      "FleetProfileService._AssignmentState.__init__": "aee6fe7e118f0e4903bc8b948e14cb811868b3150a2e67f96b7a41e72ddde94e",
+      "FleetProfileService._assignment_state": "c5c5ea97109c71bbd7a509ea3d77400cb364b780522e20ee898aeaa22a4804b0",
+      "FleetProfileService._installation_node_ids": "8fb425f9cdc30ba75095a8bffc792f78099ab22113cd6872b7f94934480aae51",
+      "FleetProfileService._installation_nodes": "6af6d451223910bc435a338af1b9472fd99372e09f48f2b25e5ff15d0c5d7101",
+      "FleetProfileService._run_nodes": "b6cf268de3e88bb19fecf9a79dce6c0a2aa639f4a3f267d7fa25f41bf260f85e"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/assignment_assessment.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/assignment_assessment.py"
+    ]
+  }
+}

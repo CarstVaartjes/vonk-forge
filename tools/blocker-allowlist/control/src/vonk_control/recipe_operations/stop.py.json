@@ -1,0 +1,173 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/stop.py": {
+      "<module>": "c3fd3f200093d550caf8636d9f32e97277cf24d3d82aca09da7757546300f0e8",
+      "StopMixin": "ed5e3ac6fc05df4c06f9f769bdef7d13fad4b0c1acc17ba45804a9847185dd84",
+      "StopMixin._check_service_stop": "029b9ea913ab34a7e2ee469391211ccf5880fba21f4c7f7866516faea8628e9c",
+      "StopMixin._defer_accepted_service_stop": "82d90421f05ec57b2dfc8ac6583c9e3fd69a77bec72e2b5839a68d715cf9f25f",
+      "StopMixin._service_stop_document": "ef97426247f9a3450ee7c8c7d9f86d0223c808dd8a482cbac07bcbbed52338da",
+      "StopMixin._service_stop_pending": "854afed7eec6de633b48397fde94b3742abc28943bf67000cd4f80ccd1460f8b",
+      "StopMixin._stop_service_run_once": "c9645b98e598d3ac1599a627b975cf01a76a719412440bd909c82a3c61bad063",
+      "StopMixin._stop_service_run_once.claim_withdrawal": "eb62d8893169ad35fe876f841b14d51577b72ba867655a1da2ccab0a8c78c2a3",
+      "StopMixin._write_stop_parent": "c62157a89389444bcced697f4ef0697d6b1c9c426bf5a1afcf2e58e4327d1292",
+      "StopMixin.preview_stop": "74811e5e19fe1ca33accbad7c4d42936926c75779e01771ef69e41646232a2ae",
+      "StopMixin.stop": "34e4d8dca97c0c180b0f2d461e7a72baa4416e9eaabcf2155976424f29f32dac"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_operations.service-stop-replay",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "_ServiceStopReplay",
+          "StopMixin._check_service_stop",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.service-stop-review-input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeRequestInvalid",
+          "StopMixin._check_service_stop",
+          "reviewed-stop-effects-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeRequestInvalid",
+          "StopMixin._check_service_stop",
+          "reviewed-stop-route-state-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeRequestInvalid",
+          "StopMixin._service_stop_pending",
+          "request-key-was-already-used-differently",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeRequestInvalid",
+          "StopMixin._stop_service_run_once",
+          "the-run-s-route-withdrawal-was-superseded-retry-the-stop",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.service-stop-review-security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._check_service_stop",
+          "accepted-absence-only-stop-no-longer-has-exact-absence-evide",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._check_service_stop",
+          "accepted-profile-stop-owner-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._check_service_stop",
+          "accepted-stop-already-has-issued-work",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._check_service_stop",
+          "accepted-stop-profile-binding-is-inconsistent",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._check_service_stop",
+          "accepted-stop-runtime-generation-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._check_service_stop",
+          "accepted-stop-runtime-payload-authority-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._defer_accepted_service_stop",
+          "accepted-stop-disappeared",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._service_stop_document",
+          "accepted-stop-document-does-not-match-its-immutable-binding",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._service_stop_document",
+          "accepted-stop-document-is-unreadable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._service_stop_document",
+          "accepted-stop-owner-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/stop.py",
+          "RecipeStopAuthorityRefused",
+          "StopMixin._stop_service_run_once.claim_withdrawal",
+          "accepted-stop-disappeared",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError",
+        "_RouteNotWithdrawn"
+      ],
+      "function": "StopMixin._stop_service_run_once",
+      "path": "control/src/vonk_control/recipe_operations/stop.py",
+      "reason": "Competing publication is re-withdrawn and exact native dispatch retried a bounded number of times. After acceptance, a canonical unknown outcome is handed to _defer_accepted_service_stop, which preserves the same root and reviewed effects and persists updated_at; reconcile_pending_service_stops resumes that exact root after its five-second due interval without retaining a transaction across publication."
+    },
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "StopMixin.stop",
+      "path": "control/src/vonk_control/recipe_operations/stop.py",
+      "reason": "Canonical logical and service Stop admission retry unknown outcomes through bounded admission_attempts. An accepted service Stop remains the exact same durable Job on publication failure; worker continuation retries it without changing the reviewed effects."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/stop.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/stop.py"
+    ]
+  }
+}

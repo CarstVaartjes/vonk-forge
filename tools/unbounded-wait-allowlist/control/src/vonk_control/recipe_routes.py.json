@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "RecipeRouteService.prepare_withdrawal_in_session",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/recipe_routes.py"
+    }
+  ]
+}

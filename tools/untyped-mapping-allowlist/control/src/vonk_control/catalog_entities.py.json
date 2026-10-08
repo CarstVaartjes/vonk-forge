@@ -1,0 +1,42 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/catalog_entities.py": {
+      "<module>": "f3b4df15d03fb9fe5862ca22e488a50380780a1710c45ca113eb4ef5e22706a4",
+      "CatalogConflict": "b397f9e8a78d39f2b6622715287b1e68df0bed8984d87605a536094cb302ace8",
+      "CatalogEntityService": "26bdd98468ea79c778e22da4bf3acf2270ca19a45c826e1ed1244224b047d741",
+      "CatalogEntityService.__init__": "84edde6446406c53156e5de65c5f67dfddf2b8bf9fb71da112dc230025e77bae",
+      "CatalogEntityService._bind_recipe_models": "14deed108d0af088a2a9f9872a1eb7c10a788428781200c9cd05c09b79cdb5e6",
+      "CatalogEntityService._read": "c25febc495f52c685122a2adc0bfae1ad46e0886af0c1d92aeaae0080c05df16",
+      "CatalogEntityService._write": "bd43d7ab29896c1d08413cb51db977cadf83573b913a2a5f9678d842b81a3030",
+      "CatalogEntityService.create_draft": "301181a595ad93b400074bce00eef59357c6bcd3b402a6bd0ba9d33be43d629a",
+      "CatalogEntityService.fail_candidate": "cd208aeca96d3b7ecfb986567ff113f7f5f3789480b13daa1a5bc9a007050897",
+      "CatalogEntityService.get_entity": "9e41eca083a43a9553a43b6ee5d8fa367aa6332fd0b4d7585923407536a173dc",
+      "CatalogEntityService.record_prebuilt_images": "618616aa2133e81fa98f0038e87bdb21008f5cd494ebda97e981d24d18fd9a44",
+      "CatalogEntityService.refresh_build_policy": "4e941c3492241c7453d28b456048b36ddddb294696d38d5075a35d15778d029a",
+      "CatalogEntityService.resolve": "073fa47d20ebea90bcdedadf035939e0eb6dfcf6af2c9493001b56be56dd2b9b",
+      "CatalogEntityService.resolve_reference": "e3e139fd62bd70056d99838358cfcde97d6592468e0ea23b7c666ba48517e6da",
+      "CatalogEntityService.revise": "e9cb1a7468fd309041198ef1227b342cfa8fd51f090cb57ea32af4c794cb80fb",
+      "CatalogError": "4e67c6b5db648ebb886a3adf745178f9e535d14d79e500138c524a1d7b524015",
+      "CatalogError.__init__": "6ae38d33a7e6bfab7a9590933c0876f7eb8d5eeb178b0776a6a2765b44a8123f",
+      "CatalogReferenceInvalid": "a77159b3f1905dfdbdcb32f6bc94f5f153bc843a14b526eefdd3250aa8510b7f",
+      "CatalogReferenceInvalid.__init__": "ef17687ad8c8c35e165e7bd82ec1d57d90048d9479320b92a40a0d24b16b952d",
+      "CatalogValidationError": "76eb7fe645e39bdd167cca53c146e6ac3687588c9968bb182c410360461312e1",
+      "_actor": "0cb1d3b23061e03f0495168e4c59c4143671a5872bbb0d22e885cb1cfc35ccf4",
+      "_digest": "dddffa40b7cc9cb190de28a2fdf01e6f87ec33c2f7ace443aa7a1d2c5b317012",
+      "_execution_projection": "79bf92da12878bb502ecb097602b3ab5bd590feecc30a6cdb9e215d55daa282d",
+      "_head": "47482658f86d80e28f9c46ac1e7a7dea4d53e3b585371ab0c21e008094d2137e",
+      "_model_artifact_files": "5d4df84e2870f547d701c698605b0c1dc95ab65bd12530cdb1200c6b1f778e0a",
+      "_parse": "d440a816ea340d99601b28461659a4c0dae482306d96d6f6a58663d040b319eb",
+      "_rederive_projection": "d77a8be79b8653cc27f9de6e6e33935f89257e1bec4aeeeacef98c672cea9120",
+      "_revision": "a173d54acfc183e636ccb0370c2051b2e9b9c694bff085f0ddcb4f73f571d314",
+      "build_policy_projection": "977fcb3e44563a3619ab35d96cdd934c6bd825d9487917ec18898d9d7a16744c",
+      "recipe_document_projection": "5a1d3f05992dbe4238fb7093306b47be419ec4eed5fca0d8a7a29f6f3f924869"
+    }
+  },
+  "debt": [
+    {
+      "count": 9,
+      "path": "control/src/vonk_control/catalog_entities.py"
+    }
+  ]
+}

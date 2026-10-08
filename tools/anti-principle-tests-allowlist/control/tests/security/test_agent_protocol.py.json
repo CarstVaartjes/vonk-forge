@@ -1,0 +1,34 @@
+{
+  "content_identities": {
+    "control/tests/security/test_agent_protocol.py": {
+      "<module>": "b2bde3764dd56f6891ca62f007728f342437269980601e227f87baa1aa911adc",
+      "Clock": "21626d60cef5ef90ea56bc5358e35616e1c1ca545f33c45140d0491020f8c64d",
+      "Clock.__call__": "368189f15349acc758f890e4948cbab3b016e7494384b3567cd33737f7861d39",
+      "Clock.__init__": "f2039c807e90c8dbd8208f63d4ce2662c55a4a5c6d8b1bc200234f77e118b854",
+      "Clock.advance": "ed5cc4d2fb625f7502e8c92179e7bf2b56f93d0166f0eeb6dbb273ccbb5c4ddb",
+      "enqueue": "5dc31b1ddb18cf0fafc1137cf233bf446061a1161d1dec12b2bc441c05282ae0",
+      "raw_result": "c33d8e1bffe8ddc34fd831f3dd33cb54b2a546cdc52a6335c8782915e7e241ec",
+      "raw_stop_claim": "65e703f08e8652cce8ddabcc8e7819b3b2766bd465b2e9b7b945c57e95bff807",
+      "service": "afee5647aaaaaa8707ae7c35ea5666bbf047883feff58de05365af3f5f9efc81",
+      "test_control_environment_installs_the_verified_protocol_wheel": "fb77c1f7371f458098e1dddee766752bc4e1192fe50993a56f91f4a0abb1e11c",
+      "test_control_environment_preserves_the_canonical_zero_byte_model_contract": "cdc38ad6ffc3a2d4d645f3b25d0343cdf5e0973917368a7e2b1ac5e8d7ef3319",
+      "test_cross_node_claim_is_denied": "300834805594d4dffc55e5963651a6a1c0df70bff54d9895ff3742d3a2589513",
+      "test_payload_and_result_documents_are_size_limited": "8ce148d870a5464c7f0eefcc926bfce5fa70ff16cae3ddb04a4c5f1c0c0c4295",
+      "test_protocol_has_no_arbitrary_operation_member": "7450382722972b6fa1e23b1d14a917dfccb37d5c031f28a4629ffdcd6faadc6f",
+      "test_release_artifacts_install_the_exact_protocol_wheel": "5c798513880bf75e9481ff30bc04cf4204dbf7cef71caf1028570a5a0edf4cc3",
+      "test_revoked_certificate_cannot_publish_result": "6102fef559f624e809da922c1417e0021268ea8c8fcb5fe53ea25609bcd17231",
+      "test_root_context_cannot_copy_reincluded_credential_artifacts": "68bdffff03484a0f3c2e98a6267a47b9c4334afe1d90b982146ee83c00416d45",
+      "test_root_context_image_installs_contracts_and_protocol_from_build_inputs": "8f36d7db6d7da2c6ed7a0032470632eb29d46ba652f8916f6820516ab0119c03",
+      "test_secret_bearing_payload_is_rejected": "8f3cd6679a97de8f7971842ae984a655e1890e1d211155e41e4089171a8d2f25",
+      "test_stale_fence_cannot_publish_success": "a05e74d9c8b2eede593d8d981ac8425f033a8237389bd38a3cba8ce7df38ef78"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_secret_bearing_payload_is_rejected",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/security/test_agent_protocol.py"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_projection/common.py": {
+      "<module>": "b5b0ca12b38e91809c94b09fe144476c1eca0c5c30823ec81630144c02170e1d",
+      "LibraryProjectionError": "c586c9263fed0aba8cbb12b54a497211285f242cf0ca48c39b7ad4fa75154b2f",
+      "LibrarySelectorAmbiguous": "fd19ebc6a9de758037db8b2d102c312a8e5d134dfd5eccad8c89ccb36677ab07",
+      "LibrarySelectorAmbiguous.__init__": "9b80add580dbc1ae0468c9903bd496f8c66fe099c9a15b700c7a698568bf9d95",
+      "_bounded_library_page": "883045569c496de399891de500df5182f5d7e34b973be6b252cfab3ebce0a45a",
+      "_canonical_document": "8db6e8d373331bcdef66d67c16baea2b8be9c6ce16921d7b29800064e461eab0",
+      "_canonical_model": "ffbd0939503282624e3c3e44b86574e60e44e8783255a83c7cd31da6bd5dfb23",
+      "_canonical_recipe": "b9c21ccea1f9045bbea79b259d1a8578bd2b9ee486e9e1cfad3effd86c0d1059",
+      "_canonical_recipe_summary": "693e657369f51e8fcba3a875f684579ecf43a8ce97e95ab63ca04046280cc526",
+      "_controller_state": "e2adf8121de7acad35318accba1c9feb867b3ac814f70abbcb7413a7311281cf",
+      "_filter_digest": "92a2b44a388520894403f3737e35a9d312537a9f4f9a77381cdddfe6c158b02c",
+      "_model_identity": "1e1a5bcb65f05e2ccb2eeb37cd6768c93644d096aed4fe863cce86e32769d65b",
+      "_note_unreadable": "62b391bf76a9699d47e3f839a21974eee4cd98b049665a367ba84de19792b183",
+      "_readable_document": "b16e77280df81d6522cdc7109c919604ccec1fc9da75577141f157ef9b083342",
+      "_recipe_creator": "065b648afb930560fbb89c8602638e8a32eaac3f46aaf770be8d6b720553bdcf",
+      "_wire_json_bytes": "7bdebff104929439dbf4d896338c9c539ca7e3afdb756056f468f4e995dee6bb"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "library_projection.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/library_projection/common.py",
+          "LibraryProjectionError",
+          "_canonical_document",
+          "active",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/common.py",
+          "LibraryProjectionError",
+          "_controller_state",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/common.py",
+          "RequestFault",
+          "_bounded_library_page",
+          "library-response-envelope-requires",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/common.py",
+          "RequestFault",
+          "_bounded_library_page",
+          "the-first-matching-library-entry-cannot-be-continued-because",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/common.py",
+          "RequestFault",
+          "_bounded_library_page",
+          "the-first-matching-library-entry-requires",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/library_projection/common.py"
+    ]
+  }
+}

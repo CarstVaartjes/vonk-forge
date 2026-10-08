@@ -1,0 +1,56 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_projection.py": {
+      "<module>": "0296f21748240433e4943a0aa46de2368b32315cec8cfb6f61acb5ad222c9840",
+      "_canonical_catalog_documents": "16d5eead65d2ad561dca10d993745b6a18a7085ff23159a684cee32b478d1b48",
+      "_certificate": "036346b6f425426809a54a4d2bd52289d18ffa744dc5e79b05849b2f404f533b",
+      "_cpu_clock_codes": "20cc0de53bb3ad443871d3ea0e19b2aaed058b980c425afa6987762701c12b05",
+      "_installed_byte_group": "6b8c91b4b7b1de738a1f8a23ab04aa9a1348395f5c4723a427da944f0f35dc0b",
+      "_installed_presence": "6a6a88e1cb07ad6480d550e401d05608c179d295cf7e2276fd90d47c5e54e247",
+      "_inventory": "25b7b2374d2c6ab7fbde59cee59021b6236b21a3f87d8ca2e4418c85a7f5bc82",
+      "_mutated_group": "8d0956d9acddc4285ee81c42debb51e7c2fa4c6207a26d6c3eae237caa6b010d",
+      "_profile": "8511d8dc77eadb84781603f77f304482e8ccc1c9a0749a03d527a51a9ca744ff",
+      "_route_warnings": "e14597a571db0db1f43acc59898fc4e746387029f96edff4e3170221164bc5b7",
+      "_set": "d30dcfd0ded67b299d5362a284bd9819061a2836002aa75c52d059c4a6eae8d6",
+      "_set.mutate": "6dfea825908dc3c4ffc3f4ae1012b3a4e363cce51651399d18eba2f11a060773",
+      "_stored_installation_plan": "de50a04ab3486f2f52ff8b7b6261640279c14f73f99ee0576d0515f4778a1012",
+      "_telemetry": "c73c274e1a539226a9f3fdaa31e6b4cb11b5117f02469174a32e24a7da5baa5f",
+      "test_a_complete_installation_raises_no_install_partial_warning": "bc06127ecfe3174f745071af5ba9f71439fc4aabf888915addbf754d312d046f",
+      "test_a_damaged_active_revision_preserves_known_presence_and_recovers": "9f6d96e59f8833ff369506f994b8c8a967dba864371bb51510efe6c81286cf3d",
+      "test_connection_uses_certificate_authority_and_finite_offline_precedence": "0e7e95f78f1f8c411d1825be792bf1a6c5b0d6bf47374ef4f12e82dbca424be5",
+      "test_display_name_update_preserves_identity_and_emits_projection_refresh": "1728420467f85ecf6ab77db1c83d9b084d7b3d178ee411829357af2d387b6185",
+      "test_fleet_api_isolates_damaged_observation_and_recovers": "fdbc998b43d92bb1004493b796d958438801a2375b3250e223b8673fbfabe3c1",
+      "test_fleet_contains_registered_node_absent_from_repository": "372e4bd0a80f25c8b7c3620996195f6e8fbb61a820ed42256e528ad41ae5b5ad",
+      "test_fleet_excludes_revoked_agent_nodes": "e285bd8725783faea561474f326acc624cc33ad42dd7088fc95e2765efbbb817",
+      "test_fleet_is_empty_when_repository_has_old_nodes_but_database_has_no_agents": "2b2150d3ede38f5de0f43ae4967d82f48de3594236891af641b6221c09a682f6",
+      "test_fleet_telemetry_dto_rejects_nil_and_noncanonical_boot_ids": "714b28ac340e5fe5bf134f73f62968be58b6d6dbe0a7f1df30b8f67016cd6414",
+      "test_freshness_boundaries_keep_telemetry_agent_and_inventory_independent": "239f4e12aff972bc7aee6b4767c7b62a29e910b74fb686d0d21a0869f666e9d6",
+      "test_install_partial_names_the_installation_the_rank_and_the_reason": "a02871cbc7f584c15ff461f7a566b8e615eed8c145710782f592bed6f92d7f49",
+      "test_installed_and_loaded_groups_require_every_exact_current_rank": "507d1677e855d98aab1fd97dd52827357e37e4582e2cd1a011a0e6915e69c06f",
+      "test_installed_bytes_flag_compares_the_persisted_payload_expectation": "bdd6fd34285873c547e34e7d003148a73598cb8519ebc295115155062a8af211",
+      "test_low_cpu_clock_is_raised_only_when_sustained_and_hot_or_loaded": "ec61ad482c17289bd9393ea507be38a7ed81b490182bfc6ef5e1768a49f65210",
+      "test_non_rfc_non_nil_boot_id_flows_through_snapshot": "161de41bfbea3d2a96e6b86878441381b16896a5c4beb295e8dfc8ea6f086f33",
+      "test_presence_does_not_fire_the_byte_reason_without_a_persisted_expectation": "b31334bb031871b20f542c66fb13384ad7b4b92619bfd8f5f553626fc8600989",
+      "test_production_shape_never_recommends_a_fabric_port_for_the_nas": "cd64792d2afc2780c6ba1584006d019a1ad04c9d9bbf92419fad4e9cbf297077",
+      "test_projection_dtos_reject_coercion_unbounded_values_and_open_vocabularies": "27ad8e3cbe2a3d42155469599b981da0e1f4f672bf65694765ae4f734aed0edb",
+      "test_projection_keeps_every_registered_node_visible_beyond_500": "ae2bf4efc7fbd06736939a26931e67f273a70563c746fff4f152e94e210bd418",
+      "test_projection_preserves_all_current_installation_groups_beyond_512": "b325ddbd8cd705a606bc1dde2395ab128a8226fc7723a0eb266b36d1684523ba",
+      "test_projection_schema_is_finite_for_states_items_and_task3_numbers": "7a55bb2e38c3a1812ae18371b5e57481e0a0419ea86045d7cf00d051b375a1a6",
+      "test_read_captures_the_committed_cursor": "0c671d82ac76a4f07f09206afe3f8f764283a9a56f3cfa5ad4d06267fc32317b",
+      "test_read_captures_the_committed_cursor.Events": "374ce82bdd24b9336a52fc55258e6ba5c88351b6f47dc5e12b569491b868b952",
+      "test_read_captures_the_committed_cursor.Events.high_watermark_in_session": "8e19c4c5acfb0e01aeb89b2979e9b0ec3f8aae68ae6750beefcf61ad8eeeecc8",
+      "test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set": "0588254e17c93e2e1dc81442df20c295aa55132f2c5bcbccf66c89edb94a59ec",
+      "test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set.record_statement": "28a7546eea5cd1d7a78d3bc52f56f4d3c79d05c76b60964e28d4ef3dc67f30c9",
+      "test_wifi_nas_route_is_a_typed_warning_with_a_recommendation": "a1aa013c468c348adc0d865a5a848f70977dcd20d6b8b020e55b267028abe312",
+      "test_wired_unknown_or_unreported_nas_route_raises_no_warning": "9f7f3e51ebc2ea779725941299de26eb3eb63227020a0af848d77a72af637cdb"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "function": "test_projection_schema_is_finite_for_states_items_and_task3_numbers",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_fleet_projection.py"
+    }
+  ]
+}

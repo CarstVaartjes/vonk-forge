@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/activity.py": {
+      "_activity": "b96f10d926c47dd5d32756957129b8541efc74ff0f4a5caad0c921a195395f8f",
+      "_age": "3f6a1b71e2a8566496eafaa4f93901dba62fb4df9eaec45dbcb52b4f73e80af1",
+      "_locks": "74e601400b20d97fd9b295e112695ddbfccb6a0e636d080d4867932c63ed2228"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "src/cluster_profiles/cli_render/activity.py"
+    }
+  ]
+}

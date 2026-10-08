@@ -1,0 +1,34 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_contract.py": {
+      "<module>": "20ba8afa9d5e15863d24ff4d792aebfddf762edff74dc278cfb49a6a7be2fe4d",
+      "ConditionalPostStopMemoryCheck.ordered_unique_stops": "bc85882b597b6eecf1acefa689ca07a9b49ea0046219a40f9b90bd01c1f1999f",
+      "EffectiveParallelism.product_matches_world_size": "01ec64938436aa87efe4efcb83ba846c870a431ace99cd40b89690a16c4173c4",
+      "MemoryUsageUncertainty.unique_ordered_claims": "671604ab9fa66e3ecc7dd50633362c99cb3471d38f47c4530dc1b5cecfd86861",
+      "RunSwitchAssessment.admission_matches_reasons": "dbd4515c31a20f24279cce08f504ec16f5a11431e5eef458c75f00a01431e3a1",
+      "RunSwitchChildProgress.total_bytes_state_is_consistent": "69fe25af48561987b361fe35f400dedc87a49734016c80601f11b26e712b4f8a",
+      "RunSwitchCleanupVerifyResult.reconciliation_matches_mode": "952e5262b631382b2c53e83b42212e0a78b7162671264dd7f5bfa148102f86ec",
+      "RunSwitchContainerBuildResult.succeeded_build_has_receipt": "5599735ec876ca7500691e6293cabfffc30960c998a555c6f38e7824557e1e8f",
+      "RunSwitchModelDownloadResult.nested_identity_matches_result": "f0ebc71d4876f617675229a36dd190e788b8ce8d97c41596a7de9d1f0947f808",
+      "RunSwitchOperation.terminal_evidence_is_consistent": "489ec1efd45d2790dd7866c57e9052a4797509548f6c975d8f9e989b76b0892f",
+      "RunSwitchOperationResult.total_bytes_state_is_consistent": "6b7dc64681a609b70a06e7c25c851f4db35bbf825d333fb9360c7b6cc8355312",
+      "RunSwitchPlan.assessment": "cab6306d2a62bce9122594ebdd4589dd4ec8e81eb40ab49e04d5a824e66ab5f7",
+      "RunSwitchPlan.cleanup_authority_matches_effect": "c99e4e6a811ad5dc6befc9f2325421ff7da71e07df1d8d7b341884ee82e5a5be",
+      "RunSwitchProfileStopScope.exact_partition": "b3eff8c094f22566c65a09f28c4ebea0a368a9f560a886de6a03ad1ab8e74b7b",
+      "RunSwitchProgress.total_bytes_state_is_consistent": "5ee10c410f1b3554ec7eedf9c6b730914b59f51644e2450248404e66df2c67a0",
+      "RunSwitchReconciliationAuthority.targets_are_exact_and_ordered": "1357df52bddc94515ec9dbb7c6c39c734045c431c2f5c55f7576257fd25ed8af",
+      "RunSwitchRuntimeImageReferenceIntent.reference_identity_is_consistent": "d7c2d81989d57fabe0b238f2b5ede751420748d46b268142d288276b7ab48d38",
+      "RunSwitchRuntimeImageResult.outer_identity_matches_receipt": "98debfd4d8c683d522bd1b7e32b67326d633dc20a3114b1b7c842710a0d74e1e",
+      "SparkGroup.validate_group": "8129cbcfed297b0e0e6bfe5f7ee6a4fc5abc95d94e8a2bb005fa5e578afd69d8"
+    }
+  },
+  "sites": [
+    {
+      "expression": "authority.recipe_revision_id != self.recipe_revision_id",
+      "function": "RunSwitchPlan.cleanup_authority_matches_effect",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_contract.py",
+      "reason": "Signed plan self-consistency: a cleanup authority must name the same revision as the plan whose effect it cleans up."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "keep_default_key",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/gateway_keys.py"
+    },
+    {
+      "count": 1,
+      "function": "keep_default_key",
+      "kind": "wait-without-timeout",
+      "path": "control/src/vonk_control/gateway_keys.py"
+    }
+  ]
+}

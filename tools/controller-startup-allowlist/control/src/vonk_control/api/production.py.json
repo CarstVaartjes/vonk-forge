@@ -1,0 +1,44 @@
+{
+  "boundaries": [
+    {
+      "path": "control/src/vonk_control/api/production.py",
+      "pure_or_core_calls": [
+        "AgentUpgradeService",
+        "CapabilityRegistry",
+        "CatalogService",
+        "ClusterMappingService",
+        "CompositeDistributionPhaseExecutor",
+        "ControllerExecutionPlanService",
+        "DatabaseSourceBundleStore",
+        "FailureEvidenceService",
+        "FleetEventRepository",
+        "FleetProjection",
+        "FleetStream",
+        "InstallAdmissionService",
+        "JobService",
+        "LibraryAssessment",
+        "LibraryProjection",
+        "ManagedRecipeCatalogSyncService",
+        "MetricsRegistry",
+        "OciLayoutImageTransport",
+        "OperationalMetricsCollector",
+        "Path",
+        "PlatformObserver",
+        "RecipeBuildService",
+        "RecipeOperationService",
+        "RunAdmissionService",
+        "RunSwitchOperationService",
+        "Settings.from_env_and_secrets",
+        "SpaFiles",
+        "TelemetryRepository",
+        "asyncio.Event",
+        "build_agent_services",
+        "build_engine",
+        "build_fleet_operator_services",
+        "build_production_fleet_profile_service",
+        "build_recipe_image_availability"
+      ],
+      "scope": "production_app"
+    }
+  ]
+}

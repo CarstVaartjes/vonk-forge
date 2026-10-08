@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/claim_reconcile.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "_cancel_superseded_operation": "86143438a977617422e0bb89d5d4ec6a81474a801f53e715b4b9e4310a3186ec",
+      "_claimable_operations": "38bd36630a4b5499a8afeac84f11b2306acd6c2e8d6dc693def0857fb6bd10f4",
+      "_fail_spent_start_budgets": "12e1c4d9bf385b4353ab76e97040d3f9f18f941c7ca7413d8affa41afe627d71",
+      "_reconcile_dead_running_operation": "3cdd65f7b63973d594eb499341e29bc37c0916b3f897d5981b673f851348f910",
+      "_settle_lapsed": "6f7cce88f6f040998dd8e09890d7ec4f8ce727f12db2b9c1a15ebe89815c8d44",
+      "_superseded_cancellation_state": "1334ccd6a7bd482d167762c650b1dd040cf51522670ede7fdec38815cc958eb3"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/claim_reconcile.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/claim_reconcile.py"
+    ]
+  }
+}

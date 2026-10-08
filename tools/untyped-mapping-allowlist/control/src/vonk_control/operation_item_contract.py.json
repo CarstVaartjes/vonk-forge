@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_item_contract.py": {
+      "<module>": "e12ec10fd6c118343788a3c90e6a400ff31e7c3bc9572e1945fff177141a59be",
+      "OperationItem": "3d3bde9730650cc4058b13363c68c4ac1d174dde143df52e0eb477345fc571d3",
+      "OperationItem._node_ids": "a2033f83fe8dc135912ff5aad6830a557847d9c4e54ae63ffe928d563bf4d662",
+      "OperationItem._readable_blockers": "03349f374b4cc60184560929ddd8dfa772265d30c8c89aeb7afd3a59f6f9cf50",
+      "OperationItem._tolerate_damaged_bookkeeping": "e525d7e7190de492573f6e7b3e5c33648b988f6bec03058f11119e0dd81d2c44",
+      "OperationItem.failure_recorded": "cb07381069e248844132da575a17326abcbff1c6898998cb701101220f153d20",
+      "OperationItem.with_evidence_download": "550ed1f048064e9948ea6ebd071f1d1ebf2ab4072a6da58ce4ce3ea5ccb3a516",
+      "OperationOwnerReference": "d130479f4aa9a76ed3bc965abb957c083ce601213c127eecbdd96e4e164d4f3b",
+      "OperationResultFacts": "10607be7b1679ab6a494282b522f6512ac2e2104e221a58c7e3a8c28950a10e0",
+      "OperationResultFacts._tolerate_damaged_parts": "b5ceae82db62c40997d9a80a0a1d59d5333d2915ad7b6b462796bfee84c65bea",
+      "OperationResultFacts.failure_evidence": "7be2f689d421b1fc74e5d3df6b154e59a2864094e8c310477c6eda613cf6e43f",
+      "OperationResultFacts.is_uncertain": "e5a698ec62df2721a535b8a9b57653731dcfedee9ab9768edb9770013fb1debd",
+      "OperationResultFacts.of": "cb83f47050e2a3c12f4afbdb9eaa1b2c09901c92075e4f52f81e3aa12e5ef50f",
+      "_bounded_failure": "b3434bb690ee2798213382936b1a7f08a976d63ca77ee34e15b3c8516429c25b",
+      "agent_receipt_for": "9f9bd83232d8b2035018071ce9ec88fb3597ff6a5a8380c0e717cbe285d4b0ff",
+      "operation_item": "1da5ed0830c051dead320978ae46553d0eceeab3685979068a3f712a1f56bd77"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "control/src/vonk_control/operation_item_contract.py"
+    }
+  ]
+}

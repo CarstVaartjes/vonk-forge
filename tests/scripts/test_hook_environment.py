@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
-import json
 import re
 import subprocess
 import sys
@@ -12,6 +11,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+
+from control.tests.registry_storage import read_registry
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -249,7 +250,7 @@ def test_scripts_cannot_delegate_automatic_preparation_to_users():
                         f"{path.relative_to(ROOT)}:{number}: {line.strip()}"
                     )
     assert failures == []
-    allowlist = json.loads((ROOT / "tools/remedy-text-allowlist.json").read_text())
+    allowlist = read_registry(ROOT / "tools/remedy-text-allowlist")
     assert not any(
         entry["path"] in {"scripts/check-staged-code", "scripts/check-staged-python"}
         for group in ("debt", "exceptions")

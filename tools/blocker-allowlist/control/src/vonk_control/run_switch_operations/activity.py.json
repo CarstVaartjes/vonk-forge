@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/activity.py": {
+      "_activity_progress": "44dbb90dfaffa5c537c108312530e725bcbb6b0a2cbad80bce4150cf77c86a66",
+      "_activity_result": "92c659a8687b7ec2a99b65d53107381f812e066557cea482fef6d8591f1a6d77"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/activity.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/activity.py"
+    ]
+  }
+}

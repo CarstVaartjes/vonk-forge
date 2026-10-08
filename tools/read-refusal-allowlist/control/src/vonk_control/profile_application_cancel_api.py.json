@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/profile_application_cancel_api.py": {
+      "<module>": "c77df89fe2a30d16f1cb74d1c6cd64c63daec8bdadf163b5a34036a63aaadf99",
+      "install_profile_application_cancel_route": "b25e48f218ca2588a8180a4c6fb7f5b05a8173c6ba19ed1116299109219402e7",
+      "install_profile_application_cancel_route.cancel_profile_application": "07f0f1798f5e26542a6520867efaa29926dd11a60de50524cb7e587a5c19cd8b",
+      "install_profile_application_cancel_route.get_profile_application_cancellation": "4e94a01ce56e5726cac52a5b25a5c4058d19e8277f81d9a95423c42b13c1363b"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "function": "install_profile_application_cancel_route.get_profile_application_cancellation",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/profile_application_cancel_api.py"
+    }
+  ]
+}

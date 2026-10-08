@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/profile.py": {
+      "_gateway_keys": "39914743e75de76d167a54d0f7d32b93ae0cd4b9fed3026d42050c3ab67abe19",
+      "_profile": "86c3b93ffce9c648d2ad7651a76471dc667984a59c56536669517664b4204953",
+      "_profile_endpoints": "b67c7f06e6e02ea43b4c915fdede4ccab2f4602ac12ba70dc13fc0148d10207b"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "src/cluster_profiles/cli_render/profile.py"
+    }
+  ]
+}

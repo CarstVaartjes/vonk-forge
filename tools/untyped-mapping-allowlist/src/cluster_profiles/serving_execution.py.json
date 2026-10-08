@@ -1,0 +1,25 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/serving_execution.py": {
+      "<module>": "1b725250dde0e805bbd31886adcfef39f003cb10d38e2dcddecfe6e06c48406c",
+      "HttpObservation": "f11ee69c73c25e82e623cbfd953eb60523d9c3abb9912761a98120579e1cc2c2",
+      "ServingExecutionError": "f14c23047b4bd9b5bd9525500dab3b1b89ff4f9672087bec4340590c983f7e4b",
+      "_assert_output_cap": "400615f1165e535dc3096f63ce0c50d2692f65820d247320eecb4f86a5ae5469",
+      "_choices": "33363ece82f5c8fe6d0082aba5d29b0b8bf0287e1e2657f68f9d0f5344ef084c",
+      "_json_body": "e27422e8bdc1a1c3b7c1c6a89fc8b11664a5fe5f0c15f53b63d41392311e9f06",
+      "_mapping": "1226ca3b0fadcf102079107616af65a02c712b9062851536e0cac61c54bc13e5",
+      "_request_body": "0a30bb3355cdad37a1e3ab66a454e0157af89e28fbdf7fabb3a69a36ce9e6369",
+      "_substitute_alias": "05dc5f60bd1121fe280d87cd81b2030195548a59c4a827b2f5492d1fb66ba0f1",
+      "evaluate_http_response": "15d7d9c2c0963f7ee120ab18ed38b67eb1e3866a44f200c3d62c658272ad46e3",
+      "evaluate_job_result": "89e0c75d700d9884b6e0d621a396a22d2337a7b8b12e5d1231b0f877f34f75a0",
+      "execute_http_check": "b0008cc70f07db2b425d7bcedb8ce5604e36c3ad62e1c2701b9f8a831e3f1b69",
+      "execute_http_check.read_bounded": "123f71e3bbd439e890cbefa5b119d191e71e309ddaba1954662c94db912fe6c8"
+    }
+  },
+  "debt": [
+    {
+      "count": 15,
+      "path": "src/cluster_profiles/serving_execution.py"
+    }
+  ]
+}

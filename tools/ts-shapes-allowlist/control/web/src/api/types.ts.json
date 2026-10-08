@@ -1,0 +1,49 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "UI-only join of the independent Model and Recipe library responses, never sent to the API; its documents are typed by generated schemas",
+      "type": "LibraryViewModel"
+    },
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "UI-only join of the independent Model and Recipe library responses, never sent to the API; its documents are typed by generated schemas",
+      "type": "LibraryViewPlacementGroup"
+    },
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "UI-only join of the independent Model and Recipe library responses, never sent to the API; its documents are typed by generated schemas",
+      "type": "LibraryViewRecipe"
+    },
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "UI-only join of the independent Model and Recipe library responses, never sent to the API; its documents are typed by generated schemas",
+      "type": "LibraryViewRecipeDetail"
+    },
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "UI-only join of the independent Model and Recipe library responses, never sent to the API; its documents are typed by generated schemas",
+      "type": "LibraryViewSnapshot"
+    },
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "ActivityFilters"
+    },
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "browser-local upload hashing progress and worker messages; not API data",
+      "type": "ArtifactTransferProgress"
+    },
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "method-signature interface over the generated schema types (client seam for tests); declares no data fields",
+      "type": "ControlApi"
+    },
+    {
+      "file": "control/web/src/api/types.ts",
+      "reason": "method-signature interface over the generated schema types (client seam for tests); declares no data fields",
+      "type": "LibraryApi"
+    }
+  ]
+}

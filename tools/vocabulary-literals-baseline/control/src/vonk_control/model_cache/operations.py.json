@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/operations.py": {
+      "<module>": "ae3de08f949ace803c0598bac0e61970a40f3a21c31948391cb8188c9a852efb",
+      "OperationsMixin": "53f296d37d9b63c7e9d7ddab7d32c73a6058f388c13e189bf18aba8aa207a2d7",
+      "OperationsMixin._canonical_failure": "b792fcaf9428daac3eeaf1e974a80cd4242e2f307c71fde36ba1e8fca9b24f6e",
+      "OperationsMixin._observed_selector": "d24dd285856ce0a6734d3f5e5d026ec20c2cdcb007378454777e9130ba135c46",
+      "OperationsMixin._operation_view": "bf7379021288496fcd21d0ea9d0995c3a64ecff14558753757f61072bc4776f8",
+      "OperationsMixin.get_operation": "87d3aa0321c0cc44b30876436a779aa1de5bdc62e897d478b5d46df0d452ed5e",
+      "OperationsMixin.get_operator_operation": "ed68e0a62e459be11ad9efe02f10691f38e55f38e2445b1b6f98c22594f1fa5b",
+      "OperationsMixin.get_operator_request": "e0812326805525c320434377821175d172282b0f660ef36a0b08c3d44aca28d1",
+      "OperationsMixin.list_operations": "8d9d4a21387b95d3c762138df233e5fea7a21dfb23bfd001942f60a6a757683c",
+      "OperationsMixin.operations_page": "c6bdbb8e28fc34e6d2c733ecf97950020a1679285dec40dfd6e1b8b1ecad1170"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/model_cache/operations.py": 1
+  }
+}

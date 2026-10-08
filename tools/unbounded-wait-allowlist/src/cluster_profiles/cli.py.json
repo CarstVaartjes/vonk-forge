@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_bare_group",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/cli.py"
+    }
+  ]
+}

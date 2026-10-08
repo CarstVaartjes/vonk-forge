@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "scripts/development_slice_client.py": {
+      "<module>": "de729f1f289b8561ba5e24b17e61319f74cba9f7465078c8fb0da26381b61b02",
+      "Client": "a5642a2d0af57f224acec5998c9c031dbc428f72a546957cc0c2a870fcd4bb58",
+      "Client.__init__": "93dca0b4e94f421926a701848342fc129ac9ac04cabe3e0f8209fab66277160c",
+      "Client.request": "7a31588f3680ccdc0b59adb64c1cc29bffef6b37567d2a5624e02198025a192c",
+      "SliceError": "3c62aae091da8a686fde1ab59455cc197542b5792f24db26f20c93b002cc9d26",
+      "require_object": "a476630cd4cee0f767b8f62b1e721fc05a45071c3c3d53d96e4e08311499be5c",
+      "validate_base_url": "28112cc0fe0ea6c28ffd3424313419f088b6ab3d04c7cf59703c972e959eacc4"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "scripts/development_slice_client.py"
+    }
+  ],
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "<module>",
+      "path": "scripts/development_slice_client.py",
+      "reason": "ObservationTransport is the acceptance bridge for a verified historical Controller release: LocalBrowserController.observation_request captures one ControllerContract before I/O and decodes records plus the full document through that exact release schema. This boundary forwards the original external source document unchanged, without trial decoders, current-contract fallback, or an independently authored application shape. The existing require_object application-read debt remains recorded separately."
+    }
+  ]
+}

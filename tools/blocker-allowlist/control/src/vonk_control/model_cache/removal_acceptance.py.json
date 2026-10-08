@@ -1,0 +1,126 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/removal_acceptance.py": {
+      "<module>": "c0cfc76fd57c0e838da5fe9ca3d6c7fb5ff52f986fb1852833c8837ee957afda",
+      "RemovalAcceptanceMixin": "fdee5519413e01c0f3dd98911b8826cb155b81bf1392c5de4e8cf02e01dfdcf8",
+      "RemovalAcceptanceMixin._accept_model_removal": "20ea5f72d03562d7f0fed5f46c15b601a7e52efdfca1fc6371f3a9d4675ac45e",
+      "RemovalAcceptanceMixin._model_object_size": "183e417e2ebceaccb333c0cc7ae8d73e89fe2a6de4bd979da4ae58a15034d01f",
+      "RemovalAcceptanceMixin._model_removal_by_request": "17fcf2767c1f190e93d6f21fc280746a96e5d8720c12c4371efde228ad16f985",
+      "RemovalAcceptanceMixin._model_removal_progress": "cb44c23e8addfa966a0797b7467856c4afa15fd240399f18489cbc8cfacdd413",
+      "RemovalAcceptanceMixin._model_storage_lock": "d4b697a75c3fff4fc6e9e4f3eb02f378528236e5b238d8acacfe4c8ffd57a4fb",
+      "RemovalAcceptanceMixin._remove_model_object_files": "0155d4b52480d2454548d9d5f52b15a2123fb7acae08bef54a3ae0507e10f133",
+      "RemovalAcceptanceMixin._remove_model_partial_set": "33545193b91781abdcbf10c94a7558db8c38b3aa78531bfe0a795801281c5480",
+      "RemovalAcceptanceMixin._replay_model_removal": "536eb76113581e78c3544ae5b40ee578006dc9f749da79710646f37e6e8d5549"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "ModelCacheConflictInvalid",
+          "RemovalAcceptanceMixin._replay_model_removal",
+          "model_cache.request_key_reused",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "model.removal-guard",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "ModelCacheDeletionFenceLost",
+          "RemovalAcceptanceMixin._accept_model_removal",
+          "artifact.deletion_fence_lost",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "ModelCacheStorageRefused",
+          "RemovalAcceptanceMixin._model_object_size",
+          "model_cache.removal_path_unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "ModelCacheStorageRefused",
+          "RemovalAcceptanceMixin._model_storage_lock",
+          "model_cache.lock_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "ModelCacheStorageRefused",
+          "RemovalAcceptanceMixin._remove_model_object_files",
+          "model_cache.removal_path_unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "ModelCacheStorageRefused",
+          "RemovalAcceptanceMixin._remove_model_partial_set",
+          "model_cache.removal_path_unsafe",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model_cache.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "InvalidValue",
+          "RemovalAcceptanceMixin._accept_model_removal",
+          "model-removal-scope-contains-duplicate-sets",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "removal.local-observation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "ModelCacheConflictUnknown",
+          "RemovalAcceptanceMixin._accept_model_removal",
+          "artifact.reference_identity_mismatch",
+          3
+        ],
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "ModelCacheConflictUnknown",
+          "RemovalAcceptanceMixin._accept_model_removal",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "removal_acceptance.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_acceptance.py",
+          "_ArtifactWriterBusy",
+          "RemovalAcceptanceMixin._model_storage_lock",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/removal_acceptance.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/removal_acceptance.py"
+    ]
+  }
+}

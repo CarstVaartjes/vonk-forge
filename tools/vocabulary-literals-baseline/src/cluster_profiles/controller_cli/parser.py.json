@@ -1,0 +1,10 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/parser.py": {
+      "add_controller_commands": "55eeff83a69015bd76614b59190c6fbd1039c670dd310265ef7f04bf97773e37"
+    }
+  },
+  "stored_state": {
+    "src/cluster_profiles/controller_cli/parser.py": 1
+  }
+}

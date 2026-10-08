@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "exact_cancel_stop_waits_for_active_start_then_blocks_late_start",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent-helper/src/operations/generation/tests.rs"
+    },
+    {
+      "count": 1,
+      "function": "exact_cancel_stop_waits_for_active_start_then_blocks_late_start",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent-helper/src/operations/generation/tests.rs"
+    }
+  ]
+}

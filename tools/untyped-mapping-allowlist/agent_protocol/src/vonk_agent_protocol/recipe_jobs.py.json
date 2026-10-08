@@ -1,0 +1,71 @@
+{
+  "content_identities": {
+    "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py": {
+      "<module>": "d11175ad67fbeed824ab86f0e7d8a6cfe4a6aa81840e960d8b90f8201cb5a5b5",
+      "RecipeJobEvidence": "851076764f77404146c5434af77cbcd4e1f845eb5e1ac415de0c7d72e3cee27c",
+      "RecipeJobFile": "82942dcca4632c2bb1e03999cc3670ee76087f92f08de4b1b116e7bf9b1f59ea",
+      "RecipeJobFile.name_is_safe": "6c96b1df9f956519643c0b8ce128cd9cda6e79b7771262dc58c6a7222ff02c4c",
+      "RecipeJobFile.parse": "931f60b371a5409ed6a99d656a0b6c15be24ecafaa5641ec98461cfff0e3c259",
+      "RecipeJobInputFile": "e57728d48c267ed7143815da5d37bd9e88cba3851758461ac473c3a44af014d8",
+      "RecipeJobInputFile.name_is_safe": "4af2fed3406dab0c9ba8158a41f3a53c335e21448e93686675f7909a1edd40db",
+      "RecipeJobInputFile.parse": "62c480b69635d73c92cb4ad88b0cd42f55f316edd7fc10a08cc3e82c290c7a20",
+      "RecipeJobOutputLimits": "01b88997e81361637b8ad58573449da466ed9766c8b9c10e27cdc3af620652c6",
+      "RecipeJobOutputLimits.array_is_immutable": "b43a4298b1960e2928b2ab049f99754bb6ea96baa5d12ea6bfae6b45f6c439b3",
+      "RecipeJobOutputLimits.limits_are_consistent": "8d37eeef0e56fdb5962093fcea305c30f725be961b9a512a594d5af87992a5b8",
+      "RecipeJobOutputLimits.media_types_are_canonical": "746457a06034955079b43c685c6aa85fc6eb1eaf9ecccb49abe0672a292dd13b",
+      "RecipeJobOutputLimits.parse": "79eaa41d3147446786bc0a058eac8be727a869e0a10693b623d5520dca2a4de0",
+      "RecipeJobOutputManifest": "fb073d2db6dda34f6b6688dfd62d4e116f9ae072adfed18a167cb4fc8de8d9ca",
+      "RecipeJobOutputManifest.manifest_is_canonical": "086fa1910177729e23c3163895e4bb2a07d9953a1b791a4d0ed71ba2e1fbcfe4",
+      "RecipeJobOutputManifest.parse": "a688c004127868f07eff22935b2a89caa9bccd6b44c43739ebf7bc80634f8a8b",
+      "RecipeJobOutputManifestContent": "641758aa375b38f3b5d37418d7b8946a2fca35c705649503854b4d67c799272f",
+      "RecipeJobOutputManifestContent.array_is_immutable": "d5880ee88d5aa27e4952f2889906952d478ab0d5e38c2b04b2c698b50eb096f5",
+      "RecipeJobOutputManifestContent.files_are_canonical": "2b8d0500c9e69b79dbd65f86c6413b36aba5f9eb0e321badedecd6f3b01560f4",
+      "RecipeJobOutputMapping": "14d110a02e5361a5ffbb22b7a695a22eac07b59e47852f6d1731b3520aa32973",
+      "RecipeJobOutputMapping.extensions_are_canonical": "7a8379e4825da8faed513a27edc1552b10dc691f1ab568f4050f58b9b107c34b",
+      "RecipeJobOutputMapping.parse": "c8c2c52b3117a60079ee68aa0ae989cfb0d6632e7cce02d2dde9fee3e164d082",
+      "RecipeJobRunRequest": "c756be62e41d6eb9afad70914e70e2548c6dae6d50f7e64c177688adb810f89d",
+      "RecipeJobRunRequest.arrays_are_immutable": "967c480479a353baf201b128a3a325854328327a58d9f2ba5dc613f777cac6ff",
+      "RecipeJobRunRequest.parse": "5cf53ca4778b219720da8758296bb8452c4fd0cc0dd3bb65a4ab6262cbee13cb",
+      "RecipeJobRunRequest.request_is_canonical": "173c1ea903d79d11c76ba199f98861747f9f63c69a31709965f2bafb31d028f7",
+      "RecipeJobRunResult": "1c7f473386e52937c75c063b0333e86cfc575e6d1d450a20d3336241bbdb71b7",
+      "RecipeJobRunResult.elapsed_milliseconds": "64316c444f3e90b97c82d116efa2da3fb19225e7a1d18680e945a01fc5a048f7",
+      "RecipeJobRunResult.output_manifest_sha256": "d9e53edf3af9e4bd1fb8a2076482ddd73098a1e98dab00ebb758b46ea9a9aa03",
+      "RecipeJobRunResult.outputs": "7521016b010fcfe44e97a00b797bd84b97b29b400c4da876a7bf8dca6d7e6a30",
+      "RecipeJobRunResult.parse": "6b334f732589e6779b9092494566f7e5cdea7363f36cb38645385d541bb50db3",
+      "RecipeJobRunResult.peak_memory_bytes": "3bb3ce54b3d94f768d9e72d951624bec9018a6713309ed02baf5ebdb7a222997",
+      "RecipeJobRunResult.reason_is_safe": "75cf711602915d422079166e935d2c6bd336e90db74cac342719915b66e14055",
+      "RecipeJobRunResult.to_mapping": "d6123e35992c119ea66104b1e62fa946a6953524d1ef7c2400eb538db169562c",
+      "_RecipeJobModel": "46e343b57b8aed8880679185d546cfaba7ac9e2fb374adb6eb824381d4582582",
+      "_RecipeJobModel.to_mapping": "ede441775c7b3be82e22e578299e7811bf85c03ec85ccf2a35997dcebf7e9feb",
+      "_as_tuple": "307d97a03b6a47b7de585c504a8d498321dde09b12f9275520f7bcd1b044feb5",
+      "_manifest_document": "d7182359998eb58f85aea983980e00fdf66b391b571d0f9e23d4782072be2f2f",
+      "_parse_model": "a02a02dcdfae1dc997e5fae015ba379d07c76dc317535ba669de4e282ad19fc7",
+      "_thaw": "ec7e8739c3aeadb0268351e8e8709e39ecb67333ac97c607b5683e2f88069294",
+      "manifest_document": "d6a62591874ef8f0187fe117f07a17638a60c4f65a15a161fc3fb2aabc06b811",
+      "manifest_sha256": "8c39722a5eb929b6967fe39918d8cc3adc6da95a8a3197a24829e816827ca6d0"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "RecipeJobRunResult.to_mapping",
+      "path": "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py",
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "_RecipeJobModel.to_mapping",
+      "path": "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py",
+      "reason": "JSON serialization of the typed wire model; the model is the contract."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "manifest_document",
+      "path": "agent_protocol/src/vonk_agent_protocol/recipe_jobs.py",
+      "reason": "JSON serialization of the typed input or output manifest model, used to build wire documents."
+    }
+  ]
+}

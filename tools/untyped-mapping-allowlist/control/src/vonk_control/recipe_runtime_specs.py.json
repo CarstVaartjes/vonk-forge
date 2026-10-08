@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_runtime_specs.py": {
+      "<module>": "8f0476baa36b88a5712e1c0200016020168bc08c9febd493a743c42315587cfe",
+      "RecipeRuntimeSpecError": "72a7fa8080a1f8b1a23b8d7e8bade92d2d4b6ef607d174c55e84f6f60550fafe",
+      "ResolvedRecipe": "69d9a2c80e54141ea2f6a56354c0fd38a46a46872fdb460efabcb7ef59d2bd64",
+      "ResolvedRecipe.models": "fd049cd5ccfdeff1e009ff39ad8acfb792ef10640640f3c99a6f77ada33014b5",
+      "_artifact_inputs": "99bb1c8adf91d3c9136932fc3a77c3b2fdb4d897000fdb986d79edaa87852bec",
+      "_build_input_digest": "80e98d39f67ad45ebfed7966151c98cff627976ad715c9c59eea4b899caf5ecd",
+      "_compiled_arguments": "c69448d0c8968bf6a3a44ab513473da526b9845e6aafcca373e23080ee4585e0",
+      "_models": "291d99f7df078e24830e8d8c8e0be4a8939c3892cc97ffdb9e152f4b0f3a9158",
+      "_package_paths": "25003563bdcfd280c94a9ab320d8dd210d911288f2c525252edc5b4c6bcb62e1",
+      "_recipe": "d24ba3a9de0a72adf7b6ad2744e83d4aceeae3148625b4231dae75e8b2357890",
+      "compile_runtime_spec": "1a9247c8f1e785ff9d3bdbebe2e51724389d283489f7ee9548209797d462ce9c",
+      "recipe_topology": "bb623b5055e47998427d351aeb6e8978f94cf0911f42a920044087a4ca8044e9",
+      "resolve_recipe_entities": "150ba2c07567796e91cd8e5369df2f9a6a0c1129959f30846a7b7b18c5691d62",
+      "split_option_choices": "acf2449b09ef7dab05b64ea34f5c0d234897160489b7b54fdc4fa6eca0f70b61"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "control/src/vonk_control/recipe_runtime_specs.py"
+    }
+  ]
+}

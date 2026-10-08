@@ -1,0 +1,174 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_builds/persistence.py": {
+      "<module>": "30cc5da7c01fa5cfd907c57747cbe9f2f51253a2bcc830c7dde3a22766d2c42f",
+      "_reserve_in_session": "9af417eb7f4f00b3c110c834427b8abf83088b5256b7d1b5a65724b915626f14",
+      "persist_plan_in_session": "76d3b99fe7f7db08b5006b6be0f7fa7bb113e0cd9e45a30a9458ad6d10fa1b5d",
+      "record_success": "8a7b0934ad87f2f9e571be98d5bacdfcd6f8c127dc2d356240d1bb1c272ed96e",
+      "reserve_in_session": "97e5a4a3df871f7b90850b8dd3b80a8ab1bd4095b3d39f7be6db50d6a6a3e993"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_builds.capacity-contract",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildInvalid",
+          "reserve_in_session",
+          "build.capacity_contract_invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_builds.exact-identity",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildRefused",
+          "_reserve_in_session",
+          "build.dependencies_stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildRefused",
+          "record_success",
+          "build.evidence_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildRefused",
+          "record_success",
+          "build.input_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildRefused",
+          "record_success",
+          "build.result_conflict",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildRefused",
+          "record_success",
+          "build.state",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_builds.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "MissingRecord",
+          "record_success",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_builds.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildAdmissionBusy",
+          "persist_plan_in_session",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildAdmissionBusy",
+          "reserve_in_session",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "_reserve_in_session",
+          "build.insufficient_disk",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "_reserve_in_session",
+          "build.insufficient_memory",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "_reserve_in_session",
+          "build.inventory_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "_reserve_in_session",
+          "build.inventory_stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "_reserve_in_session",
+          "build.node_unknown",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "_reserve_in_session",
+          "build.plan_invalid",
+          5
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "_reserve_in_session",
+          "build.runtime_changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "persist_plan_in_session",
+          "build.node_unknown",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "persist_plan_in_session",
+          "build.plan_invalid",
+          4
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/persistence.py",
+          "RecipeBuildUnknown",
+          "persist_plan_in_session",
+          "build.runtime_changed",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_builds/persistence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_builds/persistence.py"
+    ]
+  }
+}

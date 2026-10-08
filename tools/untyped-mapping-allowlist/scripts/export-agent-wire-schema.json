@@ -1,0 +1,8 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "path": "scripts/export-agent-wire-schema"
+    }
+  ]
+}

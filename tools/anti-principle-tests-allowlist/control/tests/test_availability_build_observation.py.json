@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "control/tests/test_availability_build_observation.py": {
+      "test_build_observer_yields_and_recovers_a_committed_child_before_replanning": "584e3a237a9036700ff2253eddee1a8546b4ba7edfe22b83b3e0f5fcdcaeceaa",
+      "test_build_observer_yields_and_recovers_a_committed_child_before_replanning.forbidden_poll": "6d61fc02bc96e1e47c2ceb4cd2437ef53de0d01bea371fb405c7412b88671911",
+      "test_build_observer_yields_and_recovers_a_committed_child_before_replanning.forbidden_replan": "2a75da676d758bef73ac53b8cc61fb8f0cdfd046aeef9a4e284695738d2515b8",
+      "test_build_observer_yields_and_recovers_a_committed_child_before_replanning.observe": "e0f0aefe487788e722b05ac394ff465517689758662c8a171912f568de08550c",
+      "test_build_observer_yields_and_recovers_a_committed_child_before_replanning.production": "7701408cb89d0e31711381c4977ca1057a7784df9d1eaaaf79db6b8d9b77408e",
+      "test_expired_observers_failure_cannot_erase_the_new_claims_build_dependency": "36d21e525d57d77cb601b0100db9335723683a7942731a1e15627f0a45b06ed1",
+      "test_expired_observers_failure_cannot_erase_the_new_claims_build_dependency.fail_after_claim_replacement": "b0dd4275d7ad21b164a1eaca04c9792e3cbb87125a84a28aa4280f0c1e8e91ce",
+      "test_new_availability_intent_after_removal_joins_the_accepted_build": "cab38b8979a2d4e77f483386a3248a5fcede58daa1cad81e72fc7af46762915d",
+      "test_one_availability_slot_serves_two_parents_sharing_one_real_build": "efb367eb5dc4f6dd42906403b6c1155f1918e9b17a2f1d428bb31d551b174638",
+      "test_settled_child_failure_gets_new_execution_identity_on_recovery": "8dcb6d09ae940a4e1a3413cd651fd877c5892c7869d406147bb8069b12ae33cf",
+      "test_unbound_adoption_refuses_incomplete_or_changed_execution_identity": "a467ddbe4ab356d3e8198bf5b48b677a9d8871db637da9f9354e77ddf2c5792f",
+      "test_unbound_consumer_reuses_verified_image_while_replacement_build_runs": "ab9fc5bad9ad78e7f4fc816c81402aafd25b82f3c061dc746b69135e994dad51"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "function": "test_settled_child_failure_gets_new_execution_identity_on_recovery",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_availability_build_observation.py"
+    }
+  ]
+}

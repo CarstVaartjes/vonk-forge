@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/unused_storage_collection/pressure.py": {
+      "<module>": "954ab31613ed542f1e9f8441040c78fc17ed32e7e62c3f7a50d82fa6f8248644",
+      "_check_round": "bc7a2d46745db872d69592278fd0757b526e379e3c9174bacd942b2bdd1eb61d",
+      "_nas_filesystems": "8c254c655cedd01d9162b94c3fde65e62c24753b87138b2432dbaac993394746",
+      "_pressure": "d92e73e8ae3f7f1281e672aac4102739f86a4eb7692f2543847c8610125c3fc4",
+      "_pressures": "f5b57e3b52db9b494e0ab64ca4d2084a8f80f2a52c29e5df7f35abe927a9b12f",
+      "_reclaim_blobs": "9c7517f4d57f44af8e21f4696272cdb0dc421192a71832fb53d68c3268455e2a",
+      "_relieve": "34b903fec5c0760a477fb0bd8b50dbd135550897cae8bd690554176f3a044292",
+      "_remove": "967630f2ed814475e27fbd5151f1d455bc117d2a4cbfb7d667555520656e42db"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "_remove",
+      "path": "control/src/vonk_control/unused_storage_collection/pressure.py",
+      "reason": "Unknown removal retains the item, records its next attempt and continues other items; the next timed sweep re-observes the references and retries the retained item after its scan interval."
+    }
+  ]
+}

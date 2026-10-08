@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_blockers.py": {
+      "<module>": "4c06e53f63e1aca980f23831bbe8d289d2fd2a883bd4cf7d03f9bb61c35547eb",
+      "OperationBlocker": "807b41adab43cccae74b3833a4515539611672583247184545d7348681db6732",
+      "bound_blockers": "21aeb7e8893ca3c95157241b6cfd0f5f19556ab3903200bfb64bb68891e1da5b",
+      "dump_blockers": "79df7564c7bfba3723c3143669e73ba796b11eefb3351026c76b7a4ac40b75ab",
+      "make_blocker": "541ad291bd73e6a36ebf2f645a7a9b1479fff31df0e4c2bf713ae1702e9e27df",
+      "read_blockers": "858fb3aeb9825c627306038b1542db7983c59306c7baf0b661a65c5851786921"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/operation_blockers.py"
+    }
+  ]
+}

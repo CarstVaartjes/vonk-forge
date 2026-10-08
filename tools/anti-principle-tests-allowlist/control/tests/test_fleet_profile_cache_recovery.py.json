@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_profile_cache_recovery.py": {
+      "<module>": "b5d8bd477dcdcc283aadca8094bc5d01139fbd4a7f7287e1754bf4435e24477a",
+      "_ColdInspector": "c4098379b0d00f2264a8ed4b9fdf5045ad720e2c82044867789fb9871973a1cc",
+      "_ColdInspector.inspect": "386a07e618e08d034c0c1f2bc76241e0b35d75aadb0a18e6683e7fb7f97f6973",
+      "_MissingRuntimeImage": "d7ca9e71f02b5b0750796b5a4c37668bcb47466eceaf8ac71c472ed917167992",
+      "_MissingRuntimeImage.execute": "e6ef5d3d9092d56b3b8c3fb24ec3c418f9f620fe230ddf7408ccfc0f5595bd3a",
+      "_typed_cache_failure": "88ecfe7cd406cd5c92d02ca187a532cd4fea5cca0a393f6ab162ae733a5073b9",
+      "test_cache_recovery_redownloads_bytes_that_failed_their_digest": "a1f4626fe7a9c4bba7c4298b4a0a37130046eb45541536e3e34657a8de5724a1",
+      "test_cache_recovery_refuses_access_and_integrity_failures": "25844fec932099ab0f0a98a6695bdc408cec94031c994c9b63df3f879cc1b632",
+      "test_cache_recovery_replans_an_actually_missing_build_archive": "cf63a91f167388b49700fc8bab3e42cdf1aa7c71e6906ddca13ad799a5d00b18",
+      "test_cache_recovery_replans_an_actually_missing_build_archive.replan_build": "74c9faf4b62aa3e84bf1ceb709f291f41f7bb701cad84f3d1fd8101ff4123951",
+      "test_malformed_failed_profile_does_not_block_unrelated_queued_work": "37332538ef242459c45a28c7865cc98fa9b0f85b6ddde8ceddcfcc006a18ad6e",
+      "test_run_switch_persists_typed_cache_failure": "e051fc2a3f9f047efd0b158c43b3b48c0864de726eab25643836918c0c471dee",
+      "test_selected_profile_reconciles_a_newly_enrolled_spark": "0980618c9e42fea35bf4493b86b39bfecbfbd2b02ed2ed4246bbd8bc8f1004ef",
+      "test_typed_cache_loss_queues_one_scope_bound_profile_retry": "703e4438cdd5a89dcb0e81350fd666dd9855d58c1ee78c25a1f1a84aa3a8e889"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_cache_recovery_replans_an_actually_missing_build_archive",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_cache_recovery.py"
+    }
+  ]
+}

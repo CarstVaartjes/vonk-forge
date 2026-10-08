@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "available_artifacts",
+      "kind": "loop-without-deadline",
+      "path": "scripts/resolve-publication-producer"
+    },
+    {
+      "count": 1,
+      "function": "resolve",
+      "kind": "loop-without-deadline",
+      "path": "scripts/resolve-publication-producer"
+    }
+  ]
+}

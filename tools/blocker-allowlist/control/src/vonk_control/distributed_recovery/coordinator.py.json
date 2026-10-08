@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distributed_recovery/coordinator.py": {
+      "<module>": "2337a732a355c203504b781fa106acab07dd7fe249a328f595db68aaa0f653c3",
+      "DistributedRecoveryCoordinator": "2337a732a355c203504b781fa106acab07dd7fe249a328f595db68aaa0f653c3",
+      "DistributedRecoveryCoordinator.__init__": "06ad8d0a4e3e35a7bb72794f6ed5b2c49a9e7007e9e2bd02750c46a0240a5676",
+      "DistributedRecoveryCoordinator._active_recovery": "7c20072930824c148572087df4eb89e8fd60545c26e373fc21ed210545003496",
+      "DistributedRecoveryCoordinator._settle_unreadable_runs": "2f24e042f772707840c3af94d2984ba71bec9d2fa3af558258fad13733e27316",
+      "DistributedRecoveryCoordinator._withdraw_routes": "961714332f6331f725f691236cbb5d79ee9ee2f3aebcce321c433059fc0290ee",
+      "DistributedRecoveryCoordinator.tick": "27be13d2a0a7847405bbb9be1c038ed7e3dd66f66a9b93c06572d16de48a733f"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "_RecoveryDependencyPending"
+      ],
+      "function": "DistributedRecoveryCoordinator.tick",
+      "path": "control/src/vonk_control/distributed_recovery/coordinator.py",
+      "reason": "The recovery tick schedules a recovery wait for a pending dependency and continues; the next tick reconciles the same run again."
+    }
+  ],
+  "scope": {
+    "guard_paths": [
+      "control/src/vonk_control/distributed_recovery/coordinator.py"
+    ]
+  }
+}

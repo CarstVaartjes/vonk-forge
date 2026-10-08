@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/build_selection.py": {
+      "<module>": "efc4df3fb8c35496fee6719c6f87d7e7f6fcc36b39c7e1ef6dba4f6b894684f1",
+      "BuildSelectionMixin._builder_admission": "dc437827282fddcb394140b0e3fbc9bc176ab1d6eb3bc45e273186e2f60640e3",
+      "BuildSelectionMixin._builder_nodes": "d4c0cbed0f1225e8fd49420fef39614d27f890eb03008cc25788161e86185105",
+      "BuildSelectionMixin._select_build": "95efef66f3fe435bfac505e996bbab459dfe6e741ada38a347dc2cd60fbf14aa"
+    }
+  },
+  "sites": [
+    {
+      "expression": "selected.recipe_revision_id == revision.id",
+      "function": "BuildSelectionMixin._select_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/build_selection.py",
+      "reason": "First looks at this revision's own build rows; a successor revision finds the identical earlier build by executable inputs (reusable_build_id, then the preview's recorded build input), so the revision id only orders candidates and never rejects an image."
+    }
+  ]
+}

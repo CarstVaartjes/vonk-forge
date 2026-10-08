@@ -1,0 +1,20 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "busy_detail",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/admission_locking.py"
+    }
+  ],
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "admission_wait_exhausted",
+      "justification": "Walks an already materialized finite Python exception cause chain to classify SQLSTATE before retry; object identities are recorded in seen and repeated identities or None terminate traversal. It performs no external wait or sleep.",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/admission_locking.py",
+      "reason": "input-validation"
+    }
+  ]
+}

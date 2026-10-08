@@ -1,0 +1,25 @@
+{
+  "content_identities": {
+    "control/tests/test_availability_claim_fencing.py": {
+      "<module>": "b9a77ddb0dec300fcae2c3aa4a0652a7bd89f356b47805fba8a2f1c445e3d41c",
+      "_hold_lock": "26941bdf20fc4cbed47ab72fbd4994985b790d2e86c54efd31a4c69125831072",
+      "_take_over": "b253d06155668f4627be5adda5f4d6aa5f2e097a97f322c536dd38a345ef094b",
+      "claimed_image": "d4ae517e0a3909ac116c6b19a7287934effcc18e39605719389d0ce03644ff43",
+      "test_cancelled_image_owner_recovers_after_publication_process_dies": "6b399b8af61f36e16f8afe4c431d12a30429a1724c62fe86af3f3b16045d82fc",
+      "test_contended_progress_releases_the_artifact_worker": "f7b13be2709f767c6b033526a564a7004466d75b5848b357b839ad2ba9c06dea",
+      "test_contended_progress_releases_the_artifact_worker.build_while_owner_locked": "cd5b875c294007e583b5c205e23c9658942e9d235d8302efd66eadd5f3b8fa5d",
+      "test_delayed_claim_cannot_execute_when_the_worker_name_is_reused": "bd095cc0eabbb0c2018ea83432752af80132356ccb6162b2aaa98c0d3fe90edb",
+      "test_expired_callback_preserves_the_new_claim": "f4e9381ad3c5630a7e06f18d103a99b9f224737ccc4f5bc56cf7d8f920850f5a",
+      "test_expired_callback_preserves_the_new_claim.takeover": "a3c35dce9bb67af4847b79a9843c5304d14181515a6f2f81bc2b1eed9eb383fb",
+      "test_expired_lease_cannot_be_revived_without_a_new_claim": "dbd5829f24e2f1feababbb8c9650da63cd06ce9518a8fd9c420ff49f2f514a1c"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_cancelled_image_owner_recovers_after_publication_process_dies",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_availability_claim_fencing.py"
+    }
+  ]
+}

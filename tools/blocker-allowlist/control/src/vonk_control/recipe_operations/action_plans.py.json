@@ -1,0 +1,59 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/action_plans.py": {
+      "<module>": "6ce16f8e9168c93587890d2f6306ba8c7ae2b71bd58fbe9e20eb1d34a0b71fe2",
+      "ActionPlansMixin": "1ae2b4629d36795a703bc706f02c175be35f77a1be697e78929f13d33241a356",
+      "ActionPlansMixin._model_dependents_on_nodes": "a5bcdb486c9d1a74bf8f903d8cc6c97b544489191671c065e3112e26182343fd",
+      "ActionPlansMixin._stop_plan_in_session": "020a48e4b23f61b2f10b50f98fe7204d3053bdfa94270444438579f13a4fd7bf",
+      "ActionPlansMixin._uninstall_plan_in_session": "ee11f19c24c1ec37190707ffead4a0c792dc1ce0e7c74a1264a1d2e41b047c4c"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "action_plans.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/action_plans.py",
+          "RecipeRetryLater",
+          "ActionPlansMixin._uninstall_plan_in_session",
+          "recipe-revision-authority-is-unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/action_plans.py",
+          "RecipeRequestInvalid",
+          "ActionPlansMixin._stop_plan_in_session",
+          "recipe-installation-does-not-exist",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/action_plans.py",
+          "RecipeRequestInvalid",
+          "ActionPlansMixin._stop_plan_in_session",
+          "recipe-run-does-not-exist",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/action_plans.py",
+          "RecipeRequestInvalid",
+          "ActionPlansMixin._uninstall_plan_in_session",
+          "recipe-installation-does-not-exist",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/action_plans.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/action_plans.py"
+    ]
+  }
+}

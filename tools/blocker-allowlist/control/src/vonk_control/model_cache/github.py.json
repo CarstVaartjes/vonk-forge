@@ -1,0 +1,107 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/github.py": {
+      "<module>": "c2c82d6b069b4ba0cd6c4eabf2388adf86809e319ce96b3fd6fcad0959d8d425",
+      "GithubMixin": "7f20f8380e23d5f0f78fed30bcc0669a9dac42ad630cefe620e5e8a56ce7ffc9",
+      "GithubMixin._github_error_reports_secondary_rate_limit": "20cd2383d0fb22d8518d3b10dbbd7429dc3bfce0315620e3eea9d708f944a201",
+      "GithubMixin._open_github_release_asset": "c1dfd9dfdd0c89e5be217a2b1478d11aaec68a1b91fa3bfbf7d1cd834dae17d3",
+      "GithubMixin._open_github_release_asset_once": "43e929582ce3c0d11b2b34850cf83fad9f781d3ca5cffd9911cfc3185b220d24",
+      "GithubMixin._raise_github_http_status": "1bd2355e3cb59415f0c6bfbe07d4f99e02ee87ec4b5a7f4da05a5da31ff36c00",
+      "GithubMixin._send_anonymous_github_request": "24fb36d199da130a01985ed29b55d1bb93f2fd6066787c87e6306ff9b5ed4b51",
+      "GithubMixin._validate_github_release_asset": "22ca4d7130c005307c0531a7eef07f0f243247b8564e1c8f49ebbbd51f532240"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "github.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageUnknown",
+          "GithubMixin._open_github_release_asset_once",
+          "model_cache.source_unavailable",
+          2
+        ],
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageUnknown",
+          "GithubMixin._raise_github_http_status",
+          "model_cache.source_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageUnknown",
+          "GithubMixin._validate_github_release_asset",
+          "model_cache.source_unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageRefused",
+          "GithubMixin._open_github_release_asset_once",
+          "model_cache.redirect_forbidden",
+          3
+        ],
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageRefused",
+          "GithubMixin._raise_github_http_status",
+          "model_cache.rate_limited",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageRefused",
+          "GithubMixin._raise_github_http_status",
+          "model_cache.redirect_forbidden",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageRefused",
+          "GithubMixin._raise_github_http_status",
+          "model_cache.source_access_denied",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageRefused",
+          "GithubMixin._validate_github_release_asset",
+          "model_cache.release_asset_identity_conflict",
+          3
+        ],
+        [
+          "control/src/vonk_control/model_cache/github.py",
+          "ModelCacheStorageRefused",
+          "GithubMixin._validate_github_release_asset",
+          "model_cache.release_metadata_invalid",
+          4
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "ModelCacheStorageUnknown"
+      ],
+      "function": "GithubMixin._open_github_release_asset",
+      "path": "control/src/vonk_control/model_cache/github.py",
+      "reason": "The exact observation is retried through bounded_attempts, releasing responses and transactions between attempts. Missing provider files retain the durable lifecycle source-gone budget; exhausted requests carry the typed retry hint and hold no new claim."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/github.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/github.py"
+    ]
+  }
+}

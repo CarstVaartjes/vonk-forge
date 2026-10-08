@@ -1,0 +1,26 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_build_cancellation.py": {
+      "<module>": "565873573688fbfa972d58ce8043f570ea9caa429a1ba28c55f618d2fd155750",
+      "BuildConsumerError": "77e67984d6c230fa6272df1a58dc1c22a5f84a2a3b561785439b08f4622c530d",
+      "BuildConsumerError.__init__": "d7157289e94a2c088e69b12c48683b32f1e94706d1fee214d42f3632e29ae930",
+      "RecipeBuildIntent": "19adb4e85441315ab224e75af651c98e22de699faa6a3b4d1965a4c3a48f9e66",
+      "_availability_consumer": "d75079fe7eb2016f3a02b70139b279510d0e51e3ababe0fbc1fbd5f615116078",
+      "_profile_build_dependencies": "6d8b7aac411426268109c618dc39ee11ef5b1b03b490d469e12f21372f704feb",
+      "_profile_consumer": "a8f248d8a3d52c1f23d0df569b2267fc648aee967c8b0e8cc7fb0b238ee1d6ee",
+      "_run_switch_consumer": "e91bea908ef6c797c076c3ec7c30373e11a21ecff1055c63aca43a5470a53683",
+      "build_cancellation": "0f575dca6853e6c29f649e3d78df95bc6c49fc5f0421da4e40f7aa02362dbf45",
+      "current_build_consumers": "fdb775a64247e767ba0b693a735956e0554124c93e8834ddeddbeaa887bf38a3",
+      "lock_availability_build_dependency": "f76fd0ea0212001f723d29cc66a26c489ee2da088553cec5bce0cd49fb0106b2",
+      "lock_build_dependency": "e6d5c63c04d24c97cbb049c1d8982834dc1da1daf686fb221c52ae657bbb230a",
+      "lock_profile_build_dependencies": "3da8d6fbeecf2a924d7c8e7ea98249df9ec70d5da2677d1601a182844140ee43",
+      "lock_run_switch_build_dependency": "a6f0f058b4a88433d393d734c8a753fb6a8b303fef3c68d9f9f98a446f94a3c1",
+      "needs_container_build": "438fe7e4b1f470dbec2ff17fd667b35ced5740f439770906f20f5677f4634b1d",
+      "read_build_intent": "480357c88fbf34a71eb6992c49a57ca069fd19aacf2a698ee1585c0a5692d4b3",
+      "request_build_cancellation": "ce6ab9e43dec22fdb0aaa017801591033b2e26aa51c0296b093fbe4b7380a429"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_build_cancellation.py": 2
+  }
+}

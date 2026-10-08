@@ -1,0 +1,381 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/host_runtime_plan_authority.py": {
+      "<module>": "4e729000f925d7bda71a04f61debc237f7069df8414f83a731a5c7b98befbf3b",
+      "RuntimePlanAuthorityError": "48deb54a3dfecc3796ffe0262e8aba4308992fe079929f5a1146a81b98543e98",
+      "RuntimePlanAuthorityRefused": "787e28a94c85fc0594dc70862b58f5fb24541d6c1820de646f90a61af579f53e",
+      "RuntimePlanAuthorityStale": "d7a413543345fb531142ecc00e5613017501740db9b9f62b89284da3689216ef",
+      "RuntimePlanBinding": "de6fc11669a4901292ac82cd52c56874e888bf777c0017fc4e7b968ae7a91676",
+      "RuntimePlanEvidenceUnavailable": "6aa6395188c78a1e8dfb0e159dbb733f254742e661ea8feeef06b9bf6b22b052",
+      "_RunAuthority": "aea47f4a5a28389ec5e1e5bd263d413828ea00548598786eac9a115b3433e536",
+      "_check_operation_target": "c1578bc05aa58a63d5a107649b1a20b973480193f40c3956012849b15c8f03ef",
+      "_job_run_authority": "02580373dc8538c1e919b1942dc29c4952c676b088d4fda6368a9d1eb4f41106",
+      "_load_run_authority": "97df55a0d62d0af602713d0caeffb1ed66f118bab2d7cff5d98cdc813f6575f8",
+      "_parse_job_run": "5498b307a9b457643c5ab2b4dd99b159cfe16209beee879d2d5feb54cf75e968",
+      "_parse_start": "7498c12c1ce4ce126926b2bcd39f359ddbd9094aa7123f712b8d55c1550a5ac7",
+      "_parse_stop": "97eebddd2051a317c7776c4df66a0601830984ad618c7e4a1710f16e103805af",
+      "_payload_sha256": "845c408d859e394c7a3f24d1d0eb899ac5a9fd89c58666794b994f6110ddb4b3",
+      "_placement": "874036ee1724bf8e00b0d7ed5c4640291f94e0822eb40d4c2f73421499fae71e",
+      "_placement_key": "d23a2ce488086aab37a4b2f46b26f2f765cb751f6c3a965db0f2727c860d3783",
+      "_service_run_authority": "13716f2fccfadc2a723f443bd3d3a9ed121ffd94caf113af1203b46a688f16dc",
+      "_service_stop_authority": "f0ea9265e6e2c29f928d065007f918eb629d0151a6b189df1f47f297cbed944d",
+      "_validate_child_record": "4a483117c0e0598c302cfce75cf93eb64254d2769ca9281508581bdd11785c25",
+      "_validate_recovery_start_generation": "2156bc87354f5b558913a3e9ad99dad4452ed7fcb6e85e28aa6b4afe5bf2f107",
+      "derive_runtime_plan_binding": "18854fd474b0011885e791cbcc53e118a976255889b1a43460f0a7b1f4de9244"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "exact-ordinary-jobrun-stop-input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "derive_runtime_plan_binding",
+          "run-jobrun-stop-authority-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "exact-ordinary-jobrun-stop-security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "ProfileStopAuthorityError",
+          "derive_runtime_plan_binding",
+          "run-jobrun-stop-scope-is-missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "ProfileStopAuthorityError",
+          "derive_runtime_plan_binding",
+          "run-jobrun-stop-target-is-ambiguous",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "host_runtime_plan_authority.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "InvalidType",
+          "_parse_job_run",
+          "jobrun-payload-is-not-an-object",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "InvalidType",
+          "_parse_start",
+          "start-payload-is-not-an-object",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "InvalidType",
+          "_parse_stop",
+          "stop-payload-is-not-an-object",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_job_run_authority",
+          "artifact-jobrun-identity-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_job_run_authority",
+          "artifact-jobrun-start-is-no-longer-authorized",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_load_run_authority",
+          "recipe-run-authority-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_service_run_authority",
+          "service-start-identity-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_service_run_authority",
+          "service-start-is-no-longer-authorized",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_service_stop_authority",
+          "recovery-stop-generation-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_service_stop_authority",
+          "service-stop-generation-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_service_stop_authority",
+          "service-stop-identity-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityStale",
+          "_validate_recovery_start_generation",
+          "recovery-stop-owner-is-stale",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "host_runtime_plan_authority.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "BookkeepingUnknown",
+          "_validate_recovery_start_generation",
+          "recovery-start-identity-is-inconsistent",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "BookkeepingUnknown",
+          "_validate_recovery_start_generation",
+          "recovery-start-phase-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "BookkeepingUnknown",
+          "_validate_recovery_start_generation",
+          "recovery-start-target-is-duplicated",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "BookkeepingUnknown",
+          "_validate_recovery_start_generation",
+          "singleton-recovery-target-is-duplicated",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_load_run_authority",
+          "recipe-run-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_load_run_authority",
+          "recipe-run-plan-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_parse_job_run",
+          "durable-jobrun-plan-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_parse_start",
+          "durable-start-plan-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_parse_stop",
+          "durable-stop-plan-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_service_run_authority",
+          "service-run-plan-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_service_stop_authority",
+          "durable-exact-run-ownership-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_validate_child_record",
+          "lifecycle-operation-manifest-is-missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_validate_recovery_start_generation",
+          "recovery-readiness-placement-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_validate_recovery_start_generation",
+          "recovery-start-generation-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_validate_recovery_start_generation",
+          "recovery-start-placement-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_validate_recovery_start_generation",
+          "recovery-start-plan-is-invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_validate_recovery_start_generation",
+          "recovery-start-target-set-is-invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanEvidenceUnavailable",
+          "_validate_recovery_start_generation",
+          "singleton-recovery-start-placement-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "host_runtime_plan_authority.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "ProfileStopAuthorityError",
+          "derive_runtime_plan_binding",
+          "profile-stop-target-is-ambiguous",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_check_operation_target",
+          "lifecycle-plan-node-identity-differs",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_job_run_authority",
+          "artifact-jobrun-owner-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_service_run_authority",
+          "service-start-owner-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_service_stop_authority",
+          "service-stop-differs-from-exact-accepted-run-ownership",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_service_stop_authority",
+          "service-stop-owner-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_validate_child_record",
+          "lifecycle-operation-manifest-differs",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_validate_child_record",
+          "lifecycle-operation-record-is-inconsistent",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_validate_recovery_start_generation",
+          "distributed-recovery-stop-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_validate_recovery_start_generation",
+          "recovery-stop-actor-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "_validate_recovery_start_generation",
+          "singleton-recovery-stop-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "derive_runtime_plan_binding",
+          "lifecycle-plan-owner-does-not-match-action",
+          1
+        ],
+        [
+          "control/src/vonk_control/host_runtime_plan_authority.py",
+          "RuntimePlanAuthorityRefused",
+          "derive_runtime_plan_binding",
+          "profile-jobrun-stop-authority-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "guard_paths": [
+      "control/src/vonk_control/host_runtime_plan_authority.py"
+    ]
+  }
+}

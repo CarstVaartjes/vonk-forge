@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/contracts.py": {
+      "<module>": "d2972af582075ebcf36299bdec965b35031757f4625d85a27cd46e1f18327e72",
+      "AgentConfigurationConflict": "f80ef316dfa2136c01aeee445c05f9bca260677cb5dbcf8ffb4eb6b7c1e549cc",
+      "AgentContactIdentityMismatch": "d3db968499e30ffc63e48a2e803afbacdf5d94bdf66e850bf62a67130fda9cc9",
+      "OperatorRetirementRefused": "bbab9fec47712cbc2943fb7866f435792e91bfb090641ea6440fab2640442c8d",
+      "OperatorRetirementRefused.__init__": "04c0650ed4a06370935e2b2f3338743ce6cc90b0d763e60e21df7a85904a38da",
+      "StaleAgentAttempt": "c97b5edfff767e66cc0096efa1d86cb39dd88ae0e9d2a5ee69120115d69b8155",
+      "StaleAgentFence": "0abe628504e65fc144a815ef2cc29f88e1b2ec76b225340616c1e0b42cfe03be",
+      "StaleAgentLease": "443d59d10844cdead0e80cb3f1d3b6eaf68e532ec40dbb0259d8c3969ad198e5",
+      "StaleAgentRequest": "71e0e9fcb473a5f9d2a4073dbd9c2cfa9a807e85140de84484976eca75f797c4",
+      "SupersededAgentEffect": "9e74d6e33e55d56cf72dc29523d1832a16056631b3b9c132c6e1d182caa9a426"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/contracts.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/contracts.py"
+    ]
+  }
+}

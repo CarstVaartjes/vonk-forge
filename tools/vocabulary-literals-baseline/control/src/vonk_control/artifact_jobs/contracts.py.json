@@ -1,0 +1,45 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_jobs/contracts.py": {
+      "<module>": "41f172cd4c06f561be55882975be54905776ef9985fb23cc3d8174ea722d50e2",
+      "ArtifactFileDeclaration": "1481d88499ed14cd5bc5517d2bda8a0317286a9550a9f03756a52c7f39fdd962",
+      "ArtifactJobCapabilitiesResponse": "e08d9cfd98e278f8aee665ec1bd8d0da1bcdadf0f44a59b83427db1719ba5ec4",
+      "ArtifactJobContractModel": "59d48bb28ce341ed6466b70ec0e9df0f27ac10502cdeefc2c2bedf0c9c16ff95",
+      "ArtifactJobError": "c73fd2ae7abcabeb4a15c98d655a505d96625f68f54474a8487ed25948755a24",
+      "ArtifactJobInvalid": "122f6a8c2bfffe98a5d25a8ca4485faae8f6316e263e492fd967c1cf95af3f75",
+      "ArtifactJobListResponse": "28a6ab07d065753b99458c76358d2a004f7de9e0163d9ba3464f37ead7efec3e",
+      "ArtifactJobRefused": "da1cec7326695eea8b941a650de2df761e7f4bb5526402cf616ab59080d1552e",
+      "ArtifactJobResponse": "4e24e8ad5048da3e9100026590f6a593911f851e5698cbdf6d005687c5bf43cd",
+      "ArtifactJobResponse.response_is_consistent": "c986844b6b8dc377616a8ca4e508a9d8eba84bd104a09c354fb40dd7f26f8eca",
+      "ArtifactJobStorageCapabilities": "57235454955b87235200dc44190bf7c3aeb2a7f1b70c6b2b8c3fbe0590b85e4b",
+      "ArtifactJobTransferClosedError": "8ee76b82ec7136beb1d6a5d4abb26dfef6084e1f312a926c0d08f67507305627",
+      "ArtifactJobTransportCapabilities": "830819165c011db66de8d2347b07ad914abea8555a804c65f0b9783605591022",
+      "ArtifactJobUnavailableError": "ca8596e5cf8f025dab7b7a23b0317a1322318cc5d62cb4a77fac14aaafd94efc",
+      "ArtifactJobView": "20ec2b52e30cbea08587a8cdb8a79d4b3046681cdb7b36fdc40d9e9dfd05b3b5",
+      "ArtifactOutputFile": "48a867d145b0e365b17670608c6874a46bfbf9f55600c2a7ab704801635465de",
+      "ArtifactResultInvalid": "60e66f43d995809b0bf6cab183382b08901910a58067b7843cbad03a99d6ad1a",
+      "ArtifactResultRefused": "9b331299d8421f7f4ee69d34bded73bf9d840c201e315064cb4f12f10ee0c52a",
+      "OutputLimits": "d639fd6d432679ec4a5935562bbd9c79f479b79cb4399119a94d6a152d06f55a",
+      "StorageReconciliation": "6933a3ab8ff0b93588426e6592013ef76a8394dab22be208f9a07ee81a81f6a3",
+      "_JobLaunch": "baa56094697afdaed299a67d2b36902e07f13f4c66609e88c1413378fc5e58cd",
+      "_active_recipe_revision": "402d780f772421fb1c2100daa507613f18a911652f7088ca809b1c9efaebea40",
+      "_artifact_submission_in_session": "21d3aa8ff4f3143cdfcf756855307b79753a9b723ceb648507e4957a22996440",
+      "_artifact_submission_in_session.read": "b286c8e014b4d89566abf3302923930508d29f73ed99c1c3e606a2c85e79db27",
+      "_canonical_declared_parameters": "7031abc0419cc713f83168aa6b7a0235b4d985197a3db08e50505c2d515bddbe",
+      "_compile_contract": "611ffab001480929012c53316450116c3d9e49912f8da5ea6760e708fd2e2526",
+      "_effective_output_limits": "6e186b9c284845bf4503fd52b767365d11afcc5ec875b7e0ef39353849e06dbc",
+      "_effective_parameters": "d61ff64c3466430ba18ecf9bec92b7d996392236fa4448b33b0e8e3dad7e9232",
+      "_finite_parameter_number": "11db35dc4abdac26f741620317b47dc882252e9f28a35b77bacb396db09fa5c9",
+      "_output_mappings": "6008dda32264f67864ac79ef6232c5f96c5df554ec453a880df38c22a2f74b77",
+      "_read_input_manifest": "5a71c0f9737263825cf8f8ada699db4545a49c1fe67dc9756e96f96c5f45c1b8",
+      "_recipe_interface": "2d5b0b993d4ddaef582916fa02a94b0f0b229d831499c9a7aa4f332b285f1b7b",
+      "_record_unservable_run": "9d77befc33dafdaa0be423f17009a28f15731d835dfa0dab59aed5fd97508fec",
+      "_translate_blob_error": "81113a9ead0ace584c49157191e880e3088cd6bbb0fd7cdfda9bf0f4bb9affb7",
+      "_validate_inputs_against_contract": "3e2778837dbd836075f74bd64c47e764dcfe8371371ed664ab8bd6e9b9bbfb0b",
+      "_validate_outputs_against_contract": "de2a5caac65acb7575fe4b6ae610c76c5bbdaead4a6931e4ab252f1dd440c961"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/artifact_jobs/contracts.py": 1
+  }
+}

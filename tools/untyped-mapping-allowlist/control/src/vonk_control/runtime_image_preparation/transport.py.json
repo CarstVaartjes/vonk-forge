@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/runtime_image_preparation/transport.py": {
+      "<module>": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c",
+      "OciLayoutImageTransport": "a526a809888301b4481d765850740b6862d287d801edb56c331645738319d58c",
+      "OciLayoutImageTransport.inspect_archive": "09d010ebf2e8e99ff6178772bfdf333dbee861ccaf2dd88e64e7514f631dd0c2",
+      "_config_digest": "e3c74f85165381d5b0647d420aabe8dfe02cc54550fd8c531c9d2195ccd4522b",
+      "_observed_architecture": "ac93f0957b1ab0670f15638c4bb90c71e8b00fddd0641104f42bc43af934f3de",
+      "_observed_runtime_interface": "581e3d2ead65986b26f2d5c96343a5c563495167deda7602d35af4fafbd2de9e",
+      "_run_json_text": "e047d16dbb0f871b9f8ca95678ad4061f07a670ad6125965132bdf7f5c8c76a4",
+      "_validate_evidence": "457b4f87e33c4f8f70e3a6907ee8a3197d981aed8492eb7948aae880c4640288"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "control/src/vonk_control/runtime_image_preparation/transport.py"
+    }
+  ]
+}

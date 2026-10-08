@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_profile_continuity.py": {
+      "_world": "56cc808e84d27e33d13feb0e7c5453e5560d55fb74c601e2accbcb89d0cee67c",
+      "test_new_lane_adopts_original_identity_without_fencing_its_spark": "96383760c9d57cd32e535ba2d3aaaaad0263f49b6cf2cdfd1f759741cfa72523",
+      "test_replaced_alias_is_not_adopted_as_equivalent_work": "87ce408d3dffe4cf4fa109dd3c1214c82a74835fee9de00ea63c0011ae85325a",
+      "test_selected_cancel_fences_both_original_and_new_node_ordinals": "786b991888061403b487551aca016fa0738b25f5e535e057b24cbdc8889355e7"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_selected_cancel_fences_both_original_and_new_node_ordinals",
+      "justification": "Tests exact cancellation fencing under newer selection; retained borrowed child effects cannot be claimed released before receipt.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_continuity.py",
+      "reason": "security-edge"
+    }
+  ]
+}

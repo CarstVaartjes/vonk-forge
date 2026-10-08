@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/terminal_projection.py": {
+      "<module>": "a14daed068ef142f635b61547bda6c0e9b8e1c57aa0ca26a15f772cc935a311d",
+      "TerminalProjectionMixin": "7195ac274358af0db6df31d65a4dd45cdf6792800b0b82605735a6539189ca32",
+      "TerminalProjectionMixin._project_terminal_result": "1e80b43142f7415f46086d9f421e551ea98bdc1728bec563cccaf4ad8ef87f02"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/terminal_projection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/terminal_projection.py"
+    ]
+  }
+}

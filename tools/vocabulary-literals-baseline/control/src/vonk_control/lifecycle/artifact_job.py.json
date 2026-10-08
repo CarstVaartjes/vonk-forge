@@ -1,0 +1,46 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/artifact_job.py": {
+      "<module>": "a48dc676b65ff80f702765971626b8dca2bede1ba91b3049a0f543322f70d635",
+      "ArtifactJobAdapter": "8ed146c640fd5673546256eb3cd7179f03e08df9233a9929d6e851069bd4b246",
+      "ArtifactJobAdapter.__init__": "6e3dbab0229ea2eb908bc028c63cd50ec53949f359cf7ad753c61a532c59f04f",
+      "ArtifactJobAdapter._default_reason": "09899dd306c710b0e9f4c0a709d29c03e23b971a53fad3bd4f352da1e9316ee5",
+      "ArtifactJobAdapter._effect": "97d0e457fb31c6b0fb9fbad2d3115b077dcc47d22281d2be6a889bfd08e9cca8",
+      "ArtifactJobAdapter._ended_effect": "8f57b91f607d04e1b4a273ff77dfd06ce45f118f15009df5700647fc710f6811",
+      "ArtifactJobAdapter._evidence": "ee3356e225353bce8fa74890625d969bd3b9073d49b92dd906857fb9a4aa53b2",
+      "ArtifactJobAdapter._read": "e3525784fa87432f9de0fdb4c53c2a90df2ff79fbb9c31a8a6ab4cab432d8b38",
+      "ArtifactJobAdapter._receipt": "b8b71c7d7a785df1094411e8ce101c1fea7e03eeda8ebef159788a197bdd325d",
+      "ArtifactJobAdapter._stored_state": "cf599b10ad7be9c4681d10189c47ad6030970dbfcdef798f2c13350aee5917e8",
+      "ArtifactJobAdapter.actions": "c3be29cfc6eee136d30ca2e0c6fe4243967654597f4cdfec639483d449000be5",
+      "ArtifactJobAdapter.adopt": "ea26f4bb7ca56081c68f3b3743e68d8ca57e000509144a0878560418f34847fb",
+      "ArtifactJobAdapter.apply": "1bc83556de183981bc78afc5ec10c0b326864fc6b193a6eadd81f2206ae1de5c",
+      "ArtifactJobAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "ArtifactJobAdapter.confirm_stopped": "4865d9bacaa2928048abbaa36e679c750fc9fc95aefca594569002de0174ef86",
+      "ArtifactJobAdapter.execute": "29e70a6e80ecde2561f7a3ecceffa83b26c1b831aa7329f4f70289db820c6b97",
+      "ArtifactJobAdapter.irreversible": "3cd8063cb7c4e1774e12e1999a644dc4ba6564a4dfc3bd8beff7a32750be9d0e",
+      "ArtifactJobAdapter.lifecycle": "45fb71e198140b1c0b48d7e865c1fb9b7cfda7ea118961c85254cce87790635f",
+      "ArtifactJobAdapter.mark_ready": "eb279d7d862911ae4e1fc053d1f99d2356e96d187d1e6b9992f70c0e39112fc8",
+      "ArtifactJobAdapter.mark_submitted": "0e804d4ccb123048183bedc881c34a356082bf07e8404fd502cd02d71294d2a8",
+      "ArtifactJobAdapter.new_job": "e647c3d0a1b59daa63b8c71a1bdcf6e55601b353802b9bd5ca5108922939571a",
+      "ArtifactJobAdapter.now": "0565c3db5fb3147ed7226126ab761c52b6b1ebe1dc76c7cf69f08d57a76ded95",
+      "ArtifactJobAdapter.observe": "f1aa8b6dc07c7f3fe1e9765d21b250b8780646f00c48904b1540c336d991e4ad",
+      "ArtifactJobAdapter.order_of": "fe6578a53f42719476e3e59fd23b50e4066e0de00529f6f24a406f227191ee54",
+      "ArtifactJobAdapter.project": "0f75eaba5e75a6362349f24e18a722ea99dc0b28883edaaf9f3056c1a0f10e94",
+      "ArtifactJobAdapter.project_for_order": "839099f3e7c0315b3c368f8d9979cf60ea09ba55cc29e6123f91c3455d8ee67f",
+      "ArtifactJobAdapter.reconcile": "7fc7fe1d947fe4c41b7cc49b6e493331b8f6e0f1fdf277d46b760d68a6802a88",
+      "ArtifactJobAdapter.retry_not_before": "b44b940ce07854e720fe4db639b99915d3439138008f5c5c760051a7032df7bb",
+      "ArtifactJobAdapter.session": "e7fe82313c261e6e266264f5faba15894417f2055b38f35361a4a063b2c326e9",
+      "ArtifactJobAdapter.settle": "9fa7b0f7a390cb73c7dd0c09be4d0d074c3e38e220a1e81981e3671dfd63a62e",
+      "ArtifactJobAdapter.settle.residue": "06377473ad6559ff6cb4b6325562b9c0e0b0627ff96858dd2d1d204037d8f3d7",
+      "ArtifactJobAdapter.settle.save": "8cef71b979f47ee9797aea5e16814950f422ad2b93d97be70f85fe21c0ecb156",
+      "ArtifactJobAdapter.stop": "4119e3f790ba2b8e779a76b13b56f87df1b3bec551ca91a7a37ed41c83505d6c",
+      "ArtifactJobAdapter.supported_actions": "d7b1310528650e215cdd4c298148bcfb3d104123e7c9aa6783047bce15d55619",
+      "ArtifactJobAdapter.view": "6024730c4add4098336a517223869c219635aa04a3389fbbaa22ec3d963aa25f",
+      "_with_effect": "9412cea7ff488408172bde41bc286446489f60f49218a4dd747179e20cd26eda",
+      "transition_of": "d0c10288d17c55c8f2bc7e73a3f2f8b72ce924c4ecb84ca928a5939093ceb6dc"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/lifecycle/artifact_job.py": 14
+  }
+}

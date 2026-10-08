@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/fleet.py": {
+      "_deliver_enrollment": "0304713354966b30441dfc5337731f32fd408dd19428a3ad13f0104e88114094",
+      "_fleet": "1ae8ecf018dabe502607b859e5fdf17dc1646583a8d1d93098228630de2580b4",
+      "_fleet_selector": "960696731f43450c61c5447ee499a25ae5fd3b5b422024ae57dc62440215840c",
+      "_overview": "1747b4fafec673f60339ccaa6f7ef60c548b56eb0d4fc390b21fd6611d44db72"
+    }
+  },
+  "debt": [
+    {
+      "count": 8,
+      "path": "src/cluster_profiles/controller_cli/fleet.py"
+    }
+  ]
+}

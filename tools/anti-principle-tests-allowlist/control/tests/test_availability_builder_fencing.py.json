@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/tests/test_availability_builder_fencing.py": {
+      "test_parent_claim_is_held_until_child_admission_commits": "7779b02d14ff12354c5421d3a00927aa5c7da0ced1ac831138c19da06468414e",
+      "test_parent_claim_is_held_until_child_admission_commits.paused_start": "a13c63b290afb670ce13b614e87f683d3f4cf7442f373680c49e9f2945b5b97c",
+      "test_replaced_builder_preserves_current_intent_at_each_commit": "0afa174337e2196f2eb9975a1798505745764e5510ac2b44ec0c7aade3624a89",
+      "test_replaced_builder_preserves_current_intent_at_each_commit.paused": "011a06a5b96d24d0722d7b7e09ae36f47ce823371c4413c303e9c61e01dfb96a",
+      "test_replaced_builder_preserves_current_intent_at_each_commit.takeover": "8812a1c9517a0e0565da82ab512b101a93e96acc2214b7126e5f2403b7d2bf50"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_parent_claim_is_held_until_child_admission_commits",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_availability_builder_fencing.py"
+    }
+  ]
+}

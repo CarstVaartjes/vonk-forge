@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/jobs.py": {
+      "<module>": "a38ca3c8007de5ab9283d69cbb85747f12eefe115a4f7401f0c713affa95929f",
+      "ControlProcessHeartbeat": "6b576945e3945d34b73f0001acd5ee9d64ea3b7db4202e9ce7e567c88aecb613",
+      "Job": "3ddaaadfc9bae1c92a583f49ffd1fed56328e31a8b15ef0b39e5456cc44acd73",
+      "JobAttempt": "ea8156a0e760172bf670e0745a783b829fce05ad471a5f712e07e2f563b3d339"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "control/src/vonk_control/models/jobs.py"
+    }
+  ]
+}

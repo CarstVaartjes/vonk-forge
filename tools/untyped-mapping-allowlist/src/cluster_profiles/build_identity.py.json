@@ -1,0 +1,13 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/build_identity.py": {
+      "current_build": "db7519aafd9ce830afdf47525756fb8026c8b77876e66fbb0e4fe54acba7614e"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "src/cluster_profiles/build_identity.py"
+    }
+  ]
+}

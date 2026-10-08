@@ -1,0 +1,8 @@
+{
+  "debt": [
+    {
+      "count": 5,
+      "path": "scripts/validate-recipe-library"
+    }
+  ]
+}

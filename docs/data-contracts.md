@@ -11,9 +11,9 @@ that no longer occurs fails as stale.
 
 | Guard | Scans | Allowlist |
 | --- | --- | --- |
-| Rust | `struct`/`enum` with a serde derive or impl outside `generated.rs` | `tools/serde-derive-allowlist.json` |
-| TypeScript | `type X = {` and `interface X {` in `control/web/src` outside generated files and tests | `tools/ts-shapes-allowlist.json` |
-| Python | Pydantic model classes outside the registered modules; two models sharing a name, or sharing bases and fields | `tools/python-model-registry.json` |
+| Rust | `struct`/`enum` with a serde derive or impl outside `generated.rs` | `tools/serde-derive-allowlist` |
+| TypeScript | `type X = {` and `interface X {` in `control/web/src` outside generated files and tests | `tools/ts-shapes-allowlist` |
+| Python | Pydantic model classes outside the registered modules; two models sharing a name, or sharing bases and fields | `tools/python-model-registry` |
 
 ## Where each class lives
 
@@ -43,7 +43,7 @@ Python and TypeScript clients, TypeScript vocabulary) and
 
 ## Rust types that stay hand-written
 
-Each is listed in `tools/serde-derive-allowlist.json` with its reason. The rest
+Each is listed in `tools/serde-derive-allowlist` with its reason. The rest
 of the 50 hand-written serde types of the baseline are generated now.
 
 | File | Type | Reason |
@@ -89,7 +89,7 @@ of the 50 hand-written serde types of the baseline are generated now.
 
 Every API data type is an alias of `components["schemas"][...]`. The shapes
 below are UI state, component props, or client method signatures; each is
-listed in `tools/ts-shapes-allowlist.json` with its reason.
+listed in `tools/ts-shapes-allowlist` with its reason.
 
 | File | Type | Reason |
 | --- | --- | --- |
@@ -141,7 +141,7 @@ listed in `tools/ts-shapes-allowlist.json` with its reason.
 ## Python contract modules
 
 A Pydantic model for wire or persisted data lives in `agent_protocol` or in a
-module of `tools/python-model-registry.json`. `kind` is `agent-protocol`,
+module of `tools/python-model-registry`. `kind` is `agent-protocol`,
 `controller-contract` (a `*_contract.py` module), or `declared` (an API module
 that colocates its route models with their owner, with its reason in the
 registry). The controller base class is `StrictModel` in `strict_json.py`; no

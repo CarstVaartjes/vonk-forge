@@ -1,0 +1,8 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/run_switch_operations/contracts.py"
+    }
+  ]
+}

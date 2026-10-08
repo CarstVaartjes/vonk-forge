@@ -1,0 +1,8 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "path": "scripts/lifecycle-canary"
+    }
+  ]
+}

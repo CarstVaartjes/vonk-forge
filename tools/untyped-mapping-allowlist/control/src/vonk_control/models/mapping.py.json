@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/mapping.py": {
+      "<module>": "3d14bea5c18c0946270efcf0a2c5530d4993b63106002fe16448bf60dbda188c",
+      "ClusterMapping": "231924913e5d7a51906fb156de28f640f2ecb2a4f8d73d5d9d7e9d1a31359826",
+      "ClusterMappingNode": "61c8b05c0aa8123444fa4b2ea864b870c0bdb56988fcefd8a20b437f329ab371",
+      "_reject_ready_mapping_node_mutation": "6d8a8608773fd4c737053b636dcb5ab219db391d7bdee9f2a42d148e55f55149"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/models/mapping.py"
+    }
+  ]
+}

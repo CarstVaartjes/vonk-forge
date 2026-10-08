@@ -1,0 +1,282 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/source_bundles.py": {
+      "<module>": "2d0060ee8544851bf11c55ae0a6c5d93cc5d82008248972d3812d57d701fcd24",
+      "BundleLimits": "40e496ea75552d48f5571edcdb439588fecce8a8a6883857228f3ea2625dc247",
+      "DatabaseSourceBundleStore": "9a7dd8c0fdd4a266e3f025d335dd96f72f0a62ce701f592f5bc09265b55e49c8",
+      "DatabaseSourceBundleStore.__init__": "b5a09f9099407669656e4ba4e160127283cfb77f75a4892647467f2f6c7816c4",
+      "DatabaseSourceBundleStore.get": "5aea18e9953e77f7fba90fd467a76dffd9d12ca0be137a77abe3516f19ac80c2",
+      "DatabaseSourceBundleStore.put": "300eda72696cb31ced9e992524f1251bff9a1a30d609aa122043b634863dc367",
+      "GeneratedSourceBundle": "dda678af5fe107429409e06778ff643dcab626eebbf570493dfe712bcc7df392",
+      "GeneratedSourceBundle.sha256": "3a20423b746ea1850ccdf5f0d60f3d43b2785fb04ef22899b60d5b3e8c83b41d",
+      "SourceBundleError": "6dcaddeb9eac38676f28f4e42eaf23f3b46ab45afbee54f16e7cfe3ff3064256",
+      "SourceBundleError.__init__": "06ab90ae5bc35f0122db8964da3c01771488bc97f1a32a1d76104decbe165e2d",
+      "SourceBundleIntegrityRefused": "8d2637455a3cda8d04350628ffd6223e0eb02fe5ee3fa200fb41414355882160",
+      "SourceBundleIntegrityRefused.__init__": "c2e450f1e4faa1bdc1940858e582e427cdab7b8c183cd2eef628ad2e162c9ba2",
+      "SourceBundleInvalid": "091fdd7de32f83e68ad6b9dce27155cccc5b69a2043e6413c9a595a877b29b3e",
+      "SourceBundleInvalid.__init__": "2a2d61563116111a06331cc7909439f0662a30ddd48cf540c2dc1dbaac572bc7",
+      "SourceBundleRefused": "3971b18cb74e4acdc0ddf02f50fc65d43c1324129eaadda4940ad3e0170a60c8",
+      "SourceBundleRefused.__init__": "91d06a590c921802e2b467cc08124a9ef126544f9962be7b02080f224c09aacd",
+      "SourceBundleStore": "f1bd273fc415c9dec11f5dcfa378a97f34942be13ab9e3becf852e0d90842da7",
+      "SourceBundleStore.__init__": "32cbad232f5fe6e4a0887d2befd0883e24b85554f7a2e4784862a9a9336519c8",
+      "SourceBundleStore._put": "1b2ae5d01b48b6ee0fd7a0cc680726cf3294c5bb889885b2676b26883ac61292",
+      "SourceBundleStore.get": "ad116cecd1d5ba2054094802c3a9c288a4331c28bc61bd4ac89d06202404e372",
+      "SourceBundleStore.put": "0f43377b7a5569bb8c836e74851bd9895918446531a2cefd1ae43c10ce613b24",
+      "SourceBundleStoreProtocol": "90704ab6486d6d785977d2e435b9f692115278b5f70ad4cbd9dc6c2ccc0e46ca",
+      "SourceBundleStoreProtocol.get": "88af06c1049eb3581c8367321ebac646cb55e60171359ce600ba7866ca5f2a93",
+      "SourceBundleStoreProtocol.put": "20edd8adbb9575edbe8c96e082d891c948bd2e3e8fc7af6f72d2dce38574e5b1",
+      "SourceBundleUnknown": "21e4ed867bea413dbd7ac9ce5eabf9549e697b731129c9cc821c39d22c545795",
+      "SourceBundleUnknown.__init__": "b3a2c5af977a778d179a1f5b1b591fcb880f19bb4ef9f00ab0acf7fe5506794a",
+      "StoredBundle": "29c522d86e4cdf17eb01a11da03fa98ada349ea3c9ec24cf0f9295fd8ff85c91",
+      "_generated_bundle": "a309da0724a4b4b798139acf7f65f97ea610feaaab9e797b2856572c376cac67",
+      "_inspect_archive": "48ff3b30ae01d6fd423fc4f7ce72401493498de5d3bf7d69d77fdde44a92dc4f",
+      "_observe_archive": "e4ef37fb766f04a9f6d990fb6582c9ffd3597f9bb33a32dfc0acb96858de592a",
+      "_read_archive": "7ef4aa4310f2ee8e4b526c52124115910cc19ab6c01cd4bc086f263a015d3b5a",
+      "_safe_path": "22c86fbd4d686cd966299829c1838e9b88203d950d417538d7a9539db20603f5",
+      "_stored_archive_verifies": "f0dfb6fd5c869d55cd92b999555062dc89de7b5bb372c7552a234eef3275df9f",
+      "_stored_manifest_matches": "3020a29f1393f0a6a0fce2571dca8f488d6d23a8a3babfbb5984161004b716e0",
+      "_validate_digest": "83ec95015f39adee8f8c6fce692e7e261af06390b4ac79a6f76a538873226cde",
+      "generate_source_bundle": "87871ab01e70231cdb7a418258c89b2562c252c43c0917706f25a4e06cef3f12",
+      "inspect_source_bundle": "ff41a272daeeb5ed4ddc3e66eef2d9b00fdd609070a57933aac6475a4c71e212",
+      "parse_source_bundle": "bc91e115ca2289e3544787a0966a2fb9c3856e222e4ca90ecd3512c87f555dea",
+      "parse_source_bundle_manifest": "0bf4bea48741e7c9e17473146e472132b3ebc3a739a9e7ce8ed7948a14e4c0b8"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "source_bundles.bookkeeping-debt",
+      "sites": [
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleUnknown",
+          "DatabaseSourceBundleStore.get",
+          "bundle.not_found",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleUnknown",
+          "SourceBundleStore.get",
+          "bundle.not_found",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleUnknown",
+          "SourceBundleStore.get",
+          "bundle.storage_unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleUnknown",
+          "_generated_bundle",
+          "bundle.read_failed",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleUnknown",
+          "_observe_archive",
+          "stored-source-bundle-cannot-be-verified",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "source_bundles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_inspect_archive",
+          "bundle.read_failed",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_read_archive",
+          "bundle.read_failed",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_safe_path",
+          "bundle.path_too_long",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleInvalid",
+          "_read_archive",
+          "bundle.empty",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleInvalid",
+          "generate_source_bundle",
+          "bundle.empty",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleInvalid",
+          "parse_source_bundle",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "source_bundles.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleUnknown",
+          "SourceBundleStore.put",
+          "bundle.storage_unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "source_bundles.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "SourceBundleStore._put",
+          "bundle.digest_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "SourceBundleStore.get",
+          "bundle.digest_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_inspect_archive",
+          "bundle.duplicate_path",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_inspect_archive",
+          "bundle.entry_forbidden",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_inspect_archive",
+          "bundle.expanded_too_large",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_inspect_archive",
+          "bundle.file_too_large",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_inspect_archive",
+          "bundle.invalid_archive",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_inspect_archive",
+          "bundle.size_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_inspect_archive",
+          "bundle.too_many_files",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_read_archive",
+          "bundle.archive_too_large",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_safe_path",
+          "bundle.path_forbidden",
+          2
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "_validate_digest",
+          "source-bundle-digest-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "generate_source_bundle",
+          "bundle.file_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleError",
+          "parse_source_bundle_manifest",
+          "bundle.manifest_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleIntegrityRefused",
+          "DatabaseSourceBundleStore.put",
+          "source-bundle-digest-does-not-match",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleIntegrityRefused",
+          "SourceBundleStore._put",
+          "source-bundle-digest-does-not-match",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleRefused",
+          "SourceBundleStore.get",
+          "source-bundle-storage-access-was-denied",
+          1
+        ],
+        [
+          "control/src/vonk_control/source_bundles.py",
+          "SourceBundleRefused",
+          "SourceBundleStore.put",
+          "source-bundle-storage-access-was-denied",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/source_bundles.py"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "boundaries": [
+    {
+      "path": "control/src/vonk_control/agent_services.py",
+      "pure_or_core_calls": [
+        "AgentApiServices",
+        "AgentJobService",
+        "CapabilityRegistry",
+        "DatabaseSourceBundleStore"
+      ],
+      "scope": "build_agent_services"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/assignment_persistence.py": {
+      "<module>": "a6e788cb3f7e48fdf8bbfc0ec771cd9ad9e01dcea8303e08ab73e7be4391dc90",
+      "FleetProfileService": "ec68fb5b70765f210f9073610fb5324ebb4cb689ce0d88777122497579e0399d",
+      "FleetProfileService._reserve_preview_assets": "67168ce885bbde45e1fae6e9bbfb653d767755abda1e1774cb3ca0010eda534f",
+      "FleetProfileService._validated_assignments": "02b9f95a17ff5c04765a461ef6d87ab0079156b9bd4f7bf53116fc0634c44891"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "assignment_persistence.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/assignment_persistence.py",
+          "FleetProfileAdmissionEffectBusy",
+          "FleetProfileService._reserve_preview_assets",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/assignment_persistence.py",
+          "FleetProfileInvalid",
+          "FleetProfileService._validated_assignments",
+          "recipe-has-no-active-catalog-revision",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/assignment_persistence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/assignment_persistence.py"
+    ]
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/start.py": {
+      "<module>": "61c4241d9406328e6783f6a8e2236360deed6ac7aa748641eb83a93be2d19776",
+      "StartMixin": "523b91ea089a3ba52ecba4d647cb3dde0afedde28d0680dd2c677510645fcd21",
+      "StartMixin._start_once": "a72de72b86f74f069a2a969f671d6d81d1b1a9ac2cd81c8091a81da46f3d0c30",
+      "StartMixin.enqueue_one_shot_job_in_session": "d23a5c4a96b4f601d571c94068afef403cab15e59978816bf3d100d3b6573222",
+      "StartMixin.notify_agents": "9365f914e84d2e0b3fb31aff7a6dee17957556420aa90f45870069c1571ed57e",
+      "StartMixin.start": "599ce51528db2fe1fe09c7e330d37edbc822d7391bd9338ccba094dbb38a9dcb"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin.enqueue_one_shot_job_in_session",
+          "recipe-run-is-not-accepting-jobs",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin._start_once",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin._start_once",
+          "operation-topology-order-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin._start_once",
+          "recipe-direct-fabric-rendezvous-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin._start_once",
+          "recipe-run-has-no-endpoint-owner",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin._start_once",
+          "recipe-topology-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin._start_once.start_payload",
+          "recipe-start-payload-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin.enqueue_one_shot_job_in_session",
+          "recipe-job-target-is-not-running",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "MissingRecord",
+          "StartMixin._start_once.start_payload",
+          "recipe-start-endpoint-address-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRequestInvalid",
+          "StartMixin._start_once",
+          "reviewed-plan-digest-does-not-match-the-submitted-plan",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRetryLater",
+          "StartMixin._start_once",
+          "compiled-execution-plan-is-unavailable-for-the-installed-rec",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRetryLater",
+          "StartMixin._start_once",
+          "recipe-installation-is-not-runnable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RecipeRetryLater",
+          "StartMixin._start_once",
+          "recipe-node-endpoint-evidence-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/start.py",
+          "RunAdmissionBusy",
+          "StartMixin._start_once",
+          "run-capacity-writer-is-busy",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "StartMixin.start",
+      "path": "control/src/vonk_control/recipe_operations/start.py",
+      "reason": "The request retries its whole admission transaction for canonical unknown outcomes with bounded admission_attempts; the accepted request identity keeps repeated effects idempotent."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/start.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/start.py"
+    ]
+  }
+}

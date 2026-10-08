@@ -1,0 +1,108 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/auth.py": {
+      "<module>": "4f7de472ebeb5bf9753fab23010490be015ededf631e4b1508b7889887a55b84",
+      "Actor": "93893cffb816004de808e8d57a0b1c99edeedcf210733029cf3b56822f37b6c8",
+      "Actor.__post_init__": "7416b74945f566364083309de63c6e853137c60acdfe105780435507e7b7e60f",
+      "AgentIdentity": "ca12b9f40d98f61abd3f357a94f399aeb635bf6892114a20ca9e25ac72cea44f",
+      "AgentIdentity.__post_init__": "5b80545ff2bb34cb436340a155daf7d8ab0927e456d2016fb7a3eacb1a63b486",
+      "AgentSource": "5110a80ee1501a5df7bf254ffef6783300858056c29db26b68e52a71bfc9a55a",
+      "AgentSource.__post_init__": "776bc4086e43ad96652c1d1bcdf9cb39f5a3360f302ed849e5b5a22df96b918f",
+      "AuthError": "a98db1c1eacac25aa6c728dacf9b94ba57f01f768a3c31a6cbc54d2ba029fa74",
+      "CursorCodec": "007cfa4e3a1ea27441cba53aa947c364bc1e7ec1ba7383cc0bc3f7bda44e577b",
+      "CursorCodec.__init__": "4a47315a075fc31f7aac8912fae2976953d8c4c84ff2fb87dea88d86dd932232",
+      "CursorCodec.decode": "0eb16ecaf206499fa75ea5c33fc44069ebdb54c5498b8a847f769d4de879c29a",
+      "CursorCodec.encode": "c75f74adab5296a1f54a4f0721194bf17ed0bdfcbb5938a2620eefc65a71a5fb",
+      "CursorError": "ce260de3c6f36e7122604d636faf9387c6d6bd876349fda8ef779987c66604f1",
+      "TokenCodec": "9131aff773b01710f6b1724c6437a9c959c5ac13a436d367ca466c2005d22f63",
+      "TokenCodec.__init__": "bad4cd3c9702e39c574c9a1d96ff7cef0d49b03d1fcbab98e0fe9d9c8412d9d3",
+      "TokenCodec.cursor_codec": "e447220f79515655b736b816fcf7af879b7e36fee1c588332847f6f963d980aa",
+      "TokenCodec.issue": "62877c87d1769de10b6de29e4a875499ad1b74798bc9fcc1ea2dfe59651733f4",
+      "TokenCodec.verify": "f9f5ad15e9507a227acf7908a79a107a917f3d1cb71bb26ef4099d832b5032da",
+      "TrustedProxyAgentIdentityMiddleware": "27003979081c38bec25e5469f761897ee24f3f376174e46194c7f94e6583feb4",
+      "TrustedProxyAgentIdentityMiddleware.__call__": "899d7fd4f373b8cf45edc2f00afcfce82c4396e5bce5579662dce97de45be345",
+      "TrustedProxyAgentIdentityMiddleware.__init__": "f0cad234dd945910f195ae277e5f9a897fc866d1e6e63eaa005d0c4aa2b3c051",
+      "_decode": "d96d0442a20147b270102adc12e30a44c68d99f5eeca046f0c74192f40142900",
+      "_encode": "f8b3c2e9a4c9bfe7e4ccb760596fe82dfc5f1eae1cca123cfc634ed8c8ffcb0d",
+      "agent_identity_from_scope": "78010facd5d439233d998b24841b01b21e2cf900a1273b7502cf09e2c0ef7b8d",
+      "agent_source_from_scope": "90a7e45e8961f3a47bb4e5ee588b0069c7d4b319ce471fcbafef4b298dc34d97",
+      "has_capability": "8ca44a1519d04b457bcb988f98e033499271f38a38445f479ac6d51bc3632711",
+      "require_capability": "e8f8aaabcefe9f5bdac46736e36f85a0cb760e82a5bf3dea433ae5f074250e15"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "auth.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/auth.py",
+          "CursorError",
+          "CursorCodec.decode",
+          "cursor-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "auth.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/auth.py",
+          "AuthError",
+          "Actor.__post_init__",
+          "invalid-authenticated-actor",
+          1
+        ],
+        [
+          "control/src/vonk_control/auth.py",
+          "AuthError",
+          "AgentIdentity.__post_init__",
+          "invalid-verified-agent-identity",
+          1
+        ],
+        [
+          "control/src/vonk_control/auth.py",
+          "AuthError",
+          "AgentSource.__post_init__",
+          "invalid-proxy-observed-agent-source",
+          3
+        ],
+        [
+          "control/src/vonk_control/auth.py",
+          "AuthError",
+          "TokenCodec.verify",
+          "token-is-expired",
+          1
+        ],
+        [
+          "control/src/vonk_control/auth.py",
+          "AuthError",
+          "TokenCodec.verify",
+          "token-is-malformed",
+          1
+        ],
+        [
+          "control/src/vonk_control/auth.py",
+          "AuthError",
+          "TokenCodec.verify",
+          "token-payload-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/auth.py",
+          "AuthError",
+          "TokenCodec.verify",
+          "token-signature-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/auth.py",
+          "AuthError",
+          "require_capability",
+          "missing-capability",
+          1
+        ]
+      ]
+    }
+  ]
+}

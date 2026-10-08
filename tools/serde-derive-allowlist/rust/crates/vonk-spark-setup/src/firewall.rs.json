@@ -1,0 +1,29 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
+      "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract",
+      "type": "AddressInfo"
+    },
+    {
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
+      "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract",
+      "type": "InterfaceEntry"
+    },
+    {
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
+      "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract",
+      "type": "NeighbourEntry"
+    },
+    {
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
+      "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract",
+      "type": "RdmaLink"
+    },
+    {
+      "file": "rust/crates/vonk-spark-setup/src/firewall.rs",
+      "reason": "iproute2/rdma JSON output parsed from a host command: a third-party tool's schema, not a Vonk wire contract",
+      "type": "RouteEntry"
+    }
+  ]
+}

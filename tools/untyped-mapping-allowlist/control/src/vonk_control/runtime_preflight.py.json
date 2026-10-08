@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/runtime_preflight.py": {
+      "<module>": "524c851712ec6c5b63e8c1360e01c36516b3c75a147fd8b2088dbd3be290992c",
+      "RuntimePreflightBlocker": "524c851712ec6c5b63e8c1360e01c36516b3c75a147fd8b2088dbd3be290992c",
+      "_finding_detail": "4f0eb76b9c2e5c1c39aa634c43027d7e6062ee157bc718bb06812280919dedde",
+      "admission_blockers": "b437e1c81edb0b066924e2af95c0221176b25038da393b90376179fa90203988",
+      "latest_result": "083b142bdff57192d20a42746d516a9c7e445805799b8cf614b8fe52e99313f6",
+      "mandatory_capabilities": "582e82a58af2a080ce8808113ef5523f95fbf4c717c7b3c6758d559ad9397591",
+      "recipe_requirements": "ff3c6ed6595692b3a401fa3b5478f004ab76381bd109a19dae5492d87e14b7ad",
+      "request_digest": "e51b083e70edf88f9fa5291730e46e7563a6a4dadc3ba74e79cd0a44c417ff54"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/runtime_preflight.py"
+    }
+  ]
+}

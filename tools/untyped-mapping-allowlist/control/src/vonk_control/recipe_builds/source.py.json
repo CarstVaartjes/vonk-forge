@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_builds/source.py": {
+      "<module>": "30cc5da7c01fa5cfd907c57747cbe9f2f51253a2bcc830c7dde3a22766d2c42f",
+      "_check_source_once": "6c569ce0e5f24b8afc11c4e3d60072d3a360abe0df575d0da5ca6444f9848e12",
+      "_heal_source_bundle": "ca824d9008ebc619d238c84d3ddeefde61b7f0d3e1f677477ec7d31505e47e3a",
+      "_resolve_once": "19e8dc612ca5cb45569eb69275b5c1885336a8ba7db458a36de3cb18a46829c7",
+      "_verified_bundle": "b51c3d6b70b4f44545ac513da2f89c6962341c316f927a34b011234372911cbc",
+      "_verified_bundle.damaged": "52ec268c64835651309ac62c8599489e11e7e935268fa469b5ca12b81d8e38a1",
+      "_verified_bundle.read": "40f048227f1be5097a4b102c86ba7b20b4b14b7108ae286c868c7b6552c25421",
+      "check_source": "f43de21cf216d30fdda5b2dcdc6defdce8804cedf00561f3cf8a0c0c85ac44fa",
+      "resolve": "692095ec13f274ab05623e24dc97bd4ca13dca524ba1ec46a879f48d9042f002"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/recipe_builds/source.py"
+    }
+  ]
+}

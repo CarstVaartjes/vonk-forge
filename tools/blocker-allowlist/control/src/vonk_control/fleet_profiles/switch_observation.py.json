@@ -1,0 +1,37 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/switch_observation.py": {
+      "<module>": "e3341d4b66afd5d261b9a8682b7837b69ad58be76cff9145e13a6be541781910",
+      "RunSwitchFleetProfileAdapter": "f63a91f14b0ee244b9e17d5627dfe2a87c20609b185137717928b620f0d38329",
+      "RunSwitchFleetProfileAdapter._advance": "3cbc23679ddfa9c98db74af62391a6282c28508f4580d0b198dc349b65caaed3",
+      "RunSwitchFleetProfileAdapter._advance_in_session": "9c58afa0f42e123d5027cdd9471410b10c2dc4d42bad2491519bb8037f810941",
+      "RunSwitchFleetProfileAdapter._finish_cancelled_in_session": "61e8da3efbc0a20a83abe482903ca9c0e2dad81d0c65b3ddb6dce9c7259c18a0",
+      "RunSwitchFleetProfileAdapter._observe_superseded_agent_effects": "8c0e8de73c73ba440303fc4a076636153822c4ef26eec25e7747b4bbf6aa0e74",
+      "RunSwitchFleetProfileAdapter._observed_child": "3998b62f919c5902d7014aa28e75625f749a6ff5af017743d560fd2de4014666",
+      "RunSwitchFleetProfileAdapter._queue_item_in_scope": "38e547f6fb27ddf60d158e68fcbb6461432228b13c3014dd6ade7225de06bc08",
+      "RunSwitchFleetProfileAdapter._queue_item_nodes": "cdf2fc75424e199a0afd028e909045421e1e00f9c6d21f5f9444d47b6f2690f7"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/switch_observation.py",
+          "MissingRecord",
+          "RunSwitchFleetProfileAdapter._advance_in_session",
+          "not-found",
+          2
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/switch_observation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/switch_observation.py"
+    ]
+  }
+}

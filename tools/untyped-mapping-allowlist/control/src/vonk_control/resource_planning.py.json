@@ -1,0 +1,55 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/resource_planning.py": {
+      "<module>": "da2e47e2af9e89772482ebd88b05e30b84df0046108ffcc9bfc565ff72d1b155",
+      "CapacityPlan": "ac874b68a695d430e6db178fdaaf1a463d27a54f101535cd6c79e8754c9d5f94",
+      "CapacitySnapshot": "0c406143dfb0e5acc427c5e5f20024b3a29501fa092e080a224d31f8cc60ddeb",
+      "EffectiveResourceSettings": "a416484c5481605b1420a840b6e6e6945e3f15bc92faf88b72381c82e7c520e6",
+      "EffectiveResourceSettings.identity": "db10c557f7ffd755b2b8751a18897e3ba922167129e8df05b1cb7ec6c95ca320",
+      "InstallationDiskRequirement": "2b8885c662adfbde71b1c02140822c1aaa8ae7a21d29f974fda9f6e8ab85a3ac",
+      "MemoryRequirement": "177e58c7fa0889519822f397618f2e1c684dd24193dadc64703fecd55ebf400b",
+      "MemoryRequirement.reservation_kind": "d9a8336ec313434a95a32d90fe5e9667255caef702d8ae82166127527b0acd44",
+      "MemoryReservationTotals": "135243a32a9c4aac3c28d5a832e5f4d17ff8dd0509f4838fa562e013eb2fc116",
+      "NodeCapacityPlan": "c1515b96c256087d37a293b1d5fac8a2b48cf522f233b0b34550da9b3db7a8c1",
+      "ParallelismSettings": "56092944d2c7d61b31b261fd49a50f1115108ae919202dfe206c142bbee84f32",
+      "PlannedStopRelease": "717cb1bc658eebebb44d9e1d2dc0b51be55b83d1c72db79034100d4f1ae07f18",
+      "PreparationDecision": "3fe634d4841b4421bf34b7cf93a0aeff0c1e8eaac0eff603cf0c0f16c70aadc6",
+      "ResourceDemand": "38199319f1d827fa4be0ea8706ae44fa98981030e8729f701bbc8b0ccd0311cf",
+      "ResourceDemand.allowed": "2927890c8aa48d40a46ade04602705c5ef091a7412cfa30cca84fa8c4faa361a",
+      "ResourceEvidence": "f28af0e2f11c7e588b1b53daf4479f2e2d1f77fc1e2cce8c79fdf678cf8db1d4",
+      "ResourcePreflightPlan": "f63089ff3d31c9f4f2aea7bebaeeb80134e0a9c75fdff59cca92b7da78b02507",
+      "ResourcePreflightPlan.allowed": "2d91ed7d7591e992f3d8e1f7a3bc2588b0dc9632724bc3a862ca1be1e226c9ea",
+      "ResourceReason": "34a88c6dfbbbfae391aeab3eb56a01a3da70b45d11b8a6f0f7cd12d38e31b734",
+      "SettingsResolution": "5795f589eda3a8dc1b34e581d91a4f61cb50fdbc121335501b802b5f821fba0f",
+      "SettingsResolution.allowed": "e662935583d005f5cd385c5b8b25644f44c05ee62902559e5d34f4aa7bfa826c",
+      "UnknownRunMemoryResidual": "c8ddcb6805c77fe2152d0ad8d9328b99a75face7c30940fa49fae5e9cb91bc6b",
+      "_canonical": "e97b075a78f5e6f6265abcc039bf09c723cb7ba2f2fcbe6f507bd0bd450fd8ac",
+      "_digest": "6f79d88c391b15db9caf0e02c7707e8d7aa84273dfa0cf9711854a684766adf1",
+      "_is_digest": "252163f00296a1778a2e47c74ebe0bc53ba13573a837e9bc767d4271d531c472",
+      "_minimum_known": "5494f9bd943f5569eca551e5b26292edd2c812336714ff38da3bcd39091972a8",
+      "_reason": "9d25ad1822984798a688626533be3f9eba31f84db5e075c5d8dcca107869e525",
+      "_resident_usage_uncertainty_detail": "7ccd61b832ce8698b888d697343553e04ec87f54df46c7ef2e57245d4626f978",
+      "_resource_evidence": "56e8d21770e5ede0119fffa12fae86b8a59a931ac612053bda65d4c83e654e30",
+      "_same_memory_kind": "1bd9f07f6e88ab9558c28c6de9edda3e0e5802139c7c77f6094e9b3d224b6e1a",
+      "_selected_model_bytes": "3d149e7fd3af13ace1f9e775b2907952f26c95cedd39eec61034e594dee5c126",
+      "_term": "8be11b8882c27e6ecb3e75a7dedceaa28276ed2efe8c606465cfe00d8a788b65",
+      "classify_preparation_effects": "cd7be60240a505671d2db9d0db51ee88ca309c6c0c353e66be3e1977e97c70fa",
+      "installation_disk_requirement": "43bf8bb500a77d17a022964b5be32f3b88a8fb28a7bec0e6b7d5f83b54b81a1f",
+      "memory_capacity_snapshot": "d66df32cd517457fe69eac9ac134b28842e73fb45af3ec8ec36a9693eec73f49",
+      "memory_capacity_snapshot.component": "8aa9bf9881a9877939a8b2cf6e90a1db15a0264862813df0a5726cabdd5efd6a",
+      "memory_requirement": "5dae024a9dc6b9d0bf8032ee27eaf73750491faa9c947f26b3377219870fdf16",
+      "memory_reservation_kind": "16485989d7e58ca396e9a7f40fcdbdf2f5a05b935fc69e39c36df8686cde5503",
+      "memory_reservation_kinds": "4cfe9804fa3d8f33cf074979ae0d4b49d466aeebcd3b5c9f884024ec935267e8",
+      "plan_capacity": "3b0d7a9c20e4afd6f5a5e77da3aeec3b38f626ec601ec3a9926a4a8f66aa5041",
+      "plan_resource_preflight": "db442c0e41fc670188c3e199df8be88dc14590340d44d12950884bc7365f04a7",
+      "resolve_effective_settings": "f56425898a09ba0897e78627261a4d4a7d9faa3a26882f6d1f8de38f56fa652e",
+      "resource_demand": "ccd67b46ad57b1fd5b4c1ba642baeee611287e46baac60afc0d91174c6ddfeec"
+    }
+  },
+  "debt": [
+    {
+      "count": 8,
+      "path": "control/src/vonk_control/resource_planning.py"
+    }
+  ]
+}

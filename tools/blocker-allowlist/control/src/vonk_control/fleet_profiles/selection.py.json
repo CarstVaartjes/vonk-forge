@@ -1,0 +1,70 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/selection.py": {
+      "<module>": "fde508e2788b6aadcabb234d8acedcc040a852a926f9367ddc30f8b8506d8e7e",
+      "FleetProfileService": "0e28ec513806a10451d92f870650be9b2e20263d20c525bdb9d823d76c118918",
+      "FleetProfileService._admission_session": "580d075e66b983d3ef817d5f9aa6edd0181d76103b5646a7cffb456a84b7bda9",
+      "FleetProfileService._application_is_current_selection": "ce161122e803207c838213da9c0c13379961ae08bba07aad2180a33fa73e2902",
+      "FleetProfileService._authorize": "c41da0f0c1c3efed0a48352b3e47cec8789228299997d345f1f94a536290ee60",
+      "FleetProfileService._release_claims": "ac0c468b1d301871ad229fc6eafb80fc6dd1ff7422b6794a752289d4b3c144d1",
+      "FleetProfileService._selected_profile_snapshot": "21e5fedda0241cb8fb207292acd7367ed853d0fe4f7b4655a5708a1f85c2f6d0",
+      "FleetProfileService._selected_profile_snapshot.read": "c444a6559d98e868aab621f098a6d4d7c06343cac388dc144dff49207c3be932",
+      "FleetProfileService._user_has_profile_authority": "db97636c184edcf06f8487defa4033d444b9ef9e8cb73f23d9b8f1dec608eb21"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/selection.py",
+          "FleetProfilePermissionDenied",
+          "FleetProfileService._authorize",
+          "current-profile-authority-is-unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "selection.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/selection.py",
+          "FleetProfileAdmissionBusy",
+          "FleetProfileService._admission_session",
+          "profile-admission-is-busy",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/selection.py",
+          "FleetProfileAdmissionBusy",
+          "FleetProfileService._admission_session",
+          "profile-admission-is-busy-review-again-after-the-current-fl",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/selection.py",
+          "FleetProfileAdmissionEffectBusy",
+          "FleetProfileService._admission_session",
+          "profile-admission-is-busy-review-again-after-the-current-fl",
+          2
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/selection.py",
+          "FleetProfileAdmissionStorageError",
+          "FleetProfileService._admission_session",
+          "profile-admission-database-constraint",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/selection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/selection.py"
+    ]
+  }
+}

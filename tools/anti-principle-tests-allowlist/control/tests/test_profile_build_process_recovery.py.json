@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_build_process_recovery.py": {
+      "<module>": "317bfece5de4ef7689a2d0e97ff2c580b2d890dd7b36675d78dde6d0f0bea85a",
+      "_PreparedArtifactExecutor": "696e875205ac6ec3d90fd8f408e432ac7a1f75be67c170af79315081bc1f7ab4",
+      "_PreparedArtifactExecutor.__init__": "ca820c11988591af97a19d040c180d49061eec8ee5ee5c8fcdcbf47fa597077b",
+      "_PreparedArtifactExecutor.execute": "7913c01d73d6eba56e9da9948928ff2e5de74b735e99e2ef25b1a369367acfac",
+      "_complete_agent_work": "466c5e08a764938b9fc83e35c1215a109ad5a46dea1a36dc0168a41021e5553d",
+      "_worker_process": "de10812f5dc0f31560555f6da4a17fd7d9a9e19022d174578a776e4e3a5b33d8",
+      "_worker_process.prepared_image": "03ba717c6f6c8130ba5fb6863e9638d4fbf4cbf311fe28e8c981c8084bd6d4b7",
+      "test_profile_recovers_after_worker_process_death": "770b8f19eccd9a33e55fa434e886ede3509e972b5721c300111d1c68985fdeb1",
+      "test_profile_recovers_after_worker_process_death.advance_restart_clock": "99c88acc222d089dda39b44d67a2847ae7b1895f830a57ca5117bfd0a9656673",
+      "test_profile_recovers_after_worker_process_death.run": "7a733a303a2f6bb490918b9d31f58e186b0ba0783a8c6106a0572dc7bb2a40ce"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_profile_recovers_after_worker_process_death",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_profile_build_process_recovery.py"
+    }
+  ]
+}

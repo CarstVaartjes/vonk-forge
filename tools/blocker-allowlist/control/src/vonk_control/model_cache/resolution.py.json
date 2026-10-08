@@ -1,0 +1,152 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/resolution.py": {
+      "<module>": "2dc984ba4ac575747f2d93ebcb28f6e453c82b5d80ae556beda0827ea159d7e1",
+      "ResolutionMixin": "c1c70dca9bee942003f9625d76c0fa511be5e590c34c8f552873f54711aae9d3",
+      "ResolutionMixin._resolve_model_selector": "b9dedf6f8e0aa4cd47ba5bc2e755c4c361159f46f61a4fe0c1f765abbbad578f",
+      "ResolutionMixin._resolve_model_selector_in_session": "58d5b1c0a2511ac056d60917fbdb3b2f9bc832dcac2011951d548f2cf6bdc782",
+      "ResolutionMixin.resolve_artifact_set": "e0af6d8af327020662692d47de12a7a368d532ec6e619ee9bf9aa7584cf0ca2d",
+      "ResolutionMixin.resolve_latest_cached": "2469b347ec0b1ec850f9b4607bbb7dfe5292f4d14943199aa43b9698f342e9f4"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model.artifact-identity",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionRefused",
+          "ResolutionMixin.resolve_artifact_set",
+          "model_cache.fixture_sources_forbidden",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheConflictInvalid",
+          "ResolutionMixin._resolve_model_selector_in_session",
+          "model_cache.selector_ambiguous",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheNotFoundInvalid",
+          "ResolutionMixin._resolve_model_selector_in_session",
+          "model_cache.selector_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_artifact_set",
+          "model_cache.pin_required",
+          2
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_latest_cached",
+          "model_cache.recipe_identity_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_latest_cached",
+          "model_cache.recipe_revision_missing",
+          3
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_latest_cached.compatible_model",
+          "model_cache.recipe_invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.lookup-by-id",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_artifact_set",
+          "model_cache.recipe_model_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_artifact_set",
+          "model_cache.recipe_revision_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_latest_cached",
+          "model_cache.model_variant_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_latest_cached",
+          "model_cache.recipe_identity_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionInvalid",
+          "ResolutionMixin.resolve_latest_cached",
+          "model_cache.recipe_revision_invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.request-shape",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheConflictInvalid",
+          "ResolutionMixin.resolve_artifact_set",
+          "model_cache.pin_mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheConflictInvalid",
+          "ResolutionMixin.resolve_latest_cached",
+          "model_cache.pin_mismatch",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "model.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/resolution.py",
+          "ModelCacheResolutionRefused",
+          "ResolutionMixin.resolve_artifact_set",
+          "model_cache.recipe_identity_ambiguous",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/resolution.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/resolution.py"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/toast.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "ToastItem"
+    },
+    {
+      "file": "control/web/src/components/toast.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "Toasts"
+    }
+  ]
+}

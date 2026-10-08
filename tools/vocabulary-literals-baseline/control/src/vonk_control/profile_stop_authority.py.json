@@ -1,0 +1,27 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/profile_stop_authority.py": {
+      "<module>": "bb50c0924e40d77231841ad92606aa8d5d0d20b2ee4cba154044917b6e306072",
+      "JobRunStopScope": "bd9dab0190194c503bcaef786cc6c9d9d626a71ad6613fcb4799feb61be42d26",
+      "JobRunStopScope.targets_are_exact": "0be7fe4d14d337fb2eaf8f9ca8c9aad39f7e4e89f908e1eff7eed4a9ded8948e",
+      "OfflineStopIntent": "54dd716553bfde47a2ab10ae0e8f5dd63a7e65638758fdf77902db3b0fc30f1d",
+      "ProfileJobRunStopAuthorization": "c5ec3a18e31d4fb9242166240ab07fdf21140fbe804bb17895ca154efc1a68bc",
+      "ProfileJobRunStopJob": "377506ebf7b07ad25d621bf0c101140912e9db37dfbc10a442cce38dbb5769e4",
+      "ProfileJobRunStopJob.flattened_phase_items": "6631f82a9766966d578c0ccc323ab5175fd5cf8ab40df38d843d3e45a003adf0",
+      "ProfileJobRunStopJob.model_validate_parent": "b6c3e2685247145a885ae0142ed44ddaed54f3bedf9b73390049c546d33ec9f7",
+      "ProfileJobRunStopPhaseItem": "ddad113a9cf6c9bca095f92867228a8a2b8747a72b32ae88f41f35159c97b5a6",
+      "ProfileJobRunStopTarget": "98b73e1af8aa59a82a63572dd4eac386fe7d4e928c047198065cf2954420ab33",
+      "ProfileStopAuthorityError": "54281e804938ff182b7dcbd12770c2446c27c7348b49d46a3694688a4fcc10c1",
+      "ProfileStopOwnerBinding": "9dafab6734f1417b734d9155a43457a657fd95780528407c32c75c49c183a0e5",
+      "RunStopScope": "4c160872aa06ffb0f7bce4b40b16e5aef9e8826568a0b407d4c4c81c97467f4b",
+      "RunStopScope.membership_is_exact": "f6a9fe3976c04766997103f99d92b502c3dde94fdd83b62dc1f61db3fa0b27fb",
+      "validate_jobrun_stop_source": "c075a2f806a6f80a55d798e3c5717cf2ffec3d8f9efabee22f82031768fd5af4",
+      "validate_profile_jobrun_stop_target": "aa5e0ab9d673f0d8aa801bc3c1507479feed60f1be89dad10658984baaf95536",
+      "validate_profile_stop_owner": "170bfd103111eca65a14aa48a6cb3ab24630ba64195b490af096f60f698e3b70",
+      "validate_run_jobrun_stop_target": "e46acb19c9fe0495b08ccbf8c4b7415362b66188da18d856a81c75c9a12efcbb"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/profile_stop_authority.py": 1
+  }
+}

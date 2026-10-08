@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_library_types.py": {
+      "<module>": "ca3cbd025964afea6065044c6f3ea76c6130dedd6b825fa1d56631542ee963ee",
+      "RecipeLibraryError": "7f57d6c760082e0b20754ee80f617d9900b0ce49fdab8e561b2abf0bda7ac237",
+      "RecipeLibraryError.__init__": "0408c73804e73234c009d8657a2c059325d402b509333d12f047fda4de65cd78",
+      "RecipeLibraryItem": "415a1c62352be3691ac8a51d82550c7f1e4f88f8a181a16c7a072822990f20e5",
+      "RecipeLibraryRelease": "3320098a3f8a3698574a73c09d0ef4a9d1eb0ea9726a003807917205c3b6283d",
+      "RecipeLibrarySnapshot": "bc86c9a9c9cff4701e7d377deacb7da0ff5e82494eccc5e7d2a85880fbde46dd",
+      "RecipeLibrarySourceContext": "6025525c07bf42a7e23c7b00612da4c8af29cd005e5fa098b930e9d5212ff6ca",
+      "RecipeLibrarySourceFile": "a056a12ac98923663d46aa32fc88fb2bc906ac8ee1d82c0dafcd4f90171b397d",
+      "RecipePackageEntry": "ad62c976674c710c1023c48d1a3166a153366c19c73a0ed15b5f696ea2b25983"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "RecipeLibrarySnapshot",
+      "path": "control/src/vonk_control/recipe_library_types.py",
+      "reason": "Catalog model documents exactly as the signed library published them: their content digest is over these JSON values."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "RecipePackageEntry",
+      "path": "control/src/vonk_control/recipe_library_types.py",
+      "reason": "The recipe document exactly as the signed library published it: its content digest is over these JSON values and is verified where it is imported."
+    },
+    {
+      "annotation": "dict[str, object]",
+      "count": 2,
+      "function": "RecipeLibraryItem",
+      "path": "control/src/vonk_control/recipe_library_types.py",
+      "reason": "The recipe document exactly as the signed library published it: its content digest is over these JSON values and is verified where it is imported."
+    }
+  ]
+}

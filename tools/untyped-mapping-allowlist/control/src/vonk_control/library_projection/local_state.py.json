@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_projection/local_state.py": {
+      "<module>": "d24fcd46f22e2f4d56a433b4d83d7be8582b9bf1e54e90b2661f5d8fb4674572",
+      "_apply_image_presence": "676b1b62352167c0516828842659c0925972da8ddb152b340503f37f6b63d303",
+      "_assessed": "01724bd726c888f55ab57d8cb420fbe91f13bf0bc241e60215d663a530d00c73",
+      "_database_local_state": "013ea55f0c4fef9948044d5a2bdea2f9601ebcfa718b0ebccacb581cd659f873",
+      "_local": "4c924e4b03b3b4142dd65bfb0687055735f7a5251371252bd0fdd8624cffeca7",
+      "_local_state_snapshot": "46898f6ea1e5f1dc0ead226331640df0fbef0368227da978af4786b2385469ce"
+    }
+  },
+  "debt": [
+    {
+      "count": 5,
+      "path": "control/src/vonk_control/library_projection/local_state.py"
+    }
+  ]
+}

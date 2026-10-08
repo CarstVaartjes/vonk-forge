@@ -1,0 +1,105 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_jobs/inputs.py": {
+      "<module>": "b9bf4c290ba1fe75183a08bb9422203d6d25ff9df2ab1c06675a252457c7c00f",
+      "ArtifactJobService": "b9bf4c290ba1fe75183a08bb9422203d6d25ff9df2ab1c06675a252457c7c00f",
+      "ArtifactJobService._attach_input": "a4b9fe1ba35362d5e80694b6864fb0bf63a0fc12ac8dada07c7fb2902ac5ad8f",
+      "ArtifactJobService.finalize": "94ff1671101fc41bb4e574d857b01231b95d7a0d0494c35d0fdc5d3fb71ad503",
+      "ArtifactJobService.input_upload_size": "58ad7aedb8c9b4eb3ba336ba65bce73dbe0b76b0793c0e3ff6285ec6d3ea9704",
+      "ArtifactJobService.put_input": "37e83ed0992a2068f3bb47e45b69a9eb13793842bb847b67de56971c9941558a",
+      "ArtifactJobService.put_input_stream": "d932eafcfd0e22a6ebc0e4e4a84459c159d46f3dfc30d73ef1cc71a413a198ea"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "artifact_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._attach_input",
+          "artifact-input-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._attach_input",
+          "artifact-input-does-not-match-its-declaration",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._attach_input",
+          "artifact-job-inputs-are-immutable",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.finalize",
+          "artifact-job-cannot-be-finalized",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.finalize",
+          "artifact-job-inputs-are-incomplete",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.input_upload_size",
+          "artifact-input-does-not-match-its-declaration",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.input_upload_size",
+          "artifact-job-inputs-are-immutable",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.put_input_stream",
+          "artifact-input-content-length-does-not-match",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "MissingRecord",
+          "ArtifactJobService._attach_input",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "MissingRecord",
+          "ArtifactJobService.finalize",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/inputs.py",
+          "MissingRecord",
+          "ArtifactJobService.input_upload_size",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/artifact_jobs/inputs.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/artifact_jobs/inputs.py"
+    ]
+  }
+}

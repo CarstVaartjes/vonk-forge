@@ -1,0 +1,27 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profile_adapter_conversion.py": {
+      "<module>": "90b034ad123f8180e765ccec1ecb9fceda445b6db79b8f245f1d69a9414386c6",
+      "_accepted_review": "a40777cd86a1988015ef835a92fbd4a12b7d80a304e47eb80cd22a26ea300d04",
+      "_adopted_skip_is_proven": "f53430adbd8192329f88e1d44995bcb1bb7d4523d6c118b33d1d8c521260586b",
+      "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",
+      "_convert": "d52e69341e5b9b40e4eedbd24862dd6a56cfc2014aa17ace6761217b10733dba",
+      "_job_proof": "426ba3e30f0e585f9cf66ff06038c5c147358668270781643277f180dd2b9c86",
+      "_retained_wire": "b6af3374dcc24969f0aeedf9c8221ec2ec189c02a4b00f3bd639fc14c5281f73",
+      "conversion_observation": "64d7a42125be62a0477536cc0f4748faffb9a4d80c0282f3d1126dd45cabbd39",
+      "conversion_progress": "80839414b1328736921fcc321dc8cfa5e264dd6c7014f368838dd2dac328bf67",
+      "convert_due_retained_applications": "7a63dfca7381f2ede889ea1787c4782b15cc071741fa9a3ef6d2ff96ba5b823b",
+      "needs_conversion": "00698ac5ae66b4cc9ebcabd7f2c076f3ffefca6c12bc07bfa8fd431ee988582a",
+      "try_convert_application": "af917761f4a9e015b4e68dd83ff4b52efb6374c84f8ab4c6e9b9fdfe8e89b784"
+    }
+  },
+  "sites": [
+    {
+      "expression": "plan.recipe_revision_id == assignment.recipe_revision_id",
+      "function": "_job_proof",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/fleet_profile_adapter_conversion.py",
+      "reason": "Retained child adoption binds the exact accepted assignment revision, after proving the immutable application request, queue index, child kind, payload digest, workload-intent ordinal, parent receipt and target scope. This checks ownership of an already-issued child; it neither compares reusable content nor prevents content-equivalent artifacts from reuse across revisions."
+    }
+  ]
+}

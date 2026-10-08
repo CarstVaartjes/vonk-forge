@@ -1,0 +1,53 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_events.py": {
+      "<module>": "a0e9d7e26e155d16428ab2e8d0eba871999a6b65fd56fdb52f4243d3a54de724",
+      "FleetEvent": "014dc3f0f88a4b80a3795a3fcad94d8704b8532a04104bdda9af144b44fb9ce2",
+      "FleetEventDraft": "b68ecff13867124f2564f565e08629eb15b40134b34e3cbc343df55b4007bd9d",
+      "FleetEventRecorder": "c45cac197bfddd5c74bdda7288338b8d0e590778667bf0587954625e59c24221",
+      "FleetEventRecorder.__init__": "139c6957d1f904d3382de89de486f8b9229dc0588b2c3bd93cf92725af4a5a8e",
+      "FleetEventRecorder._after_flush": "08679a97b362307b261a821d3ea203fec5bd7b122d805ca1a37a3aa0f4fbc49f",
+      "FleetEventRecorder._after_rollback": "b44b19d95c0bb60bb86a6642bdf34bc16edb0c52214a25dfc67be7f1bcfd0df7",
+      "FleetEventRecorder._after_soft_rollback": "aa4b9e13e86a7cadfdbc4dbb5728ceea3ef4335e9b0d93267761ed1173a5656b",
+      "FleetEventRecorder._after_transaction_end": "e1c4a640def4b78f1eedd82635c43130a9523cf07786a06b0f0c66dbb1309e72",
+      "FleetEventRecorder._before_flush": "462fb10c85e02ad52193b4ab2b0f3db6688bf99fe62a85b38c8c8fc172c51ce0",
+      "FleetEventRecorder._candidate_order": "4eaf1357576e503552d58474a32d37a85b4337772805165fea0f383e8d479e03",
+      "FleetEventRecorder._render": "a4a77d3be51d7d531367f845ebfcc92e919e0a738f773be8f6e8700ef55f66b8",
+      "FleetEventRecorder.install": "7f1b7a825778cc70fbd102b59aa3c4ca7ad91d58d6a098d4a8f6d76c2774334b",
+      "FleetEventRecorder.uninstall": "91b93d3ff4d157b39140b23bcf1756595b48a78670b327fd530310d7e949a83b",
+      "FleetEventRepository": "5650efa76a5bf200aa915288a1f28ff2a5031c053d8ed4593017ef8ee7d1f07d",
+      "FleetEventRepository.__init__": "d82b2a878f0f06b377a2b381ce4077eea06884dd641771be68a37f2dc59576b6",
+      "FleetEventRepository.after": "451645e6ea8bd3a0aa2ad39fc9c55fb13702ff18de4a03a3b3cf2bee7059b706",
+      "FleetEventRepository.append_in_session": "4b3296d8390b6dda8c1389354877a8d8db80da3708c357f9eb46e7ab729e1218",
+      "FleetEventRepository.high_watermark": "00ad9d2ae4b0ef5c6f98dbfc7dfab3b1a6e5f4b26ec0d737dc2e3851e6763ca0",
+      "FleetEventRepository.high_watermark_in_session": "075c1fc34a38097ee1083b58857ce5059d3d42c0241cda2a1544efac103a6efd",
+      "FleetEventRepository.replay_after": "6f320b4308f14512a44cb1d1c6f788d64c0364dac0fa01a9405989483a8f9b0b",
+      "FleetEventRepository.retention_window": "18e2b01b288c1f9441472fd3cf46cf7bd4f798afafc79f8b50a5a3ebc1d562bf",
+      "FleetReplayBatch": "39fff77fc4f21d9887e1e3c34408e64a04cbe61578b440ea9a60602f3fa62334",
+      "FleetRetentionWindow": "e496b8dc005903dfb798737fdebf6c8b0f04de69dcdae4b78bb7d66d4cd06a7e",
+      "_FleetStoredEventGap": "56d5fd97daa68c0cadf73a341a7ed936baaec8e8f8b2b1b9d53301d1287e30dc",
+      "_FleetStoredEventGap.__init__": "ca075baad08addb209099ef0c4d8fe148fdf0c450ffc6f7db10287ffbe776dc2",
+      "_as_value": "6fd9a61211ca2d2104b0e9b88233889ebf63dad0567d8111c40d476da5f6ee55",
+      "_cursor_lock_statement": "f00c8c3c538ba2c2f693916c3678b36aa2e265cb40d185b3995cbace225d52a3",
+      "_database_utc": "e23add388e6245142dee6475cc3e07490144d7179c76df677a0055e87a7aecb2",
+      "_sqlite_cursor_allocation_statement": "a319d4c753da13a8911cbd6fa4ac68930d70fd573b14ced99cd6a4f390c2200b",
+      "_stored_payload": "11212b2b15ce70b1ba8948de09cefb850ffa011a63b80215e5bd3a7c82938bef",
+      "_utc_now": "af6df384c12fe23689d90a45cb8b500547248bcb0f8cb807de6ddd64ff557e5e",
+      "_walk_payload": "25c1b3f22b7e501237fbdd994a88ed3911d062060e0ccd4b40be023811240a44"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_events.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_events.py",
+          "CursorError",
+          "FleetEventRepository.replay_after",
+          "fleet-event-cursor-is-invalid",
+          1
+        ]
+      ]
+    }
+  ]
+}

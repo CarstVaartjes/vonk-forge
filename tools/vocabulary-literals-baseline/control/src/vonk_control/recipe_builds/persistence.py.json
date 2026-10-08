@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_builds/persistence.py": {
+      "<module>": "30cc5da7c01fa5cfd907c57747cbe9f2f51253a2bcc830c7dde3a22766d2c42f",
+      "_reserve_in_session": "9af417eb7f4f00b3c110c834427b8abf83088b5256b7d1b5a65724b915626f14",
+      "persist_plan_in_session": "76d3b99fe7f7db08b5006b6be0f7fa7bb113e0cd9e45a30a9458ad6d10fa1b5d",
+      "record_success": "8a7b0934ad87f2f9e571be98d5bacdfcd6f8c127dc2d356240d1bb1c272ed96e",
+      "reserve_in_session": "97e5a4a3df871f7b90850b8dd3b80a8ab1bd4095b3d39f7be6db50d6a6a3e993"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_builds/persistence.py": 5
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "content_identities": {
+    "control/tests/test_installation_reconciliation_api.py": {
+      "<module>": "e0574ddfb8c3e424697019a190e7e93a0b286999f1cb8f2ea00f5b1d225dac0d",
+      "_actor": "63df99014f672f15aca97f699c53f3006d958370ddf6fdc3f03ea2ec01f4f0b6",
+      "_client": "18880be5e2fa70c18eefff882f0dd43f4013e26009b274da6ebc3eb4abe6b60b",
+      "_client.request_identity": "9929d41ae91d38a7972c55c871edc0e2ed870302ff3a8de73861ae9aa02ef6da",
+      "_prepare_exact_legacy_install_for_reconciliation": "0089e6ed80ca02139d6cc718cca538d17b4470e77da4edeffa0b3fd905709437",
+      "test_apply_is_administrator_only_and_preserves_request_identity": "d2db8f1347d5e772b4faae5bf2a5f64b4136cbea326a5c0bae840a0d0b542b10",
+      "test_preview_delegates_reconcile_mode_to_existing_run_switch_owner": "4daeb476db08d734bcecc3b48d9598cc8fb403f8a4d1bd3886bc6a651c5c9a41",
+      "test_reconciliation_preview_refuses_non_administrators_before_planning": "032b8577af6c363c4c89b0d3560efb74bbfc363e7b2292d9fd097d55d4027eb1",
+      "test_reconciliation_routes_are_typed_and_discoverable": "c2db612a323848a1f0efbb685dc5fd9521888615d14f3662d297e32a209f5677",
+      "test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child": "e22e2e9c442e1e8fa0ee32af6a5c514a2d34ef09b98b29609ec1af2a59295dbf",
+      "test_run_switch_status_is_a_typed_exact_id_lookup": "7d1c65ecef7dad48468ceafefdc428d8e92a8c91528c2538157fbbc31c074327"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "function": "test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_installation_reconciliation_api.py"
+    }
+  ]
+}

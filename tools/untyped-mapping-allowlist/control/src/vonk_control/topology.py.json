@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/topology.py": {
+      "<module>": "73865f4a7e7c3e74974c61f2c993668d83860708ed00174b5ae5d7d72a13bfe3",
+      "Placement": "455b5a284cd8f0d06b43f6c1baf59644c4e61f4991a9302c83b47ec2c1b105b5",
+      "TopologyError": "62130096a12099e7c8ec2509fcdfbed6cd9f55d25b1366dde5d446a721239b61",
+      "TopologyError.__init__": "911a08899e511152c5aa4b1dcb8376f11e60d4c701458bc02e6a60ce27dd7fc4",
+      "_fabric_capability": "ac4b543a38a960dea22a7c4347db68d81690152124c29ee3b3cc37fe6cd54c59",
+      "validate_topology": "be0ba79f84786f298d61c7e878648469b23a1bacf8c912d38d795fcbd9af5e8f"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/topology.py"
+    }
+  ]
+}

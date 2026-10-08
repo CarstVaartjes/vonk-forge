@@ -1,0 +1,106 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/switch_dispatch.py": {
+      "<module>": "f74be4538acfd927911785b4fa5b5e512eb0b9867f987ff0f3420d8486d71bd1",
+      "RunSwitchFleetProfileAdapter": "3b757c2cde92d1bfb15691e42ac2a0b9a69eace978a28dcdacfb3f9c370170b1",
+      "RunSwitchFleetProfileAdapter._adopt_child": "db8f654661fa0570922dd77828d69a76a371d7a619b2408a6fc531fa4d2219ab",
+      "RunSwitchFleetProfileAdapter._adopt_child.unknown": "b7f69802087ba302f4ee35c3d63741c5cea3c66d9cb291174b11b74a8fe159a8",
+      "RunSwitchFleetProfileAdapter._child_review": "732b2fd1ce932bcb31fe9cd1430f822cd91fedd2e45e9cbae0c144f1afdc7481",
+      "RunSwitchFleetProfileAdapter._start_child": "ba8316dbb4ae7873a22fa403e56ef8d3cdd0cb0c938d9cfa8e7af39616c68989",
+      "RunSwitchFleetProfileAdapter._validate_child_effects": "1574825518bfb08725a293ec4f369fab6ac681fa48f306483e7eeb55a3c7eebe"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.adoption-authority",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "FleetProfileReviewStale",
+          "RunSwitchFleetProfileAdapter._validate_child_effects",
+          "profile-child-stop-exceeds-its-current-authorized-scope",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "FleetProfileInvalid",
+          "RunSwitchFleetProfileAdapter._adopt_child",
+          "profile-child-request-key-belongs-to-another-operation",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "MissingRecord",
+          "RunSwitchFleetProfileAdapter._child_review",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "MissingRecord",
+          "RunSwitchFleetProfileAdapter._start_child",
+          "not-found",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "profile.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "FleetProfileReviewStale",
+          "RunSwitchFleetProfileAdapter._validate_child_effects",
+          "profile-child-changed-its-reviewed-stop-target-scope",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "FleetProfileReviewStale",
+          "RunSwitchFleetProfileAdapter._validate_child_effects",
+          "profile-child-exceeds-its-reviewed-spark-scope",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "FleetProfileReviewStale",
+          "RunSwitchFleetProfileAdapter._validate_child_effects",
+          "profile-child-would-remove-an-unreviewed-installation-revie",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "FleetProfileReviewStale",
+          "RunSwitchFleetProfileAdapter._validate_child_effects",
+          "profile-child-would-stop-an-unreviewed-workload-review-agai",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "switch_dispatch.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+          "FleetProfileChildPlanBlocked",
+          "RunSwitchFleetProfileAdapter._start_child",
+          "profile-child-plan-blocked",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/switch_dispatch.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/switch_dispatch.py"
+    ]
+  }
+}

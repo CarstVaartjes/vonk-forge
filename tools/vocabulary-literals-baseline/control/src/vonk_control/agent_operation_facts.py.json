@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_operation_facts.py": {
+      "<module>": "513f2f475834331165a7133ca90a23183cc17615be3b8124930165a20133bfdc",
+      "attempt_holds_open_launch_budget": "6b55af7043d5af71f4a99769b167ebd5393b7c7f7f4cb9ec94304cc2e4297905",
+      "attempt_is_live": "2be592b6b914ccbd63f71a9197416fdb444191deec04f05ed13095155341a0f6",
+      "aware": "76d7ecc53e80f258e31b281241c9a2e6735ee5b30dccc6eb54d559ca7045ab3c",
+      "completed_bytes": "06ddda32a771de6882c27a59ac2271f08c1f8f1b6e7c11bf0406484bcd04e20d",
+      "lapsed_renewal_allowed": "7bed44289efaa100c5a75dbd52e4427572dee4da3bcc8342b06e1ba0103e0f88",
+      "operation_start_deadline": "4d337d0e9f1291b048f1364ce4e549fd2b34c1bcec7c19673f18171b7f1c4db2",
+      "stalled_interruptions": "22b83472e90fbbb15ab31809e8d74990643f2133f08138e6d18e8a242587933c"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_operation_facts.py": 2
+  }
+}

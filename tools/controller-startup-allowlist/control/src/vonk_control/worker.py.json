@@ -1,0 +1,57 @@
+{
+  "boundaries": [
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "pure_or_core_calls": [
+        "AgentJobService",
+        "CapabilityRegistry",
+        "ControllerExecutionPlanService",
+        "JobService",
+        "LinuxProcessProbe",
+        "OciLayoutImageTransport",
+        "Path",
+        "Settings.from_env_and_secrets",
+        "WorkerHeartbeatRecorder",
+        "WorkerMemoryMonitor",
+        "WorkerWatchdog",
+        "build_engine",
+        "threading.Event",
+        "threading.Thread"
+      ],
+      "scope": "__main__"
+    },
+    {
+      "path": "control/src/vonk_control/worker.py",
+      "pure_or_core_calls": [
+        "ArtifactJobService",
+        "ArtifactMaintenanceCadence",
+        "AtomicRecipeRoutePublisher",
+        "AttemptResidueReconciler",
+        "CapabilityRegistry",
+        "CatalogRevisionCollector",
+        "ClusterMappingService",
+        "CompositeDistributionPhaseExecutor",
+        "DatabaseSourceBundleStore",
+        "DistributedRecoveryCoordinator",
+        "InstallAdmissionService",
+        "PrebuiltImageImporter",
+        "RecipeBuildService",
+        "RecipeOperationService",
+        "RecipeOperationWorker",
+        "RecipeRouteService",
+        "RunAdmissionService",
+        "RunSwitchOperationService",
+        "StorageDemands",
+        "TelemetryMaintenance",
+        "TelemetryMaintenanceCadence",
+        "TerminalHistoryCollector",
+        "UnusedStorageCollector",
+        "ValueError",
+        "Worker",
+        "build_production_fleet_profile_service",
+        "build_recipe_image_availability"
+      ],
+      "scope": "assemble_production_worker"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distribution_executor/verification.py": {
+      "DistributionVerification._verification_result": "dca78d6d984770bb2c64c0d2ea92543fcc14ac0baaeb417ad26e1538e90967b0",
+      "DistributionVerification._verify_evidence": "3629668f8b30f5d694e4a42cf315c02e5762c4c172342304f28b00556ed8c177"
+    }
+  }
+}

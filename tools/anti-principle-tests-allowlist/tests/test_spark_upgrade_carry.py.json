@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "tests/test_spark_upgrade_carry.py": {
+      "<module>": "3cbe32fd6e90dcdd4fce286045ea7c4bc3fd01cbb38e00a47671fa8e868a402a",
+      "_failing": "3d10d21977888328b5628ae263920006e1de3183fcf2c38a97df85c2dbaad9be",
+      "_historical_cleanup": "00a668a31f2d2fcd796525cc1657df0cc832403fcb44c72edd6341f36383314e",
+      "_lane": "7377f9ee637eb79b5078dfe7d6e124a30482165778e29aa3b914b45c2c0269da",
+      "_probe": "44c32bbe9c9c6226c5a9f19aeb7d54bd6857b8058f9442ecb95805a822850094",
+      "_scenario_lane": "a29e6a5e3a5db9b8a823cfc5bbdf9e6149b7ee7e1e618f135dc0137bc07b3d14",
+      "test_a_load_that_replaces_the_workload_names_the_run_that_now_serves": "9a25c76511c5d614287d33a62f107b9fdc42f32d39fa8cf22070a72377de7319",
+      "test_a_phase_taken_out_of_the_observed_set_gates_the_lane": "2bee6be7737be12f82132dfc16013fe48033c8d0cac21fdbad6c3652b5d40b39",
+      "test_a_withdrawn_route_after_the_agent_upgrade_fails_and_names_the_phase": "7c78fdcc40d6e95eb42a3c54016e3c9c019e2de537407135f3daec59710ee655",
+      "test_an_observed_phase_that_crashes_on_a_surprise_is_still_only_observed": "4f5a8780266c95910f9d799e1a09647c913b46c667c235c976da872075e45b76",
+      "test_an_observed_phase_that_fails_is_reported_and_does_not_fail_the_lane": "d27a2824c12abc9aefaa971d4e6cd87c8dc8c62390f17cd5ac7f598ac9dabb49",
+      "test_an_observed_phase_that_passes_leaves_its_evidence_in_the_report": "3dbdfe2519665a2017eaccf700c7c12b511d06857bcded316608c7e8a8d3305a",
+      "test_cleanup_uses_the_receipt_producers_historical_schema": "7095674303f0e2178ffdf38eea8f2585a897eb7bccfa5b408d32e7bba5305486",
+      "test_historical_schema_does_not_weaken_cleanup_evidence": "6155f9ccd50f924e002d355410cf8f7f2e298c750f53cef6ee8a67ce6868bd72",
+      "test_one_missed_probe_is_tolerated_but_two_in_a_row_are_not": "942d373a7a3cb77e0eb471ab7ce97378a06469aca55e826ec844c50f6d61d4fe",
+      "test_the_first_release_is_skipped_visibly": "69741a85b21c51605e97c957851c4e8397cfe195b7f45f1ac5fa355a864eae95",
+      "test_the_gateway_restart_during_the_controller_recreate_is_tolerated": "0e1363ea198826aedc806210d4a8402cb5e50e70fb3b745b11dc61636519c915"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_an_observed_phase_that_crashes_on_a_surprise_is_still_only_observed",
+      "kind": "transient-failed-assertion",
+      "path": "tests/test_spark_upgrade_carry.py"
+    }
+  ]
+}

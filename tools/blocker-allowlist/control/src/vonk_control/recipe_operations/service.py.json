@@ -1,0 +1,47 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/service.py": {
+      "<module>": "9574a714d504268a42ba316dda95954a3685f94ef6a5a97890bf8bbb2b1e85e8",
+      "RecipeOperationService": "9574a714d504268a42ba316dda95954a3685f94ef6a5a97890bf8bbb2b1e85e8",
+      "RecipeOperationService.__init__": "c081c353479c33a16f0d9287a0a03e15d930c473a682474dc01c72dd7cd447c1",
+      "RecipeOperationService._request_install_storage": "c98adece75093fcf52a6b8e87fc4d2c434683ad31dae95bf2f243b702aa1c4c6",
+      "RecipeOperationService.bind_storage_demands": "15474b4e6ac146a7a1eb01ec331c44367d9237c876a56c638e9adb405ad96ba4",
+      "RecipeOperationService.create_mapping": "9c59bf2d92d45617263e4886c892ce544dcea16ec7eb97379ff4de64b2343c2d",
+      "RecipeOperationService.preview_mapping": "ecc954a7cdb4e2f7d7c737599dab4f89f7b3a55861d5ac850b2b46b048edc4ec"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/service.py",
+          "RecipeRequestInvalid",
+          "RecipeOperationService.create_mapping",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/service.py",
+          "InvalidValue",
+          "RecipeOperationService.__init__",
+          "recipe-run-health-age-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/service.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/service.py"
+    ]
+  }
+}

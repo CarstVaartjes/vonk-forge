@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/components/confirm-dialog.tsx",
+      "reason": "component props: UI-only, not API data",
+      "type": "ConfirmDialogProps"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "call_edges": [
+    {
+      "calls": [
+        {
+          "function": "TransferMixin._download_one_unique",
+          "path": "control/src/vonk_control/model_cache/transfer.py"
+        }
+      ],
+      "function": "SchedulerMixin._advance_background_operations",
+      "path": "control/src/vonk_control/model_cache/scheduler.py",
+      "reason": "The worker pool runs _download_one_unique and the exception it raised surfaces at future.result() in this function, under its typed handler."
+    }
+  ],
+  "content_identities": {
+    "control/src/vonk_control/model_cache/scheduler.py": {
+      "<module>": "571ef84a43ebca186d17df893c121eb423487b904ad84d0f2258f80afd71b962",
+      "SchedulerMixin": "101f2d16d836daf2cf37d4e73f150b3bffbdb311b5a6e945ed70a6f20dd35a0b",
+      "SchedulerMixin._advance_background_operations": "5ae2edc75ef1d870e52d61cc5bb09ebe5833fbd7dfb9c03dccbc7357951eec66",
+      "SchedulerMixin._available_transfer_slots": "bc55c4563abfa237ec17595c370e5fed51592a22edd437c296bef7e58bf5174c",
+      "SchedulerMixin._claim_operations": "8d69a77da992b20e02dec9b7c78e8c753cbe186566b9c6e8013f3e4c1fa29a4d",
+      "SchedulerMixin._fill_background_slots": "149f174475fe7fb1b7cbb7b80b91f268026c29a28d4f27793ffc64eeabcac580",
+      "SchedulerMixin._finish_background_success": "5cc8f2385e185a710131a0a903867c3d8bc6c0b400ba303fb77167d233f207e4",
+      "SchedulerMixin._renew_background_claims": "a9026323d3dbe8beb0e293c8831aa9841ad85f0764120b416e27fa6ecebd8bb4",
+      "SchedulerMixin._schedule_background_download": "9f5bd9edda8bfadedee36456bf2465c9b8498c6b109544023b72e02193a171b2",
+      "SchedulerMixin.resume_operations": "96f0009d57fab58b1511e10e688e6d9b465c108ea24c5de6fcbc5434590f1e10",
+      "SchedulerMixin.run_pending": "593a2a928e962f8b8f905e7cc321fb6847da0c0529839cb9e08c3148505b24cb",
+      "SchedulerMixin.tick": "eb531f357b326ddd81883223a2dcde0b3f2988f10806608d9ceef1712f6115b9"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model_cache.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/scheduler.py",
+          "InvalidValue",
+          "SchedulerMixin.resume_operations",
+          "cache-operation-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/scheduler.py",
+          "InvalidValue",
+          "SchedulerMixin.run_pending",
+          "cache-worker-batch-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/scheduler.py",
+          "InvalidValue",
+          "SchedulerMixin.tick",
+          "cache-worker-batch-limit-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "SchedulerMixin._advance_background_operations",
+      "path": "control/src/vonk_control/model_cache/scheduler.py",
+      "reason": "A background download that ends with an unknown outcome keeps its durable operation: the typed handler records the failure, the operation settles through the core's bounded backoff and the claim loop resumes the same transfer on a later worker tick."
+    },
+    {
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "function": "SchedulerMixin._finish_background_success",
+      "path": "control/src/vonk_control/model_cache/scheduler.py",
+      "reason": "A busy publication fence is handed to _defer_artifact_writer, which releases the lease and persists the dependency wait before the lifecycle worker retries it on bounded backoff."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/scheduler.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/scheduler.py"
+    ]
+  }
+}

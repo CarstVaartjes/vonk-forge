@@ -1,0 +1,35 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/phase_dispatch.py": {
+      "<module>": "b72253438f4bc75d617db94037da0bb28be4deeb467c0a5c0a428c91909ff81b",
+      "PhaseDispatchMixin": "38cac6a16f384014d05ca6ada9bf7a9ab81cde70861f3e5d5c4fe8a412f8a51f",
+      "PhaseDispatchMixin._execute_checkpoint": "047062866c821a5f09cca1e1118ec2409ff5a42a5d9563f36c900bf3f553b29c"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "AdmissionLockBusy",
+        "InstallAdmissionBusy",
+        "RecipeBuildAdmissionBusy",
+        "RunAdmissionBusy",
+        "RunSwitchInstallPreflightExpired",
+        "RunSwitchOperationConflict",
+        "RunSwitchPostStopEvidencePending",
+        "UnknownOutcomeError",
+        "_RunSwitchBuildParentChanged"
+      ],
+      "function": "PhaseDispatchMixin._execute_checkpoint",
+      "path": "control/src/vonk_control/run_switch_operations/phase_dispatch.py",
+      "reason": "The run-switch advance loop holds the phase for a busy writer, changed build parent or pending evidence, and an unknown outcome from any phase dependency is recorded as a retry with the core's bounded backoff; it enters the same idempotent phase again on its next advance; test_run_switch_lifecycle raises every phase-path conflict and observes the operation retrying."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/phase_dispatch.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/phase_dispatch.py"
+    ]
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "content_identities": {
+    "control/tests/test_image_availability_lifecycle.py": {
+      "<module>": "08d9dc4506f321156e1f107cb0cdd423f8e5564edf89902be8b60b33324f54fc",
+      "_adapter": "dc051148516df4384e2f0d758f9782583840adf91aab138845be4d8b0a24524e",
+      "_job": "ef5b0cfac2b0bdbb34c13cf356e292719e11c23dc014699d946a75f6c0020780",
+      "_owned_service": "4bb3ae3f5545e6646ef9d8b3fa952b168eca032c2a79dc22c05369e2246633a3",
+      "_payload": "3b70566d2f64f2a0cd48bc3909c36d0e0e9fddbdb6663958adb3ff1a411bef81",
+      "test_a_cancel_of_a_queued_preparation_via_the_service_completes": "641d23c6e5b06f029c06d2f3794b7bd0c81d0988b6af72e1bf66d5e97fb28716",
+      "test_a_cancel_of_issued_work_observes_then_ends_when_nothing_is_outstanding": "0e4ff07b3f267562d758b99de6947b42dfc754b15259deb7d2ac670252438e56",
+      "test_a_cancel_of_work_that_never_ran_ends_at_once": "9715deaacf98656d2c638d34bae8b64a8fce674b697e5d51e0a4cc99598258fc",
+      "test_a_definite_failure_ends_and_a_removal_failure_is_partial": "cc5ae9d05a3879b37c96dbd1ca568be8b84ba0442d8e96f7419f999fd07940cc",
+      "test_a_dependency_wait_is_partial_and_does_not_count_as_a_failure": "00d28d2ff2029f596f308ee4a11f23017faaef580c976a4c38d2f0638324216c",
+      "test_a_failed_preparation_is_requeued_and_claimed_again": "a52109e2ea244e6cc230bd7c973bdd923cbb16cd9ba1df05de057af6020d21b5",
+      "test_a_failed_preparation_is_requeued_and_claimed_again.Flaky": "daeb27be6781a7bfa34ca75e407d4ec072573cc0195d061ee85b7b0db73a1557",
+      "test_a_failed_preparation_is_requeued_and_claimed_again.Flaky.inspect_archive": "d818e9eb12a941d4d75abf1248b0414c709b518b250d443d91d770e660aa1298",
+      "test_a_legacy_cancelling_preparation_with_a_stuck_claim_heals": "c3739f9321f36119fe93469f863a4630b601551d5c156acb6eee27e3ce080f87",
+      "test_a_legacy_operator_wait_is_retried_not_kept": "f73f17db8c81ba3cbdb079c1f539ab2a5828348a998251953e2110665194ce06",
+      "test_a_live_lease_is_never_lapsed_by_adoption": "a1d7e71047a2a57b27d581cdfb24b6d5f16985bb676e6d5b906357579a18bd97",
+      "test_a_retryable_failure_is_retried_at_the_cores_clock_with_the_floor": "92523d9a670652b9a983bbcefedd5c04be7b2479114fdca2ed81317b22f8eb0c",
+      "test_a_spent_cancel_ends_with_the_effect_unknown_and_fences_the_claim": "4daeadc20a737aff6f027481182a708468962fe92b8ccf3b18216fd0230cd9c2",
+      "test_a_supersede_ends_an_unstarted_preparation": "68ce5cdaca955cd56367b55ad1a60a3526f82332714e10e297b3d80ef8cc10c4",
+      "test_an_update_batch_is_always_observed_by_its_owner": "cc926187045621ea4e993192d0414b91454100b49a900f0ec7793e46a488b81c",
+      "test_claim_takes_a_lapsed_running_and_a_legacy_parked_row": "bc054fbbcbdfecd1743bcdeff978def6c033e8dc0e998cf18443f5009780fef4",
+      "test_damaged_clock_fields_keep_independent_live_lease_and_cancel_budget": "a6d32a79a1557524ed7f2222ed4a2674bdb0b5fc13d424a1693771d7bf66993c",
+      "test_every_stored_shape_adopts_without_a_wait": "0c9a871ec1b7e276f6ebf5f895810d8cb635d5057102d08d3771281f60f1f1d2",
+      "test_no_stored_state_and_event_leaves_a_row_waiting_for_a_person": "a974456e3bfc081672444ba86359aa4fd8e54c7c575631f657e1f890517f3b81",
+      "test_removal_steps_run_and_a_retry_clock_never_blocks_the_next_step": "e6a7e176724a16ca0c3d7332f36dff225c80c444dcedc01d54cd019f5107fb6e",
+      "test_the_cancel_budget_is_derived_from_the_recorded_request": "c878900c936ca9f9ff75e826db52a211a2b5c879b811248fd6da8245e6f97230",
+      "test_the_prebuilt_import_ends_definitely_either_way": "bf678459231596a460f6ee5238e27ff46647ff43af9cbdd02116cc0943da8a76"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_cancel_of_a_queued_preparation_via_the_service_completes",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_image_availability_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_of_issued_work_observes_then_ends_when_nothing_is_outstanding",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_image_availability_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_of_work_that_never_ran_ends_at_once",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_image_availability_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_spent_cancel_ends_with_the_effect_unknown_and_fences_the_claim",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_image_availability_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_supersede_ends_an_unstarted_preparation",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_image_availability_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_an_update_batch_is_always_observed_by_its_owner",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_image_availability_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_no_stored_state_and_event_leaves_a_row_waiting_for_a_person",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_image_availability_lifecycle.py"
+    },
+    {
+      "count": 2,
+      "function": "test_a_definite_failure_ends_and_a_removal_failure_is_partial",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_image_availability_lifecycle.py"
+    }
+  ],
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_damaged_clock_fields_keep_independent_live_lease_and_cancel_budget",
+      "justification": "Pure lifecycle adapter fence test preserves the independent live executor lease and immutable cancellation deadline under damaged clock fields. At observer-budget expiry the effect remains explicitly UNKNOWN; no resource release or fresh service admission is claimed.",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_image_availability_lifecycle.py",
+      "reason": "security-edge"
+    }
+  ]
+}

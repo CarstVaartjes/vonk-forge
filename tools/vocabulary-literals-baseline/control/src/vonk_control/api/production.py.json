@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/api/production.py": {
+      "_close_model_cache": "3de19469b91f0e1a1df8a90c5d9189d468100c831c90b78bd9a182204cb9579a",
+      "production_app": "5fabcb6c7208e5ab2152c7aa56644ad587c4f03a8896f3eacc44e7e709a71083",
+      "production_app.build_artifact_jobs": "4c060fb9071db6525f6b00b04f34bbdf69feb911acdf0127aead9c8c0832cc48",
+      "production_app.build_cache": "948c3e7d9b1ac2a7754013491fbc75a505a55c2afc4f73e7e2c4a3ef35628054",
+      "production_app.clock": "3c87c7fecd6efb5bf9a23b9256ee2cf26c0be1d7b831864e8bc856c1538e0dba",
+      "production_app.consume_agent_result": "7a81b5bc855cd0ef6226f12d62d761eeef766e27f855376c92026e359d2a50f5",
+      "production_app.lifespan": "ab66612f1805f1cc6dac4ba6c5251c445698c50fd9c3a41919b9024f333b5f54",
+      "production_app.refresh_metrics": "6010a6955dfb9d83961b17c53ca8835afb64b6db803a02f1499d0ef482828bcf"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/api/production.py": 1
+  }
+}

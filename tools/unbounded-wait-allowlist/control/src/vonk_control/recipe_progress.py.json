@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_recipe_model_identities",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/recipe_progress.py"
+    }
+  ]
+}

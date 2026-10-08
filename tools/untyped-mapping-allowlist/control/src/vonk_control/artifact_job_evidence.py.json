@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_job_evidence.py": {
+      "<module>": "c37bd4622e53fde91354b99d7fa00945ec8f840cacbb99a221ffd07009469289",
+      "ArtifactJobResultEvidence": "48fdd01e4c2cc2497c8e8d5b3ad375db187f6770c882b7fbcc6d75bfef6181e7",
+      "ArtifactJobResultEvidence.merged": "df1aec9edd33800a8a7414113093e075491a26700a78e6bdb4fd23a2b6bc5111",
+      "ArtifactJobResultEvidence.scope_unproven": "229087ce95edc75bfd1f87891f3dd4b0a266ec841d1011db94de92c227e38c6c",
+      "dump_result_evidence": "d7df95c519759fc1c0c3a785c45519e8a694c97d1a08cd7d0c415cd56bd7a8e9",
+      "read_result_evidence": "dd12ed33fe3b17a250722de3233f2aa295dd837915a6a7d41ae2766e7d2c7b9d"
+    }
+  },
+  "permanent": [
+    {
+      "annotation": "dict[str, object]",
+      "count": 1,
+      "function": "dump_result_evidence",
+      "path": "control/src/vonk_control/artifact_job_evidence.py",
+      "reason": "JSON serialization of the typed evidence model for its JSON column; the model is the contract and the column binding belongs to the stored-JSON registry."
+    }
+  ]
+}

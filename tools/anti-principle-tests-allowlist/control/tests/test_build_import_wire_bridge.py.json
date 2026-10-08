@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/tests/test_build_import_wire_bridge.py": {
+      "build_import_wire_probe": "f0f71aef2eb8c1119407129a398fa4906ed72d36cc2bf0f5e28cd0d709c103f5",
+      "test_build_wire_preserves_rust_security_invariants": "918588e57599bbdccfb790191c734c83f2c03f0dead97cf9863a59312e615e2a",
+      "test_build_wire_rejects_scalar_coercion": "4412207ffa1b46caf280ce23d7b5ad6236ab3a07bdbdce4f81802d09ff040122",
+      "test_build_wire_schema_publishes_runtime_scalar_constraints": "36fab2107154904a36fdde30e8e379756bf387577ee94b466663bd213527157c",
+      "test_cancelled_build_cleanup_crosses_the_real_wire_boundary": "7b3385fbd2f76105e2a35b49fcc1c193daec59f26d5279e3a60d724e6df19bce",
+      "test_queued_build_crosses_rust_parser_and_typed_evidence": "ea2062549721f398526cee9f7069dfe2e5bce6e8b1748d3f6f0cb5c7d5a53c7c",
+      "test_queued_build_crosses_rust_parser_and_typed_evidence.probe": "ca4cb9bd609ef23584f8c1fa431391de2267b2eafedb446f524d0281ece83d00"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_cancelled_build_cleanup_crosses_the_real_wire_boundary",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_build_import_wire_bridge.py"
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/transfer.py": {
+      "<module>": "d1950adc6c39a0c4156231d0172d81d6d56c246c33bd5233df8ab1a3703d0b4a",
+      "TransferMixin": "370123261f116fbf5675fcd395efd170ccf676e45959616194b5778e4adec73d",
+      "TransferMixin._download_locked": "933041a25762939960b8d0d1dec78e4656bc228931997e774acca919fe6f7b7b",
+      "TransferMixin._download_one_unique": "4591625529a2ddd5ef1d1ed45089299283f05ece8a82007b11ae5e6edf623e58",
+      "TransferMixin._ensure_set": "634ecebebfe458d97f999648084e23dc576b64fda6a630f02ccc29e733b373af",
+      "TransferMixin._managed_cached_objects": "c1c783d09b529317a0fced19681f1d6295341c04f2525b73b59d22391ad00046",
+      "TransferMixin._operation_transfer_snapshot": "39e983de60ec29213d6dcc549280eb7584286e0f70bab3aa48af0989dcf479ca",
+      "TransferMixin._partial_bytes": "96fbae7e892b9d49b6ce69b11ba7b22936477c7867833d871812d3e58abe40d4",
+      "TransferMixin._progress": "3d09c00ac51a45213b0b1f3528aa5076aff29cacd475a1156958c0d61ab20ed9",
+      "TransferMixin._run_download": "ab01e0c324859154411d71a310f9a0000358e5a7e8c0936bbe0f1c832a3f52e2",
+      "TransferMixin._split_partial_bytes": "3ec8f0916aeab60d464d7e488f01c631705ba086de95c8df51cdc80f0f3862ad",
+      "TransferMixin._start_transfer": "5177b13959a66c6eb341a90a8fbcca59218035e6e79425d5fdd85d267eb5561a",
+      "TransferMixin._stored_object_bytes": "9cf970538992f195e326901cc1b043940e6eff860f63112f044b32198a54144b",
+      "TransferMixin._transfer_state_for_manifest": "a8fd394d05e547f5d27512492ae75bcaa6bcb887d8fc24782066992adfc62ea7",
+      "TransferMixin._transfer_state_for_operation": "c41e43e9f94ee16d0cefa552d4a5466c495ac8762508d89157ccbb97c5dfa44d",
+      "TransferMixin._transfer_totals": "5d9f1d177916fed3e533fc5327316507b7ff387d63c0eb83814f15e55bff322c"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "transfer.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/transfer.py",
+          "OperationInterrupted",
+          "TransferMixin._download_locked",
+          "cache-operation-document-is-unreadable",
+          2
+        ],
+        [
+          "control/src/vonk_control/model_cache/transfer.py",
+          "OperationInterrupted",
+          "TransferMixin._download_locked",
+          "model-download-cancellation-was-accepted-partial-files-pres",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/transfer.py",
+          "OperationInterrupted",
+          "TransferMixin._run_download",
+          "model-download-was-removed-before-publication",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache/transfer.py",
+          "_ArtifactWriterBusy",
+          "TransferMixin._download_one_unique",
+          "message",
+          2
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "ModelCacheError",
+        "OperationInterrupted"
+      ],
+      "function": "TransferMixin._run_download",
+      "path": "control/src/vonk_control/model_cache/transfer.py",
+      "reason": "A cooperative stop is recorded as a resumable partial and any other cache error is recorded through the failure path; both report an unknown outcome to the cache operation's lifecycle, which retries the exact transfer with bounded backoff."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/transfer.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/transfer.py"
+    ]
+  }
+}

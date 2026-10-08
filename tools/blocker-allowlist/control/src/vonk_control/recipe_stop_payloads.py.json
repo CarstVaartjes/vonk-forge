@@ -1,0 +1,103 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_stop_payloads.py": {
+      "<module>": "ffa359fe45107dae878d69ce1e102d4c081c5c69373913ba6d4eadb21bf60233",
+      "RecipeStopAuthorityError": "a239300faf4ed81a05f018a889cc4be1c4d6b063a2d1597c1df18b53b071d03b",
+      "StopPayloadInvalid": "ce1fcd29e84e3cb1248b6d2c8f0265e4252f3c35c4d3b39ce1ab5a2dd2a46b48",
+      "StopPayloadInvalid.__init__": "3bbe0f8ad47a7d3676216685cb7df183b796e3ab4ca3ba4861b9c39bf0dccb1f",
+      "StopPayloadRefused": "cf86db237e75c7eb762016ba2537ac80859cb61605836eee985b6d867340af8b",
+      "StopPayloadRefused.__init__": "0b3d3334eb64034366962a1ab22aa341633abfbf1127d3cc7a59397a76dbbf22",
+      "StopPayloadUnknown": "2743a165983cb54dcf73ebbf48323e6df4b98a7568949794b7ec67834ecbc98a",
+      "StopPayloadUnknown.__init__": "63a56902fc0f95b3479186da4f4beb0b2145b11ad3f80c06eaf15162f41bd0b8",
+      "durable_run_stop_payloads": "5cd89a1660a6d28eaedbc1b46f23a14147f3fa8ffe5ad09121388ec38a4ca44a",
+      "stop_payload_from_job_run": "7acfc55a9847f274f2269d66a40ba49b82d857ba684de034fa0bac815de81f20",
+      "stop_payload_from_start": "8da9e099cda0965c0ed846c0e4002e84fc8f63b2720f4bd739f8e44cc23575fb"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.stop-authority",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_stop_payloads.py",
+          "StopPayloadRefused",
+          "durable_run_stop_payloads",
+          "recipe-stop-run-membership-differs",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_stop_payloads.bookkeeping-debt",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_stop_payloads.py",
+          "BookkeepingUnknown",
+          "stop_payload_from_job_run",
+          "job-run-generation-is-missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_stop_payloads.py",
+          "StopPayloadRefused",
+          "durable_run_stop_payloads",
+          "recipe-stop-identity-is-stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_stop_payloads.py",
+          "StopPayloadUnknown",
+          "stop_payload_from_job_run",
+          "recipe-jobrun-payload-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_stop_payloads.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_stop_payloads.py",
+          "StopPayloadInvalid",
+          "durable_run_stop_payloads",
+          "recipe-stop-generation-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_stop_payloads.py",
+          "StopPayloadInvalid",
+          "durable_run_stop_payloads",
+          "recipe-stop-target-set-is-empty-or-duplicated",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_stop_payloads.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_stop_payloads.py",
+          "BookkeepingUnknown",
+          "stop_payload_from_start",
+          "start-generation-is-missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_stop_payloads.py",
+          "StopPayloadUnknown",
+          "stop_payload_from_start",
+          "recipe-start-payload-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_stop_payloads.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_stop_payloads.py"
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/stored_json.py": {
+      "<module>": "201197950f095a3414d5f82601bedc1fa60f9d1296857c4f77a2e502a00ca753",
+      "ContractJSON": "661601e3da888d9a51788406db7b01b1096e0b6fb5c9b5c4f710e4f5824aaef2",
+      "ContractJSON.__init__": "472c18d01fa25460ff2efe758f34988995a3d78014f76813db54af4615309b0d",
+      "ContractJSON.process_bind_param": "a7593e45d7ba8888a8e8ea364fff473b61abdc97e015e067d5a6cc3a51e060d2",
+      "ContractJSON.process_result_value": "819b18693ae694f39ac232a069b7320b91ef26fdfed7fc654df0261375109882",
+      "ExternalPassthrough": "cced794a559de8bf50cf3827b5efb303a9b8edb65797e222c836184320d0f227",
+      "ExternalPassthrough.__get_pydantic_json_schema__": "59e52510191077e0a50850c1900f875c0c3a84f12cf0b05ece1e94e7e16efd45",
+      "ExternalPassthrough.__post_init__": "ac1195ea4516aae010bd676b5ecd2b4d0c9252559504db335baa796a1ab69fc8",
+      "ExternalPassthrough.declared": "b1fdafe56033ebe5e1818f309eda428d7475a5d092ea3755e7af3658e1ad4211",
+      "JsonColumn": "0ea5c9d56ec11bba0dcd642878673ea2bca16fbd3b90d58d15c09c7e2dbd35a7",
+      "JsonColumn.adapter_for": "9a25ba99821e21d0025735b19a5833b84dfdc68ad6fe75b60e79d35c374676f4",
+      "JsonColumn.all_contracts": "588e2bd03b40442bcf568820175713b1396262c76c72224b1362b0737c9f28db",
+      "JsonColumn.contract_for": "40c15b500065d12ce4689a94c8d81af657a18cb8d9c5d5237d3c040af812f521",
+      "JsonColumn.key": "f3f45adf9374aa364fc81f9978d42234da748c933c93dc3d06add30a862b813e",
+      "_check": "34d5a61bb91039fc1c3472c827432f613f4e9e0bdfe078d839ecfde2d9d115e2",
+      "_column_default": "76fb14723d523fd812d5e05b75b0dfb42db03139ed0ce853ccf0bf0e1eda7ecc",
+      "_discriminator": "060a8ee87ef89fa1303a96a80b677879ebe68ded1541b40664267fe6812e887f",
+      "_guard_row": "26c06fa1b3ca002dd1488cfabafa2710a440bac4114b0d5077e3047d8c7ca630",
+      "_is_json_type": "63b4d1f15233573a0e19f8c352ca802280dafd11538d6f9aea14a6db340a76f0",
+      "_row_subject": "ffdaf2280a6aaa565bd3006c5acd42e0ac25539eaf1e873c164883f199bc8978",
+      "_row_table": "7b477d0ee2a9d7d8ec84711b7ef6fad639ce02418b565b3f4c6da51034727fc9",
+      "_validate": "0dd7a9d632ac2363710b4efd44677f21d54767c97ba2125aed6ca6c14fdf7609",
+      "_walk": "6b8b75fe4659cf563a0fbd2fe35f1773e27f3a471a9f0ba1f837a3ff2b179092",
+      "bind": "d94156025c04ffe0a4af2fd8a158d2c4a40a4eebff806f092c47c200518dbe82",
+      "binding_for": "d7ea66ee7aee899d1dd8e6377ff6731a6297e84b56c890438ca5e9d64dff23ec",
+      "bindings": "4b534261e69627fad30c352511d0ddd186b1e9f350c2c8979fbf5dd1a0c9dde7",
+      "column_violations": "8c14571e2b764df9d37727bf53690aa2b136aa57fe0226f439b81f9427b81027",
+      "contract_models": "6cd6dc453877a4d153d84224a04dfc8bd9a8b54c696242b4aec7ce072a5fbef2",
+      "contract_models.collect": "91f99d0e6789437ee61c6139c5a0d63ce456a193c688e33629a92bbdb8af6cef",
+      "dump_column": "c80e4c34fff7a6eeb8244d5c9a8d9b1dbcb481c64131df8074e9f4ba57865302",
+      "install_write_guard": "bf181f5e8333452791004861855f0b37fa2f48d49404d34ab8da47d3a601eaa3",
+      "json_columns": "484f81ea13525b083602f6c2c2d28bc4741085819924b3a3b01a4a7fc3d36fd2",
+      "read_column": "bb770ff18e5a7f34a98861a12ae7d79388060b22c0d0db3058b0c9dde34a922e",
+      "read_row_column": "6cbd30f3abde1ebba58614a2c05d1befda08fa0d79e42e03c453231ab05e4863",
+      "set_write_guard_mode": "05d04880ba8f7c7a611740d64e8fe1184c964f9e4d3d0ef865a1ec7f91adf401",
+      "untyped_leaves": "f5fffbebfc935447f9ded9d7d60eb134c7e10de2073b36c99b9b0f13f9d0659c",
+      "write_guard_mode": "e6a830c0626b6a69030c5773a637b67d0c38828688e677849e39d392bdfe5a0b"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/stored_json.py"
+    }
+  ]
+}

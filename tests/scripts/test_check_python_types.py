@@ -20,6 +20,8 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from control.tests.registry_storage import read_registry, write_registry
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check-python-types"
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -57,15 +59,71 @@ def test_typecheck_timeout_fails_with_a_visible_cause(
 ) -> None:
     module = _module()
 
-    def expired(command: list[str], **kwargs: object) -> None:
+    calls = []
+
+    def expired(command: list[str], **kwargs: object):
+        calls.append(command)
         assert kwargs["timeout"] == module.TYPECHECK_TIMEOUT_SECONDS
-        raise subprocess.TimeoutExpired(
-            command, float(module.TYPECHECK_TIMEOUT_SECONDS)
-        )
+        if len(calls) <= 2:
+            raise subprocess.TimeoutExpired(
+                command, float(module.TYPECHECK_TIMEOUT_SECONDS)
+            )
+        return subprocess.CompletedProcess(command, 0, '{"generalDiagnostics": []}', "")
 
     monkeypatch.setattr(module.subprocess, "run", expired)
     with pytest.raises(SystemExit, match="600-second execution timeout"):
         module._diagnostics()
+    assert len(calls) == 2
+    assert module._diagnostics() == []
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("fault", ["timeout", "malformed", "shape", "exit"])
+def test_unknown_checker_outcome_reobserves_and_a_fresh_check_runs(monkeypatch, fault):
+    module = _module()
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            if fault == "timeout":
+                raise subprocess.TimeoutExpired(
+                    command, module.TYPECHECK_TIMEOUT_SECONDS
+                )
+            return subprocess.CompletedProcess(
+                command,
+                2 if fault == "exit" else 0,
+                "[]"
+                if fault == "shape"
+                else '{"generalDiagnostics": []}'
+                if fault == "exit"
+                else "unreadable",
+                "",
+            )
+        return subprocess.CompletedProcess(command, 0, '{"generalDiagnostics": []}', "")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    assert module._diagnostics() == []
+    assert len(calls) == 2
+    assert module._diagnostics() == []
+    assert len(calls) == 3
+
+
+def test_exhausted_unknown_checker_outcome_does_not_poison_a_fresh_check(monkeypatch):
+    module = _module()
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        text = "unreadable" if len(calls) <= 2 else '{"generalDiagnostics": []}'
+        return subprocess.CompletedProcess(command, 0, text, "")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    with pytest.raises(SystemExit):
+        module._diagnostics()
+    assert len(calls) == 2
+    assert module._diagnostics() == []
+    assert len(calls) == 3
 
 
 def test_an_unlisted_error_fails_even_at_the_same_total() -> None:
@@ -146,7 +204,7 @@ def test_update_keeps_known_reasons_and_reports_new_ones(
         [known],
     )
 
-    document = json.loads(target.read_text(encoding="utf-8"))
+    document = read_registry(target)
     entries = {
         (entry["file"], entry["rule"]): entry for entry in document["exceptions"]
     }
@@ -164,7 +222,7 @@ def test_failed_gate_preserves_the_actual_diagnostic_location_and_cause(
 ) -> None:
     module = _module()
     target = tmp_path / "baseline.json"
-    target.write_text(json.dumps({"schema_version": 1, "exceptions": []}))
+    write_registry(target, {"schema_version": 1, "exceptions": []})
     monkeypatch.setattr(module, "BASELINE", target)
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT)])
     report = {
@@ -196,7 +254,7 @@ def test_partial_check_does_not_require_exceptions_in_unchecked_files(
 ) -> None:
     module = _module()
     target = tmp_path / "baseline.json"
-    target.write_text(json.dumps({"schema_version": 1, "exceptions": [_exception()]}))
+    write_registry(target, {"schema_version": 1, "exceptions": [_exception()]})
     monkeypatch.setattr(module, "BASELINE", target)
     selected = "tests/scripts/test_check_python_types.py"
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), selected])
@@ -216,7 +274,7 @@ def test_partial_check_still_rejects_new_errors_and_stale_selected_exceptions(
 ) -> None:
     module = _module()
     target = tmp_path / "baseline.json"
-    target.write_text(json.dumps({"schema_version": 1, "exceptions": [_exception()]}))
+    write_registry(target, {"schema_version": 1, "exceptions": [_exception()]})
     monkeypatch.setattr(module, "BASELINE", target)
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "control/tests/example.py"])
     monkeypatch.setattr(
@@ -273,8 +331,14 @@ def test_real_hook_checks_whitespace_paths_with_prepared_environment(
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pyright]\ntypeCheckingMode = "basic"\n'
     )
-    (tmp_path / "tools/pyright-baseline.json").write_text(
-        '{"schema_version": 1, "exceptions": []}\n'
+    write_registry(
+        tmp_path / "tools/pyright-baseline", {"schema_version": 1, "exceptions": []}
+    )
+    helper_package = tmp_path / "control/tests"
+    helper_package.mkdir(parents=True)
+    shutil.copy2(
+        ROOT / "control/tests/registry_storage.py",
+        helper_package / "registry_storage.py",
     )
     shutil.copy2(SCRIPT, tmp_path / "scripts/check-python-types")
     shutil.copy2(

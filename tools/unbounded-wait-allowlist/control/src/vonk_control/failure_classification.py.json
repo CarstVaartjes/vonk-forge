@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "error_code",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/failure_classification.py"
+    }
+  ]
+}

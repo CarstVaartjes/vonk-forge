@@ -1,0 +1,36 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/run_observation.py": {
+      "<module>": "a04786fb3a49ee5c856d319ed9555dd7e30b153c549e089d24bb816d2c716cb4",
+      "RunObservationMixin": "d521115801aa982adbbf18a17338c74326b6590112f97ec124601b529c307ff7",
+      "RunObservationMixin._adopt_start_in_session": "19c4bcb306dfb14a4af44ace4b6bca39734bccaa8e74c6f64733923ac4374783",
+      "RunObservationMixin.adopt_owned_operation": "68ebae5fca366e5ffcec29fda0e5025c92dd0891d30b5d83027949c69ef63a2e",
+      "RunObservationMixin.adopt_start": "00f0ffa92891772878c8c81993dee01b91425e3b4fb60ad512a49c85990cd022",
+      "RunObservationMixin.preview_run": "b336b332864296964835d6a71a8158cb9f66b0b8dc4fc4463f8008d374f14712",
+      "RunObservationMixin.replay_start": "929169c7039b2fda240f9258d6989cf19a327ea0aa1f077171fe3ce13d6e7e9e",
+      "RunObservationMixin.run_status": "6996272fb5e503a3b717137de4eee15507f664938979e9c5e2303f277f2173ce"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/run_observation.py",
+          "MissingRecord",
+          "RunObservationMixin.run_status",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/run_observation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/run_observation.py"
+    ]
+  }
+}

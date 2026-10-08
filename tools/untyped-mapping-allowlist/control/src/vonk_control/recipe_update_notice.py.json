@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_update_notice.py": {
+      "<module>": "fff765149a4341e99e73a90e7b106e705c5e9b04dc02febe90a49a32027547b8",
+      "RecipeUpdateNotice": "7d4fc83e73e169b45e05258ee3255f80f5496e567a2c1b698374b808b40bc499",
+      "_release": "4e4550d3ff3b5a2c1730c03646dbe2754f54cec8c90fa9867ac67105615a1db1",
+      "newest_active_revisions": "8635b6d00afde6cf10ecfc82450f6c365c2df20ff4d17cb1e90eef87ac9f79de",
+      "recipe_update_notice": "f5cca9bebc287021812e19859c187f5c19022aebbce555d39dce1e930aaa906f"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/recipe_update_notice.py"
+    }
+  ]
+}

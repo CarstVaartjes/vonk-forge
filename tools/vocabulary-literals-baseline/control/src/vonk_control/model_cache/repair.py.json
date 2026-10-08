@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/repair.py": {
+      "<module>": "8fc7de7190b5869d25f44787b4691858634a8fd68670c98b57d5703084c4f1ba",
+      "RepairMixin": "cf007e32e6d68d88c9c2bd97a77d3cd85957d4b32b32e7696854f30789acd21c",
+      "RepairMixin._capacity_holds": "f3a75fff03b3f4b8211f316b13cc8e3cf25ad787d14383e6b1c252bc67607427",
+      "RepairMixin._capacity_wait": "91a9f7df1acfd2ea9f172baea0202d8075eed84e16379377f46c223983a8b56d",
+      "RepairMixin._manifest_for_set": "48cd67e652d57c4e222ec9c19aee52e161de3ce1ff1727fdaff3be178a3f07b7",
+      "RepairMixin._manifest_has_huggingface_source": "2c60fcce51a1807f1bc72594a8b4f7723cabaa2c47f261f182f9bd71bbe2e10a",
+      "RepairMixin._payload_has_huggingface_source": "6ba0293a8b70ca4c9ec19895ead37b7ad2e02427b6a8c8edf548fa5b6b31ab67",
+      "RepairMixin._record_huggingface_cooldown": "547916499682ec9134efc5c2ccd040424390a5f0dae0666c4fb051249c7cfc1e",
+      "RepairMixin._refresh_huggingface_cooldown": "7f565891883ecec5ae611781952dcbc240e1f4d6b4a6905300cb8a0e0463da6a",
+      "RepairMixin.activity_operations": "807526130e4231374aaeb21b88d0a4665a860f3c0a81f9c777b3ba237bcded09",
+      "RepairMixin.manifest_for_artifact_set": "bdd8c06010175eb1bc06cac2a11a925159f3bd91a578c74915ed9b402ed65124",
+      "RepairMixin.preparation_evidence": "6af78221e4adbdc8285fb36cb47e35fc3d6afe6b7a527f6d36c242da442d5030",
+      "RepairMixin.repair_preview": "92e2e35c21c977b562c0c256a9ab43d5d27f3c92ba33d17b8c43dd246411d041",
+      "RepairMixin.start_repair": "eb55c7728cf0bec82cc9284d08d53db56b7d10a5866882ae6bdd22041992c9c1"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/model_cache/repair.py": 5
+  }
+}

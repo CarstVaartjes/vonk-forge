@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distributed_recovery/authority.py": {
+      "_accepted_start_authority_payload": "c39ec056b72116e45716561ac5de39cc935462e1c680440367c631e1ab4ed02f",
+      "_accepted_start_child": "9b849eeca86d948635e52077b7bee34ab36ffe9c107037033d53feb3c1567404",
+      "_enqueue_recovery_stop": "ddb0e4bd257065ae1a084fbf7d81c41bb7f65900b695236de9a53e15b3bd8bf4",
+      "_original_start_authority": "f2eaaad5ae67019a721c804bbbef7a83f5b4a301bb55295f5d41fc4470e34959",
+      "_project_start_phases": "6aba82169d2a4dd13e5bcd6f06da9f3c6c900455b00d6b04d2e9f8dc3d944d45",
+      "_recovery_authority": "026df91f0e14cca3ee442ce3b60e092e4a99449c64339a68c5d94851583a545a",
+      "_start_binds_current_run_plan": "d682be7cc7ee2358b66b3f67a8c0aabffc136c43bae47bf8d49a2489a3232df0"
+    }
+  },
+  "sites": [
+    {
+      "expression": "run_plan.recipe_revision_id != installation.recipe_revision_id",
+      "function": "_recovery_authority",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/distributed_recovery/authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    }
+  ]
+}

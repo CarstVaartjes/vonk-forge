@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/tests/test_model_removal_reference_lifecycle.py": {
+      "_force_model_request": "0531926911f440b131a277df005f4b8cd3f8011713125396082d3b61c03150ee",
+      "_one_model": "afc00dca070938be0b338fea1e28e332771a51b157b8759e9dbc78a5f932b871",
+      "_register_model": "d1ed3de1e47ad73c410e1f587201b9943d13569655513b39b8717e55972a6fc8",
+      "_removal_service": "d8d5162590c3e341568a6a93ce4f79257aa23361e9cd29274511ad7d4ca446c4",
+      "_seed_model": "5f941553744d45d8b0db298bbdd3cdeb4c3745412d8f070b1c99fadc75fbcf20",
+      "_settle_removal": "bc0a6d31f1381080c9e6c03e682967b533ca58bfc60728e8c7b2e1c9d51ba0d5",
+      "test_model_removal_reference_scan_failure_rolls_back_and_same_key_recovers": "c22f60f33d44fa9ebbe47af9c8fa6739e755118fded68467f4f24d0bccded9f2",
+      "test_newer_model_removal_supersedes_an_accepted_download_request": "775c85936f9d3cbba73c124d18b044ca37d337fc39ded42d57da2de0f6e3789b",
+      "test_removing_one_set_leaves_shared_object_open_for_second_model": "776a06fae5a1b258196c5ce00a3feac85074d9096452dabcbeb08d710cc8d680",
+      "test_sibling_membership_change_after_review_keeps_the_shared_object": "8e624124e3069ff548cb33289818c76d8f888575a5e33f6ce5d395edf4877af6",
+      "test_sibling_membership_change_after_review_keeps_the_shared_object.review_then_change_sibling": "a23bcc3fb7cfbfef47cc8991171a0285534f1b5da0ba658627ae6c6ab894a5bb"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_newer_model_removal_supersedes_an_accepted_download_request",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_model_removal_reference_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_sibling_membership_change_after_review_keeps_the_shared_object",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_model_removal_reference_lifecycle.py"
+    }
+  ]
+}

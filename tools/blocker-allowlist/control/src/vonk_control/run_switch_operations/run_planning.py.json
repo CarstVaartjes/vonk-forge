@@ -1,0 +1,43 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/run_planning.py": {
+      "<module>": "4711792a94d8f3b9c03922abbfe5c0092bc717203b70040b3f10fab682dcee5d",
+      "RunPlanningMixin": "29d4ef1fb6c0605e66fbe61633f0c3651e5565dac56b4b13818c4f6f4437f823",
+      "RunPlanningMixin._preview_run": "29bfd40599c7a5c4c874af464c600099cb1427271549b0fc8370d6f2a31247c7"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/run_planning.py",
+          "MissingRecord",
+          "RunPlanningMixin._preview_run",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/run_planning.py",
+          "RunSwitchRequestInvalid",
+          "RunPlanningMixin._preview_run",
+          "profile.runtime-image-changed",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/run_planning.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/run_planning.py"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-agent/src/config.rs",
+      "reason": "operator-editable site TOML that must ignore keys a newer or older release dropped; the generated readers are JSON-only and reject unknown keys, so the file is not a wire document",
+      "type": "AgentConfig"
+    }
+  ]
+}

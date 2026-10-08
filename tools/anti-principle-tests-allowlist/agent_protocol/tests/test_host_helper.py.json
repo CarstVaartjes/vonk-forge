@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "agent_protocol/tests/test_host_helper.py": {
+      "start_plan": "aca6b7144bfb8846caaa54ffbeb788a35caaffee8a0bd2e8c8dcef0089cf28ae",
+      "stop_plan": "0fdc17f86066f84d86d2195e90d4fe4ecccacf57522a6d1ab8d359be68f8b5d1",
+      "test_exact_runtime_request_round_trips_a_plan_over_two_megabytes": "baa634ee97ce8d727415a297130f26ff680177a548dd9fab4e81240ffb3dba4c",
+      "test_runtime_authority_grant_binds_plan_generation_and_both_run_ids": "b9b0f8e38c018561601a95c6b34b15964790cd1c373efe29937251b639f439a8",
+      "test_runtime_cleanup_identity_is_required_only_for_cleanup": "66bf0a916d9bbb08005503f72f62a6e9884a9e9b14459a5158ba9f17be3cb8bf",
+      "test_runtime_reconciliation_identity_is_bound_to_cleanup_request_and_grant": "81fe2f3059b7bcf70091ba4d873bac29dd719115284594a6dd66e951837f7a81",
+      "test_runtime_request_arguments_are_bounded_by_bytes_not_a_count": "0f5f429204d570f08fbafaaba274b1c962cc556520707d5e0d8b39aca4c38207",
+      "test_runtime_request_rejects_a_typed_plan_above_its_document_ceiling": "fb9eb861ef9e779ab40811fd7e4c0159b67ba590c684aaa474b30b1f235dbbb1",
+      "test_runtime_stop_request_binds_exact_stop_plan_and_has_no_argv": "301c8555952bd9adf057196b4cce2b904104920ac33f330dd37c41be1ad3e8d8"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_runtime_stop_request_binds_exact_stop_plan_and_has_no_argv",
+      "kind": "ending-without-fresh-request",
+      "path": "agent_protocol/tests/test_host_helper.py"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/tests/test_operation_response_budget_installed_cli.py": {
+      "<module>": "0260d39b66bffde85144091a08b86144904c45732887ce568649ca45c8011bc3",
+      "_members": "f54f1951a26d32b395f95010704ba6359e0a4d50cf9b0612808ce275c9406f79",
+      "test_installed_activity_byte_continuation_and_aggregate_fact_recovery": "a1234ad203cb7f46c1f8f686d50b758f9cb5fcaf88f00c6362c856918cb84cfa",
+      "test_installed_activity_byte_continuation_and_aggregate_fact_recovery.detail": "5cc224544a931c5dae7d8c7aa55df529a22b8fb9a5fb1512d4698be9e301bebe",
+      "test_installed_activity_byte_continuation_and_aggregate_fact_recovery.page": "ee207e4b78fcdd1f89a9f78d07ddfcf3643de41225deda85e7056ac4605f39d7"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_installed_activity_byte_continuation_and_aggregate_fact_recovery",
+      "justification": "Protected large optional progress becomes unknown200; same detail repairs. Indivisible identity allocation503 obeys existing byte owner; exact continuation resumes after field repair with same IDs/total.",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_operation_response_budget_installed_cli.py",
+      "reason": "resource-bound"
+    }
+  ]
+}

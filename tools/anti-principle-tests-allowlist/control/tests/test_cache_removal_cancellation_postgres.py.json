@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/tests/test_cache_removal_cancellation_postgres.py": {
+      "_cache_adapter": "46bd5f892614c4df655f6ad317725a1f3018d81f833a069e8b057016475dccf2",
+      "_cache_adapter.Adapter": "afe9a045cbe93cee0e5cd61091ce116b452217757c66b151fa50f2b7fce39617",
+      "_cache_adapter.Adapter.__init__": "ee91a6675fd179affc70cc9c8b1a81c4db8261d3001441ef6223dd2a22c4dc33",
+      "_cache_adapter.Adapter.cancel_operation_in_session": "8e73e79444621274b04d156249b397a71f63c208c3984085c2db6a4d18d546a6",
+      "_cache_adapter.Adapter.download_preview": "432e928df79e84533684f9ad33dfdcd49da9ef7c3016d551cd6fe0321f19266e",
+      "_cache_adapter.Adapter.get_operation": "2b8e0b98e34d76e1a35b64601a7fa819ca8cf4ee249f3f8b389d3afff1e186eb",
+      "_cache_adapter.Adapter.list_operations": "c3e97ef30ff0ec1517e30bb7c83abbc5f0f5f5f86194bab7370e0d05cfd333f1",
+      "_cache_adapter.Adapter.resolve_artifact_set": "8fbcdb4347f05260e269e706c6b105fc0c7e5ba3144a212167aa9a3ff7b60289",
+      "_cache_adapter.Adapter.signal_cancelled_operation": "89bea67bce33cdb8e0f5aca5fb732e4a4d4ecaa2719336fceff3a8c90314914f",
+      "_cache_adapter.Adapter.start_download": "0e513517854d3cba6427559333c1a83d55fe11e179334ff5fae0bf1b264fa204",
+      "_recipe_model_with_assets": "262937210a8050a88073764d0f45bb686f764b7c2427223b5b9bc8318ced2c9d",
+      "_service": "c55016d9a8df2bd17e7830e047df8ce7109238d43f6153f3a1261f5102966440",
+      "_source_artifact": "68cb8177ca0cb2acaad44bbf18da369a4f000a0283d1c9dec1ea5c2aae171642",
+      "test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_peer": "c6712abb8c2879ff58e6ef29fb56500bd87e8c2c10d0d325082974554112848c"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_peer",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_cache_removal_cancellation_postgres.py"
+    }
+  ]
+}

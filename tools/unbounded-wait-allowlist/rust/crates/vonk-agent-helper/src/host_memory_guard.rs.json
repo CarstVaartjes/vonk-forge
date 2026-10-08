@@ -1,0 +1,20 @@
+{
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "kernel_events",
+      "justification": "Process-lifetime supervisor of the one `journalctl -k -f` follower that feeds the host memory guard; the guard itself never waits on it, it only try_sends into a capacity-1 channel. Each iteration spawns or reaps exactly one child: a previous follower is killed and reaped under a 1-second wait_timeout, a failed spawn or EOF sleeps 2 seconds before retry, and each journal line is read through take(4096) so no record grows unboundedly. The loop ends only when the helper process exits, by design, because losing the kernel signal would silently disable the guard.",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent-helper/src/host_memory_guard.rs",
+      "reason": "resource-bound"
+    },
+    {
+      "count": 2,
+      "function": "spawn",
+      "justification": "Two process-lifetime guard threads, each a fixed-cadence sampler rather than an external wait: every iteration performs one bounded step (a /proc read, or a docker inventory/stop through the helper's timeout-bounded CommandRunner), receives with recv_timeout of one sample interval, and sleeps SAMPLE_INTERVAL (250 ms) so there is no hot retry. Pending stops are a BTreeMap bounded by the managed-container inventory and are dropped when a successful enumeration shows the container gone. The loops end only with the helper process, by design: a guard that exits would silently disable host protection.",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent-helper/src/host_memory_guard.rs",
+      "reason": "resource-bound"
+    }
+  ]
+}

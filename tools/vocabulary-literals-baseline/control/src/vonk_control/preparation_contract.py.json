@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/preparation_contract.py": {
+      "<module>": "bd6ff63ac97aa6eb72acb201db6f26fa5ddef1e94a4c659e70136b50e1075772",
+      "CompatibilityIdentity": "a6c651c9cffc30130683e1f7f91db5ae74d2dc24048aa84e35c317dc29c01f73",
+      "CompatibilityPreparation": "21c7a4a9fec8fe660423eab790572b90dfc803aef93a6a3e6fef591d12e5b01a",
+      "CompatibilityPreparation.exception_state_is_evidenced": "2d0e8fcc3a9d282f9ec1ae670bce45abeb1b9e481d2af53c1eb95bae24e09275",
+      "ControllerAssetState": "a4a1853b5ab90a94a10641bf29b8dbd99c979e2341f4974c7f17932d91788df4",
+      "ControllerAssetState.byte_state_is_consistent": "3a75f8e685d3271965ddd9c00d1d1efc052c6420ec986864a3c38536a7de228f",
+      "ModelArtifactIdentity": "c00f9ed2adbc0ecf842cb5a161f2d63bb1202ee8fb53ddec468dbd218cd3c928",
+      "ModelArtifactIdentity.dependency_identities_are_canonical": "e1d52edbf0a790798859c68c46f2972b0102de76f1e441f3889df690decc429a",
+      "ModelArtifactPreparation": "485e74467c37fbca08daa6d363a5b28dff1a7a4dfc740da991a92b030fedbc9d",
+      "ModelArtifactPreparation.exact_model_set_is_bound": "acf49c7991023e8025a22c379f1f76725165868754045c3868090f5209f8d48b",
+      "PreparationReason": "f06c7021c0ba01aa38123b7b774e5fcd663cf03e9160250f6151a201d301323d",
+      "RolloutPreparation": "6601e7d517f63315930754fbf5093ff31bae5e16a7b2076e4c619229072c1544",
+      "RolloutPreparation.readiness_and_scope_are_consistent": "1bd0269fd203ad71eb508f7cfbbc22f70b8ce3863a6f2e9ce3845b10ae69e6f1",
+      "RuntimeImageIdentity": "d13953d8e31a51dfcfae042ebbbe01ca63e8aa79ecd2e77c25225e7d81712a09",
+      "RuntimeImagePreparation": "5b9151fe190d3fbdffdfa6fc552d4cdfeab218a9c37b4735a1cb36fedb4887b5",
+      "RuntimeImagePreparation.exact_oci_image_is_bound": "a2d202ddecd63a3ca1508a633fc1ddcfa492b858432c196294539960065d8d62",
+      "TargetAssetState": "b02e28c1981f70adee3d71a06ed78c4343948944294f4c90a01f540728d0d492",
+      "TargetAssetState.target_state_is_consistent": "3c6dd596d460389d8f7c9c4fa8463f21fd1be719935a31505992bc1483d06604",
+      "controller_assets_ready": "0443a57eef7ecf25f8d685c47703a2fc4eb43993989f0a39f4ea7c5b4f64fe7e"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/preparation_contract.py": 4
+  }
+}

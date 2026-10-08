@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/jobs.py": {
+      "<module>": "a531921420bb6a42b4a3313c899bea56a588441a86e314277227a12f9d40542a",
+      "AttemptFence": "1957f5fa4c0656b25819b2892cbccb7a1538092adf86c8cbea80cee45413f8d3",
+      "JobService": "95486cb178cc0ab82c259ddc9511ca2c9a1af2cb8ff0d4097bd05cb2caf33066",
+      "JobService.__init__": "569ac100f30865558ab616760a55ff4aa34c1ba1efac281fc25885782154fd45",
+      "JobService._active": "01ce543e33762ec61f5914d267d541b6e62cf80ae7064642280329b5661737b5",
+      "JobService._finish": "90d40a3cfdd6ccb4ebd7c42dada95792a164e3bb4bdc2809d81b16f66185821a",
+      "JobService._same_request": "4c44d36c7b28e9ad4f59ffa0728755b7fcc722045f955d31af7328ff1d55e21d",
+      "JobService.claim": "06bb1576f47ce73a46c911a611380a5ef3b4002feef48ecac682b2f61226f1bc",
+      "JobService.enqueue": "f46faf7e714befbed9bd602def9b42d9fa7975f000b5089c00923d9c0aeb36fc",
+      "JobService.enqueue_guarded": "951f9ece44cfb3566c66002e38cdbdfdcd0cfd6bb3dbd1dd2fe31addd4fe0200",
+      "JobService.fail": "e13bba1fdbf01126f1a38c5d62b34fa15d0ec526396c164b945d119bc3227675",
+      "JobService.get": "5d53341250e54bcdd8119b2cd7574a23ebba41ad94a9f895b0477370325843dd",
+      "JobService.heartbeat": "8259aca09f31be1cce0859d66345efb668cf1a01cbb84d890e36de0ee7a5a86e",
+      "JobService.succeed": "df1126e6b697e0f3bea11560587e3f8243c4c5d31a649cbffdb8ab65963bb8af",
+      "StaleAttempt": "4a47985573b1de2cc514bfe157541b0e0d009d8e6f6b1f3e07ce2aaf4562a4d4",
+      "_aware": "e3f863dd032191f03c6bc6cdd1d84a10cbae0188f0a6e678b74883dc6aedeaa0",
+      "_canonical_payload": "4cde2324709afb484d819ace954f3994ca6617d5ed5b0cc69c1437d5e05eb77e",
+      "_canonical_payload.inspect": "41309a7ebddca0303ed2e26492f2f9e1bb2c82e3f9c2a4cf698687fb0056b936",
+      "_canonical_targets": "d70d0f21500cb829555872ebf21b24b6aea778fc67817cd3fe544d01410661fa",
+      "_validated_quota_fields": "12d422d23dcbb7075e13308140c610e0541df98354d35ed7de414ee6c22737a9"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/jobs.py": 6
+  }
+}

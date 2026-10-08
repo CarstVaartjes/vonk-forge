@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/auth.tsx",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "AuthContextValue"
+    },
+    {
+      "file": "control/web/src/auth.tsx",
+      "reason": "method-signature interface over the generated schema types (client seam for tests); declares no data fields",
+      "type": "BrowserAuthApi"
+    }
+  ]
+}

@@ -1,0 +1,139 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_builds/planning.py": {
+      "<module>": "30cc5da7c01fa5cfd907c57747cbe9f2f51253a2bcc830c7dde3a22766d2c42f",
+      "_admit_spark_build": "19d8081764c4ca5332aae443e6e89ca85907cde879c249fe48f9bfeebef68a06",
+      "_prepare_plan_once": "c254a7d6fc8cde17ce670ad2f8e6249263dc028032dc4d3ba4f366c318a4323a",
+      "_usable_prebuilt": "25d6d985c60b7871f3b666e64d38227e9e409874fae5dd5ef7633bc7cfa7d00e",
+      "plan": "0199120b2d8176dd583f6ecbd08ac34d5bdeb771d9fdec50e94399211b9d3952",
+      "prepare_plan": "2d015085b4930e7c414af05d7be47d3832eef73079915faa694afe9cbccd9d83",
+      "reusable_build_id": "be1c6ec511d013f22f5c8f9365d25b3cf740edf89d59b62002b589874749b7a2"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_builds.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "MissingRecord",
+          "_prepare_plan_once",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildInvalid",
+          "_prepare_plan_once",
+          "build.recipe_unresolved",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildInvalid",
+          "_prepare_plan_once",
+          "build.source_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeSourcePolicyError",
+          "_prepare_plan_once",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_builds.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildUnknown",
+          "_admit_spark_build",
+          "build.capability_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildUnknown",
+          "_admit_spark_build",
+          "build.insufficient_disk",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildUnknown",
+          "_admit_spark_build",
+          "build.insufficient_memory",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildUnknown",
+          "_admit_spark_build",
+          "build.inventory_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildUnknown",
+          "_admit_spark_build",
+          "build.inventory_stale",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildUnknown",
+          "_admit_spark_build",
+          "build.network_capability_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildUnknown",
+          "_prepare_plan_once",
+          "build.contract_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildUnknown",
+          "_prepare_plan_once",
+          "build.node_unknown",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_builds.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_builds/planning.py",
+          "RecipeBuildRefused",
+          "_prepare_plan_once",
+          "build.resolution_stale",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "prepare_plan",
+      "path": "control/src/vonk_control/recipe_builds/planning.py",
+      "reason": "Re-observes the exact request in three attempts with 0.1/0.2 second backoff after the per-attempt reading session exits; exhaustion preserves the typed cause for the lifecycle owner, and security/input refusals are never retried."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_builds/planning.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_builds/planning.py"
+    ]
+  }
+}

@@ -1,0 +1,120 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/saved_profiles.py": {
+      "<module>": "31a341dd87eec39193a85b53d3fcb5b9943661871a0f2a4c754f0dd3e0dc7756",
+      "FleetProfileService": "aed67ea611a491633c02d438ddeb5dd544469a51b9d1a0990af4320df5ffcedd",
+      "FleetProfileService._definition": "a0d3188afaf489565cb16b8d04e45771c12e3495314741b5755c19b69337a184",
+      "FleetProfileService._definition_issue": "e14d7dfaff07edb1d11a746aa4d933699af4ec91e11334c16e0df7c93a20843c",
+      "FleetProfileService._read_view": "8768e6e8bd964aad8b0a68091da5274edc935af78937fde134edf62d0b7cbcac",
+      "FleetProfileService.create": "0f9eeaaedcbbb6daa4555f44aa6da5d6974c5a68c8fa5d91a513a9787231ddb0",
+      "FleetProfileService.definition_number": "4c6c2177aa1119f7c0371b30aa86a0cb46037f9055c8867762945e0c756a7824",
+      "FleetProfileService.get": "d7a4d760c18c93a771d4af7483cc591ce8a756b6e95334a4888322e62fc7bc18",
+      "FleetProfileService.get_number": "511f1f9e4ba774c38710db04b497fa3b220a1a3cc0b3db2b4a8d5633ebc226ff",
+      "FleetProfileService.list": "eb9e0f0ccf81bfa6f48a64a6389010de53c831cb5e60b01dcd3ab8c0e41cca27",
+      "FleetProfileService.load": "b2a74c33f68e7af3084714d305e87d19d52a62df36a8ef44f390751aabdf26e5",
+      "FleetProfileService.progress_number": "0377ec52848e9042392877e2956c2fd7bae16b27a1264d46ed48412decfb408c",
+      "FleetProfileService.read_number": "6ea8400ce7a5afe43bddc196861d8ac1f2c387d76edc641ea05effb5234324c8",
+      "FleetProfileService.update": "7e1216cfa9e7c71c3dd1555ce78b79a43207b169578dd39982824e6b982ab855",
+      "FleetProfileService.update_number": "e5073bf4b71c9f51d68205ae48294a1ca91e64ff5623cfd0bec371b58f324bf1"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.create",
+          "a-fleet-profile-with-this-name-already-exists",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.update",
+          "a-fleet-profile-with-this-name-already-exists",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.update",
+          "profile-revision-conflict-expected",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "FleetProfileInvalid",
+          "FleetProfileService.update_number",
+          "profile-revision-conflict-profile-has-not-been-created",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "MissingRecord",
+          "FleetProfileService.definition_number",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "MissingRecord",
+          "FleetProfileService.get",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "MissingRecord",
+          "FleetProfileService.get_number",
+          "not-found",
+          2
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "MissingRecord",
+          "FleetProfileService.load",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "MissingRecord",
+          "FleetProfileService.progress_number",
+          "not-found",
+          2
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "MissingRecord",
+          "FleetProfileService.read_number",
+          "not-found",
+          2
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "MissingRecord",
+          "FleetProfileService.update",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/saved_profiles.py",
+          "MissingRecord",
+          "FleetProfileService.update_number",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/saved_profiles.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/saved_profiles.py"
+    ]
+  }
+}

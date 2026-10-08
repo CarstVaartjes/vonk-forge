@@ -1,0 +1,151 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/catalog_sync.py": {
+      "<module>": "030d67941c111c233ba666dceb4b1e8a214b49075975da87bbd4b564a9cc9632",
+      "CatalogSyncError": "ea418c4aa04b9f487d1b1fcccbc1f0e7d5ff7c2643a5bf3800c2c00a92448304",
+      "CatalogSyncError.__init__": "0408c73804e73234c009d8657a2c059325d402b509333d12f047fda4de65cd78",
+      "CatalogSyncFailure": "71e10c65cedcdd5e9701bed3ffbcfdbfd342be2211ffc010d9d7bdcdc31c5211",
+      "CatalogSyncRefused": "3529811ff6843748e162fce5fe803f82ca72c991fe8e24ee23744a2bf01fd15b",
+      "CatalogSyncRefused.__init__": "3a07fb1e6262fa1481d43a8af775a0a167110b21767083267af5743e5bb15ffc",
+      "CatalogSyncRequestInvalid": "3254d3aa52a2a703cab6f58a979335cc8ea1df716e6ea71c25389a8642166251",
+      "CatalogSyncRequestInvalid.__init__": "ee01cf95da684f17f14d7f8c92dd661cdf65857e069ff947103a645af748d503",
+      "CatalogSyncUnsettled": "0f653b2f23af0441169ab9d3db9d6a4a780e4beb2e070c441d992a2cff42c30c",
+      "CatalogSyncUnsettled.__init__": "9aac7944fd2029271087ab1d9c40d68899f4774be0866caff04a3e1e6cfe9015",
+      "CatalogSyncView": "8850bccf0544508168d6d09639fa5f2e189ab859a651984e885b96eab14a0bda",
+      "ManagedRecipeCatalogSyncService": "d9f32816a96dfa011929d713f64e814bd2204edc862090cffb70975e35e7c0da",
+      "ManagedRecipeCatalogSyncService.__init__": "3f0872a902a9f3c4dff3b2f292f2073af185dd723fed78f6cdbe90c636161922",
+      "ManagedRecipeCatalogSyncService._apply": "f16fe9ce8c839f6288b39b2e05419d93172db11ca2b78581a88693a25431d3dc",
+      "ManagedRecipeCatalogSyncService._by_request_key": "53d0c57b0b763fe86e76aba93e582f6a2e4724ca95e0f988a37604f784909e8f",
+      "ManagedRecipeCatalogSyncService._expire": "50bb71e669b9a75ed1531cc6397751af8d35a3476a663cbdc55e026d16249581",
+      "ManagedRecipeCatalogSyncService._expired": "de1f16295eb7bb8837ba66517be1d8c5b853ef67ec77f8a468262001c30ec17c",
+      "ManagedRecipeCatalogSyncService._fail": "d9f62142d793c2808a54083bb721b27c209a4c9893f9bbe397efb1a1a0f4ac6c",
+      "ManagedRecipeCatalogSyncService._finish": "3d3134cc45bfe9cc03e91bb5845ebcf091197aee06b3cb801fab6988eae33fc6",
+      "ManagedRecipeCatalogSyncService._initialize": "f8a2c9483a649fdb80d6e769ba00f31d20885a6cf72b68d648dc28ce0a914ef3",
+      "ManagedRecipeCatalogSyncService._progress": "2699a4e9ecff7dc5d44d33bc2d90199a407402d42b1579b5460d47fb23454c21",
+      "ManagedRecipeCatalogSyncService._record_problem": "7352504cc6e1c6a600159aad3e8bc292414b16e53c02350d62918e07a55101b8",
+      "ManagedRecipeCatalogSyncService._record_problem_values": "7be53f36db9c2f4757f3ee129ff132cf658b92083428a9679f7f3fbfe69cc19c",
+      "ManagedRecipeCatalogSyncService._record_read_failure": "2d3f71abfb233252f4bced5603e2324109eb165296d4a9c9f4aa6ae41086e0b3",
+      "ManagedRecipeCatalogSyncService._store_source_bundle": "db90b6733ccb3f14db4a3a50fbd3a516786d94d8a81c4dfc51542eb83f96951d",
+      "ManagedRecipeCatalogSyncService._validate_request": "61b5917325aa519caeec22ca1824f016b94a76dc6701090237c2ee962709fd9a",
+      "ManagedRecipeCatalogSyncService.automatic": "c406a7ba18e1e7ea255d98e2602a146f37c13284372742e3896eb6bc2d23c3e1",
+      "ManagedRecipeCatalogSyncService.get": "ff51a26f9e184cd94fe6a37b4287913942a6f18b3a13e918db03e23c69d910f1",
+      "ManagedRecipeCatalogSyncService.latest": "f63a9437ebb463214578ce75783f322f0c952f2a99e8e3e44295c3f641cb098a",
+      "ManagedRecipeCatalogSyncService.sync": "ad3b78a862059a878c431fd863a085df8231ef4eb949a3d035d273688ce13322",
+      "RecipeLibrarySyncReader": "582d875cda2b8e5f0c2fb93e4d7646e36e786cee03dc5227265f3babe3afe67b",
+      "RecipeLibrarySyncReader.fetch": "ff5312059e919f605684dd898ce9fa38f456cf98326d24bbeed2929ccb18b1b6",
+      "RecipeLibrarySyncReader.list": "cf8416e14738068be32c607cf44ac5e168cff95dcdc8ee0314266b86f26bd595",
+      "_controller_marker": "fac49c47d66d2d5657a7ebb737c994f6027b24834c9acaa0b39e51802b528dca",
+      "_empty_result": "a7fd189352179fd83598a936169041e59c4d824b74a9eba231cbcaf16ad6d11a",
+      "_log_automatic_failure": "ce46d140005c184d3f5c1560bb9b6eb92dd81303bb9db684e1038b04b1576328",
+      "_result": "11091f55c991778cd2a80b9d22f42e9baa9c57b3f31d1883e94f0cc0846763b4",
+      "_view": "490608617b3b2dfc232574c61c69b5c9809fad8898abf105d95d3fe6988b745b",
+      "catalog_sync_failure_reason": "798a0c56e7f8513070da5f608631bb580307737335b298ce638f3f2154ae194f",
+      "catalog_sync_retry_delay": "bd4c9313eae2ed2e986b7f440d9190d225e27d801b70d21ec9ad5e3d6ce591b5",
+      "run_automatic_sync": "4c4af719ee67659a93793fca11fa94f34f4e29f5c287586883907463319e5f3b"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "catalog_sync.already-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/catalog_sync.py",
+          "CatalogSyncUnsettled",
+          "ManagedRecipeCatalogSyncService.sync",
+          "catalog.sync_in_progress",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "catalog_sync.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/catalog_sync.py",
+          "CatalogSyncError",
+          "ManagedRecipeCatalogSyncService._validate_request",
+          "catalog.sync_actor_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/catalog_sync.py",
+          "CatalogSyncError",
+          "ManagedRecipeCatalogSyncService._validate_request",
+          "catalog.sync_commit_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/catalog_sync.py",
+          "CatalogSyncError",
+          "ManagedRecipeCatalogSyncService._validate_request",
+          "catalog.sync_request_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/catalog_sync.py",
+          "CatalogSyncError",
+          "ManagedRecipeCatalogSyncService._validate_request",
+          "catalog.sync_trigger_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/catalog_sync.py",
+          "CatalogSyncError",
+          "ManagedRecipeCatalogSyncService.sync",
+          "catalog.sync_request_reused",
+          1
+        ],
+        [
+          "control/src/vonk_control/catalog_sync.py",
+          "CatalogSyncRequestInvalid",
+          "ManagedRecipeCatalogSyncService.sync",
+          "catalog.sync_preview_changed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "catalog_sync.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/catalog_sync.py",
+          "CatalogSyncRefused",
+          "ManagedRecipeCatalogSyncService.sync",
+          "catalog.sync_repository_changed",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "CatalogSyncError"
+      ],
+      "function": "run_automatic_sync",
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "reason": "The automatic library sync is asked again after every failure on a delay that doubles from 30 seconds up to the steady-state interval; a sync that finds another sync running, or cannot finish, leaves the previously imported catalog active and is unknown, never a refusal. The loop only ends when the Controller stops."
+    },
+    {
+      "catches": [
+        "SourceBundleUnknown"
+      ],
+      "function": "ManagedRecipeCatalogSyncService._apply",
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "reason": "A transient source ingress fault records an item problem and retains the previous catalog revision; the automatic sync repeats ingress on its normal bounded interval after storage recovers."
+    },
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "ManagedRecipeCatalogSyncService.sync",
+      "path": "control/src/vonk_control/catalog_sync.py",
+      "reason": "An unknown source or preview ends the accepted attempt with its typed failure result and clears active_slot in the same persisted ending path. No verified catalog generation is replaced. A shared non-blocking regression proves the slot is free and a fresh request succeeds immediately; automatic sync observes again on its existing bounded interval."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/catalog_sync.py"
+    ]
+  }
+}

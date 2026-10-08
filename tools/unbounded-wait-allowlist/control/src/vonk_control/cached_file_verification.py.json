@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 2,
+      "function": "CachedFileVerifier.verify",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/cached_file_verification.py"
+    }
+  ]
+}

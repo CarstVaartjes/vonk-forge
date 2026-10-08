@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/phase_planning.py": {
+      "<module>": "43c7004c5bb41547bb0dd1616fb436b2a267ec2d94369a9f6481dfbce4ed8e24",
+      "PhasePlanningMixin": "d1593b795b91af02774a09fc73f727db50c41644a39e0216487bd28a9d578df3",
+      "PhasePlanningMixin._finalize_plan": "988358e5e3b5da24618701be49dbd427c25fa4dd2a2d942594939536461d8b94",
+      "PhasePlanningMixin._inspect_artifacts": "cfbd974a49fb2f15cef44317726a04dce180632e2873ae6553779886c6e26ba1",
+      "PhasePlanningMixin._mapping_selection": "059a87fd4a3f177597f79ea8e058bb04db2a2ca59fbf3e7b7d1ad2329940b2af",
+      "PhasePlanningMixin._phases": "4c8afa98332eb6ffde6457e614f450247d536b6b05e8f3ae3619a1e20100b59f",
+      "PhasePlanningMixin._phases.add": "442c2f269bc29260226d85a76381aeaf458594da4bbaf96a8cd5035d20dad70c",
+      "PhasePlanningMixin._run_reserved_bytes": "5941ce1f09a04a0848fcd377b411832a1d472969da7e804016b3ca63f4494eb9",
+      "PhasePlanningMixin._stop_digest": "9767d5fa741a775f0d3b9c8f81b69f0cfaa23996db81608d4f1029ea31ae92f5",
+      "PhasePlanningMixin._storage": "6a33416555fa382940e4eae6cfaa55291c1e46d9daebad1a5f2d504da24efe37"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/phase_planning.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/phase_planning.py"
+    ]
+  }
+}

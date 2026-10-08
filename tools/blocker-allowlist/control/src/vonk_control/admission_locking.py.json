@@ -1,0 +1,61 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/admission_locking.py": {
+      "<module>": "fe410163b343e2652f7393f52080b63902f952b1b62ee497d7d343361eacaa74",
+      "AdmissionLockBusy": "7dd908590f5a4cab78ad0dbac617334d875f536d907912c587560639cc61024a",
+      "AdmissionLockBusy.__init__": "b7771832242970e9df3f7ade3c342f6e376a70922ed8c8c55e9f334206869697",
+      "AdmissionLockHolder": "bee293066824a9e24afaf30f63e850df82d8e637256d86a304facd5eb89e4c21",
+      "AdmissionLockKey": "9af805e4cd9e4cce0cb9a8495d8e7f3a34b9e0cc906fcbbc78674cf184330f99",
+      "AdmissionLockKey.__post_init__": "f8d79991cc93b204e86fbcc61694b9f844dc13df2b9db2d22a9a9a2b340efb5f",
+      "AdmissionLockKey.database_key": "27f79559719f0959f80db1dcf71cd8c585bdc44261d2e8def22fc5eeaa5cb521",
+      "AdmissionLockReport": "05b2be705f73fd6a220923c6d503c14f5c5a7b8310b1f4e0a7e3d34e858eb78e",
+      "AdmissionRowLock": "1aa05c2cee78ed1f127754eaa7bff7318eb459e90b5fa1fa589f3b9653df37a9",
+      "AdmissionRowLock.__post_init__": "eec5c0fe03633ef53c6aef5b308bef2808995b2af569c44539be54783f19a153",
+      "OpenTransaction": "622c069d41cb4c8826f11f7182d72803181f970b9cbd32b5be6f404989ec0b01",
+      "_activity": "8b9ffa3b9be6827b34652414674d76f035a5c51fc26d4284cbdf6e09a6b42bf8",
+      "_key_holder": "64ad3ca38dbd09470501c24c4f1439c7c907836b36478991402583735583c1c3",
+      "_label_transaction": "a81886d6e99c7894d1fe31bd9f0b24cb78c550aba9b8f5ef24f210a2d4d58a74",
+      "_patient": "8489bb491a114c76d6d7993bbc6d097d4c6453cf8659965dc9ebc2135003b2d0",
+      "_raise_if_busy": "99c5ace66d5f6db8e9f60dfa7ef75cad974df382ea4e3cf1a56a820a4cf7415b",
+      "_set_local_admission_timeout": "2fb9715e5c542096cf3e7ee3cbf1092cce191d037107d9d59115235fce8ab1e4",
+      "_sqlstate": "48a43031b193929bf5523b392f44aa6c27e115602ef69f4ff3a6980767a0d7ad",
+      "acquire_admission_keys": "3c390b7b441cd740e6acf21b61e1c82317912668a46df2ea01290ed775decd5d",
+      "admission_attempts": "51a185a2988928c057ffa7e83985590b3a2a24ccddd6dba81ffc26c8ad8fbdc6",
+      "admission_wait_exhausted": "4b19974e848ad4e6ad409d85e538a0918dee13847a7a1eb5145cdc62fcd8514a",
+      "busy_detail": "a9d4fd415803760182fb718acef0380eabce4e941398bb7434365586fe87ae8b",
+      "is_admission_contention": "32a4cf4cf433e472da9aff01a1dab164ba1cb9d23111de128b00bc2683c0fc88",
+      "job_request_key": "9ca662d6bd61f729530d96808ce33da515f21cf2f4d54a20f90dbddd7abb2f3d",
+      "label_transaction": "2753fd54c0fd6c204dbbe2c3fa07868eb44fb50903d829b2f840cf7612276152",
+      "lock_admission_rows": "b916aba749b1c0ec84966b8d13b464a69cffb718b3d2a932e07ce107fedb3261",
+      "node_admission_key": "39c66291a57a5cdf4379970aa372ec548d15fa98c4ed26e5c8e0e96238894791",
+      "patient_admission": "6c6b9631b03ee8f75442ea26105fc2846b48cb14bfe84da1798a3d0107ad40d8",
+      "report_admission_locks": "772ebe64d029b29cdfd0569a84d8818afaefba68c84aaafa39ad925e359adc0e"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "admission_locking.bookkeeping-debt",
+      "sites": [
+        [
+          "control/src/vonk_control/admission_locking.py",
+          "AdmissionLockBusy",
+          "_raise_if_busy",
+          "admission-lock-is-busy",
+          1
+        ],
+        [
+          "control/src/vonk_control/admission_locking.py",
+          "AdmissionLockBusy",
+          "acquire_admission_keys",
+          "admission-lock",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/admission_locking.py"
+    ]
+  }
+}

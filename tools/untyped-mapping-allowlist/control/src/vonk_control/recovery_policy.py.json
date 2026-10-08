@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recovery_policy.py": {
+      "<module>": "5a12a0f5e7bc0852c1234974c6b0742e9ac24493d2b13c752037f19345bcd487",
+      "RecoveryDecision": "7985c27145209e30d5296a6fc51ac9402f2b4f4f25744a1ff95f210669ebc145",
+      "RecoveryPolicy": "5f5d4aef64e962a1f6f5fe8f95137bda6bf2f20b792604e718798e8485a3a727",
+      "RecoveryPolicy.next_attempt": "2e195b4fa27a2454b6c22ae6007202d2e8552c865e13a5fd827d0bcc918d9e9b",
+      "classify": "5a6d9cd621c966ae67aa8723facd16c21a30b3e03fa93f350417c982be4cfc93",
+      "kind_for_agent_error": "062ced7554f099f35b2b91e2bef5edbc43338c5386bd72600bb4b48329b6bbc1",
+      "kind_for_failure_fields": "c0300e569d5d385b4704f58f99577857cc72c69ac78b785ed519690e85961c69"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/recovery_policy.py"
+    }
+  ]
+}

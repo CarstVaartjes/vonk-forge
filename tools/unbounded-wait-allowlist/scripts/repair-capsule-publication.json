@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_safe_bytes",
+      "kind": "loop-without-deadline",
+      "path": "scripts/repair-capsule-publication"
+    }
+  ]
+}

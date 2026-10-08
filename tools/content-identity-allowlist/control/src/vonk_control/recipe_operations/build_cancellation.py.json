@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/build_cancellation.py": {
+      "<module>": "eaaebc8716f949339b2a933a58a72de1c7315386eb58b16d942dbf6fad2b3079",
+      "BuildCancellationMixin._cancel_build": "8c9e239fc059b252b0995807e3265771280a3b16ee3f2baf10e3e3c3ec9b51a7",
+      "BuildCancellationMixin._cancel_current_build": "df692fa2dc53e49c0c0f98c63f900093c4a96c7483718b7e4443a32e712aadaa",
+      "BuildCancellationMixin._cancel_current_build_locked": "9de1e709e2c9b2b628021ad84765dc412caeb8103d4ec638c9c982c370928093",
+      "BuildCancellationMixin._cancel_prebuilt_build": "b0714ed1690519d945688faddc70c4cb780c1008bdf07a22f770c2ba8d503a54",
+      "BuildCancellationMixin._release_cancelled_build": "42369eec44b316262040420630551d2b769b7380db3800d22c3a0b54dffc08ed"
+    }
+  },
+  "sites": [
+    {
+      "expression": "Job.payload['owner_id'].as_string() == build_id",
+      "function": "BuildCancellationMixin._release_cancelled_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_operations/build_cancellation.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    }
+  ]
+}

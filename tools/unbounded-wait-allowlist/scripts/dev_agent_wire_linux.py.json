@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "count": 2,
+      "function": "run_commands",
+      "justification": "Pure finite traversal of a materialized workflow line list. Both nested loops increment index on every traversed line and test index < len(lines); no subprocess, I/O wait or sleep occurs inside these parsing loops.",
+      "kind": "loop-without-deadline",
+      "path": "scripts/dev_agent_wire_linux.py",
+      "reason": "input-validation"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "file": "control/web/src/hooks/use-operation-observer.ts",
+      "reason": "UI-only state or form draft; never serialized to the API",
+      "type": "Options"
+    }
+  ]
+}

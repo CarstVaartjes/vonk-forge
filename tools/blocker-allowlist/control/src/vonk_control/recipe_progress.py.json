@@ -1,0 +1,55 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_progress.py": {
+      "<module>": "8c96870492a7de809a750c948375827b2b4648465de1073e2c85739e1753720e",
+      "_cancel_requested": "306ddda16af51ffc294861b31f39c2c2ed4304926661af1c3f524140439b4404",
+      "_canonical_distributed_readiness": "4dc2ee7bf9e65faadf6eba0e7da842c1ee8d3b5cd8a25dc6ac105222707af008",
+      "_catalog_recipe": "ee69bfac7b4cc08a48eec62d7da71d4011755e12f6d7c8faa4f397a44c1bdcfb",
+      "_current_phase_index": "be365894c22dc589d9cc5c931027240dbc54f9af86bcb60eb003c0bc87a7f0c6",
+      "_lower_hex_digest": "028ef4250a8d5f562c139c4e34f1116cb1e1277db9f30aeaa6cf95c0c1a60532",
+      "_parent_execution_mode": "31ba7082cd1e402697ef95719fe0479fdb42e3d2cc684674a31fb1fef1ace58d",
+      "_parent_force_rebuild": "1c02254825220dc2eab1828c92957abe5bf5cd0b5ed84d6a522f46efd68219d8",
+      "_parent_identity": "44e53ae1c945dd69ed9a1236a7bf95d8812cd521b59182051e270e8473ad64f8",
+      "_parent_intent": "963c3fe38c92d542d6f15cd028c0ddfefa4ae34e19a824ac722679f75e032948",
+      "_parent_reconciliation": "66f966cc90ff0968addf405fb2ac046ab81219c84a07986059f0d8f07c491ed9",
+      "_parent_recovery": "14a1ab77a38dd800d8db5032a66da205fa6ea52dd176034aba5639247a071cc5",
+      "_parse_recipe_parent": "3d28ead6a5929198dd726d06d798c629ca564995d8c7db3e61fbb5e81163fef6",
+      "_primary_model_identity": "3d422a4c3a06686f8528ee815c33f2a4824c9f7e47c3ecdebc147f7637b324fd",
+      "_project_recipe_operation_progress": "6d17d411506edfb83c97378d4cc7a3ffe22191e3ea002927b88b371f7182c53c",
+      "_recipe_model_identities": "1a6f332ab48085d2efeb14cf2bfc3d951322ebcd958d2d0810c34d768b7818df",
+      "_recorded_parent": "384e88090dd18973aab41ec5c74fdd0075f6e041ed164087653ef3b1775a4119",
+      "_role_phases": "5c454ab7a60a932de1c97e8cf3311feb776591a7781c78a560f642d597d0172c",
+      "_start_deadline_failure": "364989572a4ad6f157d7d4a97f2e1d6e9f47b93d1be060c2a136e8660d8113ec",
+      "_stored_phases": "70a0f9dc989268e221601fa9760570c48a5383dd8f81e36f4df95fbf767878be",
+      "_stored_phases.read": "bb7468e0f983f662cddc39f207502f239785512231a0e5466e2bccda20ea5364",
+      "_topology_order": "a77da0581194a16a4a9c6dfa0f18f7787c6cbb614e157b76d53b968315863298",
+      "current_recipe_progress_attribution": "4fe477c5e0155a6cc66f72658e17538b6cb373834f8ac142bd03668f7c525df4"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_progress.py",
+          "RecipeRequestInvalid",
+          "_canonical_distributed_readiness",
+          "distributed-readiness-interface-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_progress.py",
+          "RecipeRequestInvalid",
+          "_canonical_distributed_readiness",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_progress.py"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/semantic.py": {
+      "_validate_document_archive": "8d42f4cc2e198f5a686cac190707a1845d98cd9809af0d7714e0891986b5c1c7",
+      "_validate_realtime_transcript": "c318ab4124eb81928a857f02f3607e369502ea19a853ceb60cbd4083f44e5d39",
+      "_validate_synchronized_media_receipt": "f5a41e94e07368193d15ed1d16284159215a88f69d0f07ab3efd29fb034f0c59"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "src/cluster_profiles/qualification_fixtures/semantic.py"
+    }
+  ]
+}

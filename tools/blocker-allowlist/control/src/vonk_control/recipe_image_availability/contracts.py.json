@@ -1,0 +1,113 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/contracts.py": {
+      "<module>": "51f53455408a5fe1b8f7a45cdb4d5abf98fb411c9d9243513a31d11671b29c15",
+      "BuildUnsettled": "1c647dc9b1371289bca7083150eb11323899e5cfdf9093e4dee2c16a43d36b28",
+      "BuildUnsettled.__str__": "8b9826fd9a6875cb3ed44712d8405a4bfabef4d2cff06daa6be14c830d14548f",
+      "ModelCacheCancellationOwner": "243674ef415e6b6e97600ae5f446d926701bd5203abd1d0f7bf64074394f2293",
+      "ModelCacheCancellationOwner.cancel_operation_in_session": "de965bc0cce95f49b1d0e65e73ccc717af5e9367a76546ff4caa03190c4432ee",
+      "ModelCacheCancellationOwner.get_operation": "aea6f3d30fbd232a7cb94229d758e7e71d07d6dc84eee5e5773123a8b662ff18",
+      "ModelCacheCancellationOwner.signal_cancelled_operation": "e6d922d44de185860f0e51328ed9181f3e9d8de62a25b68046492d55d6d2b7f2",
+      "ModelCacheOperationHandle": "caeff05335ac415594337dc6285ddb3f45cf91771873e7d8adc86affcd5597c6",
+      "ModelCacheRemovalCoordinator": "db6379425d7200e4d73a8b94b36b909fc03f97168542ba6e989a1cc155275566",
+      "ModelCacheRemovalCoordinator.accept_recipe_removal_child_in_session": "4c0e20f8ea6f9c5b7c1b203962099d424934de1f5adcd58bd0e38f3f034cc085",
+      "ModelCacheRemovalCoordinator.get_operation": "aea6f3d30fbd232a7cb94229d758e7e71d07d6dc84eee5e5773123a8b662ff18",
+      "ModelCacheRemovalCoordinator.recipe_removal_scope_in_session": "c2b712ef54855a06cfe309aa40a02cdb46a7fd00985ef011e0a6aac42692b4bf",
+      "ModelCacheRemovalCoordinator.removal_asset_status": "7b52dcc613fbae6258a862da58b3c81f04f2b292b8b6245d6e1daa7ca259ec8c",
+      "ModelCacheRemovalCoordinator.removal_owner_findings_in_session": "12e3bfff5c2df908526d7fd822a081201d72e46c2c4fb96b96d4bc5ad68666b4",
+      "ModelCacheRemovalCoordinator.retained_model_object_findings": "b48c705faadd6fe5459caa62eef3567381e72ef271122cb01280b0f3455e45c3",
+      "RecipeAuthorityResolver": "649eff19524f183664947fd8171c8522f01a104416a21f3543c386ebca883f80",
+      "RecipeAuthorityResolver.__call__": "ff4c3508a6dd3108c9b6d199951e23729107bfc9ed1ca89b672c6e20c1e69caf",
+      "RecipeImageAvailabilityClaim": "ee0fb22a9977e408758c8b8744fc98d9bbcb9bcb2bff3773336afb3a1dfa6b1b",
+      "RecipeImageAvailabilityError": "0b88535e00a84e3f61037ee64f0fde4110ed45bd181a9c241bdd08c3e08db354",
+      "RecipeImageAvailabilityError.__init__": "dbb0501d506c9797580be54e73d3c3c60a5cd8ef7430de97c94706b77e030475",
+      "RecipeImageAvailabilityInvalid": "31acd1a32bb1a4ccdb3832b4eb34017bc9765303a08da262378f046c4f967304",
+      "RecipeImageAvailabilityInvalid.__init__": "61351b5a8307f382241341d6af343ed8dd4b54302dbe45d20f38905b3d89920e",
+      "RecipeImageAvailabilityRefused": "8ad4aa944bddba233573877d94adf1eeb172f9bf6a667865e1a549848e94235c",
+      "RecipeImageAvailabilityRefused.__init__": "04ae0efed223d39344251514e42833e5a2660b8a1bf9ea90eb374fd70ded4bf7",
+      "RecipeImageAvailabilityUnknown": "ac49b8520c762767210f71aac375c619c087be8f69d16e456c76d8bcd6409e10",
+      "RecipeImageAvailabilityUnknown.__init__": "7956360d2de6d25c7a5b51a3e9bc288c07e023cb41d42ba9f6bc1fd4ea28dfed",
+      "RecipeImageBuilder": "b9412fa9693e3082c4606ee72aa0c258a75b4ff9f67b5ad943707588a45ab7a4",
+      "RecipeImageBuilder.__call__": "f04558a4b8237e2482f1209058283627becc6ebc2600d53d1fbcbc093400aae0",
+      "RuntimeImageCacheStorage": "8ccae25e739abc3b9ed7c3d2ec7591af6aabe3c91490d9520e0901bae7654f4c",
+      "RuntimeImageCacheStorage.build_archive_available": "0824687525e0bb3a15ef848300e915c22b5e20d2e5aa49e60310b8ea997c34dc",
+      "RuntimeImageCacheStorage.published_archive_bytes": "03db92f5b2cc851081148f6c62cae106601cfd2ed92b4f61c93db3bf2d60ef0e",
+      "RuntimeImageCacheStorage.remove_published": "cdc00fbb780df3657bb46436ac50d245a779c9e3bce343c738646cdd1b4d5b25",
+      "_AvailabilityClaimLost": "d807df72f76fdfe86be3411547e86056fda57401746c5e890b069e9ed18f1785",
+      "_AvailabilityClaimLost.__init__": "087aa70c2774d0481c972e01188316cf81734d2a25436b81deaba7af81a89153",
+      "_ModelQueueFailed": "17fb0ee8ca1975e4d2a60c09cd1d7c32927db3b1c3cc231329aaf64dd2a277cd",
+      "_ModelQueueFailed.__init__": "277e1c3b3b9deaaa4c34ebf1161dc7e8ec88c9d978822258861dbe9aba540b95",
+      "_RecipeRemovalSelection": "f5e635389eafb549ad6c50f6dfb462cc3c270ca36f5bc4cff4baca7aa3eb5c7b",
+      "_canonical_cancellation_id": "61238d82e16dd389e4f63d73295a8c4effcfc2dfdda26822f2c8344f32a78761",
+      "_canonical_recipe": "7139124175aac3dfe9b3f5993d9223755379efd087402e87cd00ca5b093595db",
+      "_digest": "b579d5139cff84e5961f6d2476409c47ce5f20d31c3f9ff6235f91b8851c4d8c",
+      "_failure_code": "cbfb3e8cceda7193a80715ada964b09cc69a8793b64acf881a06619f095ad3ea",
+      "_failure_detail": "f04e0a0fdcfe7a3899f99693cf09cfb46e4c09b3272949981697f12c54fe35b4",
+      "_is_database_busy": "1897fa63e9a152b89861d31d1cfc82d5485e6d4f2202861b3267f6508fbbada9",
+      "_is_digest": "5e00610c480000eaa2a256414f41e455d7434fa9eee31afa29cd3d68e0602429",
+      "_iso": "488937ba915bfcd3434dc3d40ec41081985c9ad89dfb8a600622cdcaae326958",
+      "_known_total": "1f69c1f09b2259d050a6279f1c28c3a901d02c204acb11d205ab2c5b5507e4d7",
+      "_log_excerpt": "babb458ca86c3cd2a48bece4bf0bf8b177b37d36b9457eb78d9dffcc7e915bb7",
+      "_optional_digest": "51516d1cc66e1d4f977959fd7ec6a9528cfd195385b3fefdae3b57c000696d86",
+      "_progress": "2de7a914bdb724b82395f0d49a19153144d79d72bb28f51369152c4e037115b2",
+      "_read": "cdc267f68fef1d38f44caf1c7c11a35c023a9ad2789b805276a6544678c730a7",
+      "_recovery_actions": "09e40c296641c968ee7a218e0e83d7b063d11055669b148306d3b6fc5f71078e",
+      "_removal_retry_is_due": "c976c77880993a919690eec0efc5013a661d52a06e631ba76e0be15560b8b797",
+      "_retry_after": "fb6f29b1d93d2595a16989de53c659836882e8d64ba32678b660d978371126a4",
+      "_retryable": "56e6eca45795260fad3107600a5d718ff368cf6d5f50ad210ef86e691e21bed0"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_image_availability.authority-document",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/contracts.py",
+          "RecipeImageAvailabilityInvalid",
+          "_canonical_recipe",
+          "recipe_image.recipe_invalid",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/contracts.py",
+          "InvalidValue",
+          "_canonical_cancellation_id",
+          "noncanonical-uuid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.request-shape",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/contracts.py",
+          "RecipeImageAvailabilityInvalid",
+          "_canonical_cancellation_id",
+          "recipe_image.cancellation_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/contracts.py",
+          "RecipeImageAvailabilityInvalid",
+          "_digest",
+          "recipe_image.identity_invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/contracts.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/contracts.py"
+    ]
+  }
+}

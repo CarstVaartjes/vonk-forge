@@ -8,7 +8,6 @@ ratchets. Bootstrap is deliberately separate from routine maintenance.
 from __future__ import annotations
 
 import ast
-import json
 import re
 import sys
 from collections import Counter
@@ -19,6 +18,7 @@ from pathlib import Path
 import yaml
 
 from .parsed_sources import parse_file
+from .registry_storage import read_registry, write_registry
 
 ROOT = Path(__file__).resolve().parents[2]
 REASONS = frozenset(
@@ -995,7 +995,7 @@ def scan_sites(mode: str) -> list[Site]:
 
 
 def load_allowlist(path: Path) -> dict:
-    doc = json.loads(path.read_text())
+    doc = read_registry(path)
     if (
         doc.get("schema") != 1
         or not isinstance(doc.get("debt"), list)
@@ -1119,11 +1119,11 @@ def history_gate(document: dict, previous: dict, moves=None) -> list[str]:
 
 def main(mode: str, argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    path = ROOT / "tools" / (ALLOWLISTS[mode] + "-allowlist.json")
+    path = ROOT / "tools" / (ALLOWLISTS[mode] + "-allowlist")
     sites = scan_sites(mode)
     document = load_allowlist(path)
     if args == ["--lower"]:
-        path.write_text(json.dumps(lower(document, sites), indent=2) + "\n")
+        write_registry(path, lower(document, sites))
         return 0
     if args:
         raise ValueError("only --lower is supported")

@@ -1,0 +1,40 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/persistence.py": {
+      "_application_effect_scope": "84d4417b9bb2c829731c82291026d52a9cea7d5525b7f70b14be2dbe31932579",
+      "_application_order_key": "c2c58363e87bf2eb24aa9f8f7f992a713d3d3eb76204f638744028b38e178411",
+      "_canonical_progress": "902a029ac20906b68db4062c8601ba2045f34ef95066cb14c1e282c23e9fc443",
+      "_newer_profile_intent_overlaps": "9a8890270bd80b5cdc9a386fc04ff81be2fa63726302246e5f2170f2724c8c96",
+      "_next_profile_acceptance_time": "2367fb31eab163a31910fd3a3572770eadece9ff9684159e370ad4ccd3995377",
+      "_owns_pending_admission": "e6da58c75a28b265edcc4b9150a526c1b53024f3e8a759d87394cbd242b9ec9b",
+      "_persisted_profile_plan": "a59d570b3116d6ad046b5bebdcfe238ec02d68dc78ec6dd009c81fe4dc273296",
+      "_persisted_profile_plan.read": "5b8af3cca395a1459c6d8f2729416b1bea3a8a1ccd16376f8592e0ed2076a617",
+      "_persisted_profile_progress": "a81e6f6d2963675ca6b93098e0fb2058dffa274225cf6c9a53c6061bf00aea04",
+      "_persisted_profile_result": "ef114167b7881a75117bdfe30752e82392b18962d2c2f9a39d8bc7c53446da1a",
+      "_persisted_profile_result.read": "13ada58073ee868039fa397f70ffb59541de2fe53e57a440e06b5c3428e7bac1",
+      "_persisted_profile_result.rebuild": "304ee19b5e5a51184d63f4e76a1e972e785c940700469caec8fcc38429f31efa",
+      "_persisted_profile_scope": "c0933b6694268fca439f5d041e0477351f8907ad741b786ed14a10ef97d02b6d",
+      "_profile_application_effect_nodes": "7cea74cc78f5ba2935181be4e910bb3a1cf9dd57173c164f6963467e01d2c7b7",
+      "_progress_from_receipt": "4bbc6e316e16f4811284135e7526a71e2231f9dc971cbcf4f35761b4863b22cf",
+      "_read_profile_progress": "cba71dc3071cd7cf5d02725328723dbccca0a7475bf02de154cf900581728592",
+      "_rebuild_without_values": "08706e29e86d877c65682e04487abfe9dd992bcbee2f612771713e127294da59",
+      "_rebuild_without_values.run": "f49f28c7626bf0320c46374a6bae14b9609f7d8fc46bc9fbc1cec26487d4b88f",
+      "_remaining_reviewed_effects": "e01352a44db4a7f01e64c9f2113485aeb3458a522c287265594df756fba46500",
+      "_residue_detail": "af47861c2f5bc3b7c2350577877d3740666c781b3b09920b8bd8e765f7c0dc81",
+      "_stored_progress": "7e946dcbd185a5d4731e4ee2b3f937f2025393d43a500362e815479fdc361104",
+      "_stored_recipe": "17b38fb140a2902ea169c53bca9089968d2f9c5ba5184c81b13a4d4686ad85fc",
+      "_stored_retry_lineage": "cb83891e0d5bb946bb73ecf322bfff741d1df8faa49425d9dfe59c119bae7592",
+      "_without_values": "096269cd0f4f1a4f600471aeb2e17cd22ea820e4c45a8cd0f605e5395e6a5250",
+      "_without_values.run": "6ae2fe7b259d0d2c9decfab7a7a219582b69ebd111fafaf716320aaa8d1de3c6",
+      "_workload_intent_ordinal": "e01c6cef580bb3d1c5c7197822763619d1160f3f7a0b3a1c982a7e7ffcfeb40b"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/persistence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/persistence.py"
+    ]
+  }
+}

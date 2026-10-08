@@ -1,0 +1,77 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/cancellation.py": {
+      "<module>": "741537c7a79a9aff5507c00a45213a88e1940dc7c4cfb16de362a04e9877d750",
+      "CancellationMixin": "2815dd818e1876c8ae21960fe97733b5f078f588a7d4239c9efb9ed88135ee65",
+      "CancellationMixin._heal_cancelling_build": "8d00f6234b9543a98045b5ba4ffb26939214e56c78799894801631a9d85a1219",
+      "CancellationMixin.cancel": "1dcc85064a09e79605f5a578f6f2156651734e0d9e5cbf379a0fd6a1ad5877b1",
+      "CancellationMixin.get": "13d74d4d23353a9e5f7684b75160ae43b6642af648d1e8354f60e5b3c566d861",
+      "CancellationMixin.reconcile_cancelled_builds": "21f320a6e596fbf5f02531cc4fc35877dc188e3aa76bf95c85de182648603991"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/cancellation.py",
+          "RecipeRequestInvalid",
+          "CancellationMixin.cancel",
+          "cancellation-request-identity-is-invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/cancellation.py",
+          "RecipeRequestInvalid",
+          "CancellationMixin.cancel",
+          "cancellation-request-key-was-already-used-differently",
+          3
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/cancellation.py",
+          "RecipeRequestInvalid",
+          "CancellationMixin.cancel",
+          "recipe-operation-is-not-cancellable",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/cancellation.py",
+          "InvalidValue",
+          "CancellationMixin.cancel",
+          "noncanonical-cancellation-request-key",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/cancellation.py",
+          "MissingRecord",
+          "CancellationMixin.get",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "BuildConsumerError"
+      ],
+      "function": "CancellationMixin.reconcile_cancelled_builds",
+      "path": "control/src/vonk_control/recipe_operations/cancellation.py",
+      "reason": "Contention or unknown ownership of one build is logged as deferred and does not block the other eligible builds; the same scheduler pass reads every decision again in its own short transaction, so the build is neither released nor forgotten."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/cancellation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/cancellation.py"
+    ]
+  }
+}

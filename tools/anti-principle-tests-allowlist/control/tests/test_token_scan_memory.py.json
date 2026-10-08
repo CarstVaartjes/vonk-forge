@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/tests/test_token_scan_memory.py": {
+      "<module>": "79d41a546267c24ef28948d1e0c2944e01570d04dcff29473cb3e05fc1ac9599",
+      "test_collectors_never_feed_a_buffered_result_to_the_token_scan": "96995986ec3ca4a877c2d4989e01176de11f88537ff344a7cb0716983444f3c2",
+      "test_operation_token_scan_memory_does_not_grow_with_the_table": "9a59667817495aaff48176d0b0cb1850eb91637efbae48f8ca583fb53ac7eedb"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_operation_token_scan_memory_does_not_grow_with_the_table",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_token_scan_memory.py"
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/removal_acceptance.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "reconcile_requested_removals": "241504f07b8b3dc92721f3fb604bf2b58ca41f7416d8337f624c22680ada58f5",
+      "remove_selector": "349f89a11a55dcded25f1ad98b0e0268434feb28c98763c99d1b0ac36c454436"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe_image_availability.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+          "RecipeImageAvailabilityInvalid",
+          "remove_selector",
+          "recipe_image.selector_invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+          "RecipeImageAvailabilityUnknown",
+          "remove_selector",
+          "recipe_image.operation_missing",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_image_availability.removal-guard",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+          "RecipeImageAvailabilityRefused",
+          "remove_selector",
+          "message",
+          3
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+          "RecipeImageAvailabilityRefused",
+          "remove_selector",
+          "model_cache.removal_scope_changed",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "removal_acceptance.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+          "RecipeImageAvailabilityUnknown",
+          "remove_selector",
+          "message",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "function": "reconcile_requested_removals.validate",
+      "path": "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+      "reason": "Every bounded worker pass re-observes this exact request and removal owner. Unreadable destructive intent is not executed; the removal worker retires damaged owners and the storage-fenced reaper releases their gates."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/removal_acceptance.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/removal_acceptance.py"
+    ]
+  }
+}

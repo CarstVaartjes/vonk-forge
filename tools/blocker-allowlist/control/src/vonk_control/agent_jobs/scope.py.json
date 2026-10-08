@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/scope.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "_lock_operation_scopes": "307394461a6c4e7f7973988fe0a1e2cc5a73a20db48cf6ff5202445beb776a8a",
+      "_lock_target_scopes": "d206a49ac73228967aaba960bad6342dc401707446c26ba369197fee2073efd2",
+      "_target_scope": "8640ac6475e3edcf783f3749d647d73408fab1e423f27e45fbc751bc0b9c8f5f"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/scope.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/scope.py"
+    ]
+  }
+}

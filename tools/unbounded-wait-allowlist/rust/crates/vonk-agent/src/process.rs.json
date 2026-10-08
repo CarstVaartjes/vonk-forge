@@ -1,0 +1,46 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "capture_diagnostics",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/process.rs"
+    },
+    {
+      "count": 1,
+      "function": "curl_enforces_the_download_body_limit",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent/src/process.rs"
+    },
+    {
+      "count": 1,
+      "function": "directory_bytes",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/process.rs"
+    },
+    {
+      "count": 1,
+      "function": "join_diagnostics",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent/src/process.rs"
+    },
+    {
+      "count": 1,
+      "function": "system_runner_streams_a_large_artifact_to_a_bounded_preopened_file",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent/src/process.rs"
+    },
+    {
+      "count": 1,
+      "function": "terminate_process",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent/src/process.rs"
+    },
+    {
+      "count": 4,
+      "function": "run_process_to_file",
+      "kind": "rust-wait-without-deadline",
+      "path": "rust/crates/vonk-agent/src/process.rs"
+    }
+  ]
+}

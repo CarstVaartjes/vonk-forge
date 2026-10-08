@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_projection/views.py": {
+      "<module>": "d24fcd46f22e2f4d56a433b4d83d7be8582b9bf1e54e90b2661f5d8fb4674572",
+      "authoring_recipe_detail": "184588c9418f25270f6f82a0a84bf8de341e3f27038bef3b8bc3c2b2a2f80057",
+      "model_detail": "cef2a57dca6708cdeab52e171e064d56cc1ccd33fb11013a727ac0996999defe",
+      "models": "a3fcbfacee4201f56f6825954c3c614bd1ed8abd37ac5be100c17605d053a6d2",
+      "models.encode_cursor": "34896e8d6e0ff54b62dc9a277613fbabc5cd73b7281600c42ae311ca900e6bd2",
+      "recipe_detail": "2d6b349a52208779173e3cea3590373750ff23341d74a00fa83c64570ab2fa78",
+      "recipe_library": "c6880d13496998c1496f3be57475244bb9029e90f3128d3597aff5829d6f56ae",
+      "recipe_library.encode_cursor": "5139d843710b75e07b8832673ea0a1b70fae4933e9a3aee0ec1a647dbe02d293"
+    }
+  },
+  "sites": [
+    {
+      "expression": "(selection.model.publisher, selection.model.slug, selection.model.content_sha256) in selected_keys",
+      "function": "recipe_library",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/library_projection/views.py",
+      "reason": "Catalog document identity (publisher and slug are the name of a recipe or model document in the catalog), not the identity of an image or model file."
+    },
+    {
+      "expression": "CatalogDocumentRevision.document_id == recipe_id",
+      "function": "authoring_recipe_detail",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/library_projection/views.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

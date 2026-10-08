@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/telemetry.py": {
+      "<module>": "5348b7dc3512b43e114f248cbb6132ae257b4511cd7b9bba25ed7de6485baec3",
+      "FleetEventCursor": "278a7d0d37dd61c267b28345f0a4662cab8cb88ed8164c369dcc0b09c7499fa1",
+      "FleetStreamEvent": "6e965bb63f6080382a825b4f3e6bf9e392dc141bfde0ea08dc37589aa59f1074",
+      "NodeArtifact": "4fa629b224d29b3785c5ec448319a3717e7ab69b93ef44ce02f726844ee24609",
+      "NodeInventorySnapshot": "bf67ce55f24a3b8f64bc71d8c9fa91a963330df2fbec2ae3fadc7705e2a13215",
+      "NodeTelemetryLatest": "b2765fcb121b3b74a5359461b7bbd53d4dd34d13025679294567049764f02e85",
+      "NodeTelemetrySample": "a014cff5633cb3a92bcf51e00b363e5312ada5542e277bab766e883fa861d6a2",
+      "_seed_fleet_event_cursor": "6e61b2d03be40c87e87bd3d51cc11fbd077a5e3cc54a531c1ad8552f88b3be15"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "FleetEventCursor",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/telemetry.py"
+    },
+    {
+      "count": 1,
+      "function": "NodeTelemetryLatest",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/telemetry.py"
+    }
+  ]
+}

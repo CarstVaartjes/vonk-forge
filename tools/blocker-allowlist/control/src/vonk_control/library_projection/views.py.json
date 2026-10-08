@@ -1,0 +1,117 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_projection/views.py": {
+      "<module>": "d24fcd46f22e2f4d56a433b4d83d7be8582b9bf1e54e90b2661f5d8fb4674572",
+      "authoring_recipe_detail": "184588c9418f25270f6f82a0a84bf8de341e3f27038bef3b8bc3c2b2a2f80057",
+      "model_detail": "cef2a57dca6708cdeab52e171e064d56cc1ccd33fb11013a727ac0996999defe",
+      "models": "a3fcbfacee4201f56f6825954c3c614bd1ed8abd37ac5be100c17605d053a6d2",
+      "models.encode_cursor": "34896e8d6e0ff54b62dc9a277613fbabc5cd73b7281600c42ae311ca900e6bd2",
+      "recipe_detail": "2d6b349a52208779173e3cea3590373750ff23341d74a00fa83c64570ab2fa78",
+      "recipe_library": "c6880d13496998c1496f3be57475244bb9029e90f3128d3597aff5829d6f56ae",
+      "recipe_library.encode_cursor": "5139d843710b75e07b8832673ea0a1b70fae4933e9a3aee0ec1a647dbe02d293"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "library_projection.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "CursorError",
+          "models",
+          "library-cursor-is-invalid-or-the-selection-changed-restart",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "CursorError",
+          "models",
+          "model-library-cursor-boundary-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "CursorError",
+          "models",
+          "model-library-cursor-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "CursorError",
+          "recipe_library",
+          "library-cursor-is-invalid-or-the-selection-changed-restart",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "CursorError",
+          "recipe_library",
+          "recipe-library-cursor-boundary-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "CursorError",
+          "recipe_library",
+          "recipe-library-cursor-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "LibrarySelectorAmbiguous",
+          "model_detail",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "RequestFault",
+          "model_detail",
+          "model-selector-is-required",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "RequestFault",
+          "models",
+          "model-library-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "RequestFault",
+          "models",
+          "model-library-sort-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "RequestFault",
+          "recipe_library",
+          "readiness-filters-require-assessment",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "RequestFault",
+          "recipe_library",
+          "recipe-library-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/library_projection/views.py",
+          "RequestFault",
+          "recipe_library",
+          "recipe-library-sort-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/library_projection/views.py"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/rank_authority.py": {
+      "<module>": "f736364753605ac4f040ee38f7fa12393af72dda3e9e6ab5466ef23445b3a44b",
+      "_UninstallRecipe": "decc02f440bb50ee907f00ca61576a7d0231d413bb35ad3cd00c4908f077a282",
+      "_installation_accepted_ranks": "e3d818be34e79abb75ff465e5243d278fd5db815d3c52f951a091cca954e0f06",
+      "_installation_accepted_ranks.read": "dd323ebcfb464c124b13d41f1283e4d21fe2cfba492b8e68ed651e2a38adc69e",
+      "_plan_ranks": "af8181aed145e2c4d1b654d14199fd4ae83e1c5a00b8053f0bc150d5a7a8d0ee",
+      "_profile_jobrun_parent": "4f86b60047ead3e4326229b7a378b517ed4b274a9519d7a1445ff6849e352123",
+      "_ranks_from_mapping": "f4b7319fa9525b35f6f693e826c9051a9603e7fc58fa3165afa9e48d6a1aef9d",
+      "_run_accepted_ranks": "abfea013784a37751ad14922695ed3d021857ef0b0dbbb4f5508f1de33732894",
+      "_run_accepted_ranks.read": "2cdfd4323262700f103c3f2092a966e884c6a27e5a5e0c56f1224f2c9e92a6ab",
+      "_run_is_one_shot": "6b061e502daeba7d5a0d4cba356b3a9da51a818e66ea97bd852d453d5d16424a",
+      "_run_is_one_shot.read": "09861036405afb29acf1531ce5eedaed83c03716e6af190528a9fe211461c3b9",
+      "_run_is_one_shot.rebuild": "6a0ecab379bc5a2af47d4dfbf3531445c14951714f78732fe488876e886fc54f",
+      "_run_observes_per_generation": "de4450b76fb98a1d86c3d3ad0b8f484abcc5f679aee0505de165e95cd8b620b7",
+      "_run_observes_per_generation.read": "763fabbbec4147e6f45d28f318c748d1e99b2b99e28fc5af320c5ee64e4dee93",
+      "_uninstall_recipe": "038da52444540570644a294aed7f3a8abee75b83882c482fd8fa2d53fd2c0b96"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/rank_authority.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/rank_authority.py"
+    ]
+  }
+}

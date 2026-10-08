@@ -1,0 +1,18 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/stored.py": {
+      "column_field": "e674285b3c3e820600e4fdbf7e3de6d3e5b576ce362335a55db5bc622be7955c",
+      "column_is_document": "305a9df71587eee8e09615ff1afc3f805ebfd63e8b7207544fff9773db19eef6",
+      "column_message": "c2864e494a11fca65c38085e22d6354ef92960b2e1b62d7780f3db00dbe40e2c",
+      "column_value": "c84a554750c57707ba6f4b5c96c4138838c69c82609acab7dd22f999f71fedc9"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/stored.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/stored.py"
+    ]
+  }
+}

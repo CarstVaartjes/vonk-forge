@@ -1,0 +1,54 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/removal_reconcile.py": {
+      "<module>": "3139b47d5c7fefc944128882659e28a0f93750cbc01035b26c8dddfac119c029",
+      "RemovalReconcileMixin": "945056a81398f9345c01b4d1d2f49df3fa68c3818fc659b8a979256d1b216dec",
+      "RemovalReconcileMixin._defer_model_removal": "fff7df4771cef8363abf68d803ae84524677c7316641f3bf7c1e0dd1512cbdb2",
+      "RemovalReconcileMixin._model_removal_owner_snapshot": "ba7a701cac49ae05ee456da6b5e0a8759d965ad38255352414e87f8433d3a415",
+      "RemovalReconcileMixin._persist_model_removal_checkpoint": "ad3d403a120a749b8c07575702526a953ff2f902c6d47033e586e9431d31ee73",
+      "RemovalReconcileMixin.advance_removals": "8c59ec7b57cdd8eef95b8ec68c487a3347e51ff857dcc5706d5b59f817894638",
+      "RemovalReconcileMixin.reconcile_removal_gates": "3b6afef47b1cd77934c7b97010a3c608ffaf7bc4847cda53176e21832a3a2472",
+      "RemovalReconcileMixin.reconcile_requested_removals": "2707848d02f81b3a956d2d03fea51fd4d5c0be017bc502b98284e64713842c19"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model_cache.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache/removal_reconcile.py",
+          "InvalidValue",
+          "RemovalReconcileMixin.advance_removals",
+          "model-removal-batch-limit-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "function": "RemovalReconcileMixin.reconcile_removal_gates",
+      "path": "control/src/vonk_control/model_cache/removal_reconcile.py",
+      "reason": "The removal reconciliation pass retains a busy gate and continues its bounded inventory; the worker's advance_removals callback repeats the inventory after cursor wrap, then takes the same exact storage lock before rechecking the owner."
+    },
+    {
+      "catches": [
+        "_ArtifactWriterBusy"
+      ],
+      "function": "RemovalReconcileMixin.reconcile_requested_removals",
+      "path": "control/src/vonk_control/model_cache/removal_reconcile.py",
+      "reason": "The recurring worker tick and run_pending pass re-inventory accepted waiting requests after disposable cursor wrap; a busy exact storage lock retains the accepted receipt and the old removal fence, and the next pass retries the same canonical intent."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache/removal_reconcile.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/model_cache/removal_reconcile.py"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/routes.py": {
+      "<module>": "879703b65bd949fed3ecdc9ddd258401842fd4f9e4e5fa50c0584f807fa22e10",
+      "RecipeRouteAuthority": "6ea9a07a7f6e8ae513ce4aa03b714b97a05cdd43f73eb76e35215033736d7a58",
+      "RoutePublication": "7bc2778afd54f6be379f22324ecd02f725503bd878c85dcada9dc04d3e5000cc",
+      "RoutePublicationOwner": "90dee9390a72302d27bd02c9813181a7647f7a68c392ab3ddf9a914b94425098"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "RecipeRouteAuthority",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/routes.py"
+    },
+    {
+      "count": 1,
+      "function": "RoutePublicationOwner",
+      "kind": "table-without-delete-path",
+      "path": "control/src/vonk_control/models/routes.py"
+    }
+  ]
+}

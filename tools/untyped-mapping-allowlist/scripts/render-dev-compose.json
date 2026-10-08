@@ -1,0 +1,8 @@
+{
+  "debt": [
+    {
+      "count": 3,
+      "path": "scripts/render-dev-compose"
+    }
+  ]
+}

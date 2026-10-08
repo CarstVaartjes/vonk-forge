@@ -1,0 +1,103 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/installation_preparation.py": {
+      "<module>": "ec9c95730cad99d9c42b13f69079eac88d16302a26a09a249f387dd629027694",
+      "InstallationPreparationMixin": "dc3889def45147ef93fee63860678a09d82c474c77ec1f4ed5d6d1413abde32b",
+      "InstallationPreparationMixin._prepared_installation_id": "100cf53622955f33575cbb274ac99560e27e9a8fe2cfb9c0be940b68dedf25fe",
+      "InstallationPreparationMixin._stored_compiled_plans": "fd85cc812beb306cd7883f844131168db5b2bd7c8dea19f6feffd1cfa4f0cd4e",
+      "InstallationPreparationMixin._stored_compiled_plans.read": "9d8ec339031edfcac1dcdd48bc7906d823c682274ae4fc299a9dfdc29d807661",
+      "InstallationPreparationMixin._stored_compiled_plans.rebuild": "cb3f648ab85bf2ae9c19b832a2dd237ae59f3b49720e2497e9c717e207bd228f",
+      "InstallationPreparationMixin.prepare_installation": "61658d8126ce9a6ad40b9538b0fee145400eb82977b214fdd08ce8a5d2c3d6a9",
+      "InstallationPreparationMixin.preview_install": "652d043361ce118c6ccdd9935c387ff5bce5a5ad5f6f2043888b83c0e55db57f",
+      "InstallationPreparationMixin.start_installation": "f5fc26b71f6ce1ddde7b0af9ec1bbcae8563b8bf88792d25027cd3559df9b28d"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRequestInvalid",
+          "InstallationPreparationMixin.prepare_installation",
+          "install-plan-is-blocked",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRequestInvalid",
+          "InstallationPreparationMixin.prepare_installation",
+          "compiled-execution-plan-was-not-persisted",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRequestInvalid",
+          "InstallationPreparationMixin.prepare_installation",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRequestInvalid",
+          "InstallationPreparationMixin.start_installation",
+          "recipe-installation-is-not-launchable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRequestInvalid",
+          "InstallationPreparationMixin.start_installation",
+          "recipe-installation-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRequestInvalid",
+          "InstallationPreparationMixin.start_installation",
+          "recipe-revision-is-unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRetryLater",
+          "InstallationPreparationMixin.start_installation",
+          "prior-installation-intent-requires-exact-observation-before",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRetryLater",
+          "InstallationPreparationMixin.start_installation",
+          "recipe-installation-is-being-reconciled",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/installation_preparation.py",
+          "RecipeRetryLater",
+          "InstallationPreparationMixin.start_installation",
+          "stored-installation-plan-is-unreadable-it-is-recorded-and-t",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/installation_preparation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/installation_preparation.py"
+    ]
+  }
+}

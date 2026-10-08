@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/submission.py": {
+      "_known_http_refusal_status": "e4a4072a206cc9069bbe011432aa457835a403adaf977d589a20ce9729383ca9",
+      "_submit_idempotent_request": "0fb770e5e763df4da5026172d3138994894a8c8a4cc89b2e32e32babe249c0ed",
+      "_submit_idempotent_request.request": "7d56552fc4c0b37c90c3636e7946e26a95536041eb627fd3713d1e1bf536741b"
+    }
+  },
+  "debt": [
+    {
+      "count": 6,
+      "path": "src/cluster_profiles/controller_cli/submission.py"
+    }
+  ]
+}

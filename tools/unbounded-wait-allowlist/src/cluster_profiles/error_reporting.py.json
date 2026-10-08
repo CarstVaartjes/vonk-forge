@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "classify_transport_error",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/error_reporting.py"
+    }
+  ]
+}

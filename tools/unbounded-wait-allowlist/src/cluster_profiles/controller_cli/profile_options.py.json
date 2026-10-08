@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/profile_options.py": {
+      "_apply_option_choices": "595803148b9374feff4682b6dc5a58c51ace8376907567e2c0159606365c910b",
+      "_configure_option_target": "b3759c4531a4dffc82f3991248dfe30b23879ec8ca67fe4f128fb7efd8261fac",
+      "_option_interactive": "465e40859831c77ba555a2a9c5fddf356e4231b5571538a13f2da7e02e778f8f",
+      "_parse_option_flags": "b8b2f5a6b7ac7b76bf48593676adb6316e9b7fc8eb0fb6655d32711eae977615",
+      "_prompt_option": "766beb3af67f6663cea83ab8607d53269f46a1be8ac5b73a709596ad3de773af"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "_prompt_option",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/controller_cli/profile_options.py"
+    }
+  ]
+}

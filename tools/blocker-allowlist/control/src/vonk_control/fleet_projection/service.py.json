@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_projection/service.py": {
+      "<module>": "9a63c54234d69697f8b6401e5371077f31953907f324d1d79c299a3299d8b87a",
+      "FleetProjection": "9a63c54234d69697f8b6401e5371077f31953907f324d1d79c299a3299d8b87a",
+      "FleetProjection.__init__": "0f477d467fb4347121fe44148bac6675c81bd0a189c3ac3e0172a19270c3998a",
+      "FleetProjection._certificate_state": "53a4657b142dfa70ce4830168bccba394e6412c703c36051d6ba476a9f42a567",
+      "FleetProjection._current_certificates": "f22832e90d544d7567efd77531fd76fadc4917ead03c9ddbbd673e01da968fb9",
+      "FleetProjection._exact_group_reason": "bb8a8359d8162a503928729f85bc903d4fbe2090040248aa924e1401bf75e6bf",
+      "FleetProjection._installation_rows": "0850dcf8ff26f4351730a31451081adfd0ac8dcf66fdcd1c545c2c31882ebad7",
+      "FleetProjection._latest_inventory": "0e25dff6952de8987ae47adef3e974b98f2c528a0312a379fae14243e4a82b5b",
+      "FleetProjection._mapping_members": "0932a057a09961e41ee44f61fec471cc98f915baed1c0e2fc5ede18cd06a914f",
+      "FleetProjection._node_presences": "b48c24b2d813aca39876acbc4f0e169b3f31670662ead6f92e91d6a267b976df",
+      "FleetProjection._node_profiles": "2b1a68be89d26711e21789620fcfee2412f15bdac067ec6583772c0d9c8d616e",
+      "FleetProjection._registered_agents": "54ae1367825ebd3dcf6872deae4d0635da3419218c13349224c55469c8d80a3f",
+      "FleetProjection._reservations": "0a83ab7dfa2340348632ec8c5455ad09d595729afa88e3d21a26f30e4c3b94c3",
+      "FleetProjection._run_rows": "f3a9ea5e9ca638c1800434d54b5be0a137c0ce92f137c69b5025c3008f77d5c5",
+      "FleetProjection._stalled_loads": "2becf9baecbd9a7b033f80bd837571028a7ee418715cfa5df49e33f273f7461a",
+      "FleetProjection.read": "19173693160714d86a7eafe621b0ae926fdbf016ed34ee6d1fef96e0e4eebf27",
+      "FleetProjection.read_at": "14f093a3f80578300e6dac707ebba8ddcc96e193cf93b66d8848ab9f5625674a",
+      "FleetProjection.update_display_name": "c722da06cc04dd1e7fcd263a2d1edb319693101c39be5cbf6416c8cfcff8dbb0"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_projection.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_projection/service.py",
+          "CursorError",
+          "FleetProjection.read_at",
+          "fleet-event-cursor-is-invalid",
+          1
+        ]
+      ]
+    }
+  ]
+}

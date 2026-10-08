@@ -309,7 +309,7 @@ client input changed and rejects any drift.
 
 The repository does not type-check cleanly yet, but every surviving error is a
 reviewed one. `scripts/check-python-types` treats
-`tools/pyright-baseline.json` as an allowlist: each entry names a file, a
+`tools/pyright-baseline` as an allowlist: each entry names a file, a
 pyright rule, the accepted count and the reason it is accepted. An error that
 is not listed fails even when the file's total count is unchanged; a listed
 entry whose count moves in either direction fails, so a second error of the
@@ -330,7 +330,7 @@ detects defined syntax patterns for transactions spanning external work and
 artifact locks acquired inside transactions, blockingly, or more than one at a
 time. Passing this scan establishes only its checked patterns; real PostgreSQL
 and process tests establish the exercised concurrency and recovery behavior.
-`tools/coordination-baseline.json` is a reviewed allowlist like
+`tools/coordination-baseline` is a reviewed allowlist like
 the pyright baseline: an unreviewed site fails, a baseline site that no longer
 occurs fails as stale, and every entry carries a written reason. A stale entry
 means its recorded violation no longer occurs, so delete it after reviewing the
@@ -354,7 +354,7 @@ that touches a provenance field: `build_id`, `recipe_revision_id`, `recipe_id`,
 builder binary inside a build-input comparison. Sameness of an image, a model
 file or a build is decided in `vonk_control/content_identity.py`, which the scan
 does not read. Anywhere else a site must be named in
-`tools/content-identity-allowlist.json` with a written reason (a security edge,
+`tools/content-identity-allowlist` with a written reason (a security edge,
 or ownership, cancellation, retention or navigation by id). Entries are keyed on
 file, function and expression, never a line number, an unlisted site fails, and
 an entry whose site is gone fails as stale. `test_content_identity_gates.py`
@@ -378,7 +378,7 @@ allowlist, and a new writer fails with the place to move it. `control/tests/bloc
 finds every place that produces `needs-operator` (or the agent's `waiting-for-operator`) (Python and the Rust
 agent) and every fail-closed raise in all of `control/src` (a raise of any
 exception class defined there, found through the class bases), and compares them
-with `tools/blocker-allowlist.json`: an operator wait needs a verdict and an
+with `tools/blocker-allowlist`: an operator wait needs a verdict and an
 advertised action (`KEEP` needs an irreversible effect), a raise belongs to a
 `security-edge`, `input-validation`, `already-retried` or `bookkeeping-debt`
 family, and `max_debt` / `debt_ceiling.total` only fall. The ten audited modules
@@ -449,7 +449,7 @@ A third ratchet keeps the vocabulary the contract owns out of hand-written code.
 modules and the Controller's legacy adapter: a *distinctive* word (it contains `-`,
 `_` or `.`, such as `waiting-for-operator`, `stop-unconfirmed`, `operation_cancelled`)
 or one of the stored state words `queued`, `running`, `succeeded`, `failed`,
-`cancelled`. `tools/vocabulary-literals-baseline.json` records what predates the
+`cancelled`. `tools/vocabulary-literals-baseline` records what predates the
 guard per file, and a new literal, a higher count or an unlowered count fails; the
 same test requires the web app (`control/web/src`, except generated files and tests)
 to spell none and to import `vocabulary.generated.ts` instead.
@@ -698,3 +698,14 @@ artifact size, authorization or integrity contracts.
 The Admin web CI job uses the digest-pinned Playwright image matching its locked
 version. Chromium and its system libraries are already installed, so the job
 does not perform apt or browser downloads. npm keeps its lockfile-keyed cache.
+
+### Module-local guard inventories
+
+Reviewed source inventories live in `tools/<registry>/<source-path>.json`.
+`_global.json` holds schema metadata and non-module family descriptions.
+Readers reconstruct the complete document through
+`control/tests/registry_storage.py`; writers preserve unchanged shard bytes and
+remove a shard when its module has no entries. Blocker debt and categorized
+raise totals are derived from the entries when read. Existing scanner validation
+and lowering rules still own the policy. Regenerate with the command reported
+by the relevant guard, rather than editing aggregate counts.

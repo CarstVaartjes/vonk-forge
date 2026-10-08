@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "HTTPSResponse._open.chunks",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/control_transport.py"
+    },
+    {
+      "count": 1,
+      "function": "HTTPSResponse._read",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/control_transport.py"
+    }
+  ]
+}

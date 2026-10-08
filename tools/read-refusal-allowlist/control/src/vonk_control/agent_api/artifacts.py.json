@@ -1,0 +1,46 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_api/artifacts.py": {
+      "install_artifacts_routes": "215dc07052f38f8571de1dd6dd570ecfd291694b29bad93a5c05bd5841ef85c5",
+      "install_artifacts_routes._distribution_error": "6371d07f2d94633382c90b588ed71ae7d2638f87a443b1e4ae1052d0c25192d8",
+      "install_artifacts_routes.artifact": "528c2fb723b873ec50cb9cdea5690071002aa9f10aa16bddbba4386506b2329f",
+      "install_artifacts_routes.distribution_manifest": "d7cf34744378783681abcdc3f348e0a4ce864bd281f361572908402c7d1fd594",
+      "install_artifacts_routes.distribution_object": "2a7ab684cf47750985f890f43b414adb35202d4511a0d1a09e4c3d92728d9f84",
+      "install_artifacts_routes.image_upload_context": "df5fae0b8a4a0201b99d302b8e4b07ed7664d25cb1bd4abc0f86f5608ac64bc9",
+      "install_artifacts_routes.recipe_image_upload_status": "9c7b2511de16c700db78b5b0d5800f8340596d1a04931c551bcff838990dd5a1",
+      "install_artifacts_routes.upload_recipe_image": "f1be4c3a139e8949bec05d7618c4b6dc82d6c9ba5450d2d35b341794ad30775f"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "artifact",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/agent_api/artifacts.py"
+    },
+    {
+      "count": 1,
+      "function": "distribution_manifest",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/agent_api/artifacts.py"
+    },
+    {
+      "count": 1,
+      "function": "distribution_object",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/agent_api/artifacts.py"
+    },
+    {
+      "count": 1,
+      "function": "install_artifacts_routes.distribution_manifest",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/agent_api/artifacts.py"
+    },
+    {
+      "count": 2,
+      "function": "install_artifacts_routes.distribution_object",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/agent_api/artifacts.py"
+    }
+  ]
+}

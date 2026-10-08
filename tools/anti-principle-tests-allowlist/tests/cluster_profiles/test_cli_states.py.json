@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "tests/cluster_profiles/test_cli_states.py": {
+      "_outcome": "49ebfeed16c6d4bd5d8cb189860fa9d93af07889a1204751320653d22764b767",
+      "test_a_failed_update_with_some_children_done_exits_one_like_the_old_partial": "d0593c2505caabadc8ff2254be2bc2d457d5ef9aa5b64cee2a61626d2a918436",
+      "test_a_job_prepared_or_running_is_named_by_its_stage_or_state": "4839ab3ebcef33d79062819acc2264fae962739737fb90f9ad0a14a76cb002a0",
+      "test_a_wait_for_a_person_is_the_same_under_either_spelling": "01242231e9bb1bf8dc01cc86234e3b143081d07e27e4486e3557b9ff424aa9e2",
+      "test_an_accepted_cancel_is_observing_or_the_old_cancelling_or_ended": "ec6911a5b4efa75cc1f9bd4ff8c88b088adec82b02e221ec7af182c2f495d6b9"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_job_prepared_or_running_is_named_by_its_stage_or_state",
+      "kind": "ending-without-fresh-request",
+      "path": "tests/cluster_profiles/test_cli_states.py"
+    }
+  ]
+}

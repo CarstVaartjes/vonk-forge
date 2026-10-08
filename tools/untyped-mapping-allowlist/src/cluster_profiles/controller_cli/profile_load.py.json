@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/profile_load.py": {
+      "<module>": "9261fa2a6e8713caf20dd4aeb8ed2bc291af59e9aef25c4696b20c757d03561b",
+      "_load_profile": "57c85ffc6313dbc329f9ca9503210fe95323071cb4b917240eb98b360c684ee7",
+      "_load_profile.same_application": "8bbfc5e3590f860ffe504a1edc126d29342608391b6dab7dd863124d1ddd2d9a",
+      "_review_and_submit_profile_load": "d2de038ab0c4fb0a60176f802e41f0872669b89d3cb5bf409768a1cf2300571f",
+      "_reviewed_effects_digest": "da24f2781d6aaae380692012132bf3d4e13bdaee0ba1f220d5fa92ab68cfcbf4",
+      "_submit_fleet_upgrade": "25a8fd4d8847f6f8307ee8bcba552caf97740868ea5b9e79dc5c1a1f402980ad",
+      "_submit_fleet_upgrade.validate": "3990d079ad6b72808629af7bc14e8ffe1f4ccb83792f97178907a58c163dded8",
+      "_submit_profile_load": "d21328ba47d5de9f6c99fecf4c055785b66df4df8071ae2000756cb690d4e044",
+      "_submit_profile_load.validate": "bd35e27124d27d71599a456c76c5e9e7ba85488e22e676d0addcd8c14ca15110"
+    }
+  },
+  "debt": [
+    {
+      "count": 10,
+      "path": "src/cluster_profiles/controller_cli/profile_load.py"
+    }
+  ]
+}

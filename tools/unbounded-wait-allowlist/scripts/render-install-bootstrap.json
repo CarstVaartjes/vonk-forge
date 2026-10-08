@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_read_regular",
+      "kind": "loop-without-deadline",
+      "path": "scripts/render-install-bootstrap"
+    },
+    {
+      "count": 1,
+      "function": "_write_new",
+      "kind": "loop-without-deadline",
+      "path": "scripts/render-install-bootstrap"
+    }
+  ]
+}

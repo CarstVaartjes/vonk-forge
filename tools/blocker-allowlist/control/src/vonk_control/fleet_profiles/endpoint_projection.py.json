@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/endpoint_projection.py": {
+      "<module>": "40d979fb513ee8d769cb828999271103ca809cd96bc1fc9cb7f1c1004f41feca",
+      "FleetProfileService": "01544e503706a816bc64882cf5005eb3427ee4bb22a3bfc1659eeb5f8cf12e52",
+      "FleetProfileService.endpoint_intent": "8aee5c4fb55331ce4b897b9a2090a030d7c4fcccb07d2c1545169a03f85e7f5a"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/endpoint_projection.py",
+          "MissingRecord",
+          "FleetProfileService.endpoint_intent",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/endpoint_projection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/endpoint_projection.py"
+    ]
+  }
+}

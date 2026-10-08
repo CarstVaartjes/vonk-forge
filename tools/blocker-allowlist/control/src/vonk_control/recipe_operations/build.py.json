@@ -1,0 +1,118 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/build.py": {
+      "<module>": "2d2fe2505d61a7b5c5cd0c6924b0cd678a3a9348c45730c0606ebb11b5f5d056",
+      "BuildMixin": "badd2f2d26c3215274dc734bfeb8970fafe7243aba3553e13512835c25782a9b",
+      "BuildMixin._build_once": "a16105d85dbd7ea18e2bdfcfa7a12b92410437154724d14c0ec9b14ba8112858",
+      "BuildMixin._check_build_source_once": "4875a4ad3eec7c932357e8cb427d680151bebf87a985fe25a219a98a4f483a92",
+      "BuildMixin._preview_build_once": "61fa7b2c4512b9cbcdeb87c26bc21c8a196e125e18c425154b6190b1f01f776f",
+      "BuildMixin._queue_prebuilt_build_in_session": "640e900fa2e345f55ada31150e2fb130901614baae322ef28628204ef76d2f45",
+      "BuildMixin._start_build_in_session": "a371c881e7665049292f105c2f347e820671fa3389699e733e7e20fb6d0c5706",
+      "BuildMixin._successful_build_job_in_session": "d4ef5d2ee29b7d59223e44a61895f930d9fe62a14303028ceb327c5507f7ccea",
+      "BuildMixin.build": "04e6c634f71548e5261ce1df8f1dba14d79d0cbb61dff9a6ab3f5a0be7b24d19",
+      "BuildMixin.check_build_source": "d48c220f1c5a3c1f14b3059b174b83f2d61c0599b7b8a07edbf3629848dad135",
+      "BuildMixin.preview_build": "5b4a2c3f4247d7c38df54cd8a2d1636130e36b6f3de9ed4194989b5e07f02a3f",
+      "BuildMixin.reusable_build_id": "71ebc653362e20d3f15bc0ca9762c310000a79ec114fc1ebd78c68b5958a83c6"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "build.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/build.py",
+          "RecipeRetryLater",
+          "BuildMixin._check_build_source_once",
+          "recipe-build-service-is-unavailable",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/build.py",
+          "RecipeRequestInvalid",
+          "BuildMixin._build_once",
+          "recipe-build-cancellation-is-awaiting-cleanup",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/build.py",
+          "RecipeRequestInvalid",
+          "BuildMixin._build_once",
+          "recipe-build-preview-is-stale",
+          2
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/build.py",
+          "RecipeBuildAdmissionBusy",
+          "BuildMixin._build_once",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/build.py",
+          "RecipeBuildAdmissionBusy",
+          "BuildMixin._queue_prebuilt_build_in_session",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/build.py",
+          "RecipeRetryLater",
+          "BuildMixin._preview_build_once",
+          "recipe-build-service-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/build.py",
+          "RecipeRetryLater",
+          "BuildMixin._start_build_in_session",
+          "recipe-build-service-is-unavailable",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "BuildMixin.build",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "reason": "Direct build admission retries typed uncertainty, including unavailable build-service wiring, after each failed transaction releases its locks. The finite admission budget preserves exact inputs and leaves a fresh request eligible; security refusals escape immediately."
+    },
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "BuildMixin.check_build_source",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
+    },
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "BuildMixin.preview_build",
+      "path": "control/src/vonk_control/recipe_operations/build.py",
+      "reason": "Direct build preview re-observes exact inputs through the bounded admission schedule. Exhaustion returns typed uncertainty without a claim, so the next request can observe again; security refusals escape immediately."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/build.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/build.py"
+    ]
+  }
+}

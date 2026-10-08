@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/reservation_owners.py": {
+      "<module>": "9da82c110444de7d27e6b77cdf81852af5a9639a5024b173d8b3d15c6d760f21",
+      "ReservationOwner": "c7832114ba17fecd035f9bb61184ba554f0d09e88b08d9aed932d8ad55a34623",
+      "ReservationOwner.describe": "32b40d5917044b40914c8802d44608948e83e94f467f13656f966cfdfe0901e1",
+      "_a_rank_shows_an_effect": "d86d6a35b66504182d807bed0a38db8aaa017348478a8dc6f772a9105e9a105e",
+      "_aware": "e3f863dd032191f03c6bc6cdd1d84a10cbae0188f0a6e678b74883dc6aedeaa0",
+      "_effect_is_uncertain": "9e47266177c629329b4850dc9b70b5f3a488b94d271285ec0959ac33ef66452f",
+      "_installation_owner": "fe3cc5cf8721b2f60108d4d806ed2bef468b210317f733ee2ba1c639778b7aad",
+      "_referencing_active_job": "ad85253909173dc672f4078f39e71f1f565da83b99f0f70fa368cf16d99c78dd",
+      "_settled": "14f28c21da26699bb7674015bdc6b10ce97df22fabe2cadce9703c615f26b675",
+      "release_covered_installation_claims": "fe9b817eff10ef64c6f0023b6a7b8c5cae41a7977ceabef528dc4e27929a883e",
+      "release_dead_owner_reservations": "4384d867aecca3066852117dd9ca965ee4afaa59ce045f5f74cb7aa0355e505f",
+      "reservation_owner": "c7bfba7f11b817d5efc9e85bd785a9e5108bcd2c4480da859772979a943ae8a0",
+      "run_has_live_operation": "3bdc9817504c55e8498ae7513fe8bc9ebeb95785e74358424229f3b9c1b52ea4"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/reservation_owners.py": 2
+  }
+}

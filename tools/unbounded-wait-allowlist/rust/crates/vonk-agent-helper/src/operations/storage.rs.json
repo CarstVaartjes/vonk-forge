@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "remove_directory_contents",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent-helper/src/operations/storage.rs"
+    }
+  ]
+}

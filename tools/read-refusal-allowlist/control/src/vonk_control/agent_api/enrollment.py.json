@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_api/enrollment.py": {
+      "install_enrollment_routes": "a6b68db218aec51d94f217480562668c7c8c49e4b7ba420efe0b2471ab00a12a",
+      "install_enrollment_routes.enroll": "e708918ebd76ec2a1ecca69caec7cfc918ecb93611adf1721f1f6ea0f883f1a3",
+      "install_enrollment_routes.enrollment_bootstrap": "d1a4262eace2147871483485806ce30c95b289dc80d573eeabcb889545fdaeb4"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "enrollment_bootstrap",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/agent_api/enrollment.py"
+    },
+    {
+      "count": 3,
+      "function": "install_enrollment_routes.enrollment_bootstrap",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/agent_api/enrollment.py"
+    }
+  ]
+}

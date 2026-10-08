@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/claim_authority.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "_claim_has_authority": "15130235e8742034ba94b655d873584b041d8d79578a5cd22bf68bb5f4d5c0e9",
+      "_recipe_build_runtime_matches": "aedc7bff11961359f95e336975a3c2e4546d50cc275e83d8bf819797be97ed1b",
+      "_reconcile_agent_upgrade": "5613a073c4e8fa913509c73e74c4738a078720cebf397c7abc1f0659e6f9dfb3",
+      "_reject_recipe_build_claim": "6ad2058c7649f152626bf13fc87f4d6c42b44edbc8be6e366b95532b69dfadd6"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/agent_jobs/claim_authority.py": 8
+  }
+}

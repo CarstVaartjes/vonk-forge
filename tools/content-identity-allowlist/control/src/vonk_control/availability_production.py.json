@@ -1,0 +1,79 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/availability_production.py": {
+      "<module>": "348d8a1abc3223798a8dcaae5e97fc8450af4306463514e9256cca2e359771c8",
+      "AvailabilityInvalid.__init__": "47b11910078c2cbf795f8ce9571fc9a7b9be7d90e2869994926cc2fabdfa9f94",
+      "AvailabilityUnsettled.__init__": "63d48ca9809b90eec9d8b2f21be6792268e3879c80871a2cdf401c089eebd07f",
+      "RecipeImageAvailabilityProduction.close": "152fd19dec9a507fa196c3ce7d4eb8e88dddd071dc49e1a1fab7c55703db924c",
+      "RecipeImageAvailabilityScheduler.__init__": "396866748e9ee8931530bcdefe3f7560879202184f3c5c1745c7d89c4c05b681",
+      "RecipeImageAvailabilityScheduler._run": "125943965361217b69a8b4716afc649f40497a1d1a7cb90adbdd1115eeb3fb0b",
+      "RecipeImageAvailabilityScheduler.close": "8cb2dd356f12f2d672315021d6f84f6a83da2ee6e7c6e0692faee6ae3ae180bd",
+      "RecipeImageAvailabilityScheduler.executor": "3be2bc9dd75cf3f2dddc6377c7dfb3c0b94458d5ac4169e435f1d41c49e40dcb",
+      "RecipeImageAvailabilityScheduler.memory_footprint": "ecea438fab3580ff8d8135c1507b530244b3e9da76ab308d128ab1ee0d24bbd1",
+      "RecipeImageAvailabilityScheduler.tick": "406f988d6fbb94a7ecd0215bc7409d549db3c10fcc6181c68dc25d20ee9d04f7",
+      "_build_dependency": "1c9d5a5e4ee1298e6f85f8c9a9f42cc0870cffdc956f4d763224c7707c17962d",
+      "_build_progress": "b346eff906d55b5eef00614c5b104922a1fdd2b1ed51f666ade6c4aa907dd8dc",
+      "_cached_build_receipt": "251fd2074fb92fb2abf9d32ba37da55601612e8fdfb53684b31eea24695c1e01",
+      "_capacity_wait": "9f5386fec7cc1d7418ede6571055513b0854c2e760e18ddef4f4bdac9ccb1bb4",
+      "_compile_consistent_runtime": "dd7790420003fcb9fa7547fddd749c86a8ae252f360d21d2bad4dc73a241d3f2",
+      "_dependency_unsettled": "8d43e6dc128eaa0af449ef472f4e08ed16eb6c65652c3c265a87b11f9b308b05",
+      "_new_build_dependency": "5cd6687651102b20a416a5c9ac27963da589a49df4047f3aea1de4e19da216a4",
+      "_observe_build": "5aafbbd3d5022f7eb18237c8066f83f8d462821ca84664e4212d2b42ee7b3dea",
+      "_planning_failure": "fc2c6ff6ac2113e99cda877c0ef04a8a7897e84ff7fda61f7a7809f056293882",
+      "_prebuilt_blocker": "b21cad1de95823890c35527dfeeeb386e4b3769630a94a095f0b83d2a8391f5f",
+      "_prebuilt_choice": "59674c3a71a3dcd62dbe1c2b45871556056e67694f00a52fbb501b92ebdc91b6",
+      "_pulls_prebuilt_image": "31eb87a7d1757eb576336ebd7231cb8be54b99e81a2fd4cd5407bccbd4cb5def",
+      "_recorded_decision": "368f5aba159d41e689f8ae8e292709af57fb616c94206cde245ba7cb42022414",
+      "build_recipe_image_availability": "7e085c5357ffa1ffcfc129a0a7a03002c3edcafd1572bd803812bae666b8852d",
+      "build_recipe_image_availability.authority": "5452ae29a468da5cf16518b864ed57a83509ec7eb8b9cf7e14da767116787930",
+      "build_recipe_image_availability.builder": "aa08c1bccec7d68b443bde088ce4930e33140944896e99662b0c96e5f1e4aca4",
+      "build_recipe_image_availability.builder.admission_guard": "6fd40226769640f8d50311ce7e2bcd0fe2256f2e357bdff74433ec9c617e0351",
+      "build_recipe_image_availability.recover_build": "2b0483fe84c2bd14d8da2a77ec007832cca578ca9852088a933b7dda89a37809",
+      "run_availability_scheduler": "35f5e4428408ccc49623139359ca0bf9783fc52afb729708e28047eea81e1ad8"
+    }
+  },
+  "sites": [
+    {
+      "expression": "CatalogDocumentRevision.id == recipe_revision_id",
+      "function": "build_recipe_image_availability.authority",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/availability_production.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for ownership, retention, projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeBuild.recipe_revision_id == revision_id",
+      "function": "build_recipe_image_availability.recover_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/availability_production.py",
+      "reason": "Joins an in-flight build of the same revision that the accepted availability request already names; the consumer scan is revision-scoped, and sharing an in-flight build across revisions is not attempted."
+    },
+    {
+      "expression": "parent.payload.get('recipe_revision_id') != revision_id",
+      "function": "build_recipe_image_availability.builder.admission_guard",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/availability_production.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "expression": "revision_id != resolution.recipe_revision_id",
+      "function": "build_recipe_image_availability.recover_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/availability_production.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "expression": "str(request.build_id) != candidate.id",
+      "function": "build_recipe_image_availability.recover_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/availability_production.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    },
+    {
+      "expression": "str(request.recipe_revision_id) != revision_id",
+      "function": "build_recipe_image_availability.recover_build",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/availability_production.py",
+      "reason": "Operation-internal binding: ties a persisted job, payload or plan to the build or revision row it was created for, so a replayed or swapped request fails closed; both sides come from the same operation, never from another recipe's record."
+    }
+  ]
+}

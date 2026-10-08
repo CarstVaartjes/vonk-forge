@@ -1,0 +1,39 @@
+{
+  "content_identities": {
+    "control/tests/test_fleet_profile_bookkeeping.py": {
+      "_loaded": "60a9f415886d9c2cd2fadd8136989c7c3dee2efa381e1b0829ff405e09daac47",
+      "_no_active_revision": "5ca1ada41e380b997f4f74f419caef6ca2838bb70c09c136eef3fc3b6a0a1b97",
+      "_service": "d77b9038d69b635eef22dabafdab420b676ae49757dbbbc2469963a6e24730b0",
+      "test_a_cancel_completes_when_a_node_fence_moved_to_another_intent": "efc74212d3ab2035bdf2d9ac64d9efb9e9ce5cca664a7d7ef807199568c4fe9b",
+      "test_a_damaged_order_is_retired_and_the_worker_continues": "1f3cb018f549ef93139c5d7164389d9aeaf906b78fa8f5cda74e99cbce22096f",
+      "test_a_damaged_string_list_reads_as_its_fallback": "906a7666d66c372c55593afe2b37f369682ecba4d2c55ca81dec5fc22f149774",
+      "test_a_failing_cache_resolver_reads_the_profile_with_unknown_cache": "d2f9286005157f3ec459c31d384a59d5c95432eaf92584c064507d080ff433ee",
+      "test_a_failing_cache_resolver_reads_the_profile_with_unknown_cache.unavailable": "b212ebf0bdb1bd7272e6f5d9c042b1496b11fb3bd7028017bed1ce3e1a2b26cb",
+      "test_a_malformed_retry_request_is_still_refused": "f9c8a721e751fd9aa2c119ed72b41d9d3e0b31a65f0b8cbf5199353d4b5eb4f2",
+      "test_a_retry_whose_fleet_scope_changed_is_declined_not_refused": "54618d08a5f0b70c65893bfb1c47c2efb633cf15755aa835d6ed8fe10f4c63f8",
+      "test_a_save_naming_a_recipe_without_an_active_revision_is_refused": "3fb4b51f79459444457ee3a4eac8f21d326517e220889f281a26ec48495a11f5",
+      "test_a_saved_recipe_without_an_active_revision_waits_for_the_catalog": "f9bcce08e729170c68d7dccc72c011800856c67823d67d9902e631f37ccb92e9",
+      "test_a_security_blocker_in_the_plan_is_still_refused": "9ef5179101b0b38c1fa4d109031a0ef9977f8610b8152caa250a34b3b6b10c9c",
+      "test_damaged_choices_remain_unknown_and_native_assignment_snapshots_roundtrip": "f584acdf74bcd17695e1388477e69fb6a13987b37fde14cc3d2c83ac3cce9b12",
+      "test_damaged_plan_and_result_are_retired_or_rebuilt_never_raised": "6049b66af85855a032299e821b942bd51546dfd664f581a1b202265e37b5f4d0",
+      "test_damaged_progress_is_rebuilt_from_the_row_receipt": "df0b4a3b2495988d1882746ce50023d469cbb7faff78c5f3bb40f45f41afd3a5",
+      "test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted": "d62e9e1b9cd9d9e9611a5438fb61dcffb4a01e00cd9e3c3179d9c9b1095f834f",
+      "test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted.end": "08ae2aed2105b7bc5e156b6b24654a92d0eae8e4b25d26512230ec0a340a88df",
+      "test_the_exact_identity_fence_of_a_recovery_still_refuses": "4e06faa3fc71755aca1584250db7b0c951c691cbbaf56199091f2a966d81e33e"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_cancel_completes_when_a_node_fence_moved_to_another_intent",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_fleet_profile_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_saved_recipe_without_an_active_revision_waits_for_the_catalog",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_fleet_profile_bookkeeping.py"
+    }
+  ]
+}

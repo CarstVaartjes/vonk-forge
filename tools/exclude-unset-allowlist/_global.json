@@ -1,0 +1,6 @@
+{
+  "inventory_note": "Only explicitly constructed partial requests with reviewed reasons may use exclude_unset=True. Persisted state, receipts, journals, event payloads, files and complete wire state are never eligible. No current source site needs sparse serialization.",
+  "max_sites": 0,
+  "schema": 1,
+  "sites": []
+}

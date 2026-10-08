@@ -1,0 +1,35 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/persistence.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_payload": "1cd294867f3b90fd82dbabff2d1b1ed7acbe9c15ba3d36bc7d0cb30ea5405684",
+      "_read_removal_intent": "9a2920ea1963d1e422e47386762183a337899b8d6fe6c072c7dcfe16b41a2f92",
+      "_read_removal_owner": "ad107e574bea523059b3e2f24a21d732ce5a6d7819a521fe310fc5bfa9c3899c",
+      "_read_removal_result": "7ac6f530a27c0186c79a59544469914704f40bc665bc69fb99da19f3853a9dc7",
+      "_recipe_removal_selection_in_session": "0f48ec5eee10799d2a88db865ddcae8cdfc69d41c4061f0d7368e30d6cb29fdf",
+      "_removal_payload_digest": "d505fadec4edfc2efc75b1ba2ea4adce799cb1ae7407af608d773dc9de7087f1",
+      "_removal_progress_document": "826ed26b899f35623d4f0d4549b880ce2b97df1fd499d24e0493ef49b0036bb5",
+      "_replay_removal": "f071529e4b1cc567b229a583c0b4598b3f545d6d69f92fb908c602ba024ab9a9",
+      "_resolve_recipe_selector": "9f881420640d3964faf65938ca1b51c621a1dba84da52ff8ea2295c9a9640930",
+      "_resolve_recipe_selector_in_session": "c40001dfb275636c4dc436a9c81c93406bf8b5eab5ab570b7290536b8dc30eb7",
+      "_stored_removal_result": "257f95d3fa54e62fcb82b3f85cf0b96c151302887ecd71561296eb1d06071d8f",
+      "start_selector": "5ba06b5bbdf0f1c26658f608e55e6a79cd7679d12beb79b80a5feea962029f37"
+    }
+  },
+  "sites": [
+    {
+      "expression": "operation.authority_revision != intent.recipe_revision_id",
+      "function": "_read_removal_owner",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_image_availability/persistence.py",
+      "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
+    },
+    {
+      "expression": "result.recipe_revision_id != intent.recipe_revision_id",
+      "function": "_stored_removal_result",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/recipe_image_availability/persistence.py",
+      "reason": "Availability operation bookkeeping: selects and fences the operation, its revision authority and its owner by revision id or settled build id; not a comparison of image content."
+    }
+  ]
+}

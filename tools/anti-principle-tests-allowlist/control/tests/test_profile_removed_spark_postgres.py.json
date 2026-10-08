@@ -1,0 +1,22 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_removed_spark_postgres.py": {
+      "test_preview_reviews_partial_cleanup_when_a_dual_model_spark_is_revoked": "926ee47153fd1b501a10483f074ae223cfc00d0e904d1964dd787e38c52e3540",
+      "test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim": "b9fd20395c95c6beb1df7f12d5a09c002c238e4c57240aebd1feb138da31a14d"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_profile_removed_spark_postgres.py"
+    },
+    {
+      "count": 1,
+      "function": "test_profile_apply_stops_only_reachable_rank_and_retains_missing_claim",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_profile_removed_spark_postgres.py"
+    }
+  ]
+}

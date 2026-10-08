@@ -1,0 +1,42 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/library_api.py": {
+      "<module>": "f08ff21ab267260aca30c68735a08c0f86cef04ae7ddc16632d14255bc21b39d",
+      "SelectorAmbiguityHTTPError": "70fdfac5b44fb15eaed1e8c3969f565928e3e6431b8f96ba7f7f84e8290aab32",
+      "SelectorAmbiguityHTTPError.__init__": "56c442f624ad63bf2a57b2be0ad213715bb56813fa6eebeda24eafc7d5f4a324",
+      "_error": "106e4aa44cfa369c21b0f333bc21a8860e6215c54373072e8e6d62b3111cf587",
+      "install_library_routes": "945effdde96a31eb71e46a540a7f616669b3d7864eb555558bb7b5c1a6025798",
+      "install_library_routes.library": "66d67c47d0dff3d2384584b9da9d789a556c2085915c5eeef8e66ad8035b2b6e",
+      "install_library_routes.model_detail": "48117c6883fdf13c297078c0872eff6ee49ded10f9e67c08056a07a07e18a79c",
+      "install_library_routes.model_library": "8a96680ef50e7a3bcee821d639509181d2f1f52e519055777610e6e48153e48a",
+      "install_library_routes.recipe_detail": "691299396d214aee7406f4ae68de922abd3cd5e78f57b43e304e7bde767d9806",
+      "install_library_routes.recipe_library": "c9cda1ad974b5b704a89fbae0b0509446aeab6fe6c477ddeb402b8d3c002e4ff"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "model_detail",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/library_api.py"
+    },
+    {
+      "count": 1,
+      "function": "model_library",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/library_api.py"
+    },
+    {
+      "count": 1,
+      "function": "recipe_detail",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/library_api.py"
+    },
+    {
+      "count": 1,
+      "function": "recipe_library",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/library_api.py"
+    }
+  ]
+}

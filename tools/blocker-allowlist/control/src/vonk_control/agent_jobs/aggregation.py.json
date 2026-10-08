@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/aggregation.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "_aggregate_parent": "52eb20b85cf646953f4f1f6b57beb30d18843645bdb1832507c4f70c891d55cd",
+      "_aggregate_parent_state": "225d6354f8be8411a27cf9e30f73bebadae5c971661899d94a101626c645219e"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "agent_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/agent_jobs/aggregation.py",
+          "MissingRecord",
+          "_aggregate_parent_state",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/aggregation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/aggregation.py"
+    ]
+  }
+}

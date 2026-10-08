@@ -8,7 +8,6 @@ a build lookup) and against the closest allowed shape.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from textwrap import dedent
 
@@ -26,6 +25,7 @@ from .content_identity_boundaries import (
     scan_provenance_sites,
     scan_source,
 )
+from .registry_storage import write_registry
 
 #: The repository parse is shared setup, not the first test's own time.
 pytestmark = pytest.mark.usefixtures("parsed_repository")
@@ -192,9 +192,9 @@ def test_allowlist_loader_rejects_an_unexplained_or_unknown_entry(
         "expression": "a.build_id != b.build_id",
     }
 
-    def write(document: object) -> Path:
+    def write(document: dict) -> Path:
         path = tmp_path / "allowlist.json"
-        path.write_text(json.dumps(document), encoding="utf-8")
+        write_registry(path, document)
         return path
 
     with pytest.raises(ValueError, match="written reason"):

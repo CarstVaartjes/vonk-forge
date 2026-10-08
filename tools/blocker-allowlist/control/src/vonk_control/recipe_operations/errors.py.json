@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/errors.py": {
+      "<module>": "1e1e653f5299bde7d6e59af02b96c12a2514f463cd48d3c6871b2dc76714565b",
+      "RecipeArtifactJobCancellationPending": "24a4e5b226a62a20d28b08d48ab7f4e0c203c80710572a8465349ff9f7a6bacf",
+      "RecipeArtifactJobCancellationPending.__init__": "2aa938b4e4a50dd136a4f9b2e63cde2a0a05506f3ddd63460b0edba9b53cefc8",
+      "RecipeBuildOwnershipBusy": "0a4a9738b0c655363cbc8981731b7ac0cf650650e0fde4c346101f5ab36a4f02",
+      "RecipeInstallPreflightExpired": "66c57e539592b92aa06ea2c4965ad77da7eba58aa65031ece11e335181c0a0d3",
+      "RecipeOperationConflict": "d8c458e4289c5ab7501d0ceea2af0d53838280cb636782c287faea117f7c8a7d",
+      "RecipeReconciliationBlocked": "06bc9d9e7b34d0d34fe880f9e6a055528d5e829aadf31e74bcc1347e4677b6db",
+      "RecipeReconciliationBlocked.__init__": "5b51804dd0880a9be15e724a53b42c21ad6a89e8cef3c218644e699c7a84a13e",
+      "RecipeRequestInvalid": "d498d6cf38aec23be2b7018c98c415c5067282637864d64cc44fc269a1a690cd",
+      "RecipeRetryLater": "f34fb7a393c5a4bed95f08cb65f5364f3220aff8197fac60e71093ed8963fda8",
+      "RecipeRetryLater.__init__": "2d94a1c7dce73e63fcafb7bf79e07d11d2e5048eda9139f20bf860bac0031f88",
+      "RecipeStopAuthorityRefused": "19edc43f7188eb13cfde491f7b82b08d9b8c4908c5b45e84a398df4713e0f6f8",
+      "_RouteNotWithdrawn": "b80fcd4003d0f55d9088f2d58dd433b89ae819595798ad3baa6cfd0067df4d11",
+      "_ServiceStopReplay": "c80fef410aab470324fcdd35bc58dbcc31c85c6b5b3f41e7a77c3a136c7da69d",
+      "_ServiceStopReplay.__init__": "e40e3a1961708cd8fe962a34708dce24c3d9bae1f24a7f466ef6a565e0a619ca"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/errors.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/errors.py"
+    ]
+  }
+}

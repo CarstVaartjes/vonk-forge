@@ -1,0 +1,43 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/claim_notes.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "_excluded_work_refusal": "e373e371abef4f63e00dca4c1839795f3a216eaaa77f0c490067069aa03aced2",
+      "_note_malformed_cancel_flag": "3710e06f195350d25209b386b3843c9e467faa697978a8cbdf3020a2534bab11",
+      "_record_claim_refusal": "4373d4903479f54504a6829f3d9dc2d2c03b7704e98df9a8f4da1eead3b57b30",
+      "_refresh_parent_claim_refusal": "7c99bb79bfaef61de813f346182a255ac3e4a329ebd991e6fa53519093225117",
+      "_write_refusal_note": "f07ed647e05abfed5f0d241c71800fd21f7dcce87719034f5084543ffbc93b1c",
+      "claim_next_operation": "5c2370ad642b15819c830ccb29af8e2731ff0bc89573b88121156e9f7cff55df",
+      "record_boundary_refusal": "8915ae3409333b3775474fb4b5cfc77860c8ffd197a438d591b3cb3c6ad39108"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "agent_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/agent_jobs/claim_notes.py",
+          "InvalidValue",
+          "claim_next_operation",
+          "node-and-certificate-are-required",
+          1
+        ],
+        [
+          "control/src/vonk_control/agent_jobs/claim_notes.py",
+          "InvalidValue",
+          "record_boundary_refusal",
+          "agent-boundary-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/claim_notes.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/claim_notes.py"
+    ]
+  }
+}

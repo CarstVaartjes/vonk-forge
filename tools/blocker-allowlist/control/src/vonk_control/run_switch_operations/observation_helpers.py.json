@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/observation_helpers.py": {
+      "_EstablishedEffect": "3871ab52024d2c8c7cca50f67a9b70934216276b4576b5f6ba398a3bc40d4d5f",
+      "_established_start_effect": "0d6269b430d5788bd1b0df78b05a8d971a3ab8f8297b2869dee501b42c6a375b",
+      "_established_stop_effect": "0555d9f9dd779bd94bcabf6f8ef4c5db71b6d7f204afcad7a68766e656de7584",
+      "_failure_code_of": "b00f174265e9e3bdb6385af5de5ae5338812d43918ec9021d5d667c4affc098e",
+      "_phase_request_key": "109e72fb22510908cf3a221d5d235bbfbeb361f87ac3344de95ece20b07fd9e6",
+      "_plan_blockers_are_waitable": "f204a26f333cce960a7235704725518683c4cec0acdfa9a6d367a5b9d9061853",
+      "_require_reviewed_plan": "671d455e9ebeb3f80ce62ac4de897d28cf8197cabe88dd0b4b0bbf50b8e334da",
+      "_same_intent": "e751076e169ad72cb4b49934f10d3f8908f82a738770821877f2c7db553eaecc",
+      "_start_still_progressing": "6d52cb95d1736e603135541949ea7139b74d76cb4783e49f892b66296540aa31",
+      "_stop_child_request_key": "ddaacaaa6cbf7c243bcfeb1b4c8a1f84df66f04f4d0a32ea22a00239e480babd"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "runswitch.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/observation_helpers.py",
+          "RunSwitchRequestInvalid",
+          "_require_reviewed_plan",
+          "run-switch.stale_plan",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/observation_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/observation_helpers.py"
+    ]
+  }
+}

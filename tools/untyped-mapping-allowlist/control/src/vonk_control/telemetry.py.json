@@ -1,0 +1,35 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/telemetry.py": {
+      "<module>": "6ef9895a74049c3417c9c48fb6a3f71e9c6e86ed1b7d21e1002ad5c73ba54a61",
+      "TelemetryRepository": "593546a20693bdb164aa1d83145081fb0fa5f5d3533326deef55e2e7f34aff32",
+      "TelemetryRepository.__init__": "001959eb9a9b33f78615e0318a70afb396b7e80ee8dac98a93fde729488642b4",
+      "TelemetryRepository.by_ids": "0988611f1fc2e0513729f328b06d5fd02fde4463d9cbb682ac983a496f8218e1",
+      "TelemetryRepository.latest": "1f519d80a9b6045c49116f5002d8349f734060f307418be294b872ff8f736191",
+      "TelemetryRepository.latest_in_session": "83de27be6ccd79202dcbf3d2779cf8051fd7f555e034e9a20672e7f610e4534f",
+      "TelemetryRepository.recent_in_session": "0340b14f47fbc3740e6362fa60808649499c375a8edcb932d6630241fdf1daaa",
+      "TelemetryRepository.record_batch": "d79a2d7c8b31db097940974a35999fbd62c7457b030733f120e9215e8815a6a5",
+      "TelemetrySampleInput": "93a8ce6b6ce80340eb1c16cd7bba0d5cdc16b030215c37f6a7d249e02db8bcdf",
+      "TelemetrySampleInput.__post_init__": "672df875615bd9a2159dcd5f48592c403eb8d1ce4a7aa712bf5dc44a9bedcb79",
+      "TelemetrySampleView": "6cfb54d5e6433629bb630bab59d6c89fc53e13433b2c973aac6b8e0a47caac86",
+      "_aware_utc": "aad58791bd259c39da6b0f01bf4cf80664b909b2027eab72d94552a14cdac0a9",
+      "_bounded_bytes": "f4041982675498191856c648650ce12fa332676685ce9a946f4d5f7ab5d20ce1",
+      "_canonical_sample": "08ddbbec6d1e365ed997121eb9b03e74b81b890684dea177e98a1b7975540baa",
+      "_capacity_pair": "3361c05b49d5bee440147dad4845430444fce390628735835d1e77cdc929dad0",
+      "_finite_number": "0e220ad93d8abd8476fbfe9e581a01e773b0a4caa75949208cba504ef5cadd9b",
+      "_read_view": "6f36b0ee2cfcd63533d6beae2fe8a9ba6ced95dbff324569f197eabcfe0e22e9",
+      "_row_values": "3c047dcefcba083ba198702a104ef780d69820a314236bfbb0540987198a5bf3",
+      "_same_sample": "8d4e156dbc683f6273f8747f5f1841770b4f2a54df873ad09bbf15d4fb7fbb6f",
+      "_stored_utc": "0879647c9129588669b22e3c477f9840f1690440d8ec25cf593ae43e84a72c9a",
+      "_view": "27bb6b93ca39f6420edd676cd97d0236923965e936f94a43c00ad88a05f29ec8",
+      "cpu_clock_is_low": "489208e88ca27aefbd99bd9915970c2e2c2f60d696401343f3c365d8a1945600",
+      "sustained_low_cpu_clock": "9c698121d26b70000cb04bf735c5ca4a0f97a15df53ee00a0f9d1569feac1696"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/telemetry.py"
+    }
+  ]
+}

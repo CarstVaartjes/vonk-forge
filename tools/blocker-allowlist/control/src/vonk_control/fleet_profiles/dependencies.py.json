@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/dependencies.py": {
+      "<module>": "03f995b7a0bdc3d95c05f8cd929831b786b0d55b5e15f093708c67fa757696b0"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/dependencies.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/dependencies.py"
+    ]
+  }
+}

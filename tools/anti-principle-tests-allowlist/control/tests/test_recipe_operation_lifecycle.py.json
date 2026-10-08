@@ -1,0 +1,64 @@
+{
+  "content_identities": {
+    "control/tests/test_recipe_operation_lifecycle.py": {
+      "<module>": "09ad4706eba0650139068ce7aae60528b63ca96500cfcdc176ffcb5979a90702",
+      "_fields": "aebd234fef3513a952e8f131acc6bca5bf0f48ab34230a900741de890690393f",
+      "_job": "f6524bbdfabfe437ac1d172c4de468c749fd3cf58e12f6d387f8535c0adc90e3",
+      "test_a_build_completion_racing_a_cancel_is_swept_not_parked": "2338d4be322a5da3a8e180b95c3f4b665bf0734cc2211e7ff526d2bd9f9afc5d",
+      "test_a_build_completion_that_raced_its_cancel_keeps_cancelling": "44a2597381ff194e2afae6ccb0f6ab0a874d3a0a7e2289d939217ea0c8bbe2bf",
+      "test_a_cancel_of_issued_orders_stays_in_flight_never_waits": "b773d4b9b8a9f54b8a5dc0e0152547449dbe4790100de8e1812cfef59abfbee0",
+      "test_a_definite_end_is_absorbed_by_a_parent_that_already_ended": "f3982bdee7026490539e8da444cc8ec45adac5b01f21ab3f63fb0119dc6779ad",
+      "test_a_legacy_build_wait_with_a_cancel_heals_and_one_without_is_left": "b91d09039e6e22e14ecf777d3a10b3447be083ff35c7f810505b4b4f2eefb0d0",
+      "test_a_parent_is_created_live_or_already_done_never_parked": "35063a2117c2366074750752c49e501d2ca713db6ce354094f3c9f93571e668e",
+      "test_a_parent_whose_orders_never_ran_is_cancelled_at_once": "0f4ef43c68b47c66735f485afd66533b4b37d6f6e73d352b78805b041dcfb879",
+      "test_a_waiting_parent_accepts_a_cancel": "26958929d547178e8e8c0fce68faedf3ddfb0630b45c4c2fd2b83298b5941f0f",
+      "test_adopt_maps_every_stored_state_and_the_cancel_request": "6e5fd07306879ee13efcd1a6af601db65da52cb8537b8685493c648eab6ac459",
+      "test_finish_records_the_definite_outcome_of_the_orders": "74bd4aa9cfbd566e5fc599aeb1d2b56cdbc518697e5abb49d9db644c5eb3d446",
+      "test_no_event_leaves_a_parent_waiting_for_an_operator": "5eeef3e1135000086fadf7dc221240e57c3b95d97f1f47060a0a32429f4ae9b1"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_build_completion_racing_a_cancel_is_swept_not_parked",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_build_completion_that_raced_its_cancel_keeps_cancelling",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_of_issued_orders_stays_in_flight_never_waits",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_build_wait_with_a_cancel_heals_and_one_without_is_left",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_recipe_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_parent_whose_orders_never_ran_is_cancelled_at_once",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_waiting_parent_accepts_a_cancel",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_recipe_operation_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_no_event_leaves_a_parent_waiting_for_an_operator",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_recipe_operation_lifecycle.py"
+    }
+  ]
+}

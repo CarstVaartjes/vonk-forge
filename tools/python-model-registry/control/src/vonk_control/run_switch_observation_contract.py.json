@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/run_switch_observation_contract.py",
+      "reason": "Canonical observations and retained identities for restart-safe run-switch recovery."
+    }
+  ]
+}

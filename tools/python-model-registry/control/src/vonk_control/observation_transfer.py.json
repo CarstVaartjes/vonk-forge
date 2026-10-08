@@ -1,0 +1,9 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/observation_transfer.py",
+      "reason": "Canonical immutable observation transport records; original Fleet and platform models retain domain ownership."
+    }
+  ]
+}

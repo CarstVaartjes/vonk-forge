@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/registry.py": {
+      "<module>": "5e2a30c3ed7409cef376ab3f5c3e00c1a329b410941d2dfa31b514f0f4e20859",
+      "FixtureRegistry": "5e2a30c3ed7409cef376ab3f5c3e00c1a329b410941d2dfa31b514f0f4e20859",
+      "FixtureRegistry.__init__": "408ecd432619c50018cecd3ded176deb7e28fb1aed0fc7019f7cb8aa480ae944",
+      "FixtureRegistry.load": "322be6f0178ed330fbc8f60ce972bdd4196d1d05727fd602bd68d32a31120c6a",
+      "FixtureRegistry.load.collect_service_fixture_references": "5da8b1f96c4189c5d079b39d4fe6d8d6d257e4b01f4fc141c142f718bf920290",
+      "FixtureRegistry.resolve": "71ee9dcbd01360985da6721911454585a13082cc5adc1cd189eb17f6bba0c2d1",
+      "FixtureRegistry.resolve_service": "8bb6c3ac215402c8623647bd305adfb9008889b6e8fa1b19745ad7ef243d1ccd",
+      "_fixture_format": "8881d2d50ae85c447f7d2e5488236bd5656af5276c9981265a0afff25948d083"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "src/cluster_profiles/qualification_fixtures/registry.py"
+    }
+  ]
+}

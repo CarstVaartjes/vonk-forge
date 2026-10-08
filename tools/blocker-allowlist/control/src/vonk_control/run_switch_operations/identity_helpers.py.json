@@ -1,0 +1,47 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/identity_helpers.py": {
+      "<module>": "51d7cdd047461060b0142e6278793e403870148204d58db45d202694703c9c47",
+      "_is_hex_digest": "ac566a9411c582006771085b04c673028845bc7aa36e882561405b7ea45944a3",
+      "_is_oci_digest": "f422588e8d0d6178323c0cff1fd3eef0b8fa0f1b0d93beef73c1ca5d88c544fd",
+      "_mapping_node": "f452b679c52a063bfa1c5ec53538e4d60992d629511fe19afa1cb44774da8777",
+      "_node_missing_bytes": "ef9c72936941dc681a6331ae9b437e412918fe74976b432dedc27dc870fc0546",
+      "_normalise_architecture": "cd22c32c275e903042be51ceabf4697e44cb4f076785ecdb08930bfd2bb810c7",
+      "_primary_model_digest": "ec4eceea5ef042151a444e1d6a204d53ff13df070bf791f0b51f832cfbd7f9d6",
+      "_recipe_definition": "ca3a6734310a4494478ecd9e6407c7db8e58f63929dac4fc8fb31cb2377156c3",
+      "_required_string": "ea18b075b329bd06635c48903662da03317cc8858e0064205e7ae680b6a6de64",
+      "_started_operation_id": "3d2e89e902e857e3b7eaeb65856c332bef786d3f6819f463256aefd920a20093",
+      "_stated_bytes": "f14259a5b15cc87eb2be948d9c5795fe3728697df92d9682606aca3322394c71",
+      "_string_or_none": "fa3cbf462f631fca46e58a2893daf1c1cc86f93989a44d00bfb7aecacb79550c"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "runswitch.phase-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/identity_helpers.py",
+          "RunSwitchRetryLater",
+          "_required_string",
+          "run-switch-persisted-identity-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/identity_helpers.py",
+          "RunSwitchRetryLater",
+          "_started_operation_id",
+          "run-switch-child-operation-identity-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/identity_helpers.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/identity_helpers.py"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/dispatch.py": {
+      "_key": "ee4945f4061763ddf52e2175d10d723d0474dc9a28f1dd690b7f2cbab3358fd3",
+      "run_controller": "3478fdfdcb463feb13b8f1bf19c9298480c05a8bd95e487ee4f5f5cfadae5bee"
+    }
+  },
+  "debt": [
+    {
+      "count": 2,
+      "path": "src/cluster_profiles/controller_cli/dispatch.py"
+    }
+  ]
+}

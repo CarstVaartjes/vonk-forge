@@ -1,0 +1,88 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/execution.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_claim_operation": "d906e6554c53b7d817590a95b93641b24d1738c66d96f1c70836758d731bd4d2",
+      "_current_model_child": "82f7a804b0d477f60db77fe9a76e6c102abd4abe3d87c93e512f6ad2edb05d37",
+      "_defer_for_model": "71fb6fc491bf1ba68887b214d33b1d940eaf5044b083f436bd7597892a94e2b9",
+      "_eligible": "1fb8b73a443e6d5ff6b418e922c6c855270e56e7bc88f4cc50bb1ce2a6eefdfc",
+      "_identity_lock": "65744f3725faf7c7cbe7a31f1601aab73d5817fdbdeadbce2eea2bd6d67e077b",
+      "_model_child_has_cancel_intent": "8fcacfe12b885aefcae43df40fc0478df7b7f023202fc8835561603a67ab75ba",
+      "_require_claim": "6a0425293a342d29fdfa17aa2839403d277f5c28c5c89aac520e57b59d23b5e7",
+      "_retry_due": "f75da4783ce91fc5daf12f73dceac0b6ed3ae7c8a9dcb619cab613150f7f9ce4",
+      "_run": "d5f0abf53ffe074def28be14bc71645c984f38035e872afa748adadae3af539d",
+      "_stored_recipe": "81d7f977326047e043bc1b1581600d64dee2cdf13ed9f595c4bf49e3b7b826ef",
+      "_update_model_progress": "a0ba270ec7abf5e8eaa2dd1d552a6d62b34ce232e6beec65f8e9df4f2e67bb5f",
+      "memory_footprint": "ddedf61ea49d387f014b43e9b797e2511dbe560cbe3e1a736052becf88c79a06",
+      "run_claim": "c93da2d8c45fe9f3b74e0c4be18cb4ccf7c1d07e6ffd1bc41c5a821f16f2211f"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "execution.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/execution.py",
+          "RecipeImageAvailabilityUnknown",
+          "_current_model_child",
+          "recipe_image.model_cache_invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/execution.py",
+          "RecipeImageAvailabilityUnknown",
+          "_run",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/execution.py",
+          "RecipeImageAvailabilityUnknown",
+          "_update_model_progress",
+          "recipe_image.model_child_cancelled",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/execution.py",
+          "RecipeImageAvailabilityUnknown",
+          "_update_model_progress",
+          "recipe_image.model_child_missing",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/execution.py",
+          "_AvailabilityClaimLost",
+          "_run",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_image_availability/execution.py",
+          "_AvailabilityClaimLost",
+          "_update_model_progress",
+          "message",
+          2
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError",
+        "_AvailabilityClaimLost"
+      ],
+      "function": "_run",
+      "path": "control/src/vonk_control/recipe_image_availability/execution.py",
+      "reason": "A claim lost to a newer attempt or a cancel returns without writing; an unknown outcome is recorded by _fail and the lifecycle core schedules the next attempt on its bounded backoff, so the claim loop runs the operation again."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/execution.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/execution.py"
+    ]
+  }
+}

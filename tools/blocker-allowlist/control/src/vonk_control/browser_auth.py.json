@@ -1,0 +1,79 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/browser_auth.py": {
+      "<module>": "f93b05675648d3112ff114f13b593e872ed22c15738cf8aeb5e806227a73d3ac",
+      "BootstrapResult": "428fb49d8c7a143872bc07e77159cfef342c5a527ec5d0e2a6a75746745196a0",
+      "BrowserAuthService": "8300ecba7ea0cc3d07f3f8684144983e2e4451dc0c678946a723cc6468630af3",
+      "BrowserAuthService.__init__": "b5eb2fde7a427345ae5d8644a96a9aaff0d67b62930079c309d05ad0fca3bf76",
+      "BrowserAuthService._active_session": "3b44dc90d9b53c9eaa11fe15e2d5075e137a96b89855f023e1c6920c807786eb",
+      "BrowserAuthService._cleanup_expired": "da2974708e98eddb7fee081a6177e7481965661c8d53a9dc05742d932dba7119",
+      "BrowserAuthService._now": "f2d6f8fb543824a4f39cc6ea383e97820f5c8f15f6c5648c5f8d4a433be67b08",
+      "BrowserAuthService._opaque_token": "d388740e51732698013f8c0f63f72d9aaa6273e36666855aae748db7331a0de4",
+      "BrowserAuthService._submitted_digest": "bef57a6a233e789a68c9617c0c4617c47b03caf4366f147a6b29d2057e24af54",
+      "BrowserAuthService.login": "3e2865eaa02afc9425c943ecc94dcf49ef2251dc7e8058a49ed63128c46215fa",
+      "BrowserAuthService.logout": "5ed04f275edfa0cbea7a5ef96efa78d73236adc2eb510885b97c658651f2dd86",
+      "BrowserAuthService.resolve": "1386bf8d535403790bcdac8fcf25903e5534f7f41f9d75cc9ff600790e0411de",
+      "BrowserAuthenticationError": "adbb4f1c34e6ef7f07d9cb904f56359db052d8dcbed689db1e6bd230801f020f",
+      "BrowserAuthenticationError.__init__": "411bcdaeef28c96b12f7f875e6e80cfae26c1b07c25bb1821e2d204f0e27658b",
+      "BrowserAuthenticationThrottledError": "fb6d12083c8f384fd5e264e82dfdebb16deeefa1a6bdd921d7eac8a1f228a589",
+      "BrowserAuthenticationThrottledError.__init__": "31d658777f2c89a3a36203bde0a2234d390a9da4b5a6da5759620172150b4efc",
+      "BrowserIdentity": "d26d4ebb65372c158e16c73b220fa1050c1000e671cb657b928898df92c96a1e",
+      "IssuedBrowserSession": "cbb57f4d256638a848f9e762e6df903e0cadc0a94614575f6070b4a88813e7e4",
+      "LoginAttempt": "a764099848c8aa53eb69804f7c26d6d5f38daced80118b3c539a1c3f75977394",
+      "LoginRateLimiter": "9ece068dcfc1b7b3e016fba6e7ed9909f601c5e2666d39579ad759e3abaefa6b",
+      "LoginRateLimiter.__init__": "d82314430bdce01be8b88c8d091d811180f42ca99d2bf042bcd04990cd25851b",
+      "LoginRateLimiter._evict": "2cdc05559f6f38933f7800231e8f531fd0dc6101026f9b6c26567262d616e296",
+      "LoginRateLimiter._identifier": "5fc41526b49e4ee6be689e56ad530edf4df0168ed7ffa10b65faf5587e41fc33",
+      "LoginRateLimiter.fail": "b8382b02bac3f709f968767c906cb9599e1113266945ae7d44887095c60231ea",
+      "LoginRateLimiter.reserve": "d468ecc397d1c06b68dd09e3a1d4339cade97c0e92d02f8e9a0b3e4848ae144b",
+      "LoginRateLimiter.succeed": "9c9c385a7b9065fed4e22a3abcc7ed99b6e6bc4851ab1ee90701ea16eb708a34",
+      "_AttemptState": "279e0b07b6209c29336327468fde24b0589bb3b1648b57f7e11bbd292e098ca9",
+      "_database_utc": "eae0904752d74300bf0ffdbb345fd431829270e708e1150e6543207efab39e39",
+      "_digest": "0f551781faa33a59e6b3fc367ae88db5e43945c149155b90571957a2566a2a91",
+      "_new_token": "cbb9a18a5880e756a8f21f55b2967b2d3c9b2aa5be56081403ac5ff8f5de84fb",
+      "bootstrap_administrator": "1bf8aa7ab0f0014ffe723dddd0175c5b4bed6fbfcfe5d98b1f3bb5b5e8b43ce7"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "browser_auth.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/browser_auth.py",
+          "BrowserAuthenticationError",
+          "BrowserAuthService._active_session",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/browser_auth.py",
+          "BrowserAuthenticationError",
+          "BrowserAuthService._submitted_digest",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/browser_auth.py",
+          "BrowserAuthenticationError",
+          "BrowserAuthService.login",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/browser_auth.py",
+          "BrowserAuthenticationError",
+          "bootstrap_administrator",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/browser_auth.py",
+          "BrowserAuthenticationThrottledError",
+          "BrowserAuthService.login",
+          "message",
+          1
+        ]
+      ]
+    }
+  ]
+}

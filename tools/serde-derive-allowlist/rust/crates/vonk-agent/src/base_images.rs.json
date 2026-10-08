@@ -1,0 +1,29 @@
+{
+  "entries": [
+    {
+      "file": "rust/crates/vonk-agent/src/base_images.rs",
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content",
+      "type": "Descriptor"
+    },
+    {
+      "file": "rust/crates/vonk-agent/src/base_images.rs",
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content",
+      "type": "ImageConfig"
+    },
+    {
+      "file": "rust/crates/vonk-agent/src/base_images.rs",
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content",
+      "type": "Index"
+    },
+    {
+      "file": "rust/crates/vonk-agent/src/base_images.rs",
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content",
+      "type": "Manifest"
+    },
+    {
+      "file": "rust/crates/vonk-agent/src/base_images.rs",
+      "reason": "external format: the OCI image layout, manifest, index and config documents defined by the OCI image specification, read from registry content",
+      "type": "OciLayout"
+    }
+  ]
+}

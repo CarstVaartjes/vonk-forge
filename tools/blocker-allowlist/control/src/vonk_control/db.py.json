@@ -1,0 +1,53 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/db.py": {
+      "<module>": "16574dfef7ef3d70d8c3a13689b2f7cdde8e7c5e5427b5ab475fbd0ec485f652",
+      "_DatabaseStartupContention": "934f58aff325c5bb3980530c84319a271f5b0707c032a3ba33ac40787b2df977",
+      "_check_constraint_differences": "47962b80d76a486709a017688954c2ad42a51c51cd7f0249d32fd3a27c8ca08b",
+      "_column_default_sql": "1e472f6a97e920588928f44aef682af2a4e47e8517c855a6ba80aa33503e90ee",
+      "_constraint_kind": "f5f2b6f0f75ebee83e9301713ad63c2a4df38e9c8efe9892b241e64e6fa8696e",
+      "_cosmetic_type_difference": "db65a6a203600f1e5815a4a1c246e4d63b198c68e2eed189c619a0f305c3c78e",
+      "_database_sqlstate": "6cd4fcfd8482214e21c3af66b718852c870b874581abd72b5ead0f437aff21f0",
+      "_flatten_schema_differences": "780693a06a7e3a9d8de698fe99fcacb55a74139cbe6a507c77a04067a00c7c64",
+      "_is_generated_sequence_default": "3e0638b35b79de283b994413fa2da4a048c0b3d77374d9f24ef5684b125c5a81",
+      "_quoted": "044d3cd3a3302d325e36e3fad85825e0121482245520292e89065c70883b6c91",
+      "_release_retired_table_foreign_keys": "8b2eec368c19a6eca4f92dac5d53541769aa0f130a9670109c63f1f1f88c5048",
+      "_repair_check_constraints": "1ababad04adb5bb0b958508710c78d39c6b093ee8623fa05079e5281568f24c6",
+      "_schema_difference_key": "d58ba5636fd1e54eeae426a7e2ff4df418278ce0d6627b1b95a13492865e0749",
+      "_startup_retryable": "694b34df6210de7d1b48bbddeaaf7f1a1d99d3165fa27bc5ec3b442f4525040f",
+      "adopt_legacy_rows": "30f1f7a84df0e240ceb3aac7c2a206a735e18bf8bb8ce433e8fcc40e032940ea",
+      "build_engine": "8d81300d8d312ae09510140f48377fd9af3118045832f18ea8836f0ccd6323a9",
+      "initialize_database": "d9f09db7f01997ae59e62389fcf307fe1e74836e9637898abb7015da4affed8c",
+      "initialize_database.initialize_once": "1197d4bbefa727c1bdc0597adb3cd38db586e408e14800d8fb3678352e192eb1",
+      "postgresql_connect_args": "52a2cfae04e3ff59fad2d6f0bec96648189a9cc58ae54334f09d7dafdc4f0538",
+      "reconcile_schema": "ffd05184bb6c3df1d65b1c0da38abc135ae85f4474106653b2d0125c3227489b",
+      "run_with_database_startup_retry": "9489d29bcb0dfe769a0d18f25f5ab7eb3853ecdbec8406abb644b1f0b23f711b",
+      "session_factory": "08dab907cfe5df0b7f69e42851a325b3c4c164afa485faf0aebfd9946b5f6585",
+      "upgrade_schema": "85040630d6f903eb0ad7f4fedee04a20af3a503716b89f0f169d137664865589",
+      "verify_schema_is_current": "67a7017179deec4ebc68aec297c4d069a8ee01e5989a022afcd5cbb0c9ec9c07",
+      "wait_for_database": "0bbbb320c911e25be26151d2b5dc827829ae1ae8c7585503dbddd3964784cba3",
+      "wait_for_database.connect_once": "edca7d52d1d0b9d3e9fba2ad98160da97ae241b05229e86ea8af89eba4ef8801"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "db.already-retried",
+      "sites": [
+        [
+          "control/src/vonk_control/db.py",
+          "_DatabaseStartupContention",
+          "initialize_database.initialize_once",
+          "controller-schema-owner-is-busy-startup-will-retry",
+          1
+        ],
+        [
+          "control/src/vonk_control/db.py",
+          "_DatabaseStartupContention",
+          "initialize_database.initialize_once",
+          "controller-schema-relation-is-busy-startup-will-retry",
+          2
+        ]
+      ]
+    }
+  ]
+}

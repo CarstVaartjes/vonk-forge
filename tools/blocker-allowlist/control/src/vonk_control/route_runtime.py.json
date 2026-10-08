@@ -1,0 +1,230 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/route_runtime.py": {
+      "<module>": "73722f8c480ea86d621e1a8d8ee126f9bea465342f619b81199a803b22069d97",
+      "AtomicRouteBundlePublisher": "66a03bf12d4835c001a6197126ca8b12ec2fe8904b4e16e44dfaa44ee7afe8b0",
+      "AtomicRouteBundlePublisher.__init__": "b1f30abf62a308a03d8d8957144891acb6d49e0b46c6b905760f1e9ce6015e2f",
+      "AtomicRouteBundlePublisher._activate": "d3d5404a5c4d7d5ff6e43df8d870e94c8e88b2f8e126e58742917e2ace25322f",
+      "AtomicRouteBundlePublisher._atomic_write": "938e91071c17f1ae00953b41f64c87077dd4629a427803c3b75794236dd5d1ac",
+      "AtomicRouteBundlePublisher._claim_publication_lock": "d837a8cd10b204e02bf7a5b377cadb7638e425db7333e5a466f75d8b25b031fa",
+      "AtomicRouteBundlePublisher._identity": "bdb71cb38fbbc403a4e27250f079a7f417d3119aa7800830c1108137a0f1bf3e",
+      "AtomicRouteBundlePublisher._locked": "b556995c0ee90452bc054b826c70273fe4eabe0e2ef4ffa2729691338eb81a88",
+      "AtomicRouteBundlePublisher._read_marker": "e3c2038ff0246a9f94ec03d23f18c46363104624292c44c6da208fde21cc9188",
+      "AtomicRouteBundlePublisher._require_supervisor_ack": "89287afcb62c1d8d9c620e7ecc724cfdf118114662a932fc65f17f731ffecffd",
+      "AtomicRouteBundlePublisher._stage": "c733e4ed94f557a976fc94beda7f20661c2b4b13eae14fd0d51dbdd011212e64",
+      "AtomicRouteBundlePublisher._valid_litellm": "63bc2df4c4c273ba81b84322dd1cce6894c63d852877edefb5e9ad0c8b765dcf",
+      "AtomicRouteBundlePublisher._valid_routes": "94e2ba7330921146910f5429cc22669100719604781b170e53e155eb97fcc25f",
+      "AtomicRouteBundlePublisher._validate_marker": "b77e23d0adbf1ee4167f46391ececfdd86beb1453fc10ad9de88a5ae3c616d6a",
+      "AtomicRouteBundlePublisher.inspect": "32f726147cd89786ef03d6a1357594ea79d88b3616075901711b61ceedc4ee50",
+      "FileSupervisorAcknowledger": "beebd0bd9ba44d691389642dfc001b193a4462beca79e8ed45f71c5ba9d910b8",
+      "FileSupervisorAcknowledger.__call__": "3001eed2d7a4f1f5ba035ebfc1a6044665fe258bed38630f21cfb057a3bd81c9",
+      "FileSupervisorAcknowledger.__init__": "116586e5ed87ce56ec7f9dfc82619d090be83b5451cf535b062223b97aab6247",
+      "FileSupervisorAcknowledger._matches": "8bac82e5e2f5cc96dd0fbaca9d6d00ff72dd9d15933bf5b057613e0b2762a829",
+      "RouteRuntimeError": "88943347befbcc323de64878dcd4b2457e43ffbdef84b1bb2fea6afe0b90b2e5",
+      "VerifiedRouteBundle": "c1a89baa852ec90bf5f483b2f12125541fc4226ddb05fc884bebaae2cbb9728f",
+      "_aware": "64a458c2b653aa1afb7e0bebc04b1e313ba8a2b1c61fc8caa2dfe738415610f7",
+      "_parse_time": "63151af23b0908c256ff589dd0cbd299223e86fb106eb8dfb119a65f566af281",
+      "_read_active_route_bundle": "8e017c8c1a6013d45954d95dcce86af6cda370d1a220fde4727b6569ae647e11",
+      "_sha256": "0da03bc981038a7737863967936720daacf1a239fad76678dc3eb5806bf1273c",
+      "_unknown": "85103402e55a6b63745022eaea54951d6399248b5cb87ffe8f685ed3ab816a4d",
+      "recipe_route_run_id": "d56f3b14ea7e28cb45e1adb31c172c9eb7bc88c002cef42703510a56f3505eaa",
+      "verify_active_route_bundle": "df40c5fed352dc9b8fe5c8f0eb9a055a8c36127b785434e6b0cda3820df89242"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "route_runtime.ingress-contract",
+      "sites": [
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "_read_active_route_bundle",
+          "active-route-generation-document-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "_read_active_route_bundle",
+          "route-activation-marker-fields-are-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "_read_active_route_bundle",
+          "route-activation-marker-is-not-canonical",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "route_runtime.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "FileSupervisorAcknowledger.__init__",
+          "supervisor-acknowledgement-bounds-are-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "route_runtime.lock-path-ingress",
+      "sites": [
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._locked",
+          "route-publication-lock-must-not-be-a-symlink",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "route_runtime.marker-json-ingress",
+      "sites": [
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "_read_active_route_bundle",
+          "route-activation-marker-is-invalid-json",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "route_runtime.pre-effect-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._activate",
+          "litellm-validation-rejected-the-staged-bundle",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._activate",
+          "route-validation-rejected-the-staged-bundle",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "_aware",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "route_runtime.publication-input-shape",
+      "sites": [
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._identity",
+          "publication-digest-identity-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._identity",
+          "reconciliation-id-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._identity",
+          "reconciliation-id-is-not-canonical",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "route_runtime.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher.__init__",
+          "route-generation-root-must-not-be-a-symlink",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher.__init__",
+          "route-runtime-root-must-not-be-a-symlink",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._atomic_write",
+          "route-runtime-target-must-not-be-a-symlink",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._locked",
+          "route-publication-lock-is-unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._stage",
+          "staged-route-generation-conflicts-with-existing-bytes",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._stage",
+          "staged-route-generation-is-unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "AtomicRouteBundlePublisher._validate_marker",
+          "route-activation-marker-directory-binding-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "_read_active_route_bundle",
+          "active-route-generation-checksum-mismatch",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "_read_active_route_bundle",
+          "active-route-generation-file-is-unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/route_runtime.py",
+          "RouteRuntimeError",
+          "_read_active_route_bundle",
+          "route-activation-marker-is-unsafe",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/route_runtime.py"
+    ]
+  }
+}

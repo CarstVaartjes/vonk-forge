@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_render/operations.py": {
+      "_application": "31da0707721e80c8ad6eee5989699e6e4cf4fed9e6f48992d9d64a3358fb73c1",
+      "_job": "abe29225c153c2fe4e37ddb9d4eba976ce416135fa8e88444db89116cee3d602",
+      "_operation": "58d2966ebf093a27f7935b8d8e044c401c87363c0a184a8e3642d746a9ea318b",
+      "_run_result": "c417dc9d719fd810517b26ac78c236a207d75418880aefdc0690e11acbc7cf42"
+    }
+  },
+  "debt": [
+    {
+      "count": 4,
+      "path": "src/cluster_profiles/cli_render/operations.py"
+    }
+  ]
+}

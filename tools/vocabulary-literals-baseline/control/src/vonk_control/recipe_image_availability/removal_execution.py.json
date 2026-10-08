@@ -1,0 +1,19 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/removal_execution.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_advance_recipe_image_removal": "d1256e8164629962a9d067336f1265700a09755e0ace4e0837b621ecbafd5210",
+      "_advance_recipe_model_child": "f6534c738798356a055edaeb6e655affa8a121f722af6686a40f16e74b3398e1",
+      "_advance_recipe_removal": "24f38d08fc3c1f7eb7c4c5d38f7e0db6e274a715ad7d099223e4b87ebe410dd7",
+      "_checkpoint_recipe_image_removal": "cb84aa97b3db6140bceac2765b388de16a380edb1e072cd01f9f28eeecbfdbc2",
+      "_complete_recipe_image_removal": "7d563e789215c67b6fed706c28878d612b47213572a6a8fdcb6fca899812726e",
+      "_complete_recipe_model_child": "f3ba43fd0bb5a5e98cefe28167b75d1a0593ff0664db10877ec57523e018f0e3",
+      "_record_recipe_removal_failure": "8b60daf766d90be886a5983d514127d3461f76402c611f0de67e485f2a22b19d",
+      "advance_removals": "0b9cda3358f33ab9e09a3f2d0447a8f6389e11235538b6b34dbd47a9456243bc",
+      "reconcile_removal_gates": "362db9c72ea0cc44ebefce12395851554d6ce3340e508a2e2c730b3740a15206"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/recipe_image_availability/removal_execution.py": 1
+  }
+}

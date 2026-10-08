@@ -1,0 +1,40 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_image_availability/removal_completion.py": {
+      "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df",
+      "_finish_recipe_removal": "1839087ff6e69940be6ad44470438b69121f9a5beb6e03fcd69d8635e9fe2662"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "removal_completion.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_image_availability/removal_completion.py",
+          "RecipeImageAvailabilityUnknown",
+          "_finish_recipe_removal",
+          "artifact.reference_changed",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "function": "_finish_recipe_removal",
+      "path": "control/src/vonk_control/recipe_image_availability/removal_completion.py",
+      "reason": "The recurring worker pass records reference uncertainty on the canonical removal checkpoint, releases its transaction and retries after bounded lifecycle backoff; terminal effects end and dead gates are reconciled under storage locks."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_image_availability/removal_completion.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_image_availability/removal_completion.py"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "control/tests/test_run_switch_bookkeeping.py": {
+      "_accepted": "41ce7a6f4a0da27ddd2c23e0a208bfa4afba12bf66a7c8660c3b8ce721a11206",
+      "_damage_plan": "1c23bca388c1a850fb1bacfbcf8395c8b1fa23911ac4f35563a11612b07b23d4",
+      "test_a_cancel_completes_when_the_stored_plan_is_unreadable": "61752a67fda0152c4778c77cc8123fe33a146c98cc49a26ecb698fd4463f42fe",
+      "test_a_retry_without_a_readable_plan_is_refused_not_replayed": "b99cdbe936ff560611e7d64e9e2aefad2a28e1c427d987c62ad3838d4620c60f",
+      "test_a_stale_reviewed_plan_still_refuses_at_recheck": "8ff12775673e60dd90923971208ec217c1aa223587b9746dc0d66f3ca427c5a8",
+      "test_a_stop_preview_rebuilds_a_damaged_run_plan_from_its_installation": "5cbe3d3734af43bc4ecd47421995a8cc4552fd289a62d483fa49b4b86d7d584a",
+      "test_an_inspector_without_model_cache_binding_does_not_fail_composition": "7311f7f0e6f509fd6902dc121a98e90d25ab2889619e71e87d510f612ec35a64",
+      "test_an_operation_without_any_recorded_target_still_has_a_progress_view": "b0a4342d6c1bee9671984d1b161e827abf7424ddc454735e9ff6022867996c9e",
+      "test_unreadable_stored_documents_retire_as_unknown_values": "9ecca804b962bb067d5bae5338b82f36ae471d094dfd346fdb778d93d0db5ee8"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_cancel_completes_when_the_stored_plan_is_unreadable",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_run_switch_bookkeeping.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_stop_preview_rebuilds_a_damaged_run_plan_from_its_installation",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_run_switch_bookkeeping.py"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/interfaces.py": {
+      "<module>": "d954356765047e1fd2828c2fa9d654740470e6f0dae174953d96b3d38c980b35",
+      "AgentJobQueue": "a630edc72cc93f301705487dd63cfe8014dd7089c1e4ba2906f4adbc27e54d23",
+      "AgentJobQueue.enqueue_in_session": "c59849071f08f394bbdee4f2a317a961f3c3d038568c41823da4dba07cade552",
+      "AgentJobQueue.notify_available": "cd9ff09c539b579bf45a04971aaf38ad7f19b267e2305547648b1f23d7b9829a",
+      "IssuedWorkloadReconciliation": "e81963e81b876d81b225a3f15126e50b34e5daaea8ea4cf09080381945c832f7",
+      "RecipeOperationView": "1e757dd8b7c469f704345bb9d0256bc4af275fdfe47a8132be4297c5796c7b74",
+      "RecipeOperationView.result": "5700179535456b61691b1bce54b1b5d9be23a4b63897a2ab83fb793502f6d8c2",
+      "RecipeRunRankStatus": "5d76acec96d9e85f404b3d35c7e168b787c141e244e0a6b7214053cea7e8870f",
+      "RecipeRunRecoveryOwner": "c2844f152a25869ddb2ed19381639ed35f6a95f922bfea807c907b64c303dc02",
+      "RecipeRunStatus": "e031ee737df3cf3b7655454a705f2eff0c6044db42b6d32e65871e4f1d1fc4c0"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/interfaces.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/interfaces.py"
+    ]
+  }
+}

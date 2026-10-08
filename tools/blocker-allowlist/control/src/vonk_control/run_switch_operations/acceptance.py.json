@@ -1,0 +1,69 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/acceptance.py": {
+      "<module>": "e78e5b6f9e0159f6ebcaf852e2f4aa1e052e956ff7994ea28d2e80dd1951230c",
+      "AcceptanceMixin": "f01c156afb6b86cf52e1d31dc2446d92d23af81c752b71c71b843873cc2a5f57",
+      "AcceptanceMixin.apply": "663014021ef0ac1dbe0c1c1dac18eb7a079363e43fbaededd9735a6971101ae1",
+      "AcceptanceMixin.apply_cleanup": "38f520cd036e33f1ea9246d36c034cf944a77c95b3a1326489957a15985e940c",
+      "AcceptanceMixin.apply_profile_stop": "e08f0157550d18b60373fd46a612efd7e49937d56124712cee315e394d3942f0",
+      "AcceptanceMixin.apply_run": "31ebd422d39546c35ff7b24c8b3c1beaf65b6cacfb49b4b7bdaed821aaa6b963",
+      "AcceptanceMixin.apply_stop": "8a3cbd9bdb46eeb75f18c4ad83775ab8e0562554e69cab0ee5680ccaac62f1f3",
+      "AcceptanceMixin.get": "cb26ad274d09ca9a2028d1a349e707fc55a365aef227c0a186ef2f00992a4c1b"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/acceptance.py",
+          "MissingRecord",
+          "AcceptanceMixin.get",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/acceptance.py",
+          "RunSwitchRequestInvalid",
+          "AcceptanceMixin.apply",
+          "run-switch.plan_blocked",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/acceptance.py",
+          "RunSwitchRequestInvalid",
+          "AcceptanceMixin.apply_cleanup",
+          "run-switch.plan_blocked",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/acceptance.py",
+          "RunSwitchRequestInvalid",
+          "AcceptanceMixin.apply_profile_stop",
+          "run-switch.plan_blocked",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/acceptance.py",
+          "RunSwitchRequestInvalid",
+          "AcceptanceMixin.apply_stop",
+          "run-switch.plan_blocked",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/acceptance.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/acceptance.py"
+    ]
+  }
+}

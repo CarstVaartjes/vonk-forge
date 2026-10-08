@@ -1,0 +1,13 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/qualification_fixtures/assertions.py": {
+      "_parse_assertion": "56c13dd965480315571806387afaaef1c75207d585e94aca5777c1054f090406"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "src/cluster_profiles/qualification_fixtures/assertions.py"
+    }
+  ]
+}

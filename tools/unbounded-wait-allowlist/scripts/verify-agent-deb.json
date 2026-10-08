@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_control_members",
+      "kind": "loop-without-deadline",
+      "path": "scripts/verify-agent-deb"
+    }
+  ]
+}

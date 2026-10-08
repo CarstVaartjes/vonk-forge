@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/cli_states.py": {
+      "<module>": "6ad55f49b469535792dcae836fd42e0dd4e2d6d829db7e143e1df344e4654a15",
+      "cancel_pending": "5547bc7694e8f7ad2998990f6fd05c4189d81550797d55ba9e3fb55977672a19",
+      "lifecycle_state": "df1bb0f1ae3147b60eee951bf1ac88ea7a373774f2e7b94bab9d4007d446932d",
+      "preparation": "92a7d3308556930a3cc58a69cb10e4759b1337dcccaf8971b50d808291ca661c"
+    }
+  },
+  "debt": [
+    {
+      "count": 3,
+      "path": "src/cluster_profiles/cli_states.py"
+    }
+  ]
+}

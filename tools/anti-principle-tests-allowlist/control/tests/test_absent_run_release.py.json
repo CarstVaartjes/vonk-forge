@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/tests/test_absent_run_release.py": {
+      "_active_run_claims": "9df132a0ff045b5a8880374d81b97cfad0952b4b5f108f9f52ad19cd5b5b08df",
+      "_report_absent": "052df21c545353b98ad65bd8d347e33e7dc21290d5fa3b748244138ee63b3700",
+      "_run": "21b7628bd4fff0edd6784ea17a91f130d498f64aebddf9f1d83aae2a17447181",
+      "test_stop_of_a_run_the_spark_reports_gone_succeeds_and_releases": "4bd232fa8204b78cf075a596bcd5316514baf2991a71df6d58e0dc8aad575b80",
+      "test_superseded_run_is_settled_and_released_not_recovered": "3aa313a5c903d02d09230a095ffc1bc754876b9cb3c32ce6cd9a1e0d0f02f6e6"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_stop_of_a_run_the_spark_reports_gone_succeeds_and_releases",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_absent_run_release.py"
+    },
+    {
+      "count": 1,
+      "function": "test_superseded_run_is_settled_and_released_not_recovered",
+      "kind": "observation-withdrawal-assertion",
+      "path": "control/tests/test_absent_run_release.py"
+    },
+    {
+      "count": 1,
+      "function": "test_superseded_run_is_settled_and_released_not_recovered",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_absent_run_release.py"
+    }
+  ]
+}

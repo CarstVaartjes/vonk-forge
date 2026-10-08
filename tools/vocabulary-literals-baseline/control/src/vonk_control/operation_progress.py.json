@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_progress.py": {
+      "<module>": "76b2b7bb3912b445c704c0204ea911cb1ba6659dab0cb050efb1c847888e913e",
+      "_timestamp": "41b2ac735916f3d137689527074b3d547063263481139e71b603ecb7344f1ac8",
+      "aggregate_progress": "74767dc7015f1cd6a16ede73cc98c1c0b2f57da1d3c4484306c2906e874e55d0",
+      "is_transfer_phase": "d4acf1bcb9521e75e695b7473883f329fe0855de05297b5fd58ba88bf7a28fbc",
+      "is_waiting_phase": "0ec671a825daea741f9dfc05ff0248956b8d0b384e9d159a452f106c7c361e56",
+      "member_progress": "21bcc677d9402c92899f3776f5cc8af88ef2960d890b70f35e6fb71fb81d3233",
+      "progress_document": "35ebde569d57adc231bbe8f2ccd8506aa73163747ca5c547643d8e71276e3650",
+      "progress_write_due": "7efb621d0e4b80105173b6ee0ddadaff84b59011e5610b1b1e679f1a164e41d8",
+      "project_progress": "acd307a53f1e1ed297979b3dfdce3e741b2f708466b374a734dbecf2b994a070",
+      "project_progress_for_state": "67c39f7b732019ca0db83d42d94ef7f864922a1bda65388b952abdf35b89ec06",
+      "sample_progress": "8721b8152f68bb00bfcc623da02f79703c6c9491076c0614ed71638de45a01df",
+      "stored_progress": "e308da4907c982eaf7d6440285732f9a6761ca323c3f363ef8186aa0f1ab1711"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/operation_progress.py": 1
+  }
+}

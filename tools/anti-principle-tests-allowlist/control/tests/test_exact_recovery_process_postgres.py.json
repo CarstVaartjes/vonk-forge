@@ -1,0 +1,17 @@
+{
+  "content_identities": {
+    "control/tests/test_exact_recovery_process_postgres.py": {
+      "_commit_result_then_die": "5fb50b40aec0040ad376272fc711ea08dced7bb98a0fd73de863af1de2d75827",
+      "_lose_committed_response": "48a0ea92b9158f3c5fbc2a877696a73f0a6d2de7a48749884c8b0426d0a73e37",
+      "test_postgres_exact_intent_recovers_past_budget_after_process_death": "50871357acd24e3bcbfdfae7c50ebd4c69ee7ab13b39bec04893305b7a45d04a"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_postgres_exact_intent_recovers_past_budget_after_process_death",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_exact_recovery_process_postgres.py"
+    }
+  ]
+}

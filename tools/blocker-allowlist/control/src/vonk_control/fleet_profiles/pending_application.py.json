@@ -1,0 +1,68 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/pending_application.py": {
+      "<module>": "24e200fd4c9bec50278cbd81721735ff9a9ac991def7f91f9e77f1e686bdd14e",
+      "FleetProfileService": "7c4470f79d9943539d2e63935f3446dbb646a5643c221ce24f52bcc5d7a5c477",
+      "FleetProfileService._create_pending_application": "867fa8f0f9711ea3deab6c09e29013a5f13059be219a0397d56f8c1d0996aa20",
+      "FleetProfileService._defer_pending_application": "192dc1f12bbb1bb7f35bdb4b7cf63c59ed1c9eb8ff4de8c137a7283ff8222f5d",
+      "FleetProfileService._discard_pending_application": "bd09fb7ce615cb6a92e5228515d5fb2ac5b515537c181a5074e069e66648f67f",
+      "FleetProfileService._load_replay": "4b39f75736598c4341c6bfa713ada029d7cce776d8a9f10ef0c7e2789b930ad5",
+      "FleetProfileService._matching_application": "a24ff0494e4beb9450f8211aab4cc139125804d7cc997dbbcc2b9f40c05c1f82"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/pending_application.py",
+          "FleetProfileInvalid",
+          "FleetProfileService._matching_application",
+          "fleet-profile-request-key-was-reused-for-another-plan",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/pending_application.py",
+          "MissingRecord",
+          "FleetProfileService._create_pending_application",
+          "not-found",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/pending_application.py",
+          "MissingRecord",
+          "FleetProfileService._defer_pending_application",
+          "not-found",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "profile.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/pending_application.py",
+          "FleetProfileStalePlanConflict",
+          "FleetProfileService._create_pending_application",
+          "fleet-profile-changed-before-its-admission-intent-was-persis",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/pending_application.py",
+          "FleetProfileStalePlanConflict",
+          "FleetProfileService._create_pending_application",
+          "selected-profile-or-fleet-membership-changed-during-reconcil",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/pending_application.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/pending_application.py"
+    ]
+  }
+}

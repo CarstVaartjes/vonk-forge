@@ -1,0 +1,32 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/lifecycle/job.py": {
+      "<module>": "b95e9f959cdd7eb11baee65c55317b0eddc8bafa9533ed3f8ae9e14775faea75",
+      "JobAdapter": "f67994ad4da87403ba6e61ea191ed78a8ddf053fc7cdab7ca6e8cbd97756e432",
+      "JobAdapter.__init__": "ae6abd5efd68c6a60fd5c9f7a305a3133823f1d19b4ad2a8b43da9840f023b4e",
+      "JobAdapter._attempt": "fc348f7f3c101066a298a7b0f556b28c2b15de0eb66497bfe25e7158abc3bbaf",
+      "JobAdapter.actions": "c1432fa1076f52b01800a31638a7a8bdd8d90491748d7cf5a50ffa75d316b815",
+      "JobAdapter.adopt": "ff09aa194ac014658f45e2aba8e74e43bdb798b40217652f2ee67f9dc922eeb6",
+      "JobAdapter.amend_ended": "f9d87c2cbebad9450bd1687d55bcf1a1c6897d179ecf3268c6c8c85d7cbf6d8e",
+      "JobAdapter.apply": "d3d19bf4a7538d49b907875d3d9c1b147b34d983d52a4cd22c710fc652e198ec",
+      "JobAdapter.children": "5700ebd89de0682cf585e15c6f4612f8267312acf51f3e5bc35087d73c56d42d",
+      "JobAdapter.claim": "9cff827eb5d4718694718079311a59ce3914c3c1e01f231b9545ea7bf2b7b3ba",
+      "JobAdapter.execute": "5010a5e03294af9fe74d223fa537ba7aae0b91e95c3d0d517864b0f67681bd1b",
+      "JobAdapter.finish": "c664f73e352d92b0af783e3a2baf6b76165f6281edb2d1443f0ef59997624c29",
+      "JobAdapter.heartbeat": "41bb8415802d0aade74ebdb0fdd2f0847680d75bfc5d01f466245b1f83078bf9",
+      "JobAdapter.irreversible": "103a241b7621bc3a6f99ff03eb1dd34f4507e7d73c9130a4823697f6e58c7d12",
+      "JobAdapter.lifecycle": "5a0bf7f084367de75b5c49d67abd8e6acc3521705c041e767cdf2f35927ffe1b",
+      "JobAdapter.new_job": "9d20e82447169e76b8178efc9f4419af84ab625dec9c16fd5b64d3b42e057f38",
+      "JobAdapter.now": "0565c3db5fb3147ed7226126ab761c52b6b1ebe1dc76c7cf69f08d57a76ded95",
+      "JobAdapter.observe": "fa247f5084f27d0680eafcfd99c8d320c35065afa22a0dffe5cc9381d39cc179",
+      "JobAdapter.resume": "be3ffc5848ded321ab84ddfa355a75aefdb89c6dc21525701bceb47bab43faa4",
+      "JobAdapter.retry_not_before": "b44b940ce07854e720fe4db639b99915d3439138008f5c5c760051a7032df7bb",
+      "JobAdapter.settle": "94c6d2a980473eabb8ff304d3edc8942d9c1d5cf0e3da83b14b3cbf2d8f9d8d0",
+      "JobAdapter.settle.save": "c894f47ebad8734962daacd3b5848793803418506c03cfcbee6a1292e7ea6fc1",
+      "JobAdapter.stop": "b420eced2d0abab4f6a0b2cc855d8351782309257da70f60e01642eeaec7d57f"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/lifecycle/job.py": 12
+  }
+}

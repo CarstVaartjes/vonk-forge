@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/artifact_validation.py": {
+      "_validate_artifact_execution": "b0083f1c5ed53b7ed4b3a0d284d293ff05c52bb6176f16fe278f567f79d30a50"
+    }
+  },
+  "sites": [
+    {
+      "expression": "evidence.verified_build_id != plan.recipe_build_id",
+      "function": "_validate_artifact_execution",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/artifact_validation.py",
+      "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
+    },
+    {
+      "expression": "verification.verified_build_id != plan.recipe_build_id",
+      "function": "_validate_artifact_execution",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/artifact_validation.py",
+      "reason": "Phase results of one Run/Switch operation must belong to the build row named in that operation's own plan (verification receipts are generated from the plan), so a result from another operation cannot complete this phase."
+    }
+  ]
+}

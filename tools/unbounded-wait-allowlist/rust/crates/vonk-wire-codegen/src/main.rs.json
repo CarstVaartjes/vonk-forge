@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "equality_types",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-wire-codegen/src/main.rs"
+    }
+  ]
+}

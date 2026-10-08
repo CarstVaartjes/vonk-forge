@@ -1,0 +1,54 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache_api.py": {
+      "<module>": "73a59f561daa43983bcbb100309ef70cffa1c43049a157c03d694a261dc29818",
+      "ModelCacheCursorProjectionError": "d9db80fa90e1f06d8845dc0ec7b76abce9debc95bc50898d7fc6f4985e9f4bab",
+      "ModelCacheOperationProvider": "4d77723d58c2ebac4efacaf6f5dbc0c58a079c88c8930a486af33cec42346865",
+      "ModelCacheOperationProvider.__init__": "d53fd0e0daa0cc1d25ff9f0cc7f261984414fc5cfe67ef9e31341830b40630ec",
+      "ModelCacheOperationProvider._next_cursor": "1b53b816ae279bd95a4eb080b31b38a2fb4825ca42078e6177b748ab7f08ead7",
+      "ModelCacheOperationProvider._progress": "5f8019106fd1fb64ddc2d03c7180c0834e32c731ce9b8d89371f8f4c18d6ae75",
+      "ModelCacheOperationProvider._summary": "3b81ea90ae9172673ddd118d4604d714bd98ff22b3ac182b0faab4f32387fc56",
+      "ModelCacheOperationProvider.get_operation": "6f41ab65e52adfdb9162739faf075298e3ec242b8fd44c6dd42300cad9c1b2af",
+      "ModelCacheOperationProvider.list_operations": "547e2f31ef5305105b10240a2a2b20e61cc261f58c1a4926d849cc85790db43f",
+      "_model_operator_response": "a71804a26c62bc937b770acdf5731806baa4127df9f46f280bf943678797677f",
+      "install_model_operator_routes": "a2fe0769aa26c182172748c197b877cebd7acdea65590bde59c5dc3f0820111c",
+      "install_model_operator_routes.cache": "f8c8b2aa0008b7c84681298430a1ecfa53a43f5fcdd9bcc4369259e556128b57",
+      "install_model_operator_routes.cancel_operation": "ea8636ee483d7d9668351943d9abaea72c8d31e2488338e687a869de0e49fa90",
+      "install_model_operator_routes.download": "f110a83d5be13f5bca65b96e626527ef899fd472cbaf08b48e9815127b214a87",
+      "install_model_operator_routes.failure": "da13a9646fbbd4e15f73952018c56133cf539d9f897f3bf9f067682af254930a",
+      "install_model_operator_routes.get_operation": "34bfdb7ff5bb8a0bf8b822e0f20041468cc0b1700601072e7b6291aae2039347",
+      "install_model_operator_routes.get_request": "923bfbd1a21995c5d5c8aebb8a97d6f0e75b795f27216906a1290c29bf9adc95",
+      "install_model_operator_routes.remove": "4ea2bb6055220b70e06cc7e840f1b92b2045f0ae02dfeff9c0dc40eba5a7dc44",
+      "install_model_operator_routes.require_operator": "5a9ab99b19284149a0ae73feb7ea34fc61ccb06380e47765ef68c7d7c7b13079",
+      "install_model_operator_routes.review_removal": "8f6b0168c9d0f8534390a93e2bc6cc595c6cf5902fb02bfaec4413ada6eaa933",
+      "model_cache_operation_provider": "7d3452c6c89b65a0e32207964e01d7bbfcc7eecbe8d7dd5e8e940b7dea478b00",
+      "register_model_cache_operation_provider": "5977cdfff7b887e0ef9c4421676a2cf2b59b89946e48d31bd452cfb0e646ef47"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "model_cache_api.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/model_cache_api.py",
+          "ModelCacheCursorProjectionError",
+          "ModelCacheOperationProvider._next_cursor",
+          "cursor-projection-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/model_cache_api.py",
+          "ModelCacheCursorProjectionError",
+          "ModelCacheOperationProvider._next_cursor",
+          "operation-cursor-boundary-is-invalid",
+          2
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/model_cache_api.py"
+    ]
+  }
+}

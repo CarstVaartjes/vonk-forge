@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "agent_protocol/src/vonk_agent_protocol/runtime_preflight.py": {
+      "<module>": "006a5da3d5ce089f72fb107adf09a5525b4c4f60fa994e9e19ac86c578f9c421",
+      "RuntimePreflightFinding": "1d901951887d3bf1b9c3a1b9663a7e78e2f1f7d905aaf9a933ca522c032ccc4c",
+      "RuntimePreflightFinding.finding_code": "d9a515161c0409a115dd46ab095830ef7ee5775e0cae6cbc20fba7f8a7fadcb3",
+      "RuntimePreflightRequest": "b13102eca9a8d8eeb8cee2bd7143d6ce8d3dcad282f8f62e6ed8dda91062bf29",
+      "RuntimePreflightResult": "cb0d57b95ccafd8f9cae81e7ab0962f2e20bee9bc17b2b93b60d5dca9a92096f",
+      "RuntimePreflightResult.unique_findings": "163dd486522dc507463003c0334104563a609bd44cc31f75453da268de609292"
+    }
+  },
+  "stored_state": {
+    "agent_protocol/src/vonk_agent_protocol/runtime_preflight.py": 1
+  }
+}

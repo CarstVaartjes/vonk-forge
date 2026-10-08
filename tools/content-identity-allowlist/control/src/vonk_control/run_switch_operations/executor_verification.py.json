@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/executor_verification.py": {
+      "<module>": "05bda32eb61b4f3375edcda43fa235b58033a8c42c70984ff24fc08ce7536641",
+      "ExecutorVerificationMixin._bound_installation": "ad783f133b6b46c11eb04e1ec8c816454e678a4dcf0f4e0838ef2ba51c269813",
+      "ExecutorVerificationMixin._prepared_installation_result": "3412fd196891006f6eec9dd5203db2e0fd4835b12a30c04ac52b144e98ab9aaa",
+      "ExecutorVerificationMixin._verify_cleanup": "5d216d44f7983ed35e7ce3f89112cce1e86bf714ffbfa8159ec887ed6ddbd236",
+      "ExecutorVerificationMixin._verify_installation": "4f64c2274399a0b0e053707f88d1b706c812cc484dcd0850315b720510626643"
+    }
+  },
+  "sites": [
+    {
+      "expression": "installation.recipe_revision_id != plan.recipe_revision_id",
+      "function": "ExecutorVerificationMixin._bound_installation",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/run_switch_operations/executor_verification.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    }
+  ]
+}

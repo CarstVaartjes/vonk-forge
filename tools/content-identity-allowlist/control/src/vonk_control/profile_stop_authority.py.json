@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/profile_stop_authority.py": {
+      "<module>": "bb50c0924e40d77231841ad92606aa8d5d0d20b2ee4cba154044917b6e306072",
+      "JobRunStopScope.targets_are_exact": "0be7fe4d14d337fb2eaf8f9ca8c9aad39f7e4e89f908e1eff7eed4a9ded8948e",
+      "ProfileJobRunStopJob.flattened_phase_items": "6631f82a9766966d578c0ccc323ab5175fd5cf8ab40df38d843d3e45a003adf0",
+      "ProfileJobRunStopJob.model_validate_parent": "b6c3e2685247145a885ae0142ed44ddaed54f3bedf9b73390049c546d33ec9f7",
+      "RunStopScope.membership_is_exact": "f6a9fe3976c04766997103f99d92b502c3dde94fdd83b62dc1f61db3fa0b27fb",
+      "validate_jobrun_stop_source": "b49666547bbb3e4c9a4636b5f0f8473a6fb8730131079e574e26dffacccd6f6d",
+      "validate_profile_jobrun_stop_target": "d43d78ec8de5180a6a77dd7483bccd6acde6d4413183e09de0f288c72419ec7b",
+      "validate_profile_stop_owner": "786fad52c3d6bfc2bf63688fe1ccbf8f13f36dc9d443106a8865ff6f5ae49cb1",
+      "validate_run_jobrun_stop_target": "0940af9e29bef663a510cd8dd44f998836064f39916ddf9724a9156331f02223"
+    }
+  },
+  "sites": [
+    {
+      "expression": "authorization.recipe_revision_id != accepted_revision_id",
+      "function": "validate_profile_stop_owner",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/profile_stop_authority.py",
+      "reason": "Signed Controller-to-agent plan binding: the stored plan, payload or request must name the revision the installation or run belongs to, or the operation fails closed; this is the plan-to-installation edge, not a comparison of image content."
+    },
+    {
+      "expression": "installation.recipe_revision_id != scope.recipe_revision_id",
+      "function": "validate_run_jobrun_stop_target",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/profile_stop_authority.py",
+      "reason": "Ordinary accepted Stop authority: the immutable frozen target scope must name the current installation's exact accepted recipe revision before validating the owning parent, issued source and Stop grant; this binds one destructive operation, not reusable image content."
+    },
+    {
+      "expression": "request.recipe_revision_id != installation.recipe_revision_id",
+      "function": "validate_jobrun_stop_source",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/profile_stop_authority.py",
+      "reason": "Exact issued JobRun source authority: the typed original request must name its installation's accepted recipe revision before that specific runtime target can be stopped; content-equivalent recipes do not authorize destructive effects on another accepted operation."
+    }
+  ]
+}

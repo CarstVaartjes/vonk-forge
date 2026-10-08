@@ -1,0 +1,44 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/distributed_lifecycle.py": {
+      "<module>": "720050612891741c7c1df424686705eda45eb1b474ded4e54ed228c098341993",
+      "DistributedLifecycleError": "d56f4bb27e7ac9e1594b7e2298d55ed4c272917df255e3cf7701fee2eea20fe5",
+      "DistributedRecoveryInvalid": "0c54a9ff622885c2bd145ce94d16b31fabd564e6b1e3566d66ff9ab9dedef37e",
+      "DistributedRecoveryUnsettled": "7fce375bdb30fba1ddf1e20767fe19a121301d103bc47dc0d50e3f4963ee88a0",
+      "canonical_distributed_readiness": "8522400d33b61cc4e921a460ad8c34ea60c9f73f1c320078ce77ab3cafe4f1ee"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "distributed_lifecycle.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/distributed_lifecycle.py",
+          "DistributedRecoveryInvalid",
+          "canonical_distributed_readiness",
+          "distributed-endpoint-topology-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/distributed_lifecycle.py",
+          "DistributedRecoveryInvalid",
+          "canonical_distributed_readiness",
+          "distributed-readiness-interface-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/distributed_lifecycle.py",
+          "DistributedRecoveryInvalid",
+          "canonical_distributed_readiness",
+          "distributed-readiness-path-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "guard_paths": [
+      "control/src/vonk_control/distributed_lifecycle.py"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/continuing_effects.py": {
+      "<module>": "4d6da1ca6a14fa0746334315ab0ab3669ec82ef3d0e2dff902c34df6b7cf3c4c",
+      "FleetProfileService": "f0bed62cba27834fa4f987b4b76cb4748e0c90bdc6b2f7f2adf1d7a4ede42e0b",
+      "FleetProfileService._adopted_application_scope": "e9dd54874e2509fee43855f212bd894e174b578423e7c401aebc4743cc4bf6b9",
+      "FleetProfileService._continuing_effects": "735ec653d861ea8ccf0860ffb1e908ce4fb969a101c3ad942ce2ef04bc505f5d",
+      "FleetProfileService._pending_effects": "73380feadd7a5d1491fff5ba55a70e474c2db5b7c6108076fe7acde652aca750",
+      "FleetProfileService._stop_binding_is_exact": "539d7f1c38968e94fac918dd9e2ed2fee212b24d5e69d4b8199ad0639b4b48d6"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/continuing_effects.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/continuing_effects.py"
+    ]
+  }
+}

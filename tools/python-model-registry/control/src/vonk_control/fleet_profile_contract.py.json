@@ -1,0 +1,8 @@
+{
+  "modules": [
+    {
+      "kind": "controller-contract",
+      "module": "control/src/vonk_control/fleet_profile_contract.py"
+    }
+  ]
+}

@@ -1,0 +1,203 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_blob_store.py": {
+      "<module>": "741667d6e5a79fc05460c5b54c17edbc4e6b15ff6af62a6d44ba4b399fb9424f",
+      "ArtifactBlobBusy": "b2e51e686597ed80cb49ba9d63eec897745a38214ab5701e68d35eb7d6a8c239",
+      "ArtifactBlobDigestMismatch": "0ae6db12a43832a522249ad25f1c6658b0e210cbc565f71ae60683efc2e18189",
+      "ArtifactBlobInvalid": "c2af7e263ef2d61cdf3ab310177e4c09d1a749f9815c77fb840451c4fe4a0305",
+      "ArtifactBlobQuotaExhausted": "dc5a6bba9c627114d4bcdcc7661fad6fe46c6768628aa4185a8cee04afb5df90",
+      "ArtifactBlobStore": "3a5ba1a3bab8fbde6222e5e3d27b9c6479be3abfb6ab4fc18c256a27943212ef",
+      "ArtifactBlobStore.__init__": "7536a16e56ed2f9b083924540b5f1913c927b56d79c3e636ce31d69e78317f4a",
+      "ArtifactBlobStore._claim_reference_lock": "878127098f7560bd81b9ca8e7216b9b02496bac359cb852b3a063d11151bf4a1",
+      "ArtifactBlobStore._commit": "d1bcc9cb404f634bebede689949cf9122e0b7987b84e16cb9dc441d721466e61",
+      "ArtifactBlobStore._digest": "062738892c9ae2fc1e209a0ea87e325d7a14c27abab52a6d187c6c7a52759487",
+      "ArtifactBlobStore._intact": "009849ba9a43c81f31cd856c84392057f6ff3f8fff9d757284d3050ea46087a4",
+      "ArtifactBlobStore._prepare_root": "a6a2d47f3f69acedee0c1ca6d2ece3084f0ef2ed031e4265886aec5d73b2c3b6",
+      "ArtifactBlobStore._quota_lock": "c19e3934cbfcaa3f2f2f5bd82ed78241dda519163248f7714c5422ee58c1b168",
+      "ArtifactBlobStore._quota_lock._Lock": "a23a6b325b80ea1d7d55edebc59d1ae4bea61b0fbab23b178cbe3ec17d1fa9f1",
+      "ArtifactBlobStore._quota_lock._Lock.__enter__": "a2d67b9f3d67d914e4771b7c437d466f4711f9f0cf73c41e45c9d2a683a778e2",
+      "ArtifactBlobStore._quota_lock._Lock.__exit__": "85b91c994f69938caefe5ea257ce9ba409bed0f5ddfe3734f2607ca96c466ae2",
+      "ArtifactBlobStore._reference_lock": "4f79428241af9370bc8d203c0a9196e57e4f6dd1b5ce535ca21e4d02be35ac7a",
+      "ArtifactBlobStore._release_reservation": "8ac809ddb2540170e01dae9993b210cba95817676f6e41c72b95d6ad42b5db8f",
+      "ArtifactBlobStore._reservation_entries": "2e439eea630e70e489f66466e73805da8fa387363b0f832bc2f3c0e56183674c",
+      "ArtifactBlobStore._reserve": "8774faa2130fb8a7f56e753a7e54587b1e32f89e676e7b46979333751ca60772",
+      "ArtifactBlobStore._stored_bytes": "5cfcd4328ac4c5ab9d33bc40dde04ff02887b444aefa5da2631372323f4a3452",
+      "ArtifactBlobStore._temporary_token": "c2f81f47a8cb1ea2dfa952c5efe1b89286bf48140252bb7208d0eddf51bfe9db",
+      "ArtifactBlobStore._unreserved_temporary_bytes": "64f902067be8b9efa7097b1494cdf74334027a9a946a4479a7efa994c0c98b23",
+      "ArtifactBlobStore.delete": "488cba8dd2ee3547df76e42216fa54b7b86faaebe51cdf81ff7c9467746d2470",
+      "ArtifactBlobStore.iter_file": "1b2c8bf3b2774fdaa747b2943189cd85f20f5b9681c64e6dbf4926e4b1f12ddf",
+      "ArtifactBlobStore.max_stored_bytes": "f4d38c663d06c61f1c114849bdb072aea4adc016e48d29217e376a3fde32a8fd",
+      "ArtifactBlobStore.put_bytes": "013b2ba2808bda8d981e4497446bd37a2265b12497c843163a4a70e08979a5fa",
+      "ArtifactBlobStore.put_stream": "9a1753f5c0352ec6cd3806f23983e7fd3edfc555b35bfee32ef86a0e47870777",
+      "ArtifactBlobStore.reconcile": "30c22f56639c6ab19d2b7ddd139898101902347bee8fcc0effbde70567ccbd12",
+      "ArtifactBlobStore.reference_attachment": "8792fdafc8c7ea365effa6b2f6e3c850b635a74ba3d6286983673e6f009cfe95",
+      "ArtifactBlobStore.reference_reconciliation": "0857ec0312548542ef8621f61433495f7bc836f58a773a74250fc865b0351c73",
+      "ArtifactBlobStore.resolve": "dc579191a2bb983f41dc608bc023b3e6cc65bf35e5704af5ea1750901f2505d7",
+      "ArtifactBlobStore.usage": "63363af7241f68fe43bd7bfec33a0d79d730e1b5ead7420690e56358b1d1b76b",
+      "ArtifactBlobStoreError": "df56e3b9ad024d8a6059298c83b82ce0f815e56d81d4d005c723f34a012048a1",
+      "ArtifactBlobUnsafePath": "5bd69c19dc9a761d736de5bef03e69150c866c0ae214ebc5d0c0c073d657fac2",
+      "BlobReconciliation": "8f39856bef912c758e78804cf3db1a92f4718cc3887b4f6983be57a09c818b51",
+      "BlobStoreUsage": "5cf12d287cbca60a126677ae2365bbb2505672009116b52c29669d53aff86bdb",
+      "StoredArtifactBlob": "c3dd407239760e2c3f822ef5b836837e52a6e00dab5b5725d3c5386a7534353c",
+      "_BlobReservation": "c2f7e58ec788df00c75919976d911c2a10e8371b9de1a12a34bad7b1cba47a61"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "artifact_blob_store.bookkeeping-debt",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobBusy",
+          "ArtifactBlobStore._claim_reference_lock",
+          "artifact-storage-references-are-being-reconciled",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "artifact_blob_store.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobInvalid",
+          "ArtifactBlobStore._digest",
+          "artifact-digest-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobInvalid",
+          "ArtifactBlobStore.put_bytes",
+          "artifact-bytes-exceed-the-limit",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobInvalid",
+          "ArtifactBlobStore.put_stream",
+          "artifact-upload-chunk-is-invalid",
+          2
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobInvalid",
+          "ArtifactBlobStore.put_stream",
+          "artifact-upload-exceeds-its-declared-size",
+          2
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobInvalid",
+          "ArtifactBlobStore.put_stream",
+          "artifact-upload-size-does-not-match",
+          2
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobInvalid",
+          "ArtifactBlobStore.put_stream",
+          "artifact-upload-size-is-outside-its-bound",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobQuotaExhausted",
+          "ArtifactBlobStore._commit",
+          "artifact-storage-quota-is-exhausted",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobQuotaExhausted",
+          "ArtifactBlobStore._reserve",
+          "artifact-storage-quota-is-exhausted",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "InvalidValue",
+          "ArtifactBlobStore.__init__",
+          "artifact-blob-store-configuration-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "InvalidValue",
+          "ArtifactBlobStore.reconcile",
+          "artifact-reconciliation-batch-limit-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "InvalidValue",
+          "ArtifactBlobStore.reconcile",
+          "artifact-reconciliation-orphan-grace-is-invalid",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "artifact_blob_store.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobDigestMismatch",
+          "ArtifactBlobStore.put_bytes",
+          "artifact-upload-sha-256-does-not-match",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobDigestMismatch",
+          "ArtifactBlobStore.put_stream",
+          "artifact-upload-sha-256-does-not-match",
+          2
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobUnsafePath",
+          "ArtifactBlobStore._prepare_root",
+          "artifact-storage-metadata-path-is-unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobUnsafePath",
+          "ArtifactBlobStore._prepare_root",
+          "artifact-storage-root-is-unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobUnsafePath",
+          "ArtifactBlobStore.delete",
+          "artifact-storage-key-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobUnsafePath",
+          "ArtifactBlobStore.delete",
+          "artifact-storage-path-is-unsafe",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_blob_store.py",
+          "ArtifactBlobUnsafePath",
+          "ArtifactBlobStore.resolve",
+          "artifact-storage-key-is-invalid",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/artifact_blob_store.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/artifact_blob_store.py"
+    ]
+  }
+}

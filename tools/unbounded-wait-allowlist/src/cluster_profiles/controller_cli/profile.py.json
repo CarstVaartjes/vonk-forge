@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/profile.py": {
+      "_profile": "37cbe2ff20d03efe0754217d296ccb4f525d4f8bc7dc05eba0e562fd55c68a1b"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "_profile",
+      "kind": "loop-without-deadline",
+      "path": "src/cluster_profiles/controller_cli/profile.py"
+    }
+  ]
+}

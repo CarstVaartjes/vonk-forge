@@ -1,0 +1,68 @@
+{
+  "call_edges": [
+    {
+      "calls": [
+        {
+          "function": "Worker._run_model_cache",
+          "path": "control/src/vonk_control/worker.py"
+        }
+      ],
+      "function": "Worker.run_once",
+      "path": "control/src/vonk_control/worker.py",
+      "reason": "run_once stores the model-cache source in its source list and calls it as source() inside its try; the declaration names that call."
+    }
+  ],
+  "content_identities": {
+    "control/src/vonk_control/worker.py": {
+      "<module>": "42cf5201dff1769a075ccdb2fee521f8af1c4d064df0e5bd2e5c95ce7b58a3c3",
+      "HandlerRequest": "91d66d00998f0de70c95d04565e3215add206cde04991e9c2acd605fe7795404",
+      "HandlerRequest.__getitem__": "834711e5b3551eab2efae5db014a2ea93e59ca4eb4999f755e3688d2a9141a66",
+      "HandlerRequest.__iter__": "9e38b6016e944bd23480eb1ba63d4ba6d722329301e96245c2a2d153ece5f288",
+      "HandlerRequest.__len__": "ff9889616933e5bc7518b3667629ea9a18199ac6cc34fe317ee582a72d973284",
+      "Worker": "b8b191e2946b749dbaf7d502ab89d175387af5a9ebd493c86d3a9df7a3e122ec",
+      "Worker.__init__": "4b67401e62ab77b31985a5d6180db60d995871229b7d5e315d6bc7ebd8143f10",
+      "Worker._run_generic": "2dd47b9bd5040ae1a719b5aa39aca6b9390d39fcda8273fd5fd0bc7f5dacc12d",
+      "Worker._run_housekeeping": "d3abdc85a33cd1c7ddfea9e53af042fbe5ae8c8633d16dfea8b1e5995282e6cc",
+      "Worker._run_model_cache": "71b5e55a99203d0981a8ab4b9f9cd931551506c0005e26fe1758be0fb3d3c5f3",
+      "Worker.close": "e961dca5524d04a90f2526c930177097ec8c42478883eeddb79ffbfdc4047206",
+      "Worker.memory_footprint": "800ba0ae6e4475a40671df3ce5f717af3b5f8278ecd474f1adb8042710f468b3",
+      "Worker.run_once": "b4426c335ee70343cee4c7a08fc306c52f753914744331c03acb6245cff26b85",
+      "WorkerHeartbeatRecorder": "d321445ab19c91054518a99643cb041e032d3b0512680ea28e0f7ca4e544066e",
+      "WorkerHeartbeatRecorder.__init__": "da38faa499c085ebae4d13f89ef89657d02caf28ba8f6b13e24d0c211554f926",
+      "WorkerHeartbeatRecorder._register_process_start": "55b1f5bf3615b176cc3d436ec210d5588992f8a149e8b44d3433826898f31cb0",
+      "WorkerHeartbeatRecorder.completed_loop": "55416446e05ceba704aa748402a4407cd9a7150853d65eb8ab33b2330b183b2b",
+      "WorkerWatchdog": "aec15900ed344989299e9fc74f3b13ab5f636eeae3f51750aed774356dfef950",
+      "WorkerWatchdog.__init__": "637ed8d7ec3a6a559df39c814c5de3b0ef421bc2696cd2bc66ba837f871373b8",
+      "WorkerWatchdog.beat": "7f01b6080dba4d00b93796719c48f04e3a630058ee178cbd5c6970ecf2e98d6b",
+      "WorkerWatchdog.stalled": "71d5c4bba45b02767bf934aec482d7fa9b4e89414255ecde6a3347e064ef0a03",
+      "assemble_production_worker": "9a2fb6fe2de2f24b9bc18c008a0a937c8942af8b0345fb8c674555a7995cfe47",
+      "current_worker_instance_id": "881324cd1b006a8d763eded0aad65a0ef37a4ecf44521b33f91a802c258fb8f5"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "Worker._run_housekeeping",
+      "path": "control/src/vonk_control/worker.py",
+      "reason": "A housekeeping task whose outcome is unknown is logged and contained; the worker pass runs the same task again on its next pass."
+    },
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "Worker.close",
+      "path": "control/src/vonk_control/worker.py",
+      "reason": "Shutdown retries each unknown checkpoint on the bounded request pause schedule, continues closing other owned executors, then releases the process so durable claims resume on restart."
+    },
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "Worker.run_once",
+      "path": "control/src/vonk_control/worker.py",
+      "reason": "The worker pass contains one source's unknown outcome: the failure is logged, the pass moves on to the other sources and the heartbeat, and the failed source runs again on the next pass; no source state is ended by it."
+    }
+  ]
+}

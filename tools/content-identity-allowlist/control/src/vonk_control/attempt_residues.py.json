@@ -1,0 +1,48 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/attempt_residues.py": {
+      "<module>": "2908dae5faa6b058d7d4656c39b922d8ce1ad1524cee59a7cc4e7d9871fafe41",
+      "AttemptResidueReconciler.__init__": "bd0cada7ee4ec92cf791c5bfff29935198ee41043216ef05d822f0e90bd63e25",
+      "AttemptResidueReconciler._dead_owner_claims": "383e6ce91fc0fe07af90e5479c37d1181719956226ad8f011a79986e5e7ddf21",
+      "AttemptResidueReconciler._defer": "eefd667f44ee51c0c8bf40dcd2831b2077116e45992d1d568e5192d438cc860b",
+      "AttemptResidueReconciler._incomplete_installations": "99aa8338da9ab012d22f28cb96abd926ccce2fbf076c927400585e7a3aa4c346",
+      "AttemptResidueReconciler._leftover_candidates": "11da49c5c196e9129760d1bdec17eade0ed36805859e5d7b65dfae5bc170f9e5",
+      "AttemptResidueReconciler._log": "1ef6cf53138724e80e369dcdd26b0b63c12ad15c705b8d4cda2a64dfd95dd651",
+      "AttemptResidueReconciler._never_installed_plans": "c550d99e7c622bd99c689bf7666ad8085e1aed8dacdc91d1a08fa14cbd7b48da",
+      "AttemptResidueReconciler._owned_scope": "fc397df943173b18d952e9f9b18e37f6fad02e802eb6755ae8e7c0fbcc636eca",
+      "AttemptResidueReconciler._ownerless_grants": "c6f7d0438ca857c46353bc0d66448c0fdef87c20060ef9bb467443eb0b492644",
+      "AttemptResidueReconciler._quiet_since": "bbbe822344a15682ec9dbabbb3b6aa7953f01fd4c0ec65a9b129256f30f40c49",
+      "AttemptResidueReconciler._untouched_since": "2890eeacd79ef5d32fbd5e36cb51866dd8ff371fa082025e221f95c51e1e58d8",
+      "AttemptResidueReconciler.tick": "aaf08bfe00859e98500633c5a90989e85c5f7627e51b67ccdff639e0e7681fbb",
+      "LeftoverRemoval.preview_uninstall": "bfe4f69152f9886f2a45d302037482d562afbf47dfda1e9ee02c09282f143902",
+      "LeftoverRemoval.uninstall": "b6771b5aa37f1bc5b2adb7d576b50fd06bdb59313f807708828ead03a19a8cd5",
+      "_owned_nodes": "75e9cec6a7baac6d6f2572b7b96712d9f6c8f4e8b5b731af87c6a40df5e0b0dc",
+      "incomplete_installation_ids": "fa63e985c735e578e23b95a483b788f544c04a17eee000dedf796ce607e53242",
+      "superseded_plan_ids": "2560003960294ec5a14935c95053f4224722c036237ab3d2ab85210a97c3b45f",
+      "unowned_never_installed": "391b4b042010dac2b6cb04793457827596a3d265e4516538ba4d552736688d1b"
+    }
+  },
+  "sites": [
+    {
+      "expression": "CatalogDocumentRevision.id == installation.recipe_revision_id",
+      "function": "superseded_plan_ids",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/attempt_residues.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeInstallation.recipe_revision_id == recipe_revision_id",
+      "function": "unowned_never_installed",
+      "kind": "provenance_comparison",
+      "path": "control/src/vonk_control/attempt_residues.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    },
+    {
+      "expression": "RecipeInstallation.recipe_revision_id.in_(same_recipe)",
+      "function": "superseded_plan_ids",
+      "kind": "provenance_filter",
+      "path": "control/src/vonk_control/attempt_residues.py",
+      "reason": "Selects the rows that belong to a revision or build row by its id, for retention and garbage collection (unknown references keep, never delete), projection or navigation; the id is the thing asked for, not a stand-in for image or model content."
+    }
+  ]
+}

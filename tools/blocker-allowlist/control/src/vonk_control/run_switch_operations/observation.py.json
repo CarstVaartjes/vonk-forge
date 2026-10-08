@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/observation.py": {
+      "<module>": "1cf3ebe14c4cfd36a8d06ece13c300c57a131b1a1865a81fcd2ac938d06f735a",
+      "ObservationMixin": "a13490fc9e0f66364d0aa7c36cf9d9992382108b580791dfde4377c76c5a88af",
+      "ObservationMixin._hold_after_advance_failure": "a8f506a4e10a3bef208018b8bc72f543c72bb5f7666efeb8caaecd5ba5bc85dc",
+      "ObservationMixin._record_wait": "a1bd7235591e71205fd0d2128cbfc2b588cd5d0967fb78dd8f613187ef1cd72d",
+      "ObservationMixin.activity_provider": "7b341dfaf4a9a4022de444983243314d30e3f7065a428dde8284477d1285b722",
+      "ObservationMixin.bind_model_cache": "5222b8501e7049199cb30edffccf0916c776a7c964d6e9a8b70ab3597cc25d0e",
+      "ObservationMixin.tick": "bd7a15079d3d99a8a672f0744e2ea5e67314afabf20602de1e17ce91a048b2ba"
+    }
+  },
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "ObservationMixin.tick",
+      "path": "control/src/vonk_control/run_switch_operations/observation.py",
+      "reason": "The worker tick contains one operation's unknown outcome: the failure is logged, _hold_after_advance_failure keeps the checkpoint and schedules a bounded retry that names its cause, and the rest of the batch advances; the next tick picks the operation up when due."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/observation.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/observation.py"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "scan_archive",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/base_images.rs"
+    },
+    {
+      "count": 1,
+      "function": "sha256_file",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/base_images.rs"
+    }
+  ]
+}

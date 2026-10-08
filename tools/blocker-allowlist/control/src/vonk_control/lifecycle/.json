@@ -1,0 +1,7 @@
+{
+  "scope": {
+    "guard_paths": [
+      "control/src/vonk_control/lifecycle/"
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "content_identities": {
+    "control/tests/test_cli_update_contract.py": {
+      "<module>": "e4ca3555999807966d59e40d83a8ab107008881cfe4dcc00a706ecfd2fcc8c08",
+      "Jobs": "e4ca3555999807966d59e40d83a8ab107008881cfe4dcc00a706ecfd2fcc8c08",
+      "Jobs.enqueue": "8682d13a9baf413883c99e0575336f70b563d65bf8b3673eb4dd122264f61d72",
+      "Jobs.get": "a8c5ed3bc7d758b6bf5cb023395727db6a83f83f9d7f989e5b426c546c86eca2",
+      "test_authenticated_contract_complete_membership_fault_recovery": "77365fd1e07645f28393162e65a9ce8812ea4f9735ef54411a371395587e1f67",
+      "test_authenticated_contract_complete_membership_fault_recovery.read": "a82fc035d44a4c43d4390fb30fdcc975fb44475a2faed4d3bb20ea011626dc1e",
+      "test_authenticated_contract_complete_membership_fault_recovery.read_api_identity": "fd6ad0c443a611a30b54754239f6bf3d9ac2ce3a27fe706e03f8d6f796cf43db"
+    }
+  },
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "test_authenticated_contract_complete_membership_fault_recovery",
+      "justification": "All257 heartbeat identities persisted; malformed stored identity gives retry503, same row repaired then same authenticated read compatible; mixed-process TTL repair also verified.",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_cli_update_contract.py",
+      "reason": "dependency-unavailable"
+    }
+  ]
+}

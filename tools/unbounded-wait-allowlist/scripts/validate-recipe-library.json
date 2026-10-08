@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_validate_v2_package",
+      "kind": "loop-without-deadline",
+      "path": "scripts/validate-recipe-library"
+    }
+  ]
+}

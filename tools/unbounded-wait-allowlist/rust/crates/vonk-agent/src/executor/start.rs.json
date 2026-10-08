@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "execute_start",
+      "justification": "The runtime inspection future is selected against wait_ready_until and cancellation; the readiness owner enforces the immutable start deadline or current lease deadline and drops the observer at completion.",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/executor/start.rs",
+      "reason": "resource-bound"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "content_identities": {
+    "agent_protocol/src/vonk_agent_protocol/wire_model.py": {
+      "<module>": "d3d24c6f136632d24db11b2d5c2f12171569c7d62f8b1be7f0f749748d51de35",
+      "OperationCheckpoint": "08ae8653958683c2a50564c0bf11259b99b67093c8160e0615b76471a73863ee",
+      "OperationMemberProgress": "7ceb7d90e6ba69fcef1089694504f7798b39e3e388826a1f0e9d1a4eb38d3255",
+      "OperationMemberProgress.timestamp_has_timezone": "e120cd9a793fe854a7814a644d583c5e722f878688a93fbba4fccec5c8d05f5b",
+      "OperationMemberProgress.totals_are_consistent": "d116f2722150e8f694526e23678bc3816a8b810c1c37815a455e31a2997dc837",
+      "OperationProgress": "93b949005e0da62e56283f07ea1b5102174efe595d9805c4eee76eda17c01f55",
+      "OperationProgress.timestamp_has_timezone": "e120cd9a793fe854a7814a644d583c5e722f878688a93fbba4fccec5c8d05f5b",
+      "OperationProgress.totals_are_explicit_and_consistent": "986338053d5582202bd501a57a91d4bcb5bbba721b82c9c2c5e74bf3e84fe6f4",
+      "StrictJSONModel": "c5ec06bd8c3ab45fe56aa7b997b408f28bf3294cebd15010b4ee403f6478ec7f",
+      "StrictJSONModel.__get_pydantic_core_schema__": "c538aba26d7633b3281569ee08a6aff43525c0556b00a522d19d347f2422908a",
+      "WireEnum": "60e38caec115e0f17c207411f38ae29b0cbc69b548f9b87addcf8ce181340f2e",
+      "WireEnum.__get_pydantic_core_schema__": "25c18dd2a3954316243abe35dffef299f0be681fa81126fbff36257fbc225f8e",
+      "WireModel": "a1c5414773c15d4b6bb1482510ef8a6ab654f294952cc7bab8148ee9e23ff305",
+      "WireModel.__getitem__": "6ed60b2f91cd25afb0c5ac8f64c8b01d46ac4296e6829308636da171484eef19",
+      "WireModel.__iter__": "dd56f4f598fe7ef007126032b2524c32be3458ce50323ceec5d58a393e1a46b7",
+      "WireModel.__len__": "70fed40cee0a45bd7ae300ffff7ca6b26951b0012a217c74dbe7375abbb99f99",
+      "_bind_string_enum_values": "73f2b75a34a4e345419b256865649e7fb484ae1f37ea88f724e9633dc2aacb3e",
+      "_check_literal_type": "85f7d21b62db1d02cd58302f19f3edea8d9e535f8f76060180d664f7c416e84a",
+      "_wrap_numeric_literals": "99a0b21c90361a808a9e2f72bc67162a95610e91e047a2fbd846fe7883ab4ba2",
+      "normalize_operation_progress": "e779e0698a3e0672fd51f5b6a6b90ce79217402e40dc0b97101efdd66965cd40",
+      "strict_json_datetime": "4acd5871bac393647bcf789b38bdab3e46e243a3d46e67eb0a07a133b6445574",
+      "typed_tag": "045018d224e5f43e397b9c1f3b33ceb0152bbcbb625c9137d87ea1c7f905d037"
+    }
+  },
+  "stored_state": {
+    "agent_protocol/src/vonk_agent_protocol/wire_model.py": 1
+  }
+}

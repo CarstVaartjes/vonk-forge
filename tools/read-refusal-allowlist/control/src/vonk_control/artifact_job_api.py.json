@@ -1,0 +1,76 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_job_api.py": {
+      "<module>": "c8fa6ad995236df9ecc2f3564d771e6f92dcacf4cd79d69547857918ac42143b",
+      "ArtifactJobCreate": "4e06e15ea29a33edd75a352a62f8244502e027426908cc0f795d3c118277d326",
+      "ArtifactJobModel": "b4084114cb3587178219f696217f1f0888af4cea51c932b39ab7d4b216dc772b",
+      "CancelRequest": "d603687060af42fce689fa771c1536e51e333f97501b52d913be2b70ae9bcfb5",
+      "_mutating": "a4a723179b09dc896652896642f41d4875a098181430653f96740a0381cfbd53",
+      "_service": "47d01e8585d2d24b7d90df5bbdccb1e07541d5e92b35db6493af4eadb25c8c2d",
+      "_view": "136e14edf2d83d6b0403cc4a4f09fa36c7b444063c96e867b7b65855eebf8a76",
+      "install_artifact_job_routes": "ec3cf2786b079e7ee558213fe11acc3487ad58b6da229622dd754fa943a520a8",
+      "install_artifact_job_routes.agent_input": "243d04aefd8ab3bd62309579155e15518a14bcc0c74227c65d1e80e63b0549e4",
+      "install_artifact_job_routes.agent_output": "1d5597c80b26335e0a71fe216e1db1cc8eea64d1cecc50de97322f8145f77091",
+      "install_artifact_job_routes.cancel_job": "a5c6b064b3f680e5bf85968b22b835f22521471eabf3702de239b898a2c8d5af",
+      "install_artifact_job_routes.capabilities": "b78204c144c74aae22f8892fc3c1352d3ddb94736fd084eac50b69fe38a3fa27",
+      "install_artifact_job_routes.create_job": "e35ca8cfa91ba07e2cd3f7594df51b2feab4d88f0715c4681b9eca690a7dcb30",
+      "install_artifact_job_routes.download_result": "e059317ddd316994c252ab4ffb69d0efa421e4ad28a785fef34664d26fc6ee4a",
+      "install_artifact_job_routes.finalize_job": "5b5ea293a50fac8db67581d292af2268e939c384739aece74018f10d285ca060",
+      "install_artifact_job_routes.job_by_request_id": "78edb6c102bbb43c72c2587419a25b01a23cbb3b0a45b8a70ac07e0edf52abf2",
+      "install_artifact_job_routes.job_status": "cc97c4902dc94a7a6b131a1273f8790305d57c04c02da7b68046d1b12c66c2c8",
+      "install_artifact_job_routes.list_jobs": "5ce46ac97959936cd31ee80c364025729ce110bac0c1134d13a344529727fd35",
+      "install_artifact_job_routes.submit_job": "464de38abaef54bf94e9247fea9652fa2b9867d1e48051728e0a5e57c340fd29",
+      "install_artifact_job_routes.upload_input": "f431101657b32e0ee1a1de111a3d82fc0030c609c9c47f09c2222f7a58707090"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "agent_input",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/artifact_job_api.py"
+    },
+    {
+      "count": 1,
+      "function": "capabilities",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/artifact_job_api.py"
+    },
+    {
+      "count": 1,
+      "function": "download_result",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/artifact_job_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_artifact_job_routes.agent_input",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/artifact_job_api.py"
+    },
+    {
+      "count": 1,
+      "function": "install_artifact_job_routes.download_result",
+      "kind": "get-refusal",
+      "path": "control/src/vonk_control/artifact_job_api.py"
+    },
+    {
+      "count": 1,
+      "function": "job_by_request_id",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/artifact_job_api.py"
+    },
+    {
+      "count": 1,
+      "function": "job_status",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/artifact_job_api.py"
+    },
+    {
+      "count": 1,
+      "function": "list_jobs",
+      "kind": "get-helper-refusal",
+      "path": "control/src/vonk_control/artifact_job_api.py"
+    }
+  ]
+}

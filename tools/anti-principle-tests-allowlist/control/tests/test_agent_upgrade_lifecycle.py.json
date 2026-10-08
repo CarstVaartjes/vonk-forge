@@ -1,0 +1,28 @@
+{
+  "content_identities": {
+    "control/tests/test_agent_upgrade_lifecycle.py": {
+      "<module>": "cf0cd0ed427c63b000656dd020fbeafb85e437840cfc36b62a02243dcc06f021",
+      "_job": "c5b4f38706f0e048dc3866da9fd967cd6ee7abd2492e3cde8daec34491c2e26e",
+      "_stored": "e8c180715aa61864c7425003deca955b3746a6e2fcb2d24ea9e4947f127ad9bf",
+      "test_a_cancel_of_a_rollout_completes_at_once": "adb5b6e6f3d83e7f445c7a7821ef43d2ba35bf143c6ad0235bb58efb485113f1",
+      "test_a_failed_rollout_that_failed_for_a_real_reason_is_not_reopened": "66606b5d9684fc3082d0a5a70afb34764a665d9f77936cbc64300a363ec37d7a",
+      "test_a_legacy_waiting_rollout_is_healed_from_its_orders": "c0a1fc8135217a056eb54f3bc50cdf934c3388473db58b7bced2a7dd5afdb069",
+      "test_a_live_legacy_dispatch_and_a_running_order_are_untouched": "8aa392af0f3fd5a9ca853b664dd87904d0d440b1d525f20fe7d82e339ee0b4f3",
+      "test_a_projection_never_writes_a_wait": "035114c557dbaf69e1e0e3fc88659530b0bb6c7d594eef4099323eb0b2cc2fba",
+      "test_a_rollout_ends_through_the_core_and_a_terminal_row_absorbs_events": "9a79eb864616613dc5dd99ea6ac235e38ee2ec248d103e20c569eb48c9a87d30",
+      "test_a_rollout_the_worker_failed_as_unsupported_runs_again": "543eaabfa489454e3cf917aa07e134d2a7980c0d23d81c2dadb177c49c747105",
+      "test_an_expired_legacy_dispatch_is_projected_from_its_orders": "f14e404e3b8dd87596746a5817b5500829ac7baad82a72b063dd1944d5a0e96f",
+      "test_every_stored_shape_adopts_and_no_event_waits_for_an_operator": "c1aab55279cc7c505acaf96eca82efb1e3d1c0ab322e23b8409129a48bc63c72",
+      "test_the_superseding_request_is_adopted_as_the_cancel_request": "4e8b53dd93681ee03c52af221c7892df867deccbbcc49bed120c27a7772d3f76",
+      "test_the_worker_tick_heals_rollouts": "2159b7d8615b8f8ae782ec4293e31cf855afc312f23cf3a658aa51592da92c54"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_every_stored_shape_adopts_and_no_event_waits_for_an_operator",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_agent_upgrade_lifecycle.py"
+    }
+  ]
+}

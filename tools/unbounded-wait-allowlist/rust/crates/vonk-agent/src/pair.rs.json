@@ -1,0 +1,12 @@
+{
+  "exceptions": [
+    {
+      "count": 1,
+      "function": "bounded_pairing_body",
+      "justification": "The sole production caller constructs its reqwest client with a 30-second whole-request deadline (10-second connect deadline), which applies through response chunk consumption; the existing real TCP timeout proof verifies this transport cause. Each chunk is checked before allocation against MAX_RESPONSE_BYTES; the function does not reset the request deadline or create a new retry budget.",
+      "kind": "rust-loop-without-deadline",
+      "path": "rust/crates/vonk-agent/src/pair.rs",
+      "reason": "resource-bound"
+    }
+  ]
+}

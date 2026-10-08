@@ -1,0 +1,56 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/assessment_support.py": {
+      "_assignments_needing_preparation": "ac72c5032ee1d0d78cbbfd67e6fca5eda6ddf22b9de7d66f2c543bb9c610e940",
+      "_deferral_code": "9593c701e7e5bd2b74f91238017ab5be088e4f0f13c68d7da74bbf901f0cf512",
+      "_disk_shortfalls": "7abb8491de7671c8e5f57f93f251a23221755f3488f25485baefdef9d20294c3",
+      "_operation_state": "b82b9f9e628711e41fcc5cd77c21f81f6ba46702cf692aebeef450a4194c2566",
+      "_preview_blocker_codes": "742b75f2e194fe427683251417a4110a9352f9fd322345d07799677d3b29ea5c",
+      "_preview_blockers": "4b3ac92728debbcaf918b8c95263fc9442d7e248d0129af9e6ebe06377792af5",
+      "_profile_preview_is_waitable": "ab723b632650535b24a1677c80171a2486ae28b6b460bda9f5b9ca4e6fbd24f7",
+      "_progress_with_blockers": "f2c8e08290634036cef72412595d5e758add5e70e586595e6a59868603063e92",
+      "_recovery_preparation_identity": "ba1464efed3d8daea479ff20839399db85e90965a102cb3944f6882455d54cbc",
+      "_relief_blocker": "da9ed0093b4aa7ea66e8eebfebcc267a9bd90f12671e952a5972f4b359e6621f",
+      "_require_recovery_preparation": "5ee0285651b18380bc25d3f2da01385e6261f7920d0a8ed74bf7c27a63a598b4",
+      "_require_recovery_preparations": "13058b6601cddc6c1372d0f5858208d8764bbcd5707dcf3ec1070b94973ed6d7",
+      "_storage_wait_of": "4a37948c1daf00b7e3c7bbcb2c1c624395d87f1fc01278471efaf73085d342fc",
+      "_storage_wait_of_preview": "7a6aadb739b33f2c04ef596cee9e1603edf3f089a809bfdf1859a8c2b74c996a",
+      "_stored_state": "d8ef61103dbacefcd09f170860e5471a16c0952cfd9e854859308af15bece719",
+      "_string_items": "7a23aa6fcb45189f5f490e13ba3a4792fcb5890d9acc3dce65b2ede2d5f5cfd1"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "profile.exact-identity",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/assessment_support.py",
+          "_FleetProfileRecoveryBindingConflict",
+          "_require_recovery_preparation",
+          "profile.recovery_artifact_changed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "profile.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/assessment_support.py",
+          "_FleetProfileRecoveryBindingConflict",
+          "_require_recovery_preparation",
+          "profile.recovery_cache_pending",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/assessment_support.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/assessment_support.py"
+    ]
+  }
+}

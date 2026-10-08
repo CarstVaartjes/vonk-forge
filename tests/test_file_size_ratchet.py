@@ -7,13 +7,14 @@ diff of that file. After a split or reduction, record the smaller exact count
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
+from control.tests.registry_storage import read_registry
+
 ROOT = Path(__file__).resolve().parents[1]
-ALLOWLIST = "tools/file-size-allowlist.json"
+ALLOWLIST = "tools/file-size-allowlist"
 LIMIT = 1500
 FOCUSED_PACKAGES = (
     "control/src/vonk_control/operation_api/",
@@ -93,7 +94,7 @@ def evaluate(
 
 
 def test_source_file_sizes_only_fall() -> None:
-    listed: dict[str, int] = json.loads((ROOT / ALLOWLIST).read_text())["files"]
+    listed: dict[str, int] = read_registry(ROOT / ALLOWLIST)["files"]
     # Hermetic: actual sizes against the reviewed allowlist only. Raising a
     # listed ceiling is a visible, reviewed diff of the allowlist file.
     assert not (problems := evaluate(source_counts(ROOT), listed, dict(listed))), (

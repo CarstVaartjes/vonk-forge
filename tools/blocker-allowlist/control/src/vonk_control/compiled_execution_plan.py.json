@@ -1,0 +1,199 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/compiled_execution_plan.py": {
+      "<module>": "4c1b147fab2ed89bf70bd8ac2c2e89380b550b85ee52a583184bafd7caa01771",
+      "CompiledExecutionPlanError": "2f6203b37faea47a21cd032ce5c376a33727c086a37c05a5b67a1f7c37344b4e",
+      "CompiledModelArtifact": "569392f130f748083308117ba8de9dacf3c27cf58d90834ca0522092cf365e0d",
+      "CompiledModelArtifact.materialized_path_is_safe": "74b8e98598aab349059ebef724594ff21170c9c86c419bc336b7a06805f5be88",
+      "CompiledModelArtifact.mount_is_bound": "632254af05abd47f4d4b76ae8a242b053d004f6b7ae9aba99346fd4be0ed5f42",
+      "CompiledModelArtifact.path_is_relative": "2dafeaf8cac7dd49b349521a95b52e76743dcf67cb76e5dc489c3500549b3d1f",
+      "CompiledModelArtifact.roles_are_canonical": "4c41b2f2fd19a49931acd723445e57d6a7d2211cbd216310db04bc2c706d469b",
+      "DistributionObjectReceipt": "4adc0287b009c7d5dee140774b50819aeee17d4f16f867ed9371f496519f3b05",
+      "DistributionObjectReceipt.byte_count_matches_digest_kind": "e220c14f8237caad31f8c487355b135aab385d011e8cd3a5659b4235df12331c",
+      "DistributionObjectReceipt.name_is_safe": "b72c526ca47914653f24a5c562e4af30ef942b27cc58b0ec7ba8e376219987e4",
+      "ExecutionMount": "002843d8e925510f3ba0de7fea6ceeff0db2de4784f10d2b22d2f55a64b4b74b",
+      "ExecutionMount.source_is_safe": "3ced0a32813219c2113519fdc31c4767a6cbf9bf9bc76c962c3153a64db97473",
+      "ExecutionMount.target_is_safe": "11deeab35ca5a16e6c0b69c7d38a032c3b8ac7a6288bfe9e60c7ac6dbf7ed580",
+      "ModelCatalogIdentity": "d9b13cb7ae0a6977fbe7d90bcb765b421a70894ec6d6b44c9c0e65a6727b1f1e",
+      "ModelCatalogIdentity.publisher_is_safe_text": "b89f5f9aa63cf40ea6a504c6e16422a57876e65a7bd7e11fbe2471d67fc6738a",
+      "VerifiedExecutionPlan": "658d524ffa3fff61ff9f7be8abda966ef10acf5278d205fb81d9aab1429baaee",
+      "VerifiedExecutionPlan.artifact_set_bytes_are_exact": "1353b621e6ce32968f277399a0ad85ba466e304b8a5437fe0cd374d6cf331df8",
+      "VerifiedExecutionPlan.to_compiled_launch_payload": "23289245eb7e8f23a13c926eba49bf68ffe2eb9576b604f96cdcb4e289fe92e6",
+      "VerifiedModelObject": "8de0fc9aaeb9234d8b0d99e65a1dc32be9c62eedb7251e78c0160a50d24223cb",
+      "VerifiedModelObject.exact_distribution_object_is_bound": "954bea8ea7faa1d69f738b4cd53be2ec8bbae611af73031cf22bdeaa9d5d93ab",
+      "VerifiedModelObject.path_is_relative": "2dafeaf8cac7dd49b349521a95b52e76743dcf67cb76e5dc489c3500549b3d1f",
+      "VerifiedModelObject.roles_are_canonical": "657ef822c54ac6d1ec820a7fdfc05b472b433afbb8e3fbe434bfd253daa754aa",
+      "VerifiedRuntimeImage": "6468eb788e8ac6a65273d960fa595f5b011d644cef4d8f8aa8c8746347945986",
+      "_digest": "74c3e54e4f8dfea72d45dcc6660192498b340f15a6874958e1853a2f2395ff3b",
+      "_safe_path": "9e9973ca48176897c5ee8519826121418579dbcbe3f70b3faed88e18223ec208",
+      "_verified_model_object": "f92819159cbb0160b625de957d7247a22016b7ed6bafe22ba85348e88e12c051",
+      "compile_verified_execution_plan": "97262e2bb5d62f8413ab08eae525ad319f8d04d3d6175a365c64fc5d2a656b02",
+      "materialized_model_path": "a76f0c64b355e79c8db849a60926b16840dee02a2a2558491fa7d11b62d92a14",
+      "validate_compiled_launch_payload": "1da82504062d4e233a0dd4b13b91ca89ad1ac75b629f5f04e8ee3dbfbac09d38"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "compiled_execution_plan.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "VerifiedExecutionPlan.to_compiled_launch_payload",
+          "compiled-launch-plan-must-contain-exactly-one-endpoint-or-jo",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "VerifiedExecutionPlan.to_compiled_launch_payload",
+          "compiled-runtime-executable-and-argv-are-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "VerifiedExecutionPlan.to_compiled_launch_payload",
+          "compiled-security-has-an-unsupported-network-mode",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "VerifiedExecutionPlan.to_compiled_launch_payload",
+          "compiled-security-mount-is-not-controller-owned",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "VerifiedExecutionPlan.to_compiled_launch_payload",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "_digest",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "canonical-runtime-artifact-cannot-bind-the-verified-model-ob",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "runtime-execution-identity-does-not-cover-the-compiled-launc",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "runtime-model-artifact-is-not-covered-by-the-verified-cache",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "runtime-model-artifact-physical-identity-conflicts",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "runtime-model-file-path-digest-or-size-does-not-match-the-v",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "runtime-spec-has-no-selected-model-artifacts",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "verified-cache-objects-do-not-exactly-cover-the-selected-mod",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "verified-model-object-sequence-is-empty",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "verified-model-objects-repeat-a-model-file-identity",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "verified-runtime-image-does-not-match-the-compiled-runtime-p",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "validate_compiled_launch_payload",
+          "compiled-launch-plan-is-not-json",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "validate_compiled_launch_payload",
+          "compiled-launch-plan-is-too-large",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "validate_compiled_launch_payload",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "compiled_execution_plan.receipt-request",
+      "sites": [
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "_verified_model_object",
+          "verified-model-object-receipt-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/compiled_execution_plan.py",
+          "CompiledExecutionPlanError",
+          "compile_verified_execution_plan",
+          "verified-execution-plan-receipts-are-inconsistent",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/compiled_execution_plan.py"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/claim.py": {
+      "<module>": "e017e40182ee6cfc9205cf7a688c6fbb76626ddcf42ab80e5eaaf372429f0a09",
+      "_claim_once": "0ac3add66b4acebca88e002d37e48d6996c576b04a2d6e0ace6830713cfd3a7b"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/claim.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/claim.py"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_api/diagnostics.py": {
+      "_agent_upgrade_diagnostics": "bc3c9249b6f9b44a0711185c20072f7d951d0fa704685101c5d8f6b99eaeaa75",
+      "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/operation_api/diagnostics.py": 1
+  }
+}

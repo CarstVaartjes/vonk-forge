@@ -1,0 +1,36 @@
+{
+  "content_identities": {
+    "control/tests/test_recipe_image_availability_api.py": {
+      "<module>": "6fb807f90e832f20fdea02a865dd3b2c5601d855061b070aa39b0da39f57a146",
+      "_download": "90df97a5d612d78f49a8e610c70249df8eaf17f8412d809a18d8bf6a5c5e0727",
+      "_operator_client": "c0c1c8831eebbd2518c15acb22930900ac824c6b5a0c5a50083e42592d9a4cae",
+      "test_availability_refusal_detail_is_redacted_and_bounded": "71e6cbe1d39d5e921029d5d9732cd0d2bd1cee6830bbe5c91eff47abc550692d",
+      "test_completed_result_projection_is_strict_and_exposes_both_children": "93a037361feef58de107c1a02d83e30e349fb7dd9430aaa36a14066a612bacb7",
+      "test_download_keeps_the_special_case_refusals_unchanged": "04b44cee211167d3d23c3cc2f9c15fc42a2fb6e4f9c33d23ee396d4c131a6606",
+      "test_download_names_a_source_policy_refusal_instead_of_unavailable": "97a86c14fe91b871a0b6df4ccb05ec47d9cf5db86725309b6e462cb462a3ea7c",
+      "test_download_names_a_terminal_availability_refusal": "b61ccc00434395642d667784ad98ab735fa413ae5495c7a42e4bf5fcda68c5c6",
+      "test_download_names_a_transient_availability_refusal": "24eb1cfa172ac43755a5df8863f386845698dda73f2850972bfda295c2fa9fec",
+      "test_model_cache_progress_maps_to_shared_typed_progress": "7a9832458b819608d00d7c02adfc1396ccdf52eafd447ad23f5c411afe71780f",
+      "test_model_child_requires_typed_model_references": "ea1b242ff2ad1a2c7136045d43e9ff66b883e8f06b6bb9460b1550f9be2dc4ac",
+      "test_openapi_uses_typed_recipe_models_and_conflict_schema": "f9fc02a4ad44da620bcbc23ee6b17110193453401d3e5f268414ded2e4f563c7",
+      "test_operation_observation_names_a_transient_availability_refusal": "697c10ac6df888cb2ac570ebd5174df7f0b4c08785dab909bf3c103452caf58a",
+      "test_optional_missing_image_progress_does_not_create_a_fake_child": "1a06ca3df3eb876d11a3838466af50a98ab7e19ac35a54486ad1b564aa812624",
+      "test_progress_rejects_non_object_persisted_values": "4886b38d4f7d67f387bf4dc90b59458d9bbd15c02529ed8213ddd47881b33191",
+      "test_recipe_cancel_requires_mutation_role_and_returns_durable_request": "7fdf50d5ddfd38494266214c7f034685081991b83919a77b422a3cec13e4ff39",
+      "test_recipe_operation_observation_is_readable_by_any_authenticated_actor": "06b6fc518aac03c30587de6bfcc2c6f91192bf26410c11a126cc2994c28b0aaf",
+      "test_remove_names_a_terminal_availability_refusal": "a229df110c29f32de88c131600bc61473e58219816302754e977b2b6a5c657bb",
+      "test_remove_response_preserves_partial_progress_and_failure": "411c62a273c4c262f49860f4739baf2784f42c9bc465d7aea006e542a1109e2b",
+      "test_remove_response_projects_the_stored_model_choice_not_the_request": "5fb09682878d7b62a4fce57d83a7dc96369fc5fa909943bf406524d9cf5ca1f4",
+      "test_remove_review_is_read_only_and_returns_the_canonical_digest": "9d84fa4e36eef7f58f5d76399124fbbda6c6c64a41cc3fadeb2a3869d4d1128d",
+      "test_remove_review_requires_the_same_operator_role_as_removal": "18a29da3adad07dffd3336a335001c78ed27e9b175ff561c6f491ea08ce8f7cc"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_operation_observation_names_a_transient_availability_refusal",
+      "kind": "refused-read-assertion",
+      "path": "control/tests/test_recipe_image_availability_api.py"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "content_identities": {
+    "control/tests/test_profile_intent_ordering.py": {
+      "_application": "84a668481f03c803bf48caafe39be8ffea1a2f4cf4eca9ac7c8e21b12bdd9a7b",
+      "_pending": "8e9a21e08d08921fc3e8c5e563e6f05a1fa4f6d2c2fc95c9f01684eb44fb8cf4",
+      "_profile_and_review": "7232ee8e0bcc7c6855b72f83c5a581022ab27f555fd32e004b489dcf7c592b06",
+      "_profile_order_services": "8db0a2031bb1313aefb9cb6435263d62e25e4f8fc14d7760a12ad272055c0eed",
+      "_selector": "0227b5847b802235b9e222f24c05bb133fbe072380b0299dd5453d2177a6eb2a",
+      "test_acceptance_order_overflow_fails_closed_without_receipt": "872f8f73913dde8cf1899f0dfb36299f3c15e3edac4b1df56520eb112dae9346",
+      "test_clock_rollback_cannot_make_later_accepted_receipt_older": "9d9667d6a5e5c8126a70ad461fd663469f1da1a453dd0251c643c2a1073801ea",
+      "test_direct_queue_cannot_overtake_later_terminal_receipt": "8169fe33bad3a168fe6bd866abe26985c4251a6ad086b10057c7dd85d1753463",
+      "test_equal_persisted_acceptance_time_uses_deterministic_uuid4_order": "ca87aa4edb2dcd22dc37b69510bc2f406b52fdfc289e7aff2ecbd71c91e45fbf",
+      "test_malformed_sibling_retry_root_does_not_block_new_pending_admission": "d0569fe971ee499d11b1c91142bd9e34378329479d77f97fa2e60a9bb5eea3a5",
+      "test_older_unbound_admission_cannot_overtake_newer_bound_deferred_intent": "c6d50bc57cce0ebd321f00782e0e747cf4cfd131cedc3d566f1df0dd68c82db3",
+      "test_pending_later_receipt_does_not_supersede_retry_until_accepted": "3acf848eb0f363edd39a1c80dbacdc51051a4d2244bd267b959c9ac9022e6bb8",
+      "test_sequential_acceptance_order_survives_service_reconstruction": "8afdc7341c451f67718c081ab88a566f6ee4ffed9b118359619e1065e1bffc5e"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_direct_queue_cannot_overtake_later_terminal_receipt",
+      "kind": "transient-failed-assertion",
+      "path": "control/tests/test_profile_intent_ordering.py"
+    }
+  ]
+}

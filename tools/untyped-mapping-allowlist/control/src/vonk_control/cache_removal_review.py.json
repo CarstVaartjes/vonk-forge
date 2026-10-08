@@ -1,0 +1,30 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/cache_removal_review.py": {
+      "<module>": "1a244c756213e9123ab41bdc1921e7d158c96edc99b0ad028ad173cd4d42ce81",
+      "CacheRemovalAsset": "33c0e472eeb804b996c32677abb6ab29dc1c3ab75f849cec88981f97cf48c264",
+      "CacheRemovalAsset.byte_observation_is_consistent": "0cccdb5446fb1a974fd5a982f99ffa1b69b82348afb80351af179d2b355bb1d7",
+      "CacheRemovalBlocker": "8dce46973425f3770b3fdf40372dd747c3395975e172d846f7c91f7273a9fb99",
+      "CacheRemovalFinding": "490d6462848da4c8b40ac9a5d8e11bd1e5c844277c5d49b581e001f2693600db",
+      "CacheRemovalReview": "46ae1021f00560d0a548d1d6a6de3f7ea37ee3682296a09d4716535de7c38d9f",
+      "CacheRemovalReview.digest_matches_content": "02953c8b59276e2df0fecf740f811c9c867bb1f2598fe3ebe4e3cec02e312724",
+      "CacheRemovalReviewContent": "301afbffb3ff3651def245ff4c1967819fb8922f97ab25c90b1c64353944ac38",
+      "CacheRemovalReviewContent.resource_fields_match": "ac1d3f5ced67c50fc3b381e3a5b62e9c16d8c18aab567b2d4a4bed2f0f026333",
+      "_CacheRemovalModel": "283ee0d8a1517e3b99b4239ee94a7f4dea1bfa6467f1ef57eb340adcd033b124",
+      "_asset_order": "ca4ca317e0191575c1b90c2c692dca1f5ac173143a1343c86eb363ae31699529",
+      "_blocker_order": "de76f4204044440b9c1397414598cdd0df66baaaea9aca875912070532508d65",
+      "_canonical_content": "5092fda759d143bb3de0f8437e9d0de5a750c1e79235e9b6f2c74ac472465082",
+      "_finding_order": "4d00210e77e2b321f02493e41d39221ea1a62162314bead797eaaaa147c4fbf7",
+      "_require_review_byte_budget": "21c34a4db5b789960043c1547289209d242ab5c72a6ad8add459795d3c625b64",
+      "cache_removal_review_digest": "44da2e1fe32bb3605d1d02532930099302a68e3e9f6b78d2c1c2a6c09e2372cf",
+      "refusing_removal_blockers": "0d9cf376fdc48664f1b56ce13c8c31e0555f9460d0ee555233bf9a551596eb92",
+      "seal_cache_removal_review": "36f195507b15fd2e3b04aa00078a23a7d283a9e39cc5a9ae1711a34d1e46c2f7"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "path": "control/src/vonk_control/cache_removal_review.py"
+    }
+  ]
+}

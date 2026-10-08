@@ -1,0 +1,29 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/control_client/client.py": {
+      "<module>": "ffc7705c514bc3da0664f6a655dbe5630d313ffb141305f4731cc9e07559170a",
+      "ControlClient": "b5c7e42f9eaf3aeb90c9ae0cf0bb4be61d3ef212bdeb87baafe138a1a07c6884",
+      "ControlClient.__init__": "7c5fce937e3d6fc6a472d7d4b7aa9a3dbd42430456f0ebccf8880e77bb2c601a",
+      "ControlClient._call_generated": "c9e394adc3b7b491881c7099e4b7023c1e99cfe2b3cd8d1b9cf53af99acd10ea",
+      "ControlClient._generated_client": "1217d45aa53d3a12e7b18f71f842ca2e57bd410aaf5c36d71a7700534973b10f",
+      "ControlClient._raise_http_error": "c84efc9df95181736f0643d00fcfbabe3deb44edcf0ca335447860348980ed4e",
+      "ControlClient._raise_http_status": "395770fff5d726876d3130a2d5642e892bd9f1acba13b3e271ac55a4026360ee",
+      "ControlClient._read_observation": "001f0b69a41a6d472649be34e0b5206d3a3e658683bd36a378c69e73094c624b",
+      "ControlClient._request_response": "afbed5fa5f0cb6b3d3540a2876bffc174fdc567836a13c746e51eb14e6062282",
+      "ControlClient.fleet": "9c7f77a9e91731719edc819fce536a49d36bef0c04f692c6c4528ecffb5916af",
+      "ControlClient.from_environment": "ac1146dcd36f18385fc6d6c91510894855098f92b2c8031658b7890758dc28e7",
+      "ControlClient.get": "c29579e584cc4a2db15c2c2fa20306c2a6ec944de3b839b0ec9e595d857f448c",
+      "ControlClient.job": "a6a5e7b550f203a776082f5fff3ac90dc7f73056b8255313a092ece3229df289",
+      "ControlClient.profile_endpoints": "2ad92db4f43135d9c6fefd79c34eeb3b7caafc20513b9ed2ffa8370b125d34d1",
+      "ControlClient.request": "fbd15d41bc98540c4b3994ceda508c193f5eebf5acdf18bae0484efb16bf278f",
+      "ControlClient.request_timeout_seconds": "6ff15a66a539119a2e2fd9aaada337d52131d38d98c716b458cb2e9bfd6dc84e",
+      "ControlClient.wait_job": "3fe3b0aa2b65fbd9c16e14c6de93a407e3c5af1ed4ffc7b431f6088669723a0c"
+    }
+  },
+  "debt": [
+    {
+      "count": 5,
+      "path": "src/cluster_profiles/control_client/client.py"
+    }
+  ]
+}

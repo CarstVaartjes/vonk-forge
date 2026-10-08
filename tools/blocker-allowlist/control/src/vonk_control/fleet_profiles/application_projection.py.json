@@ -1,0 +1,42 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/fleet_profiles/application_projection.py": {
+      "<module>": "e1f9fac3e35917149aaa73535aa62a2809bc29eec48634f9021d613526ec0684",
+      "FleetProfileService": "1fcdfef7c859215413cb9a8023bd569504de8f6bb46fb79764c5a6141b6d56bb",
+      "FleetProfileService._application_assignments": "49e1acb87380cfffbc54cc01fcabf190b0063f2204a2691aacee6e10f88e412e",
+      "FleetProfileService._application_view": "85804f39584fc42a2087ea5a26dfaa254106a4c4c86aa681276e812bdc63ab70",
+      "FleetProfileService._effect_progress": "e9cf937ec26bdd6c5fdd3e804408215cb07652bea3575c43bd6bc3729ff04924",
+      "FleetProfileService._intended_profile": "cb3ec7a164a05bd53e965bb5b4e8a2b404b7f7422b49f67968eb8363ef5e2df5",
+      "FleetProfileService._reviewed_profile_plan": "1b78a3a3558582749a3872928e6ed9e495a0eac5822a6119b47abef040597566"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "fleet_profiles.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/fleet_profiles/application_projection.py",
+          "FleetProfileInvalid",
+          "FleetProfileService._intended_profile",
+          "persisted-application-plan-exceeds-its-reviewed-intent",
+          1
+        ],
+        [
+          "control/src/vonk_control/fleet_profiles/application_projection.py",
+          "MissingRecord",
+          "FleetProfileService._application_assignments",
+          "not-found",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/fleet_profiles/application_projection.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/fleet_profiles/application_projection.py"
+    ]
+  }
+}

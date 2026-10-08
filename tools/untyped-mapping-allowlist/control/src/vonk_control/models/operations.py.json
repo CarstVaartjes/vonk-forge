@@ -1,0 +1,16 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/models/operations.py": {
+      "<module>": "6598e477de600d0a283307c359855aea247c26eaf9996bd673139795e7c61a96",
+      "AgentOperation": "9aeb4f63b0f00ac0a7e1557936e456229920a2aad7fed1d4b78bee2fdfd4d58c",
+      "AgentOperationAttempt": "510d1724e6ac2297a4e6c65f1a59f7d0466f152508ca1254faedb67ea7b089d9",
+      "ArtifactDistributionAssignment": "154b7ea75fcf016d52ba0dd17c435143bffd129d7c382d2a26dbea1f2ad70d65"
+    }
+  },
+  "debt": [
+    {
+      "count": 4,
+      "path": "control/src/vonk_control/models/operations.py"
+    }
+  ]
+}

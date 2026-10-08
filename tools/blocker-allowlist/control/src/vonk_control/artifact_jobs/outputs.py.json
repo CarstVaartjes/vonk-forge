@@ -1,0 +1,187 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/artifact_jobs/outputs.py": {
+      "<module>": "0dfe7c12bf93107c93bc4b1cd4c647c7a283476ae9b416fd8b1e31970da2ecd8",
+      "ArtifactJobService": "0dfe7c12bf93107c93bc4b1cd4c647c7a283476ae9b416fd8b1e31970da2ecd8",
+      "ArtifactJobService._attach_output": "10ef6d96208c2659a94e4c46a37b11f0a96dbbc365bdf3cbba7069b36334992a",
+      "ArtifactJobService._validate_output_upload": "ead9dd41fca9190d7d38d3f7c25f578af31cdd566ee65fbafed98342c8fc3909",
+      "ArtifactJobService.consume_agent_result": "9b4076eda6d271851d02dd38f54c1c3f94ec8510c7e85029a6e5ee936431d050",
+      "ArtifactJobService.input_blob": "3533921a9c0a3c1ae8c7be13058fb31877e3b879402b35d599dd3af547535818",
+      "ArtifactJobService.put_output": "6f874a6ca7159d77e7e33b3f984755ad0919d7bbd5b481092f77ce43ba538ca9",
+      "ArtifactJobService.put_output_stream": "86fa0501ba7ed0d99c06d897f713177c4cb4af731e13f26efcbb0cc88575bc6a",
+      "ArtifactJobService.result_blob": "088365fcf8e7c2ab1f3e50d4851dca2d3cf37fed65487b5fb1f2ec4e9a02ae0c"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "artifact-job.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobTransferClosedError",
+          "ArtifactJobService._attach_output",
+          "artifact-job-transfer-is-closed",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobTransferClosedError",
+          "ArtifactJobService._validate_output_upload",
+          "artifact-job-transfer-is-closed",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "artifact_jobs.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._attach_output",
+          "artifact-output-bytes-exceed-the-limit",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._attach_output",
+          "artifact-output-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._attach_output",
+          "artifact-output-file-count-exceeds-the-limit",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._attach_output",
+          "artifact-output-media-type-is-not-allowed",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._attach_output",
+          "stored-artifact-output-does-not-match-declaration",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._validate_output_upload",
+          "artifact-output-bytes-exceed-the-limit",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._validate_output_upload",
+          "artifact-output-file-count-exceeds-the-limit",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService._validate_output_upload",
+          "artifact-output-media-type-is-not-allowed",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactJobInvalid",
+          "ArtifactJobService.result_blob",
+          "artifact-job-result-is-not-available",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactResultInvalid",
+          "ArtifactJobService.consume_agent_result",
+          "artifact-job-contract-is-unreadable",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactResultInvalid",
+          "ArtifactJobService.consume_agent_result",
+          "artifact-result-does-not-match-uploaded-outputs",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactResultInvalid",
+          "ArtifactJobService.consume_agent_result",
+          "artifact-result-exceeds-output-limits",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactResultInvalid",
+          "ArtifactJobService.consume_agent_result",
+          "artifact-result-media-type-is-not-allowed",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactResultInvalid",
+          "ArtifactJobService.consume_agent_result",
+          "artifact-result-state-and-exit-code-disagree",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactResultInvalid",
+          "ArtifactJobService.consume_agent_result",
+          "cancelled-artifact-result-cannot-retain-uploaded-outputs",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactResultInvalid",
+          "ArtifactJobService.consume_agent_result",
+          "waiting-artifact-result-identity-or-output-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "MissingRecord",
+          "ArtifactJobService.input_blob",
+          "not-found",
+          3
+        ],
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "MissingRecord",
+          "ArtifactJobService.result_blob",
+          "not-found",
+          3
+        ]
+      ]
+    },
+    {
+      "family": "artifact_jobs.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/artifact_jobs/outputs.py",
+          "ArtifactResultRefused",
+          "ArtifactJobService.consume_agent_result",
+          "artifact-result-identity-does-not-match",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/artifact_jobs/outputs.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/artifact_jobs/outputs.py"
+    ]
+  }
+}

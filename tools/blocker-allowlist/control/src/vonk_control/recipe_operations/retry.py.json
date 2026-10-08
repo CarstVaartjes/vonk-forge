@@ -1,0 +1,112 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/recipe_operations/retry.py": {
+      "<module>": "2fe83690d8c158d7c553260bffbd405fed7434d219a8cb6a9f98a46df54784b2",
+      "RetryMixin": "b9c1cd0ff0dbf05bcdd64ae2b91a7b391407779259205b93454d3ee3cda64412",
+      "RetryMixin._retry_build_in_session": "34fc7867a7eed1db97f9d53c7c9d5ea396fbb1639847f71bc84422f5122917ec",
+      "RetryMixin._retry_build_in_session.plan_from": "81e7d2278bf19b9e1dc1d4f696232c52cc18a49af2508037e5fbdcbab679c098",
+      "RetryMixin._retry_build_in_session.rebuild": "644c094afa10b29ca1e57ae698163a4e80217b5da2369c3f201859d7fe5fd14c",
+      "RetryMixin._retry_install_in_session": "b38a0137658046197a3fa03b9c34e08211ae90be3009cd81e712dd3d804675f5",
+      "RetryMixin._retry_once": "86b62a016238932cbcbe59b55a2f4fab5a8133501be620d70c8dedac48eb2af3",
+      "RetryMixin.retry": "9f979bb95843772f5bf266f0d1dc355b87719e43c2d2276cfac6c2ac7737e887"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "recipe.request-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRequestInvalid",
+          "RetryMixin._retry_build_in_session",
+          "cancelled-recipe-build-intent-is-not-retryable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRequestInvalid",
+          "RetryMixin._retry_build_in_session",
+          "recipe-build-is-not-retryable",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRequestInvalid",
+          "RetryMixin._retry_install_in_session",
+          "recipe-installation-is-not-retryable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRequestInvalid",
+          "RetryMixin._retry_install_in_session",
+          "recipe-operation-is-not-retryable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRequestInvalid",
+          "RetryMixin._retry_once",
+          "recipe-operation-is-not-retryable",
+          2
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRequestInvalid",
+          "RetryMixin._retry_once",
+          "request-key-was-already-used",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "recipe_operations.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRetryLater",
+          "RetryMixin._retry_build_in_session",
+          "recipe-build-service-is-unavailable",
+          1
+        ],
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRetryLater",
+          "RetryMixin._retry_build_in_session",
+          "stored-recipe-build-plan-is-unreadable-it-is-recorded-and-t",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "retry.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/recipe_operations/retry.py",
+          "RecipeRetryLater",
+          "RetryMixin._retry_install_in_session",
+          "stored-compiled-execution-plan-is-unreadable-for-install-ret",
+          1
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "function": "RetryMixin.retry",
+      "path": "control/src/vonk_control/recipe_operations/retry.py",
+      "reason": "Bounded admission attempts re-observe the exact request after each reading session or failed transaction is released; security refusals escape immediately."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/recipe_operations/retry.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/recipe_operations/retry.py"
+    ]
+  }
+}

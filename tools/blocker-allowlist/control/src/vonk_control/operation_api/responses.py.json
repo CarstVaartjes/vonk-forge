@@ -1,0 +1,61 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/operation_api/responses.py": {
+      "<module>": "4cdf48e13036dbbdb0f9c736cac723d6478f9db0ba1a90ff803e41d2119d58c3",
+      "_OperationResponseTooLarge": "4cdf48e13036dbbdb0f9c736cac723d6478f9db0ba1a90ff803e41d2119d58c3",
+      "_OperationResponseTooLarge.__init__": "1e1e1acaf25df9e361895fc79c7bf020a76f3603447d1c3171ce04db3566f4f5",
+      "_advertised_actions": "205161e9bb74cfa67535226998d60fe197bb626f04ef922c6a5d7ab78c4d6be1",
+      "_encode_offset": "185e0212635040843f71789ebb0b35e31b7d2c76c7b54786edb38d64e1ccf532",
+      "_failure_projection": "6ba75abf530e38617ed9a97718165544191165e0a05bac910cd158b7c6997d18",
+      "_item_failure": "80a666db5f90bdad83f71eab74688860c425aaa7247fd403a7b4efaaa1e8cb4a",
+      "_job_operation_response": "d26f618df08093a5b1f605700ebbd8acc2c5af883a87602e320ddbcf52ef2ae5",
+      "_operation_item": "a897433c3608ad55667049f66d8c49e2a5419075d7692f65910740e6d7929d89",
+      "_optional_text": "e75392893321c3013f216eede8efd92d931daba4fe69f67efbc613b8331f22a7",
+      "_progress_projection": "d31d1bfbd2dff2d353d82c8f5a423839a6515388ac6b1b7ec1bc0ef5ac32f7aa",
+      "_required_bool": "0803f185522b774fdf9081656ab42355aa12efd5ec347ba26625fc0fa23d9601",
+      "_required_node_ids": "eb5f9b692ddeab51859a19a5081c01e44d55f5911dff7d684259ce22baebc53f",
+      "_required_text": "66c3d0666a9f196359d47dc58befcebb2e4dafaf771f730da37389141e42c97a",
+      "_response_bytes": "12ad6cdbe76682625229884ffe5afe765157b0b55661ced64c68d63b0c4b8344",
+      "_result_uncertain": "e1486b6239510d339f73b1ec90099d5f8a7cd707c9d0fcb68fea8527dcbfc12f",
+      "bounded_operation_detail": "08cf61dcf8880851b9fc2be347bdec7157b5482f8a9d72175ba4f2af2025e6a3",
+      "bounded_operations_response": "552023df9906c47dec7fc92bf15dc82f55bc10b813fa4378e4b6863dd862994a",
+      "bounded_operations_response.continuation": "dc5ffac3b68926985a66e89c5de73dc8304fff08b3fcce8fb76af14ba6c3c724",
+      "decode_offset": "552c95aba0d195e0be7bb67a30ff97f968fec02f6d0dff7d72b217d8b766267a",
+      "job_response": "854dedab9eaaa78cd5788584ccf2431418d96dc1cd7269492cfb5cb8ad7e93a5",
+      "operation_detail_response": "0e50dd5ac3dfad8170c84dc670d9a5441badc285a7e1c33928045989d0b742eb"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "operation_api.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/operation_api/responses.py",
+          "BoundedJSONError",
+          "_required_bool",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/operation_api/responses.py",
+          "BoundedJSONError",
+          "_required_text",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/operation_api/responses.py",
+          "CursorError",
+          "decode_offset",
+          "target-cursor-is-invalid",
+          2
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/operation_api/responses.py"
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --project control --frozen python
-"""Three-way merge of ``tools/blocker-allowlist.json`` for integration branches.
+"""Three-way merge of ``tools/blocker-allowlist`` for integration branches.
 
 ``merge-blocker-allowlist BASE OURS THEIRS OUT`` merges per *site*, not per text
 line: each ``(path, class, function, code)`` key keeps the count OURS has plus
@@ -17,6 +17,9 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from control.tests.registry_storage import read_registry, write_registry
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -114,10 +117,8 @@ def main(argv: list[str]) -> int:
     if len(argv) != 4:
         print("usage: merge-blocker-allowlist BASE OURS THEIRS OUT", file=sys.stderr)
         return 2
-    from control.tests.blocker_boundaries import dump_document
-
-    base, ours, theirs = (json.loads(Path(p).read_text()) for p in argv[:3])
-    Path(argv[3]).write_text(dump_document(merge(base, ours, theirs)), encoding="utf-8")
+    base, ours, theirs = (read_registry(Path(p)) for p in argv[:3])
+    write_registry(Path(argv[3]), merge(base, ours, theirs))
     return 0
 
 

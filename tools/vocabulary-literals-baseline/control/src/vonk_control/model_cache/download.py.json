@@ -1,0 +1,20 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/model_cache/download.py": {
+      "<module>": "a7bcdd92bec8e8e761c07ddfda7320157a72795a5ec9d75b2759df4e651ed72e",
+      "DownloadMixin": "3ff925b0df57a0f9250386ddd6594c72ea9ccfa03c281e7c14fb3eb7402cc620",
+      "DownloadMixin._complete_download": "be491fc7d3c3bcb3309daba7b145c528c0cd65281899f14cf07d9ce3fda9e3bf",
+      "DownloadMixin._download_parallel_ranges": "7bb754973522c0b64643c84fa922d674f4a7a328b6a1c0585af68bcfaf8e4f83",
+      "DownloadMixin._download_sequential": "b5cf1beaa60a8b3d799dc488da3efeaceec7865728c9b01aa21e89256bf7bb76",
+      "DownloadMixin._open_source": "fc2f99dd8aaac4a53a9d1c8a4998fe0be13a3ca400d08d9d7aeb3d2fec2f84b2",
+      "DownloadMixin._publication_allowed": "99d0c006addc8a52a5d1925adbac6c083a2528d0462f8844bda888c05fa7a621",
+      "DownloadMixin._require_model_sets_open": "17690f34140c4e2043d9fc9c2c280c8feff3287329b4b576b64ec0dbf2919bca",
+      "DownloadMixin._require_transfer_running": "d3693dca5163956729db3e68661a35d6ae095c2558ca57cf8b6daafd0999a246",
+      "DownloadMixin._stream_gate": "d8d592951cc4b693bbcb5c693f36eb908cb8e57c4cd620f8b373ee1fc0a6afc1",
+      "DownloadMixin._validate_http_download": "773f47e5e15c277b46dbe7e9ea0f7827aae23c78c1f5042b6a2037b22c3a924a"
+    }
+  },
+  "stored_state": {
+    "control/src/vonk_control/model_cache/download.py": 1
+  }
+}

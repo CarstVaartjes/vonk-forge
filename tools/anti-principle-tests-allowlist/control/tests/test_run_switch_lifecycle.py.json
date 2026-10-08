@@ -1,0 +1,93 @@
+{
+  "content_identities": {
+    "control/tests/test_run_switch_lifecycle.py": {
+      "<module>": "69862979fb6ffc95a428b7b0a842cdef850a3811e7a7b6328196e9de2efdd7c5",
+      "_Harness": "72544f2ab397ca30ff9e8aa1808554f97293d46f498c5d75b603c8ebbf33bcd2",
+      "_Harness.__init__": "fcbc9c353fa149b8d853afe0c96c0e5dd53e43deefc139e9200ae3fac6acd84e",
+      "_Harness.advance_to_due": "34e3d86796bb2f036b5075262c16def03296e8dc0271e0764c88df17b82e96b8",
+      "_Harness.make_legacy_operator_wait": "f108e952473eaf7681b9591d7192716dfc0b20d5797f6727300b2bb52fb42cad",
+      "_Harness.restart": "b95d1409ea39185d1fb7e7657efefc4bea661b9afa2fdadb16969b5625626e0d",
+      "_Harness.row": "8840bb2377d024d482781f3573f06632eca8c23cf5ba52d30205af09a91c2725",
+      "_Harness.view": "e42a718f17e262bcab9ea824e3e25af031be03f050c75a210b0a2360b50aac33",
+      "_ScriptedExecutor": "5fc2018be4cb4ed3369e8cfea479e3a1d97fe2a35844772441c76a75c2e01d70",
+      "_ScriptedExecutor.__init__": "7900457279d9597773cbbb48f9678f2be8425a1b973accb9a572038c91ae6b09",
+      "_ScriptedExecutor.execute": "66fea162e47950dcc39b01269045fd74af012c57c2dd6f4d19bcfd35aba86e60",
+      "_job": "f38d82905a5e747c80a63c69459c6b356c31777a28999974d9b2a73945c017ef",
+      "_phase_path_classes": "8c8e3788501c56f264b19fdb89211c042c295f693a2586e5b4da184c02a35a01",
+      "_retried_codes": "990f24adc79a377397b6ed7b9b72546ae877545d5fc87f45c8583b091147e67c",
+      "_retrying": "4688183482ff29efae8b022431cd0fe77476c2a4f1c6b3c8d68c52cef143d0b1",
+      "module_conflict": "3a384b98250d28e1b3b18a7d5a3c7d6ffb6c7577d7da69cde92b04681e359f27",
+      "test_a_cancel_completes_for_a_legacy_parked_operation": "cb995c691747cd4440b6acbcb6267cf41d94f5e0fa1e0b1ce4a004a2ecec14ef",
+      "test_a_cancel_completes_when_the_stop_stays_unconfirmed": "56af386f9bd513f736f07985ccd2772588cb12cdffb0a99ae046780a192df760",
+      "test_a_cancel_ends_when_the_child_ends_without_waiting_for_its_clock": "93db853feb3f47844caede546cb137c32b612fc042f7d78dffe5101335eeefef",
+      "test_a_cancel_survives_a_restart_in_the_middle": "97fbabf8b9e31239aa4e6cdac398732dccb82f1f46236bd23afd05404487fd2a",
+      "test_a_cancel_that_is_not_due_is_not_reported_as_progress": "8243f59e69cceabc0536c083598141b96bfdc9f3f4c01e22d654cc2376e2d8e6",
+      "test_a_changed_accepted_image_ends_the_operation_but_a_stop_gap_is_observed": "bcb5a3db18441c9dba1244a25ee1035f63e127b49eb8fac822d3f1351aa641cf",
+      "test_a_legacy_operator_wait_is_re_evaluated_by_the_first_decision": "789299c9dfca79c0444550c33aed51c03df98f846a44bb15bd50e8fdf2ac655d",
+      "test_a_legacy_operator_wait_with_a_live_child_is_observed_not_failed": "efd94486ced98c540ca3ac92084082bf6749de254829aef9d101789c6cee28e4",
+      "test_a_live_child_is_left_untouched_by_a_tick": "83c7b979143a217710a9e9c3970d4b93790f31f94e7925a5250b868c2ce80102",
+      "test_a_receipt_that_does_not_validate_is_retried_not_failed": "bb567661d093c274fae0b30656ef4cc8241da1597b2ebb33cafa1aa24337a1e3",
+      "test_a_retry_never_lands_before_the_evidence_it_waits_for_can_exist": "b9b646da375f484b3d723c7da7818149d81e722fda31da33cc9559cf919b907f",
+      "test_a_reviewed_destructive_or_digest_guard_ends_the_operation": "f7a7473d0be5c2660d0bd1d85fad68fdfad3161b763d81624b0e27515efb9b3e",
+      "test_an_error_nobody_classified_is_retried_by_the_tick_guard": "e17551ecf92d63a437e313391234751a50e4989808a67be61412864239fa6579",
+      "test_an_error_nobody_classified_is_retried_by_the_tick_guard.advance": "08195685d35690c22af2ae4e8218d56e26c267047dbb79d7032a457cbde5b1ae",
+      "test_an_unknown_outcome_of_a_phase_is_retried_even_when_not_flagged_retryable": "605ff8e73d336675d20e5f50414372b36341a49a50eb1a8921b2366a928e02a4",
+      "test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick": "26e767cfc26e1d124acacf02d2ee34950817d8a78175ed2d1689fa03ca1bb93e",
+      "test_an_unknown_outcome_outside_the_phase_handler_is_retried_by_the_tick.advance": "01a6c1166fd1c588273b282df729cada5fbe293e43486f96c729f83ffb228cbe",
+      "test_every_conflict_of_the_phase_path_is_retried_unless_it_is_a_security_edge": "490381be3147f1285454c1abc09f71f77bf0f22e9ed3d31242bc0f025a6fdb31",
+      "test_final_verification_that_cannot_be_observed_is_retried_not_failed": "cb4ff1078317bc6524a8cb6e5fb2f938b7a40f8832e99e737a7d7afa0e6c7ff2",
+      "test_final_verification_that_cannot_be_observed_is_retried_not_failed._Faulty": "acacabd0e32ca5aa7fe50ff77e0c26dc6634607fe35452c0046c327720fdb176",
+      "test_final_verification_that_cannot_be_observed_is_retried_not_failed._Faulty.__getattr__": "de796b4679ba691939e5adc4cf8e5bd1f0a588b301e58b54728aefaec4296a37",
+      "test_final_verification_that_cannot_be_observed_is_retried_not_failed._Faulty.execute": "e907f1b25b42884320646acfd8bcf359efdc4825796a0830bdc90c32d8c668e2",
+      "test_final_verification_that_cannot_be_observed_is_retried_not_failed.drive": "5935d20d07a6a5e380da8924864cce8d12df1adc52002a04c4b959993490ea80",
+      "test_no_run_switch_state_can_wait_for_an_operator": "632f065355140f8433fcb34bc4a7456ada28a851cf3136f083a217a270ce4cb5",
+      "test_the_adapter_projects_children_through_the_composite_aggregate": "14d49fad2cfcafae8e54762e35657205eda4cfdb6142d13c3637eed185fc0bf7",
+      "test_the_allowlist_category_decides_whether_a_phase_conflict_is_definite": "06a1556fe2e3a902036f750cb401121e9dcad1ac122d1c6a92d66c7190d6f1ad",
+      "test_the_retry_clock_is_the_cores_and_resets_on_a_new_cause": "a2922c71f35cd80c0eeaafe80e11276fc565ccca554e8f194be68e83e0b8f63e"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_cancel_completes_for_a_legacy_parked_operation",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_run_switch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_completes_when_the_stop_stays_unconfirmed",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_run_switch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_ends_when_the_child_ends_without_waiting_for_its_clock",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_run_switch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_survives_a_restart_in_the_middle",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_run_switch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_cancel_that_is_not_due_is_not_reported_as_progress",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_run_switch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_operator_wait_is_re_evaluated_by_the_first_decision",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_run_switch_lifecycle.py"
+    },
+    {
+      "count": 1,
+      "function": "test_a_legacy_operator_wait_with_a_live_child_is_observed_not_failed",
+      "kind": "operator-wait-assertion",
+      "path": "control/tests/test_run_switch_lifecycle.py"
+    }
+  ]
+}

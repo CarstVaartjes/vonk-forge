@@ -1,0 +1,21 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/agent_jobs/persistence.py": {
+      "<module>": "e06263134c294bc4f29ff4a943cc31027ea0e6f00b9624d798d2bb8f74161d4d",
+      "_OrderStore": "d02eec69af19021045f2f188713ff3812bcfd999e056c02436b2cf08eaf0457b",
+      "_OrderStore.__init__": "50f70eb638413901cde7743e69c07a432f9fcd13a0f38faa1da7c9955ac78086",
+      "_OrderStore._save": "6f0306900c2603cbeb1a87048058606b3a24ca2ca8aa0145d8662389ca0e130c",
+      "_OrderStore.due": "5e8d3c170efac728d7d71ce534e6a7ae556290f6a854307f374c415bab319cac",
+      "_OrderStore.record_residue": "0918607c894f80eb7afbc16c79d48e56f978e7fee3cfdc3441202b8805d0d56e",
+      "_OrderStore.save": "c3484285ccba40e3c2cbc3f0c9fc4726b29b7ac143f493f3daa4ba16a22a6fea"
+    }
+  },
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/agent_jobs/persistence.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/agent_jobs/persistence.py"
+    ]
+  }
+}

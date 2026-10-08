@@ -1,0 +1,85 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/oci_image_store.py": {
+      "<module>": "b8e52271055676ed9a924f665fa550453bce96d4487b581f86270d05e6658362",
+      "Collection": "d8bff6f13ae605b9e7570e50009f2a062516c3a7bf78bb6236df725672d31624",
+      "OciImageStore": "aa778fd043905f2dc7806f654af52b71abb534c5d876a06b74270a73c8e966fe",
+      "OciImageStore.__init__": "d26de77ce99c80daf33a1a53b9137819b0c83d93b37fb9fc116b6266b02c115c",
+      "OciImageStore._copy": "e1488b95acb8210b4c6e0159b91aaf76aa771d2d97af10b61bdef0b712e01fab",
+      "OciImageStore._lock": "8f8f1192e11b8e2ff6ae72a290f552eec58b3a5adeb51f6a91929c7f857775d0",
+      "OciImageStore._referenced_blobs": "4b3992ba060b782fe118070e072653ea85b8a8c4ecd0a5891730a8b28ca79673",
+      "OciImageStore._sweep": "52f54e043fb31d90d9cfd9527b1bd00d1310991ff2e9975d87adb4ec7817e005",
+      "OciImageStore.blob_path": "d37cc9828f731077a099a3f0931e9e9140e4ced7c4cd7787ad7920198360ca3c",
+      "OciImageStore.collect": "cf6865c7483a2bb0ec4359db8c748ffb8aa9f9316ba9297a341e19a4c1b944fb",
+      "OciImageStore.import_archive": "f68eeb05ae66377d0bc059a2b6f98ed8e1fe57b0f493ae634a0c8665cc11e879",
+      "OciImageStore.import_reference": "025c3109a17e2131a47d3e2b31eb1b238b8aeea462884ace6d7459b0c12314b8",
+      "OciImageStore.read": "7e7f8a73f40d089dc21457b72aee05a632a672e59e11f8fc0edfca4fd0c07031",
+      "OciImageStoreError": "cd29b4f95c659d89665f72b76b7537e1f70116b9ced0f36d8677982329d97d40",
+      "OciImageStoreError.__init__": "74022fef4f9484803954515fde3370a0455dea5804d11397607669fc2ee3f6f1",
+      "StoreUnknown": "8de973f059da386fcfef80f106eb2d96be452c4b4affc2f25602115452458f97",
+      "StoredImage": "3741aaa6128b5cd55e065ec5c36d99964f0edfb21ea1db50a1bb6130225c2cc9",
+      "StoredImage.blob_digests": "bf030e7b314e5d31ca77c82ce61307b86e9a10742c1c44cf396c37e9b2769030",
+      "_descriptor_size": "319e5ac362f927ff0e09ebd4256a0216d0d7bc33c2354895bf92ac5f65a39c02",
+      "_stored_image": "d920c6e2afea4ace2d35bf680ef2b65806d76bd64598f96c8ee06703856a7e30"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "oci_image_store.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/oci_image_store.py",
+          "OciImageStoreError",
+          "OciImageStore.import_reference",
+          "image_store.reference_unpinned",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "oci_image_store.security-edge",
+      "sites": [
+        [
+          "control/src/vonk_control/oci_image_store.py",
+          "OciImageStoreError",
+          "OciImageStore.blob_path",
+          "image_store.digest_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/oci_image_store.py",
+          "OciImageStoreError",
+          "OciImageStore.read",
+          "image_store.manifest_corrupt",
+          1
+        ],
+        [
+          "control/src/vonk_control/oci_image_store.py",
+          "OciImageStoreError",
+          "_descriptor_size",
+          "image_store.manifest_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/oci_image_store.py",
+          "OciImageStoreError",
+          "_stored_image",
+          "image_store.manifest_invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/oci_image_store.py",
+          "OciImageStoreError",
+          "_stored_image",
+          "image_store.manifest_unsupported",
+          1
+        ]
+      ]
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/oci_image_store.py"
+    ]
+  }
+}

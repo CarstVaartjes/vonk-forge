@@ -1,0 +1,8 @@
+{
+  "debt": [
+    {
+      "count": 2,
+      "path": "scripts/verify-agent-binaries"
+    }
+  ]
+}

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import json
 from pathlib import Path
 
 import pytest
@@ -23,6 +22,7 @@ from .principle_guards import (
     scan_sites,
     scan_source,
 )
+from .registry_storage import write_registry
 
 
 @pytest.mark.parametrize(
@@ -132,14 +132,14 @@ def test_exception_requires_fixed_reason_and_duplicate_keys_fail(tmp_path: Path)
     }
     doc = {"schema": 1, "debt": [], "exceptions": [entry]}
     path = tmp_path / "allow.json"
-    path.write_text(json.dumps(doc))
+    write_registry(path, doc)
     with pytest.raises(ValueError, match="fixed reason"):
         load_allowlist(path)
     entry["reason"] = "security-edge"
-    path.write_text(json.dumps(doc))
+    write_registry(path, doc)
     assert load_allowlist(path)["exceptions"]
     doc["debt"] = [entry]
-    path.write_text(json.dumps(doc))
+    write_registry(path, doc)
     with pytest.raises(ValueError, match="duplicate"):
         load_allowlist(path)
 
@@ -152,7 +152,7 @@ def principle_inventory(request):
 
 def test_principle_debt_only_falls(principle_inventory):
     mode, sites = principle_inventory
-    path = ROOT / "tools" / (ALLOWLISTS[mode] + "-allowlist.json")
+    path = ROOT / "tools" / (ALLOWLISTS[mode] + "-allowlist")
     document = load_allowlist(path)
     assert evaluate_gate(sites, document) == []
 

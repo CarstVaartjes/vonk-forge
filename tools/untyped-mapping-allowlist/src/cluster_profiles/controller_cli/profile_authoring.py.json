@@ -1,0 +1,15 @@
+{
+  "content_identities": {
+    "src/cluster_profiles/controller_cli/profile_authoring.py": {
+      "_profile_authoring": "e4551bf2e3c24cb1d779a0bb16f698d55e6859fd7ed2ddf9953f0c86b96c358e",
+      "_profile_save": "0ac044b333b42a3e95eb2ef4d4a497c964f40aec9209d785f20d870cbf3447d2",
+      "_spark_id_list": "39227aac5675e488862cf1da893a1774e9240e1b345e662575cabdbc78f3f99f"
+    }
+  },
+  "debt": [
+    {
+      "count": 4,
+      "path": "src/cluster_profiles/controller_cli/profile_authoring.py"
+    }
+  ]
+}

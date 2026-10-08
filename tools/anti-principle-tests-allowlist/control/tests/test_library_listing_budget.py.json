@@ -1,0 +1,38 @@
+{
+  "content_identities": {
+    "control/tests/test_library_listing_budget.py": {
+      "<module>": "eb1e9db863c6ff075fcc57bebc43d90395ba123f67c3b88946723f0e60755786",
+      "_check_queued_download_projection": "cc2b14a343b75e0168251226d6db19bf3447bb44f8c07dc1e7e5d434d47c6351",
+      "_hex": "e53d232ce05d8ba55110c5371deaa9a374908ca1c36ea643ef727db4ea227876",
+      "_library": "f26efb54333d2165e8f3580d75ad86a858f8c23d3cb509920674ec2f2b5abf89",
+      "_queued_download_progress": "f4ad4d1f08ca2ce460df9f2287218aee0fba4c43362793fe1f1d51ef6eecd264",
+      "_seed_recipes_with_images": "400732fae917af265eb157995c2857d98e88bf97f91d327712bccad840fb54fa",
+      "test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow": "e5f3f8bc827807092317dd442e1177af7e766810d494a06e1f0defeb0ad70105",
+      "test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow.probe": "3b851853e50578d74d1ec7c83f23642ff73f0b0cbd066ad1bd822d84c7dc56d7",
+      "test_a_blocked_placement_read_degrades_the_recipe_not_the_listing": "2036288be087de96ab358dd20468920e4de408ae4bd19462b1ed2fd5e12fc9bf",
+      "test_a_blocked_placement_read_degrades_the_recipe_not_the_listing.blocked_inspect": "4165f9340511be29e24249ab76c8f21a77f2465136cde87775e8f1e8c0be5a0e",
+      "test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored": "6969d8e75af276eac1817f73142e44b6210570101b08fd19f845035e802b0f00",
+      "test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored.controller": "b755278fc3647ed8d117c6a1b21e2546b509d95d5da250e48f5edc64e1518c99",
+      "test_an_unreadable_image_is_named_and_does_not_fail_the_answer": "cb2bf9fb6c1f10e438d16277e0518b87f5e863ad147665e28dbac696ce501190",
+      "test_an_unreadable_image_is_named_and_does_not_fail_the_answer.probe": "618a703ea8798939a586b0e3d30758f29467f9a49e2fdda8bc4ae241f443c8e0",
+      "test_assessment_reads_do_not_walk_the_stored_model_objects": "939df8662b4818eca7056060ac2df342e49e0724e324180bd44f11863a824f37",
+      "test_assessment_reads_do_not_walk_the_stored_model_objects.stats_for_one_listing": "a0cf2cf6d494df18ca53de457f1ccb28c539e9c61fdb44aec9c347c161d0654c",
+      "test_assessment_reads_do_not_walk_the_stored_model_objects.stats_for_one_listing.counting": "210254bfbf91d857b85981de78e6f799cbf5a83f565a1b777fb26f6a141cf294",
+      "test_image_presence_is_asked_once_for_concurrent_and_recent_readers": "d87dfce93ce497ee787dec820a4e906acd8662d93a0e389ecf4efce193051b2b",
+      "test_image_presence_is_asked_once_for_concurrent_and_recent_readers.probe": "c925c3d1fad59713c1c3097d0357a62ef5b9895d35a95331855c48ab8f17bdb9",
+      "test_listing_asks_about_each_current_image_once_whatever_the_history": "624f1878dd29fc60767a417f45cd6ae9dea894c4fd92df0745616a07a3faf871",
+      "test_listing_asks_about_each_current_image_once_whatever_the_history.counting": "4edf666a5b932f0eea97cb6c15025c57cfd312b8def223539f4c6f4c2e1f17e6",
+      "test_queued_download_progress_is_projected_from_the_persisted_row": "5999f65e74a6e106ea1939708f3e721da5fec675c4f1869ae7620f4f308ffafc",
+      "test_queued_download_progress_is_projected_on_postgres": "986aebd9f2cda8ad61ebc989b6b8bd539dadb6e29f6bbc1cd07d78867e6176f1",
+      "test_queued_download_progress_is_projected_on_postgres.bind_model": "46ed202de9935e89ca66f9bbf7e77abc7c0e8cfd68f84e63d99a0ed792b3b113"
+    }
+  },
+  "debt": [
+    {
+      "count": 1,
+      "function": "test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored",
+      "kind": "ending-without-fresh-request",
+      "path": "control/tests/test_library_listing_budget.py"
+    }
+  ]
+}

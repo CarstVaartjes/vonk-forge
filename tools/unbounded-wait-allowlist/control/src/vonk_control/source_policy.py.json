@@ -1,0 +1,10 @@
+{
+  "debt": [
+    {
+      "count": 1,
+      "function": "_has_heredoc",
+      "kind": "loop-without-deadline",
+      "path": "control/src/vonk_control/source_policy.py"
+    }
+  ]
+}

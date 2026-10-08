@@ -1,0 +1,121 @@
+{
+  "content_identities": {
+    "control/src/vonk_control/run_switch_operations/cancellation_retry.py": {
+      "<module>": "81d97107d98b3e970636929c5f24dd15f048c9c28c367a1225fcc9dba5812ac6",
+      "CancellationRetryMixin": "5d1771533a115a0f5dfe4b2dce6a8d14d83b7e7da9cc6b2a65c511ffc84c9b99",
+      "CancellationRetryMixin._cancel_once": "49667bc7fd00fb753a57534c403493903a2f504d2510d012da6ea512772270a4",
+      "CancellationRetryMixin.cancel": "d0658e1658a5954d61f9ef0752ccaf8ca5a185d19a9a76b7beba5a75d5bf642f",
+      "CancellationRetryMixin.retry": "91a70196557c2c8b3cb02fe9529d5d452332a6d63ce52989ab55971cb698b018"
+    }
+  },
+  "fail_closed": [
+    {
+      "family": "cancellation_retry.proven-retry",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRetryLater",
+          "CancellationRetryMixin._cancel_once",
+          "message",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRetryLater",
+          "CancellationRetryMixin._cancel_once",
+          "run-switch-cancellation-boundary-changed",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRetryLater",
+          "CancellationRetryMixin._cancel_once",
+          "run-switch-cancellation-owner-is-busy",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "run_switch_operations.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "MissingRecord",
+          "CancellationRetryMixin._cancel_once",
+          "message",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.input-validation",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRequestInvalid",
+          "CancellationRetryMixin.retry",
+          "run-switch-operation-is-not-retryable",
+          3
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRequestInvalid",
+          "CancellationRetryMixin.retry",
+          "run-switch-request-key-was-already-used",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRequestInvalid",
+          "CancellationRetryMixin.retry",
+          "run-switch-retry-request-key-is-invalid",
+          1
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRequestInvalid",
+          "CancellationRetryMixin.retry",
+          "run-switch.superseded",
+          1
+        ]
+      ]
+    },
+    {
+      "family": "runswitch.submit-time",
+      "sites": [
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRequestInvalid",
+          "CancellationRetryMixin.retry",
+          "message",
+          2
+        ],
+        [
+          "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+          "RunSwitchRequestInvalid",
+          "CancellationRetryMixin.retry",
+          "run-switch-retry-runtime-image-reference-is-invalid",
+          2
+        ]
+      ]
+    }
+  ],
+  "retry_loops": [
+    {
+      "catches": [
+        "RunSwitchRetryLater"
+      ],
+      "function": "CancellationRetryMixin.cancel",
+      "path": "control/src/vonk_control/run_switch_operations/cancellation_retry.py",
+      "reason": "Cancellation intent is committed before contested fences. Bounded admission_attempts retries fresh transactions; exhaustion reports the last typed contention while retaining committed intent, and the worker resumes its durable stop deadline."
+    }
+  ],
+  "scope": {
+    "audited_paths": [
+      "control/src/vonk_control/run_switch_operations/cancellation_retry.py"
+    ],
+    "guard_paths": [
+      "control/src/vonk_control/run_switch_operations/cancellation_retry.py"
+    ]
+  }
+}
