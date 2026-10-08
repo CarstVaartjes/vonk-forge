@@ -1242,7 +1242,7 @@
       "catches": [
         "GatewayKeyError"
       ],
-      "reason": "The default client key is asked for again on a delay that doubles from 5 to 300 seconds until LiteLLM answers and the key matches its secrets file; an unreachable or unsettled gateway is unknown, never a refusal, and the loop ends only when the key is ready or the Controller stops."
+      "reason": "A default observation attempt ends after at most six passes, with bounded waits and no mutation claim held between them."
     },
     {
       "path": "control/src/vonk_control/gateway_keys.py",
@@ -1251,46 +1251,6 @@
         "GatewayKeyError"
       ],
       "reason": "Public key operations observe gateway uncertainty here. Read-only listing and health retry three times with bounded backoff and per-request timeouts; mutation attempts are never replayed blindly and end with the shared typed UnknownError, without local claims or gates. Default-key maintenance reconciles the persisted secret on its next bounded-rate pass."
-    },
-    {
-      "path": "control/src/vonk_control/gateway_keys.py",
-      "function": "GatewayKeyService.create",
-      "catches": [
-        "GatewayKeyError"
-      ],
-      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
-    },
-    {
-      "path": "control/src/vonk_control/gateway_keys.py",
-      "function": "GatewayKeyService.revoke",
-      "catches": [
-        "GatewayKeyError"
-      ],
-      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
-    },
-    {
-      "path": "control/src/vonk_control/gateway_keys.py",
-      "function": "GatewayKeyService.roll",
-      "catches": [
-        "GatewayKeyError"
-      ],
-      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
-    },
-    {
-      "path": "control/src/vonk_control/gateway_keys.py",
-      "function": "GatewayKeyService.ensure_default",
-      "catches": [
-        "GatewayKeyError"
-      ],
-      "reason": "A bounded key mutation attempt ends with the shared typed UnknownError rather than blind replay or an untyped refusal. It leaves no local claim, busy flag or queue gate, so a fresh request is admitted. Default maintenance reobserves the durable secret on its next backoff pass; API callers receive the typed observation contract."
-    },
-    {
-      "path": "control/src/vonk_control/recipe_routes/candidate.py",
-      "function": "candidate_in_session",
-      "catches": [
-        "RecipeRouteNotReady"
-      ],
-      "reason": "Three non-sleeping candidate observations precede the typed unknown end; no claim is acquired. The worker reopens the transaction on its persisted bounded route backoff."
     },
     {
       "path": "control/src/vonk_control/recipe_routes/service.py",
@@ -1305,7 +1265,8 @@
       "function": "AtomicRecipeRoutePublisher._activate",
       "catches": [
         "_ActivatedRecipeRouteError",
-        "RecipeRouteNotReady"
+        "RecipeRouteNotReady",
+        "RecipeRouteSuperseded"
       ],
       "reason": "Three bounded publication attempts retry lock contention and activation uncertainty for both recipe publication and withdrawal. Lost acknowledgements adopt only identical checksum-verified active bytes; a busy retry retains the exact activation fence. Neither SQL transactions nor artifact locks are held during backoff."
     },
@@ -1313,17 +1274,43 @@
       "path": "control/src/vonk_control/recipe_routes/service.py",
       "function": "RecipeRouteService._execute",
       "catches": [
-        "RecipeRouteSuperseded"
+        "RecipeRouteNotReady",
+        "Exception"
       ],
-      "reason": "Bounded exact claim observation ends with typed scope-changed; a superseded claim is replaced by each fresh publication, and no transaction is held during external completion observation."
+      "reason": "Three bounded exact-effect reconciliations retain the original claim and verified generation, release all locks before backoff, and end/release the claim at exhaustion."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes/withdrawal.py",
+      "function": "maintain",
+      "catches": [
+        "RecipeRouteNotReady",
+        "Exception"
+      ],
+      "reason": "Three authoritative maintenance observations open new transactions; ordinary unknown outcomes end the request without a retained lock, and standing desired cleanup is independently reconciled."
     },
     {
       "path": "control/src/vonk_control/recipe_routes/service.py",
-      "function": "RecipeRouteService._claim_run_publication",
+      "function": "RecipeRouteService._maintain_once",
       "catches": [
-        "RecipeRouteSuperseded"
+        "RecipeRouteNotReady"
       ],
-      "reason": "Bounded exact claim observation ends with typed scope-changed; a superseded claim is replaced by each fresh publication, and no transaction is held during external completion observation."
+      "reason": "Owner-scoped observation schedules at most six durable attempts with a five-minute deadline. Exhaustion ends that attempt while preserving standing desired cleanup and allowing a fresh explicit request."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes/service.py",
+      "function": "RecipeRouteService.maintain",
+      "catches": [
+        "RecipeRouteNotReady"
+      ],
+      "reason": "Missing local ownership is observed in three fresh bounded transactions; failure ends this maintenance request without a held lock or execution claim."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_routes/shared.py",
+      "function": "route_publication_transaction",
+      "catches": [
+        "RecipeRouteNotReady"
+      ],
+      "reason": "Three fresh nonblocking owner-acquisition transactions release/rollback failed observations before backoff. The caller body is yielded exactly once; exhaustion cannot hold any SQL or process lock."
     }
   ],
   "call_edges": [
@@ -1722,13 +1709,13 @@
     },
     "control/src/vonk_control/api/production.py": {
       "_close_model_cache": "3de19469b91f0e1a1df8a90c5d9189d468100c831c90b78bd9a182204cb9579a",
-      "production_app": "5fabcb6c7208e5ab2152c7aa56644ad587c4f03a8896f3eacc44e7e709a71083",
+      "production_app": "69a87adbd854ad789f7e8ecfebb5fbad98b1b81fd032fc2090d729be0b52f2b9",
       "production_app.clock": "3c87c7fecd6efb5bf9a23b9256ee2cf26c0be1d7b831864e8bc856c1538e0dba",
       "production_app.build_cache": "948c3e7d9b1ac2a7754013491fbc75a505a55c2afc4f73e7e2c4a3ef35628054",
       "production_app.build_artifact_jobs": "4c060fb9071db6525f6b00b04f34bbdf69feb911acdf0127aead9c8c0832cc48",
       "production_app.consume_agent_result": "7a81b5bc855cd0ef6226f12d62d761eeef766e27f855376c92026e359d2a50f5",
       "production_app.refresh_metrics": "6010a6955dfb9d83961b17c53ca8835afb64b6db803a02f1499d0ef482828bcf",
-      "production_app.lifespan": "ab66612f1805f1cc6dac4ba6c5251c445698c50fd9c3a41919b9024f333b5f54"
+      "production_app.lifespan": "aa11e5aba024977601e66aa3cce0f0ecc081b571e75b51d0669799bea8492254"
     },
     "control/src/vonk_control/artifact_blob_store.py": {
       "BlobStoreUsage": "5cf12d287cbca60a126677ae2365bbb2505672009116b52c29669d53aff86bdb",
@@ -2169,7 +2156,7 @@
       "ManagedRecipeCatalogSyncService._validate_request": "61b5917325aa519caeec22ca1824f016b94a76dc6701090237c2ee962709fd9a",
       "catalog_sync_retry_delay": "bd4c9313eae2ed2e986b7f440d9190d225e27d801b70d21ec9ad5e3d6ce591b5",
       "catalog_sync_failure_reason": "798a0c56e7f8513070da5f608631bb580307737335b298ce638f3f2154ae194f",
-      "run_automatic_sync": "4c4af719ee67659a93793fca11fa94f34f4e29f5c287586883907463319e5f3b",
+      "run_automatic_sync": "ba6baf3b4daa3e8d0fa0603fd58276fef420d607970e24a62cd1a0c45f892f31",
       "_log_automatic_failure": "ce46d140005c184d3f5c1560bb9b6eb92dd81303bb9db684e1038b04b1576328",
       "_result": "11091f55c991778cd2a80b9d22f42e9baa9c57b3f31d1883e94f0cc0846763b4",
       "_empty_result": "a7fd189352179fd83598a936169041e59c4d824b74a9eba231cbcaf16ad6d11a",
@@ -3005,17 +2992,17 @@
     },
     "control/src/vonk_control/gateway_keys.py": {
       "GatewayKeyError": "3ac6e34bd1374f0ef5af9db6b0df2c745c2416e044ad8f91303631e49383361f",
-      "_observe_gateway": "98556db49d7d6068a777c2387de97176e46c9decfd4b358c3da5bf3ead48c8b8",
-      "GatewayKeyConflict": "6f14cf8f23e0608e72951bae9be1f385fba4464374cbc5202c6c3e2beb842a5e",
-      "GatewayKeyCreateRequest": "bbf33ca5199793c277958e2e6f1ed8712cda31024d7d77a3c572b89660cfcda0",
+      "_observe_gateway": "17fde57bb5df99a03c5dbc96f46a5a3ac33e85021d9974f67f736fc0b1c7de72",
+      "GatewayKeyCreateRequest": "6cd84b40ee7af8e3db6c5f6be6ec602b922e5723fafcf1e0532ca48eab55b9b1",
       "GatewayKeyView": "18b22d38e0ebbb703ff0437cccdf006826716cd0b5a688c2224bf091547294c9",
-      "GatewayKeyCreated": "acf0518f61b5a75394e77337374fc17de1f8551db18fb64ba090b9fccc0a04b9",
+      "GatewayKeyCreated": "3393ade09b770e23053ff8fac4c17d91ebedb0c7ab1a1a9bca55ed7eacc43c38",
       "GatewayKeyList": "a270179e5ee961dae92a3582c2f1495f905ac9632d94d268f79f92e525ca1a06",
       "GatewayKeyRevoked": "865d559201dedf986aec43bae4d784ba979c361f2657f62dd47f9b411430ef11",
       "_LiteLlmRequest": "c28077aa273335894930aed3585cfc8de731c03f4665666b2218f34498868b87",
       "_KeyMetadata": "8a5746cfd7eb8bb31c8d9b5a40211008462d3f2508b5e8c557f5a36d1574ed79",
       "_KeyGenerateRequest": "d01d86f11f3f935efae585e7fa5edab1f12fe278b41fde051c5485f46ebfba07",
-      "_KeyDeleteRequest": "43b26f9a65e1a95fb41a2ed4f96e75dbfe08cf8293e960421202d9cb0953dd1e",
+      "GatewayMutationReceipt": "a37e0678e1d817a930936045bbf89fa782caabd9f74b2155901b46ddb0d24a99",
+      "_KeyDeleteRequest": "a0d4237c15404671231577186a00cc6d90f7ba9c1b044fd92420b4b16a841333",
       "_KeyUpdateRequest": "ce33ed639950b5a42d180a5b73fc7888e2eec0e0357e104a44faf4a0417ef653",
       "_KeyListParams": "daba75a542dcdb1d71d706558476fa287d5e3a0b030d8d177e10b026e4c17173",
       "_KeyInfoParams": "c3ed0a2f9ad6adc69ac99f8440beefd3d6b0d8659a76ba7743702025d3d78f85",
@@ -3034,44 +3021,51 @@
       "_remaining": "eb4d399677046f3c3f01b0a4751cb3576800c90c169ff5ad82e0a0d879928153",
       "_rolling_alias": "6cfbbb4b20d3ed64ce9d0c7c0bdfb80c27cb47fb8933cbbd3e2eabf43e3a5ed1",
       "_view": "b497541e9bae8b616c67f60069bc9d8541634899a60e0fdb447b50285db3af6f",
-      "GatewayKeyService": "9a240b47ec4ac153b1efdc74e67fb594c2f98af617e88b8e624011385ebab78c",
+      "GatewayKeyService": "7df2e4d4ed152400f23bb4db72cf96f918aa26b4604d0624b0ffa0f6d8e8497a",
       "GatewayKeyService.__init__": "4d4e97f92817e4474421d46df38f62d70cd973d2def4cebfa8ca720872de79cd",
       "GatewayKeyService.check_health": "e776afd511f6ec4a8a45ae292856a13f7cb53215782724c2e22ec2c07c16beeb",
       "GatewayKeyService.list_keys": "bb62e6cb39f7bb1346e60394134ede8302583086630028f2c30eed31eb36f534",
-      "GatewayKeyService.create": "dfd86b75952ab240949f7da8eb4673e31829c4118ce77c147292d17e69cb22f7",
-      "GatewayKeyService.create.create_once": "8809bca4b40e50a543d81946cae69207ad56115bf86ed4aeb72ae217330a9ea4",
-      "GatewayKeyService.revoke": "a59edf94df5bc72f92dd62ea648b9b8c3c4365aa7d8aefa3f7c27c786662df40",
-      "GatewayKeyService.roll": "4859d8ac140796ebb77d1a1790b28cb86ea034002379e548eb602ff9e9e387a6",
-      "GatewayKeyService.roll.roll_once": "ae8f8a5b33b1cdf8333c905bc1144bb0bf1294d6b4d5c6214aee5f65210aaa77",
-      "GatewayKeyService.ensure_default": "9be834456b495db3a4c4d8d6a9652b531fd520de0c4d770416b7e48f9cc0e107",
+      "GatewayKeyService.create": "a649088f28f553ca63f28c3e17522bc0cf54c01a8a23efb871b321fe59974815",
+      "GatewayKeyService.create.create_once": "f68ff84f8c57f7811e5ba8616ce19566236dd1b7c1815baa41df4dd49f64230d",
+      "GatewayKeyService.revoke": "eeb8a967ce50629dcc522ee40ff5530c3bb9d6de4e1f5514d140fde84caaa447",
+      "GatewayKeyService.revoke.revoke_once": "f12494e17bcf104dd8e98ed6c8ddea982d3e5467136f20821de9f9dfdf6f26a9",
+      "GatewayKeyService.roll": "40d9a79e7b75f0e15b86d31e360b259dd336c8c4b9563fc3385d7a186a2c7ea4",
+      "GatewayKeyService.roll.roll_once": "ec51d6b9d04278421ec06db349aaafdfefe5f33d687b65a70aebdc0cf142afea",
+      "GatewayKeyService._mutation_request": "00ce000bfe402945956a4b90e47ea94c2b7534debc88a0452cae8c4e164c3344",
+      "GatewayKeyService.ensure_default": "8fd217f84c47d84025dbec3725d8d8b99096a4164261c214f2797c6a49ec6007",
+      "GatewayKeyService.ensure_default.ensure_once": "b9e322fd47a15fa56769ea7dcbea0ae8ba73bb08d979433b45846346cdf76132",
       "GatewayKeyService._gateway_check_health": "59224477fb04e7ab5d2233762fbc1dd88a2914312df2aa41e43782a003308662",
       "GatewayKeyService.close": "3ed8acf22610ce747d8b40df5c7967e3356974125547d47bd137491c551b9d0f",
-      "GatewayKeyService._gateway_request": "553f2bb33401df305176acb8650144e2b1c9b6579e765b1d5f87e69aabd5ee97",
+      "GatewayKeyService._gateway_request": "efa9a0fa5e81442fa4047ccfbc6a63c8154c17f3de81a2f8c804aa9737e2595a",
       "GatewayKeyService._gateway_raw_keys": "70f5b985ea70a114eaa50e01cf255802569838926c4738a1ef14694e7e46f6df",
       "GatewayKeyService._gateway_list_keys": "8ceb99b17b2aa3d674479b95e059d6ea9809d9b9d55ef08a84771f0aa02c8b44",
       "GatewayKeyService._gateway_exists": "1170dc8e7198849333377d2fc9fb5eae7b60a66b69e4cd8e54026236df95a2ea",
-      "GatewayKeyService._gateway_create": "492fbc04e6c1214563de9936d2d360f668a26ed6e281cacf0e17eb7191b81c31",
-      "GatewayKeyService._gateway_create_under": "efd6a4cc7d20bbbabf34e6d6b92d008803244e0ccbaf2afa82d65d5751325447",
-      "GatewayKeyService._gateway_observe_created": "e8a68375df576265d164dec861017066eadcbac299284c4aa82b70ca4798135e",
-      "GatewayKeyService._gateway_delete_alias": "6da52bd2ce22ea0cada3a52874f6a9d171ca6d44dcb82c9c20f58645cb9509b1",
-      "GatewayKeyService._gateway_revoke": "c1eba269f1aa3829be88fa848dc783c19d0ad77c4233d7c2dfaf1d637f060597",
+      "GatewayKeyService._gateway_create": "1b12df29959f1b02ee6518c9cbd726315ffd2cb373891d47a6bb223de1657dbd",
+      "GatewayKeyService._gateway_create_under": "5b6696bc03d5d25dc32fdfc3a6ef59a4b9b7b3410013eddce6a8f77721f19e42",
+      "GatewayKeyService._gateway_key_info": "9bcff1050194b95c98a385f5e1901dfc7a0202ed79183a0a1f1753f207d7f7ca",
+      "GatewayKeyService._gateway_observe_created": "e3a7b4cf5841398456c4646e4534c39a47ed5e7699766d52c806fe12559b0419",
+      "GatewayKeyService._gateway_delete_alias": "3dd4d2f741344eed15ec70f8b4e074d3ba18ecb28a24148e23e828ccb75fab3a",
+      "GatewayKeyService._gateway_revoke": "c0bc99f57bb02ebabd8a668e1e4177c4572814dc36a53d4fbdb92839483d2a90",
       "GatewayKeyService._mutation_claim": "0d016bfa246ee020a2eeee5cbc341992ba181b89e42209b37eac7ed6278aecfe",
       "GatewayKeyService._intent_path": "d420513c616ce1dda61cc0c77eb74878b83c3dbac7e7b5602ce06e341a66b103",
-      "GatewayKeyService._forget_intent": "f308f5ce92716b5947ba98eb1f4bdef5563d675039952964110d717f15f47e0f",
-      "GatewayKeyService._read_intent": "c1373487864d0692e6a76c764a207d6b9dfb44f221f9a941d7c5fa178cb4f810",
-      "GatewayKeyService._gateway_roll": "47894caed180cee0863a3bd2d2e87ffd4712727bae1929b5240e7f3f41989d82",
-      "GatewayKeyService._gateway_ensure_default": "235e3982b5135d52eb35dd0c0ad9ecf26581290e566a3147bbbe13b2726a0104",
-      "keep_default_key": "83f1661f2df61ff7be135e6ca46ee9507ce6648adecc72175682873593a7afb4",
+      "GatewayKeyService._receipt_path": "b69504a8edbffa27691f67d80620b798c29a0f5cb00fedc933481d95fecd3c82",
+      "GatewayKeyService._read_receipt": "27d690b9971f9acbd602945f7ff631bd3e262e8db7cf39929fbce38a3916f888",
+      "GatewayKeyService._pending_receipt": "49c9a4d74c56c1855254c92a393e86f1e8126378d497150a72c1af3fda60dab7",
+      "GatewayKeyService._restore_request_intent": "e884c0698c2108602d04eb85913045f5bc3981faf355304c83e4591e03abffc9",
+      "GatewayKeyService._forget_intent": "cb35c44cb9f759e6fc7f8cb472b4f09aa70e0d6be5d9204fd818b2a6406d73d8",
+      "GatewayKeyService._read_intent": "c4d26ce75d9484feb64c3ad6c9dd7d4aff4b2bf67026d6522ba564c92402ed1c",
+      "GatewayKeyService._gateway_roll": "2036fd321a5c65746f5273ade29f524aba347548c1be7fc954dbfbcc15844d51",
+      "GatewayKeyService._gateway_ensure_default": "8e8f51eb7b56b988f8109f70a65ac36226f2f5a22add59149c92ca6f3da830ee",
+      "keep_default_key": "f79d08dd3d72183a279def2c57f5c579d5cc05c8ec5bf9ca4c9ef2b366c9a053",
       "_read_key": "2e898d94ed8980af3930950387d6f16ca00820ee48abe52dec00c827010c55f5",
       "_write_private": "b51ffcff58562425d19908c2024a254dcd705a20746d39d1c2cac633b7b28574",
-      "install_gateway_key_routes": "cf9887f07d5b4d135fb46e9f2bf2cc02a921345c60ef940ce3e3f2d53798874d",
-      "install_gateway_key_routes.available": "bf06b6f24aa9ee165f3616ca490346f8f08273dd2b943cc88871745ef1645844",
-      "install_gateway_key_routes.authorize": "6ebff86b34855e4007017a85584b418401836eb1db113bdab3fa8bc1637d762c",
-      "install_gateway_key_routes.list_gateway_keys": "e4026c42f024f7a34e430a5a4e9ddf9512c48a6f510fd46f2c7b101e9423ea1d",
-      "install_gateway_key_routes.create_gateway_key": "c329231911525a7314bebefa0eb7ab26d2b00dd169848eda102b47016f2ecb21",
-      "install_gateway_key_routes.revoke_gateway_key": "68d74f8590fcaa1140c6e4d4a16edfdeb6be237cc5148d1b3598c1e11f0183c4",
-      "install_gateway_key_routes.roll_gateway_key": "2e6e54dcee2c087999a8e691a0974f6358f1ab279992a82ad1f303b452fd2554",
-      "<module>": "e04dd8b53531ddc54a38d75eef71c3f10fabddf8626928e5d1843f1dbe272681"
+      "install_gateway_key_routes": "25d8599c7349f9f18b13d830e014e396eb5a82f1afee9b5a10bf7cd84b1607be",
+      "install_gateway_key_routes.authorize": "efbb5aae21bec13ca44cf2518ede34d2a2b0d50374e1f42032db464f74e56c7e",
+      "install_gateway_key_routes.list_gateway_keys": "8a08dc02bb93a9cced3f67acad869d4e5e59902cc87d131e85178c10646aa5d5",
+      "install_gateway_key_routes.create_gateway_key": "9afa99c991db4f3e9cb7baca647e6e15c2ce40278f389eff1312745a979fbd3d",
+      "install_gateway_key_routes.revoke_gateway_key": "ee6f489e9fbb78e96d8a3de1fb42b8515730b52465ebb20bcd4c3896485f5eb3",
+      "install_gateway_key_routes.roll_gateway_key": "b5d92cc9aedee8f33992a034f9c47adc7e5f34c0438354972e67362afde36b41",
+      "<module>": "0c1aac7ae9b5ada204c78e3346b567a0bdc5d5a3d0160294599d1cc9f5195df3"
     },
     "control/src/vonk_control/harnesses/canonical.py": {
       "_canonical_json": "146175eb2460e313b8b706ce4b207dff60b4a140ef02b8ed2bee694d79a37ae5",
@@ -4348,7 +4342,7 @@
       "StoredInstallationPlan.node_and_compiled_ids_match": "39ce915c3dad2d99fb8b878f3ab01edf25a05d7fcef926b8a1d14a791aa5b2e0",
       "StoredRunNodePlan": "d360e42c7a3968551c00e747d87d6ad10663c9eea2b427d0b2410a12bb45a45f",
       "StoredRunNodePlan.observation_timestamp_is_aware": "4a083a452e8ad06daf1c5cffd3a8c4dc63fac79fc5799b500cdaa72bde96222d",
-      "StoredRunPlan": "ba638ee91fe1081c0e1bdbb1743cefbb7693d77190c4a96a16bba5df6071e551",
+      "StoredRunPlan": "15cc3294359bf526bafde8bab00d7bc5a7ee0e1537a9f4d239d77d89dabf606f",
       "StoredRunPlan.nodes_are_unique": "12a2e9c56750db73f44c17c6083b8cd5946e2b6847144794aba618ec69ad6777",
       "StoredRunEndpoint": "6f6ebcc3bcafd39b83e8cc9ed90294c574498eaeba831aae93ce1a223935e561",
       "StoredPolicyFinding": "a99078b141adbcbd19d644f8ab570d7721e12dcbe4ab8a57e240e721a8223fe8",
@@ -4368,7 +4362,7 @@
       "build_policy_document": "7f695390444d31510c61941273ecd6e4401d3e48f364711743644d8db5dbd244",
       "parse_stored_run_endpoint": "7bb97615b06d1e9a72e974675bea20c2fe58552a34a5695563a77f8835a66356",
       "run_endpoint_document": "50ce0581e113e24bb754263e420134eabf12fc6aaf830a83eaf26b151ca3742b",
-      "<module>": "bf0d2f2a234cb7cd1fa4a42211c96dcad31660f6b95d4e32e4a55c46ab589bb4"
+      "<module>": "78281ee9e41e8c5fab89312136d0b67a269b9b3099fc8a53c1bfb3d2c3a29c04"
     },
     "control/src/vonk_control/recipe_image_availability/cancellation.py": {
       "update": "70c31a691f710c22d1e2a9edd6d5cb72044b12087ac6170f5392a2e50e419112",
@@ -4687,12 +4681,13 @@
       "_FleetProfileCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
       "_RunSwitchCoordinator": "02961d2c009383e9a3f87e48593ebb5638a0be212332ce43cba90184e95ac7db",
       "_RunSwitchCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
-      "RecipeOperationWorker": "09f864ac373dd4051b45b0e86b6c0a7e3ca4b7c374f298d308de672097649cd0",
+      "RecipeOperationWorker": "947e591af5de7910fb6179cfe163b4fedd9dcbfb943c1b2a52ece3fa51a0e863",
       "RecipeOperationWorker.__init__": "259dd62f553359422b5f00134f0c89143093c22fdb6e8e1941436249a46dcd5a",
-      "RecipeOperationWorker.tick": "b636f66b36184bb1503364f4fb5304a288dbbd8e3ae875c7ebe48daf5073d6ed",
-      "RecipeOperationWorker._defer_publication": "a5e234c9e1d113fc7f968e539e26ed734a388c8d44f34358e4ddd6c429ef63ee",
-      "RecipeOperationWorker._expire_initial_observation_deadline": "8d96ac49577ad0b206b31bc7c331136569180e52045d5433b65bcedfff25c21d",
-      "<module>": "4098616598c130ff5ac35d38b8e28e223bd969de2575b8e22bad96a3b6ca422a"
+      "RecipeOperationWorker.tick": "c3484e85a0991253e8e772d7483fa951743726ef13d6ea48ebc80443393f9da4",
+      "RecipeOperationWorker._defer_publication": "2bad1ccf97955036769adb7fa219f2006e1f04232e42cba3da84dce5d89fb7b0",
+      "RecipeOperationWorker._end_publication": "f23e1388e670ab96f8d6ff65dd0004cd8ae9cf3dd7f8564b93e0028dc553b94b",
+      "RecipeOperationWorker._expire_initial_observation_deadline": "0892da6e44086ff940dad5dfd79e6cfdff7fca069498c86dfde4d56e9956c1e0",
+      "<module>": "7115103151e610d1322dced6466f9519c61daa5dee3050a764401a6759b1d1c5"
     },
     "control/src/vonk_control/recipe_operations/__init__.py": {
       "<module>": "0561f1130bcc9b4ca48a51746ec5cd702f8f07bd764916a90bba28eb9aec801a"
@@ -5078,52 +5073,54 @@
       "<module>": "8c96870492a7de809a750c948375827b2b4648465de1073e2c85739e1753720e"
     },
     "control/src/vonk_control/recipe_routes/__init__.py": {
-      "<module>": "50018b75cd0741dfc221429001e89af382778f0c302abc40a234cb5cec883ab1"
+      "<module>": "b4901b8691cda999d5170f1b5b62661bdfcc0bd121c18afee1d439b77defbc6f"
     },
     "control/src/vonk_control/recipe_routes/candidate.py": {
-      "_candidate_once": "669abce6bced9d59b7db36732e6cebe49c5dfad321c29679e00f34c7a165efda",
-      "_primary_model_alias": "a5c52074516836c08edc729414160397cc38084c79ef9892103f3dd854c3a89b",
-      "_endpoint": "a614046094efcdec62f0f329285a886debd270f8bda712e402303e5c330a2dbd",
-      "candidate_in_session": "6347ad99b0b12a2c075c309a16d9f77d6b01b8a26bb9fbd2ee1cf9d7b652bec7",
+      "_candidate_once": "50cc09e110fc6b949f556533078036c146e568d0410efa729d7ee021551e2248",
+      "_primary_model_alias": "0ee02f7b8af7af030f3b4f5be98d8730fd96883cad95ad3bed2f1e508a000fbf",
+      "_endpoint": "563c05b8179cb57963780ad520caf67360c9daad4d3fc5e9531c1bbdfc1ce014",
+      "candidate_in_session": "49bd1115dccab31a211b215edc09e58fa687bcedc4937212ec3a0a4bc405b827",
       "<module>": "9b465599462a2d989fdebfdbbd23c0e85be37e878728d156762c3b4ef5216805"
     },
     "control/src/vonk_control/recipe_routes/publisher.py": {
-      "AtomicRecipeRoutePublisher": "c7e8563e9010d0f035167a787f40a34b7f7d7c374443165428b6657efe126bb5",
+      "AtomicRecipeRoutePublisher": "5e3ddc61ac930c3ebfc8310f2244ac26c68b0ea661c9f114e2b67f8f86ea09ad",
+      "AtomicRecipeRoutePublisher.fenced": "72eafacc091c02adb0b97a4afc2299dfc6c4767ed0e05453f970db67ed6a4929",
       "AtomicRecipeRoutePublisher.__init__": "3e1fd3de63e442a11e8713af7399f6178aefe6d0441214731ec8f57b7c6edd1b",
       "AtomicRecipeRoutePublisher.publish_recipe": "35560fca7ca53db4e4d27d372a86c64934ed9a4549062123eabac4bef8ff8b80",
       "AtomicRecipeRoutePublisher.publish_empty": "24cff5df9f741879f75e16d9b68d53eb53a17b703b7e1e12820cc05e4136980e",
       "AtomicRecipeRoutePublisher.active_marker_digest": "1a9a903487521620bd5ced80885ce4cef0ba70e883b5a0df4726583297d0d62e",
       "AtomicRecipeRoutePublisher.accepted_run": "1f17d8cd58416044d8a4d813ead0c157e3a17837ff9e2fd7e880458e56b7c8b2",
       "AtomicRecipeRoutePublisher._next_generation": "b43dd9af51d77dba7686220f65786206b2193cea760d31e0e51b70389a063af4",
-      "AtomicRecipeRoutePublisher._activate": "09f1871bba55fa1f8eab0fd06ee9482b34393e9ef1016e0570d858f00ebb11ce",
-      "AtomicRecipeRoutePublisher._activate_once": "514490f069e58b08eef1c87660634bc12155fcb0864e986f5042e9e319a172a8",
-      "<module>": "c7e8563e9010d0f035167a787f40a34b7f7d7c374443165428b6657efe126bb5"
+      "AtomicRecipeRoutePublisher._activate": "0938c5c3cd3713e92690839a90c617c775980a2c056208ba3304c9335f5d79f1",
+      "AtomicRecipeRoutePublisher._activate_once": "e8f9c34f83255db91d0a42606ef57fa3f038a75d3606197f4793d708d55b11fd",
+      "<module>": "5e3ddc61ac930c3ebfc8310f2244ac26c68b0ea661c9f114e2b67f8f86ea09ad"
     },
     "control/src/vonk_control/recipe_routes/service.py": {
-      "RecipeRouteService": "4867521bee0933d6de788be5ca239cecaea24400f770181f8e5ed415b87e84e4",
+      "RecipeRouteService": "8c9a471c49519aedbfb91f3026457c8656143af5105654da8c4a385374d91e0a",
       "RecipeRouteService.__init__": "369b3e8654ba9f85e967ed045132c00fc2fc0bdeb7f3b97e3c90e235646a1791",
-      "RecipeRouteService.publish_run": "6e466ffcd8a0914b7c3bd3f2039f44c8aa6668f03256636ef942b402c497537c",
-      "RecipeRouteService._claim_run": "564ec51d5a4c071b038ffb1dfec0d7c1f5d6985610ff6b9bdb656ce6c66bfe02",
+      "RecipeRouteService.publish_run": "23563b6c82b88a2360e644473f110441ac980eb9cebdbae24d6a5d44c83fc4b1",
+      "RecipeRouteService._claim_run": "cd799a1412cfd665a4f34c63e57b73013ebbb23800ea26ec486a64e746c24043",
       "RecipeRouteService.publication_transaction": "cc297c3cb5277e9beeda567d989fe9ca8ea7c69e2149ea1a25d68c5a23efe7d9",
-      "RecipeRouteService._claim_in_session": "facc8a45df94ed2022cfaf1040830daf045df1cbb479fa2cccd5465cc8489ee9",
+      "RecipeRouteService._claim_in_session": "3769522ac390074c979a74d42fd84befce5e7f5abc48fd32205ea13dabf69479",
       "RecipeRouteService._claim_current": "91960b561004626735f5ff4594afb656e322618ba438b9580b544e1652221bc3",
       "RecipeRouteService._claim_is_current": "2af678e2b8163adfc67f53c0b450a3e939fe86d44df0c1668f397c672bf4f053",
-      "RecipeRouteService._execute": "1ca4e7541c82f7e1ef775457b7b6e13f89931e1fb6e0f68d8959eb997929754f",
-      "RecipeRouteService._execute_once": "3c9401711d1ebf3080b2633f84646a83248506f177908441897bd434dc1eac08",
-      "RecipeRouteService._record_failure": "cd201d5dbb0f4ab3096417fed54b8451417ad2207aa936e33386895674769244",
-      "RecipeRouteService._settle_failed_run_withdrawal": "e580cee991c2411af5cdfa248a1b0613a790310a3692ebd0001fc6a8d3171750",
-      "RecipeRouteService._record_completion": "a2be382447daace03698136fa5da613e2fc8732167513fe33550cca2f605b6f6",
-      "RecipeRouteService._claim_run_publication": "18e2c13958e0aeb929c28a8c5e2cb0f1c776a201134c897334bec57f53ecf0cb",
+      "RecipeRouteService._execute": "a3c133f92ff8752641bcee10724fbe5a75ecc991f25dc009fff45743b2f7a033",
+      "RecipeRouteService._execute_once": "778c4a64cea649f21a8f5129e31ec224ae0e0c95eb64937004efc207c2d24d5c",
+      "RecipeRouteService._record_failure": "089154ba4910c997ffbe0cf33e6496d74999298261ad16b3c954a78fbc894f82",
+      "RecipeRouteService._settle_failed_run_withdrawal": "39db3932b7792d7527b9b58ab7b679c672036700e0399c5d14bf0f10b8e8bfa3",
+      "RecipeRouteService._record_completion": "16d0575979286d2dc1dbc3990d2c9bcb4416df550d1f126b20fb41603549d461",
+      "RecipeRouteService._effect_claim_current": "ed6397f2bd5b21dcab32117bb817219dfb59b6c30ee05334b6808f35f85154e6",
+      "RecipeRouteService._claim_run_publication": "fc37b79a79a2519db913d40d029834ce28585053f4d858d1e8c45af95e3f4265",
       "RecipeRouteService._claim_run_publication_once": "79b2f3eee4bd370b5bf97c2cb4930c8da0fc5742a28b0090a1a0151caa05c8c3",
       "RecipeRouteService._claim_run_publication_once.complete": "d9dfe56a75de1fee6c335ed5ae6f05285c326dec2f5dfb34c767b4d6aef78fe2",
       "RecipeRouteService._claim_run_publication_once.fail": "fa78e613ed8b04621cb5ace4f96415b59dfa385bb50f7c49ce094aeb0cbbf870",
-      "RecipeRouteService._complete_run_publication": "bf5a984b3d612e759e2747149b22000ef9dfd9b035ad1dbff8602f30c73c75ff",
-      "RecipeRouteService._fail_run_publication": "d4bfb94794098d49a893135bbe277aa365d76746fa2d2732415e0065a3afa527",
-      "RecipeRouteService._fail_recovery_publication_in_session": "1a64d0cf3c1261dede3d2f7811d56204fba6a423fb71110667eae685a3b57006",
-      "RecipeRouteService._recovery_job": "9255cb69f628070735f2fac7d6c32ce7c145bab91d4fb023d3baca76e22b6dc7",
-      "RecipeRouteService._recovery_publication": "f39d2b2ab8c8f6dc0ee9c0deb91592d1a66def70f7b0b15edd70437485643b7c",
+      "RecipeRouteService._complete_run_publication": "6eac6a0c4efca710bfb13a4531e9611b4fe594ea9b58c93338575fc1b97f3bec",
+      "RecipeRouteService._fail_run_publication": "a056a61b1dfba2cfa333d4b739cd5d6f14ad4e900514eb795566c4a603a2a841",
+      "RecipeRouteService._fail_recovery_publication_in_session": "37ef6c3eaeb3dfdac03d536a5a7a4126faeff6c899e8ac78fa432456af90c33c",
+      "RecipeRouteService._recovery_job": "c82426e65bbf8be0310beb2e540a915e1c0d27def481904962023094d6bef422",
+      "RecipeRouteService._recovery_publication": "768fa32d2f0dd96607e18c0e2efab8fbf0c51d09892ebe9b63a6c48cc6f93f73",
       "RecipeRouteService._recovery_context": "8a62b92e238930abf8b88d87c17ae3c697e86927be5db087c10dec756ee8c32f",
-      "RecipeRouteService._enforce_recovery_publication_deadline": "cce5562a4a7ba507ca1cba2caf164b2f5a58f20453e86607ffbfc304ad81d8f9",
+      "RecipeRouteService._enforce_recovery_publication_deadline": "f3494e5efd1cd7cf16493e477210418969c86d9c91e8f914c2e4949ebef1650a",
       "RecipeRouteService.withdraw_run": "70ddc98a5af77837570320ccf38f7e51e30f654b198354fd601196c627e7aecb",
       "RecipeRouteService.withdraw_runs": "6092b3d1a4ba0f6d0d18c4d44acaec300c8776b57db5c458c4d4dd81b3d87f04",
       "RecipeRouteService._withdrawn_after_backoff": "e632cf93cbeb33737f091c60b45de8950f125704307e424b01218789465b4878",
@@ -5133,16 +5130,17 @@
       "RecipeRouteService._withdrawal_effect": "58152196292a2d620ba22816e863cd3d5d9ec5f6b1554b5c0897d7b13826c779",
       "RecipeRouteService._withdrawal_publication": "5ffe85bade044ce9676c8b6de9c6f20dfbeff2c2bc4909d91f4fe500cb3395d1",
       "RecipeRouteService._record_withdrawal_in_session": "18f8911a1eba443a40987c7ea1e25ed840879fc8ae1ab112ff0fe3c8c7a51ddf",
-      "RecipeRouteService.maintain": "211fa039c5ed9936483f7ad8af458e110274af3103a72da03ee13be1303d595a",
+      "RecipeRouteService.maintain": "aef36a9ef66926ddf8649cc3bed368f1f29d600de28fafaef715fa7177027e9d",
+      "RecipeRouteService._maintain_once": "7879f19fa82d056e5540062da57d4b8af16473ac21ebd5cd5926a1a325cc92fc",
       "RecipeRouteService._restore_abandoned_stop_withdrawals": "9d6cd061aa4904360b718b4137076422c175025cf8ec93330aae4daefe12453b",
       "RecipeRouteService._maintenance_step_in_session": "81ee857c85781217cf0700f3362d5cd7a5f3e0b6eaf23882b787c8aab7219dfb",
       "RecipeRouteService._maintain_empty_routes": "6510b0fa42136b6d61b27caeb9230bfe58c234c5e7be389782e69634a54e8953",
       "RecipeRouteService._publish": "61b9b8fae983fd297f626114b03caf69b19d69fc803c450d488cf8743470aa9a",
       "RecipeRouteService._publish_empty": "14dffd18b0f03a0c0cdfa1f8263c7423af1aa7c8a884a4ff58f10dd9f7fa3016",
-      "RecipeRouteService.projection_in_session": "715bd7a79e20c058fbbcd0bc898c030f35b81c8ea5aae9a2a6fab56718ae5bfc",
+      "RecipeRouteService.projection_in_session": "7443babb15abf060bac116317043c442aeb49c67624cec0c2f40e5158756e023",
       "RecipeRouteService._note_retained": "e664cf99c0cedb2843d912d8aa9f646e6b71fd60a4b0196ec57ff5c1407ffa66",
       "RecipeRouteService.candidate_in_session": "f4b57dd0b0061f2d6099d47b508a6e06fdc12641796662e681d50f4491193755",
-      "<module>": "4867521bee0933d6de788be5ca239cecaea24400f770181f8e5ed415b87e84e4"
+      "<module>": "8c9a471c49519aedbfb91f3026457c8656143af5105654da8c4a385374d91e0a"
     },
     "control/src/vonk_control/recipe_routes/shared.py": {
       "route_health_recovery_pending": "4d6fe9d3fa885b3eec9db2734b6dad0cb5842a1268b8b380ca2c8fea8c43bd00",
@@ -5157,10 +5155,9 @@
       "RecipeRouteSuperseded.__init__": "fbeb60a9fad1c8802e6e8e684ffef2d8450077518bd7cbbc870332ceaf0302c3",
       "RecipeRecoveryDeadlineError": "e9093f32606f04c2531cdd7b8cbbc600be0969a3a5c0818596316dd9fd669531",
       "RecipeRecoveryDeadlineError.__init__": "fbeb60a9fad1c8802e6e8e684ffef2d8450077518bd7cbbc870332ceaf0302c3",
-      "RecipeRecoveryPublicationError": "eea9825a9304004ba5e66b8ee9cde584f7c227e428577fdd1ea867dad3ce0ebb",
       "_ActivatedRecipeRouteError": "57d3933951293a536b988b9fafcfb32be2e0355bd930726070eca244b2e13ea1",
       "_ActivatedRecipeRouteError.__init__": "3e68f47ccece9310fda3792f112654eee26c8023b4557e60e0c66a5199b32166",
-      "publication_is_temporary": "8424e154011fd166c5e3323a1f4d8090541f876cde0cecbc71eaf283e2f8b475",
+      "publication_is_temporary": "4443c3c863031291a09912ee6e3eb1cfaeb2028d325ec12a4b5d039793229cd1",
       "_RecipeEndpoint": "0ef6a6cd599664a64f73ac0e6b0f708d5c468710e5f6a8db4ff4dbe465149448",
       "_RecipeEndpoint.api_base": "311839e171d88994c70f9fdba235c4e81be4b022db48fbe0509be828715fc27a",
       "_RecipeEndpoint.route_document": "7e6ba8ace88ad9ae9ee8b7464aef1135c0550c5b4f3be0da114c4848e0dcd2fc",
@@ -5170,12 +5167,12 @@
       "_RecoveryPublication": "ce9a8a5b1af9f4f02fd054307823a4332b9f975c5740ad8ee80b8aaa1e259f22",
       "_Claim": "aa8ce0055a3714b3b19330e561d659448fa91d3d1edd2817aa7dffb6687ee795",
       "_Publication": "22ec2e79380f2443c523e652501b814384429f9bb253c570392276ab12b557dd",
-      "route_publication_owner_lock_statement": "d1e42ca6896837318067b792c5b45d4bc286f8c2b8340754e38ed5f42ac50343",
-      "lock_route_publication_owner_in_session": "0fcc9c4e1c2e77f5573bc1fc28cbbda2f25989c529093bb6430292c13841e825",
-      "route_publication_transaction": "899797b8a931858d9445663bd0ba68d0fcf868201758ac85d099e785caefd74b",
+      "route_publication_owner_lock_statement": "60f919b760a5b5170ad0a6196d485128721b639cbdfeead25ef70256f62fc6d2",
+      "lock_route_publication_owner_in_session": "009ef912e049e0dc9faedc0807ae0d4a8644ad8e3989896ffeabd5cb79d9f64d",
+      "route_publication_transaction": "83f707e36f5e8113c3c5c1cbb49ff544db4a1b5d7f66b42deb83fce7e6d709f8",
       "_claim_ordinal": "0f17a3a3361bcb82dbaa42818b38b51bb4f7425e94e88bae29a511ccbac8e569",
       "_aware": "9b2e980f441c7279ca2f128f28ba566eec71f96a641fea813cf292850730fa8c",
-      "<module>": "07a2f9767f2aefaa2762570a6dc4af26e1f7e3ebc5a5ab744044e5e80b94b0a4"
+      "<module>": "40321caafbe8e9640fff65d08a50f7fbed3d2ff0374f5ad66aef96e0cf9ba43d"
     },
     "control/src/vonk_control/recipe_routes/withdrawal.py": {
       "withdraw_run": "b6e79f31c19798d8d3e3a7c398cec8c185bdab4769ec06f160178753252345cd",
@@ -5188,9 +5185,9 @@
       "_withdrawal_publication": "4a9c69060c795fe7b7f9f0885c6323cca2099cacc0592b20ff71dd3f190e6a3c",
       "_withdrawal_publication.complete": "44d2e9e74553b5102125b160665a78b2f307f94d171fea0abb00be7a5754b9cc",
       "_record_withdrawal_in_session": "2b3d710d02eba4789189c889f0d1d0bd6ac697054b96ae453667a9eba3a42c05",
-      "maintain": "e39c6c3d051c9bc1223a66e6009d05af37e92d0a7892d77823247f9e97b0434a",
+      "maintain": "6f760629326f3ed251f1517a4f0cd450b610aaa34e2b3dde10716768ba185d5b",
       "_restore_abandoned_stop_withdrawals": "58d1a3983bb7ad3b57af97ad54c0dd85ba7e0b120021ebc5fe012fd31bb3f89c",
-      "_maintenance_step_in_session": "b6a6ed37fd70b764c76627f897cdc45ef256a21021061ae06c5699a56c7504ed",
+      "_maintenance_step_in_session": "8c9ba64cd4fee03ca4a3362bd934ff58376ca00fd912faba73602b2b73b9f27d",
       "_maintain_empty_routes": "5cc138983b36dc4605d44572e3b22b692c6c2ebb2a5d7f6c486cbc8fe7f42bf3",
       "<module>": "9b465599462a2d989fdebfdbbd23c0e85be37e878728d156762c3b4ef5216805"
     },
@@ -5315,15 +5312,15 @@
       "RunPlan": "3613e03a55051fe81b5b97401b689cd514e4cb9f4e4d39b8e0af04dd9ae74c38",
       "require_same_execution": "0dab1cf8743e289e09ad585a75fcf9b4a6a611d04b69ee64f77fa0bf9b97b91d",
       "require_same_execution.identity": "48675545a7ac57251640db2d63b2fdb40abf98df3b60d08061030e1f0008d8b7",
-      "RunAdmissionService": "f12d87a95420556514b82e316a5e429593c8ae7f9b0f5cf919557191fa01ffe1",
+      "RunAdmissionService": "4d10b842c2449ca908e57e5b57c0466afde8d1be35d2e94a3685df9e2216a478",
       "RunAdmissionService.__init__": "790e5f582fb834ba8b0d8760f8c050a2ecb4dae34f157309e77459221eb5621d",
       "RunAdmissionService.plan_run": "2c1baa97543917a60e9435883873aa9aed19318ffd2d985f1cd33e66558105e5",
       "RunAdmissionService.accept_run": "f0a86033a7d33e63e5c2b42fcb1c4e0bce84095e18561b167e921d9e80935b17",
       "RunAdmissionService.accept_run_in_session": "b05eff90b8a2a0b114e24897fdf432f9367f9c97e1b3fca45a142f932fb174cf",
-      "RunAdmissionService._accept_run_locked_in_session": "edbe7963a9a9e0737b338c6416a8d4118b5467f7afa9b0a7292c51bd91e17350",
+      "RunAdmissionService._accept_run_locked_in_session": "c58beb0aa6b6f35dc218eb2e3efd10869e873821f02a472b49f59afbbfb36aa8",
       "_planned_port_demand": "0ab7b6fd29513642bf4ca8fd3c1a44a79147601968cfe69b04419e1248447e77",
       "_node_document": "64e918d94381c8384dcd7a4991aec2fd6080fed077ddafb97529837a04907d2a",
-      "<module>": "47f9775202d1ac4d4885565a48242ecbc6ed4fd9ea6e76d34636a9f80d6810e2"
+      "<module>": "8bf237b576770b2a89ff815aacd52ca8a752944151f2bbab6d2e05e9ca8f1554"
     },
     "control/src/vonk_control/run_switch_journal_repair.py": {
       "journal_document": "3b945dc4de97f78ad268148a0fa68d6af3418a81c49a88d8c4155c394ce315ce",
@@ -6696,14 +6693,6 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CursorError validates a contract or request.",
       "sites": [
         ["control/src/vonk_control/fleet_projection/service.py", "CursorError", "FleetProjection.read_at", "fleet-event-cursor-is-invalid", 1]
-      ]
-    },
-    {
-      "family": "gateway_keys.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class GatewayKeyConflict validates a contract or request.",
-      "sites": [
-        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyConflict", "GatewayKeyService._gateway_create", "key", 1]
       ]
     },
     {
@@ -9427,6 +9416,56 @@
       "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRouteNotReady is caught and retried by a registered retry loop.",
       "sites": [
         ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_candidate_once", "recipe-run-alias-is-invalid-or-duplicated", 1]
+      ]
+    },
+    {
+      "family": "gateway_keys.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class GatewayKeyError is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_ensure_default", "default-gateway-key-observation-is-unavailable", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_key_info", "gateway-exact-key-observation-is-unavailable", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService._gateway_request", "gateway-reply-is-unreadable", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService.ensure_default.ensure_once", "gateway-mutation-claim-is-busy", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService.revoke.revoke_once", "gateway-mutation-claim-is-busy", 1],
+        ["control/src/vonk_control/gateway_keys.py", "GatewayKeyError", "GatewayKeyService.revoke.revoke_once", "gateway-revocation-effect-is-unconfirmed", 1]
+      ]
+    },
+    {
+      "family": "candidate.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRouteNotReady is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "_endpoint", "entrypoint-endpoint-projection-is-unmatched", 1],
+        ["control/src/vonk_control/recipe_routes/candidate.py", "RecipeRouteNotReady", "candidate_in_session", "stored-route-projection-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "publisher.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRouteSuperseded is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_routes/publisher.py", "RecipeRouteSuperseded", "AtomicRecipeRoutePublisher._activate_once", "route-publication-was-superseded", 1]
+      ]
+    },
+    {
+      "family": "service.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRouteNotReady is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteNotReady", "RecipeRouteService._claim_in_session", "route-publication-owner-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteNotReady", "RecipeRouteService._effect_claim_current", "route-ownership-observation-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteNotReady", "RecipeRouteService._maintain_once", "route-publication-owner-is-unavailable", 3],
+        ["control/src/vonk_control/recipe_routes/service.py", "RecipeRouteNotReady", "RecipeRouteService._recovery_publication", "recovery-metadata-is-unavailable", 1]
+      ]
+    },
+    {
+      "family": "shared.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRouteNotReady is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_routes/shared.py", "RecipeRouteNotReady", "lock_route_publication_owner_in_session", "route-publication-owner-is-unavailable", 1],
+        ["control/src/vonk_control/recipe_routes/shared.py", "RecipeRouteNotReady", "route_publication_transaction", "route-publication-owner-is-busy", 1]
       ]
     }
   ]

@@ -10,6 +10,7 @@ from datetime import UTC
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import RouteState as RunRouteState
@@ -33,6 +34,7 @@ from ..presence import ManagementAddressPolicy, PresenceError
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_endpoint,
+    parse_stored_run_plan,
     run_plan_document,
 )
 from ..route_bundle_contract import (
@@ -78,7 +80,9 @@ def _candidate_once(
         .where(
             RecipeRun.state == RunState.RUNNING,
             or_(
-                RecipeRun.route_state == RunRouteState.PUBLISHED,
+                RecipeRun.route_state.in_(
+                    [RunRouteState.PUBLISHED, RunRouteState.FAILED]
+                ),
                 RecipeRun.id == include_run_id,
             ),
         )
@@ -118,7 +122,8 @@ def _candidate_once(
         # below as before. A route not yet published still needs current
         # proof before it is first served.
         serving = (
-            run.route_state == RunRouteState.PUBLISHED and run.id != include_run_id
+            run.route_state in {RunRouteState.PUBLISHED, RunRouteState.FAILED}
+            and run.id != include_run_id
         )
         if any(node.state in {RunState.STOPPED, RunState.FAILED} for node in nodes):
             raise RecipeRankStopped(
@@ -252,6 +257,19 @@ def _candidate_once(
                 # only that route instead of blocking every other one.
                 error.run_id = run.id
                 raise
+            identity = RouteRunIdentity(
+                run_id=run.id,
+                alias=run.alias,
+                plan_digest=run.plan_digest,
+                run_generation=run.run_generation,
+                upstream_model=upstream_model,
+                ranks=[
+                    RouteRankIdentity(
+                        node_id=node.node_id, rank=node.rank, role=node.role
+                    )
+                    for node in nodes
+                ],
+            )
             model_policies[run.alias] = {
                 "requests_per_minute": 60,
                 "tokens_per_minute": 1_000_000,
@@ -261,32 +279,27 @@ def _candidate_once(
             upstream_models[run.alias] = upstream_model
             included.add(run.id)
             endpoints[run.alias] = endpoint
-            run_identities.append(
-                RouteRunIdentity(
-                    run_id=run.id,
-                    alias=run.alias,
-                    plan_digest=run.plan_digest,
-                    run_generation=run.run_generation,
-                    upstream_model=upstream_model,
-                    ranks=[
-                        RouteRankIdentity(
-                            node_id=node.node_id, rank=node.rank, role=node.role
-                        )
-                        for node in nodes
-                    ],
-                )
-            )
-        except RecipeRouteError as error:
+            run_identities.append(identity)
+        except (
+            RecipeRouteError,
+            ValidationError,
+            RecipeExecutionContractError,
+        ) as error:
             if not serving or isinstance(
                 error, RecipeRankStopped | RecipeEndpointAuthorityRefused
             ):
                 raise
             read_accepted = getattr(self._publisher, "accepted_run", None)
-            if read_accepted is None:
-                raise
-            accepted = read_accepted(run.id, self._management_policy)
+            accepted = (
+                read_accepted(run.id, self._management_policy)
+                if read_accepted is not None
+                else None
+            )
             if accepted is None:
-                raise
+                # Unknown history belongs to this owner. No unverifiable bytes
+                # are copied into a new bundle and unrelated requests proceed.
+                self._note_retained(run.id, [str(error)])
+                continue
             retained_aliases: list[str] = []
             for accepted_alias, endpoint in accepted.endpoints.items():
                 agent = session.get(AgentNode, endpoint.node_id)
@@ -298,22 +311,27 @@ def _candidate_once(
                     # A stale accepted projection cannot displace the owner
                     # already selected from current authorized intent.
                     continue
-                retained_aliases.append(accepted_alias)
-                model_policies[accepted_alias] = accepted.policy.models[accepted_alias]
-                aliases[accepted_alias] = endpoint.api_base
-                endpoints[accepted_alias] = endpoint
-                accepted_policy = RouteAcceptedModelPolicy.model_validate_json(
-                    json.dumps(dict(accepted.policy.models[accepted_alias]))
-                )
-                upstream_models[accepted_alias] = accepted_policy.upstream_model
-                run_identities.append(
-                    RouteAcceptedRunIdentity(
+                try:
+                    accepted_policy = RouteAcceptedModelPolicy.model_validate_json(
+                        json.dumps(dict(accepted.policy.models[accepted_alias]))
+                    )
+                    accepted_identity = RouteAcceptedRunIdentity(
                         run_id=run.id,
                         alias=accepted_alias,
                         accepted_endpoint=endpoint.route_document(),
                         accepted_policy=accepted_policy,
                     )
-                )
+                except ValidationError:
+                    # Corruption belongs to this owner; never consume partial
+                    # unverified identity or gate another owner's publication.
+                    self._note_retained(run.id, [str(error)])
+                    continue
+                retained_aliases.append(accepted_alias)
+                model_policies[accepted_alias] = accepted.policy.models[accepted_alias]
+                aliases[accepted_alias] = endpoint.api_base
+                endpoints[accepted_alias] = endpoint
+                upstream_models[accepted_alias] = accepted_policy.upstream_model
+                run_identities.append(accepted_identity)
             if retained_aliases:
                 included.add(run.id)
                 self._note_retained(run.id, [str(error)])
@@ -329,18 +347,16 @@ def _candidate_once(
 
 
 def _primary_model_alias(session: Session, run: RecipeRun) -> str:
+    stored = parse_stored_run_plan(run.plan)
+    if stored.upstream_model is not None:
+        return stored.upstream_model
     installation = session.get(RecipeInstallation, run.installation_id)
     revision = (
         session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         if installation is not None
         else None
     )
-    if (
-        revision is None
-        or revision.kind != "recipe"
-        or revision.schema_version != 2
-        or revision.state != "active"
-    ):
+    if revision is None or revision.kind != "recipe" or revision.schema_version != 2:
         raise RecipeRouteNotReady(
             "recipe runtime interface authority is stale", run_id=run.id
         )
@@ -404,17 +420,10 @@ def _endpoint(
     except ValueError as error:
         raise RecipeRouteNotReady("entrypoint endpoint is invalid") from error
     if (
-        parsed.scheme != "http"
-        or address.is_loopback
+        address.is_loopback
         or address.is_link_local
         or address.is_multicast
         or address.is_unspecified
-        or port != node.port
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-        or parsed.path.rstrip("/") not in {"", "/v1"}
     ):
         raise RecipeEndpointAuthorityRefused(
             "entrypoint endpoint is outside management policy"
@@ -425,7 +434,17 @@ def _endpoint(
         raise RecipeEndpointAuthorityRefused(
             "entrypoint endpoint is outside management policy"
         ) from error
-    assert port is not None
+    if (
+        parsed.scheme != "http"
+        or port is None
+        or port != node.port
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path.rstrip("/") not in {"", "/v1"}
+    ):
+        raise RecipeRouteNotReady("entrypoint endpoint projection is unmatched")
     return _RecipeEndpoint(
         node_id=node.node_id,
         address=str(address),
@@ -443,23 +462,16 @@ def candidate_in_session(
     exclude_run_ids: frozenset[str],
     lock: bool,
 ) -> _RecipeCandidate:
-    """Observe a candidate at most three times without sleeping under SQL locks.
-
-    Exhaustion returns the typed observation error to the worker, which retries
-    the whole transaction with its persisted route backoff. No claim is made by
-    candidate observation, so a fresh publication never queues behind this one.
-    """
-    last: RecipeRouteNotReady | None = None
-    for _attempt in range(3):
-        try:
-            return _candidate_once(
-                self,
-                session,
-                include_run_id=include_run_id,
-                exclude_run_ids=exclude_run_ids,
-                lock=lock,
-            )
-        except RecipeRouteNotReady as error:
-            last = error
-    assert last is not None
-    raise last
+    """One authoritative observation; the request owner retries fresh transactions."""
+    try:
+        return _candidate_once(
+            self,
+            session,
+            include_run_id=include_run_id,
+            exclude_run_ids=exclude_run_ids,
+            lock=lock,
+        )
+    except (ValidationError, RecipeExecutionContractError) as error:
+        raise RecipeRouteNotReady(
+            "stored route projection is unavailable", run_id=include_run_id
+        ) from error

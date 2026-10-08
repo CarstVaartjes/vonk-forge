@@ -206,7 +206,7 @@ module defines its own.
 | `control/src/vonk_control/fleet_profiles/contracts.py` | controller-contract | 1 | Saved profile content identity used by admission and projections. |
 | `control/src/vonk_control/fleet_projection/common.py` | declared | 12 | Complete typed projection of PostgreSQL-authoritative Fleet state, transferred through bounded immutable observation records. |
 | `control/src/vonk_control/fleet_stream_contract.py` | controller-contract | 13 | Typed JSON envelopes emitted by the Fleet Server-Sent Events stream. |
-| `control/src/vonk_control/gateway_keys.py` | declared | 5 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
+| `control/src/vonk_control/gateway_keys.py` | declared | 6 | Inference gateway client keys: LiteLLM virtual keys managed by the Controller. |
 | `control/src/vonk_control/harnesses/canonical_metadata.py` | declared | 1 | Strict platform metadata for built-in canonical harnesses. |
 | `control/src/vonk_control/job_documents.py` | controller-contract | 41 | Typed documents of the generic job queue bound to the job columns; the kind-agnostic remainder is a declared passthrough. |
 | `control/src/vonk_control/library_contract.py` | controller-contract | 45 | Bounded typed contract and deterministic display helpers for Library reads. |
@@ -305,8 +305,10 @@ Controller capability availability and retryable refusals are owned by
 
 `operation_api/openapi.py` passes external OpenAPI and JSON Schema documents through `ExternalSchemaDocument`, annotated with `ExternalPassthrough`; application responses remain canonical registered models.
 
-Gateway mutation recovery uses the existing `gateway_keys._KeyGenerateRequest`
-contract. The proposed alias, scope, lifetime, and secret are persisted before
+Gateway mutation recovery uses `gateway_keys.GatewayMutationReceipt` to bind
+a request identity and durable completion to the exact `_KeyGenerateRequest`.
+Completed receipts remain independent of alias history; a fresh request ID
+creates a new secret and a repeated ID reuses its original receipt. The proposed alias, scope, lifetime, and secret are persisted before
 LiteLLM mutation in `/gateway-secrets/mutations`, the Controller's writable,
 persistent gateway secret bind mount. Records and claim files are private
 (mode 0600, directory mode 0700); normalized administrative secrets remain

@@ -5,15 +5,20 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import RoutePublicationState, RunState, WaitReason
+from vonk_agent_protocol import (
+    RoutePublicationState,
+    RunState,
+    SecurityRefusalError,
+    WaitReason,
+)
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
+from ..bounded_retry import bounded_attempts
 from ..litellm import (
     LiteLlmGeneration,
 )
@@ -38,6 +43,7 @@ from .shared import (
     RecipeEndpointAuthorityRefused,
     RecipeRankStopped,
     RecipeRouteError,
+    RecipeRouteNotReady,
     RecipeRouteSuperseded,
     WithdrawalFollowUp,
     _aware,
@@ -310,18 +316,23 @@ def maintain(self) -> bool:
     with none open, and records the result conditionally.
     """
 
-    with self.publication_transaction() as session:
-        step = self._maintenance_step_in_session(session)
-    if isinstance(step, bool):
-        return step
-    try:
-        self._execute(step)
-    except RecipeRouteSuperseded:
-        pass
-    except RecipeRouteError:
-        if not step.contained:
+    last: Exception | None = None
+    for _attempt in bounded_attempts():
+        try:
+            with self.publication_transaction() as session:
+                step = self._maintenance_step_in_session(session)
+            if isinstance(step, bool):
+                return step
+            self._execute(step)
+            return True
+        except SecurityRefusalError:
             raise
-    return True
+        except RecipeRouteNotReady as error:
+            last = error
+        except Exception as error:  # noqa: BLE001
+            last = error
+    assert last is not None
+    raise last
 
 
 def _restore_abandoned_stop_withdrawals(
@@ -394,7 +405,11 @@ def _maintenance_step_in_session(
     published = tuple(
         session.scalars(
             select(RecipeRun)
-            .where(RecipeRun.route_state == RunRouteState.PUBLISHED)
+            .where(
+                RecipeRun.route_state.in_(
+                    [RunRouteState.PUBLISHED, RunRouteState.FAILED]
+                )
+            )
             .order_by(RecipeRun.created_at, RecipeRun.id)
             .with_for_update(of=RecipeRun)
         )
@@ -412,11 +427,11 @@ def _maintenance_step_in_session(
         )
     )
     for run in recovering:
-        try:
-            recovery = self._claim_run_publication(session, run.id)
-        except RecipeRouteError:
-            continue
-        return replace(recovery, contained=True)
+        # Give the request worker a fresh observation budget without holding
+        # this maintenance transaction while publishing or retrying a rank.
+        run.route_state = RunRouteState.PENDING
+        run.route_attempts = 0
+        run.route_next_attempt_at = self._clock()
     if not published:
         return self._maintain_empty_routes(session)
     not_running = frozenset(
@@ -450,7 +465,7 @@ def _maintenance_step_in_session(
             # already accepted endpoint stopped serving. Initial route
             # publication still validates every candidate field.
             self._note_retained(error.run_id, [str(error)])
-            return False
+            raise
         published_ids = frozenset(run.id for run in published)
         recovery_error = f"{_HEALTH_RECOVERY_ERROR}: {error}"[:512]
         log_event(

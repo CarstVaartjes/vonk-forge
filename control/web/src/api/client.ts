@@ -536,15 +536,23 @@ export class ApiClient implements ControlApi {
     name: string,
     models: string[],
     expires?: string,
+    requestId: string = crypto.randomUUID(),
   ): Promise<GatewayKeyCreated> {
     return gatewayData(
-      await this.generated.POST("/api/key", { body: { name, models, expires: expires || null } }),
+      await this.generated.POST("/api/key", {
+        body: { name, models, expires: expires || undefined, request_id: requestId },
+      }),
     );
   }
 
-  async rollGatewayKey(name: string): Promise<GatewayKeyCreated> {
+  async rollGatewayKey(
+    name: string,
+    requestId: string = crypto.randomUUID(),
+  ): Promise<GatewayKeyCreated> {
     return gatewayData(
-      await this.generated.POST("/api/key/{name}/roll", { params: { path: { name } } }),
+      await this.generated.POST("/api/key/{name}/roll", {
+        params: { path: { name }, query: { request_id: requestId } },
+      }),
     );
   }
 

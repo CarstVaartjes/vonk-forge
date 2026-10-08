@@ -109,7 +109,6 @@
     "control/src/vonk_control/recipe_image_availability_api.py": 5,
     "control/src/vonk_control/recipe_image_removal_contract.py": 1,
     "control/src/vonk_control/recipe_lifecycle_contract.py": 4,
-    "control/src/vonk_control/recipe_operation_worker.py": 1,
     "control/src/vonk_control/recipe_progress.py": 1,
     "control/src/vonk_control/recipe_update_batches.py": 13,
     "control/src/vonk_control/reservation_owners.py": 2,
@@ -553,13 +552,13 @@
     },
     "control/src/vonk_control/api/production.py": {
       "_close_model_cache": "3de19469b91f0e1a1df8a90c5d9189d468100c831c90b78bd9a182204cb9579a",
-      "production_app": "5fabcb6c7208e5ab2152c7aa56644ad587c4f03a8896f3eacc44e7e709a71083",
+      "production_app": "5f1b2a4ccc4674a057bf31e47705ef9ff0d7306aa31010d0e83561857507997e",
       "production_app.clock": "3c87c7fecd6efb5bf9a23b9256ee2cf26c0be1d7b831864e8bc856c1538e0dba",
       "production_app.build_cache": "948c3e7d9b1ac2a7754013491fbc75a505a55c2afc4f73e7e2c4a3ef35628054",
       "production_app.build_artifact_jobs": "4c060fb9071db6525f6b00b04f34bbdf69feb911acdf0127aead9c8c0832cc48",
       "production_app.consume_agent_result": "7a81b5bc855cd0ef6226f12d62d761eeef766e27f855376c92026e359d2a50f5",
       "production_app.refresh_metrics": "6010a6955dfb9d83961b17c53ca8835afb64b6db803a02f1499d0ef482828bcf",
-      "production_app.lifespan": "ab66612f1805f1cc6dac4ba6c5251c445698c50fd9c3a41919b9024f333b5f54"
+      "production_app.lifespan": "ca193439180e46443df8efa9edf3ebb9f825644e160ad0b77b577f0d832d2c9e"
     },
     "control/src/vonk_control/artifact_jobs/contracts.py": {
       "ArtifactJobError": "c73fd2ae7abcabeb4a15c98d655a505d96625f68f54474a8487ed25948755a24",
@@ -759,7 +758,7 @@
       "ManagedRecipeCatalogSyncService._validate_request": "61b5917325aa519caeec22ca1824f016b94a76dc6701090237c2ee962709fd9a",
       "catalog_sync_retry_delay": "bd4c9313eae2ed2e986b7f440d9190d225e27d801b70d21ec9ad5e3d6ce591b5",
       "catalog_sync_failure_reason": "798a0c56e7f8513070da5f608631bb580307737335b298ce638f3f2154ae194f",
-      "run_automatic_sync": "4c4af719ee67659a93793fca11fa94f34f4e29f5c287586883907463319e5f3b",
+      "run_automatic_sync": "ba6baf3b4daa3e8d0fa0603fd58276fef420d607970e24a62cd1a0c45f892f31",
       "_log_automatic_failure": "ce46d140005c184d3f5c1560bb9b6eb92dd81303bb9db684e1038b04b1576328",
       "_result": "11091f55c991778cd2a80b9d22f42e9baa9c57b3f31d1883e94f0cc0846763b4",
       "_empty_result": "a7fd189352179fd83598a936169041e59c4d824b74a9eba231cbcaf16ad6d11a",
@@ -2444,23 +2443,6 @@
       "_model_accepts": "f8e0698d5a9e736369fda2db0110dd940f802258fb0f95e6476c3d4a108a1bef",
       "RecipeOperationConflictResponse": "4d51324fa6f11b77b686701bf34f97c2daee8bc0b24bf5bdcccfb1546184a12f",
       "<module>": "b5cbbc5316bccf3ad246271d6b5e71e913a6a9b6a116b97f46282d2221e1db1e"
-    },
-    "control/src/vonk_control/recipe_operation_worker.py": {
-      "_RoutePublisher": "b8768f7797dc900a4315b58e3417256b32d0a9d9aa39b13ff32fa995553312b6",
-      "_RoutePublisher.publish_run": "315b00c8b5bf167ae441322f2bac0588e1e27ff343de79c0955995219dc9270f",
-      "_RoutePublisher.maintain": "a53c4e5790453916a9ef519a356d6c9c49445f672754c02fad989181485ea9c8",
-      "_RecoveryCoordinator": "d416655c8b0a547d3f5c223fde1113001dfdf648c3d27b02a2ea79ece7812907",
-      "_RecoveryCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
-      "_FleetProfileCoordinator": "6278d487e53f107305ef9491315b7e61da9fb8dd184e8b721011fb4f414a6534",
-      "_FleetProfileCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
-      "_RunSwitchCoordinator": "02961d2c009383e9a3f87e48593ebb5638a0be212332ce43cba90184e95ac7db",
-      "_RunSwitchCoordinator.tick": "f4490b9038f4235245e747e8ff116d6902e26510955f7fdbba6aee5904603e1f",
-      "RecipeOperationWorker": "09f864ac373dd4051b45b0e86b6c0a7e3ca4b7c374f298d308de672097649cd0",
-      "RecipeOperationWorker.__init__": "259dd62f553359422b5f00134f0c89143093c22fdb6e8e1941436249a46dcd5a",
-      "RecipeOperationWorker.tick": "b636f66b36184bb1503364f4fb5304a288dbbd8e3ae875c7ebe48daf5073d6ed",
-      "RecipeOperationWorker._defer_publication": "a5e234c9e1d113fc7f968e539e26ed734a388c8d44f34358e4ddd6c429ef63ee",
-      "RecipeOperationWorker._expire_initial_observation_deadline": "8d96ac49577ad0b206b31bc7c331136569180e52045d5433b65bcedfff25c21d",
-      "<module>": "4098616598c130ff5ac35d38b8e28e223bd969de2575b8e22bad96a3b6ca422a"
     },
     "control/src/vonk_control/recipe_progress.py": {
       "_parse_recipe_parent": "3d28ead6a5929198dd726d06d798c629ca564995d8c7db3e61fbb5e81163fef6",

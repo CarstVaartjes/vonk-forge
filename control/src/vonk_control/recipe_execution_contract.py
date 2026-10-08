@@ -156,6 +156,7 @@ class StoredRunPlan(_PersistedModel):
     recipe_revision_id: UuidId
     plan_digest: Digest
     nodes: list[StoredRunNodePlan]
+    upstream_model: str | None = Field(default=None, min_length=1, max_length=256)
     # This is added only for one-shot logical jobs.  Its omission is the
     # declared optional-default form; explicit null is normalized away.
     execution_mode: Literal["one-shot-jobs"] | None = None

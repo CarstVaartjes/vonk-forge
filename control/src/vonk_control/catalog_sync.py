@@ -834,6 +834,7 @@ async def run_automatic_sync(
     *,
     interval_seconds: int,
     settle_seconds: float = 10.0,
+    reconcile: Callable[[], object] | None = None,
 ) -> None:
     """Run the automatic library sync until ``stop`` is set; it never dies.
 
@@ -853,6 +854,10 @@ async def run_automatic_sync(
     failures = 0
     while not stop.is_set():
         try:
+            # Each periodic tick starts a separate bounded observation epoch;
+            # failure in catalog discovery cannot suppress standing key intent.
+            if reconcile is not None:
+                await asyncio.to_thread(reconcile)
             await asyncio.to_thread(lambda: service.automatic())
             failures = 0
         except (CatalogSyncError, RecipeLibraryError, OSError) as error:

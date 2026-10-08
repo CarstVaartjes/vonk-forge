@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 
-from vonk_agent_protocol import GatewayRouteState
+from vonk_agent_protocol import GatewayRouteState, SecurityRefusalError
 from vonk_agent_protocol.outcome import UnknownError
 
-from ..bounded_retry import bounded_attempts
+from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..litellm import (
     LiteLlmGeneration,
     LiteLlmPolicy,
@@ -35,6 +38,7 @@ from .shared import (
     _UPSTREAM_MODEL,
     RecipeEndpointAuthorityRefused,
     RecipeRouteNotReady,
+    RecipeRouteSuperseded,
     _ActivatedRecipeRouteError,
     _AtomicRecipeGeneration,
     _aware,
@@ -47,6 +51,17 @@ class AtomicRecipeRoutePublisher:
     """Adapt recipe routes to the controller's one atomic live bundle."""
 
     _AUTHORITY_ID = RECIPE_ROUTE_AUTHORITY_ID
+    _ownership: ContextVar[Callable[[], bool] | None] = ContextVar(
+        "route_ownership", default=None
+    )
+
+    @contextmanager
+    def fenced(self, check: Callable[[], bool]) -> Iterator[None]:
+        token = self._ownership.set(check)
+        try:
+            yield
+        finally:
+            self._ownership.reset(token)
 
     def __init__(self, publisher: AtomicRouteBundlePublisher) -> None:
         self._publisher = publisher
@@ -180,7 +195,10 @@ class AtomicRecipeRoutePublisher:
         """Reconcile the same exact activated bytes after a lost acknowledgement."""
         last: _ActivatedRecipeRouteError | None = None
         not_ready: RecipeRouteNotReady | None = None
-        for _attempt in bounded_attempts():
+        # The service owns its effect budget. Direct publisher requests own
+        # this budget instead, so nested wrappers never multiply activations.
+        pauses = () if self._ownership.get() is not None else REQUEST_PAUSES
+        for _attempt in bounded_attempts(pauses=pauses):
             try:
                 result = self._activate_once(
                     route_digest,
@@ -197,12 +215,18 @@ class AtomicRecipeRoutePublisher:
                 if result is None:
                     break
                 return result
+            except RecipeRouteSuperseded as error:
+                not_ready = error
             except _ActivatedRecipeRouteError as error:
                 last = error
             except RecipeRouteNotReady as error:
                 # Keep any activated generation: a busy retry must not discard
                 # the exact marker fence or hide an already completed effect.
                 not_ready = error
+            except SecurityRefusalError:
+                raise
+            except Exception as error:  # noqa: BLE001 - unavailable local/peer observation
+                not_ready = RecipeRouteNotReady(str(error))
         if last is not None:
             raise last
         assert not_ready is not None
@@ -222,6 +246,9 @@ class AtomicRecipeRoutePublisher:
         with self._publisher._locked() as uncertainty:
             if uncertainty is not None:
                 raise RecipeRouteNotReady(uncertainty.reason)
+            check = self._ownership.get()
+            if check is not None and not check():
+                raise RecipeRouteSuperseded("route publication was superseded")
             try:
                 current = self._publisher._read_marker(optional=True, verify_files=True)
             except RouteRuntimeError:
@@ -290,6 +317,8 @@ class AtomicRecipeRoutePublisher:
             uncertainty = self._publisher._require_supervisor_ack(marker)
             if uncertainty is not None:
                 acknowledgement_error = RecipeRouteNotReady(uncertainty.reason)
+        except SecurityRefusalError:
+            raise
         except Exception as error:  # noqa: BLE001
             acknowledgement_error = error
         config_sha256 = hashlib.sha256(litellm).hexdigest()

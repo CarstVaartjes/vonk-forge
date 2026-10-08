@@ -2,24 +2,27 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentOperation,
     LifecycleState,
     RoutePublicationState,
     RunState,
+    SecurityRefusalError,
     WaitReason,
 )
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 
 from ..bounded_retry import bounded_attempts
-from ..distributed_lifecycle import DistributedLifecycleError
-from ..distributed_recovery import enforce_recovery_deadline
+from ..job_documents import DistributedRecoveryMarker
 from ..litellm import (
     LiteLlmGeneration,
 )
@@ -32,6 +35,7 @@ from ..models import (
     RoutePublicationOwner,
 )
 from ..presence import ManagementAddressPolicy
+from ..recovery_policy import RecoveryPolicy
 from ..route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     ActivationMarker,
@@ -44,7 +48,6 @@ from .shared import (
     _LOGGER,
     RECIPE_ROUTE_CLAIM_ID,
     RecipeRecoveryDeadlineError,
-    RecipeRecoveryPublicationError,
     RecipeRouteError,
     RecipeRouteNotReady,
     RecipeRouteSuperseded,
@@ -57,7 +60,6 @@ from .shared import (
     _RecipeCandidate,
     _RecipeWithdrawal,
     _RecoveryPublication,
-    publication_is_temporary,
     route_publication_transaction,
 )
 
@@ -82,18 +84,22 @@ class RecipeRouteService:
         self._retained: dict[str, str] = {}
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
-        """Bounded observation preserves each accepted publication's exact claim."""
-        last: RecipeRouteNotReady | None = None
-        publication: _Publication | None = None
+        """Observe acquisition in fresh transactions, then reconcile the exact effect."""
+        last: Exception | None = None
         for _attempt in bounded_attempts():
             try:
-                if publication is None:
-                    publication = self._claim_run(run_id)
-                return self._execute(publication)
+                publication = self._claim_run(run_id)
+                break
+            except SecurityRefusalError:
+                raise
             except RecipeRouteNotReady as error:
                 last = error
-        assert last is not None
-        raise last
+            except Exception as error:  # noqa: BLE001
+                last = error
+        else:
+            assert last is not None
+            raise last
+        return self._execute(publication)
 
     def _claim_run(self, run_id: str) -> _Publication:
         """Claim one run before effects and conditional completion.
@@ -108,10 +114,12 @@ class RecipeRouteService:
         with self.publication_transaction() as session:
             try:
                 publication = self._claim_run_publication(session, run_id)
-            except (
-                RecipeRecoveryDeadlineError,
-                RecipeRecoveryPublicationError,
-            ) as error:
+                owner = session.get(RoutePublicationOwner, 1)
+                if owner is not None:
+                    owner.reconciliation_attempts = 0
+                    owner.reconciliation_next_at = None
+                    owner.reconciliation_deadline_at = None
+            except RecipeRecoveryDeadlineError as error:
                 committed_error = error
         if committed_error is not None:
             raise committed_error
@@ -131,7 +139,7 @@ class RecipeRouteService:
 
         owner = session.get(RoutePublicationOwner, 1)
         if owner is None:
-            raise RuntimeError("route publication owner is unavailable")
+            raise RecipeRouteNotReady("route publication owner is unavailable")
         now = _aware(self._clock())
         pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
         ordinal = (_claim_ordinal(pending) or 0) + 1
@@ -176,15 +184,35 @@ class RecipeRouteService:
             return self._claim_current(session, claim)
 
     def _execute(self, publication: _Publication) -> LiteLlmGeneration:
-        """Re-observe supersession with no transaction or claim lock held."""
-        last: RecipeRouteSuperseded | None = None
-        for _attempt in bounded_attempts():
+        """Reconcile ordinary unknown outcomes without retaining locks between attempts."""
+        last: Exception | None = None
+        try:
+            for _attempt in bounded_attempts():
+                try:
+                    return self._execute_once(publication)
+                except SecurityRefusalError:
+                    raise
+                except RecipeRouteNotReady as error:
+                    last = error
+                except Exception as error:  # noqa: BLE001
+                    last = error
+            assert last is not None
+            raise last
+        finally:
+            # Cleanup must never replace an authenticated refusal with a local
+            # bookkeeping error. A new claim supersedes this abandoned attempt.
             try:
-                return self._execute_once(publication)
-            except RecipeRouteSuperseded as error:
-                last = error
-        assert last is not None
-        raise last
+                with self.publication_transaction() as session:
+                    if self._claim_current(session, publication.claim):
+                        pending = session.get(RoutePublication, RECIPE_ROUTE_CLAIM_ID)
+                        if (
+                            pending is not None
+                            and pending.state
+                            == RoutePublicationState.PUBLICATION_PENDING
+                        ):
+                            pending.state = RoutePublicationState.FAILED
+            except Exception as error:  # noqa: BLE001 - bounded owner observation already ended
+                _LOGGER.warning("publication claim settlement is unobserved: %s", error)
 
     def _execute_once(self, publication: _Publication) -> LiteLlmGeneration:
         """Run the effect with no transaction open, then complete conditionally."""
@@ -192,8 +220,11 @@ class RecipeRouteService:
         try:
             if not self._claim_is_current(publication.claim):
                 raise RecipeRouteSuperseded("route publication was superseded")
-            generation = publication.effect()
-        except RecipeRouteSuperseded:
+            with self._publisher.fenced(
+                lambda: self._effect_claim_current(publication.claim)
+            ):
+                generation = publication.effect()
+        except (SecurityRefusalError, RecipeRouteSuperseded):
             raise
         except Exception as error:
             if not self._claim_is_current(publication.claim):
@@ -214,10 +245,7 @@ class RecipeRouteService:
         with self.publication_transaction() as session:
             try:
                 publication.fail(session, error)
-            except (
-                RecipeRecoveryDeadlineError,
-                RecipeRecoveryPublicationError,
-            ) as failure:
+            except RecipeRecoveryDeadlineError as failure:
                 committed_error = failure
         if committed_error is not None:
             self._settle_failed_run_withdrawal(committed_error.run_id)
@@ -233,23 +261,7 @@ class RecipeRouteService:
 
         if run_id is None:
             return
-        try:
-            with self.publication_transaction() as session:
-                publication = self._withdrawal_publication(
-                    session,
-                    self.prepare_withdrawal_in_session(session, frozenset({run_id})),
-                )
-            self._execute(publication)
-        # External publishers are plug-ins and may fail with any ordinary
-        # exception; the committed intent is retried by maintenance.
-        except Exception as error:  # noqa: BLE001
-            log_event(
-                _LOGGER,
-                "recipe.route.withdrawal_deferred",
-                service="control-routes",
-                run_id=run_id,
-                reason=type(error).__name__,
-            )
+        self.maintain()
 
     def _record_completion(
         self, publication: _Publication, generation: LiteLlmGeneration
@@ -263,25 +275,31 @@ class RecipeRouteService:
             pending.state = RoutePublicationState.COMPLETED
             try:
                 publication.complete(session, generation)
-            except (
-                RecipeRecoveryDeadlineError,
-                RecipeRecoveryPublicationError,
-            ) as failure:
+            except RecipeRecoveryDeadlineError as failure:
                 committed_error = failure
         if committed_error is not None:
             self._settle_failed_run_withdrawal(committed_error.run_id)
             raise committed_error
 
+    def _effect_claim_current(self, claim: _Claim) -> bool:
+        # Artifact lock is already held. Never wait for the SQL owner here.
+        try:
+            with self.sessions.begin() as session:
+                owner = session.scalar(
+                    select(RoutePublicationOwner)
+                    .where(RoutePublicationOwner.singleton_id == 1)
+                    .with_for_update(nowait=True)
+                )
+                if owner is None:
+                    return False
+                return self._claim_current(session, claim)
+        except SQLAlchemyError as error:
+            raise RecipeRouteNotReady(
+                "route ownership observation is unavailable"
+            ) from error
+
     def _claim_run_publication(self, session: Session, run_id: str) -> _Publication:
-        """Bound observation before any claim, including a target that ended."""
-        last: RecipeRouteSuperseded | None = None
-        for _attempt in range(3):
-            try:
-                return self._claim_run_publication_once(session, run_id)
-            except RecipeRouteSuperseded as error:
-                last = error
-        assert last is not None
-        raise last
+        return self._claim_run_publication_once(session, run_id)
 
     def _claim_run_publication_once(
         self, session: Session, run_id: str
@@ -336,7 +354,7 @@ class RecipeRouteService:
             # The exact activated bundle is still recorded; missing bookkeeping
             # cannot roll back completion or hold the next publisher's claim.
             self.projection_in_session(
-                session, generation, state=RoutePublicationState.COMPLETED
+                session, generation, state=RoutePublicationState.WITHDRAWAL_PENDING
             )
             log_event(
                 _LOGGER,
@@ -372,6 +390,9 @@ class RecipeRouteService:
         for included_id in sorted(candidate.included):
             included = session.get(RecipeRun, included_id, with_for_update=True)
             if included is None or included.state != RunState.RUNNING:
+                publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
+                if publication is not None:
+                    publication.state = RoutePublicationState.WITHDRAWAL_PENDING
                 continue
             included.route_state = RunRouteState.PUBLISHED
             included.route_generation = generation.generation
@@ -397,15 +418,9 @@ class RecipeRouteService:
         if isinstance(deadline_error, RecipeRecoveryDeadlineError):
             failure: RecipeRouteError = deadline_error
         else:
-            if publication_is_temporary(publication_error):
-                # The route remains unpublished while the worker schedules
-                # a bounded retry within the original recovery deadline.
-                raise publication_error
-            failure = RecipeRecoveryPublicationError(
-                "recovery route publication failed: "
-                f"{type(publication_error).__name__}",
-                run_id=run_id,
-            )
+            # Ordinary peer/local representations share the same observation
+            # bound. Authenticated refusals bypass this handler unchanged.
+            raise publication_error
         # A newer publication owns the bundle record; do not overwrite it.
         generation = (
             publication_error.generation
@@ -449,7 +464,6 @@ class RecipeRouteService:
             "recovery_error": str(failure),
         }
         recovery.job.updated_at = self._clock()
-        run.state = RunState.FAILED
         run.route_state = RunRouteState.WITHDRAWN
         run.route_error = str(failure)[:512]
         publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
@@ -462,15 +476,19 @@ class RecipeRouteService:
 
         jobs = session.scalars(
             select(Job)
-            .where(Job.kind == "recipe.start")
+            .where(
+                Job.kind == AgentOperation.RECIPE_START,
+                Job.state != LifecycleState.FAILED,
+            )
             .order_by(Job.created_at.desc(), Job.id.desc())
         )
         recovery_job = next(
             (
                 job
                 for job in jobs
-                if job.payload.get("owner_id") == run.id
-                and isinstance(job.payload.get("recovery"), Mapping)
+                if isinstance(job.payload, Mapping)
+                and job.payload.get("owner_id") == run.id
+                and "recovery" in job.payload
             ),
             None,
         )
@@ -486,10 +504,15 @@ class RecipeRouteService:
 
     @staticmethod
     def _recovery_publication(job: Job) -> _RecoveryPublication:
-        recovery = job.payload["recovery"]
-        assert isinstance(recovery, Mapping)
-        deadline = datetime.fromisoformat(str(recovery["deadline"]))
-        return _RecoveryPublication(job, _aware(deadline))
+        try:
+            marker = DistributedRecoveryMarker.model_validate_json(
+                json.dumps(job.payload["recovery"])
+            )
+        except (TypeError, ValueError, KeyError) as error:
+            raise RecipeRouteNotReady("recovery metadata is unavailable") from error
+        return _RecoveryPublication(
+            job, _aware(datetime.fromisoformat(marker.deadline))
+        )
 
     def _recovery_context(
         self, session: Session, run: RecipeRun
@@ -503,15 +526,12 @@ class RecipeRouteService:
         recovery_job = self._recovery_job(session, run)
         if recovery_job is None:
             return None
-        try:
-            enforce_recovery_deadline(recovery_job.payload, now=self._clock())
-        except DistributedLifecycleError as error:
-            run.state = RunState.FAILED
-            run.route_state = RunRouteState.WITHDRAWN
-            run.route_error = str(error)[:512]
-            run.updated_at = self._clock()
-            return RecipeRecoveryDeadlineError(str(error), run_id=run.id)
-        return self._recovery_publication(recovery_job)
+        recovery = self._recovery_publication(recovery_job)
+        if _aware(self._clock()) >= recovery.deadline:
+            return RecipeRecoveryDeadlineError(
+                "recovery deadline elapsed", run_id=run.id
+            )
+        return recovery
 
     def withdraw_run(
         self,
@@ -585,7 +605,72 @@ class RecipeRouteService:
         )
 
     def maintain(self) -> bool:
-        return withdrawal_steps.maintain(self)
+        for _attempt in bounded_attempts():
+            try:
+                return self._maintain_once()
+            except SecurityRefusalError:
+                raise
+            except RecipeRouteNotReady:
+                continue
+            except Exception as error:  # noqa: BLE001 - local observation ends within this budget
+                _LOGGER.warning(
+                    "route reconciliation observation is unavailable: %s", error
+                )
+                continue
+        return False
+
+    def _maintain_once(self) -> bool:
+        now = _aware(self._clock())
+        with self.publication_transaction() as session:
+            owner = session.get(RoutePublicationOwner, 1)
+            if owner is None:
+                raise RecipeRouteNotReady("route publication owner is unavailable")
+            if owner.reconciliation_next_at is not None and now < _aware(
+                owner.reconciliation_next_at
+            ):
+                return False
+            # Standing desired routes survive an ended observation attempt.
+            # The next scheduled reconciliation begins a fresh finite budget;
+            # neither that schedule nor an old claim gates an explicit request.
+            if owner.reconciliation_deadline_at is None or now >= _aware(
+                owner.reconciliation_deadline_at
+            ):
+                owner.reconciliation_attempts = 0
+                owner.reconciliation_deadline_at = now + timedelta(minutes=5)
+        try:
+            result = withdrawal_steps.maintain(self)
+        except SecurityRefusalError:
+            raise
+        except (RecipeRouteNotReady, Exception) as error:  # noqa: BLE001
+            with self.publication_transaction() as session:
+                owner = session.get(RoutePublicationOwner, 1)
+                if owner is None:
+                    raise RecipeRouteNotReady("route publication owner is unavailable")
+                owner.reconciliation_attempts += 1
+                policy = RecoveryPolicy(
+                    max_failures=6, base_delay_seconds=5, max_delay_seconds=60
+                )
+                owner.reconciliation_next_at = policy.next_attempt(
+                    RECIPE_ROUTE_AUTHORITY_ID, owner.reconciliation_attempts, now
+                )
+                if owner.reconciliation_next_at is None:
+                    owner.reconciliation_deadline_at = None
+                    owner.reconciliation_next_at = now + timedelta(seconds=60)
+            log_event(
+                _LOGGER,
+                "recipe.route.observation_ended",
+                service="control-routes",
+                reason=str(error),
+            )
+            return False
+        with self.publication_transaction() as session:
+            owner = session.get(RoutePublicationOwner, 1)
+            if owner is None:
+                raise RecipeRouteNotReady("route publication owner is unavailable")
+            owner.reconciliation_attempts = 0
+            owner.reconciliation_next_at = None
+            owner.reconciliation_deadline_at = None
+        return result
 
     def _restore_abandoned_stop_withdrawals(self, session: Session) -> bool:
         return withdrawal_steps._restore_abandoned_stop_withdrawals(self, session)
@@ -603,7 +688,11 @@ class RecipeRouteService:
         return self._publisher.publish_empty(route_digest)
 
     def projection_in_session(
-        self, session: Session, generation: LiteLlmGeneration, *, state: str
+        self,
+        session: Session,
+        generation: LiteLlmGeneration,
+        *,
+        state: RoutePublicationState,
     ) -> None:
         marker = getattr(generation, "activation_marker", None)
         if not isinstance(marker, ActivationMarker):

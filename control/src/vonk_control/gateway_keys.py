@@ -21,9 +21,11 @@ import tempfile
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
+from uuid import uuid4
 
 import httpx2
 from fastapi import FastAPI, HTTPException, Response, status
@@ -31,6 +33,7 @@ from fastapi import Path as PathParameter
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 from vonk_agent_protocol import (
     ErrorCategory,
+    InvalidRequestReason,
     SecurityRefusalReason,
     UnknownError,
     UnknownOutcomeError,
@@ -76,24 +79,29 @@ def _observe_gateway[T](
     action: Callable[[], T], *, attempts: int = 1
 ) -> T | UnknownError:
     """Bound retries; mutation retries reconcile their retained exact secret first."""
+    last_unknown: UnknownError | None = None
     for attempt in range(attempts):
         try:
-            return action()
-        except GatewayKeyError:
-            if attempt + 1 < attempts:
-                time.sleep(0.05 * (2**attempt))
-    return UnknownError(
+            result = action()
+            if not isinstance(result, UnknownError):
+                return result
+            last_unknown = result
+        except HTTPException as error:
+            if error.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+                raise
+        except (GatewayKeyError, OSError, ValueError):
+            pass
+        if attempt + 1 < attempts:
+            time.sleep(0.05 * (2**attempt))
+    return last_unknown or UnknownError(
         category=ErrorCategory.UNKNOWN, reason=WaitReason.OBSERVATION_UNAVAILABLE
     )
-
-
-class GatewayKeyConflict(ValueError):
-    pass
 
 
 class GatewayKeyCreateRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
     name: str = Field(pattern=_NAME_PATTERN, max_length=63)
     models: list[Annotated[str, Field(pattern=_MODEL_PATTERN)]] = Field(
         default_factory=list, max_length=64
@@ -114,7 +122,7 @@ class GatewayKeyView(StrictJSONModel):
 
 
 class GatewayKeyCreated(GatewayKeyView):
-    """The only response that carries the key. It is not shown again."""
+    """The retained key for this mutation; the exact receipt can be replayed."""
 
     key: str = Field(min_length=1, max_length=512)
 
@@ -150,8 +158,16 @@ class _KeyGenerateRequest(_LiteLlmRequest):
     key: str | None = None
 
 
+class GatewayMutationReceipt(StrictJSONModel):
+    request_id: str
+    body: _KeyGenerateRequest
+    completed: bool = False
+    superseded: bool = False
+
+
 class _KeyDeleteRequest(_LiteLlmRequest):
-    key_aliases: list[str]
+    key_aliases: list[str] = Field(default_factory=list)
+    keys: list[str] | None = None
 
 
 class _KeyUpdateRequest(_LiteLlmRequest):
@@ -280,6 +296,8 @@ def _view(item: _LiteLlmKey) -> GatewayKeyView | None:
 class GatewayKeyService:
     """Create, list and revoke LiteLLM virtual keys with the master key."""
 
+    _request: ContextVar[str | None] = ContextVar("gateway_request", default=None)
+
     def __init__(
         self,
         *,
@@ -310,6 +328,7 @@ class GatewayKeyService:
         models: list[str] | None = None,
         expires: str | None = None,
         key: str | None = None,
+        request_id: str | None = None,
     ) -> GatewayKeyCreated | UnknownError:
         def create_once() -> GatewayKeyCreated | UnknownError:
             with self._mutation_claim(name) as acquired:
@@ -318,31 +337,68 @@ class GatewayKeyService:
                         category=ErrorCategory.UNKNOWN,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
+                self._restore_request_intent(name)
                 return self._gateway_create(
                     name, models=models, expires=expires, key=key
                 )
 
-        return _observe_gateway(create_once, attempts=3)
+        if request_id is not None:
+            receipt = self._read_receipt(self._receipt_path(name, request_id))
+            if receipt is not None and (
+                receipt.body.models != list(models or [])
+                or receipt.body.duration != expires
+                or (key is not None and receipt.body.key != key)
+            ):
+                raise HTTPException(
+                    status_code=422, detail=InvalidRequestReason.MALFORMED
+                )
+        retained = self._pending_receipt(name)
+        if request_id is None and retained is not None and not retained.completed:
+            body = retained.body
+            request_id = (
+                retained.request_id
+                if (
+                    body.models == list(models or [])
+                    and body.duration == expires
+                    and (key is None or key == body.key)
+                )
+                else str(uuid4())
+            )
+        return self._mutation_request(name, request_id, create_once)
 
     def revoke(self, name: str) -> GatewayKeyRevoked | UnknownError:
-        with self._mutation_claim(name) as acquired:
-            if not acquired:
-                return UnknownError(
-                    category=ErrorCategory.UNKNOWN,
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            try:
-                result = self._gateway_revoke(name)
-            except GatewayKeyError:
-                return UnknownError(
-                    category=ErrorCategory.UNKNOWN,
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            self._forget_intent(name)
-            self._forget_intent(_rolling_alias(name))
-            return result
+        def revoke_once() -> GatewayKeyRevoked | UnknownError:
+            with self._mutation_claim(name) as acquired:
+                if not acquired:
+                    raise GatewayKeyError("gateway mutation claim is busy")
+                # Newest revoke includes the exact temporary alias of an
+                # interrupted rotation. Keep its secret until both are absent.
+                for alias in (name, _rolling_alias(name)):
+                    if self._gateway_exists(alias):
+                        self._gateway_delete_alias(alias)
+                for alias in (name, _rolling_alias(name)):
+                    receipt = self._read_receipt(self._intent_path(alias))
+                    if receipt is not None and receipt.body.key is not None:
+                        secret = receipt.body.key
+                        if self._gateway_key_info(secret) is not None:
+                            self._gateway_request(
+                                "POST",
+                                "/key/delete",
+                                json=_KeyDeleteRequest(keys=[secret]),
+                            )
+                            if self._gateway_key_info(secret) is not None:
+                                raise GatewayKeyError(
+                                    "gateway revocation effect is unconfirmed"
+                                )
+                self._forget_intent(name, superseded=True)
+                self._forget_intent(_rolling_alias(name), superseded=True)
+                return GatewayKeyRevoked(name=name)
 
-    def roll(self, name: str) -> GatewayKeyCreated | UnknownError:
+        return _observe_gateway(revoke_once, attempts=3)
+
+    def roll(
+        self, name: str, *, request_id: str | None = None
+    ) -> GatewayKeyCreated | UnknownError:
         def roll_once() -> GatewayKeyCreated | UnknownError:
             with self._mutation_claim(name) as acquired:
                 if not acquired:
@@ -350,24 +406,73 @@ class GatewayKeyService:
                         category=ErrorCategory.UNKNOWN,
                         reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
+                self._restore_request_intent(_rolling_alias(name))
                 return self._gateway_roll(name)
 
-        return _observe_gateway(roll_once, attempts=3)
+        return self._mutation_request(_rolling_alias(name), request_id, roll_once)
+
+    def _mutation_request(
+        self,
+        alias: str,
+        request_id: str | None,
+        action: Callable[[], GatewayKeyCreated | UnknownError],
+    ) -> GatewayKeyCreated | UnknownError:
+        # Receipt identity outlives alias-history cleanup. A new request never
+        # adopts a completed operation's secret, even if cleanup failed.
+        retained = self._pending_receipt(alias)
+        identity = request_id or (
+            retained.request_id
+            if retained is not None and not retained.completed
+            else str(uuid4())
+        )
+        token = self._request.set(identity)
+        try:
+            completed = self._read_receipt(self._receipt_path(alias, identity))
+            if completed is not None and completed.superseded:
+                return UnknownError(
+                    category=ErrorCategory.UNKNOWN, reason=WaitReason.SCOPE_CHANGED
+                )
+            if (
+                completed is not None
+                and completed.completed
+                and completed.body.key is not None
+            ):
+                return GatewayKeyCreated(
+                    name=alias.removesuffix(".rolling"),
+                    models=completed.body.models,
+                    key=completed.body.key,
+                )
+
+            def reconcile() -> GatewayKeyCreated | UnknownError:
+                receipt = self._read_receipt(self._receipt_path(alias, identity))
+                if receipt is not None and receipt.superseded:
+                    return UnknownError(
+                        category=ErrorCategory.UNKNOWN, reason=WaitReason.SCOPE_CHANGED
+                    )
+                if (
+                    receipt is not None
+                    and receipt.completed
+                    and receipt.body.key is not None
+                ):
+                    return GatewayKeyCreated(
+                        name=alias.removesuffix(".rolling"),
+                        models=receipt.body.models,
+                        key=receipt.body.key,
+                    )
+                return action()
+
+            return _observe_gateway(reconcile, attempts=3)
+        finally:
+            self._request.reset(token)
 
     def ensure_default(self, path: Path = DEFAULT_KEY_FILE) -> bool | UnknownError:
-        with self._mutation_claim(DEFAULT_KEY_NAME) as acquired:
-            if not acquired:
-                return UnknownError(
-                    category=ErrorCategory.UNKNOWN,
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
-            try:
+        def ensure_once() -> bool:
+            with self._mutation_claim(DEFAULT_KEY_NAME) as acquired:
+                if not acquired:
+                    raise GatewayKeyError("gateway mutation claim is busy")
                 return self._gateway_ensure_default(path)
-            except (GatewayKeyError, OSError):
-                return UnknownError(
-                    category=ErrorCategory.UNKNOWN,
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
-                )
+
+        return _observe_gateway(ensure_once, attempts=3)
 
     def _gateway_check_health(self) -> bool:
         code, _payload = self._gateway_request("GET", "/health/readiness")
@@ -410,10 +515,16 @@ class GatewayKeyService:
                 ),
             )
         try:
-            payload: object = response.json() if response.content else {}
+            payload: object = response.json()
         except ValueError:
-            payload = {}
-        return response.status_code, payload if isinstance(payload, dict) else {}
+            payload = None
+        if not isinstance(payload, dict):
+            # HTTP 404 is the peer's documented absence observation. A blank
+            # or unreadable success/failure reply never becomes an empty fact.
+            if response.status_code == 404:
+                return response.status_code, {}
+            raise GatewayKeyError("gateway reply is unreadable")
+        return response.status_code, payload
 
     def _gateway_raw_keys(self) -> list[_LiteLlmKey]:
         keys: list[_LiteLlmKey] = []
@@ -452,14 +563,6 @@ class GatewayKeyService:
         expires: str | None = None,
         key: str | None = None,
     ) -> GatewayKeyCreated:
-        pending = self._read_intent(name)
-        if (
-            pending is None
-            and not self._intent_path(name).exists()
-            and not self._intent_path(_rolling_alias(name)).exists()
-            and self._gateway_exists(name)
-        ):
-            raise GatewayKeyConflict(f"key {name} already exists")
         created = self._gateway_create_under(
             name, models=models, expires=expires, key=key
         )
@@ -469,7 +572,7 @@ class GatewayKeyService:
             # own receipt until the obsolete remote alias is reconciled.
             if self._gateway_exists(rolling):
                 self._gateway_delete_alias(rolling)
-            self._forget_intent(rolling)
+            self._forget_intent(rolling, superseded=True)
         self._forget_intent(name)
         return created
 
@@ -482,7 +585,7 @@ class GatewayKeyService:
         key: str | None = None,
     ) -> GatewayKeyCreated:
         body = self._read_intent(name)
-        replacement = self._intent_path(name).exists() and (
+        replacement = body is not None and (
             body is None
             or body.models != list(models or [])
             or body.duration != expires
@@ -506,7 +609,19 @@ class GatewayKeyService:
             try:
                 self._intent_root.mkdir(parents=True, exist_ok=True, mode=0o700)
                 self._intent_root.chmod(0o700)
-                _write_private(self._intent_path(name), body.model_dump_json())
+                identity = self._request.get() or str(uuid4())
+                prior = self._read_receipt(self._intent_path(name))
+                if (
+                    prior is not None
+                    and prior.request_id != identity
+                    and not prior.completed
+                ):
+                    self._forget_intent(name, superseded=True)
+                receipt = GatewayMutationReceipt(request_id=identity, body=body)
+                _write_private(
+                    self._receipt_path(name, identity), receipt.model_dump_json()
+                )
+                _write_private(self._intent_path(name), receipt.model_dump_json())
             except OSError as error:
                 raise GatewayKeyError(
                     "gateway mutation persistence is unavailable"
@@ -548,15 +663,23 @@ class GatewayKeyService:
         view = _view(described) or GatewayKeyView(name=name, models=[])
         return GatewayKeyCreated(**view.model_dump(), key=secret)
 
+    def _gateway_key_info(self, secret: str) -> _LiteLlmKey | None:
+        code, payload = self._gateway_request(
+            "GET", "/key/info", params=_KeyInfoParams(key=secret)
+        )
+        if code == 404:
+            return None
+        info = _KeyInfoReply.model_validate(payload).info
+        if code != 200 or info is None or info.key_alias is None:
+            raise GatewayKeyError("gateway exact key observation is unavailable")
+        return info
+
     def _gateway_observe_created(
         self, body: _KeyGenerateRequest
     ) -> GatewayKeyCreated | None:
         assert body.key is not None
-        code, payload = self._gateway_request(
-            "GET", "/key/info", params=_KeyInfoParams(key=body.key)
-        )
-        info = _KeyInfoReply.model_validate(payload).info
-        if code != 200 or info is None or info.key_alias != body.key_alias:
+        info = self._gateway_key_info(body.key)
+        if info is None or info.key_alias != body.key_alias:
             return None
         view = _view(info)
         assert view is not None
@@ -571,15 +694,12 @@ class GatewayKeyService:
             if not self._gateway_exists(name):
                 return
             raise
-        if code != 200 and self._gateway_exists(name):
+        if self._gateway_exists(name):
             raise GatewayKeyError(f"LiteLLM refused to revoke the key (HTTP {code})")
 
-    def _gateway_revoke(self, name: str) -> GatewayKeyRevoked | UnknownError:
-        if not self._gateway_exists(name):
-            return UnknownError(
-                category=ErrorCategory.UNKNOWN, reason=WaitReason.SCOPE_CHANGED
-            )
-        self._gateway_delete_alias(name)
+    def _gateway_revoke(self, name: str) -> GatewayKeyRevoked:
+        if self._gateway_exists(name):
+            self._gateway_delete_alias(name)
         return GatewayKeyRevoked(name=name)
 
     @contextmanager
@@ -610,31 +730,75 @@ class GatewayKeyService:
     def _intent_path(self, name: str) -> Path:
         return self._intent_root / (hashlib.sha256(name.encode()).hexdigest() + ".json")
 
-    def _forget_intent(self, name: str) -> None:
-        try:
-            self._intent_path(name).unlink(missing_ok=True)
-        except OSError:
-            # A retained receipt is safe to observe again; cleanup is bookkeeping.
-            pass
+    def _receipt_path(self, name: str, request_id: str) -> Path:
+        return self._intent_root / (
+            hashlib.sha256((name + ":" + request_id).encode()).hexdigest() + ".receipt"
+        )
 
-    def _read_intent(self, name: str) -> _KeyGenerateRequest | None:
+    @staticmethod
+    def _read_receipt(path: Path) -> GatewayMutationReceipt | None:
         try:
-            if self._intent_path(name).is_symlink():
+            if path.is_symlink():
                 return None
-            body = _KeyGenerateRequest.model_validate_json(
-                self._intent_path(name).read_bytes()
-            )
-            if (
-                body.key_alias != name
-                or body.key is None
-                or _KEY_PATTERN.fullmatch(body.key) is None
-                or body.allowed_routes != _KEY_ROUTES
-                or body.metadata != _KeyMetadata()
-            ):
-                return None
-            return body
+            return GatewayMutationReceipt.model_validate_json(path.read_bytes())
         except (OSError, ValueError):
             return None
+
+    def _pending_receipt(self, alias: str) -> GatewayMutationReceipt | None:
+        receipt = self._read_receipt(self._intent_path(alias))
+        if receipt is None or receipt.completed or receipt.superseded:
+            return None
+        archived = self._read_receipt(self._receipt_path(alias, receipt.request_id))
+        return (
+            None
+            if archived is not None and (archived.completed or archived.superseded)
+            else receipt
+        )
+
+    def _restore_request_intent(self, name: str) -> None:
+        identity = self._request.get()
+        if identity is None:
+            return
+        retained = self._read_receipt(self._receipt_path(name, identity))
+        if retained is not None and not retained.completed and not retained.superseded:
+            _write_private(self._intent_path(name), retained.model_dump_json())
+
+    def _forget_intent(self, name: str, *, superseded: bool = False) -> None:
+        receipt = self._read_receipt(self._intent_path(name))
+        if receipt is None:
+            return
+        completed = receipt.model_copy(
+            update={"completed": True, "superseded": superseded}
+        )
+        # Atomic replace plus directory fsync retires the active receipt before
+        # any optional cleanup. An unlink failure cannot resurrect its effect.
+        archived = self._read_receipt(self._receipt_path(name, receipt.request_id))
+        if archived is None or not archived.completed:
+            _write_private(
+                self._receipt_path(name, receipt.request_id),
+                completed.model_dump_json(),
+            )
+        _write_private(self._intent_path(name), completed.model_dump_json())
+
+    def _read_intent(self, name: str) -> _KeyGenerateRequest | None:
+        receipt = self._read_receipt(self._intent_path(name))
+        if receipt is None or receipt.completed:
+            return None
+        if (
+            self._request.get() is not None
+            and receipt.request_id != self._request.get()
+        ):
+            return None
+        body = receipt.body
+        if (
+            body.key_alias != name
+            or body.key is None
+            or _KEY_PATTERN.fullmatch(body.key) is None
+            or body.allowed_routes != _KEY_ROUTES
+            or body.metadata != _KeyMetadata()
+        ):
+            return None
+        return body
 
     def _gateway_roll(self, name: str) -> GatewayKeyCreated | UnknownError:
         """Resume the exact replacement secret before observing mutable alias state."""
@@ -670,15 +834,24 @@ class GatewayKeyService:
             if current is not None
             else None,
         )
-        self._forget_intent(name)
+        self._forget_intent(name, superseded=True)
         if self._gateway_exists(name):
             self._gateway_delete_alias(name)
-        code, _ = self._gateway_request(
+        _code, _ = self._gateway_request(
             "POST",
             "/key/update",
             json=_KeyUpdateRequest(key=created.key, key_alias=name),
         )
-        if code != 200:
+        observed = self._gateway_observe_created(
+            _KeyGenerateRequest(
+                key_alias=name,
+                key=created.key,
+                models=created.models,
+                allowed_routes=list(_KEY_ROUTES),
+                metadata=_KeyMetadata(),
+            )
+        )
+        if observed is None:
             raise GatewayKeyError("gateway rename effect is unconfirmed")
         self._forget_intent(temporary)
         return created.model_copy(update={"name": name})
@@ -700,6 +873,8 @@ class GatewayKeyService:
         info = _KeyInfoReply.model_validate(payload).info
         if code == 200 and info is not None and info.key_alias == DEFAULT_KEY_NAME:
             return False
+        if code != 404:
+            raise GatewayKeyError("default gateway key observation is unavailable")
         if self._gateway_exists(DEFAULT_KEY_NAME):
             self._gateway_revoke(DEFAULT_KEY_NAME)
         self._gateway_create(DEFAULT_KEY_NAME, key=key)
@@ -714,16 +889,16 @@ async def keep_default_key(
     first_delay: float = 5.0,
     maximum_delay: float = 300.0,
 ) -> None:
-    """Retry until the default client key exists and matches its secrets file.
+    """End this startup observation after six attempts.
 
-    LiteLLM starts after the API, so the first attempts may find no gateway.  An
-    attempt that cannot reach it or settle with it is unknown, not failed: the
-    delay doubles up to ``maximum_delay`` and the key is asked for again until it
-    is ready or ``stop`` is set.
+    Periodic production reconciliation starts independent bounded observations
+    of the standing default-key intent after this startup attempt ends.
     """
 
     delay = first_delay
-    while not stop.is_set():
+    for _attempt in range(6):
+        if stop.is_set():
+            return
         try:
             observed = await asyncio.to_thread(lambda: service.ensure_default(path))
             if not isinstance(observed, UnknownError):
@@ -734,10 +909,12 @@ async def keep_default_key(
                 "default gateway client key observation: %s", observed.reason
             )
         except HTTPException as error:
-            _LOGGER.error(
-                "gateway key security boundary refused (HTTP %s)", error.status_code
-            )
-            return
+            if error.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+                _LOGGER.error(
+                    "gateway key authority refused (HTTP %s)", error.status_code
+                )
+                return
+            _LOGGER.warning("gateway key dependency is unavailable")
         except (GatewayKeyError, OSError) as error:
             _LOGGER.warning(
                 "default gateway client key not ready: %s; retrying in %s seconds",
@@ -790,14 +967,9 @@ def install_gateway_key_routes(
     _ADMIN_OPERATION_IDS[("post", _REVOKE_PATH)] = "revokeGatewayKey"
     _ADMIN_OPERATION_IDS[("post", _ROLL_PATH)] = "rollGatewayKey"
 
-    def available() -> GatewayKeyService:
-        if service is None:
-            raise HTTPException(status_code=503, detail="Gateway keys unavailable")
-        return service
-
     def authorize(actor: Actor, path: str) -> None:
         if actor.role not in MUTATION_ROLES[("POST", path)]:
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise HTTPException(status_code=403, detail=SecurityRefusalReason.FORBIDDEN)
 
     @app.get(
         _KEY_PATH,
@@ -808,14 +980,19 @@ def install_gateway_key_routes(
     def list_gateway_keys(
         actor: Actor = actor_dependency,
     ) -> GatewayKeyList | UnknownError:
-        return available().list_keys()
+        if service is None:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        return _observe_gateway(lambda: service.list_keys())
 
     @app.post(
         _KEY_PATH,
         response_model=GatewayKeyCreated | UnknownError,
         responses={
             202: {"model": UnknownError},
-            **bounded_error_responses(401, 403, 409, 422, 502, 503),
+            **bounded_error_responses(401, 403, 422, 502, 503),
         },
         status_code=status.HTTP_201_CREATED,
         operation_id="createGatewayKey",
@@ -826,15 +1003,23 @@ def install_gateway_key_routes(
         actor: Actor = actor_dependency,
     ) -> GatewayKeyCreated | UnknownError:
         authorize(actor, _KEY_PATH)
-        try:
-            result = available().create(
-                body.name, models=body.models, expires=body.expires
+        if service is None:
+            response.status_code = status.HTTP_202_ACCEPTED
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-            if isinstance(result, UnknownError):
-                response.status_code = status.HTTP_202_ACCEPTED
-            return result
-        except GatewayKeyConflict as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
+        result = _observe_gateway(
+            lambda: service.create(
+                body.name,
+                models=body.models,
+                expires=body.expires,
+                request_id=body.request_id,
+            )
+        )
+        if isinstance(result, UnknownError):
+            response.status_code = status.HTTP_202_ACCEPTED
+        return result
 
     @app.post(
         _REVOKE_PATH,
@@ -847,7 +1032,12 @@ def install_gateway_key_routes(
         actor: Actor = actor_dependency,
     ) -> GatewayKeyRevoked | UnknownError:
         authorize(actor, _REVOKE_PATH)
-        return available().revoke(name)
+        if service is None:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        return _observe_gateway(lambda: service.revoke(name))
 
     @app.post(
         _ROLL_PATH,
@@ -857,7 +1047,13 @@ def install_gateway_key_routes(
     )
     def roll_gateway_key(
         name: str = PathParameter(pattern=_NAME_PATTERN, max_length=63),
+        request_id: str | None = None,
         actor: Actor = actor_dependency,
     ) -> GatewayKeyCreated | UnknownError:
         authorize(actor, _ROLL_PATH)
-        return available().roll(name)
+        if service is None:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        return _observe_gateway(lambda: service.roll(name, request_id=request_id))

@@ -8,14 +8,14 @@ import re
 import threading
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import TypeAdapter
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     SecurityRefusalError,
@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.enrollment import NodeId
 
+from ..bounded_retry import bounded_attempts
 from ..litellm import (
     LiteLlmGeneration,
     LiteLlmPolicy,
@@ -136,10 +137,6 @@ class RecipeRecoveryDeadlineError(UnknownOutcomeError, RecipeRouteError):
         self.run_id = run_id
 
 
-class RecipeRecoveryPublicationError(RecipeRouteError):
-    pass
-
-
 class _ActivatedRecipeRouteError(UnknownOutcomeError, RecipeRouteError):
     def __init__(self, message: str, *, generation: LiteLlmGeneration) -> None:
         UnknownOutcomeError.__init__(
@@ -150,23 +147,8 @@ class _ActivatedRecipeRouteError(UnknownOutcomeError, RecipeRouteError):
 
 
 def publication_is_temporary(error: BaseException) -> bool:
-    """Whether another publication attempt can genuinely resolve ``error``.
-
-    This is deliberately an allowlist.  When the Controller cannot tell a
-    dependency hiccup from an invalid contract it must keep the route
-    fail-closed and report the failure, not retry it forever; only the
-    conditions below are known to carry no authority decision of their own.
-    """
-
-    if isinstance(error, RecipeRouteNotReady):
-        # A fail-closed candidate is waiting for current rank evidence, which
-        # the next attempt re-reads.
-        return True
-    if isinstance(error, _ActivatedRecipeRouteError):
-        # The generation is activated but its supervisor acknowledgement was
-        # not confirmed, so a later attempt reconciles that same generation.
-        return True
-    return isinstance(error, OSError)
+    """Unknown peer/local outcomes are reconciled within the owning bound."""
+    return not isinstance(error, SecurityRefusalError)
 
 
 @dataclass(frozen=True)
@@ -257,7 +239,7 @@ def route_publication_owner_lock_statement():
     return (
         select(RoutePublicationOwner)
         .where(RoutePublicationOwner.singleton_id == 1)
-        .with_for_update(of=RoutePublicationOwner)
+        .with_for_update(of=RoutePublicationOwner, nowait=True)
     )
 
 
@@ -282,7 +264,7 @@ def lock_route_publication_owner_in_session(
             pass
         owner = session.scalar(statement)
     if owner is None:
-        raise RuntimeError("route publication owner is unavailable")
+        raise RecipeRouteNotReady("route publication owner is unavailable")
     return owner
 
 
@@ -290,22 +272,32 @@ def lock_route_publication_owner_in_session(
 def route_publication_transaction(
     sessions: sessionmaker[Session],
 ) -> Iterator[Session]:
-    """Open one owner-locked publication transaction.
-
-    SQLite ignores ``FOR UPDATE``. Its process-wide lock therefore covers the
-    full transaction and external publication, while PostgreSQL relies on the
-    singleton row lock and remains safe across controller processes.
-    """
-
-    with sessions() as session:
-        serialization = (
-            _SQLITE_ROUTE_PUBLICATION_LOCK
-            if session.get_bind().dialect.name == "sqlite"
-            else nullcontext()
-        )
-        with serialization, session.begin():
+    """Reobserve acquisition in fresh transactions; never retry the caller's body."""
+    last: RecipeRouteNotReady | None = None
+    for _attempt in bounded_attempts():
+        stack = ExitStack()
+        try:
+            session = stack.enter_context(sessions())
+            if session.get_bind().dialect.name == "sqlite":
+                if not _SQLITE_ROUTE_PUBLICATION_LOCK.acquire(blocking=False):
+                    raise RecipeRouteNotReady("route publication owner is busy")
+                stack.callback(_SQLITE_ROUTE_PUBLICATION_LOCK.release)
+            stack.enter_context(session.begin())
             lock_route_publication_owner_in_session(session)
-            yield session
+            break
+        except RecipeRouteNotReady as error:
+            last = error
+            session.rollback()
+            stack.close()
+        except SQLAlchemyError:
+            last = RecipeRouteNotReady("route publication owner is unavailable")
+            session.rollback()
+            stack.close()
+    else:
+        assert last is not None
+        raise last
+    with stack:
+        yield session
 
 
 def _claim_ordinal(claim_row: RoutePublication | None) -> int | None:

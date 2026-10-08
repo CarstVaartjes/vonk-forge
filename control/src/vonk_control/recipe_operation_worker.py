@@ -3,28 +3,35 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Protocol
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import RouteState, RunState
+from vonk_agent_protocol import (
+    AgentOperation,
+    LifecycleState,
+    RouteState,
+    RunState,
+    SecurityRefusalError,
+)
 
 from .categorized_errors import InvalidValue
-from .models import RecipeRun, RunNode
+from .models import Job, RecipeRun, RunNode
 from .recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_run_plan,
 )
+from .recipe_lifecycle_contract import RecipeOperationResult
 from .recipe_routes import RecipeRouteNotReady
 from .recovery_policy import RecoveryPolicy
 
 #: Capped publication retry.  The first attempt is prompt so a momentary
 #: supervisor hiccup does not delay a ready run, and the cap keeps a
-#: persistent failure from becoming a tight retry loop.  A running run keeps
-#: retrying for as long as it serves, so a dependency or evidence problem that
-#: clears converges without another operator command.
+#: persistent failure from becoming a tight retry loop. Each publication
+#: observation ends after six failures; standing serving intent is reconciled
+#: by independent, durable maintenance epochs.
 _ROUTE_PUBLICATION_RETRY = RecoveryPolicy(
     max_failures=6, base_delay_seconds=5, max_delay_seconds=60
 )
@@ -131,6 +138,9 @@ class RecipeOperationWorker:
         for run_id in run_ids:
             try:
                 self._routes.publish_run(run_id)
+            except SecurityRefusalError as error:
+                self._end_publication(run_id, error)
+                continue
             except RecipeRouteNotReady as error:
                 # Observation is retryable, but it still consumes an attempt.
                 # Persist the same bounded schedule used for other unknown
@@ -159,9 +169,40 @@ class RecipeOperationWorker:
             run.route_attempts = attempts
             run.route_error = f"{type(error).__name__}: {error}"[:512]
             run.route_next_attempt_at = _ROUTE_PUBLICATION_RETRY.next_attempt(
-                run_id, attempts, now, ongoing_intent=True
+                run_id, attempts, now
             )
+            if run.route_next_attempt_at is None:
+                # End publication observation, never invent a remote stop.
+                run.route_state = RouteState.FAILED
+                run.observation_deadline_at = None
+                # End only this owner's route-observation job. No rank stop or
+                # failed workload is inferred from lost recovery metadata.
+                for job in session.scalars(
+                    select(Job).where(Job.kind == AgentOperation.RECIPE_START)
+                ):
+                    if (
+                        isinstance(job.payload, Mapping)
+                        and job.payload.get("owner_id") == run.id
+                        and "recovery" in job.payload
+                    ):
+                        job.state = LifecycleState.FAILED
+                        job.result = RecipeOperationResult(
+                            successful_nodes=[],
+                            failed_nodes=[],
+                            node_evidence={},
+                            recovery_error=(str(error) or type(error).__name__)[:512],
+                        ).model_dump(mode="json", exclude_none=True)
+                        job.updated_at = now
             run.updated_at = now
+
+    def _end_publication(self, run_id: str, error: BaseException) -> None:
+        with self._sessions.begin() as session:
+            run = session.get(RecipeRun, run_id, with_for_update=True)
+            if run is not None and run.route_state == RouteState.PENDING:
+                run.route_state = RouteState.WITHDRAWN
+                run.route_next_attempt_at = None
+                run.route_error = str(error)[:512]
+                run.updated_at = self._clock()
 
     def _expire_initial_observation_deadline(self) -> bool:
         now = self._clock()
@@ -215,7 +256,7 @@ class RecipeOperationWorker:
                 if not missing:
                     continue
                 for node in missing:
-                    node.state = "failed"
+                    node.state = LifecycleState.FAILED
                     node.observation_process_running = None
                     node.observation_failure_diagnostics = None
                     node.observation_observed_at = None

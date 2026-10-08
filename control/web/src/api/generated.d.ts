@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 697288b9821d65f1b0067698a94a88c603312ef851369ce5d907a8401efdf163. Do not edit.
+// Generated from canonical OpenAPI SHA256 ba8b4282c07e44cb861c0a7f9de538299081a3316e0ce4179c10880c236d8f1f. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -4990,10 +4990,12 @@ export interface components {
             models?: string[];
             /** Name */
             name: string;
+            /** Request Id */
+            request_id?: string | null;
         };
         /**
          * GatewayKeyCreated
-         * @description The only response that carries the key. It is not shown again.
+         * @description The retained key for this mutation; the exact receipt can be replayed.
          */
         GatewayKeyCreated: {
             /** Created At */
@@ -12718,6 +12720,11 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Upstream Model
+             * @default null
+             */
+            upstream_model: string | null;
         };
         /** StringParameter */
         StringParameter: {
@@ -14992,15 +14999,6 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
             /** @description Unprocessable Content */
             422: {
                 headers: {
@@ -15099,7 +15097,9 @@ export interface operations {
     };
     rollGatewayKey: {
         parameters: {
-            query?: never;
+            query?: {
+                request_id?: string | null;
+            };
             header?: never;
             path: {
                 name: string;

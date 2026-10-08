@@ -315,8 +315,13 @@ export interface ControlApi extends LibraryApi {
   enrollmentStatus(grantId: string, signal?: AbortSignal): Promise<EnrollmentGrantStatus>;
   revokeEnrollment(grantId: string): Promise<EnrollmentGrantStatus>;
   gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList>;
-  createGatewayKey(name: string, models: string[], expires?: string): Promise<GatewayKeyCreated>;
-  rollGatewayKey(name: string): Promise<GatewayKeyCreated>;
+  createGatewayKey(
+    name: string,
+    models: string[],
+    expires?: string,
+    requestId?: string,
+  ): Promise<GatewayKeyCreated>;
+  rollGatewayKey(name: string, requestId?: string): Promise<GatewayKeyCreated>;
   revokeGatewayKey(name: string): Promise<GatewayKeyRevoked>;
   operations(
     cursor?: string,

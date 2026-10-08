@@ -83,3 +83,60 @@ def test_the_automatic_sync_is_asked_again_after_every_unsettled_attempt() -> No
 
     asyncio.run(run())
     assert service.attempts == 4
+
+
+def test_periodic_reconciliation_restarts_ended_default_key_observations(tmp_path):
+    import asyncio
+
+    import httpx2
+    from vonk_control.catalog_sync import run_automatic_sync
+    from vonk_control.gateway_keys import GatewayKeyService, keep_default_key
+
+    from .test_gateway_keys import MASTER, FakeLiteLlm
+
+    peer = FakeLiteLlm()
+    ready = [False]
+
+    def transport(request):
+        if not ready[0]:
+            raise httpx2.ReadError("offline", request=request)
+        return peer.handle(request)
+
+    gateway = GatewayKeyService(
+        master_key=lambda: MASTER,
+        transport=httpx2.MockTransport(transport),
+        intent_root=tmp_path / "mutations",
+    )
+    path = tmp_path / "client-key"
+    stop = asyncio.Event()
+
+    class Catalog:
+        def automatic(self):
+            stop.set()
+
+    async def run():
+        await asyncio.wait_for(
+            keep_default_key(
+                gateway, stop, path=path, first_delay=0.001, maximum_delay=0.001
+            ),
+            timeout=10,
+        )
+        assert not peer.keys
+        ready[0] = True
+        await asyncio.wait_for(
+            run_automatic_sync(
+                Catalog(),  # type: ignore[arg-type] - peer fake only implements the exercised boundary
+                stop,
+                interval_seconds=0,
+                settle_seconds=0,
+                reconcile=lambda: gateway.ensure_default(path),
+            ),
+            timeout=10,
+        )
+
+    asyncio.run(run())
+    assert peer.keys["default"]["key"] == path.read_text().strip()
+    assert peer.counter == 1
+    from .test_gateway_keys import _created
+
+    assert _created(gateway.create("fresh")).key != path.read_text().strip()
