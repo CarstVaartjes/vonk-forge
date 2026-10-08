@@ -137,6 +137,8 @@ class RecoveringService[T]:
                     )
                 return getattr(self.require_service(), name)(*args, **kwargs)
 
+            # Like a bound method: the owner stays inspectable (e.g. its root).
+            vars(invoke)["__self__"] = self
             return invoke
         return getattr(self.require_service(), name)
 
