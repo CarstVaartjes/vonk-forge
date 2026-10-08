@@ -11,14 +11,14 @@ use uuid::Uuid;
 
 use crate::{
     inventory::shared_memory_pool,
-    process::{ProcessRunner, Program},
+    process::{ProcessError, ProcessRunner, Program},
 };
 
 const SOURCE_TEXT_LIMIT: u64 = 64 * 1024;
 const MAX_CAPACITY_BYTES: u64 = 16 * 1024_u64.pow(4);
 pub const MAX_REPORT_SAMPLES: usize = 16;
 
-pub use vonk_agent_protocol::generated::{TelemetryRequest, TelemetrySample};
+pub use vonk_agent_protocol::generated::{GpuUnavailableReason, TelemetryRequest, TelemetrySample};
 
 #[derive(Debug, Error)]
 pub enum TelemetryError {
@@ -99,7 +99,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .filter(|value| {
                 value.free_bytes <= value.total_bytes && value.total_bytes <= MAX_CAPACITY_BYTES
             });
-        let accelerator = self
+        let accelerator_result = self
             .runner
             .run(
                 Program::NvidiaSmi,
@@ -110,9 +110,33 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 ],
                 Duration::from_secs(10),
             )
-            .ok()
-            .filter(|output| output.success && output.stdout.len() <= SOURCE_TEXT_LIMIT as usize)
-            .and_then(|output| parse_first_accelerator(&output.stdout));
+            .map_err(|error| match error {
+                ProcessError::Timeout => GpuUnavailableReason::GpuCommandTimeout,
+                ProcessError::OutputLimit => GpuUnavailableReason::GpuInvalidOutput,
+                _ => GpuUnavailableReason::GpuCommandFailed,
+            })
+            .and_then(|output| {
+                if !output.success {
+                    return Err(GpuUnavailableReason::GpuCommandFailed);
+                }
+                if output.stdout.len() > SOURCE_TEXT_LIMIT as usize {
+                    return Err(GpuUnavailableReason::GpuInvalidOutput);
+                }
+                parse_first_accelerator(&output.stdout)
+                    .ok_or(GpuUnavailableReason::GpuInvalidOutput)
+            });
+        let gpu_unavailable_reason = match &accelerator_result {
+            Err(reason) => Some(*reason),
+            Ok(value)
+                if value.utilization.is_none()
+                    && value.temperature_c.is_none()
+                    && value.memory.is_none() =>
+            {
+                Some(GpuUnavailableReason::GpuUnsupportedMetrics)
+            }
+            Ok(_) => None,
+        };
+        let accelerator = accelerator_result.ok();
         let cpu_frequency = read_cpu_frequency(&self.paths.cpu_root);
         // GB10 exposes one physical unified pool. Keep that capacity in the
         // memory fields so consumers cannot sum RAM and VRAM twice.
@@ -127,6 +151,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             memory_available_bytes: memory.map(|value| value.1),
             disk_total_bytes: disk.map(|value| value.total_bytes),
             disk_free_bytes: disk.map(|value| value.free_bytes),
+            gpu_unavailable_reason,
             gpu_utilization_percent: accelerator.as_ref().and_then(|value| value.utilization),
             gpu_memory_total_bytes: dedicated.map(|value| value.0),
             gpu_memory_free_bytes: dedicated.map(|value| value.1),
@@ -291,17 +316,20 @@ fn parse_first_accelerator(value: &[u8]) -> Option<AcceleratorReading> {
     if name.is_empty() || name.chars().count() > 256 {
         return None;
     }
-    let memory = match (optional_mib(memory_total)?, optional_mib(memory_free)?) {
-        (Some(total), Some(free)) if free <= total => Some((total, free)),
-        (None, None) => None,
-        _ => return None,
-    };
-    let utilization = if is_missing(utilization) {
+    // Unsupported or malformed memory is independent of load and temperature.
+    // GB10 has no dedicated VRAM: /proc/meminfo owns its unified capacity.
+    let memory = if shared_memory_pool(Some(name)) {
         None
     } else {
-        let value = utilization.parse::<f64>().ok()?;
-        (value.is_finite() && (0.0..=100.0).contains(&value)).then_some(value)
+        match (optional_mib(memory_total), optional_mib(memory_free)) {
+            (Some(Some(total)), Some(Some(free))) if free <= total => Some((total, free)),
+            _ => None,
+        }
     };
+    let utilization = utilization
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && (0.0..=100.0).contains(value));
     Some(AcceleratorReading {
         name: (*name).to_owned(),
         temperature_c,

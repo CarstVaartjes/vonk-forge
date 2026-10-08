@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.telemetry import GpuUnavailableReason
 
 from .models import AgentNode, NodeTelemetryLatest, NodeTelemetrySample
 from .strict_json import warn_unreadable_once
@@ -81,6 +82,7 @@ class TelemetrySampleInput:
     gpu_utilization_percent: float | None
     gpu_memory_total_bytes: int | None
     gpu_memory_free_bytes: int | None
+    gpu_unavailable_reason: GpuUnavailableReason | None = None
     gpu_temperature_c: int | None = None
     cpu_frequency_avg_mhz: int | None = None
     cpu_frequency_min_mhz: int | None = None
@@ -140,6 +142,7 @@ class TelemetrySampleView:
     gpu_utilization_percent: float | None
     gpu_memory_total_bytes: int | None
     gpu_memory_free_bytes: int | None
+    gpu_unavailable_reason: GpuUnavailableReason | None = None
     gpu_temperature_c: int | None = None
     cpu_frequency_avg_mhz: int | None = None
     cpu_frequency_min_mhz: int | None = None
@@ -167,6 +170,7 @@ _SAMPLE_FIELDS = (
     "gpu_utilization_percent",
     "gpu_memory_total_bytes",
     "gpu_memory_free_bytes",
+    "gpu_unavailable_reason",
     "gpu_temperature_c",
     "cpu_frequency_avg_mhz",
     "cpu_frequency_min_mhz",
@@ -199,7 +203,16 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
         boot_id=uuid.UUID(row.boot_id),
         observed_at=_stored_utc(row.observed_at),
         received_at=_stored_utc(row.received_at),
-        **{name: getattr(row, name) for name in _SAMPLE_FIELDS},
+        gpu_unavailable_reason=(
+            GpuUnavailableReason(row.gpu_unavailable_reason)
+            if row.gpu_unavailable_reason is not None
+            else None
+        ),
+        **{
+            name: getattr(row, name)
+            for name in _SAMPLE_FIELDS
+            if name != "gpu_unavailable_reason"
+        },
     )
 
 

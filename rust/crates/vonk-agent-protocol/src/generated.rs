@@ -3527,6 +3527,54 @@ impl ::std::convert::TryFrom<::std::string::String> for GatewayRouteState {
     }
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[allow(clippy::enum_variant_names)]
+pub enum GpuUnavailableReason {
+    #[serde(rename = "gpu.command-failed")]
+    GpuCommandFailed,
+    #[serde(rename = "gpu.command-timeout")]
+    GpuCommandTimeout,
+    #[serde(rename = "gpu.invalid-output")]
+    GpuInvalidOutput,
+    #[serde(rename = "gpu.unsupported-metrics")]
+    GpuUnsupportedMetrics,
+}
+impl ::std::fmt::Display for GpuUnavailableReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::GpuCommandFailed => f.write_str("gpu.command-failed"),
+            Self::GpuCommandTimeout => f.write_str("gpu.command-timeout"),
+            Self::GpuInvalidOutput => f.write_str("gpu.invalid-output"),
+            Self::GpuUnsupportedMetrics => f.write_str("gpu.unsupported-metrics"),
+        }
+    }
+}
+impl ::std::str::FromStr for GpuUnavailableReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "gpu.command-failed" => Ok(Self::GpuCommandFailed),
+            "gpu.command-timeout" => Ok(Self::GpuCommandTimeout),
+            "gpu.invalid-output" => Ok(Self::GpuInvalidOutput),
+            "gpu.unsupported-metrics" => Ok(Self::GpuUnsupportedMetrics),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for GpuUnavailableReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for GpuUnavailableReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum HelperErrorCode {
     #[serde(rename = "call_join_failed")]
     CallJoinFailed,
@@ -14950,6 +14998,8 @@ pub struct TelemetrySample {
     pub gpu_memory_total_bytes: ::std::option::Option<u64>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub gpu_temperature_c: ::std::option::Option<u32>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub gpu_unavailable_reason: ::std::option::Option<GpuUnavailableReason>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub gpu_utilization_percent: ::std::option::Option<f64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -19814,6 +19864,69 @@ impl<'de> ::serde::Deserialize<'de> for GatewayRouteState {
             Raw::Published => Self::Published,
             Raw::Maintenance => Self::Maintenance,
             Raw::Unavailable => Self::Unavailable,
+        })
+    }
+}
+impl GpuUnavailableReason {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::GpuCommandFailed => "gpu.command-failed",
+            Self::GpuCommandTimeout => "gpu.command-timeout",
+            Self::GpuInvalidOutput => "gpu.invalid-output",
+            Self::GpuUnsupportedMetrics => "gpu.unsupported-metrics",
+        }
+    }
+}
+impl ::std::ops::Deref for GpuUnavailableReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for GpuUnavailableReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for GpuUnavailableReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for GpuUnavailableReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("GpuUnavailableReason"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        #[allow(clippy::enum_variant_names)]
+        enum Raw {
+            #[serde(rename = "gpu.command-failed")]
+            GpuCommandFailed,
+            #[serde(rename = "gpu.command-timeout")]
+            GpuCommandTimeout,
+            #[serde(rename = "gpu.invalid-output")]
+            GpuInvalidOutput,
+            #[serde(rename = "gpu.unsupported-metrics")]
+            GpuUnsupportedMetrics,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::GpuCommandFailed => Self::GpuCommandFailed,
+            Raw::GpuCommandTimeout => Self::GpuCommandTimeout,
+            Raw::GpuInvalidOutput => Self::GpuInvalidOutput,
+            Raw::GpuUnsupportedMetrics => Self::GpuUnsupportedMetrics,
         })
     }
 }
@@ -33223,6 +33336,8 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             pub gpu_memory_total_bytes: ::std::option::Option<u64>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub gpu_temperature_c: ::std::option::Option<u32>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub gpu_unavailable_reason: ::std::option::Option<GpuUnavailableReason>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub gpu_utilization_percent: ::std::option::Option<f64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -33247,6 +33362,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             gpu_memory_free_bytes: raw.gpu_memory_free_bytes,
             gpu_memory_total_bytes: raw.gpu_memory_total_bytes,
             gpu_temperature_c: raw.gpu_temperature_c,
+            gpu_unavailable_reason: raw.gpu_unavailable_reason,
             gpu_utilization_percent: raw.gpu_utilization_percent,
             memory_available_bytes: raw.memory_available_bytes,
             memory_total_bytes: raw.memory_total_bytes,

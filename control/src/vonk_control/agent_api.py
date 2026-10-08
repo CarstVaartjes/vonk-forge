@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import fcntl
 import hashlib
 import json
@@ -152,6 +153,12 @@ from .strict_json import ControllerAPIRoute, StrictJSONModel
 from .telemetry import TelemetryRepository, TelemetrySampleInput
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+#: Telemetry fields copied verbatim from the wire sample (all but the boot ID).
+_TELEMETRY_FIELDS = tuple(
+    item.name
+    for item in dataclasses.fields(TelemetrySampleInput)
+    if item.name != "boot_id"
+)
 #: Response header naming a run the Controller never owned.
 RECIPE_RUN_DISPOSITION_HEADER = "x-vonk-recipe-run-disposition"
 RECIPE_RUN_UNOWNED = RecipeRunDispositionValue.UNOWNED.value
@@ -946,18 +953,7 @@ def install_agent_routes(
                 tuple(
                     TelemetrySampleInput(
                         boot_id=uuid.UUID(sample.boot_id),
-                        observed_at=sample.observed_at,
-                        memory_total_bytes=sample.memory_total_bytes,
-                        memory_available_bytes=sample.memory_available_bytes,
-                        disk_total_bytes=sample.disk_total_bytes,
-                        disk_free_bytes=sample.disk_free_bytes,
-                        gpu_utilization_percent=sample.gpu_utilization_percent,
-                        gpu_memory_total_bytes=sample.gpu_memory_total_bytes,
-                        gpu_memory_free_bytes=sample.gpu_memory_free_bytes,
-                        gpu_temperature_c=sample.gpu_temperature_c,
-                        cpu_frequency_avg_mhz=sample.cpu_frequency_avg_mhz,
-                        cpu_frequency_min_mhz=sample.cpu_frequency_min_mhz,
-                        cpu_frequency_max_mhz=sample.cpu_frequency_max_mhz,
+                        **{name: getattr(sample, name) for name in _TELEMETRY_FIELDS},
                     )
                     for sample in body.samples
                 ),

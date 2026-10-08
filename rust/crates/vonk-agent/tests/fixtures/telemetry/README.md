@@ -1,0 +1,1 @@
+Representative NVIDIA CSV fixtures for unsupported and malformed fields; these are hermetic protocol examples, not captures from the production Sparks. CPU sysfs fixtures are materialized in the telemetry test temporary directory.

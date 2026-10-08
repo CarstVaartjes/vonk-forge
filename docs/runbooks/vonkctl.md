@@ -191,7 +191,11 @@ Spark warnings, and runs that are not running, not healthy, not published,
 missing ranks, or reporting stale ranks. `--wide` adds Spark, run, and
 installation IDs and the observation time; `--json` returns the complete
 Controller document. Saved desired assignments remain visible through the
-Profile view. For API base URLs, use `vonkctl profile endpoint`.
+Profile view. GPU readings show utilisation and temperature independently.
+GB10 capacity appears in the host memory column because RAM and GPU memory
+share one physical pool; it is never counted as additional VRAM. A failed GPU
+query carries `GpuUnavailableReason` in telemetry and the human display.
+For API base URLs, use `vonkctl profile endpoint`.
 
 Enrollment and re-enrollment require a new `--output FILE`. The CLI reserves
 that private file before asking the Controller for a grant. The grant document
