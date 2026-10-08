@@ -51,6 +51,7 @@ from vonk_agent_protocol import (
     SourceBundleCode,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RecipeRunDispositionValue
 from vonk_agent_protocol.claims import ClaimRequest
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
@@ -151,10 +152,9 @@ from .strict_json import ControllerAPIRoute, StrictJSONModel
 from .telemetry import TelemetryRepository, TelemetrySampleInput
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-#: Response header on a disposition lookup naming a run this Controller has
-#: no record of; the agent then retires that run's local lifecycle.
+#: Response header naming a run the Controller never owned.
 RECIPE_RUN_DISPOSITION_HEADER = "x-vonk-recipe-run-disposition"
-RECIPE_RUN_UNOWNED = "unowned"
+RECIPE_RUN_UNOWNED = RecipeRunDispositionValue.UNOWNED.value
 # Present on a known run that is currently running: its accepted generation,
 # so an agent that cannot read its own metadata can still report the run.
 RECIPE_RUN_GENERATION_HEADER = "x-vonk-recipe-run-generation"

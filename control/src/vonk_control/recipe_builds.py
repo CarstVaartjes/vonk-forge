@@ -572,14 +572,13 @@ class RecipeBuildResolution:
     def cached(self) -> bool:
         return self.build_id is not None
 
-    def build_input_for_builder(self, binary_digest: str) -> str:
+    def build_input_for_builder(self, binary_digest: str) -> str | None:
         """Bind canonical executable intent to an accepted builder identity."""
         if _SHA256.fullmatch(binary_digest) is None:
-            raise RecipeBuildUnknown(
-                RecipeBuildCode.PLAN_INVALID,
-                "recorded builder identity is invalid",
-                reason=WaitReason.STALE_PLAN,
-            )
+            # A damaged cached receipt is not a reusable content identity.
+            # No effect was accepted: resolution can examine the next receipt
+            # or prepare a fresh build without retaining a claim.
+            return None
         return _digest(self.input_intent | {"builder_binary_digest": binary_digest})
 
 

@@ -8,8 +8,14 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.agent_client_decision import AgentClientDecision
+from ..models.agent_client_decision import check_agent_client_decision
+from ..models.agent_diagnostic_operation import AgentDiagnosticOperation
+from ..models.agent_diagnostic_operation import check_agent_diagnostic_operation
 from ..models.agent_result_state import AgentResultState
 from ..models.agent_result_state import check_agent_result_state
+from ..models.agent_transport_kind import AgentTransportKind
+from ..models.agent_transport_kind import check_agent_transport_kind
 from ..models.artifact_preparation import ArtifactPreparation
 from ..models.artifact_preparation import check_artifact_preparation
 from ..models.asset_availability import AssetAvailability
@@ -62,6 +68,8 @@ from ..models.observation_cause import check_observation_cause
 from ..models.observation_cause import ObservationCause
 from ..models.observed_assignment_state import check_observed_assignment_state
 from ..models.observed_assignment_state import ObservedAssignmentState
+from ..models.oci_failure_category import check_oci_failure_category
+from ..models.oci_failure_category import OciFailureCategory
 from ..models.operator_action_name import check_operator_action_name
 from ..models.operator_action_name import OperatorActionName
 from ..models.operator_surface import check_operator_surface
@@ -102,6 +110,8 @@ from ..models.profile_switch_child_kind import check_profile_switch_child_kind
 from ..models.profile_switch_child_kind import ProfileSwitchChildKind
 from ..models.progress_phase import check_progress_phase
 from ..models.progress_phase import ProgressPhase
+from ..models.recipe_run_disposition_value import check_recipe_run_disposition_value
+from ..models.recipe_run_disposition_value import RecipeRunDispositionValue
 from ..models.reservation_state import check_reservation_state
 from ..models.reservation_state import ReservationState
 from ..models.resource_blocker_code import check_resource_blocker_code
@@ -146,10 +156,15 @@ class LifecycleVocabulary:
     from this one module.
 
         Attributes:
+            agent_client_decision (AgentClientDecision): The client's bounded observation decision after a request outcome.
+            agent_diagnostic_operation (AgentDiagnosticOperation): Stable diagnostic origins for client requests and local
+                preparation.
             agent_result_state (AgentResultState): The state words of an agent result on the wire.
 
                 Unknown effects are observed by the Controller with bounded retries. The
                 retired operator-wait spelling is adopted only when reading old receipts.
+            agent_transport_kind (AgentTransportKind): Safe transport classifications; unknown never invents a network
+                cause.
             artifact_preparation (ArtifactPreparation): The stages of an artifact job before it is submitted.
 
                 These are preparation, not execution: a job is ``draft`` while its inputs are
@@ -206,6 +221,7 @@ class LifecycleVocabulary:
                 ``expired``), which is why an adopted attempt also yields its cause.
             observed_assignment_state (ObservedAssignmentState): Where a fleet-profile assignment stands on the Sparks, as
                 observed.
+            oci_failure_category (OciFailureCategory): Secret-free OCI failure context preserved across the helper boundary.
             operator_action (OperatorActionName): The operator actions a row can advertise and the core accepts.
             operator_surface (OperatorSurface): The real surfaces behind an advertised action in the blocker allowlist.
             outcome_kind (OutcomeKind): What an executor reported, as the lifecycle core sees it.
@@ -235,6 +251,7 @@ class LifecycleVocabulary:
                 superseded.
             profile_switch_child_kind (ProfileSwitchChildKind): Fleet profile SwitchChildKind contract words.
             progress_phase (ProgressPhase): What an operation is doing, as the measured progress names it.
+            recipe_run_disposition (RecipeRunDispositionValue): The header verdict for a run the Controller never owned.
             reservation_state (ReservationState): The standing of a resource reservation.
             resource_blocker_code (ResourceBlockerCode): The capacity-fit codes the resource planner gives a node that
                 cannot fit.
@@ -281,7 +298,10 @@ class LifecycleVocabulary:
             wait_verdict (WaitVerdict): The verdicts of the blocker allowlist for an operator wait.
      """
 
+    agent_client_decision: AgentClientDecision
+    agent_diagnostic_operation: AgentDiagnosticOperation
     agent_result_state: AgentResultState
+    agent_transport_kind: AgentTransportKind
     artifact_preparation: ArtifactPreparation
     asset_availability: AssetAvailability
     blocker_category: BlockerCategory
@@ -307,6 +327,7 @@ class LifecycleVocabulary:
     model_file_state: ModelFileState
     observation_cause: ObservationCause
     observed_assignment_state: ObservedAssignmentState
+    oci_failure_category: OciFailureCategory
     operator_action: OperatorActionName
     operator_surface: OperatorSurface
     outcome_kind: OutcomeKind
@@ -327,6 +348,7 @@ class LifecycleVocabulary:
     profile_retry_disposition: ProfileRetryDisposition
     profile_switch_child_kind: ProfileSwitchChildKind
     progress_phase: ProgressPhase
+    recipe_run_disposition: RecipeRunDispositionValue
     reservation_state: ReservationState
     resource_blocker_code: ResourceBlockerCode
     route_publication_state: RoutePublicationState
@@ -346,7 +368,13 @@ class LifecycleVocabulary:
 
 
     def to_dict(self) -> dict[str, Any]:
+        agent_client_decision: str = self.agent_client_decision
+
+        agent_diagnostic_operation: str = self.agent_diagnostic_operation
+
         agent_result_state: str = self.agent_result_state
+
+        agent_transport_kind: str = self.agent_transport_kind
 
         artifact_preparation: str = self.artifact_preparation
 
@@ -398,6 +426,8 @@ class LifecycleVocabulary:
 
         observed_assignment_state: str = self.observed_assignment_state
 
+        oci_failure_category: str = self.oci_failure_category
+
         operator_action: str = self.operator_action
 
         operator_surface: str = self.operator_surface
@@ -438,6 +468,8 @@ class LifecycleVocabulary:
 
         progress_phase: str = self.progress_phase
 
+        recipe_run_disposition: str = self.recipe_run_disposition
+
         reservation_state: str = self.reservation_state
 
         resource_blocker_code: str = self.resource_blocker_code
@@ -468,7 +500,10 @@ class LifecycleVocabulary:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "agent_client_decision": agent_client_decision,
+            "agent_diagnostic_operation": agent_diagnostic_operation,
             "agent_result_state": agent_result_state,
+            "agent_transport_kind": agent_transport_kind,
             "artifact_preparation": artifact_preparation,
             "asset_availability": asset_availability,
             "blocker_category": blocker_category,
@@ -494,6 +529,7 @@ class LifecycleVocabulary:
             "model_file_state": model_file_state,
             "observation_cause": observation_cause,
             "observed_assignment_state": observed_assignment_state,
+            "oci_failure_category": oci_failure_category,
             "operator_action": operator_action,
             "operator_surface": operator_surface,
             "outcome_kind": outcome_kind,
@@ -514,6 +550,7 @@ class LifecycleVocabulary:
             "profile_retry_disposition": profile_retry_disposition,
             "profile_switch_child_kind": profile_switch_child_kind,
             "progress_phase": progress_phase,
+            "recipe_run_disposition": recipe_run_disposition,
             "reservation_state": reservation_state,
             "resource_blocker_code": resource_blocker_code,
             "route_publication_state": route_publication_state,
@@ -536,7 +573,22 @@ class LifecycleVocabulary:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        agent_client_decision = check_agent_client_decision(d.pop("agent_client_decision"))
+
+
+
+
+        agent_diagnostic_operation = check_agent_diagnostic_operation(d.pop("agent_diagnostic_operation"))
+
+
+
+
         agent_result_state = check_agent_result_state(d.pop("agent_result_state"))
+
+
+
+
+        agent_transport_kind = check_agent_transport_kind(d.pop("agent_transport_kind"))
 
 
 
@@ -666,6 +718,11 @@ class LifecycleVocabulary:
 
 
 
+        oci_failure_category = check_oci_failure_category(d.pop("oci_failure_category"))
+
+
+
+
         operator_action = check_operator_action_name(d.pop("operator_action"))
 
 
@@ -766,6 +823,11 @@ class LifecycleVocabulary:
 
 
 
+        recipe_run_disposition = check_recipe_run_disposition_value(d.pop("recipe_run_disposition"))
+
+
+
+
         reservation_state = check_reservation_state(d.pop("reservation_state"))
 
 
@@ -832,7 +894,10 @@ class LifecycleVocabulary:
 
 
         lifecycle_vocabulary = cls(
+            agent_client_decision=agent_client_decision,
+            agent_diagnostic_operation=agent_diagnostic_operation,
             agent_result_state=agent_result_state,
+            agent_transport_kind=agent_transport_kind,
             artifact_preparation=artifact_preparation,
             asset_availability=asset_availability,
             blocker_category=blocker_category,
@@ -858,6 +923,7 @@ class LifecycleVocabulary:
             model_file_state=model_file_state,
             observation_cause=observation_cause,
             observed_assignment_state=observed_assignment_state,
+            oci_failure_category=oci_failure_category,
             operator_action=operator_action,
             operator_surface=operator_surface,
             outcome_kind=outcome_kind,
@@ -878,6 +944,7 @@ class LifecycleVocabulary:
             profile_retry_disposition=profile_retry_disposition,
             profile_switch_child_kind=profile_switch_child_kind,
             progress_phase=progress_phase,
+            recipe_run_disposition=recipe_run_disposition,
             reservation_state=reservation_state,
             resource_blocker_code=resource_blocker_code,
             route_publication_state=route_publication_state,

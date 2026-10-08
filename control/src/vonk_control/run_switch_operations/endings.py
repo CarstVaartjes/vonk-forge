@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import (
     TYPE_CHECKING,
 )
@@ -11,26 +11,31 @@ from typing import cast as typing_cast
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, RunSwitchCode
+from vonk_agent_protocol.agent_words import ProfileSwitchChildKind
 
 from ..bounded_json import require_integer
 from ..failure_classification import error_code, is_security_failure
 from ..models import (
     Job,
+    RecipeRun,
 )
 from ..recipe_operations import (
     RecipeOperationView,
 )
+from ..reservation_owners import release_dead_owner_reservations
 from ..run_switch_contract import (
     RunSwitchOperation,
     RunSwitchOperationResult,
+    RunSwitchPlan,
 )
 from ..run_switch_progress import (
     _merge_progress_evidence as _merge_progress_evidence,  # noqa: PLC0414 -- shared helper export
 )
 from ..stored_json import read_row_column
+from .constants import _FINAL_VERIFICATION_MAX_SECONDS
 from .errors import RunSwitchOperationConflict
 from .ownership import _checkpoint_matches, _complete_cancellation
-from .planning_helpers import _now, _stored_job_plan
+from .planning_helpers import _aware, _now, _stored_job_plan
 from .provider import _ADAPTER
 from .result_helpers import _persisted_result, _read_progress
 
@@ -40,6 +45,46 @@ if TYPE_CHECKING:
 
 
 class EndingsMixin:
+    def _settle_stop_observation(
+        self,
+        session: Session,
+        job: Job,
+        plan: RunSwitchPlan,
+        progress: RunSwitchOperationResult,
+        now: datetime,
+    ) -> bool:
+        """End an absent target or expired stop observer without inventing effects.
+
+        A standalone clear's accepted request time owns its observation budget,
+        including child waits and exceptions before final verification. It survives a
+        restart and changing retry causes. The runtime owner still reconciles
+        issued stops; ending its observer cannot withdraw a serving route or
+        certify that physical capacity is free.
+        """
+        if (
+            plan.action != ProfileSwitchChildKind.STOP
+            or progress.cancellation
+            or progress.profile_application_id is not None
+        ):
+            # A profile child is the durable Stop effect, shared by continuing
+            # assignments and replacement/startup adoption. Its creation time
+            # is not the lifetime of any one observer. Profile cancellation and
+            # exact Stop authority own its retirement; a standalone clear's
+            # observation budget must never retire this reusable effect.
+            return False
+        deadline = _aware(job.created_at) + timedelta(
+            seconds=_FINAL_VERIFICATION_MAX_SECONDS
+        )
+        if plan.run_id is not None and session.get(RecipeRun, plan.run_id) is None:
+            release_dead_owner_reservations(session, now)
+            code = RunSwitchCode.STOP_TARGET_DISAPPEARED
+        elif now >= deadline:
+            code = RunSwitchCode.FINAL_VERIFICATION_TIMEOUT
+        else:
+            return False
+        self._mark_failed(job, code, now=now, failure_code=code, progress=progress)
+        return True
+
     def _get_child_operation(
         self, operation_id: str
     ) -> RecipeOperationView | _ChildView | RunSwitchOperation | None:

@@ -21,8 +21,12 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any, NamedTuple
 
 from .agent_words import (
+    AgentClientDecision,
+    AgentDiagnosticOperation,
+    AgentTransportKind,
     FailureStage,
     HostHelperResponseStatus,
+    OciFailureCategory,
     ProfileAction,
     ProfileCancellationCause,
     ProfileChildJobKind,
@@ -38,6 +42,7 @@ from .agent_words import (
     ProfileRetryDisposition,
     ProfileSwitchChildKind,
     ProgressPhase,
+    RecipeRunDispositionValue,
 )
 from .state_machines import (
     AssetAvailability,
@@ -778,6 +783,12 @@ class LifecycleVocabulary(WireModel):
     generator and the OpenAPI/TypeScript generators emit each closed word set
     from this one module.
     """
+
+    recipe_run_disposition: RecipeRunDispositionValue
+    agent_client_decision: AgentClientDecision
+    agent_transport_kind: AgentTransportKind
+    oci_failure_category: OciFailureCategory
+    agent_diagnostic_operation: AgentDiagnosticOperation
 
     profile_installation_policy: ProfileInstallationPolicy
     profile_child_phase: ProfileChildPhase
