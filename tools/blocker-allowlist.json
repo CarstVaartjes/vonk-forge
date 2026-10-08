@@ -2003,13 +2003,15 @@
       "CatalogSyncError.__init__": "0408c73804e73234c009d8657a2c059325d402b509333d12f047fda4de65cd78",
       "CatalogSyncRefused": "3529811ff6843748e162fce5fe803f82ca72c991fe8e24ee23744a2bf01fd15b",
       "CatalogSyncRefused.__init__": "3a07fb1e6262fa1481d43a8af775a0a167110b21767083267af5743e5bb15ffc",
+      "CatalogSyncRequestInvalid": "3254d3aa52a2a703cab6f58a979335cc8ea1df716e6ea71c25389a8642166251",
+      "CatalogSyncRequestInvalid.__init__": "ee01cf95da684f17f14d7f8c92dd661cdf65857e069ff947103a645af748d503",
       "CatalogSyncUnsettled": "0f653b2f23af0441169ab9d3db9d6a4a780e4beb2e070c441d992a2cff42c30c",
       "CatalogSyncUnsettled.__init__": "9aac7944fd2029271087ab1d9c40d68899f4774be0866caff04a3e1e6cfe9015",
       "CatalogSyncView": "8850bccf0544508168d6d09639fa5f2e189ab859a651984e885b96eab14a0bda",
       "CatalogSyncFailure": "71e10c65cedcdd5e9701bed3ffbcfdbfd342be2211ffc010d9d7bdcdc31c5211",
-      "ManagedRecipeCatalogSyncService": "b6c0992bbfc51595d8210f662bd0950405a0432e6f98a47bd07183af165eb204",
+      "ManagedRecipeCatalogSyncService": "d9f32816a96dfa011929d713f64e814bd2204edc862090cffb70975e35e7c0da",
       "ManagedRecipeCatalogSyncService.__init__": "3f0872a902a9f3c4dff3b2f292f2073af185dd723fed78f6cdbe90c636161922",
-      "ManagedRecipeCatalogSyncService.sync": "3323971a6f94fa477a28c3b8ee350aeec640365fd550ae5f713a4d06f4edaf2b",
+      "ManagedRecipeCatalogSyncService.sync": "ad3b78a862059a878c431fd863a085df8231ef4eb949a3d035d273688ce13322",
       "ManagedRecipeCatalogSyncService._expired": "de1f16295eb7bb8837ba66517be1d8c5b853ef67ec77f8a468262001c30ec17c",
       "ManagedRecipeCatalogSyncService._expire": "50bb71e669b9a75ed1531cc6397751af8d35a3476a663cbdc55e026d16249581",
       "ManagedRecipeCatalogSyncService.latest": "f63a9437ebb463214578ce75783f322f0c952f2a99e8e3e44295c3f641cb098a",
@@ -2033,7 +2035,7 @@
       "_result": "11091f55c991778cd2a80b9d22f42e9baa9c57b3f31d1883e94f0cc0846763b4",
       "_empty_result": "a7fd189352179fd83598a936169041e59c4d824b74a9eba231cbcaf16ad6d11a",
       "_view": "490608617b3b2dfc232574c61c69b5c9809fad8898abf105d95d3fe6988b745b",
-      "<module>": "bd9148135767f0e7b21bb7d9a39f469bec1a97b241aa6599f255d4358d233886"
+      "<module>": "030d67941c111c233ba666dceb4b1e8a214b49075975da87bbd4b564a9cc9632"
     },
     "control/src/vonk_control/cli_update_contract.py": {
       "CliUpdateContract": "7424267c832515dd7344ef575649e46774be04e38a4331a912e9fbf3d236d64f",
@@ -3735,16 +3737,17 @@
       "install_model_operator_routes.download": "f110a83d5be13f5bca65b96e626527ef899fd472cbaf08b48e9815127b214a87",
       "install_model_operator_routes.remove": "4ea2bb6055220b70e06cc7e840f1b92b2045f0ae02dfeff9c0dc40eba5a7dc44",
       "install_model_operator_routes.cancel_operation": "ea8636ee483d7d9668351943d9abaea72c8d31e2488338e687a869de0e49fa90",
-      "ModelCacheOperationProvider": "3adab2ce8ddea2df74276af8f59b6f3a7bf23610257b50495e7fb5d536897ec3",
-      "ModelCacheOperationProvider.__init__": "38d3a6e5c1d42017c7f4ce0236db9a63a23498b4418abc648948b7a23aeb3d52",
+      "ModelCacheCursorProjectionError": "d9db80fa90e1f06d8845dc0ec7b76abce9debc95bc50898d7fc6f4985e9f4bab",
+      "ModelCacheOperationProvider": "4d77723d58c2ebac4efacaf6f5dbc0c58a079c88c8930a486af33cec42346865",
+      "ModelCacheOperationProvider.__init__": "d53fd0e0daa0cc1d25ff9f0cc7f261984414fc5cfe67ef9e31341830b40630ec",
       "ModelCacheOperationProvider.list_operations": "547e2f31ef5305105b10240a2a2b20e61cc261f58c1a4926d849cc85790db43f",
-      "ModelCacheOperationProvider._next_cursor": "d610476aa669e0a3b7a66403c8ad5b28d7327cb30405d0876044853f793e104a",
+      "ModelCacheOperationProvider._next_cursor": "1b53b816ae279bd95a4eb080b31b38a2fb4825ca42078e6177b748ab7f08ead7",
       "ModelCacheOperationProvider.get_operation": "6f41ab65e52adfdb9162739faf075298e3ec242b8fd44c6dd42300cad9c1b2af",
       "ModelCacheOperationProvider._summary": "3b81ea90ae9172673ddd118d4604d714bd98ff22b3ac182b0faab4f32387fc56",
       "ModelCacheOperationProvider._progress": "5f8019106fd1fb64ddc2d03c7180c0834e32c731ce9b8d89371f8f4c18d6ae75",
       "model_cache_operation_provider": "7d3452c6c89b65a0e32207964e01d7bbfcc7eecbe8d7dd5e8e940b7dea478b00",
       "register_model_cache_operation_provider": "5977cdfff7b887e0ef9c4421676a2cf2b59b89946e48d31bd452cfb0e646ef47",
-      "<module>": "6cfc65a10730683b20a06f2f3346083ba6109c820aef399839b15b01c7be7499"
+      "<module>": "73a59f561daa43983bcbb100309ef70cffa1c43049a157c03d694a261dc29818"
     },
     "control/src/vonk_control/model_cache_ranges.py": {
       "RangeResponseError": "a6b015d3820f2ed675c0fb99dad9a949a4e55288033c65d54ee3ec003e0f3928",
@@ -4073,7 +4076,7 @@
       "accepted_profile_runtime_image": "e0e953b1525df51714583bc9cf774abc5423bcd2b522bd73d854017b7f0443e8",
       "_profile_disk_binding": "28ee3b213d96bf59f1359b450ff876dab5a645e9418606cdbf1f8fd5484ad351",
       "inherited_profile_disk": "1a3bfc4eee1b15028b5435391d11c1efa2f5c35b09684b532502f1d8bde353c2",
-      "prepared_profile_installation": "fd53231d4c18bd1c6ae32a2999fe4775475c33c3d4a0221f971eb7ff33df3050",
+      "prepared_profile_installation": "5c33f561d16c4f91c68e1a274734693b634313191ee47af63a2d8629c5ca5d9e",
       "release_replaced_profile_claims": "9bc488838ee07c72ba56bb5eeef84d776467ae746257ec0396544bce209b196c",
       "release_unassigned_profile_claims": "dcd271bf9e6019bc79a33e8789d05522cd8c0d9139f366e39bcc6377d1f1c060",
       "restore_released_profile_claims": "d6ecef81036a7eb88898726f6d68e0ee127ad1a3dca15f84530cbea18f7590b4"
@@ -6345,13 +6348,14 @@
     {
       "family": "catalog_sync.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request. Rejects an empty or oversized actor before scheduling. Rejects a malformed caller-supplied expected commit before scheduling. Rejects an invalid sync trigger before scheduling.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: message rejects the shape or identity of a request. Rejects an empty or oversized actor before scheduling. Rejects a malformed caller-supplied expected commit before scheduling. Rejects an invalid sync trigger before scheduling. A caller-supplied preview commit mismatch is rejected before catalog effects; a fresh correctly reviewed request is admitted.",
       "sites": [
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_actor_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_commit_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_request_invalid", 2],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_trigger_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_request_reused", 1]
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_request_reused", 1],
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncRequestInvalid", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1]
       ]
     },
     {
@@ -6820,9 +6824,10 @@
     {
       "family": "model_cache_api.input-validation",
       "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class OperationProjectionError validates a contract or request.",
+      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class OperationProjectionError validates a contract or request. Pagination requires its configured authenticated signer and an exact boundary; malformed inputs never become an unsigned or truncated page.",
       "sites": [
-        ["control/src/vonk_control/model_cache_api.py", "OperationProjectionError", "ModelCacheOperationProvider._next_cursor", "operation-cursor-boundary-is-invalid", 2]
+        ["control/src/vonk_control/model_cache_api.py", "ModelCacheCursorProjectionError", "ModelCacheOperationProvider._next_cursor", "cursor-projection-unavailable", 1],
+        ["control/src/vonk_control/model_cache_api.py", "ModelCacheCursorProjectionError", "ModelCacheOperationProvider._next_cursor", "operation-cursor-boundary-is-invalid", 2]
       ]
     },
     {
@@ -8217,8 +8222,7 @@
       "category": "already-retried",
       "reason": "An unknown outcome raised on a path that a registered retry or observe loop (retry_loops, AST-proven by blocker_retries) catches and re-runs on its bounded backoff; the raise is the handoff to that loop, not a dead end.",
       "sites": [
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1]
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncUnsettled", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_in_progress", 2]
       ]
     },
     {

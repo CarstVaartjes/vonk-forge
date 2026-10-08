@@ -1896,6 +1896,7 @@ def test_malformed_pagination_boundary_fails_instead_of_ending_the_page(cache) -
     last one.
     """
 
+    from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
     from vonk_control import operation_api
 
     service, _sessions = cache
@@ -1908,14 +1909,19 @@ def test_malformed_pagination_boundary_fails_instead_of_ending_the_page(cache) -
     )
     with pytest.raises(
         operation_api.OperationProjectionError, match="boundary is invalid"
-    ):
+    ) as caught:
         provider._next_cursor(("only-one",), state=None, node_id=None, request_id=None)
+    assert isinstance(caught.value, InvalidRequestError)
+    assert caught.value.typed_reason is InvalidRequestReason.MALFORMED
     with pytest.raises(
         operation_api.OperationProjectionError, match="boundary is invalid"
-    ):
+    ) as caught:
         provider._next_cursor(
             (1, "operation-id"), state=None, node_id=None, request_id=None
         )
+
+    assert isinstance(caught.value, InvalidRequestError)
+    assert caught.value.typed_reason is InvalidRequestReason.MALFORMED
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(

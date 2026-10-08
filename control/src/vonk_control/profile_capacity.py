@@ -1,4 +1,10 @@
-from vonk_agent_protocol import DesiredAssignmentState, ReservationState
+from vonk_agent_protocol import (
+    DesiredAssignmentState,
+    ReservationState,
+    RunSwitchCode,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
 """Capacity ownership from accepted profile intent to its exact child.
 
@@ -752,7 +758,7 @@ def prepared_profile_installation(
     or a claim was released or never existed (the caller admits the
     installation as usual and reserves afresh). Active claims that disagree
     about their owner cannot prove the atomic handoff. They remain accounted
-    to their existing owners; the caller uses ordinary admission instead.
+    to their existing owners; a typed unknown outcome triggers bounded reconciliation.
     """
     _, _, requirements, claims = _profile_disk_binding(
         session,
@@ -777,9 +783,11 @@ def prepared_profile_installation(
         or claim.amount_bytes > (requirements[node_id] or 0)
         for node_id, claim in claims.items()
     ):
-        # Never adopt an unmatched installation or free its physical claim.
-        # A damaged shortcut is not a gate on the normal admission path.
-        return None
+        # Active ownership is authority, not a disposable admission shortcut.
+        raise UnknownOutcomeError(
+            RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT,
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     return identities.pop()
 
 

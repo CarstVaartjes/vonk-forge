@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncCode,
     CatalogSyncState,
+    InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
     SecurityRefusalError,
     SecurityRefusalReason,
@@ -82,6 +84,15 @@ class CatalogSyncRefused(SecurityRefusalError, CatalogSyncError):
     def __init__(self, code: CatalogSyncCode, detail: str) -> None:
         CatalogSyncError.__init__(self, code, detail)
         self.typed_reason = SecurityRefusalReason.FORBIDDEN
+
+
+class CatalogSyncRequestInvalid(InvalidRequestError, CatalogSyncError):
+    """The requested sync no longer matches its reviewed input."""
+
+    def __init__(self, code: CatalogSyncCode, detail: str) -> None:
+        super().__init__(
+            code, detail, reason=InvalidRequestReason.CONFLICT, field="expected_commit"
+        )
 
 
 class CatalogSyncUnsettled(UnknownOutcomeError, CatalogSyncError):
@@ -236,7 +247,7 @@ class ManagedRecipeCatalogSyncService:
                     "recipe library repository identity changed",
                 )
             if expected_commit is not None and snapshot.commit != expected_commit:
-                raise CatalogSyncUnsettled(
+                raise CatalogSyncRequestInvalid(
                     CatalogSyncCode.PREVIEW_CHANGED,
                     "recipe library changed since it was reviewed",
                 )

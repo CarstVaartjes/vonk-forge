@@ -89,22 +89,44 @@ def test_activity_absent_projection_is_not_a_read_failure():
         _global_get_operation(services, "missing")
 
 
-def test_cache_cursor_absence_keeps_readable_page():
+def test_cache_pagination_requires_configured_authenticated_cursors():
     from unittest.mock import Mock
 
+    from vonk_agent_protocol import InvalidRequestReason
+    from vonk_control.auth import CursorCodec, CursorError
     from vonk_control.model_cache import ModelCacheService
-    from vonk_control.model_cache_api import ModelCacheOperationProvider
+    from vonk_control.model_cache_api import (
+        ModelCacheCursorProjectionError,
+        ModelCacheOperationProvider,
+    )
 
     provider = ModelCacheOperationProvider(Mock(spec=ModelCacheService))
-    boundary = ("2026-10-08T00:00:00+00:00", "operation")
-    cursor = provider._next_cursor(
-        boundary,
-        state=None,
-        node_id=None,
-        request_id=None,
+    assert (
+        provider._next_cursor(None, state=None, node_id=None, request_id=None) is None
     )
+    boundary = ("2026-10-08T00:00:00+00:00", "operation")
+    with pytest.raises(ModelCacheCursorProjectionError) as caught:
+        provider._next_cursor(boundary, state=None, node_id=None, request_id=None)
+    assert caught.value.typed_reason is InvalidRequestReason.NOT_READY
+    codec = CursorCodec(b"x" * 32)
+    provider = ModelCacheOperationProvider(Mock(spec=ModelCacheService), codec)
+    cursor = provider._next_cursor(boundary, state=None, node_id=None, request_id=None)
     assert cursor is not None
-    assert provider._cursors.decode(
+    assert codec.decode(
+        cursor,
+        resource="model-cache-operations",
+        order="created-at-desc/id-desc/v1",
+        context={"state": None, "node_id": None, "request_id": None},
+    ) == list(boundary)
+    replacement = "A" if cursor[-1] != "A" else "B"
+    with pytest.raises(CursorError):
+        codec.decode(
+            cursor[:-1] + replacement,
+            resource="model-cache-operations",
+            order="created-at-desc/id-desc/v1",
+            context={"state": None, "node_id": None, "request_id": None},
+        )
+    assert codec.decode(
         cursor,
         resource="model-cache-operations",
         order="created-at-desc/id-desc/v1",
@@ -127,11 +149,16 @@ def test_incomplete_cached_build_enters_normal_preparation():
     assert _cached_build_receipt(resolution) is None
 
 
-def test_unmatched_handoff_does_not_adopt_or_block(monkeypatch):
+def test_unmatched_active_handoff_is_named_and_preserves_owners(monkeypatch):
     from unittest.mock import Mock
 
     from sqlalchemy.orm import Session
-    from vonk_agent_protocol import ReservationState
+    from vonk_agent_protocol import (
+        ReservationState,
+        RunSwitchCode,
+        UnknownOutcomeError,
+        WaitReason,
+    )
     from vonk_control import profile_capacity
     from vonk_control.models import ResourceReservation
 
@@ -156,7 +183,7 @@ def test_unmatched_handoff_does_not_adopt_or_block(monkeypatch):
             claims,
         ),
     )
-    assert (
+    with pytest.raises(UnknownOutcomeError) as caught:
         profile_capacity.prepared_profile_installation(
             Mock(spec=Session),
             "profile",
@@ -164,8 +191,9 @@ def test_unmatched_handoff_does_not_adopt_or_block(monkeypatch):
             tuple(claims),
             workload_intent_ordinal=1,
         )
-        is None
-    )
+    assert caught.value.typed_reason is WaitReason.SCOPE_CHANGED
+    assert str(caught.value) == RunSwitchCode.INSTALLATION_HANDOFF_INCONSISTENT
+    assert {claim.owner_id for claim in claims.values()} == {"one", "two"}
     assert all(claim.state == ReservationState.ACTIVE for claim in claims.values())
 
 
