@@ -89,14 +89,12 @@ def test_activity_absent_projection_is_not_a_read_failure():
         _global_get_operation(services, "missing")
 
 
-def test_cache_pagination_requires_configured_authenticated_cursors():
+def test_cache_pagination_uses_authenticated_observation_cursors():
     from unittest.mock import Mock
 
-    from vonk_agent_protocol import InvalidRequestReason
     from vonk_control.auth import CursorCodec, CursorError
     from vonk_control.model_cache import ModelCacheService
     from vonk_control.model_cache_api import (
-        ModelCacheCursorProjectionError,
         ModelCacheOperationProvider,
     )
 
@@ -105,9 +103,14 @@ def test_cache_pagination_requires_configured_authenticated_cursors():
         provider._next_cursor(None, state=None, node_id=None, request_id=None) is None
     )
     boundary = ("2026-10-08T00:00:00+00:00", "operation")
-    with pytest.raises(ModelCacheCursorProjectionError) as caught:
+    assert (
         provider._next_cursor(boundary, state=None, node_id=None, request_id=None)
-    assert caught.value.typed_reason is InvalidRequestReason.NOT_READY
+        is not None
+    )
+    assert (
+        provider._next_cursor(("damaged",), state=None, node_id=None, request_id=None)
+        is None
+    )
     codec = CursorCodec(b"x" * 32)
     provider = ModelCacheOperationProvider(Mock(spec=ModelCacheService), codec)
     cursor = provider._next_cursor(boundary, state=None, node_id=None, request_id=None)

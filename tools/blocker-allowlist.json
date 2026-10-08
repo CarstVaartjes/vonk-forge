@@ -206,6 +206,7 @@
       "control/src/vonk_control/recipe_stop_payloads.py",
       "control/src/vonk_control/recipe_update_batches.py",
       "control/src/vonk_control/route_runtime.py",
+      "control/src/vonk_control/run_admission.py",
       "control/src/vonk_control/run_switch_operations/__init__.py",
       "control/src/vonk_control/run_switch_operations/acceptance.py",
       "control/src/vonk_control/run_switch_operations/activity.py",
@@ -479,7 +480,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 108,
+    "total": 127,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -1259,6 +1260,14 @@
         "UnknownOutcomeError"
       ],
       "reason": "An unknown source or preview ends the accepted attempt with its typed failure result and clears active_slot in the same persisted ending path. No verified catalog generation is replaced. A shared non-blocking regression proves the slot is free and a fresh request succeeds immediately; automatic sync observes again on its existing bounded interval."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_operations/installation_preparation.py",
+      "function": "InstallationPreparationMixin.prepare_installation",
+      "catches": [
+        "UnknownOutcomeError"
+      ],
+      "reason": "Preparation rolls back each failed transaction and repeats exact admission through bounded admission_attempts. Exhaustion releases all transaction holds and leaves a fresh request eligible."
     }
   ],
   "call_edges": [
@@ -2010,33 +2019,33 @@
       "CatalogValidationError": "76eb7fe645e39bdd167cca53c146e6ac3687588c9968bb182c410360461312e1",
       "CatalogReferenceInvalid": "a77159b3f1905dfdbdcb32f6bc94f5f153bc843a14b526eefdd3250aa8510b7f",
       "CatalogReferenceInvalid.__init__": "ef17687ad8c8c35e165e7bd82ec1d57d90048d9479320b92a40a0d24b16b952d",
-      "CatalogEntityService": "26bdd98468ea79c778e22da4bf3acf2270ca19a45c826e1ed1244224b047d741",
+      "CatalogEntityService": "295f531ff661c376986b71f89935d5083c59bfdbea6bcf679116f910d0512436",
       "CatalogEntityService.__init__": "84edde6446406c53156e5de65c5f67dfddf2b8bf9fb71da112dc230025e77bae",
       "CatalogEntityService._write": "bd43d7ab29896c1d08413cb51db977cadf83573b913a2a5f9678d842b81a3030",
       "CatalogEntityService._read": "c25febc495f52c685122a2adc0bfae1ad46e0886af0c1d92aeaae0080c05df16",
-      "CatalogEntityService.refresh_build_policy": "4e941c3492241c7453d28b456048b36ddddb294696d38d5075a35d15778d029a",
-      "CatalogEntityService.record_prebuilt_images": "618616aa2133e81fa98f0038e87bdb21008f5cd494ebda97e981d24d18fd9a44",
+      "CatalogEntityService.refresh_build_policy": "9e860296f06aad27cbd35fcfed92ff72c58a1858de799a7b4ad6313e87de37b1",
+      "CatalogEntityService.record_prebuilt_images": "798a75acb107787a1c2f43d210fca7c227afdd9027427a550e6f24bbb58a34df",
       "CatalogEntityService.create_draft": "301181a595ad93b400074bce00eef59357c6bcd3b402a6bd0ba9d33be43d629a",
-      "CatalogEntityService.revise": "e9cb1a7468fd309041198ef1227b342cfa8fd51f090cb57ea32af4c794cb80fb",
+      "CatalogEntityService.revise": "f502a21c6785ef3a05336f8175a2262137bdb9bd15a44ac7e53b0e7c915dadce",
       "CatalogEntityService.resolve": "073fa47d20ebea90bcdedadf035939e0eb6dfcf6af2c9493001b56be56dd2b9b",
-      "CatalogEntityService.fail_candidate": "cd208aeca96d3b7ecfb986567ff113f7f5f3789480b13daa1a5bc9a007050897",
+      "CatalogEntityService.fail_candidate": "f040abdebe3690e1d4d8f3881583b2ffb52cc5757b98abd6c3e1f942586b24c0",
       "CatalogEntityService.get_entity": "9e41eca083a43a9553a43b6ee5d8fa367aa6332fd0b4d7585923407536a173dc",
       "CatalogEntityService.resolve_reference": "e3e139fd62bd70056d99838358cfcde97d6592468e0ea23b7c666ba48517e6da",
       "CatalogEntityService._bind_recipe_models": "14deed108d0af088a2a9f9872a1eb7c10a788428781200c9cd05c09b79cdb5e6",
       "_parse": "d440a816ea340d99601b28461659a4c0dae482306d96d6f6a58663d040b319eb",
       "_revision": "a173d54acfc183e636ccb0370c2051b2e9b9c694bff085f0ddcb4f73f571d314",
       "recipe_document_projection": "5a1d3f05992dbe4238fb7093306b47be419ec4eed5fca0d8a7a29f6f3f924869",
-      "_rederive_projection": "d77a8be79b8653cc27f9de6e6e33935f89257e1bec4aeeeacef98c672cea9120",
+      "_rederive_projection": "2944663de742ab4eda82f40901d21a01e17a51d9c26eb5997d61ff3beec1f8ea",
       "build_policy_projection": "977fcb3e44563a3619ab35d96cdd934c6bd825d9487917ec18898d9d7a16744c",
       "_model_artifact_files": "5d4df84e2870f547d701c698605b0c1dc95ab65bd12530cdb1200c6b1f778e0a",
       "_execution_projection": "79bf92da12878bb502ecb097602b3ab5bd590feecc30a6cdb9e215d55daa282d",
       "_digest": "dddffa40b7cc9cb190de28a2fdf01e6f87ec33c2f7ace443aa7a1d2c5b317012",
       "_head": "47482658f86d80e28f9c46ac1e7a7dea4d53e3b585371ab0c21e008094d2137e",
       "_actor": "0cb1d3b23061e03f0495168e4c59c4143671a5872bbb0d22e885cb1cfc35ccf4",
-      "<module>": "f3b4df15d03fb9fe5862ca22e488a50380780a1710c45ca113eb4ef5e22706a4"
+      "<module>": "9330fa3a8764fb2275ad32310db5b9086a3c98e57027ae336236bed27e950a9b"
     },
     "control/src/vonk_control/catalog_revision_contract.py": {
-      "CatalogRevisionContractError": "e8aeeb6cfccd08a44f7fe8d988d2e31991b53eed571b22417b0d7d0a7d59f282",
+      "CatalogRevisionContractError": "5d8eb1625165d89f79c2a047844ae5e23fcdf91d48f027e96f72fac943c8d558",
       "RecipePackageHandleProjection": "2daffd856c6f6f2e88fc74fcf56026321bc4f3d395224415b840ea4247a9edf5",
       "_CatalogRevisionProjection": "c382044a313f6c0c545acac712063a3a6ca3ad3bb81e03f474aaff7de8131e4e",
       "PrebuiltImage": "08ea5add19530927428569abaabaa5ed325ca9c293ab01f3a04a3f4fac029937",
@@ -2050,11 +2059,11 @@
       "RecipeRevisionProjection": "2a185c67e92a06b00a9ee1a9fdb1c743a3ca80d33ea707d5979affb5f823e0dc",
       "UnprojectedRevision": "b25568daff0efdb50ee665520cdb7f90dd8a9e3611fa995ce27709dde923b73f",
       "_json": "79c5110558c58d3e55b2cfca31bab664d22b95f095699e46d6ad5580ebe4d502",
-      "read_catalog_projection": "c328336a0c2269958e606968d7015cfa6724966918af48bf7fcac116ce208420",
+      "read_catalog_projection": "3a980768f6b479aa692286fd837b19762762bd0576ea973e93c2d113bd5aa652",
       "write_catalog_projection": "a30ac42553d6c625d12735f39e04e65f87b097b8815e999a7d065b09966c5d2e",
-      "read_catalog_document": "91f6623b49419902593a26cf390153ecd99873bb0999cb7f9192fc4e29ebfad2",
+      "read_catalog_document": "97cfd136feb0d58c218b09e37426d116fbf26b1966d861e53280a4a5cbcea431",
       "read_model_set": "be4d32395a4e5b505a3b3a6c24b707446a61ed368f1962114ef2f64a54226c1e",
-      "<module>": "0bb58bdf25f3c4c7bc653ca5c1c92ece24b2a693e7d70035b5e20198c2768d53"
+      "<module>": "3445a5ab775e27d9e60e518c4b47b81f5c56097a6405869649348e7bf8e89619"
     },
     "control/src/vonk_control/catalog_service.py": {
       "_CatalogImportDocument": "2363976f91f5fdf06298b9d9a3ca9c46f2936f966d418dd2f5939bd29de22812",
@@ -2062,18 +2071,18 @@
       "RecipeRevisionView": "7ba5f33be873c1621924c52b1b59e873b3a5c32f75066364e35a792cade970c7",
       "RecipeCatalogLocalRevision": "ae49cbd59e6076b17a592ec02b5e065f68cc3bf225895e6991e9bc0c15bc1b32",
       "SourceBundleView": "0f651524cf61fa356e9fe6f9531c138e0d08d5c6c5488bd7bf17060bdfa9e933",
-      "CatalogService": "c8a7960505b5daf9e8575cb8f1223fb5e386b6d21893b495146ce97c8fe02d18",
+      "CatalogService": "625e32679adb5de94ca92e1b17347869c3778e4e8f00f0b0a9aed1dba65b253d",
       "CatalogService.__init__": "778e955cb50d683f69019d560ef38d127ad6d0674b0c7a1580519e6d87b52d77",
       "CatalogService.store_source_bundle": "31b2b81b0ee49f67817c82ca9a2ae52b02a1315ab7188a1161f797cca9c9bf2f",
       "CatalogService.get_recipe": "e2b12f54ea50c22d3ca837ca588a834780a3a04e4cc573d5402e504db2f29235",
-      "CatalogService.recipe_catalog_local_revisions": "4ea275b58766d34073c3d748bfded58268d071d9c4c1dc0a46f63986a230cd5f",
+      "CatalogService.recipe_catalog_local_revisions": "edaec8f0ba708a40acda441283c43aacdc824a41c9084f963437bd263bd204e9",
       "CatalogService.retract_recipes_absent_from": "8e8c733675a94359685958eea332f61d6fde5aaa79370a02e97204658e988d83",
       "CatalogService.import_catalog_models": "03e783af87caab212f01c56bbc391946aef1808a00fde76ea288c7d7aaed527d",
       "CatalogService.refresh_build_policy": "0b32285b305b9b892cf31628bdf25a3b603b192cde9d263ff661cfe3bd3448a9",
       "CatalogService.record_prebuilt_images": "d04ef21e53f42a2ae68125112fb16e7bb77d8b7ae430e07616c2956ef3640b45",
       "CatalogService.import_recipe_library": "5d7bc15b4c934022f2aa49aae9398d9a81aa211f257d74a0ad6f0d121ca42220",
       "CatalogService._select_imported_recipe_head": "6eee0c77fb655e3f3bd28f3d615271ccd277f4fd77a186283419ad1e2a58091c",
-      "CatalogService._upsert_canonical_document": "d8ef30c34c2ba053c795758596b007462fbbf376f8e69ed6a6510484378cdfbc",
+      "CatalogService._upsert_canonical_document": "dac417a3fb3bd8b5c8e6e70c4f34ced69b9cfbda3205ca329e4ee812f3a8ba73",
       "CatalogService.resolve_recipe_revision": "f79135c82694f4fe31cf284a80f3bcc63a5cb0933fdf2fd395351cb5ba34e9a3",
       "_get_active_recipe": "6592e19aef43dfdac0f032f6a1df1d5a561fc3667a4c3ddd294bd7a1e83d45e9",
       "_resolve_recipe": "2b3ce6199dfb933c9b9e6ca1489a8bccb6346cb2d98c0bed89d797ed2690a93d",
@@ -2083,7 +2092,7 @@
       "_release_version": "25fae76e14508224df8918aac0093b8ddfa7bafdd260d918e5ffea54818b06d8",
       "_package_handle_metadata": "a3b83fea8b2a2aacd4cccd4cfebd3724be75371b413fe8c6a42c8f8b3163a023",
       "_actor": "4cd7a803231c3ba9ae9aecc2672ff2961362f434839937c847dfc0fb3db9e990",
-      "<module>": "c45751d48ec3bb5cf0ebd3493a36373532fdc1fbf0622710a3f5d6c9d17ef577"
+      "<module>": "ab558e018d44580cd0341f615272d2d20200f39e563cee9ca672c12eade9e8ee"
     },
     "control/src/vonk_control/catalog_sync.py": {
       "_controller_marker": "fac49c47d66d2d5657a7ebb737c994f6027b24834c9acaa0b39e51802b528dca",
@@ -2094,22 +2103,22 @@
       "CatalogSyncError.__init__": "0408c73804e73234c009d8657a2c059325d402b509333d12f047fda4de65cd78",
       "CatalogSyncRefused": "3529811ff6843748e162fce5fe803f82ca72c991fe8e24ee23744a2bf01fd15b",
       "CatalogSyncRefused.__init__": "3a07fb1e6262fa1481d43a8af775a0a167110b21767083267af5743e5bb15ffc",
-      "CatalogSyncRequestInvalid": "3254d3aa52a2a703cab6f58a979335cc8ea1df716e6ea71c25389a8642166251",
-      "CatalogSyncRequestInvalid.__init__": "ee01cf95da684f17f14d7f8c92dd661cdf65857e069ff947103a645af748d503",
+      "CatalogSyncRequestInvalid": "1fd66ba26c83057e2fc2509abc5ecb59f694ab3ff215a6218f44c6acad41a76b",
+      "CatalogSyncRequestInvalid.__init__": "505e39379113a446798a623aaa496281cf08cbccf97c245869431bd427b3f68a",
       "CatalogSyncUnsettled": "0f653b2f23af0441169ab9d3db9d6a4a780e4beb2e070c441d992a2cff42c30c",
       "CatalogSyncUnsettled.__init__": "9aac7944fd2029271087ab1d9c40d68899f4774be0866caff04a3e1e6cfe9015",
       "CatalogSyncView": "8850bccf0544508168d6d09639fa5f2e189ab859a651984e885b96eab14a0bda",
       "CatalogSyncFailure": "71e10c65cedcdd5e9701bed3ffbcfdbfd342be2211ffc010d9d7bdcdc31c5211",
-      "ManagedRecipeCatalogSyncService": "d9f32816a96dfa011929d713f64e814bd2204edc862090cffb70975e35e7c0da",
+      "ManagedRecipeCatalogSyncService": "d5f264d7135e892b93c8530aa57593fc4edad1a14d18b447a794f1919f3e213a",
       "ManagedRecipeCatalogSyncService.__init__": "3f0872a902a9f3c4dff3b2f292f2073af185dd723fed78f6cdbe90c636161922",
-      "ManagedRecipeCatalogSyncService.sync": "ad3b78a862059a878c431fd863a085df8231ef4eb949a3d035d273688ce13322",
+      "ManagedRecipeCatalogSyncService.sync": "a55023eb7ea80b88cc2c35917ede197de6df90b9ef5a1585f8208a082b717bbd",
       "ManagedRecipeCatalogSyncService._expired": "de1f16295eb7bb8837ba66517be1d8c5b853ef67ec77f8a468262001c30ec17c",
       "ManagedRecipeCatalogSyncService._expire": "50bb71e669b9a75ed1531cc6397751af8d35a3476a663cbdc55e026d16249581",
       "ManagedRecipeCatalogSyncService.latest": "f63a9437ebb463214578ce75783f322f0c952f2a99e8e3e44295c3f641cb098a",
       "ManagedRecipeCatalogSyncService.get": "ff51a26f9e184cd94fe6a37b4287913942a6f18b3a13e918db03e23c69d910f1",
-      "ManagedRecipeCatalogSyncService.automatic": "c406a7ba18e1e7ea255d98e2602a146f37c13284372742e3896eb6bc2d23c3e1",
+      "ManagedRecipeCatalogSyncService.automatic": "aa2f9d1c9b9098ecf84d0945fb8344244076e06e4975508e4277ba48f5a0c505",
       "ManagedRecipeCatalogSyncService._record_read_failure": "2d3f71abfb233252f4bced5603e2324109eb165296d4a9c9f4aa6ae41086e0b3",
-      "ManagedRecipeCatalogSyncService._apply": "f16fe9ce8c839f6288b39b2e05419d93172db11ca2b78581a88693a25431d3dc",
+      "ManagedRecipeCatalogSyncService._apply": "d1b0c12807a3665c4522bcd3bdd691a517259e1413691230313c7709bd1228d8",
       "ManagedRecipeCatalogSyncService._store_source_bundle": "db90b6733ccb3f14db4a3a50fbd3a516786d94d8a81c4dfc51542eb83f96951d",
       "ManagedRecipeCatalogSyncService._record_problem": "7352504cc6e1c6a600159aad3e8bc292414b16e53c02350d62918e07a55101b8",
       "ManagedRecipeCatalogSyncService._record_problem_values": "7be53f36db9c2f4757f3ee129ff132cf658b92083428a9679f7f3fbfe69cc19c",
@@ -2124,9 +2133,9 @@
       "run_automatic_sync": "4c4af719ee67659a93793fca11fa94f34f4e29f5c287586883907463319e5f3b",
       "_log_automatic_failure": "ce46d140005c184d3f5c1560bb9b6eb92dd81303bb9db684e1038b04b1576328",
       "_result": "11091f55c991778cd2a80b9d22f42e9baa9c57b3f31d1883e94f0cc0846763b4",
-      "_empty_result": "a7fd189352179fd83598a936169041e59c4d824b74a9eba231cbcaf16ad6d11a",
+      "_empty_result": "4a339c4507cfc29fd1ab25876c75201bcb1837ffbd6b8335b3a8c54c9a7bd1ba",
       "_view": "490608617b3b2dfc232574c61c69b5c9809fad8898abf105d95d3fe6988b745b",
-      "<module>": "030d67941c111c233ba666dceb4b1e8a214b49075975da87bbd4b564a9cc9632"
+      "<module>": "ff0f98ba8c46ddb6b2e7c4d1e303e6d8118e1073ff5439bf39f47c85318103a6"
     },
     "control/src/vonk_control/cli_update_contract.py": {
       "CliUpdateContract": "7424267c832515dd7344ef575649e46774be04e38a4331a912e9fbf3d236d64f",
@@ -3206,39 +3215,39 @@
       "<module>": "a531921420bb6a42b4a3313c899bea56a588441a86e314277227a12f9d40542a"
     },
     "control/src/vonk_control/library_projection.py": {
-      "LibraryProjectionError": "c586c9263fed0aba8cbb12b54a497211285f242cf0ca48c39b7ad4fa75154b2f",
+      "LibraryProjectionError": "5801feebead79a8f734508bcf2bbbb1476c165f881978af530d3f1aea2364c39",
       "LibrarySelectorAmbiguous": "fd19ebc6a9de758037db8b2d102c312a8e5d134dfd5eccad8c89ccb36677ab07",
       "LibrarySelectorAmbiguous.__init__": "9b80add580dbc1ae0468c9903bd496f8c66fe099c9a15b700c7a698568bf9d95",
       "_wire_json_bytes": "7bdebff104929439dbf4d896338c9c539ca7e3afdb756056f468f4e995dee6bb",
       "_bounded_library_page": "883045569c496de399891de500df5182f5d7e34b973be6b252cfab3ebce0a45a",
-      "_controller_state": "e2adf8121de7acad35318accba1c9feb867b3ac814f70abbcb7413a7311281cf",
+      "_controller_state": "71c59b3797ddbe91c4e64b9d44f551d6e8d4b22a62b79e0a1737d08f0c3f17a1",
       "_filter_digest": "92a2b44a388520894403f3737e35a9d312537a9f4f9a77381cdddfe6c158b02c",
-      "_note_unreadable": "62b391bf76a9699d47e3f839a21974eee4cd98b049665a367ba84de19792b183",
+      "_note_unreadable": "51472ffbb6218e1d3511f2c1120664a033f40474fb91e33bd18322facf4e670a",
       "_readable_document": "b16e77280df81d6522cdc7109c919604ccec1fc9da75577141f157ef9b083342",
-      "_canonical_document": "8db6e8d373331bcdef66d67c16baea2b8be9c6ce16921d7b29800064e461eab0",
+      "_canonical_document": "7be9ea12b531f28e84a9ed6c97374772610f5311b76e15174914c7726601724c",
       "_canonical_model": "ffbd0939503282624e3c3e44b86574e60e44e8783255a83c7cd31da6bd5dfb23",
       "_canonical_recipe": "b9c21ccea1f9045bbea79b259d1a8578bd2b9ee486e9e1cfad3effd86c0d1059",
       "_model_identity": "1e1a5bcb65f05e2ccb2eeb37cd6768c93644d096aed4fe863cce86e32769d65b",
       "_recipe_creator": "065b648afb930560fbb89c8602638e8a32eaac3f46aaf770be8d6b720553bdcf",
       "_canonical_recipe_summary": "693e657369f51e8fcba3a875f684579ecf43a8ce97e95ab63ca04046280cc526",
-      "LibraryProjection": "9139471f368b28292121f5f41c071864751773f93804ab6fc3ebc55a9445f57d",
+      "LibraryProjection": "fbab5e14ca5a7baea206b21a61e24f46a85c5f1de5c4dcfc33e3b30e3a99b6c1",
       "LibraryProjection.__init__": "522b6d369c16bda6af84f680bc39ae22a9382f7867d8e8f1b8c4cf849fac79f1",
       "LibraryProjection._assessed": "59d111efeb4a5d0bc8137a6b853b86efe4145c660cbb608e86f4907a79009680",
       "LibraryProjection.selector": "2204eebbd2660227fac8805b652dbbc6902d1731cffe6d3070c6dc651a6f7048",
-      "LibraryProjection._local_state_snapshot": "797c8a24887a53413d2f162ee76ba044a72152656cb713ea72cbf6173bb32c12",
-      "LibraryProjection._local": "c55736ac69dcbeb9d42ac463fc49c827c4d109b636d1d72960499895b7dccfc5",
-      "LibraryProjection._merge_local": "53448e4cbe6295b172733ffaef5fce57becb7fa6ef5a503910055d9ab106e562",
+      "LibraryProjection._local_state_snapshot": "b2df21bafbd53a010507bf8c331ba8d56d68fb7960822ec5996314d3bac4f161",
+      "LibraryProjection._local": "9bd96457a36b59c2cce912601e4b24ab8b48f44af22e7a024534432d2ac030a0",
+      "LibraryProjection._merge_local": "f39bc9b1dec590d510a766e8f54292ebf5ec91215c736ec914b2046a82d3f85c",
       "LibraryProjection._cache_progress": "7fae25686144682a35a727320b00dbf64dde94ab57f528e2ed5bb5dfd91ca4b6",
       "LibraryProjection._database_local_state": "80830dbf0398d59648ab00c081b3f4112912db04aaa0ad3edec3257f57da9c74",
       "LibraryProjection._apply_image_presence": "fc3b9ac10ee24f547aae6af34b459a4a589fdc1babc9ccf4cfea62361d75750d",
       "LibraryProjection._library_release": "ab314cf336f2794231220c4d4baef55e9b842ac0eb5f4bb48bfc9617e2b274be",
       "LibraryProjection._model_usage": "0471a2e6c7d40c81089ee6a4d41e5c9dd6b12748915d63d5a14eab136f31395d",
       "LibraryProjection._recipe_resources": "e88a07664678b06bb1dba782daecf048f1b021284068bd238f013913b710bcbf",
-      "LibraryProjection._model_projection": "5174057185655cdabbb08a1e9fe29c27e1d97d6b1417883431d2f228028704ed",
-      "LibraryProjection._recipe_projection": "794bd57ceff632e73fcc4d6785fae6c00fbabb6feab37d009d2fbc3270575fe8",
+      "LibraryProjection._model_projection": "4aab59ceb1de24313b6840ad994b5325564b2528b636b4ffe8e23b8e2164245f",
+      "LibraryProjection._recipe_projection": "17a93a1e1e16ccf35ec85b3395f094f4b2084b5ff7a09f6fe10957e0842f386c",
       "LibraryProjection._alignment_by_model": "2f3b7371a31f5a11748a769ab014bfa23983b8f86f679f966d186d828942b108",
       "LibraryProjection._catalog_documents": "6d479d5f703060f7076aa4090f71142a57eee0877d673d4190ac64de0565bbac",
-      "LibraryProjection._documents_for_snapshot": "5dbe1e7e9c39107ce468f30dfe9f198ae5db83fbe5a260e23b8b1ea848833d6f",
+      "LibraryProjection._documents_for_snapshot": "4846197fda3a4d1543dbf2b04d6ea1752c48d416328b1bee306bfa17fc1a83c2",
       "LibraryProjection._matches_any": "3ba6342aa7196ac6e6f3eadf6ac5dabf3e118989596f9e7c0bd2d450723b61dd",
       "LibraryProjection._resolve_selector": "5db731cf6a4b501e07f70ac94dcf9cdb686d9468afc0eec735f6811e2449ec78",
       "LibraryProjection._facet_values": "622d4137be7cb6ebc7ba1ae2db41ba80677fa0c0f855b44974d63d86a17cd79e",
@@ -3247,12 +3256,12 @@
       "LibraryProjection.models.encode_cursor": "34896e8d6e0ff54b62dc9a277613fbabc5cd73b7281600c42ae311ca900e6bd2",
       "LibraryProjection._model_sort_key": "70a3de1090d812285d367eceed1604d29fa382fbdbc4fd108594e3fd6ad11c50",
       "LibraryProjection.model_detail": "8e41fba0950e926d248d00306ff28c09a2ebd4f6c4a6de8c99f6cb995f3e8dc8",
-      "LibraryProjection.recipe_library": "b87acc1d37c20b5643921b1cb9b901571d23efcf532ecf2b4ced15ff87933d6d",
+      "LibraryProjection.recipe_library": "c65d20a616cdda265b2dc566beef85a4673562b06a56e431ba1358cda7c7b8dd",
       "LibraryProjection.recipe_library.encode_cursor": "5139d843710b75e07b8832673ea0a1b70fae4933e9a3aee0ec1a647dbe02d293",
       "LibraryProjection._recipe_sort_key": "83d4424a095f6aeef6c6193f84928bf00782f3c55729b874ce7840dcb7ac704e",
       "LibraryProjection.recipe_detail": "d7890b5ef6b12747041baaf1338a5c54ba6790091de56cd7fd37f459e3677d5f",
       "LibraryProjection.authoring_recipe_detail": "c6beab0ebed9b5145bd6889b2d51f9cdf21c1e3af773255dceb4700f462af976",
-      "<module>": "11ee906b165112486ea52b5808114c7ff9835e6700691a7969516dad460c83e0"
+      "<module>": "1c36f6ec9f1f5eaf201dc00985aafd3c35455b923125d564958e42d43c19589c"
     },
     "control/src/vonk_control/lifecycle/agent_operation.py": {
       "is_artifact_owned": "021c7bc7bbaab5ac413522db67c0ade6bd634374867e125580cd0e743edaac96",
@@ -3840,17 +3849,16 @@
       "install_model_operator_routes.download": "f110a83d5be13f5bca65b96e626527ef899fd472cbaf08b48e9815127b214a87",
       "install_model_operator_routes.remove": "4ea2bb6055220b70e06cc7e840f1b92b2045f0ae02dfeff9c0dc40eba5a7dc44",
       "install_model_operator_routes.cancel_operation": "ea8636ee483d7d9668351943d9abaea72c8d31e2488338e687a869de0e49fa90",
-      "ModelCacheCursorProjectionError": "d9db80fa90e1f06d8845dc0ec7b76abce9debc95bc50898d7fc6f4985e9f4bab",
-      "ModelCacheOperationProvider": "4d77723d58c2ebac4efacaf6f5dbc0c58a079c88c8930a486af33cec42346865",
-      "ModelCacheOperationProvider.__init__": "d53fd0e0daa0cc1d25ff9f0cc7f261984414fc5cfe67ef9e31341830b40630ec",
-      "ModelCacheOperationProvider.list_operations": "547e2f31ef5305105b10240a2a2b20e61cc261f58c1a4926d849cc85790db43f",
-      "ModelCacheOperationProvider._next_cursor": "1b53b816ae279bd95a4eb080b31b38a2fb4825ca42078e6177b748ab7f08ead7",
+      "ModelCacheOperationProvider": "4f8c7227f6755cbfd1038b5026f83c5512221d39c8206f03d376428e861c4fe9",
+      "ModelCacheOperationProvider.__init__": "784ecbc0f906b3355f33a9741e10be67908ba470c8b7fb8b4c63e815bdfa5219",
+      "ModelCacheOperationProvider.list_operations": "3601f5e3dcc4a789b360d2ed86baccc643c3efc4142788ae4e7e7da3f83dbbe7",
+      "ModelCacheOperationProvider._next_cursor": "ee7a8718c0bf06c65721783e65be8d4404d1959a7d34b8ca960147913678aba8",
       "ModelCacheOperationProvider.get_operation": "6f41ab65e52adfdb9162739faf075298e3ec242b8fd44c6dd42300cad9c1b2af",
       "ModelCacheOperationProvider._summary": "3b81ea90ae9172673ddd118d4604d714bd98ff22b3ac182b0faab4f32387fc56",
       "ModelCacheOperationProvider._progress": "5f8019106fd1fb64ddc2d03c7180c0834e32c731ce9b8d89371f8f4c18d6ae75",
       "model_cache_operation_provider": "7d3452c6c89b65a0e32207964e01d7bbfcc7eecbe8d7dd5e8e940b7dea478b00",
       "register_model_cache_operation_provider": "5977cdfff7b887e0ef9c4421676a2cf2b59b89946e48d31bd452cfb0e646ef47",
-      "<module>": "73a59f561daa43983bcbb100309ef70cffa1c43049a157c03d694a261dc29818"
+      "<module>": "cbcaef2f057de600476089b567bb2dac2708bbb0b3efa821ed5d2f7588a0aecd"
     },
     "control/src/vonk_control/model_cache_ranges.py": {
       "RangeResponseError": "a6b015d3820f2ed675c0fb99dad9a949a4e55288033c65d54ee3ec003e0f3928",
@@ -3893,7 +3901,7 @@
       "<module>": "b92f3620e933d3d3f40d57ffaece581f02adbed9cf8dc26ea8480d21762f960f"
     },
     "control/src/vonk_control/operation_api/contracts.py": {
-      "OperationProjectionError": "db7dd5a5fddc84c42ed53e23f4417efe3f2c8d9ae4cda128eeb758ead7d53063",
+      "OperationProjectionError": "8d7d29db2feb0fdc4880710b72508fb6c3875e0b4fb4819968d4b68fe1f408d3",
       "EmptyBody": "3ff32d05eab384fcb919fe82c92953b50cb0977a82bf4d8463f31e9864669e92",
       "ErrorContextResponse": "c4abd4fe4b10de08692deec69fb5967b1509b35e71ba8cf587a5026b080b87e2",
       "BoundedErrorResponse": "077982de6b0b122b702335ca5256d39f3a73e40c635d0e2baa0d5ec0b5164c19",
@@ -3920,7 +3928,7 @@
       "JobResumeResponse": "7c8ea98a21915ed51be18c12d2ee7bf94bab1637509838f462dff0da7e36d214",
       "OperationApiServices": "f2b45ec6618e32a98838725993496d3cf70d91f1d71c9378ebbba55f32918579",
       "OperationPage": "0c40fea2eafe43a1cd29d1ac929b894a80649f72b5d8d13a3eb0e5a32d67d247",
-      "OperationListPage": "5860d4dce0d706416f642a627059da38d4defed61e911f7e6e2ebb5528e41ce8",
+      "OperationListPage": "fc4f1415855c2856b2939705f03ef1827f242deb8534cb676319d17362c16318",
       "OperationQuery": "95782ef74c286d5579a454f27f3835eabdcc049870bb8cd6508125a81735e8f4",
       "OperationProvider": "a9bd57e414bdca04ad4f1fba91a9e5d17a6349d63d75ea374f7c68231a96cb0b",
       "OperationProviderProtocol": "42a1676ae397d88577150981590baac1a2e5049f5ed3eefdd42b15113e884fa2",
@@ -3928,11 +3936,11 @@
       "OperationProviderProtocol.list_operations": "a53fd89cd5db2bcef1bed9d7e119f5552ee4394e77febf3960c34d2c570cd61c",
       "OperationProviderProtocol.get_operation": "2d2eff2981032e2fbbf97ce81617889ed6eb63f30450db8a0c12052dbb499cec",
       "OperationProviderProtocol.represented_job_kinds": "579bc56e3cad0c2a4725de5e36eeb417386b0b14a63a950dac6b4de0338e096d",
-      "<module>": "3eaaad187b23c072fc963f043930a4a5025662202412350bbf435269a4164e4c"
+      "<module>": "d1147f7c29273e7c99fff636bd6b282924ade532d82e65d8d4e9456d4e771560"
     },
     "control/src/vonk_control/operation_api/diagnostics.py": {
       "_aware": "8aedde3512a1482ae2dd8345d52a8ddc051a8bb1c1f745ec61d5308ea34f0d0b",
-      "_agent_upgrade_diagnostics": "bc3c9249b6f9b44a0711185c20072f7d951d0fa704685101c5d8f6b99eaeaa75"
+      "_agent_upgrade_diagnostics": "a7c9b5124c63bc6e6220825d70ceba5ffbf56d3ff3b07035c6f6cf4a9355395b"
     },
     "control/src/vonk_control/operation_api/durable.py": {
       "_DurableOperationProjection": "84da4a06ac2c0ca344b1a4db220a32d5f69e6051080769125f117d3784217b10",
@@ -3966,8 +3974,8 @@
     "control/src/vonk_control/operation_api/providers.py": {
       "observation_cursors": "c6bc1ef245c9f138b8dc012d09af82feb036bfe9789061a5bed6595fe630b357",
       "_operation_boundary": "740c0904332ec64e159f66fad0218b301a2f19a562ee16ad8ade515e093392cc",
-      "merge_operation_providers": "d6988453771dc15ece606ca81feabfed8503088c13a7bfadf7770bc76ee0d1cc",
-      "get_operation_from_providers": "483b54f885d3af91e52e71fcf267c0fa358af074d06fc2b7172b566f9ae308c7",
+      "merge_operation_providers": "a640e072b35ca30861b46f7cfcb7c4b21ef9d4b775d2774cd1baabd0344458da",
+      "get_operation_from_providers": "dc961bf4ea352bf64f8cf848e4e806ec798a157d27afa309ba911ce01de4e36d",
       "_activity_keyset_filter": "a2b70c2acaf139b82e85ebf7c1a8f3b4abc25d1429f40a52be60070d9f0156b7",
       "_activity_node_ids": "302fa6f2cebc833dd0ba15d2de1dd8db0576d3fad3177e54dbe3f2c400d6e6dd",
       "_activity_owner_request_id": "71058d373ef9ccdc4083d7d4b281857cf9ab05e5435b6330bcdb7e3664bae291",
@@ -4004,7 +4012,7 @@
       "_OperationResponseTooLarge": "4cdf48e13036dbbdb0f9c736cac723d6478f9db0ba1a90ff803e41d2119d58c3",
       "_OperationResponseTooLarge.__init__": "1e1e1acaf25df9e361895fc79c7bf020a76f3603447d1c3171ce04db3566f4f5",
       "bounded_operation_detail": "08cf61dcf8880851b9fc2be347bdec7157b5482f8a9d72175ba4f2af2025e6a3",
-      "bounded_operations_response": "552023df9906c47dec7fc92bf15dc82f55bc10b813fa4378e4b6863dd862994a",
+      "bounded_operations_response": "8c8ae32d5971f4782d89c85a9beb3e43b180aa74603dbd10cd0f433e2b1df105",
       "bounded_operations_response.continuation": "dc5ffac3b68926985a66e89c5de73dc8304fff08b3fcce8fb76af14ba6c3c724",
       "<module>": "4cdf48e13036dbbdb0f9c736cac723d6478f9db0ba1a90ff803e41d2119d58c3"
     },
@@ -4716,21 +4724,22 @@
       "<module>": "1e1e653f5299bde7d6e59af02b96c12a2514f463cd48d3c6871b2dc76714565b"
     },
     "control/src/vonk_control/recipe_operations/install.py": {
-      "InstallMixin": "271e5008e78a701e6210ee725937bf660b3fdfcf50f4484ffb454bf9ba707309",
-      "InstallMixin._install_once": "77b8c97b62a524a70c6c1b8cac1e3a4ef7820203e5a83d872b64e4e141c0caa9",
+      "InstallMixin": "f33f70c0e43e480374c1fc930da4df7b411acf35d5a9a929590c62aaabe11469",
+      "InstallMixin._install_once": "3f4b84c6c0d99293b2771c58a44969f21c22a90c0e249899abf85b3311c976be",
       "InstallMixin.install": "1a2ff6b2c0b943146d9c793e61de8f4bc88157cdf1371603fde7026ec60cb218",
-      "<module>": "184d0c31939212f7ac253004432e1b7f59a211861feedb2f6bce9b8b67a888c0"
+      "<module>": "a4655510f4188bc9ede7eb61fa06e72703c3b0274a0841acc673ce42adb7e014"
     },
     "control/src/vonk_control/recipe_operations/installation_preparation.py": {
-      "InstallationPreparationMixin": "dc3889def45147ef93fee63860678a09d82c474c77ec1f4ed5d6d1413abde32b",
+      "InstallationPreparationMixin": "9e82bdbf19353debe005b31929a26066f93d18555547767f02159c3ea8f7792c",
       "InstallationPreparationMixin.preview_install": "652d043361ce118c6ccdd9935c387ff5bce5a5ad5f6f2043888b83c0e55db57f",
-      "InstallationPreparationMixin.prepare_installation": "61658d8126ce9a6ad40b9538b0fee145400eb82977b214fdd08ce8a5d2c3d6a9",
+      "InstallationPreparationMixin.prepare_installation": "30b2aa219024c052750f1ff15fc6e7fecfdca47f13c4555e0452eb7388a01ffd",
+      "InstallationPreparationMixin._prepare_installation_once": "cc98bd6670617207a3294a294ae2d023de305feb4583748bf4edd07acc5a4f36",
       "InstallationPreparationMixin._prepared_installation_id": "100cf53622955f33575cbb274ac99560e27e9a8fe2cfb9c0be940b68dedf25fe",
       "InstallationPreparationMixin._stored_compiled_plans": "fd85cc812beb306cd7883f844131168db5b2bd7c8dea19f6feffd1cfa4f0cd4e",
       "InstallationPreparationMixin._stored_compiled_plans.read": "9d8ec339031edfcac1dcdd48bc7906d823c682274ae4fc299a9dfdc29d807661",
       "InstallationPreparationMixin._stored_compiled_plans.rebuild": "cb3f648ab85bf2ae9c19b832a2dd237ae59f3b49720e2497e9c717e207bd228f",
       "InstallationPreparationMixin.start_installation": "f5fc26b71f6ce1ddde7b0af9ec1bbcae8563b8bf88792d25027cd3559df9b28d",
-      "<module>": "ec9c95730cad99d9c42b13f69079eac88d16302a26a09a249f387dd629027694"
+      "<module>": "49b2b3bc0fb5fcfc3335041b2cdadab64829b3d8d532c010d6008d0366652f2f"
     },
     "control/src/vonk_control/recipe_operations/intent.py": {
       "_bound_workload_intent": "0356f70a62abf451ada30959612e09e68be7ec680ac2d7d3a8376581bb95737c",
@@ -4759,10 +4768,10 @@
       "<module>": "d954356765047e1fd2828c2fa9d654740470e6f0dae174953d96b3d38c980b35"
     },
     "control/src/vonk_control/recipe_operations/job_activation.py": {
-      "JobActivationMixin": "bbfdfcd40000bd057268b600436c739f29d080a14848949e347de7f7b786284b",
-      "JobActivationMixin._activate_job_run_once": "067dfa6e946b776cc8a9a962a6cac01b94ba1cdf964884e03a15dc0c1b5f2e52",
+      "JobActivationMixin": "cbbd713c25a4114b0ebafa374482b29ff78d671228903bb0637733062f7fd4be",
+      "JobActivationMixin._activate_job_run_once": "96f73f3ed813d200f49fad2e45e89feb4717910be2ff3bbd0fd51c288ab3f458",
       "JobActivationMixin.activate_job_run": "1d89dabd0bd31a51b859c49e6101e45b56b39f3359d58b8bd8dd80c6e4c39989",
-      "<module>": "9a79a9350791df5e6f9d8640286d0cf8e02eb6eb9a4458fb3722c3c4a3fdd6a5"
+      "<module>": "4c9be3be8eac161676141ea897a351114ad3688f50ebeee8d07151db6c4cc431"
     },
     "control/src/vonk_control/recipe_operations/job_run_completion.py": {
       "JobRunCompletionMixin": "e97e5fbd5a2192856bc513e7f766b90852c69490e642ed4200ef75fa2c8ff40a",
@@ -4902,12 +4911,12 @@
       "<module>": "9574a714d504268a42ba316dda95954a3685f94ef6a5a97890bf8bbb2b1e85e8"
     },
     "control/src/vonk_control/recipe_operations/start.py": {
-      "StartMixin": "523b91ea089a3ba52ecba4d647cb3dde0afedde28d0680dd2c677510645fcd21",
-      "StartMixin._start_once": "a72de72b86f74f069a2a969f671d6d81d1b1a9ac2cd81c8091a81da46f3d0c30",
+      "StartMixin": "adb3d44837bf3bce75037de0d814fcf927300dee9d9cc53359ac2be0b2d2c3e6",
+      "StartMixin._start_once": "b51561f224aeb86234e4d040edba2bc76791b8f9c2c00d80e76369cd0f04a624",
       "StartMixin.start": "599ce51528db2fe1fe09c7e330d37edbc822d7391bd9338ccba094dbb38a9dcb",
       "StartMixin.enqueue_one_shot_job_in_session": "d23a5c4a96b4f601d571c94068afef403cab15e59978816bf3d100d3b6573222",
       "StartMixin.notify_agents": "9365f914e84d2e0b3fb31aff7a6dee17957556420aa90f45870069c1571ed57e",
-      "<module>": "61c4241d9406328e6783f6a8e2236360deed6ac7aa748641eb83a93be2d19776"
+      "<module>": "7afe8c1c5ed47cd1012fac5e252cc17485e56a7a24ebec7d73b20fab979a1cef"
     },
     "control/src/vonk_control/recipe_operations/stop.py": {
       "StopMixin": "ed5e3ac6fc05df4c06f9f769bdef7d13fad4b0c1acc17ba45804a9847185dd84",
@@ -5008,7 +5017,7 @@
       "RecipePackageUnsettled.__init__": "de58d242a62e3d7f44cd961c667d371b0f7d457d7943411f0e129c94d5740eff",
       "RecipePackageRequestInvalid": "88a37c0f79c28b8dfce27f4c3f8e1c3f00b2cef265df45407d83dd00a7f4cdd3",
       "RecipePackageRequestInvalid.__init__": "e18c2e00ba5a13a7f8ae9cb01a0bef0d767e08fc60d4e51298c297eee12074ff",
-      "_snapshot_content": "2348b3b42867d092e0fb7f0530fa9717f9ea5256543b51d81d580b43118d997c",
+      "_snapshot_content": "ec66fab5a097066a8b7c775d2fcb685bf1bc2b46d89afb44f9f8d2372fb956ac",
       "<module>": "174515d245a170966e57be75382f0cd3da2eea70d9bdba8264a1a868ae1fd2e5"
     },
     "control/src/vonk_control/recipe_progress.py": {
@@ -6412,7 +6421,6 @@
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.not_candidate", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.resolve", "catalog.stale_revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogConflict", "CatalogEntityService.revise", "catalog.stale_revision", 1],
-        ["control/src/vonk_control/catalog_entities.py", "CatalogRevisionContractError", "_rederive_projection", "catalog-revision", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.model_reference_invalid", 2],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService._bind_recipe_models", "catalog.recipe_invalid", 1],
         ["control/src/vonk_control/catalog_entities.py", "CatalogValidationError", "CatalogEntityService.resolve_reference", "catalog.reference", 1],
@@ -6434,8 +6442,6 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class CatalogRevisionContractError validates a contract or request.",
       "sites": [
-        ["control/src/vonk_control/catalog_revision_contract.py", "CatalogRevisionContractError", "read_catalog_document", "catalog-revision", 3],
-        ["control/src/vonk_control/catalog_revision_contract.py", "CatalogRevisionContractError", "read_catalog_projection", "catalog-revision", 1],
         ["control/src/vonk_control/catalog_revision_contract.py", "CatalogRevisionContractError", "write_catalog_projection", "catalog-projection-is-invalid", 1]
       ]
     },
@@ -6455,8 +6461,7 @@
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "CatalogService.resolve_recipe_revision", "catalog.document_invalid", 1],
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "CatalogService.store_source_bundle", "message", 2],
         ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "_actor", "catalog.actor", 1],
-        ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "_package_handle_metadata", "recipe_library.package_handle_invalid", 4],
-        ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "_view", "catalog.recipe_invalid", 1]
+        ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "_package_handle_metadata", "recipe_library.package_handle_invalid", 4]
       ]
     },
     {
@@ -6468,7 +6473,7 @@
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_commit_invalid", 1],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_request_invalid", 2],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService._validate_request", "catalog.sync_trigger_invalid", 1],
-        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_request_reused", 1],
+        ["control/src/vonk_control/catalog_sync.py", "CatalogSyncError", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_request_reused", 2],
         ["control/src/vonk_control/catalog_sync.py", "CatalogSyncRequestInvalid", "ManagedRecipeCatalogSyncService.sync", "catalog.sync_preview_changed", 1]
       ]
     },
@@ -6838,10 +6843,7 @@
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "InstallAdmissionService._accept_install_in_session", "mapping-or-build-changed-while-reserving", 1],
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "require_admissible", "install.plan_invalid", 1],
         ["control/src/vonk_control/install_admission.py", "InstallPlanStale", "require_same_execution", "install.plan_stale", 1],
-        ["control/src/vonk_control/install_admission.py", "InvalidType", "InstallAdmissionService.plan_install", "mapping-role-is-absent-from-recipe-topology", 1],
         ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "cluster-mapping-is-not-ready", 1],
-        ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "recipe-revision-is-not-resolved", 1],
-        ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "successful-recipe-build-does-not-match-the-mapping", 1],
         ["control/src/vonk_control/install_admission.py", "MissingRecord", "InstallAdmissionService.plan_install", "not-found", 2]
       ]
     },
@@ -6872,11 +6874,6 @@
         ["control/src/vonk_control/library_projection.py", "CursorError", "LibraryProjection.recipe_library", "library-cursor-is-invalid-or-the-selection-changed-restart", 1],
         ["control/src/vonk_control/library_projection.py", "CursorError", "LibraryProjection.recipe_library", "recipe-library-cursor-boundary-is-invalid", 1],
         ["control/src/vonk_control/library_projection.py", "CursorError", "LibraryProjection.recipe_library", "recipe-library-cursor-is-invalid", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._local", "message", 4],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._local_state_snapshot", "local-state-provider-did-not-return-a-mapping", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "LibraryProjection._merge_local", "local-state-running-set-is-not-a-list", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "_canonical_document", "active", 1],
-        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "_controller_state", "message", 1],
         ["control/src/vonk_control/library_projection.py", "LibrarySelectorAmbiguous", "LibraryProjection._resolve_selector", "message", 1],
         ["control/src/vonk_control/library_projection.py", "LibrarySelectorAmbiguous", "LibraryProjection.model_detail", "message", 1],
         ["control/src/vonk_control/library_projection.py", "RequestFault", "LibraryProjection.model_detail", "model-selector-is-required", 1],
@@ -6902,15 +6899,6 @@
         ["control/src/vonk_control/litellm.py", "LiteLlmPolicyError", "render_config", "litellm-policy-must-publish-at-least-one-model", 1],
         ["control/src/vonk_control/litellm.py", "LiteLlmPolicyError", "render_config", "litellm-routes-must-be-already-rendered-strings", 1],
         ["control/src/vonk_control/litellm.py", "LiteLlmPolicyError", "render_config", "litellm-upstream-model-is-invalid", 1]
-      ]
-    },
-    {
-      "family": "model_cache_api.input-validation",
-      "category": "input-validation",
-      "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class OperationProjectionError validates a contract or request.",
-      "sites": [
-        ["control/src/vonk_control/model_cache_api.py", "ModelCacheCursorProjectionError", "ModelCacheOperationProvider._next_cursor", "cursor-projection-unavailable", 1],
-        ["control/src/vonk_control/model_cache_api.py", "ModelCacheCursorProjectionError", "ModelCacheOperationProvider._next_cursor", "operation-cursor-boundary-is-invalid", 2]
       ]
     },
     {
@@ -6943,18 +6931,12 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class BoundedJSONError validates a contract or request; class CursorError validates a contract or request; class OperationProjectionError validates a contract or request.",
       "sites": [
-        ["control/src/vonk_control/operation_api/diagnostics.py", "BoundedJSONError", "_agent_upgrade_diagnostics", "agent-upgrade-job", 2],
         ["control/src/vonk_control/operation_api/responses.py", "BoundedJSONError", "_required_bool", "message", 1],
         ["control/src/vonk_control/operation_api/responses.py", "BoundedJSONError", "_required_text", "message", 1],
         ["control/src/vonk_control/operation_api/responses.py", "CursorError", "decode_offset", "target-cursor-is-invalid", 2],
         ["control/src/vonk_control/operation_api/durable.py", "CursorError", "_DurableOperationProjection.job_operations", "operation-cursor-is-invalid", 1],
         ["control/src/vonk_control/operation_api/durable.py", "CursorError", "_DurableOperationProjection.list_operations", "operation-cursor-is-invalid", 1],
-        ["control/src/vonk_control/operation_api/providers.py", "CursorError", "merge_operation_providers", "operation-cursor-is-invalid", 1],
-        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "_operation_boundary", "operation-created-at-is-invalid", 2],
-        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "_operation_boundary", "operation-id-is-invalid", 1],
-        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "get_operation_from_providers", "operation-ids-are-not-globally-unique", 1],
-        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "merge_operation_providers", "message", 2],
-        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "merge_operation_providers", "operation-ids-are-not-globally-unique", 1]
+        ["control/src/vonk_control/operation_api/providers.py", "CursorError", "merge_operation_providers", "operation-cursor-is-invalid", 1]
       ]
     },
     {
@@ -7262,16 +7244,11 @@
       "category": "input-validation",
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class RunPlanConflict validates a contract or request.",
       "sites": [
-        ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "mapping-endpoint-owner-is-missing", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "topology-role-memory-is-invalid", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidType", "run_port_demand", "artifact-job-recipes-currently-require-one-node", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidType", "run_port_demand", "recipe-interface-port-is-invalid", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidType", "run_port_demand", "recipe-interfaces-are-invalid", 1],
-        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "cluster-mapping-generation-changed-after-installation", 1],
-        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "exact-recipe-dependencies-are-unavailable", 1],
         ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "recipe-installation-is-not-complete", 1],
-        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "recipe-revision-is-unavailable", 1],
-        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "run-memory-demand-is-unavailable-for-the-selected-settings", 1],
         ["control/src/vonk_control/run_admission.py", "MissingRecord", "RunAdmissionService.plan_run", "message", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.dependencies_stale", 1],
         ["control/src/vonk_control/run_admission.py", "RunPlanInvalid", "RunAdmissionService._accept_run_locked_in_session", "run.plan_invalid", 1],
@@ -7496,13 +7473,9 @@
       "sites": [
         ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "artifact-job-recipes-currently-require-a-single-node-topolog", 1],
         ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "artifact-workload-target-disappeared", 1],
-        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "message", 1],
         ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "recipe-is-not-an-artifact-job-recipe", 1],
-        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRequestInvalid", "JobActivationMixin._activate_job_run_once", "stored-run-plan-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._admit_workload_intent", "workload-intent-target-disappeared", 1],
         ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._admit_workload_intent", "workload-intent-was-superseded", 1],
-        ["control/src/vonk_control/recipe_operations/install.py", "RecipeRequestInvalid", "InstallMixin._install_once", "compiled-execution-plan-is-missing-for-one-or-more-mapped-no", 1],
-        ["control/src/vonk_control/recipe_operations/install.py", "RecipeRequestInvalid", "InstallMixin._install_once", "message", 2],
         ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "compiled-execution-plan-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "operation-group-has-no-target-nodes", 1],
         ["control/src/vonk_control/recipe_operations/persistence.py", "RecipeRequestInvalid", "PersistenceMixin._queue_in_session", "operation-phases-are-invalid", 1],
@@ -7514,7 +7487,6 @@
         ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_build_in_session", "recipe-build-is-not-retryable", 2],
         ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_install_in_session", "recipe-installation-is-not-retryable", 1],
         ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_install_in_session", "recipe-operation-is-not-retryable", 1],
-        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "message", 1],
         ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "operation-topology-order-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "recipe-direct-fabric-rendezvous-is-unavailable", 1],
         ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin._start_once", "recipe-run-has-no-endpoint-owner", 1],
@@ -7534,8 +7506,6 @@
         ["control/src/vonk_control/recipe_operations/supersession.py", "RecipeRequestInvalid", "SupersessionMixin.assess_superseded_issued", "workload-intent-was-superseded", 1],
         ["control/src/vonk_control/recipe_operations/service.py", "RecipeRequestInvalid", "RecipeOperationService.create_mapping", "message", 1],
         ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin.enqueue_one_shot_job_in_session", "recipe-job-target-is-not-running", 1],
-        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.prepare_installation", "compiled-execution-plan-was-not-persisted", 2],
-        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.prepare_installation", "message", 2],
         ["control/src/vonk_control/recipe_operations/supersession.py", "RecipeRequestInvalid", "SupersessionMixin.reconcile_superseded_unissued", "workload-intent-ordinal-is-invalid", 1],
         ["control/src/vonk_control/recipe_operations/supersession.py", "RecipeRequestInvalid", "SupersessionMixin.reconcile_superseded_unissued", "workload-intent-was-superseded", 1],
         ["control/src/vonk_control/recipe_operations/retry.py", "RecipeRequestInvalid", "RetryMixin._retry_once", "recipe-operation-is-not-retryable", 2],
@@ -7928,9 +7898,7 @@
       "reason": "Rejects an invalid or out-of-contract request, document or configuration at the boundary that owns it, before any effect; the caller fixes the input and asks again. Rule-classified, then reviewed: class AvailabilityInvalid is of the input-validation error type; class InvalidValue is of the input-validation error type.",
       "sites": [
         ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "_compile_consistent_runtime", "recipe_image.runtime_invalid", 2],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.recipe_invalid", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.recipe_unavailable", 1],
-        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.runtime_invalid", 1],
         ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "unsupported", 1],
         ["control/src/vonk_control/availability_production.py", "InvalidValue", "RecipeImageAvailabilityScheduler.__init__", "availability-scheduler-parallelism-is-invalid", 1],
         ["control/src/vonk_control/availability_production.py", "InvalidValue", "build_recipe_image_availability", "recipe-image-artifact-root-is-required", 1],
@@ -8278,8 +8246,7 @@
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-memory-reservation-is-invalid", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-recipe-differs-from-the-installed-workload", 1],
         ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-role-differs-from-the-accepted-canonical-workload", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-timeout-exceeds-the-installed-workload", 1],
-        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-build-receipt-is-unavailable", 1]
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "compile_job_invocation", "job-timeout-exceeds-the-installed-workload", 1]
       ]
     },
     {
@@ -8644,7 +8611,7 @@
         ["control/src/vonk_control/recipe_operations/result_consumption.py", "RecipeRequestInvalid", "ResultConsumptionMixin.consume_agent_result", "recipe-cancellation-was-not-requested", 1],
         ["control/src/vonk_control/recipe_operations/result_consumption.py", "RecipeRequestInvalid", "ResultConsumptionMixin.consume_agent_result", "run-cancellation-scope-changed", 1],
         ["control/src/vonk_control/recipe_operations/start.py", "RecipeRequestInvalid", "StartMixin.enqueue_one_shot_job_in_session", "recipe-run-is-not-accepting-jobs", 1],
-        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin.prepare_installation", "install-plan-is-blocked", 1],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRequestInvalid", "InstallationPreparationMixin._prepare_installation_once", "install-plan-is-blocked", 1],
         ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin.uninstall", "request-key-was-already-used-differently", 1],
         ["control/src/vonk_control/recipe_operations/uninstall.py", "RecipeRequestInvalid", "UninstallMixin.uninstall", "uninstall-plan-is-stale-or-blocked", 1],
         ["control/src/vonk_control/recipe_operations/intent.py", "RecipeRequestInvalid", "_cancel_reason", "cancellation-reason-is-required", 1]
@@ -9423,6 +9390,92 @@
       "reason": "Bookkeeping, unavailable evidence or a damaged record: this should become an unknown outcome that is observed and reconciled, not a refusal. Counted against the debt ceiling until it is converted. Rule-classified, then reviewed: class RecipePackageUnsettled is an unknown outcome with no proven retry loop.",
       "sites": [
         ["control/src/vonk_control/recipe_packages/__init__.py", "RecipePackageUnsettled", "RecipePackageClient._download_library", "recipe_package.unavailable", 1]
+      ]
+    },
+    {
+      "family": "install.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRetryLater is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations/install.py", "RecipeRetryLater", "InstallMixin._install_once", "message", 2],
+        ["control/src/vonk_control/recipe_operations/install.py", "RecipeRetryLater", "InstallMixin._install_once", "compiled-execution-plan-is-missing-for-one-or-more-mapped-no", 1]
+      ]
+    },
+    {
+      "family": "installation_preparation.already-retried",
+      "category": "already-retried",
+      "reason": "Product preparation now retries typed uncertainty with the registered bounded owner; all failed transactions roll back before the next attempt.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRetryLater", "InstallationPreparationMixin._prepare_installation_once", "compiled-execution-plan-was-not-persisted", 2],
+        ["control/src/vonk_control/recipe_operations/installation_preparation.py", "RecipeRetryLater", "InstallationPreparationMixin._prepare_installation_once", "message", 2]
+      ]
+    },
+    {
+      "family": "job_activation.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRetryLater is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRetryLater", "JobActivationMixin._activate_job_run_once", "message", 1],
+        ["control/src/vonk_control/recipe_operations/job_activation.py", "RecipeRetryLater", "JobActivationMixin._activate_job_run_once", "stored-run-plan-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "start.already-retried",
+      "category": "already-retried",
+      "reason": "Busy, waiting or superseded: the owner of the operation retries or re-observes, so the raise is a handoff and never a dead end. Rule-classified, then reviewed: class RecipeRetryLater is caught and retried by a registered retry loop.",
+      "sites": [
+        ["control/src/vonk_control/recipe_operations/start.py", "RecipeRetryLater", "StartMixin._start_once", "message", 1]
+      ]
+    },
+    {
+      "family": "catalog_revision_contract.input-validation.stored-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Local catalog readers remain strict on damaged source bytes on call paths without proven recovery. Exact authenticated re-ingestion repairs them, but the remaining direct reader refusal is debt, not input validation.",
+      "sites": [
+        ["control/src/vonk_control/catalog_revision_contract.py", "CatalogRevisionContractError", "read_catalog_document", "catalog-revision", 3]
+      ]
+    },
+    {
+      "family": "catalog_service.input-validation.stored-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Local catalog readers remain strict on damaged source bytes on call paths without proven recovery. Exact authenticated re-ingestion repairs them, but the remaining direct reader refusal is debt, not input validation.",
+      "sites": [
+        ["control/src/vonk_control/catalog_service.py", "CatalogValidationError", "_view", "catalog.recipe_invalid", 1]
+      ]
+    },
+    {
+      "family": "library_projection.input-validation.observation-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Local parser failures now yield unknown or partial results on the main observation paths. Strict helper callers without a registered recovery owner remain conservatively counted as bookkeeping debt, never as caller validation.",
+      "sites": [
+        ["control/src/vonk_control/library_projection.py", "LibraryProjectionError", "_canonical_document", "active", 1]
+      ]
+    },
+    {
+      "family": "operation_api.input-validation.observation-debt",
+      "category": "bookkeeping-debt",
+      "reason": "Local parser failures now yield unknown or partial results on the main observation paths. Strict helper callers without a registered recovery owner remain conservatively counted as bookkeeping debt, never as caller validation.",
+      "sites": [
+        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "_operation_boundary", "operation-created-at-is-invalid", 2],
+        ["control/src/vonk_control/operation_api/providers.py", "OperationProjectionError", "_operation_boundary", "operation-id-is-invalid", 1]
+      ]
+    },
+    {
+      "family": "recipe.local-availability-bookkeeping-debt",
+      "category": "bookkeeping-debt",
+      "reason": "F10 local revisions, mapping observations, dependencies, memory and runtime projections still refuse through the admission/compiler owners. Those producers are outside this track ownership and are not fixed by changing wrapper exceptions. Retain all eleven audited sites as debt until their product preparation/recovery paths are implemented.",
+      "sites": [
+        ["control/src/vonk_control/install_admission.py", "InvalidType", "InstallAdmissionService.plan_install", "mapping-role-is-absent-from-recipe-topology", 1],
+        ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "recipe-revision-is-not-resolved", 1],
+        ["control/src/vonk_control/install_admission.py", "InvalidValue", "InstallAdmissionService.plan_install", "successful-recipe-build-does-not-match-the-mapping", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidType", "RunAdmissionService.plan_run", "mapping-endpoint-owner-is-missing", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "cluster-mapping-generation-changed-after-installation", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "exact-recipe-dependencies-are-unavailable", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "recipe-revision-is-unavailable", 1],
+        ["control/src/vonk_control/run_admission.py", "InvalidValue", "RunAdmissionService.plan_run", "run-memory-demand-is-unavailable-for-the-selected-settings", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.recipe_invalid", 1],
+        ["control/src/vonk_control/availability_production.py", "AvailabilityInvalid", "build_recipe_image_availability.authority", "recipe_image.runtime_invalid", 1],
+        ["control/src/vonk_control/execution_plan_service.py", "ExecutionPlanCompilationError", "ControllerExecutionPlanService.compile_installation", "recipe-build-receipt-is-unavailable", 1]
       ]
     }
   ]

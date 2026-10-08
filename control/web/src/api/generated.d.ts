@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 fbcff7cf53af2b27c880e6fa059ed6f664a1c502694e1e1517e9a2f533d0ac90. Do not edit.
+// Generated from canonical OpenAPI SHA256 a700d48df9cd903b54717da93f99407f666c3ea0aad7672f43f87139488e2260. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -5986,6 +5986,11 @@ export interface components {
             imported_count: number | ExactNumber;
             /** Problems */
             problems: components["schemas"]["ManagedCatalogSyncProblem"][];
+            /**
+             * Reviewed Content Sha256
+             * @default null
+             */
+            reviewed_content_sha256: string | null;
             /**
              * Schema Version
              * @constant

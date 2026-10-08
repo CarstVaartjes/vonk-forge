@@ -1357,3 +1357,51 @@ def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_pa
     assert fresh_run.owner_id != started.owner_id
     complete_started_recipe(sessions, service, fresh_run.id)
     assert service.get(fresh_run.id).state == "succeeded"
+
+
+@pytest.mark.parametrize("exhaust", [False, True])
+def test_install_submission_retries_local_receipt_failure_without_poisoning_fresh_admission(
+    tmp_path, monkeypatch, exhaust
+):
+    _sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(
+        tmp_path, nodes=1
+    )
+    plan = service.preview_install(mapping_id, build_id)
+    original = service._install_admission.refresh_install_receipts
+    calls = []
+
+    def refresh(*args, **kwargs):
+        calls.append(True)
+        if exhaust or len(calls) == 1:
+            raise ValueError("local receipt is temporarily unreadable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service._install_admission, "refresh_install_receipts", refresh)
+    if exhaust:
+        with pytest.raises(UnknownOutcomeError):
+            service.install(
+                plan,
+                plan_digest=plan.plan_digest,
+                actor="admin",
+                request_id=str(uuid.uuid4()),
+            )
+        assert len(calls) > 1
+        monkeypatch.setattr(
+            service._install_admission, "refresh_install_receipts", original
+        )
+    accepted = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id=str(uuid.uuid4())
+    )
+    if not exhaust:
+        assert len(calls) == 2
+    assert accepted.id
+    # A new request can reuse the accepted exact installation; the first
+    # transient failure committed no operation or admission reservation.
+    fresh_plan = service.preview_install(mapping_id, build_id)
+    fresh = service.install(
+        fresh_plan,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid.uuid4()),
+    )
+    assert fresh.id

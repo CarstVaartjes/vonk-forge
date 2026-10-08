@@ -1818,8 +1818,8 @@ def test_corrupt_stored_evidence_decoration_preserves_readable_identity(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt() -> None:
-    """A package document that is present but unreadable must not read as absent."""
+def test_agent_upgrade_diagnostics_omit_unreadable_optional_package() -> None:
+    """Damaged optional diagnostics do not refuse observation of the operation."""
 
     engine = create_engine("sqlite://")
     job_table = Job.__table__
@@ -1855,11 +1855,10 @@ def test_agent_upgrade_diagnostics_distinguish_absent_from_corrupt() -> None:
     # An upgrade that carries no package document has no diagnostics to project.
     assert diagnostics(stored({})) is None
     assert diagnostics(stored({"package": None})) is None
-    # A present but non-object package is corruption, and the message names the
-    # job so the corrupt row can be found.
     corrupt = stored({"package": "not-a-document"})
-    with pytest.raises(BoundedJSONError, match=f"{corrupt} package payload is invalid"):
-        diagnostics(corrupt)
+    assert diagnostics(corrupt) is None
+    # A fresh operation remains observable after the malformed historical row.
+    assert diagnostics(stored({})) is None
 
 
 def _parked_stop_services(tmp_path, *, clock: MutableClock):

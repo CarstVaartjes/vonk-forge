@@ -694,23 +694,21 @@ def test_automatic_sync_retries_untyped_fetch_failure_and_keeps_other_items(
     assert flaky_reader.fetches.count(second.uri) == 2
 
 
-def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(
+def test_catalog_review_binds_content_and_accepts_identical_republication(
     tmp_path: Path,
 ) -> None:
     sessions, service, reader, _item_value = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)
-    from vonk_agent_protocol import (
-        CatalogSyncCode,
-        InvalidRequestError,
-        InvalidRequestReason,
+    reviewed = reader.snapshot
+    changed = replace(
+        reviewed, items=(replace(reviewed.items[0], content_sha256="f" * 64),)
     )
-
-    with pytest.raises(CatalogSyncError, match="changed since") as caught:
+    with pytest.raises(CatalogSyncError):
         sync.sync(
             request_key=str(uuid.uuid4()),
             trigger="manual",
             actor="test",
-            expected_commit="b" * 40,
+            reviewed_snapshot=changed,
         )
     with sessions() as session:
         assert session.scalars(select(CatalogDocumentRevision)).all() == []
@@ -722,18 +720,39 @@ def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(
             )
             is None
         )
-    assert isinstance(caught.value, InvalidRequestError)
-    assert caught.value.typed_reason is InvalidRequestReason.CONFLICT
-    typed = caught.value.typed_error()
-    assert typed is not None and typed.field == "expected_commit"
-    assert caught.value.code == CatalogSyncCode.PREVIEW_CHANGED
+    request_key = str(uuid.uuid4())
     result = sync.sync(
+        request_key=request_key,
+        trigger="manual",
+        actor="test",
+        expected_commit="b" * 40,
+        reviewed_snapshot=replace(reviewed, commit="b" * 40),
+    )
+    assert result.imported_count == 1
+    reused = sync.sync(
         request_key=str(uuid.uuid4()),
         trigger="manual",
         actor="test",
-        expected_commit=reader.list().commit,
+        reviewed_snapshot=reviewed,
     )
-    assert result.imported_count == 1
+    assert reused.unchanged_count == 1
+
+    assert (
+        sync.sync(
+            request_key=request_key,
+            trigger="manual",
+            actor="test",
+            reviewed_snapshot=reviewed,
+        ).id
+        == result.id
+    )
+    with pytest.raises(CatalogSyncError):
+        sync.sync(
+            request_key=request_key,
+            trigger="manual",
+            actor="test",
+            reviewed_snapshot=changed,
+        )
 
 
 def test_sync_marks_reader_failure_failed_and_releases_active_slot(

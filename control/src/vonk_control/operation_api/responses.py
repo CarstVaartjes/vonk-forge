@@ -453,12 +453,20 @@ def bounded_operations_response(
     best_count = 0
     best_cursor = None
     cursorless_envelope = _response_bytes(
-        OperationsResponse(operations=[], total=page.total, next_cursor=None)
+        OperationsResponse(
+            operations=[],
+            total=page.total,
+            next_cursor=None,
+            projection_issue=page.projection_issue,
+        )
     )
     for index, detail in enumerate(details):
         cursor = continuation(index)
         single = OperationsResponse(
-            operations=[detail], total=page.total, next_cursor=cursor
+            operations=[detail],
+            total=page.total,
+            next_cursor=cursor,
+            projection_issue=page.projection_issue,
         )
         envelope = _response_bytes(single) - _response_bytes(detail)
         try:
@@ -473,7 +481,12 @@ def bounded_operations_response(
         prefix_bytes += _response_bytes(projected_detail)
         comma_bytes = len(projected) - 1
         exact_envelope = _response_bytes(
-            OperationsResponse(operations=[], total=page.total, next_cursor=cursor)
+            OperationsResponse(
+                operations=[],
+                total=page.total,
+                next_cursor=cursor,
+                projection_issue=page.projection_issue,
+            )
         )
         if exact_envelope + prefix_bytes + comma_bytes <= MAX_CONTROL_DOCUMENT_BYTES:
             best_count = len(projected)
@@ -486,10 +499,16 @@ def bounded_operations_response(
             break
     if not details:
         return OperationsResponse(
-            operations=[], total=page.total, next_cursor=page.next_cursor
+            operations=[],
+            total=page.total,
+            next_cursor=page.next_cursor,
+            projection_issue=page.projection_issue,
         )
     if best_count == 0:
         raise _OperationResponseTooLarge(cursorless_envelope + prefix_bytes)
     return OperationsResponse(
-        operations=projected[:best_count], total=page.total, next_cursor=best_cursor
+        operations=projected[:best_count],
+        total=page.total,
+        next_cursor=best_cursor,
+        projection_issue=page.projection_issue,
     )

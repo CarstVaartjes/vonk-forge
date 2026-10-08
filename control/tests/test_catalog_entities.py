@@ -18,7 +18,12 @@ from vonk_control.catalog_entities import (
     CatalogEntityService,
     CatalogValidationError,
 )
-from vonk_control.catalog_revision_contract import read_catalog_projection
+from vonk_control.catalog_revision_contract import (
+    CatalogRevisionContractError,
+    RecipeRevisionProjection,
+    read_catalog_document,
+    read_catalog_projection,
+)
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -375,8 +380,9 @@ def test_refresh_rederives_a_projection_an_earlier_release_wrote(
     revision = _recipe_revision(service)
     valid = dict(revision.projected)
     _store_projection(session, revision, _pre_contract_projection(valid))
-    with pytest.raises(ValueError, match="invalid projected data"):
-        read_catalog_projection(revision)
+    readable = read_catalog_projection(revision)
+    assert isinstance(readable, RecipeRevisionProjection)
+    assert readable.title == valid["title"]
 
     service.refresh_build_policy()
 
@@ -413,12 +419,11 @@ def test_refresh_does_not_repair_a_projection_of_a_document_that_does_not_match(
     with caplog.at_level(logging.WARNING):
         service.refresh_build_policy()
 
-    session.refresh(revision)
-    assert revision.projected == broken
-    assert any(
-        revision.id in message and "digest does not match" in message
-        for message in caplog.messages
-    )
+    revision = session.get(CatalogDocumentRevision, revision.id)
+    assert revision is not None and revision.projected == broken
+    # Damaged source bytes are never promoted into a reusable projection.
+    with pytest.raises(CatalogRevisionContractError):
+        read_catalog_document(revision)
 
 
 def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(
@@ -445,8 +450,8 @@ def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(
     with caplog.at_level(logging.INFO):
         service.refresh_build_policy()
 
-    session.refresh(first)
-    assert first.projected == broken
+    first = session.get(CatalogDocumentRevision, first.id)
+    assert first is not None and first.projected == broken
     assert first.id not in caplog.text
 
 

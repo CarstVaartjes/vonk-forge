@@ -659,16 +659,16 @@
       "install_model_operator_routes.download": "f110a83d5be13f5bca65b96e626527ef899fd472cbaf08b48e9815127b214a87",
       "install_model_operator_routes.remove": "4ea2bb6055220b70e06cc7e840f1b92b2045f0ae02dfeff9c0dc40eba5a7dc44",
       "install_model_operator_routes.cancel_operation": "ea8636ee483d7d9668351943d9abaea72c8d31e2488338e687a869de0e49fa90",
-      "ModelCacheOperationProvider": "8baa5a27bce45bdeafd6d35980e8179781665305318fc945f5b1f5c74c7ec14e",
-      "ModelCacheOperationProvider.__init__": "814f582d8574eb9c9f8d604762403f981ab651ef7b8d47d1a710f3357a932358",
-      "ModelCacheOperationProvider.list_operations": "547e2f31ef5305105b10240a2a2b20e61cc261f58c1a4926d849cc85790db43f",
-      "ModelCacheOperationProvider._next_cursor": "a3c1d25800e97ff531b0e3517a15d29b876341dc6f4e3aa96a75fa642d20f3aa",
+      "ModelCacheOperationProvider": "4f8c7227f6755cbfd1038b5026f83c5512221d39c8206f03d376428e861c4fe9",
+      "ModelCacheOperationProvider.__init__": "784ecbc0f906b3355f33a9741e10be67908ba470c8b7fb8b4c63e815bdfa5219",
+      "ModelCacheOperationProvider.list_operations": "3601f5e3dcc4a789b360d2ed86baccc643c3efc4142788ae4e7e7da3f83dbbe7",
+      "ModelCacheOperationProvider._next_cursor": "ee7a8718c0bf06c65721783e65be8d4404d1959a7d34b8ca960147913678aba8",
       "ModelCacheOperationProvider.get_operation": "6f41ab65e52adfdb9162739faf075298e3ec242b8fd44c6dd42300cad9c1b2af",
       "ModelCacheOperationProvider._summary": "3b81ea90ae9172673ddd118d4604d714bd98ff22b3ac182b0faab4f32387fc56",
       "ModelCacheOperationProvider._progress": "5f8019106fd1fb64ddc2d03c7180c0834e32c731ce9b8d89371f8f4c18d6ae75",
       "model_cache_operation_provider": "7d3452c6c89b65a0e32207964e01d7bbfcc7eecbe8d7dd5e8e940b7dea478b00",
       "register_model_cache_operation_provider": "5977cdfff7b887e0ef9c4421676a2cf2b59b89946e48d31bd452cfb0e646ef47",
-      "<module>": "aa464280a5d2d443092583c3ce38495f05710978d11383a18c7a5e162ebc9cce"
+      "<module>": "cbcaef2f057de600476089b567bb2dac2708bbb0b3efa821ed5d2f7588a0aecd"
     },
     "control/src/vonk_control/operator_projection_api.py": {
       "FleetRenameRequest": "f2e72589415ee5e7744d16a007fb8c998186168d6483b186e81bb53b065340c2",

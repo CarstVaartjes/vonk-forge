@@ -16,16 +16,16 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AssetAvailability,
     InstallationState,
     RunState,
+    UnknownOutcomeError,
     adopt_machine_state,
     canonical_message,
 )
 from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
-    read_model,
-    read_recipe,
 )
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -33,13 +33,13 @@ from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from . import model_cache_states
 from .auth import CursorCodec, CursorError
 from .catalog_queries import active_head_revision
+from .catalog_revision_contract import read_catalog_document
 from .library_assessment import unassessed
 from .library_contract import (
     _MAX_PAGE_RECIPES,
     FreshnessPolicy,
     LibraryFacetValues,
     LibraryFilterValues,
-    LibraryLocalProgress,
     LibraryLocalState,
     LibraryModelIdentity,
     LibraryModelProjection,
@@ -80,7 +80,7 @@ from .revision_images import revision_images
 from .strict_json import serialize_json_value
 
 
-class LibraryProjectionError(RuntimeError):
+class LibraryProjectionError(UnknownOutcomeError):
     """The active catalog contains a document outside the public authority."""
 
 
@@ -103,6 +103,7 @@ _LOCAL_STATE_PRIORITY = {
     "preparing": 2,
     "cached": 3,
 }
+
 
 type LibraryControllerState = Literal[
     "cached", "preparing", "not_cached", "failed", "unknown"
@@ -213,7 +214,7 @@ def _controller_state(
 
     controller = states.get(value)
     if controller is None:
-        raise LibraryProjectionError(detail)
+        return cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
     return controller
 
 
@@ -231,8 +232,7 @@ _LOGGED_UNREADABLE: set[str] = set()
 def _note_unreadable(kind: str, key: str, detail: str) -> None:
     """Say once that a stored row is unreadable.
 
-    The projection leaves that one row out (or reads it as unknown) and goes on:
-    a damaged row is evidence to rebuild, never a reason to fail the whole page.
+    Damaged rows are unknown or omitted; healthy siblings remain readable.
     """
 
     marker = f"{kind}:{key}"
@@ -268,8 +268,10 @@ def _canonical_document(
     document_type: type[ModelDefinition | RecipeDefinition],
 ) -> ModelDefinition | RecipeDefinition:
     try:
-        reader = read_model if document_type is ModelDefinition else read_recipe
-        return reader(revision.document)
+        parsed = read_catalog_document(revision)
+        if not isinstance(parsed, document_type):
+            raise TypeError("catalog document kind is unavailable")
+        return parsed
     except (TypeError, ValueError) as error:
         raise LibraryProjectionError(
             f"active {revision.kind} document is not canonical"
@@ -424,12 +426,15 @@ class LibraryProjection:
     def selector(publisher: str, slug: str) -> str:
         return f"{publisher}/{slug}"
 
-    def _local_state_snapshot(self) -> Mapping[str, Mapping[str, object]]:
-        snapshot = self._local_state()
+    def _local_state_snapshot(self) -> Mapping[str, Mapping[str, object]] | None:
+        try:
+            snapshot = self._local_state()
+        except (OSError, RuntimeError, TypeError, ValueError):
+            _note_unreadable("local-state", "provider", "observation is unavailable")
+            return None
         if not isinstance(snapshot, Mapping):
-            raise LibraryProjectionError(
-                "local state provider did not return a mapping"
-            )
+            _note_unreadable("local-state", "provider", "observation is unavailable")
+            return None
         return snapshot
 
     def _local(
@@ -437,30 +442,24 @@ class LibraryProjection:
         digest: str,
         *,
         kind: str,
-        snapshot: Mapping[str, Mapping[str, object]],
+        snapshot: Mapping[str, Mapping[str, object]] | None,
     ) -> LibraryLocalState:
+        if snapshot is None:
+            return LibraryLocalState(
+                controller=cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
+            )
         raw = snapshot.get(digest, {})
-        if not isinstance(raw, Mapping):
-            raise LibraryProjectionError(f"{kind} local state is not a mapping")
-        # No record of the asset in the local state means it is not cached.
-        candidate = raw.get("controller", "not_cached")
-        if not isinstance(candidate, str) or candidate not in _LOCAL_STATE_PRIORITY:
-            raise LibraryProjectionError(f"{kind} local state is invalid")
-        controller = cast(LibraryControllerState, candidate)
-        running = raw.get("running_on", [])
-        if not isinstance(running, list) or not all(
-            isinstance(item, str) for item in running
-        ):
-            raise LibraryProjectionError(f"{kind} running state is invalid")
-        preparation_value = raw.get("preparation")
-        preparation = None
-        if preparation_value is not None:
-            if not isinstance(preparation_value, Mapping):
-                raise LibraryProjectionError(f"{kind} preparation state is invalid")
-            preparation = LibraryLocalProgress.model_validate(preparation_value)
-        return LibraryLocalState(
-            controller=controller, running_on=running, preparation=preparation
-        )
+        try:
+            if not isinstance(raw, Mapping):
+                raise TypeError("local observation is not a mapping")
+            return LibraryLocalState.model_validate_json(
+                canonical_message(raw or {"controller": "not_cached"})
+            )
+        except (TypeError, ValueError):
+            _note_unreadable(kind, digest, "local observation is unavailable")
+            return LibraryLocalState(
+                controller=cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
+            )
 
     @staticmethod
     def _merge_local(
@@ -483,7 +482,8 @@ class LibraryProjection:
             current["controller"] = controller
         nodes = current["running_on"]
         if not isinstance(nodes, list):
-            raise LibraryProjectionError("local state running set is not a list")
+            nodes = []
+            current["controller"] = AssetAvailability.UNKNOWN.value
         current["running_on"] = sorted(set(nodes) | set(running_on))
         if preparation is not None:
             previous = current.get("preparation")
@@ -903,7 +903,7 @@ class LibraryProjection:
         self,
         revision: CatalogDocumentRevision,
         document: ModelDefinition,
-        snapshot: Mapping[str, Mapping[str, object]],
+        snapshot: Mapping[str, Mapping[str, object]] | None,
         alignment: Sequence[str] = (),
     ) -> LibraryModelProjection:
         return LibraryModelProjection(
@@ -928,7 +928,7 @@ class LibraryProjection:
         revision: CatalogDocumentRevision,
         document: RecipeDefinition,
         model_by_key: Mapping[tuple[str, str, str], ModelDefinition],
-        snapshot: Mapping[str, Mapping[str, object]],
+        snapshot: Mapping[str, Mapping[str, object]] | None,
     ) -> LibraryRecipeProjection:
         model_selectors = [
             self.selector(selection.model.publisher, selection.model.slug)
@@ -1022,12 +1022,12 @@ class LibraryProjection:
             return documents
 
     def _documents_for_snapshot(
-        self, snapshot: Mapping[str, Mapping[str, object]]
+        self, snapshot: Mapping[str, Mapping[str, object]] | None
     ) -> tuple[
         list[tuple[CatalogDocumentRevision, ModelDefinition]],
         list[tuple[CatalogDocumentRevision, RecipeDefinition]],
     ]:
-        local_digests = tuple(snapshot)
+        local_digests = tuple(snapshot) if snapshot is not None else ()
         return (
             self._catalog_documents(
                 kind="model", local_digests=local_digests, reader=_canonical_model
@@ -1460,7 +1460,7 @@ class LibraryProjection:
             }
             if selected_keys is None:
                 # A recipe with local state of its own counts as cached too.
-                local_recipe_digests = set(snapshot)
+                local_recipe_digests = set(snapshot) if snapshot is not None else set()
                 selected_keys = cached_keys
             else:
                 selected_keys &= cached_keys

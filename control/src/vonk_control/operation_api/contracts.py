@@ -10,7 +10,7 @@ from types import UnionType
 from typing import Annotated, Literal, Protocol
 
 from pydantic import Field, model_serializer
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import OperationProgress, UnknownOutcomeError
 
 from ..auth import CursorCodec
 from ..fleet_profile_contract import (
@@ -30,7 +30,7 @@ from ..strict_json import StrictModel
 from .constants import DIGEST_PATTERN, NODE_PATTERN, BoundedIdentifier, NodeIdentifier
 
 
-class OperationProjectionError(RuntimeError):
+class OperationProjectionError(UnknownOutcomeError):
     """Durable operation state cannot be safely projected."""
 
 
@@ -336,7 +336,8 @@ class OperationPage:
 class OperationListPage:
     items: Sequence[OperationRow]
     next_cursor: str | None
-    total: int
+    total: int | None
+    projection_issue: str | None = None
 
 
 @dataclass(frozen=True)

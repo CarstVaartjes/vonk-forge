@@ -12,7 +12,7 @@ from pydantic import ConfigDict, StrictStr, TypeAdapter, ValidationError
 from sqlalchemy import String, and_, cast, false, func, or_, select, true
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
-from vonk_agent_protocol import LifecycleSubject, canonical_message
+from vonk_agent_protocol import LifecycleState, LifecycleSubject, canonical_message
 
 from ..auth import CursorCodec, CursorError
 from ..models import AgentOperation, Job
@@ -100,28 +100,39 @@ def merge_operation_providers(
         projected_at=now,
     )
     rows: list[OperationItem] = []
-    total = 0
+    total: int | None = 0
     seen: set[str] = set()
+    projection_issue = None
     for provider in providers:
-        page = provider.list_operations(query)
-        total += page.total
+        try:
+            page = provider.list_operations(query)
+        except (OSError, ValueError, OperationProjectionError):
+            projection_issue = "Some operation observations are unavailable."
+            total = None
+            continue
+        if total is not None:
+            total = total + page.total if page.total is not None else None
+        projection_issue = projection_issue or page.projection_issue
         for row in page.items:
-            item = operation_item(row)
-            node_ids = item.node_ids
-            if not all(re.fullmatch(NODE_PATTERN, node) for node in node_ids):
-                raise OperationProjectionError(
-                    f"{provider.family} provider returned invalid node_ids"
-                )
+            try:
+                item = operation_item(row)
+                node_ids = item.node_ids
+                if not all(re.fullmatch(NODE_PATTERN, node) for node in node_ids):
+                    raise ValueError("provider node observation is unavailable")
+                boundary = _operation_boundary(item)
+            except (TypeError, ValueError, OperationProjectionError):
+                warn_unreadable_once(provider.family, str(getattr(row, "id", "row")))
+                projection_issue = "Some operation observations are unavailable."
+                continue
             if node_id is not None and node_id not in node_ids:
                 continue
-            boundary = _operation_boundary(item)
             if after is not None and boundary >= after:
-                raise OperationProjectionError(
-                    f"{provider.family} provider returned a stale operation row"
-                )
+                projection_issue = "Some operation observations are unavailable."
+                continue
             operation_id = boundary[1]
             if operation_id in seen:
-                raise OperationProjectionError("operation ids are not globally unique")
+                projection_issue = "Some operation observations are unavailable."
+                continue
             seen.add(operation_id)
             rows.append(item)
     rows.sort(key=_operation_boundary, reverse=True)
@@ -136,7 +147,12 @@ def merge_operation_providers(
             context=context,
             boundary=[created_at.isoformat(), operation_id],
         )
-    return OperationListPage(items=rows, next_cursor=next_cursor, total=total)
+    return OperationListPage(
+        items=rows,
+        next_cursor=next_cursor,
+        total=total,
+        projection_issue=projection_issue,
+    )
 
 
 def get_operation_from_providers(
@@ -160,11 +176,22 @@ def get_operation_from_providers(
         except KeyError:
             continue
         if match is not None:
-            raise OperationProjectionError("operation ids are not globally unique")
+            warn_unreadable_once(provider.family, operation_id)
+            match = match.model_copy(update={"result_unreadable": True})
+            continue
         match = operation_item(item)
     if match is None:
         raise KeyError(operation_id)
-    _operation_boundary(match)
+    try:
+        _operation_boundary(match)
+    except OperationProjectionError:
+        match = match.model_copy(
+            update={
+                "state": LifecycleState.OBSERVING.value,
+                "result_unreadable": True,
+                "supported_actions": [],
+            }
+        )
     return match
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import logging
@@ -45,6 +46,7 @@ from .recipe_library_types import (
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
+from .recipe_packages.contracts import _snapshot_content
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import SourceBundleUnknown
 
@@ -91,7 +93,10 @@ class CatalogSyncRequestInvalid(InvalidRequestError, CatalogSyncError):
 
     def __init__(self, code: CatalogSyncCode, detail: str) -> None:
         super().__init__(
-            code, detail, reason=InvalidRequestReason.CONFLICT, field="expected_commit"
+            code,
+            detail,
+            reason=InvalidRequestReason.CONFLICT,
+            field="reviewed_snapshot",
         )
 
 
@@ -171,14 +176,18 @@ class ManagedRecipeCatalogSyncService:
         trigger: str,
         actor: str,
         expected_commit: str | None = None,
+        reviewed_snapshot: RecipeLibrarySnapshot | None = None,
     ) -> CatalogSyncView:
         self._validate_request(request_key, trigger, actor, expected_commit)
+        reviewed_content = (
+            hashlib.sha256(_snapshot_content(reviewed_snapshot)).hexdigest()
+            if reviewed_snapshot is not None
+            else None
+        )
         existing = self._by_request_key(request_key)
         if existing is not None:
-            if (existing.trigger, existing.actor, existing.expected_commit) != (
-                trigger,
-                actor,
-                expected_commit,
+            if (existing.trigger, existing.actor) != (trigger, actor) or (
+                _result(existing.result).reviewed_content_sha256 != reviewed_content
             ):
                 raise CatalogSyncError(
                     CatalogSyncCode.REQUEST_REUSED,
@@ -200,7 +209,7 @@ class ManagedRecipeCatalogSyncService:
             current_count=0,
             conflict_count=0,
             missing_count=0,
-            result=json.loads(canonical_message(_empty_result())),
+            result=json.loads(canonical_message(_empty_result(reviewed_content))),
             error_code=None,
             error_detail=None,
             actor=actor,
@@ -235,6 +244,13 @@ class ManagedRecipeCatalogSyncService:
         except IntegrityError as error:
             replay = self._by_request_key(request_key)
             if replay is not None:
+                if (replay.trigger, replay.actor) != (trigger, actor) or (
+                    _result(replay.result).reviewed_content_sha256 != reviewed_content
+                ):
+                    raise CatalogSyncError(
+                        CatalogSyncCode.REQUEST_REUSED,
+                        "request key was already used for different sync semantics",
+                    ) from error
                 return _view(replay)
             raise CatalogSyncUnsettled(
                 CatalogSyncCode.IN_PROGRESS, "another managed catalog sync is running"
@@ -246,7 +262,9 @@ class ManagedRecipeCatalogSyncService:
                     CatalogSyncCode.REPOSITORY_CHANGED,
                     "recipe library repository identity changed",
                 )
-            if expected_commit is not None and snapshot.commit != expected_commit:
+            if reviewed_snapshot is not None and _snapshot_content(
+                snapshot
+            ) != _snapshot_content(reviewed_snapshot):
                 raise CatalogSyncRequestInvalid(
                     CatalogSyncCode.PREVIEW_CHANGED,
                     "recipe library changed since it was reviewed",
@@ -255,7 +273,13 @@ class ManagedRecipeCatalogSyncService:
             if callable(prepare):
                 prepare(snapshot)
             if self._initialize(run.id, snapshot):
-                applied = self._apply(run.id, snapshot, actor=actor, trigger=trigger)
+                applied = self._apply(
+                    run.id,
+                    snapshot,
+                    actor=actor,
+                    trigger=trigger,
+                    reviewed_content=reviewed_content,
+                )
                 # A run that was replaced meanwhile (its lease lapsed) stops
                 # quietly: the run that replaced it owns the catalog now.
                 if applied is not None:
@@ -395,6 +419,7 @@ class ManagedRecipeCatalogSyncService:
             trigger="automatic",
             actor="system:recipe-library-sync",
             expected_commit=snapshot.commit,
+            reviewed_snapshot=snapshot,
         )
 
     def _record_read_failure(self, code: str, detail: str) -> None:
@@ -457,10 +482,11 @@ class ManagedRecipeCatalogSyncService:
         *,
         actor: str,
         trigger: str = "automatic",
+        reviewed_content: str | None = None,
     ) -> ManagedCatalogSyncResult | None:
         """Apply the snapshot; ``None`` when this run was replaced meanwhile."""
 
-        result = _empty_result()
+        result = _empty_result(reviewed_content)
         self._catalog.refresh_build_policy()
         # Index documents the reader could not validate were already skipped;
         # report each one without holding up the rest of the snapshot.
@@ -519,8 +545,17 @@ class ManagedRecipeCatalogSyncService:
                 try:
                     hydrated = self._reader.fetch(item.uri)
                     if (
-                        hydrated.library_commit != snapshot.commit
-                        or hydrated.content_sha256 != item.content_sha256
+                        hydrated.content_sha256 != item.content_sha256
+                        or (
+                            item.package_sha256 is not None
+                            and hydrated.package_sha256 != item.package_sha256
+                        )
+                        or (
+                            item.source_bundle_sha256 is not None
+                            and hydrated.source_bundle_sha256
+                            != item.source_bundle_sha256
+                        )
+                        or hydrated.prebuilt_image != item.prebuilt_image
                     ):
                         # The library moved on while this snapshot was applied:
                         # the recipe is left as it is, named as a problem, and
@@ -904,8 +939,9 @@ def _result(value: object) -> ManagedCatalogSyncResult:
         return unknown
 
 
-def _empty_result() -> ManagedCatalogSyncResult:
+def _empty_result(reviewed_content: str | None = None) -> ManagedCatalogSyncResult:
     return ManagedCatalogSyncResult(
+        reviewed_content_sha256=reviewed_content,
         schema_version=1,
         state=CatalogSyncState.CURRENT,
         imported_count=0,

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
 from vonk_agent_protocol import (
-    InvalidRequestError,
-    InvalidRequestReason,
     OperationProgress,
 )
 
@@ -35,7 +34,6 @@ from .model_cache_progress import project_cache_progress
 from .operation_api import (
     OperationApiServices,
     OperationListPage,
-    OperationProjectionError,
     OperationProvider,
     bounded_error_responses,
 )
@@ -278,10 +276,6 @@ def install_model_operator_routes(
             raise failure(error) from None
 
 
-class ModelCacheCursorProjectionError(InvalidRequestError, OperationProjectionError):
-    """Pagination requires a valid boundary and authenticated cursor signer."""
-
-
 class ModelCacheOperationProvider:
     """Current Activity provider for the Controller-owned cache family."""
 
@@ -291,7 +285,9 @@ class ModelCacheOperationProvider:
         self, service: ModelCacheService, cursors: CursorCodec | None = None
     ) -> None:
         self._service = service
-        self._cursors = cursors
+        from .operation_api.providers import observation_cursors
+
+        self._cursors = cursors or observation_cursors()
 
     def list_operations(self, query: Any = None) -> Any:
         limit = int(getattr(query, "limit", 100) or 100)
@@ -320,6 +316,11 @@ class ModelCacheOperationProvider:
             items=items,
             next_cursor=next_cursor,
             total=require_integer(page["total"], "page total"),
+            projection_issue=(
+                "Operation pagination observation is unavailable."
+                if page.get("_next_boundary") is not None and next_cursor is None
+                else None
+            ),
         )
 
     def _next_cursor(
@@ -330,31 +331,21 @@ class ModelCacheOperationProvider:
         node_id: object,
         request_id: object,
     ) -> str | None:
-        """Encode the page boundary, keeping absence distinct from corruption.
-
-        ``None`` means the service found no further page, so no cursor is
-        correct. A present boundary that is not the exact ``(created_at,
-        operation_id)`` pair is an internal contract violation and must fail
-        loudly instead of silently truncating pagination.
-        """
+        """Sign readable boundaries; unavailable bookkeeping has no cursor."""
 
         if boundary is None:
             return None
         if not isinstance(boundary, tuple) or len(boundary) != 2:
-            raise ModelCacheCursorProjectionError(
-                "operation cursor boundary is invalid",
-                reason=InvalidRequestReason.MALFORMED,
-            )
+            return None
         created_at, operation_id = boundary
         if not isinstance(created_at, str) or not isinstance(operation_id, str):
-            raise ModelCacheCursorProjectionError(
-                "operation cursor boundary is invalid",
-                reason=InvalidRequestReason.MALFORMED,
-            )
-        if self._cursors is None:
-            raise ModelCacheCursorProjectionError(
-                "cursor projection unavailable", reason=InvalidRequestReason.NOT_READY
-            )
+            return None
+        if not operation_id:
+            return None
+        try:
+            datetime.fromisoformat(created_at)
+        except ValueError:
+            return None
         context = {"state": state, "node_id": node_id, "request_id": request_id}
         return self._cursors.encode(
             resource="model-cache-operations",
