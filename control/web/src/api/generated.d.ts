@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 697288b9821d65f1b0067698a94a88c603312ef851369ce5d907a8401efdf163. Do not edit.
+// Generated from canonical OpenAPI SHA256 4ac93477c8125cc423295611df0afab7e80d6a3fc9b65525c381a7aa922d9fce. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -6433,6 +6433,16 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Scope From Content
+             * @default false
+             */
+            scope_from_content: boolean;
+            /**
+             * Scope Pending
+             * @default false
+             */
+            scope_pending: boolean;
             /** Selected */
             selected: string[];
             /** Selected Objects */
@@ -8339,6 +8349,11 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Scope Pending
+             * @default false
+             */
+            scope_pending: boolean;
         };
         /**
          * RecipeCacheRemovalIntent

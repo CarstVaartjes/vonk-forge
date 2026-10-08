@@ -8,12 +8,10 @@ from datetime import UTC
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select, true
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from vonk_agent_protocol import (
     LifecycleState,
-    ModelCacheCode,
     RecipeImageCode,
-    WaitReason,
 )
 from vonk_forge_contracts import document_sha256
 
@@ -61,8 +59,6 @@ from .contracts import (
     ModelCacheRemovalCoordinator,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
-    RecipeImageAvailabilityRefused,
-    RecipeImageAvailabilityUnknown,
 )
 
 if TYPE_CHECKING:
@@ -99,18 +95,8 @@ def remove_selector(
                 with_model=with_model,
             )
 
-    self.reconcile_removal_gates()
-    observed_review = self.review_removal(selector, with_model=with_model)
-    observed_blockers = refusing_removal_blockers(observed_review)
-    if observed_blockers:
-        first_blocker = observed_blockers[0]
-        raise RecipeImageAvailabilityRefused(
-            first_blocker.code,
-            first_blocker.detail,
-            retryable=first_blocker.retryable,
-            recovery_actions=first_blocker.recovery_actions,
-        )
-
+    # Bind content targets without reading local receipts or peer membership.
+    # The accepted Job owns every subsequent observation and its finite budget.
     operation_id = str(uuid.uuid4())
     try:
         with self._sessions.begin() as session:
@@ -123,17 +109,127 @@ def remove_selector(
                     request_id=request_id,
                     with_model=with_model,
                 )
-
             selection = self._recipe_removal_selection_in_session(
-                session, selector, with_model=with_model
+                session, selector, with_model=False
+            )
+            now = self._clock()
+            now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+            review = self._sealed_recipe_removal_review(
+                selector=selector,
+                with_model=with_model,
+                selection=selection,
+                references=(),
+                active_work=(),
+                blockers=(),
+                assets=(),
+                now=now,
+            )
+            intent = RecipeCacheRemovalIntent(
+                schema_version=SCHEMA_VERSION,
+                kind=REMOVE_OPERATION_KIND,
+                action=review.action,
+                selector=selector,
+                actor=actor,
+                request_key=request_id,
+                review_digest=review.review_digest,
+                recipe_revision_id=selection.revision_id,
+                with_model=with_model,
+                removal_fence=str(uuid.uuid4()),
+            )
+            plan = RecipeCacheRemovalPlan(
+                schema_version=SCHEMA_VERSION,
+                intent=intent,
+                image_archives=list(selection.image_archives),
+                model_children=[],
+            )
+            checkpoint = RecipeCacheRemovalCheckpoint(
+                schema_version=SCHEMA_VERSION,
+                scope_pending=True,
+                image_index=0,
+                image_pending_bytes=None,
+                image_reclaimed_bytes=0,
+                model_index=0,
+                model_reclaimed_bytes=0,
+                retry_attempts=0,
+                failure=None,
+            )
+            owner = RecipeCacheRemovalOwner(
+                schema_version=SCHEMA_VERSION, plan=plan, checkpoint=checkpoint
+            )
+            operation = self._lifecycle.new_job(
+                id=operation_id,
+                request_id=request_id,
+                kind=REMOVE_OPERATION_KIND,
+                actor=actor,
+                authority_revision=selection.revision_id,
+                targets=[],
+                payload_digest=self._removal_payload_digest(plan),
+                payload=serialize_json_value(owner),
+                result=None,
+                current_attempt=1,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(operation)
+            session.flush()
+            from .persistence import removal_status
+
+            return removal_status(self, operation, owner)
+    except IntegrityError:
+        # The unique request key arbitrates concurrent admission. Observe the
+        # exact winner after this transaction has rolled back, before retrying
+        # any effect or changing the accepted intent.
+        with self._sessions() as session:
+            existing = session.scalar(select(Job).where(Job.request_id == request_id))
+            if existing is None:
+                raise
+            return self._replay_removal(
+                existing,
+                selector=selector,
+                actor=actor,
+                request_id=request_id,
+                with_model=with_model,
+            )
+
+
+def observe_recipe_removal(
+    self: RecipeImageAvailabilityService, operation_id: str
+) -> bool:
+    """Re-observe managed storage and peer scope under the original owner."""
+    with self._sessions() as session:
+        operation = session.get(Job, operation_id)
+        if operation is None or operation.state not in job_states.words(
+            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+        ):
+            return False
+        pinned = self._read_removal_owner(operation)
+    selector = pinned.plan.intent.selector
+    actor = pinned.plan.intent.actor
+    request_id = pinned.plan.intent.request_key
+    with_model = pinned.plan.intent.with_model
+    observed_review = self.review_removal(
+        pinned.plan.intent.recipe_revision_id, with_model=with_model
+    )
+    blockers = refusing_removal_blockers(observed_review)
+    if blockers:
+        first = blockers[0]
+        return self._record_recipe_removal_failure(
+            operation_id, code=first.code, detail=first.detail, retryable=True
+        )
+    try:
+        with self._sessions.begin() as session:
+            selection = self._recipe_removal_selection_in_session(
+                session, pinned.plan.intent.recipe_revision_id, with_model=with_model
             )
             revision_id = selection.revision_id
             image_archives = selection.image_archives
             model_scope = selection.model_scope
 
-            removal_fence = str(uuid.uuid4())
-            model_operation_id = str(uuid.uuid4()) if model_scope is not None else None
-            model_removal_fence = str(uuid.uuid4()) if model_scope is not None else None
+            if image_archives != tuple(pinned.plan.image_archives):
+                return False
+            removal_fence = pinned.plan.intent.removal_fence
+            model_operation_id = str(uuid.uuid4())
+            model_removal_fence = str(uuid.uuid4())
             image_owner_kind: RemovalOwnerKind = "recipe-image-job"
             assignments: list[tuple[ArtifactIdentity, RemovalOwnerKind, str, str]] = [
                 (
@@ -145,8 +241,6 @@ def remove_selector(
                 for archive in image_archives
             ]
             if model_scope is not None:
-                if model_operation_id is None or model_removal_fence is None:
-                    raise AssertionError("model removal owner identity is missing")
                 model_owner_kind: RemovalOwnerKind = "model-cache-operation"
                 assignments.extend(
                     (
@@ -176,7 +270,7 @@ def remove_selector(
                 current_blockers,
             ) = self._recipe_removal_impact_in_session(
                 session,
-                selector,
+                pinned.plan.intent.recipe_revision_id,
                 with_model=with_model,
                 own_assignments=assignments,
             )
@@ -195,18 +289,11 @@ def remove_selector(
             )
             current_blockers = refusing_removal_blockers(current_review)
             if current_blockers:
-                first_blocker = current_blockers[0]
-                raise RecipeImageAvailabilityRefused(
-                    first_blocker.code,
-                    first_blocker.detail,
-                    retryable=first_blocker.retryable,
-                    recovery_actions=first_blocker.recovery_actions,
-                )
+                session.rollback()
+                return False
 
             model_children: list[RecipeCacheRemovalModelChild] = []
             if model_scope is not None:
-                assert model_operation_id is not None
-                assert model_removal_fence is not None
                 child_request_key = str(
                     uuid.uuid5(
                         uuid.NAMESPACE_URL,
@@ -225,20 +312,16 @@ def remove_selector(
                     scope=model_scope,
                 )
                 if accepted_child is None:
-                    raise RecipeImageAvailabilityRefused(
-                        ModelCacheCode.REMOVAL_SCOPE_CHANGED,
-                        "model cache scope changed before the recipe removal was accepted",
-                    )
+                    session.rollback()
+                    return False
                 child_id, accepted_key, selected_sets, plan_digest = accepted_child
                 if (
                     child_id != model_operation_id
                     or accepted_key != child_request_key
                     or selected_sets != model_scope.selected_sets
                 ):
-                    raise RecipeImageAvailabilityRefused(
-                        ModelCacheCode.REMOVAL_SCOPE_CHANGED,
-                        "accepted model removal does not match the reviewed recipe scope",
-                    )
+                    session.rollback()
+                    return False
                 model_children.append(
                     RecipeCacheRemovalModelChild(
                         request_key=accepted_key,
@@ -251,7 +334,7 @@ def remove_selector(
             intent = RecipeCacheRemovalIntent(
                 schema_version=SCHEMA_VERSION,
                 kind=REMOVE_OPERATION_KIND,
-                action="remove",
+                action=pinned.plan.intent.action,
                 selector=selector,
                 actor=actor,
                 request_key=request_id,
@@ -266,79 +349,36 @@ def remove_selector(
                 image_archives=list(image_archives),
                 model_children=model_children,
             )
-            checkpoint = RecipeCacheRemovalCheckpoint(
-                schema_version=SCHEMA_VERSION,
-                image_index=0,
-                image_pending_bytes=None,
-                image_reclaimed_bytes=0,
-                model_index=0,
-                model_reclaimed_bytes=0,
-                retry_attempts=0,
-                failure=None,
+            checkpoint = pinned.checkpoint.model_copy(
+                update={"scope_pending": False, "failure": None}
             )
             owner = RecipeCacheRemovalOwner(
                 schema_version=SCHEMA_VERSION,
                 plan=plan,
                 checkpoint=checkpoint,
             )
-            now = self._clock()
-            now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-            operation = self._lifecycle.new_job(
-                id=operation_id,
-                request_id=request_id,
-                kind=REMOVE_OPERATION_KIND,
-                actor=actor,
-                authority_revision=revision_id,
-                targets=[],
-                payload_digest=self._removal_payload_digest(plan),
-                payload=serialize_json_value(owner),
-                result=None,
-                current_attempt=1,
-                created_at=now,
-                updated_at=now,
-            )
-            session.add(operation)
-            session.flush()
-    except IntegrityError:
-        with self._sessions() as session:
-            existing = session.scalar(select(Job).where(Job.request_id == request_id))
-            if existing is None:
-                raise
-            return self._replay_removal(
-                existing,
-                selector=selector,
-                actor=actor,
-                request_id=request_id,
-                with_model=with_model,
-            )
-    except ArtifactLifecycleError as error:
-        raise RecipeImageAvailabilityUnknown(
-            error.code,
-            error.detail,
-            retryable=error.retryable,
-            recovery_actions=("retry",) if error.retryable else (),
-        ) from error
-    except ModelCacheConflict as error:
-        raise RecipeImageAvailabilityRefused(
-            error.code,
-            error.detail,
-            retryable=error.recovery == "retry",
-            retry_after_seconds=error.retry_after_seconds,
-            recovery_actions=("retry",) if error.recovery == "retry" else (),
-        ) from error
-
-    with self._sessions() as session:
-        operation = session.get(Job, operation_id)
-        if operation is None:
-            raise RecipeImageAvailabilityUnknown(
-                RecipeImageCode.OPERATION_MISSING,
-                "accepted recipe removal owner could not be read",
-                retryable=True,
-                recovery_actions=("retry",),
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-        intent = self._read_removal_intent(operation)
-        return self._read_removal_result(operation, intent)
+            operation = session.get(Job, operation_id, with_for_update={"nowait": True})
+            if operation is None or operation.state not in job_states.words(
+                LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
+            ):
+                session.rollback()
+                return False
+            current = self._read_removal_owner(operation)
+            if current != pinned:
+                session.rollback()
+                return False
+            operation.payload = serialize_json_value(owner)
+            operation.payload_digest = self._removal_payload_digest(plan)
+        return True
+    except (ArtifactLifecycleError, ModelCacheConflict, DBAPIError) as error:
+        return self._record_recipe_removal_failure(
+            operation_id,
+            code=getattr(error, "code", RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE),
+            detail=getattr(
+                error, "detail", "recipe removal database observation unavailable"
+            ),
+            retryable=True,
+        )
 
 
 def reconcile_requested_removals(

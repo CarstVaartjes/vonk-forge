@@ -22,8 +22,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, OperationProgress, UnknownOutcomeError
-from vonk_control.artifact_lifecycle import ArtifactLifecycleError
+from vonk_agent_protocol import LifecycleState, OperationProgress
 from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
     runtime_image_reference_reasons,
@@ -1323,7 +1322,7 @@ def test_remove_recipe_does_not_cancel_accepted_build_or_preparation(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_damaged_reference_owner_is_unknown_and_reobserved_after_repair(
+def test_damaged_reference_owner_ends_removal_and_admits_fresh_work(
     tmp_path: Path,
 ) -> None:
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'reference-budget.sqlite'}")
@@ -1366,20 +1365,36 @@ def test_damaged_reference_owner_is_unknown_and_reobserved_after_repair(
             )
         )
 
-    with sessions() as session, pytest.raises(ArtifactLifecycleError) as refused:
-        runtime_image_reference_reasons(session, (ARCHIVE_SHA,))
-
-    assert isinstance(refused.value, UnknownOutcomeError)
+    recipe = _recipe("recipe-source-build.json")
     with sessions.begin() as session:
-        application = session.get(
-            FleetProfileApplication, "00000000-0000-4000-8000-000000000032"
-        )
-        assert application is not None
-        session.delete(application)
+        _add_head(session, _add_revision(session, "damaged-reference", recipe))
+    storage = FilesystemRuntimeImageStorage(tmp_path / "damaged-reference-cache")
+    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
+    receipt_path = storage.root / f"{ARCHIVE_SHA}.receipt.json"
+    receipt_path.write_text(_reference_receipt().model_dump_json())
+    observed = [now]
+    service = _service(
+        sessions,
+        storage=storage,
+        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
+        clock=lambda: observed[0],
+    )
+    key = str(uuid.uuid4())
+    accepted = service.remove_selector(
+        recipe.identity.slug, actor="operator", request_id=key
+    )
+    for _ in range(8):
+        service.advance_removals(limit=1)
+        observed[0] += timedelta(seconds=30)
     with sessions() as session:
-        assert runtime_image_reference_reasons(session, (ARCHIVE_SHA,)) == {
-            ARCHIVE_SHA: ()
-        }
+        ended = session.get(Job, accepted.operation_id)
+        assert ended is not None and ended.state == LifecycleState.FAILED
+    assert receipt_path.exists()
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
+    fresh = service.start(
+        "damaged-reference", actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert fresh.id != accepted.operation_id
     engine.dispose()
 
 
@@ -1492,16 +1507,27 @@ def test_damaged_removal_owner_does_not_hold_up_later_request(
         bad.updated_at = datetime.now(UTC) - timedelta(seconds=1)
 
     # The damaged owner ends without retaining the queue.
-    assert service.advance_removals(limit=2) == 2
+    for _ in range(6):
+        service.advance_removals(limit=2)
 
     with sessions() as session:
         bad = session.scalar(select(Job).where(Job.request_id == bad_key))
         good = session.scalar(select(Job).where(Job.request_id == good_key))
-        assert bad is not None
-        assert good is not None and good.state == "succeeded"
+        assert bad is not None and bad.state == LifecycleState.FAILED
+        assert good is not None and good.state == LifecycleState.SUCCEEDED
+        from vonk_control.models import ArtifactLifecycleGate
+
+        assert (
+            session.scalar(
+                select(ArtifactLifecycleGate).where(
+                    ArtifactLifecycleGate.removal_owner_id == bad.id
+                )
+            )
+            is None
+        )
     with sessions() as session:
-        ended = session.scalar(select(Job).where(Job.request_id == good_key))
-        assert ended is not None and ended.state == "succeeded"
+        ended = session.scalar(select(Job).where(Job.request_id == bad_key))
+        assert ended is not None and ended.state == LifecycleState.FAILED
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
         cast(Job | RecipeImageAvailabilityView, ended),
@@ -1663,16 +1689,16 @@ def test_recipe_removal_request_key_replays_before_resolving_current_head(
     )
 
 
-def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
+def test_active_recipe_removal_admits_independent_request_and_replays_accepted_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An existing deletion fence is visible, while its accepted key still recovers."""
+    """Catches refusal of a newer request or replay through mutable observations."""
 
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'active-review.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    now = datetime.now(UTC)
+    now = [datetime.now(UTC)]
     receipt = _reference_receipt()
     with sessions.begin() as session:
         revision = _add_revision(session, "revision-active-review", recipe)
@@ -1687,7 +1713,7 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         sessions,
         storage=storage,
         authority=lambda *_args, **_kwargs: (recipe, _runtime()),
-        clock=lambda: now,
+        clock=lambda: now[0],
     )
     selector = recipe.identity.slug
     before = service.review_removal(selector, with_model=False)
@@ -1699,51 +1725,62 @@ def test_active_recipe_removal_blocks_fresh_review_but_replays_accepted_key(
         request_id=request_key,
         with_model=False,
     )
-    assert accepted.state == "queued"
-
-    changed_key = "00000000-0000-4000-8000-000000000042"
-    with pytest.raises(RecipeImageAvailabilityError) as stale:
-        service.remove_selector(
-            selector,
-            actor="operator",
-            request_id=changed_key,
-            with_model=False,
-        )
-    # The in-flight removal owns the assets; a second request waits for it.
-    assert stale.value.code == "artifact.deletion_in_progress"
-    assert stale.value.retryable is True
-    with sessions() as session:
-        assert session.scalar(select(Job).where(Job.request_id == changed_key)) is None
-        existing = session.scalar(select(Job).where(Job.request_id == request_key))
-        gate = session.get(ArtifactLifecycleGate, ("runtime-image", ARCHIVE_SHA))
-        assert existing is not None and gate is not None
-        assert gate.removal_owner_id == existing.id
+    assert accepted.state == LifecycleState.QUEUED
     assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
 
-    during = service.review_removal(selector, with_model=False)
-    assert any(
-        blocker.code == "artifact.deletion_in_progress" for blocker in during.blockers
+    changed_key = "00000000-0000-4000-8000-000000000042"
+    newer = service.remove_selector(
+        selector,
+        actor="operator",
+        request_id=changed_key,
+        with_model=False,
     )
-    assert during.review_digest != before.review_digest
+    assert newer.operation_id != accepted.operation_id
+    with sessions() as session:
+        assert (
+            session.scalar(select(Job).where(Job.request_id == changed_key)) is not None
+        )
+        assert (
+            session.scalar(select(Job).where(Job.request_id == request_key)) is not None
+        )
+    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
 
     def no_mutable_review(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("same-key recovery must precede mutable review")
 
-    monkeypatch.setattr(service, "review_removal", no_mutable_review)
-    replay = service.remove_selector(
-        selector,
-        actor="operator",
-        request_id=request_key,
-        with_model=False,
-    )
-    assert replay.operation_id == accepted.operation_id
-    assert replay.review_digest == before.review_digest
-    fresh = service.start(
-        "revision-active-review",
-        actor="operator",
-        request_id="prepare-during-removal",
-    )
-    assert fresh.state == "queued"
+    with monkeypatch.context() as fault:
+        fault.setattr(service, "review_removal", no_mutable_review)
+        replay = service.remove_selector(
+            selector,
+            actor="operator",
+            request_id=request_key,
+            with_model=False,
+        )
+        assert replay.operation_id == accepted.operation_id
+
+    # Both independent owners must finish or end through the normal worker;
+    # neither may leave a gate behind that prevents subsequent preparation.
+    for _ in range(12):
+        service.advance_removals(limit=10)
+        now[0] += timedelta(minutes=1)
+    for request in (accepted, newer):
+        ended = service.get_operator_request(request.request_key, actor="operator")
+        assert isinstance(ended, RecipeCacheRemovalStatus)
+        assert ended.state in (
+            LifecycleState.SUCCEEDED,
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+        )
+        assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            cast(RecipeCacheRemovalStatus | RecipeImageAvailabilityView, ended),
+            end=lambda receipt: receipt,
+            fresh=lambda _: service.start(
+                "revision-active-review",
+                actor="operator",
+                request_id=str(uuid.uuid4()),
+            ),
+        )
 
 
 def test_postgres_recipe_removal_persists_owner_before_first_unlink(

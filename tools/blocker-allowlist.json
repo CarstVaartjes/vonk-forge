@@ -498,7 +498,7 @@
   },
   "max_debt": 0,
   "debt_ceiling": {
-    "total": 116,
+    "total": 114,
     "unaudited": 0,
     "note": "Raise sites whose category is bookkeeping-debt. The ceiling falls as sites are fixed or re-categorized with a written reason; it rises only when the retry proof stops crediting a site that sat in a loop on just some of its call paths (blocker_classifier --rebalance)."
   },
@@ -794,9 +794,13 @@
       "path": "control/src/vonk_control/recipe_image_availability/removal_execution.py",
       "function": "advance_removals",
       "catches": [
-        "RecipeImageAvailabilityError"
+        "RecipeImageAvailabilityError",
+        "ArtifactLifecycleError",
+        "ModelCacheError",
+        "RuntimeImagePreparationError",
+        "UnknownOutcomeError"
       ],
-      "reason": "The cache-removal pass runs on every worker tick over every queued, running or backing-off removal; an owner whose evidence is unreadable or changed is skipped for this pass, nothing is removed, and the same row is read again on the next pass, so it never blocks the rows after it."
+      "reason": "Each worker tick re-observes the original owner after its persisted next action. Unknown scope, peer, receipt or database observations consume its finite checkpoint budget; the creation-time deadline remains effective when retry recording contends. Exhaustion ends only this owner and exact storage-lock reconciliation releases gates."
     },
     {
       "path": "control/src/vonk_control/recipe_image_availability/requests.py",
@@ -1278,6 +1282,23 @@
         "UnknownOutcomeError"
       ],
       "reason": "A typed unknown ends this pure validation entry with a diagnostic without effects or claims; remaining recipes are examined and a fresh invocation is immediately eligible."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_acceptance.py",
+      "function": "observe_recipe_removal",
+      "catches": [
+        "ArtifactLifecycleError",
+        "ModelCacheConflict"
+      ],
+      "reason": "The pending accepted owner calls this observer from the recurring removal worker. Scope and peer uncertainty records a checkpoint retry; five failures or the durable creation-time deadline end that owner with bytes retained. Transactions unwind before the failure is recorded."
+    },
+    {
+      "path": "control/src/vonk_control/recipe_image_availability/removal_execution.py",
+      "function": "_record_recipe_removal_failure",
+      "catches": [
+        "RecipeImageAvailabilityError"
+      ],
+      "reason": "A request whose plan becomes unreadable while recording its retry ends the exact owner without any byte effect. The worker storage-lock reconciler releases dead ownership, and a fresh request is independently admitted; no guessed scope is persisted."
     }
   ],
   "call_edges": [
@@ -1857,10 +1878,10 @@
     "control/src/vonk_control/artifact_reference_scan.py": {
       "ArtifactReferenceFinding": "3d3ab3923bbdac7355634fc7d19dce62c539bb835954ad4e57de6b7f2c80a4ab",
       "_finding": "00319a334bf51f0c4acc2db86926fed674ddd07a8bc6d1d285176235f3a76a0b",
-      "_reason_projection": "e0a699c0788ea845ed78a90710c66e67389da9f008120a254923cdd4efbde9f6",
+      "_reason_projection": "436a3fa5948ac768a77c18f52737cc85b4f7a140c8a858f73015149072238600",
       "require_model_sets_open": "7583efc05f8747752f4263fda58846c4a79262cf301f0b72d4f2aef3e00ee5f1",
       "model_set_objects": "86defa957598efdcf30e1cdc89b1c5b552d363355c3fcb51a296a3919e0acae8",
-      "model_set_reference_findings": "033de2f9afb74bd939918228458b3b91ae5686aee1fad2a5182ea2c4e38d18a8",
+      "model_set_reference_findings": "fb0a645d5a9d0a1e2af67e5bb23a92f258603a779d7d7646474e648a28c4cdb7",
       "model_set_reference_findings.account": "7d865f6be624426b3bb165d5f9015904eb47db52f9d35894c9eb67ae57d11e5d",
       "model_set_reference_reasons": "8873ed7b1fc4d46fc3d0e5cf89d05bcfe552753b64a3118776d35d1212fbfd09",
       "runtime_image_reference_findings": "d2b7885d5c85236cb389aebf87a71dd7e9f07b64e21737ef75f821ee773584cb",
@@ -3451,11 +3472,11 @@
       "<module>": "1f1c919571ef4f4256d4fa9d299b815ae9ec6e558a3905c034fdeec95b0a34c3"
     },
     "control/src/vonk_control/model_cache/core.py": {
-      "CoreMixin": "1c1eda04c45da851397c170526d52fcf1fe5d6b3403343c697fa09a00326f4b4",
+      "CoreMixin": "477988a0c6fed52c7fc3f9b930f9c902cca4468b4e674f4baba06b647b5e0019",
       "CoreMixin.close": "7b5a59316b767d79ef9ac403ccb74cc7670049d14fe679e11a398c66df87b3e4",
       "CoreMixin.root": "133a3fca9f083aa9fff4f23cf7b9ceb4e737867fa7419e4906d8bba0314e528d",
       "CoreMixin.reserve_bytes": "4fa800e631dc08afe9b97c58a45f4eaa00cd2fe7fb49ded3902b4311ffe6f0f2",
-      "CoreMixin._session": "b8b21c7946010fe487279f9aadf7f3523726f00819b59f800c322de7c720eddd",
+      "CoreMixin._session": "66b66555d6e215c10845c0778f99b1b109935599f45fa87bf4ffb222f844645d",
       "CoreMixin.running_here": "951f254d7df7d6db4e3da878d0e583c21bf0a6de8bf2f293d1585f5faa586e17",
       "CoreMixin.objects_present": "61d9fca33502d8fc38dc45fdd18cd33d3e41ff6313cc1830169d57d1c7848863",
       "CoreMixin._objects_present": "283148d408109e94bd81e5d9fba95cfdc928258ed33b95ddec21bfddc3e0750d",
@@ -3474,30 +3495,30 @@
       "CoreMixin._stored_manifest.read": "f14e408444e6102e968900cdec6bf7c66e8e66b156a421b4aa58a9b861dec549",
       "CoreMixin._project_end": "e9776b39835cd196baa2c94c07b24a8155dc306a7668baafdc7250541bec9cf2",
       "CoreMixin._project_cancelled_set": "1d42a6d4fe18619495877e10790b3b8ff72066ea59ed90ba1c3681a37f9438a3",
-      "<module>": "015127e77b7397ab124e5e23c6c6b5e22ad4474c18f9cdf09629ea6bcaa60143"
+      "<module>": "9bd8b71fff98dba08343be5f8652c4d86f1ff521218a7e23df12e6756a156351"
     },
     "control/src/vonk_control/model_cache/download.py": {
-      "DownloadMixin": "077696289a21959cae73281f13431dad98c7bcb9e95d0742b4a38b3ac078fa79",
+      "DownloadMixin": "9bb8c2290c1038c1d98c4b12c626121edbdfc6ffb63807642c381d930116ab61",
       "DownloadMixin._require_transfer_running": "d3693dca5163956729db3e68661a35d6ae095c2558ca57cf8b6daafd0999a246",
       "DownloadMixin._stream_gate": "d8d592951cc4b693bbcb5c693f36eb908cb8e57c4cd620f8b373ee1fc0a6afc1",
       "DownloadMixin._download_sequential": "b5cf1beaa60a8b3d799dc488da3efeaceec7865728c9b01aa21e89256bf7bb76",
       "DownloadMixin._complete_download": "be491fc7d3c3bcb3309daba7b145c528c0cd65281899f14cf07d9ce3fda9e3bf",
-      "DownloadMixin._publication_allowed": "99d0c006addc8a52a5d1925adbac6c083a2528d0462f8844bda888c05fa7a621",
+      "DownloadMixin._publication_allowed": "d3707c9fc4c47041425094441e9bf016a36799ebed57d7bf269ae5df91473b51",
       "DownloadMixin._require_model_sets_open": "88eef9f677fb187af48d2ef3f13f33f90bef131402f4372b2e8909f3ee1c370c",
-      "DownloadMixin._reference_unknown": "bf576b55f93ed789f3ecb7a424fce48d91c1259d6b812b6938d85d07a5b97518",
+      "DownloadMixin._reference_unknown": "0ba5074e94ad98de3e7712895cd27c3e6dd77025a43f2bf6c4cf1724ddff1032",
       "DownloadMixin._validate_http_download": "773f47e5e15c277b46dbe7e9ea0f7827aae23c78c1f5042b6a2037b22c3a924a",
       "DownloadMixin._download_parallel_ranges": "7bb754973522c0b64643c84fa922d674f4a7a328b6a1c0585af68bcfaf8e4f83",
       "DownloadMixin._open_source": "fc2f99dd8aaac4a53a9d1c8a4998fe0be13a3ca400d08d9d7aeb3d2fec2f84b2",
-      "<module>": "1d1b03fe114494d7eb9a1107123f145ff0fe9f80636bd90af1075ec29afdd450"
+      "<module>": "91b47a868317eab161414a7598ea710f888fe7add1f643feb46ca9cd662270fc"
     },
     "control/src/vonk_control/model_cache/download_admission.py": {
-      "DownloadAdmissionMixin": "d30b9ab8216fc1bfd97d47c6534747cff89b891145bf9d6b0a150030cc406589",
-      "DownloadAdmissionMixin.start_download": "436b31021305ed34a198804a1e49a14d9aaccf2876763091b96bc40d9ce2144d",
+      "DownloadAdmissionMixin": "6b63de20c19fcc0baf1c1e32dc0579c685737e791cd4c94220909bcee1cb2af8",
+      "DownloadAdmissionMixin.start_download": "2ec1a686949d5acd9544ecfa015ef12db5cf4c03ccd1adfe89517e7eda5941d7",
       "DownloadAdmissionMixin._download_replay": "cc8abf78d195dd0ffa5fc04dd8401c9a0d269bd0005132d3ec8c5db61b40a906",
       "DownloadAdmissionMixin._resolve_requested_manifest": "aff5e082c0e6038ff133974d1b7a4fa170f4f1381c048d456f539e0a08779808",
       "DownloadAdmissionMixin.download_preview": "227609d9216aa7d8d1aa50d8d51a51e43164a9c4741bcb746d889f43241413ac",
-      "DownloadAdmissionMixin._download_preview_for_manifest": "8f33bf91d375f72680b93c3610774005230aa981f94ffda7e0dd2f42c78dc3c9",
-      "<module>": "0ffb7b7e771269e30fe0466e65e7b7e0c9fde1e9197ac2f1b661504ed83484e6"
+      "DownloadAdmissionMixin._download_preview_for_manifest": "207d9fc6e8eb948b0cbb2d2e2b4f0d5a32c3c36d43f7a4e7e5860f2fda9a9085",
+      "<module>": "b773268f0eb7db5ca2007771a4a1718405fa24163dac6de28f552976fe700c73"
     },
     "control/src/vonk_control/model_cache/errors.py": {
       "ModelCacheError": "7ebc823967a37aec019d2588948d6b0c381e9e8d8ddf5d7b7b1b2905ab38824b",
@@ -3592,7 +3613,7 @@
       "<module>": "ae3de08f949ace803c0598bac0e61970a40f3a21c31948391cb8188c9a852efb"
     },
     "control/src/vonk_control/model_cache/persistence.py": {
-      "_model_removal_intent_digest": "00546c387f85a47ffec8e8e114fd8bce1f93869fd6668cb6e0e431715949b4f5",
+      "_model_removal_intent_digest": "233cfb8ab7de0f2d7f55fc04e7d0053c8481a89bec2f9217d652857fd304c081",
       "_read_operation_payload": "f946751ed5dc093af247aa373a20825228058d01c86ebf666a01a944c4c43467",
       "_parse_operation_envelope": "87864274212284d1e788efa7adf34b38ce8b1b165c5d5b3aa7af9686b433325d",
       "_read_manifest_document": "7032b7768f597efbe3b7f439b010ef13bf09b00ea3dc66e2f5e565abc6209d59",
@@ -3619,51 +3640,54 @@
       "<module>": "57ae20a420ba8f5ea7ab96940a169f00a111b2322aa206012040a9c44d8f2e7f"
     },
     "control/src/vonk_control/model_cache/removal_acceptance.py": {
-      "RemovalAcceptanceMixin": "fdee5519413e01c0f3dd98911b8826cb155b81bf1392c5de4e8cf02e01dfdcf8",
+      "RemovalAcceptanceMixin": "70f02d4c9a3c2b4781ebe192a59d80c82f634af6691990d00b85de1e367baf94",
       "RemovalAcceptanceMixin._model_removal_by_request": "17fcf2767c1f190e93d6f21fc280746a96e5d8720c12c4371efde228ad16f985",
       "RemovalAcceptanceMixin._replay_model_removal": "536eb76113581e78c3544ae5b40ee578006dc9f749da79710646f37e6e8d5549",
-      "RemovalAcceptanceMixin._accept_model_removal": "20ea5f72d03562d7f0fed5f46c15b601a7e52efdfca1fc6371f3a9d4675ac45e",
+      "RemovalAcceptanceMixin._accept_model_removal": "667a9ac589d946e2c7888d96dc8d59a7e3215f15300015edd8894f0538f40519",
       "RemovalAcceptanceMixin._model_removal_progress": "cb44c23e8addfa966a0797b7467856c4afa15fd240399f18489cbc8cfacdd413",
       "RemovalAcceptanceMixin._model_storage_lock": "d4b697a75c3fff4fc6e9e4f3eb02f378528236e5b238d8acacfe4c8ffd57a4fb",
       "RemovalAcceptanceMixin._model_object_size": "183e417e2ebceaccb333c0cc7ae8d73e89fe2a6de4bd979da4ae58a15034d01f",
       "RemovalAcceptanceMixin._remove_model_object_files": "0155d4b52480d2454548d9d5f52b15a2123fb7acae08bef54a3ae0507e10f133",
       "RemovalAcceptanceMixin._remove_model_partial_set": "33545193b91781abdcbf10c94a7558db8c38b3aa78531bfe0a795801281c5480",
-      "<module>": "c0cfc76fd57c0e838da5fe9ca3d6c7fb5ff52f986fb1852833c8837ee957afda"
+      "<module>": "f5e0eb6bde6a4746b612ee38bc01572f60748b46fa28f87d496681f692c26eaf"
     },
     "control/src/vonk_control/model_cache/removal_execution.py": {
-      "RemovalExecutionMixin": "386326dc279ab0e0213f393871a94266ddcfc7b8eb3b8df6812a725eb4e41406",
+      "RemovalExecutionMixin": "71f5a4b2e28c4eeb9edc21609b5f0059caf88a0724c8edb949e108bd0e312fdc",
       "RemovalExecutionMixin._retire_removal": "58c581df1b31d1f3783f771669c64cc195acbea44dcd0066cccccb8653e9124e",
-      "RemovalExecutionMixin._advance_model_removal": "058f48f03bce1be859190b4c52df7f83b1064ad325dd4fc27550c8ca08a50eee",
-      "RemovalExecutionMixin._advance_model_removal_step": "69199929641a8a67e0164a7632e9f9d05e4327d2273fbdd0b3bac6ef4dab6e7f",
+      "RemovalExecutionMixin._advance_model_removal": "378bcfbaa94ba3a3203a86835237199823ee45912aac1c9f384be39077e00d71",
+      "RemovalExecutionMixin._advance_model_removal_step": "64bcac92fe4573fcd5e922ad5e7518fb06e784badde55df6b46bde092f0b4257",
       "RemovalExecutionMixin._finish_model_removal_in_session": "94fae63958b35784806f5ff326b330a550974ac2541d37d8098ec8c2e17eaf3e",
-      "<module>": "aa2707aea178850567fe544dc056f2b0ed23e9f363d44ed01cbdc9bc2f5d34fd"
+      "<module>": "c944b71a022bc6bdd96d114abbb629969910187f1c8067a062f1f9e0fe392563"
     },
     "control/src/vonk_control/model_cache/removal_reconcile.py": {
-      "RemovalReconcileMixin": "945056a81398f9345c01b4d1d2f49df3fa68c3818fc659b8a979256d1b216dec",
+      "RemovalReconcileMixin": "18dc108998f699c6e8115ca26b41023a55bff4110908c10fbe0ac6631cd7ee17",
+      "RemovalReconcileMixin._observe_model_removal_scope": "f3f403844c0b9857c8959a65f8da4674b482fc6be7a81f077e762c1c86feebdf",
+      "RemovalReconcileMixin._observe_model_removal_scope.newer_request": "dd08d1f5c882394d63f3b237d9b21e2737939530bdaaba1c78ea9b5bf1da94c4",
+      "RemovalReconcileMixin._reconcile_exact_scope_owners": "56fd088592da2ab864752537dd5c3248de9af84d696a4e81f1e0dc7b5f6fdb5b",
       "RemovalReconcileMixin._model_removal_owner_snapshot": "ba7a701cac49ae05ee456da6b5e0a8759d965ad38255352414e87f8433d3a415",
       "RemovalReconcileMixin._persist_model_removal_checkpoint": "ad3d403a120a749b8c07575702526a953ff2f902c6d47033e586e9431d31ee73",
-      "RemovalReconcileMixin._defer_model_removal": "fff7df4771cef8363abf68d803ae84524677c7316641f3bf7c1e0dd1512cbdb2",
-      "RemovalReconcileMixin.reconcile_requested_removals": "2707848d02f81b3a956d2d03fea51fd4d5c0be017bc502b98284e64713842c19",
-      "RemovalReconcileMixin.reconcile_removal_gates": "3b6afef47b1cd77934c7b97010a3c608ffaf7bc4847cda53176e21832a3a2472",
+      "RemovalReconcileMixin._defer_model_removal": "389dca03f12c820e77890a8612875564a784f3efea2ae43b8b774ba8afe47f85",
+      "RemovalReconcileMixin.reconcile_requested_removals": "eb9c991b4f4b2d6c45daa97a920e2d831f557a71239fe90b52af636a1b5477e9",
+      "RemovalReconcileMixin.reconcile_removal_gates": "12041d5c96c46ccb0a7ec1a6e0ea1aa95c8bdf61b5eaa936a6f9c33ed97be44c",
       "RemovalReconcileMixin.advance_removals": "8c59ec7b57cdd8eef95b8ec68c487a3347e51ff857dcc5706d5b59f817894638",
-      "<module>": "3139b47d5c7fefc944128882659e28a0f93750cbc01035b26c8dddfac119c029"
+      "<module>": "ce31552b81ab5bf37b1613e0e8fa8f0ddea28f2b11454cc8d3e3b9f69d967ba8"
     },
     "control/src/vonk_control/model_cache/removal_review.py": {
-      "RemovalReviewMixin": "b0ffbba530cfd088552cf1a45c0ec1286bd389e997794dc1d59ca6695100761a",
+      "RemovalReviewMixin": "b3c1bce65b1ac5d8b7b7699ff94cef2890b0447d802d89550ce779f34b53dead",
       "RemovalReviewMixin.download_model_selector": "07deb7170b8ea35c5b86d1e7381da2830929e1fabdd683b0f0205dd78e34a0f6",
-      "RemovalReviewMixin.remove_model_selector": "01d60d5d8cfe8bc624c9155775a133ffe0e701c25a82e7548f3b484112b9fa81",
+      "RemovalReviewMixin.remove_model_selector": "a2c08eb27c784f62ce7efc9b5ec8169d6e55359aecded585d608999d1501b6e3",
       "RemovalReviewMixin.accept_unused_removal": "8552162e0971b024b6308bfcc9689ca409bcc3f5c7dd2c394ff0cdd87fce7502",
       "RemovalReviewMixin.accept_unused_set_removal": "efdc9854b21c3f931a691f31890e9edcd73e0ae8e8cf6e22abbde7aff5ade3ef",
       "RemovalReviewMixin.unused_set_bytes": "c24e37faeee6708ddd6e1f5b9ad6a351a1eb0a11556e934e093b32e43ed3fe40",
       "RemovalReviewMixin._cancel_superseded_downloads": "d119196552e24c6954603c79863f50553533efa9f937514f9338d38def55e2d3",
-      "RemovalReviewMixin.review_model_removal": "c7533bbc8cfbdff3a5270b28f13f1963335997d0efea07e29f497d0c785c3ac3",
+      "RemovalReviewMixin.review_model_removal": "c5c5c52e359e5b486c4b70961f4211089fad3ca4cdf8961a51c75a8588e0c0ba",
       "RemovalReviewMixin.removal_owner_findings_in_session": "8f0b6861a1846b69dd85972d7a7a5de7b908d01c33577be36b32d5d8cfd60973",
       "RemovalReviewMixin.retained_model_object_findings": "67377f393dff319a72cd77221bb8bed9452adebfa57bdb3a6976f0d6c2a36462",
       "RemovalReviewMixin.accept_removal_for_sets_in_session": "3dbd8addcd1dba95e56f9c979d53d8416397e817dcfe494f7bd6292260766607",
       "RemovalReviewMixin.accept_recipe_removal_child_in_session": "bda823ad047a40d8c533b70368706b9e2eb3ee46ae069a97bb4bcdde0d4c2a08",
       "RemovalReviewMixin.recipe_removal_scope_in_session": "edca8a8112399ec464d724e4dd8d9cdd8e89b71e21a18626f8b6d24bc4ad7365",
       "RemovalReviewMixin._model_removal_scope_for_sets": "d2ba4f1016ae3307703297abea0b48ac36b28721796d944ac78f85c6399c9901",
-      "<module>": "c20afabee48a92cea7a38c52129d9f18d1c80cd05e540fa60cd174f7ce846e95"
+      "<module>": "007434d39580e0ac569956a4569590cc319f637beff3e7cbc2ac38a53772d141"
     },
     "control/src/vonk_control/model_cache/removal_scope.py": {
       "RemovalScopeMixin": "15c9d041bbc8df883313378fe819212ac20b1da828027adee3ae83d44d462ae4",
@@ -3707,10 +3731,10 @@
       "<module>": "d0593de3633f45d5f150cbf5c9bfd93905b8485e715db9e72295784ad98b6a9a"
     },
     "control/src/vonk_control/model_cache/scheduler.py": {
-      "SchedulerMixin": "101f2d16d836daf2cf37d4e73f150b3bffbdb311b5a6e945ed70a6f20dd35a0b",
+      "SchedulerMixin": "aa28d3912ca597be26550fe873041d0779ba24cd6e6249c8f2dedcf924b275af",
       "SchedulerMixin.resume_operations": "96f0009d57fab58b1511e10e688e6d9b465c108ea24c5de6fcbc5434590f1e10",
       "SchedulerMixin.run_pending": "593a2a928e962f8b8f905e7cc321fb6847da0c0529839cb9e08c3148505b24cb",
-      "SchedulerMixin.tick": "eb531f357b326ddd81883223a2dcde0b3f2988f10806608d9ceef1712f6115b9",
+      "SchedulerMixin.tick": "aba6658d063aef2cb4b744c18dee2fb7b1a3cab1c3e375cb0fd9e3607772c8c5",
       "SchedulerMixin._available_transfer_slots": "bc55c4563abfa237ec17595c370e5fed51592a22edd437c296bef7e58bf5174c",
       "SchedulerMixin._schedule_background_download": "9f5bd9edda8bfadedee36456bf2465c9b8498c6b109544023b72e02193a171b2",
       "SchedulerMixin._fill_background_slots": "149f174475fe7fb1b7cbb7b80b91f268026c29a28d4f27793ffc64eeabcac580",
@@ -3718,12 +3742,12 @@
       "SchedulerMixin._renew_background_claims": "a9026323d3dbe8beb0e293c8831aa9841ad85f0764120b416e27fa6ecebd8bb4",
       "SchedulerMixin._finish_background_success": "5cc8f2385e185a710131a0a903867c3d8bc6c0b400ba303fb77167d233f207e4",
       "SchedulerMixin._claim_operations": "8d69a77da992b20e02dec9b7c78e8c753cbe186566b9c6e8013f3e4c1fa29a4d",
-      "<module>": "571ef84a43ebca186d17df893c121eb423487b904ad84d0f2258f80afd71b962"
+      "<module>": "788dff4b81e146e25c40abf3d115be7cd71015ee9c4bb9a3c9d0458a20c14d8f"
     },
     "control/src/vonk_control/model_cache/service.py": {
-      "ModelCacheService": "e315e84ded0980b3fddf40c617f15e4c5f622ffac9bba24500417a1387132d80",
-      "ModelCacheService.__init__": "864b31edf6d40761c3b8ab5194a963545f54acc742d13ca5fa0de97df0201ce6",
-      "<module>": "e315e84ded0980b3fddf40c617f15e4c5f622ffac9bba24500417a1387132d80"
+      "ModelCacheService": "b7efc50e4b7d90737aa57f67fd63a9e1d8ef1734adbc821e69d624aa19763d97",
+      "ModelCacheService.__init__": "ee68bea246814dab4e080db3f1307eafbde61ab1fb74f26b132a249fdb84da8f",
+      "<module>": "b7efc50e4b7d90737aa57f67fd63a9e1d8ef1734adbc821e69d624aa19763d97"
     },
     "control/src/vonk_control/model_cache/source_helpers.py": {
       "_model_selector": "f6318959a69436217e2004fe390e6c4520d25b7a55a1e6de5f2754d35dd1d4db",
@@ -4452,7 +4476,8 @@
       "_read_removal_owner": "3409641f95878dcc2c9d78e192fa600d97da4e403e0cd4b17a2c694f24446ca7",
       "_read_removal_intent": "9a2920ea1963d1e422e47386762183a337899b8d6fe6c072c7dcfe16b41a2f92",
       "_removal_progress_document": "826ed26b899f35623d4f0d4549b880ce2b97df1fd499d24e0493ef49b0036bb5",
-      "_read_removal_result": "7ac6f530a27c0186c79a59544469914704f40bc665bc69fb99da19f3853a9dc7",
+      "_read_removal_result": "c3849e499bda1e81b51352608214487d8441a2e43821b6db57044e81321e3f46",
+      "removal_status": "3f25b186b49ebd6f92c662b41d75d2fe20cdfd1c838b6784d5fb553f4db3d513",
       "_stored_removal_result": "257f95d3fa54e62fcb82b3f85cf0b96c151302887ecd71561296eb1d06071d8f",
       "_replay_removal": "f071529e4b1cc567b229a583c0b4598b3f545d6d69f92fb908c602ba024ab9a9",
       "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df"
@@ -4468,7 +4493,8 @@
       "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df"
     },
     "control/src/vonk_control/recipe_image_availability/removal_acceptance.py": {
-      "remove_selector": "349f89a11a55dcded25f1ad98b0e0268434feb28c98763c99d1b0ac36c454436",
+      "remove_selector": "f7c7f818997e9f136d2485ce92f09fd18cd2fb040ac5d144f21dda15b4f75518",
+      "observe_recipe_removal": "3144d2251efd21ef8ac318e58d0e1745ea287f8e64ac51481943c11b4d977532",
       "reconcile_requested_removals": "241504f07b8b3dc92721f3fb604bf2b58ca41f7416d8337f624c22680ada58f5",
       "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df"
     },
@@ -4478,24 +4504,25 @@
     },
     "control/src/vonk_control/recipe_image_availability/removal_execution.py": {
       "reconcile_removal_gates": "362db9c72ea0cc44ebefce12395851554d6ce3340e508a2e2c730b3740a15206",
-      "advance_removals": "0b9cda3358f33ab9e09a3f2d0447a8f6389e11235538b6b34dbd47a9456243bc",
-      "_advance_recipe_removal": "24f38d08fc3c1f7eb7c4c5d38f7e0db6e274a715ad7d099223e4b87ebe410dd7",
+      "advance_removals": "20dfb63868ec77beb91675e0cd0a60191dec7b4098546e4912b637888d674b30",
+      "_advance_recipe_removal": "b4c08047ba5337d44a90b783c6877eff1fe03d964070f24a55f99504338f86a9",
       "_advance_recipe_image_removal": "d1256e8164629962a9d067336f1265700a09755e0ace4e0837b621ecbafd5210",
       "_checkpoint_recipe_image_removal": "cb84aa97b3db6140bceac2765b388de16a380edb1e072cd01f9f28eeecbfdbc2",
       "_complete_recipe_image_removal": "7d563e789215c67b6fed706c28878d612b47213572a6a8fdcb6fca899812726e",
       "_advance_recipe_model_child": "f6534c738798356a055edaeb6e655affa8a121f722af6686a40f16e74b3398e1",
       "_complete_recipe_model_child": "f3ba43fd0bb5a5e98cefe28167b75d1a0593ff0664db10877ec57523e018f0e3",
-      "_record_recipe_removal_failure": "dbb7958a15532020e54b7bcb1c25d69e59959a9fa2a12ca04888be3ea384b685",
+      "_record_recipe_removal_failure": "e259be22334f8c6a692e5bf7faaf8fa6fe5bb2522bd22bab05bcbf0f06724f61",
       "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df"
     },
     "control/src/vonk_control/recipe_image_availability/removal_review.py": {
       "_cache_removal_finding": "13b71bc6c26290fd369525cb9368dc3e372ac2096cd2b39961fe94353e116682",
       "_recipe_removal_impact_in_session": "c7911af7edd08a0eae8b657aa74da091ceec72a23d911283f195e5db6ea55dec",
       "_runtime_image_removal_assets": "8b4572107abb758d37f05f4c26b8dea34c89df1ced67f1b7594f1ad2f69fd9b2",
-      "_model_removal_assets": "2e452b37c5b1cee5fff96d5f797ae031ed990c367df4c084190f2fbac3ef8a1f",
+      "_model_removal_assets": "f0a9ea91897353f9d7a616cb45f515c9a382193b042dace8203ab4e7920f5398",
+      "_model_removal_assets.unknown": "f3d3dc415a7c0173a56cf52e4214a2a58338ed4899960c35c926f55599b98cbc",
       "_review_assets_for_selection": "2571f78ad18910af580de8d1a393359672b7322c268b256d8afd88dc96541184",
       "_sealed_recipe_removal_review": "f7087a95a86ddaf8e3b21a93e34f08d5f9b45add1cb9550f19aed68074acdeb4",
-      "review_removal": "da5e39e62c634a1863120f49af1c4ebe9baa491cece07230d22f5829939bc30b",
+      "review_removal": "84c278664be437128215f06ac895cf2e77575aae42da5a333a9bd81a86a72031",
       "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df"
     },
     "control/src/vonk_control/recipe_image_availability/requests.py": {
@@ -4521,7 +4548,7 @@
       "<module>": "fcc0a2b85bfc1d901b5670b35688508956c0e0ed6cf6a085dab6c9d84f34c8df"
     },
     "control/src/vonk_control/recipe_image_availability/service.py": {
-      "RecipeImageAvailabilityService": "817b8d8d744739aad05452c7c3cd39dba169215589d0e9604b084805a8d62fba",
+      "RecipeImageAvailabilityService": "cfc70cc56649e3b0e020cbbab9edd87eb9b6bf2154519da711c64170769ddf73",
       "RecipeImageAvailabilityService.__init__": "5ec29064fd78273c598ba041230879074aabf4180b81c78cabdc22ddd14ecd55",
       "RecipeImageAvailabilityService._payload": "5ff5ab5cdc972fb136a9541e02022cb206b7421d89db3ef3d5951327a82f9363",
       "RecipeImageAvailabilityService._recipe_removal_selection_in_session": "6b8fca98c3239d8e044e322fc015b86cbcc2ae65ecd5cc019897709180af8a97",
@@ -4543,6 +4570,7 @@
       "RecipeImageAvailabilityService._sealed_recipe_removal_review": "8538a9330b0c046e4591d19350a007a7ca3f64954ba770ef6e39b0e5f72753ac",
       "RecipeImageAvailabilityService.review_removal": "99e58a469a4f207162a4345d706dce80185419d7765e2d1b5c89e05688a2366b",
       "RecipeImageAvailabilityService.remove_selector": "c064b0888c385d2a5748ea6ca4ae1fd071a8480fba06f4263e2ce8783ae7cda6",
+      "RecipeImageAvailabilityService._observe_recipe_removal": "ebfa314081e782eac000395deac185d5e1e9e46467280044120ab08631f6b0ee",
       "RecipeImageAvailabilityService.reconcile_requested_removals": "f03e341f2492a9fc17efe3c1f79e8d67e0e010fef119be7ea8556b130324ecd1",
       "RecipeImageAvailabilityService.reconcile_removal_gates": "55572e2b93dad2d8bc2874c43d0df8142bbc9b0a3ea39bc3fe7f6bef6333c3ce",
       "RecipeImageAvailabilityService.advance_removals": "d0bc582e394fdffad75981020541bc9cb9bd3fc7ed8e4a30009f6047be6b896f",
@@ -4621,7 +4649,7 @@
       "RecipeImageAvailabilityService._fail": "4d9478aee90ab04caa61a7cac647ffd3577ce92f6a4953b0b2ac5a06b1cf9fdb",
       "RecipeImageAvailabilityService._unknown_view": "e168454415c5acb4d05a44476511eb11fe7ab85ac7de6fd90a40c6ce5716bc3d",
       "RecipeImageAvailabilityService._view": "c2dae460a6bcc14018f61ee0722496235dec232aec383a5ab7eb8894926257e9",
-      "<module>": "09007166015041d179d75d1d07427960f0db66f74a966af6605c66542faa5968"
+      "<module>": "865efc4328f8975e19aceb0225ca0f3b9c897864392dcb49300c12c60d28e55c"
     },
     "control/src/vonk_control/recipe_operation_phases.py": {
       "decode_stored_phases": "091823c6a00a05c3a6e1df3de8a7d30e3110678baed13f429a91ef0e77ff31b3",
@@ -7192,8 +7220,7 @@
       "sites": [
         ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage._stored_image", "runtime_image.archive_unavailable", 1],
         ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.lock_unavailable", 3],
-        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.publication_contended", 1],
-        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1]
+        ["control/src/vonk_control/runtime_image_preparation/storage.py", "RuntimeImagePreparationUnknown", "FilesystemRuntimeImageStorage.publication_lock", "runtime_image.publication_contended", 1]
       ]
     },
     {
@@ -7462,9 +7489,7 @@
       "reason": "Destructive-effect guard: a recipe cache removal and the references that compete with it are decided on one exact, reviewed scope. A review that cannot be sealed on consistent evidence, a reference scan that is unavailable (an unavailable scan does not prove an object unused), a changed scope at acceptance (reject changed effects instead of broadening consent) and an artifact reserved for removal all refuse here; the refusal names its retry or inspect action.",
       "sites": [
         ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RuntimeImagePreparationRefused", "_persist_provisional_image_reference", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RuntimeImagePreparationRefused", "_persist_receipt", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityRefused", "remove_selector", "message", 3],
-        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityRefused", "remove_selector", "model_cache.removal_scope_changed", 2]
+        ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RuntimeImagePreparationRefused", "_persist_receipt", "message", 1]
       ]
     },
     {
@@ -7489,7 +7514,6 @@
       "sites": [
         ["control/src/vonk_control/recipe_image_availability/image_preparation.py", "RecipeImageAvailabilityInvalid", "_prepare_claimed_image", "recipe_image.build_unavailable", 1],
         ["control/src/vonk_control/recipe_image_availability/persistence.py", "RecipeImageAvailabilityInvalid", "_recipe_removal_selection_in_session", "model_cache.unavailable", 1],
-        ["control/src/vonk_control/recipe_image_availability/removal_review.py", "RecipeImageAvailabilityInvalid", "_model_removal_assets", "model_cache.unavailable", 1],
         ["control/src/vonk_control/recipe_image_availability/requests.py", "RecipeImageAvailabilityInvalid", "_start_request_once", "recipe_image.metadata_refresh_unavailable", 1]
       ]
     },
@@ -8165,8 +8189,7 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "RecipeImageAvailabilityUnknown", "cancel", "recipe_image.cancel_busy", 2],
-        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityUnknown", "remove_selector", "recipe_image.operation_missing", 1]
+        ["control/src/vonk_control/recipe_image_availability/cancellation.py", "RecipeImageAvailabilityUnknown", "cancel", "recipe_image.cancel_busy", 2]
       ]
     },
     {
@@ -8897,8 +8920,7 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/model_cache/removal_acceptance.py", "_ArtifactWriterBusy", "RemovalAcceptanceMixin._model_storage_lock", "message", 1],
-        ["control/src/vonk_control/recipe_image_availability/removal_acceptance.py", "RecipeImageAvailabilityUnknown", "remove_selector", "message", 1]
+        ["control/src/vonk_control/model_cache/removal_acceptance.py", "_ArtifactWriterBusy", "RemovalAcceptanceMixin._model_storage_lock", "message", 1]
       ]
     },
     {
@@ -9211,6 +9233,7 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
+        ["control/src/vonk_control/runtime_image_preparation/contracts.py", "RuntimeImagePreparationUnknown", "read_runtime_image_reference_intent", "runtime_image.reference_intent_invalid", 1],
         ["control/src/vonk_control/runtime_image_preparation/contracts.py", "_ReceiptDocumentRejected", "_load_receipt_document", "message", 1],
         ["control/src/vonk_control/runtime_image_preparation/contracts.py", "_ReceiptDocumentRejected", "_load_receipt_document", "runtime_image.receipt_unavailable", 3]
       ]
@@ -9308,18 +9331,7 @@
       "category": "already-retried",
       "reason": "An unknown-outcome raise that a registered retry or observe loop catches without re-raising and retries or reports to the lifecycle core, on every call path that reaches it (see retry_loops for each loop and why it retries). Proven by the AST test in control/tests/blocker_retries.py.",
       "sites": [
-        ["control/src/vonk_control/model_cache/removal_review.py", "ModelCacheConflictUnknown", "RemovalReviewMixin.remove_model_selector", "retry", 1],
-        ["control/src/vonk_control/model_cache/removal_review.py", "ModelCacheStorageUnknown", "RemovalReviewMixin.accept_recipe_removal_child_in_session", "model_cache.removal_plan_invalid", 1],
-        ["control/src/vonk_control/recipe_image_availability/removal_review.py", "RecipeImageAvailabilityUnknown", "_model_removal_assets", "model_cache.review_invalid", 4],
-        ["control/src/vonk_control/recipe_image_availability/removal_review.py", "RecipeImageAvailabilityUnknown", "review_removal", "message", 1]
-      ]
-    },
-    {
-      "family": "removal.admission-observation",
-      "category": "bookkeeping-debt",
-      "reason": "Stored owner observation is not a caller or security refusal. Until every admission path proves bounded recovery it remains debt.",
-      "sites": [
-        ["control/src/vonk_control/model_cache/removal_review.py", "ModelCacheConflictRefused", "RemovalReviewMixin.remove_model_selector", "message", 1]
+        ["control/src/vonk_control/model_cache/removal_review.py", "ModelCacheStorageUnknown", "RemovalReviewMixin.accept_recipe_removal_child_in_session", "model_cache.removal_plan_invalid", 1]
       ]
     },
     {

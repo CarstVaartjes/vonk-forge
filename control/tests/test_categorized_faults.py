@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import pytest
 from vonk_agent_protocol import (
-    ArtifactLifecycleCode,
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
@@ -113,24 +112,22 @@ def test_model_cache_artifact_lifecycle_leaves_accept_retryable(
             fence=str(uuid4()),
             now=datetime.now(UTC),
         )
-    with (
-        sessions() as session,
-        pytest.raises(model_cache.ModelCacheRemovalOwnerInvalid) as caught,
-    ):
-        service.removal_owner_findings_in_session(session, scope)
-    assert caught.value.retryable
-    assert isinstance(caught.value, UnknownOutcomeError)
-    assert caught.value.typed_reason is WaitReason.OBSERVATION_UNAVAILABLE
-    assert service.reconcile_removal_gates() == 1
+    with sessions.begin() as session:
+        removal = service.accept_removal_for_sets_in_session(
+            session,
+            actor="test",
+            request_key=str(uuid4()),
+            selector="owner-recovery",
+            selected_sets=scope.selected_sets,
+        )
+    for _ in range(8):
+        service.advance_removals(limit=1)
+        if service.get_operation(removal.id).state == LifecycleState.SUCCEEDED:
+            break
+    assert service.get_operation(removal.id).state == LifecycleState.SUCCEEDED
     fresh, _artifact = _queue(service, tmp_path, str(uuid4()))
     service.run_pending()
     assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
-
-    fence = model_cache.ModelCacheDeletionFenceLost(
-        ArtifactLifecycleCode.DELETION_FENCE_LOST, "x", retryable=True
-    )
-    assert isinstance(fence, SecurityRefusalError)
-    assert fence.retryable is True
 
 
 def test_writer_busy_is_unknown_and_resumes() -> None:
