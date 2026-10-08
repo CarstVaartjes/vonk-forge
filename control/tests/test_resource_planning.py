@@ -553,7 +553,7 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
     source = Path(__file__).resolve().parents[1] / "src" / "vonk_control"
     services = {"RunAdmissionService", "RunSwitchOperationService"}
     seen: dict[str, int] = {}
-    for path in sorted(source.glob("*.py")):
+    for path in sorted(source.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text())):
             if not isinstance(node, ast.Call):
                 continue
