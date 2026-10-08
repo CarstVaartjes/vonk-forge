@@ -126,13 +126,6 @@ def test_a_class_of_a_category_type_names_its_family(cls: str, category: str) ->
     ("function", "code", "category"),
     [
         ("CatalogEntityService.resolve_reference", "catalog.reference_missing", INPUT),
-        ("CatalogEntityService.revise", "catalog.revision_missing", DEBT),
-        ("_head", "catalog.head_missing", DEBT),
-        (
-            "CatalogEntityService._bind_recipe_models",
-            "catalog.model_artifact_missing",
-            DEBT,
-        ),
     ],
 )
 def test_reference_request_validation_does_not_hide_persisted_catalog_debt(

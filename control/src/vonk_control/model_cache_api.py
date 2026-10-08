@@ -6,9 +6,13 @@ from collections.abc import Mapping
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
+    OperationProgress,
+)
 
-from .auth import MUTATION_ROLES, Actor
+from .auth import MUTATION_ROLES, Actor, CursorCodec
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
 from .model_cache import (
@@ -274,12 +278,18 @@ def install_model_operator_routes(
             raise failure(error) from None
 
 
+class ModelCacheCursorProjectionError(InvalidRequestError, OperationProjectionError):
+    """Pagination requires a valid boundary and authenticated cursor signer."""
+
+
 class ModelCacheOperationProvider:
     """Current Activity provider for the Controller-owned cache family."""
 
     family = "model-cache"
 
-    def __init__(self, service: ModelCacheService, cursors: Any | None = None) -> None:
+    def __init__(
+        self, service: ModelCacheService, cursors: CursorCodec | None = None
+    ) -> None:
         self._service = service
         self._cursors = cursors
 
@@ -331,19 +341,27 @@ class ModelCacheOperationProvider:
         if boundary is None:
             return None
         if not isinstance(boundary, tuple) or len(boundary) != 2:
-            raise OperationProjectionError("operation cursor boundary is invalid")
+            raise ModelCacheCursorProjectionError(
+                "operation cursor boundary is invalid",
+                reason=InvalidRequestReason.MALFORMED,
+            )
         created_at, operation_id = boundary
         if not isinstance(created_at, str) or not isinstance(operation_id, str):
-            raise OperationProjectionError("operation cursor boundary is invalid")
-        context = {"state": state, "node_id": node_id, "request_id": request_id}
-        if self._cursors is not None:
-            return self._cursors.encode(
-                resource="model-cache-operations",
-                order="created-at-desc/id-desc/v1",
-                context=context,
-                boundary=[created_at, operation_id],
+            raise ModelCacheCursorProjectionError(
+                "operation cursor boundary is invalid",
+                reason=InvalidRequestReason.MALFORMED,
             )
-        raise OperationProjectionError("operation cursor projection unavailable")
+        if self._cursors is None:
+            raise ModelCacheCursorProjectionError(
+                "cursor projection unavailable", reason=InvalidRequestReason.NOT_READY
+            )
+        context = {"state": state, "node_id": node_id, "request_id": request_id}
+        return self._cursors.encode(
+            resource="model-cache-operations",
+            order="created-at-desc/id-desc/v1",
+            context=context,
+            boundary=[created_at, operation_id],
+        )
 
     def get_operation(self, operation_id: str) -> OperationItem:
         try:
