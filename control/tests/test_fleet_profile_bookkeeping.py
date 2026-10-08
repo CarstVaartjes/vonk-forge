@@ -373,7 +373,7 @@ def test_the_exact_identity_fence_of_a_recovery_still_refuses() -> None:
     _require_recovery_preparation("assignment", None, accepted)
 
 
-@pytest.mark.parametrize("damage", ["intent-identity", "review-identity"])
+@pytest.mark.parametrize("damage", ["intent-identity", "review-identity", "scope"])
 def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) -> None:
     from types import SimpleNamespace
 
@@ -392,9 +392,14 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
         intended_value = progress["intended_profile"]
         assert isinstance(intended_value, dict)
         intended = dict(intended_value)
-        intended[
-            "profile_digest" if damage == "intent-identity" else "reviewed_plan_digest"
-        ] = "e" * 64
+        if damage == "scope":
+            intended["scope"] = {"node_ids": [_node_id(9)]}
+        else:
+            intended[
+                "profile_digest"
+                if damage == "intent-identity"
+                else "reviewed_plan_digest"
+            ] = "e" * 64
         progress["intended_profile"] = intended
         row.progress = progress
 
@@ -417,3 +422,54 @@ def test_damaged_review_ends_without_holds_and_a_fresh_load_is_admitted(damage) 
     assert ended.state == LifecycleState.SUPERSEDED
     assert ended.progress.supersede_code is not None
     assert fresh.id != ended.id
+
+
+@pytest.mark.parametrize("damage", ("missing", "scope"))
+def test_planner_observation_damage_admits_load_and_reobserves(damage):
+    """Catches an internal assessment becoming a caller refusal or dispatch."""
+    from datetime import timedelta
+
+    from vonk_agent_protocol import LifecycleState
+    from vonk_control.lifecycle.evidence import BookkeepingReason, retire_as_unknown
+
+    from .test_fleet_profiles import _assessment
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
+    broken = [True]
+    adapter = _SwitchAdapter()
+
+    def assess(_session, assignment, node_ids, **_kwargs):
+        if broken[0] and damage == "missing":
+            return retire_as_unknown(
+                "profile-assessment",
+                assignment.id,
+                BookkeepingReason.EVIDENCE_UNAVAILABLE,
+                "observation unavailable",
+            )
+        return _assessment(
+            _exact_preparation((_node_id(9),) if broken[0] else node_ids)
+        )
+
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: now[0],
+        switch_adapter=adapter,
+        assessment_provider=assess,
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    first = service.apply(profile.id, request_key=_uuid(1110), actor="admin")
+    assert not adapter.starts
+    # A newer request is admitted while the old observation is still unknown.
+    fresh = service.apply(profile.id, request_key=_uuid(1111), actor="admin")
+    assert fresh.id != first.id
+    broken[0] = False
+    for _ in range(12):
+        now[0] += timedelta(seconds=61)
+        service.tick()
+    assert adapter.starts
+    assert service.application(fresh.id).state in {
+        LifecycleState.RUNNING,
+        LifecycleState.SUCCEEDED,
+    }

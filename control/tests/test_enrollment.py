@@ -23,7 +23,6 @@ from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.ca_issuance_contract import CertificateIssuanceBinding
 from vonk_control.enrollment import (
-    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
     EnrollmentService,
@@ -1712,7 +1711,7 @@ def test_grant_revocation_and_consumption_serialize_on_postgres(postgres_engine)
     assert final.state == ("consumed" if authority.calls else "revoked")
 
 
-def test_known_rotation_capacity_refusal_preserves_active_certificate(
+def test_rotation_response_loss_preserves_exact_request_and_recovers(
     service, monkeypatch
 ) -> None:
     from vonk_agent_protocol.reason_codes import CertificateCode
@@ -1728,16 +1727,22 @@ def test_known_rotation_capacity_refusal_preserves_active_certificate(
             reason_code=CertificateCode.RESPONSE_UNREPRESENTABLE,
         )
 
+    original = authority.renew_node
     monkeypatch.setattr(authority, "renew_node", refuse_capacity)
-    with pytest.raises(CertificateResponseCapacityRefused) as refusal:
-        enrollment.renew(NODE_ID, issued.serial, csr())
-    assert refusal.value.reason_code == "certificate.response_unrepresentable"
+    request = csr()
+    with pytest.raises(RenewalIssuanceUncertain):
+        enrollment.renew(NODE_ID, issued.serial, request)
     assert len(authority.calls) == calls
     with sessions() as session:
         source = session.get(AgentCertificate, issued.serial)
         assert source is not None and source.state == "active"
         intent = session.scalar(select(AgentCertificateRotation))
         assert intent is not None and intent.state == "issuing"
+    monkeypatch.setattr(authority, "renew_node", original)
+    _clock.advance(seconds=61)
+    recovered = enrollment.renew(NODE_ID, issued.serial, request)
+    assert recovered.node_id == NODE_ID
+    assert len(authority.calls) == calls + 1
 
 
 class RecoveryAuthority(RecordingAuthority):

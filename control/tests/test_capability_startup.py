@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from vonk_control import api, artifact_blob_store, recipe_packages, route_runtime
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.capabilities import CapabilityRegistry
+from vonk_control.capabilities import CapabilityRegistry, RecoveringService
 from vonk_control.capability_contract import (
     CapabilityAvailability,
     CapabilityReason,
@@ -161,6 +161,7 @@ def test_guarded_method_binding_and_retry_rate():
     )
     issue = service.issue
     assert calls[0] == 0
+    registry.retry_due()
     for _ in range(3):
         with pytest.raises(HTTPException) as failure:
             issue()
@@ -169,10 +170,10 @@ def test_guarded_method_binding_and_retry_rate():
             failure.value.detail.model_dump_json()
         )
         assert reply.retryable
-        assert reply.reason == CapabilityReason.CONFIGURATION_INVALID
     assert calls[0] == 1
     broken[0] = False
     now[0] += timedelta(seconds=1)
+    registry.retry_due()
     assert issue() == 7
     assert calls[0] == 2
 
@@ -197,6 +198,7 @@ def test_health_outage_recovers_without_reconstructing_or_replaying_effects():
         Service,
         check=lambda _service: healthy[0],
     )
+    registry.retry_due()
     service.issue()
     healthy[0] = False
     now[0] += timedelta(seconds=30)
@@ -279,3 +281,79 @@ def test_initializer_retry_reuses_owned_resources_and_shutdown_does_not_construc
     unopened = registry.guard(ControllerCapability.ARTIFACT_STORAGE, Service, Service)
     unopened.close()
     assert constructed[0] == 1
+
+
+@pytest.mark.parametrize("boundary", ("factory", "initializer", "health"))
+def test_hung_construction_releases_owner_and_fences_late_result(boundary, monkeypatch):
+    """Catches a timeout that leaves the lock owned or publishes a stale result."""
+    from threading import Event, Thread
+
+    from vonk_control import capabilities
+
+    threads = []
+
+    def worker(**kwargs):
+        thread = Thread(**kwargs)
+        threads.append(thread)
+        return thread
+
+    monkeypatch.setattr(capabilities, "Thread", worker)
+
+    now = [datetime.now(UTC)]
+    entered = Event()
+    release = Event()
+    finished = Event()
+    calls = [0]
+    first = object()
+    fresh = object()
+
+    def hang():
+        entered.set()
+        assert release.wait(timeout=5)
+
+    def factory():
+        calls[0] += 1
+        if calls[0] == 1:
+            if boundary == "factory":
+                hang()
+            return first
+        return fresh
+
+    def initialize(value):
+        if value is first and boundary == "initializer":
+            hang()
+
+    def health(value):
+        if value is first and boundary == "health":
+            hang()
+        if value is first:
+            finished.set()
+        return True
+
+    owner = RecoveringService(
+        ControllerCapability.MODEL_CACHE,
+        object,
+        factory,
+        lambda: now[0],
+        initialize=initialize,
+        check=health,
+        construction_timeout_seconds=0.05,
+    )
+    try:
+        start = time.monotonic()
+        owner.attempt_construction()
+        assert time.monotonic() - start < 1
+        assert entered.is_set()
+        assert owner._lock.acquire(blocking=False)
+        owner._lock.release()
+        assert owner.status.next_attempt_at is not None
+        now[0] += timedelta(seconds=1)
+        owner.attempt_construction()
+        assert owner.require_service() is fresh
+        release.set()
+        assert finished.wait(timeout=1)
+        threads[0].join(timeout=1)
+        assert not threads[0].is_alive()
+        assert owner.require_service() is fresh
+    finally:
+        release.set()

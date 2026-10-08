@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import UnknownError
 from vonk_control.auth import AgentIdentity, AgentSource
 from vonk_control.models import AgentCertificate, AgentNode, AgentPresence, Base
 from vonk_control.presence import (
@@ -127,7 +128,7 @@ def test_observe_upserts_presence_bound_to_exact_active_certificate(
         assert session.get(AgentPresence, NODE_ID).management_address == "10.0.0.43"
 
 
-def test_latest_fails_closed_for_stale_or_no_longer_active_certificate(
+def test_latest_is_unknown_until_fresh_authenticated_contact(
     presence_system,
 ) -> None:
     sessions, service, source, current = presence_system
@@ -135,16 +136,16 @@ def test_latest_fails_closed_for_stale_or_no_longer_active_certificate(
 
     assert service.latest(NODE_ID, maximum_age_seconds=60).address == "10.0.0.42"
     current[0] += timedelta(seconds=61)
-    with pytest.raises(PresenceError, match="stale"):
-        service.latest(NODE_ID, maximum_age_seconds=60)
+    assert isinstance(service.latest(NODE_ID, maximum_age_seconds=60), UnknownError)
+    fresh = service.observe(source)
+    assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
 
     current[0] = NOW
     with sessions.begin() as session:
         certificate = session.get(AgentCertificate, "serial-a")
         assert certificate is not None
         certificate.state = "retired"
-    with pytest.raises(PresenceError, match="certificate"):
-        service.latest(NODE_ID, maximum_age_seconds=60)
+    assert isinstance(service.latest(NODE_ID, maximum_age_seconds=60), UnknownError)
     with pytest.raises(PresenceError, match="certificate"):
         service.observe(source)
 
@@ -171,8 +172,9 @@ def test_latest_revalidates_durable_address_instead_of_trusting_the_row(
         assert row is not None
         row.management_address = "not-an-ip"
 
-    with pytest.raises(PresenceError, match="canonical IP"):
-        service.latest(NODE_ID, maximum_age_seconds=60)
+    assert isinstance(service.latest(NODE_ID, maximum_age_seconds=60), UnknownError)
+    fresh = service.observe(source)
+    assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
 
 
 def test_latest_rejects_a_malformed_durable_certificate_binding(
@@ -185,8 +187,9 @@ def test_latest_rejects_a_malformed_durable_certificate_binding(
         assert row is not None
         row.certificate_fingerprint = ""
 
-    with pytest.raises(PresenceError, match="binding is invalid"):
-        service.latest(NODE_ID, maximum_age_seconds=60)
+    assert isinstance(service.latest(NODE_ID, maximum_age_seconds=60), UnknownError)
+    fresh = service.observe(source)
+    assert service.latest(NODE_ID, maximum_age_seconds=60) == fresh
 
 
 def test_latest_in_session_reads_through_the_callers_transaction(
@@ -232,12 +235,10 @@ def test_missing_presence_is_unknown_and_next_authenticated_contact_repairs_it(
     presence_system,
 ) -> None:
     """Catches refusing a missing record or retaining a gate after that read."""
-    from vonk_agent_protocol import UnknownError, WaitReason
 
     _, service, source, _ = presence_system
     missing = service.latest(NODE_ID, maximum_age_seconds=60)
     assert isinstance(missing, UnknownError)
-    assert missing.reason is WaitReason.OBSERVATION_UNAVAILABLE
     recorded = service.observe(source)
     observed = service.latest(NODE_ID, maximum_age_seconds=60)
     assert observed == recorded

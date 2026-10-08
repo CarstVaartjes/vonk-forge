@@ -1632,7 +1632,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
         async def first_source():
             yield b"aaaa"
             first_streaming.set()
-            await release_first.wait()
+            await asyncio.wait_for(release_first.wait(), timeout=5)
 
         async def second_source():
             nonlocal second_consumed
@@ -1647,7 +1647,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
                 maximum_bytes=4,
             )
         )
-        await first_streaming.wait()
+        await asyncio.wait_for(first_streaming.wait(), timeout=5)
         usage = second_store.usage()
         assert usage.model_dump() == {
             "max_stored_bytes": 6,
@@ -1656,7 +1656,7 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
             "in_flight_uploads": 1,
             "remaining_bytes": 2,
         }
-        with pytest.raises(ArtifactBlobStoreError, match="quota"):
+        with pytest.raises(ArtifactBlobStoreError):
             await second_store.put_stream(
                 hashlib.sha256(b"bbbb").hexdigest(),
                 second_source(),
@@ -1675,6 +1675,11 @@ def test_blob_store_serializes_concurrent_quota_and_reconciles(tmp_path) -> None
         return [await first]
 
     results = asyncio.run(exercise())
+    assert first_store.usage().in_flight_uploads == 0
+    fresh = second_store.put_bytes(
+        hashlib.sha256(b"bb").hexdigest(), b"bb", maximum_bytes=2
+    )
+    assert fresh.path.read_bytes() == b"bb"
     assert first_store.usage().used_bytes <= 6
     survivor = next((item for item in results if not isinstance(item, Exception)), None)
     referenced = {survivor.sha256} if survivor is not None else set()

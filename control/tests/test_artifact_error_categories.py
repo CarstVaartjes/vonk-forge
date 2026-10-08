@@ -42,7 +42,7 @@ def test_upload_digest_mismatch_is_a_security_refusal(tmp_path: Path) -> None:
     assert caught.value.typed_error() is not None
 
 
-def test_oversized_upload_and_quota_are_invalid_requests(tmp_path: Path) -> None:
+def test_oversized_upload_is_invalid_and_capacity_ends_unknown(tmp_path: Path) -> None:
     digest = hashlib.sha256(b"content").hexdigest()
     with pytest.raises(ArtifactBlobInvalid) as too_big:
         _store(tmp_path).put_bytes(digest, b"content", maximum_bytes=3)
@@ -51,8 +51,7 @@ def test_oversized_upload_and_quota_are_invalid_requests(tmp_path: Path) -> None
         _store(tmp_path / "small", max_stored_bytes=3).put_bytes(
             digest, b"content", maximum_bytes=100
         )
-    assert quota.value.category is ErrorCategory.INVALID_REQUEST
-    assert isinstance(quota.value, ValueError)
+    assert quota.value.category is ErrorCategory.UNKNOWN
 
 
 def test_unsafe_storage_key_is_a_security_refusal(tmp_path: Path) -> None:

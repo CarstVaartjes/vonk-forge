@@ -292,12 +292,19 @@ class AgentPresenceService:
                 certificate_fingerprint=row.certificate_fingerprint,
                 verified=True,
             )
-        except AuthError as error:
-            raise PresenceError("presence certificate binding is invalid") from error
-        if self._lock_active_node(session, node_id) is None:
-            raise PresenceError("agent node is not active")
-        if self._lock_active_certificate(session, identity, now) is None:
-            raise PresenceError("presence certificate is not active")
+        except AuthError:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        if (
+            self._lock_active_node(session, node_id) is None
+            or self._lock_active_certificate(session, identity, now) is None
+        ):
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         original_binding = (
             row.certificate_serial,
             row.certificate_fingerprint,
@@ -307,14 +314,29 @@ class AgentPresenceService:
             row.certificate_serial,
             row.certificate_fingerprint,
         ):
-            raise PresenceError("presence certificate changed during read")
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         observed_at = _stored_utc(row.observed_at)
-        address = self._policy.validate(row.management_address)
+        try:
+            address = self._policy.validate(row.management_address)
+        except PresenceError:
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         certificate_serial = row.certificate_serial
         if observed_at > now:
-            raise PresenceError("management address presence is in the future")
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         if now - observed_at > timedelta(seconds=maximum_age_seconds):
-            raise PresenceError("management address presence is stale")
+            return UnknownError(
+                category=ErrorCategory.UNKNOWN,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
         return ManagementAddressObservation(
             node_id=node_id,
             certificate_serial=certificate_serial,

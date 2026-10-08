@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from threading import Lock
+from threading import Event, Lock, Thread
 from typing import Any, cast
 
 from fastapi import HTTPException
@@ -32,6 +32,7 @@ class RecoveringService[T]:
         clock: Callable[[], datetime],
         check: Callable[[T], bool] | None = None,
         initialize: Callable[[T], object] | None = None,
+        construction_timeout_seconds: float = 35.0,
     ):
         self._type = service_type
         self._factory = factory
@@ -41,6 +42,9 @@ class RecoveringService[T]:
         self._initialized = False
         self._value: T | None = None
         self._lock = Lock()
+        self._construction_timeout = construction_timeout_seconds
+        self._generation = 0
+        self._construction_deadline: datetime | None = None
         self._delay = 1.0
         self._next_health_check: datetime | None = None
         self.status = CapabilityStatus(
@@ -49,68 +53,109 @@ class RecoveringService[T]:
             reason=CapabilityReason.INITIALIZING,
         )
 
-    def attempt_construction(self) -> None:
-        if self.status.availability == CapabilityAvailability.AVAILABLE and (
-            self._check is None
-            or (
-                self._next_health_check is not None
-                and self._clock() < self._next_health_check
-            )
-        ):
-            return
-        if not self._lock.acquire(blocking=False):
-            return
-        try:
+    def attempt_construction(self, *, wait: bool = True) -> None:
+        # Only ownership metadata is locked. A factory/initializer/probe must
+        # never keep the owner locked while it performs blocking I/O.
+        with self._lock:
             now = self._clock()
+            if self._construction_deadline is not None:
+                if now < self._construction_deadline:
+                    return
+                self._generation += 1
+                self._construction_deadline = None
+                self._unavailable(CapabilityReason.DEPENDENCY_UNAVAILABLE, now)
             if (
                 self.status.next_attempt_at is not None
                 and now < self.status.next_attempt_at
             ):
                 return
-            try:
-                value = self._value if self._value is not None else self._factory()
-                self._value = value
-                if not self._initialized:
-                    if self._initialize is not None:
-                        self._initialize(value)
-                    self._initialized = True
-                if self._check is not None and not self._check(value):
-                    self.status = CapabilityStatus(
-                        capability=self.status.capability,
-                        availability=CapabilityAvailability.UNAVAILABLE,
-                        reason=CapabilityReason.DEPENDENCY_UNAVAILABLE,
-                        next_attempt_at=now + timedelta(seconds=self._delay),
-                    )
-                    self._delay = min(60.0, self._delay * 2)
-                    return
-            except Exception as error:  # noqa: BLE001 -- capability construction cannot kill its process
-                reason = (
-                    CapabilityReason.CONFIGURATION_INVALID
-                    if isinstance(error, (ValueError, TypeError))
-                    else CapabilityReason.STORAGE_UNAVAILABLE
-                    if isinstance(error, OSError)
-                    else CapabilityReason.DEPENDENCY_UNAVAILABLE
+            if self.status.availability == CapabilityAvailability.AVAILABLE and (
+                self._check is None
+                or (
+                    self._next_health_check is not None
+                    and now < self._next_health_check
                 )
+            ):
+                return
+            self._generation += 1
+            generation = self._generation
+            self._construction_deadline = now + timedelta(
+                seconds=self._construction_timeout
+            )
+            if self.status.availability == CapabilityAvailability.UNAVAILABLE:
                 self.status = CapabilityStatus(
                     capability=self.status.capability,
                     availability=CapabilityAvailability.UNAVAILABLE,
-                    reason=reason,
-                    next_attempt_at=now + timedelta(seconds=self._delay),
+                    reason=CapabilityReason.INITIALIZING,
+                    next_attempt_at=self._construction_deadline,
                 )
-                self._delay = min(60.0, self._delay * 2)
-            else:
+            done = Event()
+            value = self._value
+            initialized = self._initialized
+        Thread(
+            target=self._construct,
+            args=(generation, value, initialized, done),
+            daemon=True,
+        ).start()
+        if wait and not done.wait(timeout=self._construction_timeout):
+            with self._lock:
+                if self._generation == generation:
+                    self._generation += 1
+                    self._construction_deadline = None
+                    self._unavailable(
+                        CapabilityReason.DEPENDENCY_UNAVAILABLE, self._clock()
+                    )
+
+    def _unavailable(self, reason: CapabilityReason, now: datetime) -> None:
+        self.status = CapabilityStatus(
+            capability=self.status.capability,
+            availability=CapabilityAvailability.UNAVAILABLE,
+            reason=reason,
+            next_attempt_at=now + timedelta(seconds=self._delay),
+        )
+        self._delay = min(60.0, self._delay * 2)
+
+    def _construct(
+        self, generation: int, value: T | None, initialized: bool, done: Event
+    ) -> None:
+        reason: CapabilityReason | None = None
+        try:
+            value = value if value is not None else self._factory()
+            if not initialized:
+                if self._initialize is not None:
+                    self._initialize(value)
+                initialized = True
+            if self._check is not None and not self._check(value):
+                reason = CapabilityReason.DEPENDENCY_UNAVAILABLE
+        except Exception as error:  # noqa: BLE001 -- isolate construction from the process
+            reason = (
+                CapabilityReason.CONFIGURATION_INVALID
+                if isinstance(error, (ValueError, TypeError))
+                else CapabilityReason.STORAGE_UNAVAILABLE
+                if isinstance(error, OSError)
+                else CapabilityReason.DEPENDENCY_UNAVAILABLE
+            )
+        with self._lock:
+            if self._generation == generation:
+                self._construction_deadline = None
+                now = self._clock()
                 self._value = value
-                self._delay = 1.0
-                self._next_health_check = now + timedelta(seconds=30)
-                self.status = CapabilityStatus(
-                    capability=self.status.capability,
-                    availability=CapabilityAvailability.AVAILABLE,
-                )
-        finally:
-            self._lock.release()
+                self._initialized = initialized
+                if reason is not None:
+                    self._unavailable(reason, now)
+                else:
+                    self._value = value
+                    self._initialized = True
+                    self._delay = 1.0
+                    self._next_health_check = now + timedelta(seconds=30)
+                    self.status = CapabilityStatus(
+                        capability=self.status.capability,
+                        availability=CapabilityAvailability.AVAILABLE,
+                    )
+        done.set()
 
     def require_service(self) -> T:
-        self.attempt_construction()
+        self.attempt_construction(wait=False)
         if (
             self._value is None
             or self.status.availability != CapabilityAvailability.AVAILABLE
@@ -224,15 +269,10 @@ class CapabilityRegistry:
         task.add_done_callback(self._tasks.discard)
 
     async def _retry_one(self, service: RecoveringService[Any]) -> None:
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(service.attempt_construction), timeout=35.0
-            )
-        except TimeoutError:
-            # The nonblocking construction lock fences a still-finishing thread.
-            pass
-        finally:
-            self._schedule(service)
+        # Dispatch performs no blocking constructor I/O. The generation deadline
+        # fences late results and the next scheduler tick releases expired ownership.
+        service.attempt_construction(wait=False)
+        self._schedule(service)
 
     async def stop_recovery(self) -> None:
         self._stopping = True

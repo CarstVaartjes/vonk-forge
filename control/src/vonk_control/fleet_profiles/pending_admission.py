@@ -6,16 +6,14 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from pydantic import TypeAdapter
 from sqlalchemy import func, or_, select
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState, SupersedeCode
+from vonk_agent_protocol import LifecycleState, SupersedeCode
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
     ProfileOperationKind,
 )
 
 from .. import fleet_profile_states, job_states
-from ..categorized_errors import InvalidType
 from ..fleet_profile_adapter_conversion import needs_conversion
 from ..fleet_profile_contract import (
     FleetProfileOperationState,
@@ -94,13 +92,7 @@ class FleetProfileService:
                 "Z",
                 "+00:00",
             )
-            retry_cutoff = TypeAdapter(datetime).dump_python(_aware(now), mode="json")
-            if not isinstance(retry_cutoff, str):
-                raise InvalidType(
-                    "profile admission retry cutoff is not a string",
-                    reason=InvalidRequestReason.MALFORMED,
-                )
-            retry_cutoff_text = retry_cutoff.replace("Z", "+00:00")
+            retry_cutoff_text = _aware(now).isoformat()
             rows = session.scalars(
                 select(FleetProfileApplication)
                 .where(
@@ -160,7 +152,7 @@ class FleetProfileService:
                     application_id,
                     state=_CANCELLED_OPERATION,
                     reason="Profile admission retired: its accepted intent could "
-                    "not be read; load the profile again",
+                    "not be read",
                 )
                 return True
             plan = plan.model_copy(

@@ -45,9 +45,6 @@ from ..run_switch_operations import RunSwitchOperationService
 from .assessment_support import (
     _operation_state,
 )
-from .contracts import (
-    FleetProfileInvalid,
-)
 from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
@@ -334,8 +331,8 @@ class FleetProfileService:
 
         An application whose accepted intent cannot be read (never recorded, or
         its reviewed plan is damaged) is a :class:`Residue`: the caller retires or
-        skips it.  A digest that is *inconsistent* is a different matter and still
-        refuses: it is the integrity check of what was reviewed.
+        skips it. Inconsistent local projections are unknown too: execution never
+        invents accepted effects, and a fresh reviewed load remains admissible.
         """
 
         progress = _stored_progress(application)
@@ -398,9 +395,11 @@ class FleetProfileService:
             or plan.resolved_assignments
             != sorted(intended.assignments, key=lambda item: item.id)
         ):
-            raise FleetProfileInvalid(
-                "Persisted application plan exceeds its reviewed intent",
-                reason=InvalidRequestReason.CONFLICT,
+            return retire_as_unknown(
+                "profile-intent",
+                str(application.id),
+                BookkeepingReason.EVIDENCE_MISMATCH,
+                "persisted application plan exceeds its reviewed intent",
             )
         _validate_remaining_effects(root_plan.effects, plan.effects)
         return intended

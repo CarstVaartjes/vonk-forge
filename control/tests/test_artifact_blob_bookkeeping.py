@@ -77,9 +77,50 @@ def test_an_unsafe_storage_root_still_refuses(tmp_path: Path) -> None:
         _store(tmp_path).usage()
 
 
-def test_an_upload_over_the_quota_is_refused_at_ingress(tmp_path: Path) -> None:
+def test_an_upload_over_current_capacity_ends_without_blocking_fresh_work(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path, quota=4)
     content = b"larger than four bytes"
 
     with pytest.raises(ArtifactBlobStoreError):
         store.put_bytes(_digest(content), content, maximum_bytes=1024)
+    assert store.usage().in_flight_uploads == 0
+    fresh = store.put_bytes(_digest(b"ok"), b"ok", maximum_bytes=4)
+    assert fresh.path.read_bytes() == b"ok"
+
+
+@pytest.mark.parametrize("boundary", ("reserve", "commit"))
+def test_capacity_attempt_releases_claims_and_fresh_upload_recovers(tmp_path, boundary):
+    """Catches quota exhaustion retaining temporary claims or rejecting reuse."""
+    from vonk_control.artifact_blob_store import ArtifactBlobQuotaExhausted
+
+    store = _store(tmp_path, quota=8)
+    occupied = store.put_bytes(_digest(b"12345"), b"12345", maximum_bytes=8)
+    payload = b"abcd"
+
+    async def chunks():
+        yield payload
+        if boundary == "commit":
+            # A concurrent unreserved transfer consumes the available space.
+            (tmp_path / "blobs" / ".tmp" / "competing.part").write_bytes(b"12345")
+
+    if boundary == "commit":
+        store.delete(occupied.storage_key, occupied.sha256)
+    with pytest.raises(ArtifactBlobQuotaExhausted):
+        import asyncio
+
+        asyncio.run(
+            store.put_stream(
+                _digest(payload), chunks(), expected_bytes=len(payload), maximum_bytes=8
+            )
+        )
+    assert store.usage().in_flight_uploads == 0
+    assert not list((tmp_path / "blobs" / ".reservations").glob("*.reserve"))
+    if boundary == "reserve":
+        store.delete(occupied.storage_key, occupied.sha256)
+    else:
+        (tmp_path / "blobs" / ".tmp" / "competing.part").unlink()
+    healed = store.put_bytes(_digest(payload), payload, maximum_bytes=8)
+    assert healed.path.read_bytes() == payload
+    assert store.put_bytes(_digest(payload), payload, maximum_bytes=8) == healed

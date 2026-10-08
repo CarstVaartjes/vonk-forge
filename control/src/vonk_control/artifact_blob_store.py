@@ -64,8 +64,8 @@ class ArtifactBlobInvalid(InvalidRequestError, ArtifactBlobStoreError):
     """An upload or digest outside its declared contract (size, chunk, format)."""
 
 
-class ArtifactBlobQuotaExhausted(InvalidRequestError, ArtifactBlobStoreError):
-    """The upload does not fit the configured storage quota."""
+class ArtifactBlobQuotaExhausted(UnknownOutcomeError, ArtifactBlobStoreError):
+    """Storage is temporarily unavailable; this attempt releases its claims."""
 
 
 class ArtifactBlobDigestMismatch(SecurityRefusalError, ArtifactBlobStoreError):
@@ -503,7 +503,7 @@ class ArtifactBlobStore:
             if accounted > self._max_stored_bytes:
                 raise ArtifactBlobQuotaExhausted(
                     "artifact storage quota is exhausted",
-                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             os.replace(temporary, destination)
             descriptor = os.open(directory, os.O_RDONLY)
@@ -579,7 +579,7 @@ class ArtifactBlobStore:
             if accounted + size_bytes > self._max_stored_bytes:
                 raise ArtifactBlobQuotaExhausted(
                     "artifact storage quota is exhausted",
-                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             token = uuid.uuid4().hex
             path = self._root / ".reservations" / f"{token}.reserve"

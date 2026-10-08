@@ -3850,7 +3850,7 @@ def test_reenrollment_refuses_an_unprivileged_actor_before_node_lookup(agent_sys
     assert response.status_code == 403
 
 
-def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial(
+def test_enrollment_reply_loss_is_unknown_and_exact_request_recovers(
     agent_system, monkeypatch
 ) -> None:
     from vonk_agent_protocol.reason_codes import CertificateCode
@@ -3868,11 +3868,7 @@ def test_known_enrollment_capacity_refusal_preserves_exact_reason_without_denial
     monkeypatch.setattr(services.enrollment._authority, "issue_node", refuse_capacity)
     body = json.loads(valid_enrollment_body(enrollment_grant(services)))
     response = client.post("/agent/enroll", json=body)
-    assert response.status_code == 422
-    assert (
-        response.json()["detail"]["reason_code"]
-        == "certificate.response_unrepresentable"
-    )
+    assert response.status_code == 503
     # A repaired capacity policy resumes the accepted grant and CSR rather than
     # consuming its failure as an authority denial or requiring fresh consent.
     monkeypatch.setattr(services.enrollment._authority, "issue_node", original_issue)
