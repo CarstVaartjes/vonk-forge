@@ -26,7 +26,6 @@ from vonk_agent_protocol.compiled_execution_plan import (
 from .. import job_states
 from ..admission_locking import admission_attempts, admission_wait_exhausted
 from ..install_admission import (
-    InstallAdmissionBusy,
     InstallPlan,
 )
 from ..install_admission import (
@@ -56,7 +55,7 @@ from ..recipe_progress import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
-from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .errors import RecipeRetryLater
 from .interfaces import RecipeOperationView
 from .observation_helpers import _active_recipe_revision
 
@@ -164,11 +163,9 @@ class InstallationPreparationMixin:
             service._install_admission.refresh_install_receipts(
                 plan, now=now, profile_application_id=profile_application_id
             )
-        except InstallAdmissionBusy:
-            raise
         except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
             raise
-        except (RuntimeError, ValueError) as error:
+        except (RuntimeError, ValueError, TypeError, OSError) as error:
             raise RecipeRetryLater(str(error)) from error
         with service._sessions.begin() as session:
             existing_id = service._prepared_installation_id(session, plan)
@@ -183,11 +180,9 @@ class InstallationPreparationMixin:
                     profile_application_id=profile_application_id,
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
-            except InstallAdmissionBusy:
-                raise
             except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
                 raise
-            except (RuntimeError, ValueError) as error:
+            except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise RecipeRetryLater(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
             if installation is None:
@@ -327,7 +322,7 @@ class InstallationPreparationMixin:
                 RecipeInstallation, installation_id, with_for_update=True
             )
             if installation is None:
-                raise RecipeRequestInvalid("recipe installation is unavailable")
+                raise RecipeRetryLater("recipe installation is unavailable")
             existing = service._idempotent_in_session(
                 session,
                 request_id,
@@ -410,7 +405,7 @@ class InstallationPreparationMixin:
                 InstallationState.FAILED,
                 InstallationState.INSTALLING,
             }:
-                raise RecipeRequestInvalid("recipe installation is not launchable")
+                raise RecipeRetryLater("recipe installation is not launchable")
             nodes = tuple(
                 session.scalars(
                     select(InstallationNode)
@@ -428,7 +423,7 @@ class InstallationPreparationMixin:
                 )
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
             if revision is None or revision.content_digest is None:
-                raise RecipeRequestInvalid("recipe revision is unavailable")
+                raise RecipeRetryLater("recipe revision is unavailable")
             installation.state = InstallationState.INSTALLING
             installation.updated_at = now
             for node in nodes:

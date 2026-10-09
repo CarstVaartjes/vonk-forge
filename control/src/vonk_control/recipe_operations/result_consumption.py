@@ -13,10 +13,11 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationNodeState,
     InstallationState,
-    InvalidRequestReason,
     LifecycleState,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
+    RecipeStartPayload,
+    RecipeStopPayload,
     RouteState,
     RunState,
     UnknownOutcomeError,
@@ -27,9 +28,6 @@ from .. import agent_operation_states
 from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
-)
-from ..categorized_errors import (
-    MissingRecord,
 )
 from ..job_documents import (
     RecipeBuildCleanupParent,
@@ -53,6 +51,7 @@ from ..models import (
 from ..recipe_build_cancellation import (
     build_cancellation,
 )
+from ..recipe_execution_contract import parse_stored_run_plan
 from ..recipe_lifecycle_contract import (
     LifecycleNodeResult,
 )
@@ -71,9 +70,11 @@ from ..recipe_progress import (
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .constants import _WORKLOAD_INTENT_KINDS
-from .errors import RecipeRequestInvalid
+from .errors import RecipeRequestInvalid, RecipeRetryLater
+from .intent import _intent_is_current, _job_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES, RecipeOperationView
-from .results import _RANK_FAILED, _node_result, _recorded_result, _unproven_evidence
+from .orphan_cleanup import consume_orphan_cleanup
+from .results import _RANK_FAILED, _node_result, _unproven_evidence
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -115,7 +116,7 @@ class ResultConsumptionMixin:
         with service._sessions.begin() as session:
             job = session.get(Job, operation_id)
             if job is None or not job.kind.startswith("recipe."):
-                raise MissingRecord(operation_id)
+                raise RecipeRetryLater("recipe result owner observation is unavailable")
             operations = tuple(
                 session.scalars(
                     select(AgentOperation).where(
@@ -175,10 +176,8 @@ class ResultConsumptionMixin:
             state == LifecycleState.CANCELLED.value
             and job.kind in _WORKLOAD_INTENT_KINDS
         ):
-            if not _recorded_result(
-                job.kind, read_row_column(job, "result"), subject=job.id
-            ) is not None or not _cancel_requested(job):
-                raise RecipeRequestInvalid("recipe cancellation was not requested")
+            # Authentication, attempt fencing and cancellation authorization
+            # belong to agent_jobs. This consumer only projects its receipt.
             owner_id = _parent_identity(job, "owner_id")
             if owner_id is None:
                 retire_as_unknown(
@@ -205,15 +204,14 @@ class ResultConsumptionMixin:
                 installation = session.get(
                     RecipeInstallation, owner_id, with_for_update=True
                 )
-                if node is None or installation is None:
-                    raise RecipeRequestInvalid(
-                        "installation cancellation scope changed",
-                        reason=InvalidRequestReason.CONFLICT,
-                    )
-                node.state = _RANK_FAILED
-                node.updated_at = now
-                installation.state = InstallationState.PARTIAL
-                installation.updated_at = now
+                # The queue validated the exact attempt before calling this
+                # projection. Missing SQL rows must not roll its receipt back.
+                if node is not None:
+                    node.state = _RANK_FAILED
+                    node.updated_at = now
+                if installation is not None:
+                    installation.state = InstallationState.PARTIAL
+                    installation.updated_at = now
             elif job.kind in {
                 WireAgentOperation.RECIPE_START.value,
                 WireAgentOperation.RECIPE_STOP.value,
@@ -226,18 +224,100 @@ class ResultConsumptionMixin:
                     .with_for_update(of=RunNode)
                 )
                 run = session.get(RecipeRun, owner_id, with_for_update=True)
-                if node is None or run is None:
-                    raise RecipeRequestInvalid(
-                        "run cancellation scope changed",
-                        reason=InvalidRequestReason.CONFLICT,
+                try:
+                    target = (
+                        read_stored_model(
+                            RecipeStartPayload, operation.payload, from_json=True
+                        )
+                        if operation.kind == WireAgentOperation.RECIPE_START
+                        else read_stored_model(
+                            RecipeStopPayload, operation.payload, from_json=True
+                        )
                     )
-                # The agent sends cancelled only after its exact host STOP has
-                # returned. Keep reservations for the current intent's stop.
-                node.state = RunState.STOPPED
-                node.updated_at = now
-                run.state = RunState.LOST
-                run.route_state = RouteState.WITHDRAWN
-                run.updated_at = now
+                except (TypeError, ValueError):
+                    # Retain the authenticated receipt; the queue's bounded
+                    # observation repairs its missing exact target projection.
+                    return
+                if run is not None and target.run_generation != run.run_generation:
+                    # A previous generation's Stop cannot release this one's
+                    # resources or alter its working route.
+                    return
+                ordinal = _job_workload_intent(session, job)
+                current_intent = ordinal is not None and _intent_is_current(
+                    session, ordinal, job.targets
+                )
+                if (
+                    operation.kind == WireAgentOperation.RECIPE_START
+                    and not current_intent
+                ):
+                    # The successor owns observation and exact Stop of this
+                    # runtime. An obsolete Start receipt cannot change its
+                    # rank projection or claims underneath the accepted Stop.
+                    return
+                if node is None and run is not None:
+                    try:
+                        accepted = parse_stored_run_plan(read_row_column(run, "plan"))
+                        rank = next(
+                            (
+                                rank
+                                for rank in accepted.nodes
+                                if rank.node_id == operation.node_id
+                            ),
+                            None,
+                        )
+                    except (TypeError, ValueError):
+                        rank = None
+                    if rank is not None:
+                        node = RunNode(
+                            run_id=owner_id,
+                            node_id=rank.node_id,
+                            rank=rank.rank,
+                            role=rank.role,
+                            state=RunState.STOPPED,
+                            port=rank.port,
+                            reserved_memory_bytes=rank.required_memory_bytes,
+                            updated_at=now,
+                        )
+                        session.add(node)
+                # This authenticated cancellation receipt follows exact host
+                # STOP. Release only this rank, even if its projection vanished.
+                service._release_node_reservations(
+                    session, owner_id, (operation.node_id,), now
+                )
+                if isinstance(target, RecipeStopPayload):
+                    # Earlier role phases may have succeeded before this rank
+                    # was cancelled. Their exact receipts must not leave claims
+                    # behind merely because the parent cannot finish successfully.
+                    for sibling in session.scalars(
+                        select(AgentOperation).where(
+                            AgentOperation.parent_job_id == job.id,
+                            AgentOperation.kind == WireAgentOperation.RECIPE_STOP,
+                            AgentOperation.state == LifecycleState.SUCCEEDED,
+                        )
+                    ):
+                        try:
+                            stopped = read_stored_model(
+                                RecipeStopPayload, sibling.payload, from_json=True
+                            )
+                        except (TypeError, ValueError):
+                            continue
+                        if (
+                            stopped.run_id == owner_id
+                            and stopped.run_generation == target.run_generation
+                            and stopped.plan_digest == target.plan_digest
+                            and stopped.recipe_content_sha256
+                            == target.recipe_content_sha256
+                        ):
+                            service._release_node_reservations(
+                                session, owner_id, (sibling.node_id,), now
+                            )
+                if node is not None:
+                    node.state = RunState.STOPPED
+                    node.updated_at = now
+                if run is not None and current_intent:
+                    run.state = RunState.LOST
+                    run.route_state = RouteState.WITHDRAWN
+                    run.updated_at = now
             return
         if operation.state in agent_operation_states.LIVE:
             # The queue's accepted lifecycle decision owns recovery. A missing
@@ -265,6 +345,15 @@ class ResultConsumptionMixin:
             )
             succeeded = False
             raw_evidence = _unproven_evidence(unproven or "no evidence")
+        if consume_orphan_cleanup(
+            session,
+            job,
+            operation,
+            succeeded=succeeded,
+            evidence=raw_evidence,
+            now=service._clock(),
+        ):
+            return
         service._project_node_result(
             session,
             job,

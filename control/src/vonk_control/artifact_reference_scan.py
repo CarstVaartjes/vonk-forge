@@ -28,8 +28,6 @@ from vonk_forge_contracts import RecipeDefinition
 from . import job_states, model_cache_states
 from .artifact_lifecycle import (
     ArtifactIdentity,
-    ArtifactLifecycleError,
-    ArtifactReferenceIdentityStale,
     ArtifactReferenceUnsettled,
     ArtifactReferenceUnverified,
     lock_reference_gates,
@@ -40,13 +38,16 @@ from .content_identity import ImageContent, differing_image_fields
 from .fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfilePreview,
+    RecipeSelector,
 )
 from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from .machine_states import DISTRIBUTION_HELD, INSTALLATION_ACTIVE
 from .model_cache_contract import CacheManifest
 from .models import (
     ArtifactDistributionAssignment,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
+    CatalogRecipeModelReference,
     FleetProfile,
     FleetProfileApplication,
     Job,
@@ -194,9 +195,11 @@ def require_model_sets_open(
         and existing_sets
         and objects_by_set[requested[0]] != expected_objects
     ):
-        raise ArtifactReferenceIdentityStale(
+        raise ArtifactReferenceUnsettled(
             ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
             "accepted model object identities disagree with the current model-set membership",
+            retryable=True,
+            reason=WaitReason.SCOPE_CHANGED,
         )
     all_objects = {digest for values in objects_by_set.values() for digest in values}
     all_objects.update(identity.sha256 for identity in expected_identities)
@@ -282,6 +285,94 @@ def model_set_objects(
     return result
 
 
+def saved_profile_selectors(profile: FleetProfile) -> tuple[str, ...] | None:
+    """Recover the protective selector projection independently of draft fields.
+
+    A damaged option, node or variant cannot hide a readable recipe selector.
+    An unreadable selector has unknown scope and protects every candidate;
+    neither the scan nor its caller edits authoring intent to invent certainty.
+    Each collection attempt ends, and the next pass re-reads the owner.
+    """
+    try:
+        assignments = TypeAdapter(list[FleetProfileAssignmentInput]).validate_json(
+            canonical_message(profile.assignments), strict=True
+        )
+        return tuple(assignment.recipe_selector for assignment in assignments)
+    except (TypeError, ValueError):
+        retire_as_unknown(
+            "artifact-reference.recipe-selector",
+            profile.id,
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            "saved profile reference projection is being re-observed",
+        )
+    if not isinstance(profile.assignments, list):
+        return None
+    selectors: list[str] = []
+    for assignment in profile.assignments:
+        if not isinstance(assignment, Mapping):
+            return None
+        try:
+            selector = TypeAdapter(RecipeSelector).validate_python(
+                assignment.get("recipe_selector"), strict=True
+            )
+        except (TypeError, ValueError):
+            return None
+        selectors.append(selector)
+    return tuple(selectors)
+
+
+def _selector_revisions(
+    session: Session, selector: str
+) -> tuple[CatalogDocumentRevision, ...]:
+    publisher, _, slug = selector.partition("/")
+    head = session.scalar(
+        select(CatalogDocumentHead).where(
+            CatalogDocumentHead.kind == "recipe",
+            CatalogDocumentHead.publisher == publisher,
+            CatalogDocumentHead.slug == slug,
+        )
+    )
+    if head is not None and head.active_revision_id is not None:
+        current = session.get(CatalogDocumentRevision, head.active_revision_id)
+        if current is not None:
+            return (current,)
+    # Missing head bookkeeping is recovered conservatively from this exact
+    # selector's records, never by substituting a different selector. This is
+    # retention evidence only; it neither changes intent nor admits execution.
+    return tuple(
+        session.scalars(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.publisher == publisher,
+                CatalogDocumentRevision.slug == slug,
+            )
+            .order_by(CatalogDocumentRevision.created_at, CatalogDocumentRevision.id)
+        )
+    )
+
+
+def _protect_saved(
+    findings: dict[str, set[ArtifactReferenceFinding]],
+    profile: FleetProfile,
+    kind: Literal["model-set", "runtime-image"],
+    digests: Iterable[str],
+) -> None:
+    for digest in digests:
+        findings[digest].add(
+            _finding(
+                kind,
+                digest,
+                owner_kind="fleet-profile",
+                owner_id=profile.id,
+                state="saved",
+                classification="saved-reference",
+                detail="saved profile retains this content or its reference is unresolved",
+                reason=f"saved profile {profile.id}",
+            )
+        )
+
+
 def model_set_reference_findings(
     session: Session, set_digests: Iterable[str]
 ) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
@@ -314,107 +405,92 @@ def model_set_reference_findings(
         digest: set() for digest in selected
     }
 
-    # A saved profile remains a protective selector reference. Resolve it
-    # against the current active recipe head and protect every exact cache set
-    # for that recipe; model_variant may select a subset, so protecting all
-    # current variants is deliberately conservative until the operator edits
-    # the profile or reviews a new exact application.
-    try:
-        profile_rows = session.scalars(
-            select(FleetProfile)
-            .order_by(FleetProfile.id)
-            .execution_options(yield_per=64)
+    # Resolve relational owner pointers first; only content digests decide which
+    # bytes a binding protects. Identical recipe content shares these bindings.
+    recipe_content = {
+        owner_id: digest
+        for owner_id, digest in session.execute(
+            select(
+                CatalogDocumentRevision.id, CatalogDocumentRevision.content_digest
+            ).where(CatalogDocumentRevision.kind == "recipe")
         )
-        for profile in profile_rows:
-            encoded = canonical_message(profile.assignments)
-            assignments = TypeAdapter(list[FleetProfileAssignmentInput]).validate_json(
-                encoded, strict=True
-            )
-            for assignment in assignments:
-                publisher, separator, slug = assignment.recipe_selector.partition("/")
-                if not separator:
-                    # A selector that names no publisher resolves to no recipe
-                    # revision, so it protects nothing: it is recorded and skipped
-                    # instead of deferring every removal.
-                    retire_as_unknown(
-                        "artifact-reference.recipe-selector",
-                        profile.id,
-                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                        "a saved profile assignment names an invalid recipe selector",
-                    )
-                    continue
-                revisions = session.scalars(
-                    select(CatalogDocumentRevision)
-                    .where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.publisher == publisher,
-                        CatalogDocumentRevision.slug == slug,
-                    )
-                    .order_by(
-                        CatalogDocumentRevision.revision_number.desc(),
-                        CatalogDocumentRevision.created_at.desc(),
-                        CatalogDocumentRevision.id.desc(),
-                    )
-                    .limit(1)
-                )
-                revision = next(iter(revisions), None)
-                if revision is None:
-                    raise ArtifactReferenceUnverified(
-                        ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-                        "saved-profile recipe selector has no readable active revision; removal was deferred",
-                        retryable=True,
-                    )
-                recipe = TypeAdapter(RecipeDefinition).validate_json(
-                    read_catalog_document(revision).model_dump_json(),
-                    strict=True,
-                )
+    }
+    bound_models: dict[str, set[str]] = {}
+    for owner_id, model_digest in session.execute(
+        select(
+            CatalogRecipeModelReference.recipe_revision_id,
+            CatalogRecipeModelReference.model_content_digest,
+        )
+    ):
+        digest = recipe_content.get(owner_id)
+        if digest is not None:
+            bound_models.setdefault(digest, set()).add(model_digest)
+
+    for profile in session.scalars(select(FleetProfile).order_by(FleetProfile.id)):
+        selectors = saved_profile_selectors(profile)
+        if selectors is None:
+            _protect_saved(findings, profile, "model-set", selected)
+            continue
+        for selector in selectors:
+            revisions = _selector_revisions(session, selector)
+            if not revisions:
+                _protect_saved(findings, profile, "model-set", selected)
+                continue
+            for record in revisions:
+                model_digests = set(bound_models.get(record.content_digest, ()))
                 required: set[str] = set()
-                for model_digest in _recipe_model_content_digests(recipe):
-                    model = session.execute(
-                        select(CatalogDocumentRevision)
-                        .where(
-                            CatalogDocumentRevision.kind == "model",
-                            CatalogDocumentRevision.content_digest == model_digest,
-                        )
-                        .order_by(CatalogDocumentRevision.created_at.desc())
-                        .limit(1)
-                    ).scalar_one()
-                    file_ids = _recipe_model_file_ids(recipe, model_digest)
-                    required.update(
-                        artifact.sha256
-                        for artifact in _canonical_model_artifacts(model)
-                        if file_ids is None or artifact.id in file_ids
+                readable = True
+                try:
+                    recipe = TypeAdapter(RecipeDefinition).validate_json(
+                        read_catalog_document(record).model_dump_json(), strict=True
                     )
-                for set_digest, row in sets.items():
-                    manifest = CacheManifest.model_validate_json(
-                        canonical_message(row.manifest), strict=True
-                    )
-                    available = {artifact.sha256 for artifact in manifest.artifacts}
-                    if required and required <= available:
-                        findings[set_digest].add(
-                            _finding(
-                                "model-set",
-                                set_digest,
-                                owner_kind="fleet-profile",
-                                owner_id=profile.id,
-                                state="saved",
-                                classification="saved-reference",
-                                detail=(
-                                    "saved profile assignment resolves to this "
-                                    "active recipe revision"
-                                ),
-                                reason=f"saved profile {profile.id}",
+                    model_digests.update(_recipe_model_content_digests(recipe))
+                    for model_digest in model_digests:
+                        model = session.scalar(
+                            select(CatalogDocumentRevision)
+                            .where(
+                                CatalogDocumentRevision.kind == "model",
+                                CatalogDocumentRevision.content_digest == model_digest,
                             )
+                            .order_by(CatalogDocumentRevision.created_at.desc())
+                            .limit(1)
                         )
-    except ArtifactLifecycleError:
-        raise
-    except Exception as error:
-        raise ArtifactReferenceUnverified(
-            ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-            "saved-profile references could not be validated; removal was deferred",
-            retryable=True,
-        ) from error
+                        if model is None:
+                            readable = False
+                            continue
+                        file_ids = _recipe_model_file_ids(recipe, model_digest)
+                        required.update(
+                            artifact.sha256
+                            for artifact in _canonical_model_artifacts(model)
+                            if file_ids is None or artifact.id in file_ids
+                        )
+                except (TypeError, ValueError, RuntimeError):
+                    readable = False
+                protected: set[str] = set()
+                for set_digest, row in sets.items():
+                    if (
+                        row.recipe_revision_sha256 == record.content_digest
+                        or row.model_content_sha256 in model_digests
+                    ):
+                        protected.add(set_digest)
+                        continue
+                    try:
+                        manifest = CacheManifest.model_validate_json(
+                            canonical_message(row.manifest), strict=True
+                        )
+                    except (TypeError, ValueError):
+                        protected.add(set_digest)
+                        continue
+                    if required and required <= {
+                        artifact.sha256 for artifact in manifest.artifacts
+                    }:
+                        protected.add(set_digest)
+                    elif not readable and (
+                        not model_digests or row.model_content_sha256 is None
+                    ):
+                        # There is no exact independent scope for these bytes.
+                        protected.add(set_digest)
+                _protect_saved(findings, profile, "model-set", protected)
 
     def account(value: object) -> None:
         try:
@@ -585,81 +661,20 @@ def runtime_image_reference_findings(
     if not selected:
         return {}
 
-    # Saved selectors protect authorized current-head images, but the grant
-    # alone is not a reference. The profile selector plus that grant resolves
-    # to the exact archive identity.
-    try:
-        for profile in session.scalars(
-            select(FleetProfile)
-            .order_by(FleetProfile.id)
-            .execution_options(yield_per=64)
-        ):
-            encoded = canonical_message(profile.assignments)
-            assignments = TypeAdapter(list[FleetProfileAssignmentInput]).validate_json(
-                encoded, strict=True
+    for profile in session.scalars(select(FleetProfile).order_by(FleetProfile.id)):
+        selectors = saved_profile_selectors(profile)
+        if selectors is None:
+            _protect_saved(findings, profile, "runtime-image", selected)
+            continue
+        for selector in selectors:
+            revisions = _selector_revisions(session, selector)
+            if not revisions:
+                _protect_saved(findings, profile, "runtime-image", selected)
+                continue
+            archives = revision_archives(
+                session, [revision.id for revision in revisions]
             )
-            for assignment in assignments:
-                publisher, separator, slug = assignment.recipe_selector.partition("/")
-                if not separator:
-                    # A selector that names no publisher resolves to no recipe
-                    # revision, so it protects nothing: it is recorded and skipped
-                    # instead of deferring every removal.
-                    retire_as_unknown(
-                        "artifact-reference.recipe-selector",
-                        profile.id,
-                        BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                        "a saved profile assignment names an invalid recipe selector",
-                    )
-                    continue
-                revision = session.scalar(
-                    select(CatalogDocumentRevision)
-                    .where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.publisher == publisher,
-                        CatalogDocumentRevision.slug == slug,
-                    )
-                    .order_by(
-                        CatalogDocumentRevision.revision_number.desc(),
-                        CatalogDocumentRevision.created_at.desc(),
-                        CatalogDocumentRevision.id.desc(),
-                    )
-                    .limit(1)
-                )
-                if revision is None:
-                    raise ArtifactReferenceUnverified(
-                        ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-                        "saved-profile recipe selector has no readable active revision; removal was deferred",
-                        retryable=True,
-                    )
-                # Every verified image the recipe's builds produced is one the
-                # saved selector can resolve to; unknown means keep.
-                for archive in sorted(revision_archives(session, [revision.id])):
-                    if archive not in selected:
-                        continue
-                    findings[archive].add(
-                        _finding(
-                            "runtime-image",
-                            archive,
-                            owner_kind="fleet-profile",
-                            owner_id=profile.id,
-                            state="saved",
-                            classification="saved-reference",
-                            detail=(
-                                "saved profile assignment resolves to a recipe "
-                                "that built this image"
-                            ),
-                            reason=f"saved profile {profile.id}",
-                        )
-                    )
-    except ArtifactLifecycleError:
-        raise
-    except Exception as error:
-        raise ArtifactReferenceUnverified(
-            ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-            "saved-profile references could not be validated; removal was deferred",
-            retryable=True,
-        ) from error
+            _protect_saved(findings, profile, "runtime-image", selected & archives)
 
     def account(value: object) -> None:
         try:
@@ -942,7 +957,10 @@ def runtime_image_reference_reasons(
 def _profile_plan(value: object) -> FleetProfilePreview:
     try:
         return read_stored_model(
-            FleetProfilePreview, canonical_message(value), strict=True, from_json=True
+            FleetProfilePreview,
+            canonical_message(value),
+            strict=True,
+            from_json=True,
         )
     except (TypeError, ValueError, ValidationError) as error:
         raise ArtifactReferenceUnverified(

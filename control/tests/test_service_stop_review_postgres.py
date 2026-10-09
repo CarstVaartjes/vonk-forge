@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.categorized_errors import InvalidRequestError
 from vonk_control.job_documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
@@ -263,13 +263,15 @@ def test_pending_service_stop_cannot_resume_under_changed_authority(
     ).tick()
     with sessions() as session:
         accepted = session.get(Job, accepted_id)
-        assert accepted is not None and accepted.state == "running"
+        assert accepted is not None
+        assert accepted.state not in {
+            LifecycleState.RUNNING,
+            LifecycleState.QUEUED,
+            LifecycleState.OBSERVING,
+        }
         assert canonical_message(accepted.payload) == original_payload
         assert accepted.status_reason is not None
-        assert (
-            "deferred" in accepted.status_reason
-            and "next reconciliation" in accepted.status_reason
-        )
+        assert accepted.result is not None
         assert (
             session.scalar(
                 select(AgentOperation.id).where(
@@ -280,6 +282,19 @@ def test_pending_service_stop_cannot_resume_under_changed_authority(
         )
     assert len(publisher.aliases) == before_publications
     assert claims(sessions, run_id) == before_claims
+    if change == "runtime-generation":
+        with sessions.begin() as session:
+            run = session.get(RecipeRun, run_id)
+            assert run is not None
+            run.run_generation -= 1
+    fresh_plan = restarted.preview_stop(run_id)
+    fresh = restarted.stop(
+        run_id,
+        plan_digest=fresh_plan.plan_digest,
+        actor="admin",
+        request_id=str(uuid4()),
+    )
+    assert fresh.id != accepted_id
 
 
 @pytest.mark.parametrize("replacement", ["adopt", "cancel"])
@@ -466,17 +481,30 @@ def test_profile_adopts_exact_accepted_stop_before_native_dispatch(
             )
         )
         if replacement == "cancel":
-            assert not native and accepted.state == "running"
+            assert not native
+            assert accepted.state not in {
+                LifecycleState.RUNNING,
+                LifecycleState.QUEUED,
+                LifecycleState.OBSERVING,
+            }
             assert review.stage == "withdrawal-claimed"
-            assert (
-                accepted.status_reason is not None
-                and "deferred" in accepted.status_reason
-            )
+            assert accepted.result is not None
             assert claims(sessions, run_id) == before_claims
-            return
-        assert len(native) == 1
-        native_id = native[0].id
-        assert review.stage == "dispatched"
+        else:
+            assert len(native) == 1
+        if replacement != "cancel":
+            native_id = native[0].id
+            assert review.stage == "dispatched"
+    if replacement == "cancel":
+        fresh_plan = restarted.preview_stop(run_id)
+        fresh_stop = restarted.stop(
+            run_id,
+            plan_digest=fresh_plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid4()),
+        )
+        assert fresh_stop.id != accepted_id
+        return
     jobs = AgentJobService(sessions, clock=lambda: clock[0])
     jobs.set_result_consumer(restarted.consume_agent_result)
     fresh, stop, _grant = _issue_exact_stop_grant(
