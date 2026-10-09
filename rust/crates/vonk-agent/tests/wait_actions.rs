@@ -70,13 +70,12 @@ const ADVERTISED: &[(WaitReason, Action)] = &[
         WaitReason::ModelCustodyUnconfirmed,
         Action::ControllerReissues,
     ),
-    (WaitReason::JobStopUnconfirmed, Action::OperatorStopRoute),
     (WaitReason::JobStateUncertain, Action::OperatorStopRoute),
 ];
 
-/// Wait reasons whose only advertised action needs a person. A ceiling that
-/// only falls: removing one lowers the number, and the test fails until it does.
-const OPERATOR_ONLY_CEILING: usize = 2;
+/// The only wait reasons whose advertised action needs a person, by name (no
+/// counts): a new one must be justified here, and a healed one is removed.
+const OPERATOR_ONLY: &[WaitReason] = &[WaitReason::JobStateUncertain];
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -199,18 +198,24 @@ fn the_table_lists_only_waits_the_agent_constructs() {
 }
 
 #[test]
-fn a_person_is_the_advertised_action_of_at_most_the_ceiling() {
-    let operator_only = ADVERTISED
+fn a_person_is_the_advertised_action_only_of_the_named_waits() {
+    let operator_only: Vec<_> = ADVERTISED
         .iter()
         .filter(|(_, action)| *action == Action::OperatorStopRoute)
-        .count();
+        .map(|(reason, _)| *reason)
+        .collect();
+    let unnamed: Vec<_> = operator_only
+        .iter()
+        .filter(|reason| !OPERATOR_ONLY.contains(reason))
+        .collect();
+    assert!(unnamed.is_empty(), "new operator-only waits: {unnamed:?}");
+    let healed: Vec<_> = OPERATOR_ONLY
+        .iter()
+        .filter(|reason| !operator_only.contains(reason))
+        .collect();
     assert!(
-        operator_only <= OPERATOR_ONLY_CEILING,
-        "{operator_only} operator-only waits exceed the ceiling of {OPERATOR_ONLY_CEILING}"
-    );
-    assert_eq!(
-        operator_only, OPERATOR_ONLY_CEILING,
-        "lower OPERATOR_ONLY_CEILING to {operator_only}: the ceiling only falls"
+        healed.is_empty(),
+        "no longer operator-only, remove: {healed:?}"
     );
 }
 
