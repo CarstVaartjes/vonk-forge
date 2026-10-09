@@ -51,12 +51,21 @@ pub fn apply_setup_from_with_authority(
         &release.package.sha256,
         &release.version,
         &release.architecture,
-        false,
     )?;
     let owner = paths
         .required_owner
         .unwrap_or_else(|| rustix::process::geteuid().as_raw());
-    validate_plan_against_installation(&envelope, paths)?;
+    // Capture retained enrollment before isolating damaged generated projections.
+    if !matches!(envelope.plan, ApplyOperation::Fresh { .. }) {
+        for path in [&paths.config, &paths.agent] {
+            reconcile_generated_parent(path, owner)?;
+        }
+    }
+    let mut existing = if matches!(envelope.plan, ApplyOperation::Fresh { .. }) {
+        None
+    } else {
+        Some(observe_paired_configuration(paths, runner)?)
+    };
     for path in [
         &paths.agent,
         &paths.config,
@@ -68,28 +77,24 @@ pub fn apply_setup_from_with_authority(
         isolate_damaged_generated_path(path, owner)?;
     }
     if !matches!(envelope.plan, ApplyOperation::Fresh { .. }) {
-        let config = paired_configuration(&paths.config, paths)?;
-        if let Some(encoded) = &envelope.repair_ca_pem {
-            let ca = hex::decode(encoded).map_err(|_| SetupError::PrivilegedInput)?;
-            atomic_root_write(&paths.ca, &ca, owner, 0o644)?;
-        }
-        if let Some(encoded) = &envelope.repair_helper_authority {
-            let key = hex::decode(encoded).map_err(|_| SetupError::PrivilegedInput)?;
-            if !valid_helper_authority(&key) {
-                return Err(SetupError::PrivilegedInput);
-            }
+        let config = existing.as_ref().ok_or(SetupError::ObservationUnavailable(
+            vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+        ))?;
+        refresh_configuration(paths, config, owner)?;
+        if !installation::read_generated(&paths.ca, MAX_CA_BYTES, paths.required_owner)
+            .is_some_and(|ca| verify_ca(&ca, &config.ca_sha256).is_ok())
+            || installed_helper_authority(paths).is_err()
+        {
             let discovery = prepare::observe_enrollment(
                 &config.enrollment_url,
                 &config.ca_sha256,
                 None,
                 runner,
             )?;
-            // The authenticated authority owns the current key. A stale
-            // unprivileged observation never adds a second admission gate.
-            let key = discovery.helper_authority;
-            atomic_root_write(
+            configuration::write_generated_projection(&paths.ca, &discovery.ca_pem, owner, 0o644)?;
+            configuration::write_generated_projection(
                 &paths.helper_authority,
-                format!("{}\n", hex::encode(key)).as_bytes(),
+                format!("{}\n", hex::encode(discovery.helper_authority)).as_bytes(),
                 owner,
                 0o644,
             )?;
@@ -105,12 +110,28 @@ pub fn apply_setup_from_with_authority(
                 rendezvous_port: wire.rendezvous_port,
                 fabric_bandwidth_mbps: wire.fabric_bandwidth_mbps,
             };
-            atomic_root_write(
-                &paths.firewall_config,
-                firewall.render().as_bytes(),
-                owner,
-                0o600,
-            )?;
+            let config = existing.as_mut().ok_or(SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            ))?;
+            config.fabric_address = firewall.node_fabric_ip;
+            config.fabric_bandwidth_mbps = firewall.fabric_bandwidth_mbps;
+            refresh_configuration(paths, config, owner)?;
+            configuration::publish_firewall(paths, &firewall, owner)?;
+        } else {
+            let mut observed = None;
+            for attempt in 0..3 {
+                if let Ok(firewall) = installed_firewall_configuration(paths) {
+                    observed = Some(firewall);
+                    break;
+                }
+                if attempt < 2 {
+                    runner.sleep(Duration::from_millis(100));
+                }
+            }
+            let firewall = observed.ok_or(SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            ))?;
+            configuration::publish_firewall(paths, &firewall, owner)?;
         }
     }
     match envelope.plan {
@@ -139,9 +160,11 @@ pub fn apply_setup_from_with_authority(
             if let Some(mapping) = host_mapping {
                 install_host_mapping(paths, &mapping, owner)?;
             }
+            // Record ambiguous pairing before dispatch. A lost process response
+            // must resume observation with retained authority, not consume a grant.
             write_setup_state(
                 paths,
-                format!("{}\n", InstallState::UnpairedV1).as_bytes(),
+                format!("{}\n", InstallState::RecoveringV1).as_bytes(),
                 owner,
             )?;
             pair_agent(
@@ -150,11 +173,6 @@ pub fn apply_setup_from_with_authority(
                 &config.enrollment_url,
                 &config.ca_sha256,
                 pairing_token,
-            )?;
-            write_setup_state(
-                paths,
-                format!("{}\n", InstallState::RecoveringV1).as_bytes(),
-                owner,
             )?;
             start_and_verify(paths, runner)?;
             write_setup_state(
@@ -164,23 +182,24 @@ pub fn apply_setup_from_with_authority(
             )
         }
         ApplyOperation::Pair {
-            enrollment_url,
-            ca_sha256,
+            enrollment_url: _,
+            ca_sha256: _,
             pairing_token,
         } => {
-            let config = paired_configuration(&paths.config, paths)?;
-            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
-            verify_ca(&ca, &config.ca_sha256)?;
-            if config.enrollment_url != enrollment_url || config.ca_sha256 != ca_sha256 {
-                return Err(SetupError::PrivilegedInput);
-            }
-            refresh_configuration(paths, &config, owner)?;
+            let config = existing.as_ref().ok_or(SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            ))?;
             ensure_package_installed(
                 paths,
                 runner,
                 &staged,
                 &release.version,
                 &release.architecture,
+            )?;
+            write_setup_state(
+                paths,
+                format!("{}\n", InstallState::RecoveringV1).as_bytes(),
+                owner,
             )?;
             pair_agent(
                 paths,
@@ -189,11 +208,7 @@ pub fn apply_setup_from_with_authority(
                 &config.ca_sha256,
                 pairing_token,
             )?;
-            write_setup_state(
-                paths,
-                format!("{}\n", InstallState::RecoveringV1).as_bytes(),
-                owner,
-            )?;
+
             start_and_verify(paths, runner)?;
             write_setup_state(
                 paths,
@@ -202,17 +217,13 @@ pub fn apply_setup_from_with_authority(
             )
         }
         ApplyOperation::Reenroll {
-            enrollment_url,
-            ca_sha256,
+            enrollment_url: _,
+            ca_sha256: _,
             pairing_token,
         } => {
-            let config = paired_configuration(&paths.config, paths)?;
-            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
-            verify_ca(&ca, &config.ca_sha256)?;
-            if config.enrollment_url != enrollment_url || config.ca_sha256 != ca_sha256 {
-                return Err(SetupError::PrivilegedInput);
-            }
-            refresh_configuration(paths, &config, owner)?;
+            let config = existing.as_ref().ok_or(SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            ))?;
             ensure_package_installed(
                 paths,
                 runner,
@@ -220,12 +231,19 @@ pub fn apply_setup_from_with_authority(
                 &release.version,
                 &release.architecture,
             )?;
-            pair_agent(paths, runner, &enrollment_url, &ca_sha256, pairing_token)?;
             write_setup_state(
                 paths,
                 format!("{}\n", InstallState::RecoveringV1).as_bytes(),
                 owner,
             )?;
+            pair_agent(
+                paths,
+                runner,
+                &config.enrollment_url,
+                &config.ca_sha256,
+                pairing_token,
+            )?;
+
             stop_agent_for_identity_reload(paths, runner)?;
             start_and_verify(paths, runner)?;
             write_setup_state(
@@ -235,10 +253,6 @@ pub fn apply_setup_from_with_authority(
             )
         }
         ApplyOperation::Recover => {
-            let config = paired_configuration(&paths.config, paths)?;
-            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
-            verify_ca(&ca, &config.ca_sha256)?;
-            refresh_configuration(paths, &config, owner)?;
             ensure_package_installed(
                 paths,
                 runner,
@@ -254,24 +268,76 @@ pub fn apply_setup_from_with_authority(
                 owner,
             )
         }
-        ApplyOperation::Upgrade => {
-            let config = paired_configuration(&paths.config, paths)?;
-            let ca = fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall)?;
-            verify_ca(&ca, &config.ca_sha256)?;
-            refresh_configuration(paths, &config, owner)?;
-            upgrade_existing(
-                paths,
-                runner,
-                &staged,
-                &release.version,
-                &release.architecture,
-            )
-        }
+        ApplyOperation::Upgrade => upgrade_existing(
+            paths,
+            runner,
+            &staged,
+            &release.version,
+            &release.architecture,
+        ),
     }
 }
 
 /// Preserve unexpected managed objects without following or deleting their bytes.
-fn isolate_damaged_generated_path(path: &Path, owner: u32) -> Result<(), SetupError> {
+fn reconcile_generated_parent(path: &Path, owner: u32) -> Result<(), SetupError> {
+    let parent = path.parent().ok_or(SetupError::PrivilegedInput)?;
+    for attempt in 0..3 {
+        if installation::safe_existing_parent(path, Some(owner)).unwrap_or(false) {
+            return Ok(());
+        }
+        // Only the dedicated generated directory is repaired. Its containing
+        // directory must already be safe; never follow or delete an unsafe object.
+        if installation::safe_existing_parent(parent, Some(owner)).unwrap_or(false) {
+            match fs::symlink_metadata(parent) {
+                Ok(metadata)
+                    if metadata.is_dir()
+                        && !metadata.file_type().is_symlink()
+                        && metadata.uid() == owner =>
+                {
+                    let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o755));
+                }
+                Ok(_) => {
+                    if let Some(container) = parent.parent() {
+                        let retired = container
+                            .join(format!(".vonk-spark-retired-{}", Uuid::new_v4().simple()));
+                        if fs::rename(parent, retired).is_ok() {
+                            let _ = fs::create_dir(parent);
+                        }
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    let _ = fs::create_dir(parent);
+                }
+                Err(_) => {}
+            }
+        }
+        if attempt < 2 {
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    if installation::safe_existing_parent(path, Some(owner)).unwrap_or(false) {
+        return Ok(());
+    }
+    Err(SetupError::ObservationUnavailable(
+        vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+    ))
+}
+
+pub(super) fn isolate_damaged_generated_path(path: &Path, owner: u32) -> Result<(), SetupError> {
+    for attempt in 0..3 {
+        if isolate_generated_path_once(path, owner).is_ok() {
+            return Ok(());
+        }
+        if attempt < 2 {
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    Err(SetupError::ObservationUnavailable(
+        vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+    ))
+}
+
+fn isolate_generated_path_once(path: &Path, owner: u32) -> Result<(), SetupError> {
     let parent = path.parent().ok_or(SetupError::PrivilegedInput)?;
     installation::safe_existing_parent(path, Some(owner))?;
     match fs::symlink_metadata(path) {
@@ -293,46 +359,21 @@ fn isolate_damaged_generated_path(path: &Path, owner: u32) -> Result<(), SetupEr
     }
 }
 
-pub(super) fn validate_plan_against_installation(
-    envelope: &ApplyEnvelope,
+fn observe_paired_configuration(
     paths: &InstallPaths,
-) -> Result<(), SetupError> {
-    let observed_ca = || match &envelope.repair_ca_pem {
-        Some(encoded) => hex::decode(encoded).map_err(|_| SetupError::PrivilegedInput),
-        None => fs::read(&paths.ca).map_err(|_| SetupError::ExistingInstall),
-    };
-    if let Some(wire) = &envelope.repair_firewall {
-        let config = paired_configuration(&paths.config, paths)?;
-        if plan::ipv4(wire.node_fabric_ip)? != config.fabric_address {
-            return Err(SetupError::PrivilegedInput);
+    runner: &mut dyn CommandRunner,
+) -> Result<WrittenConfig, SetupError> {
+    for attempt in 0..3 {
+        if let Ok(config) = paired_configuration(&paths.config, paths) {
+            return Ok(config);
+        }
+        if attempt < 2 {
+            runner.sleep(Duration::from_millis(100));
         }
     }
-    match &envelope.plan {
-        ApplyOperation::Fresh { .. } => Ok(()),
-        ApplyOperation::Pair {
-            enrollment_url,
-            ca_sha256,
-            ..
-        }
-        | ApplyOperation::Reenroll {
-            enrollment_url,
-            ca_sha256,
-            ..
-        } => {
-            let config = paired_configuration(&paths.config, paths)?;
-            let ca = observed_ca()?;
-            verify_ca(&ca, &config.ca_sha256)?;
-            if &config.enrollment_url != enrollment_url || &config.ca_sha256 != ca_sha256 {
-                return Err(SetupError::PrivilegedInput);
-            }
-            Ok(())
-        }
-        ApplyOperation::Recover | ApplyOperation::Upgrade => {
-            let config = paired_configuration(&paths.config, paths)?;
-            let ca = observed_ca()?;
-            verify_ca(&ca, &config.ca_sha256)
-        }
-    }
+    Err(SetupError::ObservationUnavailable(
+        vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+    ))
 }
 
 pub(super) fn validate_apply_envelope(envelope: &ApplyEnvelope) -> Result<(), SetupError> {
