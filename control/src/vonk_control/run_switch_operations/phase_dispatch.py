@@ -31,7 +31,7 @@ from ..admission_locking import (
 )
 from ..bounded_json import require_integer
 from ..content_identity import same_image
-from ..failure_classification import error_code, is_redownload
+from ..failure_classification import error_code, is_security_failure
 from ..install_admission import (
     InstallAdmissionBusy,
 )
@@ -332,7 +332,7 @@ class PhaseDispatchMixin:
                 fail(
                     f"{type(error).__name__}: {error}",
                     failure_code=error.code,
-                    definite=not (error.retryable or is_redownload(error.code)),
+                    definite=is_security_failure(error.code),
                 )
                 return True
             except (

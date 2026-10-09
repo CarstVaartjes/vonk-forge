@@ -8,6 +8,8 @@ use crate::{
     runtime_identity::{AgentRuntimeIdentity, PreparedRuntimeIdentity, RuntimeIdentityError},
 };
 
+const HELPER_UPGRADE_PENDING: &str = "/var/lib/vonk-forge/helper-upgrade.pending";
+
 #[derive(Debug, Error)]
 pub enum SelfTestError {
     #[error("agent runtime path is unsafe: {0}")]
@@ -29,8 +31,18 @@ pub fn run(
     // Upgrade markers are disposable bookkeeping, not executable identity.
     // Runtime identity and the Controller activation receipt remain the proof;
     // observation/recovery must stay available even with a stale marker.
+    observe_helper_upgrade_pending(Path::new(HELPER_UPGRADE_PENDING));
     AgentHttpClient::from_config(config)?;
     Ok(PreparedRuntimeIdentity::from_executable(executable)?.mark_self_test_passed()?)
+}
+
+fn observe_helper_upgrade_pending(path: &Path) {
+    if !matches!(fs::symlink_metadata(path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
+        eprintln!(
+            "vonk-agent: helper activation unconfirmed; package owner reconciliation pending"
+        );
+    }
 }
 
 fn verify_runtime_directories(data: &Path, runtime: &Path) -> Result<(), SelfTestError> {
@@ -70,7 +82,9 @@ mod tests {
                 1 => fs::create_dir(&marker).unwrap(),
                 _ => symlink(data.join("missing"), &marker).unwrap(),
             }
+            observe_helper_upgrade_pending(&marker);
             verify_runtime_directories(data, runtime.path()).unwrap();
+            assert!(fs::symlink_metadata(&marker).is_ok());
             if kind == 1 {
                 fs::remove_dir(&marker).unwrap();
             } else {

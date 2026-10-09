@@ -109,7 +109,13 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 temporary_runtime_observation_failure()
             }
             Some(Err(error)) => runtime_failure("runtime image pull was denied", &error),
-            None if *cancellation.borrow() => cancelled("controller cancelled during image pull"),
+            // Dropping the helper observer cannot prove an image pull stopped.
+            // The next request reconciles the same content-addressed image.
+            None if *cancellation.borrow() => ExecutionResult::unknown(
+                WaitReason::RuntimeEffectUnconfirmed,
+                "superseded distribution effects await observation",
+                UnknownEvidence::at(FailureStage::ArtifactDistribution),
+            ),
             None => temporary_runtime_observation_failure(),
         }
     }

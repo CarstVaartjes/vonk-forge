@@ -2,6 +2,17 @@
 
 use super::{distribution::run_with_authority, *};
 
+// Dropping an observer is not proof that a copy stopped. The owned worker
+// observes this signal at each bounded copy checkpoint and retains verified
+// sources; its installation lock remains owned until the worker settles.
+struct CancelCopyOnDrop(tokio::sync::watch::Sender<bool>);
+
+impl Drop for CancelCopyOnDrop {
+    fn drop(&mut self) {
+        self.0.send_replace(true);
+    }
+}
+
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     pub(super) async fn prepare_installation(
         &self,
@@ -98,6 +109,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 
         let data_root = self.runtime.data_root.to_path_buf();
         let copy_cancellation = cancellation.clone();
+        let (copy_stop, copy_cancelled) = tokio::sync::watch::channel(false);
+        let _copy_stop = CancelCopyOnDrop(copy_stop);
         let copy_lease = lease_deadline.clone();
         let progress_client = self.client.clone();
         let fence = claim.fence;
@@ -115,7 +128,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         let deadline =
             Instant::now() + Duration::from_secs(75 + materialized_bytes.div_ceil(1024 * 1024));
-        tokio::task::spawn_blocking(move || {
+        let worker = tokio::task::spawn_blocking(move || {
             let runtime = OciRuntime {
                 runner: &crate::process::SystemProcessRunner,
                 data_root: &data_root,
@@ -128,14 +141,17 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 &mut |done, total| progress_client.set_progress_bytes(fence, done, total),
                 &|| {
                     *copy_cancellation.borrow()
+                        || *copy_cancelled.borrow()
                         || remaining_lease(*copy_lease.borrow()).is_zero()
                         || Instant::now() >= deadline
                 },
             )
-        })
-        .await
-        .map_err(|_| Box::new(temporary_runtime_observation_failure()))?
-        .map_err(|_| Box::new(temporary_runtime_observation_failure()))
+        });
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), worker)
+            .await
+            .map_err(|_| Box::new(temporary_runtime_observation_failure()))?
+            .map_err(|_| Box::new(temporary_runtime_observation_failure()))?
+            .map_err(|_| Box::new(temporary_runtime_observation_failure()))
     }
 
     pub(super) async fn execute_install(

@@ -49,6 +49,10 @@ const ADVERTISED: &[(WaitReason, Action)] = &[
         WaitReason::AgentRestartInterrupted,
         Action::ControllerReissues,
     ),
+    (
+        WaitReason::RuntimeEffectUnconfirmed,
+        Action::ControllerReissues,
+    ),
     (WaitReason::StopUnconfirmed, Action::ControllerReissues),
     (WaitReason::CleanupUnconfirmed, Action::ControllerReissues),
     (

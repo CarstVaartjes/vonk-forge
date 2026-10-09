@@ -106,3 +106,58 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
             .await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::executor::test_support::{NoProcess, claim};
+
+    #[tokio::test]
+    async fn superseded_distribution_yields_without_network_or_host_effects() {
+        let data = tempfile::tempdir().unwrap();
+        let runtime = tempfile::tempdir().unwrap();
+        let client = AgentHttpClient::for_http_test(
+            "http://127.0.0.1:1/",
+            "spk_0123456789abcdef0123456789abcdef",
+        );
+        let executor = RecipeExecutor {
+            client: &client,
+            runtime_root: runtime.path(),
+            runtime: OciRuntime {
+                runner: &NoProcess,
+                data_root: data.path(),
+            },
+        };
+        let mut obsolete = claim();
+        obsolete.operation = AgentOperation::ArtifactDistributionV1;
+        obsolete.payload =
+            vonk_agent_protocol::generated::AgentClaimPayload::ArtifactDistributionPayload(
+                vonk_agent_protocol::generated::ArtifactDistributionPayload {
+                    plan_digest: "a".repeat(64),
+                },
+            );
+        let (_, deadline) = tokio::sync::watch::channel(obsolete.deadline);
+        let (cancel, cancellation) = tokio::sync::watch::channel(true);
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            executor.execute(&obsolete, deadline, cancellation),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(result, ExecutionResult::Unknown(_)));
+        assert!(std::fs::read_dir(data.path()).unwrap().next().is_none());
+        // Cancellation ownership is per request; ending an obsolete transfer
+        // leaves a new operation free to execute on the normal dispatch path.
+        drop(cancel);
+        let current = claim();
+        let (_, deadline) = tokio::sync::watch::channel(current.deadline);
+        let (_cancel, cancellation) = tokio::sync::watch::channel(false);
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            executor.execute(&current, deadline, cancellation),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(result, ExecutionResult::Failed(_)));
+    }
+}

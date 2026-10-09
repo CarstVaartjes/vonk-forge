@@ -54,25 +54,42 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 let progress_client = self.client.clone();
                 let progress_claim = claim.clone();
                 let total_bytes = evidence.image_bytes;
-                let mut progress_task = tokio::spawn(async move {
-                    let mut completed_bytes = 0;
-                    let mut cadence = tokio::time::interval(Duration::from_secs(1));
-                    cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    while receiver.changed().await.is_ok() {
-                        cadence.tick().await;
-                        completed_bytes = completed_bytes.max(*receiver.borrow_and_update());
-                        let progress = AgentProgress {
-                            fence: progress_claim.fence,
-                            progress: Some(OperationProgress {
-                                completed_bytes: completed_bytes.into(),
-                                total_bytes: Some(total_bytes.into()),
-                                total_bytes_known: true,
-                                ..phase_progress(ProgressPhase::Uploading)
-                            }),
-                        };
-                        let _ = progress_client.heartbeat(&progress).await;
-                    }
-                });
+                let mut progress_task =
+                    tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                        let mut completed_bytes = 0;
+                        let mut cadence = tokio::time::interval(Duration::from_secs(1));
+                        cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                        let deadline = tokio::time::Instant::now()
+                            + Duration::from_secs(u64::from(
+                                progress_claim.observation_budget_seconds,
+                            ));
+                        while matches!(
+                            tokio::time::timeout_at(deadline, receiver.changed()).await,
+                            Ok(Ok(()))
+                        ) {
+                            if tokio::time::timeout_at(deadline, cadence.tick())
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                            completed_bytes = completed_bytes.max(*receiver.borrow_and_update());
+                            let progress = AgentProgress {
+                                fence: progress_claim.fence,
+                                progress: Some(OperationProgress {
+                                    completed_bytes: completed_bytes.into(),
+                                    total_bytes: Some(total_bytes.into()),
+                                    total_bytes_known: true,
+                                    ..phase_progress(ProgressPhase::Uploading)
+                                }),
+                            };
+                            let _ = tokio::time::timeout_at(
+                                deadline,
+                                progress_client.heartbeat(&progress),
+                            )
+                            .await;
+                        }
+                    }));
                 let transfer_client = self.client.clone();
                 let transfer_fence = claim.fence;
                 let result = self
@@ -99,6 +116,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 .is_err()
                 {
                     progress_task.abort();
+                    let _ = progress_task.await;
                 }
                 if let Err(error) = result {
                     return recipe_build_client_failure_result(

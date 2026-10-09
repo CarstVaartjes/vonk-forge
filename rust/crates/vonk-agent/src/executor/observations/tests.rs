@@ -45,7 +45,10 @@ async fn sixty_five_exact_observations_use_two_bounded_native_wire_batches() {
     }
     let database = root.path().join("state.sqlite");
     let mut observations = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // This test aggregates successive independently bounded pages to verify
+    // the wire batches. Its aggregate fixture budget is the scan's freshness
+    // budget; claim-lane latency is covered by the partial-history regression.
+    let deadline = Instant::now() + crate::oci::MAX_EMPTY_SCAN_AGE.to_std().unwrap();
     loop {
         assert!(
             Instant::now() < deadline,

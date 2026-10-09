@@ -37,6 +37,13 @@ pub enum OciError {
 }
 
 impl OciError {
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Process(ProcessError::Cancelled) => true,
+            Self::Install { source, .. } | Self::Start { source, .. } => source.is_cancelled(),
+            _ => false,
+        }
+    }
     pub fn safe_start_context(&self) -> (FailureStage, &'static str) {
         let (stage, source) = match self {
             Self::Start { stage, source } => (*stage, source.as_ref()),

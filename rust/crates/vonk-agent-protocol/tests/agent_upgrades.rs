@@ -7,6 +7,7 @@ use vonk_agent_protocol::{AgentClaim, AgentUpgradeRequest};
 
 fn claim(payload: Value) -> Result<AgentClaim, vonk_agent_protocol::ProtocolError> {
     Ok(AgentClaim {
+        observation_budget_seconds: 3600,
         deadline: DateTime::parse_from_rfc3339("2026-08-27T12:00:00+00:00").unwrap(),
         fence: Uuid::new_v4(),
         operation: "agent.upgrade.v1".parse().unwrap(),

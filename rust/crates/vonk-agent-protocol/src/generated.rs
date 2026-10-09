@@ -179,6 +179,7 @@ pub struct AgentClaim {
     )]
     pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
     pub fence: ::uuid::Uuid,
+    pub observation_budget_seconds: u32,
     pub operation: AgentOperation,
     pub payload: AgentClaimPayload,
 }
@@ -15673,6 +15674,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
             )]
             pub deadline: ::chrono::DateTime<::chrono::FixedOffset>,
             pub fence: ::uuid::Uuid,
+            pub observation_budget_seconds: u32,
             pub operation: AgentOperation,
             pub payload: AgentClaimPayload,
         }
@@ -15681,6 +15683,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentClaim {
         Ok(Self {
             deadline: raw.deadline,
             fence: raw.fence,
+            observation_budget_seconds: raw.observation_budget_seconds,
             operation: raw.operation,
             payload: raw.payload,
         })

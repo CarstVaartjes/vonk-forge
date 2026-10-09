@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     FailureCode,
     LifecycleState,
+    ReservationState,
     RunSwitchCode,
     canonical_message,
 )
@@ -4014,7 +4015,8 @@ def test_run_switch_failure_classification_is_terminal_only_for_authentication()
         assert is_security_failure(_failure_code_of(status_error(status))) is True
     for status in (404, 429, 500, 503):
         assert is_security_failure(_failure_code_of(status_error(status))) is False
-    for number in (errno.EPERM, errno.ENOSPC, errno.ECONNRESET):
+    assert is_security_failure(_failure_code_of(PermissionError(errno.EPERM, "x")))
+    for number in (errno.ENOSPC, errno.ECONNRESET):
         assert is_security_failure(_failure_code_of(OSError(number, "x"))) is False
 
 
@@ -5637,9 +5639,9 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
             (nodes[0], "uninstalled"),
             (nodes[1], "failed"),
         ]
-        # Retained member evidence, rather than the intermediate claim state,
-        # drives the next exact reconciliation below.
 
+    # The partial result must admit a fresh cleanup, reuse the completed rank,
+    # and release all claims once the remaining exact effect is confirmed.
     retry_plan = service.preview_cleanup(
         RunSwitchCleanupPreviewRequest(
             installation_id=installation.owner_id,
@@ -5690,7 +5692,9 @@ def test_new_reconcile_review_reuses_partial_cleanup_and_releases_last_claim(
                 )
             )
         )
-        assert claims and all(item.state == "released" for item in claims)
+        assert claims and all(
+            item.state == ReservationState.RELEASED for item in claims
+        )
 
 
 def test_scoped_cleanup_removes_the_installation_through_run_switch(

@@ -88,7 +88,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         let _lock = self.lock_installation_reconciliation(installation_id)?;
         self.supersede_reconciliation_checkpoint(installation_id)?;
-        self.install_unlocked(spec, installation_id, recipe_content_sha256, &mut |_, _| {})
+        self.install_unlocked(
+            spec,
+            installation_id,
+            recipe_content_sha256,
+            &mut |_, _| {},
+            &|| false,
+        )
     }
 
     pub(super) fn install_unlocked(
@@ -97,13 +103,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         installation_id: &str,
         recipe_content_sha256: &str,
         progress: &mut dyn FnMut(u64, u64),
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<(), OciError> {
         self.install_unlocked_controlled(
             spec,
             installation_id,
             recipe_content_sha256,
             progress,
-            &|| false,
+            cancelled,
         )
     }
 
@@ -156,7 +163,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         )
         .map_err(|error| install_error(FailureStage::ModelMaterialization, error))?;
         if cancelled() {
-            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+            return Err(ProcessError::Cancelled.into());
         }
         write_installation_metadata(self.data_root, &installation, spec)
             .map_err(|error| install_error(FailureStage::InstallationMetadata, error))?;
@@ -191,6 +198,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             recipe_content_sha256,
             expected_bytes,
             &mut |_, _| {},
+            &|| false,
         )
     }
 
@@ -203,6 +211,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         recipe_content_sha256: &str,
         expected_bytes: u64,
         progress: &mut dyn FnMut(u64, u64),
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<(), OciError> {
         self.install_with_space_check_controlled(
             spec,
@@ -210,7 +219,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             recipe_content_sha256,
             expected_bytes,
             progress,
-            &|| false,
+            cancelled,
         )
     }
 
@@ -224,7 +233,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), OciError> {
         if cancelled() {
-            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+            return Err(ProcessError::Cancelled.into());
         }
         let encoded = serde_json::to_vec(spec)?;
         if encoded.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {

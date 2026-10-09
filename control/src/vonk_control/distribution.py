@@ -32,8 +32,6 @@ from vonk_agent_protocol import (
     DistributionAssignmentState,
     DistributionCode,
     DistributionObject,
-    InvalidRequestError,
-    InvalidRequestReason,
     LifecycleState,
     ModelFileState,
     SecurityRefusalError,
@@ -54,6 +52,7 @@ from .artifact_lifecycle import (
     require_reference_open,
 )
 from .artifact_reference_scan import require_model_sets_open
+from .bounded_retry import bounded_attempts
 from .compiled_execution_plan import DistributionObjectReceipt, VerifiedModelObject
 from .distribution_assignment import NodeDistributionAssignment
 from .models import (
@@ -79,15 +78,6 @@ class DistributionError(ValueError):
         super().__init__(detail)
         self.code = code
         self.detail = detail
-
-
-class DistributionInputError(InvalidRequestError, DistributionError):
-    """Invalid source configuration detected before object or grant effects."""
-
-    def __init__(self, code: str, detail: str) -> None:
-        DistributionError.__init__(self, code, detail)
-        self.typed_reason = InvalidRequestReason.UNSUPPORTED
-        self.typed_field = None
 
 
 class DistributionUnknown(UnknownOutcomeError, DistributionError):
@@ -201,10 +191,9 @@ class FilesystemObjectSource:
                 or root_stat.st_uid not in {0, os.geteuid()}
                 or root_stat.st_mode & 0o022
             ):
-                raise DistributionRefused(
-                    SecurityRefusalReason.FORBIDDEN,
+                raise DistributionUnknown(
+                    DistributionCode.OBJECT_UNAVAILABLE,
                     "managed distribution object root is unsafe",
-                    reason=SecurityRefusalReason.FORBIDDEN,
                 )
             descriptor = os.open(
                 os.fspath(root),
@@ -275,21 +264,17 @@ class RecipeBuildObjectSource(FilesystemObjectSource):
         return False
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
-        with self.sessions() as session:
-            return (
-                session.scalar(
-                    select(RecipeBuild.id).where(
-                        RecipeBuild.state == "succeeded",
-                        RecipeBuild.image_digest == image_digest,
-                        RecipeBuild.oci_layout_sha256 == archive_sha256,
-                        RecipeBuild.image_bytes > 0,
-                    )
-                )
-                is not None
-            )
+        from .oci_image_store import StoreUnknown
+
+        stored = self._runtime_storage.layout.read(f"sha256:{archive_sha256}")
+        return (
+            stored is not None
+            and not isinstance(stored, StoreUnknown)
+            and stored.manifest_digest == image_digest
+        )
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
-        raise DistributionError(
+        raise DistributionUnknown(
             DistributionCode.OBJECT_UNAVAILABLE,
             "runtime images are pulled from the layered store, not downloaded",
         )
@@ -573,9 +558,24 @@ class CompositeObjectSource:
     def verified_model_objects_for_set(
         self, artifact_set_sha256: str, manifest: object = None
     ) -> tuple[VerifiedModelObject, ...]:
+        """Re-observe a repaired service binding within the request budget."""
+        missing: DistributionUnknown | None = None
+        for _attempt in bounded_attempts():
+            try:
+                return self._verified_model_objects_for_set_once(
+                    artifact_set_sha256, manifest
+                )
+            except DistributionUnknown as error:
+                missing = error
+        assert missing is not None
+        raise missing
+
+    def _verified_model_objects_for_set_once(
+        self, artifact_set_sha256: str, manifest: object = None
+    ) -> tuple[VerifiedModelObject, ...]:
         resolver = getattr(self.model_source, "verified_model_objects_for_set", None)
         if resolver is None:
-            raise DistributionInputError(
+            raise DistributionUnknown(
                 DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "NAS cache source lacks canonical model-file identity",
             )
@@ -1019,6 +1019,11 @@ class DistributionService:
         """
         key = (plan_digest, node_id)
         now = self.clock()
+        if now.tzinfo is None or now.utcoffset() != UTC.utcoffset(now):
+            raise DistributionUnknown(
+                DistributionCode.OBJECT_UNAVAILABLE,
+                "distribution authorization clock is unavailable",
+            )
         with self._authorized_lock:
             cached = self._authorized.get(key)
             if cached is not None:
@@ -1086,11 +1091,12 @@ class DistributionService:
                 DistributionCode.WRONG_NODE, "assignment is bound to another node"
             )
         now = self.clock()
-        if (
-            now.tzinfo is None
-            or now.utcoffset() != UTC.utcoffset(now)
-            or assignment.expires_at <= now
-        ):
+        if now.tzinfo is None or now.utcoffset() != UTC.utcoffset(now):
+            raise DistributionUnknown(
+                DistributionCode.OBJECT_UNAVAILABLE,
+                "distribution authorization clock is unavailable",
+            )
+        if assignment.expires_at <= now:
             if self.sessions is not None:
                 with self.sessions.begin() as session:
                     row = session.scalar(

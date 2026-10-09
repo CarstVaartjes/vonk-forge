@@ -33,7 +33,9 @@ pub(super) fn materialize_compiled_models(
     plan: &CompiledExecutionPlan,
     installation_id: &str,
 ) -> Result<Vec<PathBuf>, OciError> {
-    materialize_compiled_models_observed(data_root, plan, installation_id, &mut |_, _| {})
+    materialize_compiled_models_observed(data_root, plan, installation_id, &mut |_, _| {}, &|| {
+        false
+    })
 }
 
 /// Bytes between two progress reports while one model file is copied.
@@ -53,8 +55,9 @@ pub(super) fn materialize_compiled_models_observed(
     plan: &CompiledExecutionPlan,
     installation_id: &str,
     progress: &mut dyn FnMut(u64, u64),
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<PathBuf>, OciError> {
-    materialize_compiled_models_with(data_root, plan, installation_id, true, progress)
+    materialize_compiled_models_with(data_root, plan, installation_id, true, progress, cancelled)
 }
 
 /// `link` is false only where a test needs the copy fallback on a filesystem
@@ -65,6 +68,7 @@ pub(super) fn materialize_compiled_models_with(
     installation_id: &str,
     link: bool,
     progress: &mut dyn FnMut(u64, u64),
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<PathBuf>, OciError> {
     materialize_compiled_models_controlled(
         data_root,
@@ -72,7 +76,7 @@ pub(super) fn materialize_compiled_models_with(
         installation_id,
         link,
         progress,
-        &|| false,
+        cancelled,
     )
 }
 
@@ -312,7 +316,7 @@ mod recovery_tests;
 
 fn check_materialization_cancelled(cancelled: &dyn Fn() -> bool) -> Result<(), OciError> {
     if cancelled() {
-        return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
+        return Err(ProcessError::Cancelled.into());
     }
     Ok(())
 }
