@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InvalidRequestReason
 
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -20,7 +19,6 @@ from ..fleet_profile_contract import FleetProfileAssignmentInput, FleetProfilePr
 from ..lifecycle.evidence import Residue
 from .contracts import (
     FleetProfileAdmissionEffectBusy,
-    FleetProfileInvalid,
 )
 from .persistence import _stored_recipe
 from .projection_support import (
@@ -50,12 +48,13 @@ class FleetProfileService:
         for value in values:
             resolved = self._recipe_document(session, value.recipe_selector)
             if isinstance(resolved, Residue):
-                # A save names its recipes: one without an active revision cannot
-                # be chosen (a malformed request, refused at submit time).
-                raise FleetProfileInvalid(
-                    f"recipe has no active catalog revision: {value.recipe_selector}",
-                    reason=InvalidRequestReason.NOT_FOUND,
+                # A well-formed selector already resolved to catalog identity.
+                # Missing active bytes are local evidence, not malformed input.
+                assignments.append(value)
+                notes.append(
+                    f"{value.recipe_selector}: catalog evidence is unavailable"
                 )
+                continue
             document, revision = resolved
             # Every option is saved with an explicit value: the operator's
             # choice, or the recipe default where none was made or offered.

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import LifecycleState, UnknownOutcomeError, canonical_message
 
 from .. import job_states
 from ..agent_jobs import AgentJobService
@@ -160,6 +160,7 @@ class FleetProfileService:
             try:
                 child = adapter.advance(row.id, session=session)
             except (
+                UnknownOutcomeError,
                 FleetProfileChildPlanBlocked,
                 KeyError,
                 RuntimeError,

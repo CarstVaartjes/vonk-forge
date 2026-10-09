@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
@@ -20,9 +21,10 @@ from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from .. import job_states
 from ..fleet_profile_contract import FleetProfileApplicationView, FleetProfilePreview
 from ..lifecycle.evidence import Residue
-from ..models import FleetProfile, FleetProfileApplication
+from ..models import FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
 from ..profile_capacity import restore_released_profile_claims
+from ..settings import STORAGE_ADMISSION_WAIT_SECONDS
 from ..storage_demands import StorageRelief
 from .assessment_support import (
     _assignments_needing_preparation,
@@ -43,12 +45,9 @@ from .persistence import (
     _persisted_profile_plan,
     _persisted_profile_progress,
     _stored_progress,
-    _stored_retry_lineage,
 )
 from .projection_support import (
     _aware,
-    _digest,
-    _profile_document,
 )
 
 if TYPE_CHECKING:
@@ -87,6 +86,13 @@ class FleetProfileService:
             ):
                 return None
             progress = _persisted_profile_progress(row)
+            if now >= _aware(row.created_at) + timedelta(
+                seconds=STORAGE_ADMISSION_WAIT_SECONDS
+            ):
+                self._defer_exact_step(
+                    row, progress, "Accepted effect observation budget expired", now
+                )
+                return self._application_view(row)
             if (
                 progress.cancellation is not None
                 or not self._application_is_current_selection(session, row, progress)
@@ -136,27 +142,7 @@ class FleetProfileService:
             # A damaged receipt cannot prove that it still carries the current
             # recoverable intent, so it simply does not advertise retry.
             return False
-        if row.selection_generation is not None:
-            if not self._application_is_current_selection(session, row, progress):
-                return False
-        else:
-            profile = session.get(FleetProfile, row.profile_id)
-            try:
-                current_profile_digest = (
-                    _digest(_profile_document(profile)) if profile is not None else None
-                )
-            except (
-                FleetProfileConflict,
-                KeyError,
-                TypeError,
-                ValidationError,
-                ValueError,
-            ):
-                return False
-        if progress.intended_profile is None or (
-            row.selection_generation is None
-            and current_profile_digest != row.profile_digest
-        ):
+        if progress.intended_profile is None:
             return False
         try:
             superseded = self._superseding_intent(session, row, progress)
@@ -175,21 +161,10 @@ class FleetProfileService:
                 return False
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
             return False
-        # The scoped accepted-order scan above catches later overlapping work,
-        # and _superseding_intent checks the durable node ordinals. This final
-        # profile-level pass only checks for active siblings or explicit retry
-        # children; malformed unrelated history must not deny a valid retry.
-        others = session.scalars(
-            select(FleetProfileApplication).where(
-                FleetProfileApplication.profile_id == row.profile_id,
-                FleetProfileApplication.id != row.id,
-            )
-        )
-        return not any(
-            other.state in {LifecycleState.QUEUED.value, LifecycleState.RUNNING.value}
-            or _stored_retry_lineage(other) == row.id
-            for other in others
-        )
+        # Only the accepted order and overlapping node fences own effects.
+        # A historical retry child or an older/nonoverlapping sibling is not
+        # another admission authority.
+        return True
 
     def bind_preparation_starter(self, starter: PreparationStarter) -> None:
         """Attach the Controller's preparation authority after startup wiring."""
