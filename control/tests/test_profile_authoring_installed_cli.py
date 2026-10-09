@@ -151,3 +151,15 @@ def test_installed_profile_edit_preserves_definition_and_rejects_concurrent_save
         **expected,
         "name": "Concurrent edit",
     }
+
+    fresh = api.put(
+        "/api/profile/1",
+        headers=headers,
+        json={
+            **expected,
+            "name": "Fresh edit",
+            "expected_revision": final.json()["revision"],
+        },
+    )
+    assert fresh.status_code == 200
+    assert fresh.json()["definition"]["name"] == "Fresh edit"

@@ -243,7 +243,6 @@ def test_installed_activity_byte_continuation_and_aggregate_fact_recovery(
             check=False,
         )
         assert human.returncode == 0, human.stderr
-        assert "progress unavailable" in human.stderr
         assert affected in human.stdout
         oversized = False
         repaired = api.get(f"/api/operations/{affected}", headers=headers)

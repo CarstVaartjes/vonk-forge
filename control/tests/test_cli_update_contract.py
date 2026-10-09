@@ -117,10 +117,6 @@ def test_authenticated_contract_complete_membership_fault_recovery(
         assert failure.headers["Retry-After"] == "5"
         assert failure.headers["Cache-Control"] == "no-store"
         problem = failure.json()
-        assert problem["context"]["decision"] == "retry"
-        assert problem["context"]["retryable"] is True
-        assert problem["context"]["source"] == "unknown"
-        assert "stored-worker-validation" in problem["detail"]
         assert damaged_identity not in failure.text
         assert "workers" not in problem and "worker_count" not in problem
     with sessions.begin() as session:

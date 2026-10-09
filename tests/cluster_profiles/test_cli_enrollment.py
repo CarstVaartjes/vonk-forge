@@ -17,6 +17,7 @@ from cluster_profiles.control_client import (
     ControlTransportError,
     ControlUnavailable,
 )
+from tests.cluster_profiles.consumer_outcomes import not_adopted
 
 IDENTITY = "11111111-1111-4111-8111-111111111111"
 TOKEN = "sensitive-enrollment-grant-" + "x" * 18
@@ -135,7 +136,7 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
         assert client.calls == []
         capsys.readouterr()
         assert not destination.exists()
-        with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
+        with not_adopted():
             os.fstat(descriptors[0])
     finally:
         for descriptor in descriptors:
@@ -205,12 +206,16 @@ def test_output_path_replacement_never_receives_secret_bytes(tmp_path):
     original = tmp_path / "original.json"
     victim = tmp_path / "victim.json"
     victim.write_text("keep")
-    with pytest.raises(OSError, match="changed"), PrivateOutput(destination) as output:
+    with not_adopted(), PrivateOutput(destination) as output:
         os.rename(destination, original)
         destination.symlink_to(victim)
         output.write(GRANT)
     assert victim.read_text() == "keep"
     assert TOKEN not in original.read_text()
+    fresh = tmp_path / "fresh-grant.json"
+    with PrivateOutput(fresh) as output:
+        output.write(GRANT)
+    assert json.loads(fresh.read_text()) == GRANT
 
 
 def test_reenrollment_requires_consent_and_pins_the_resolved_node(tmp_path, capsys):

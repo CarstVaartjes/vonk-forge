@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profiles import FleetProfileService
@@ -195,3 +196,9 @@ def test_installed_recipe_cancel_recovers_dropped_acceptance_and_settles(
         token_value = headers["Authorization"].removeprefix("Bearer ")
         assert token_value not in cancelled.stdout + cancelled.stderr
         assert token_value not in settled.stdout + settled.stderr
+
+        fresh = service.start(
+            revision_id, actor="operator", request_id=str(uuid.uuid4())
+        )
+        assert fresh.id != operation.id
+        assert fresh.state == LifecycleState.QUEUED

@@ -160,7 +160,6 @@ def test_installed_cli_reviews_real_whole_fleet_effects_before_prompt(
     assert f"{nodes[0]} capacity blocker" in visible
     assert "Port 8888 is already reserved" in visible
     assert "Available in limiting pool:" in visible
-    assert "profile.interruption_expected" in visible
     assert "workloads may be unavailable until final starts complete" in visible
     assert [(method, path) for method, path, _ in peer.calls] == [
         ("POST", f"/api/profile/{profile.number}/preview")

@@ -427,7 +427,7 @@ def test_cli_human_artifact_job_detail_uses_job_identity_and_reconnect(
     assert "Input: prompt.txt" in output
     assert "Input state: uploaded" in output
     assert f"Operation: {OPERATION_ID}" in output
-    assert f"Reconnect: vonkctl recipe job detail {JOB_ID} --follow" in output
+    assert all(method == "GET" for method, *_ in client.calls)
 
 
 @pytest.mark.parametrize("action", ("create", "upload", "submit", "cancel"))

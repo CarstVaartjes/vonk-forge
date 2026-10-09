@@ -8,6 +8,7 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlNotFound
+from tests.cluster_profiles.consumer_outcomes import not_adopted
 
 KEY = "11111111-1111-4111-8111-111111111111"
 DIGEST = "c" * 64
@@ -15,10 +16,16 @@ APPLICATION = "33333333-3333-4333-8333-333333333333"
 
 
 def test_profile_load_no_longer_accepts_a_caller_supplied_plan_digest():
-    with pytest.raises(cli._UsageError):
+    with not_adopted():
         cli._parser().parse_args(
             ("--profile", "2", "profile", "load", "--expected-plan", DIGEST)
         )
+    assert (
+        cli._parser()
+        .parse_args(("--profile", "2", "profile", "load", "--yes"))
+        .profile_number
+        == 2
+    )
 
 
 class Client:

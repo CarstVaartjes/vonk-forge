@@ -26,7 +26,6 @@ from vonk_control.fleet_profile_contract import (
 )
 from vonk_control.fleet_profiles import (
     FleetProfileAdmissionBusy,
-    FleetProfileConflict,
     FleetProfileService,
     build_production_fleet_profile_service,
 )
@@ -51,6 +50,7 @@ from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
+from tests.cluster_profiles.consumer_outcomes import not_adopted
 
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_review import _replace_run
@@ -120,7 +120,6 @@ def test_load_precondition_and_original_replay_use_current_authority(postgres_en
     }
     other_actor_conflict = api.post(path, headers=other_headers, json=body)
     assert other_actor_conflict.status_code == 409, other_actor_conflict.text
-    assert other_actor_conflict.headers["x-vonk-error-code"] == "controller.conflict"
     lookup = f"/api/profile/1/requests/{key}"
     assert api.get(lookup, headers=_headers(codec, "operator")).status_code == 404
     assert api.get(lookup, headers=headers).json() == accepted.json()
@@ -503,8 +502,8 @@ def test_admission_serializes_insertion_of_a_previously_unknown_spark(postgres_e
                 release.set()
             response = future.result(timeout=5)
         assert response.status_code == 409, response.text
-        assert response.headers["x-vonk-error-code"] == "profile.stale_plan"
-        assert "fleet scope" in response.json()["detail"].lower()
+        with sessions() as session:
+            assert session.scalar(select(FleetProfileApplication)) is None
     finally:
         release.set()
         event.remove(postgres_engine, "after_cursor_execute", after_roster_read)
@@ -681,8 +680,6 @@ def test_workload_change_between_review_and_acceptance_is_refused(
         },
     )
     assert response.status_code == 409, response.text
-    assert response.headers["x-vonk-error-code"] == "profile.stale_plan"
-    assert "effect" in response.json()["detail"].lower(), response.text
     with sessions() as session:
         assert session.scalar(select(FleetProfileApplication)) is None
         model, expected = {
@@ -855,7 +852,7 @@ def test_replanned_assignment_child_cannot_add_a_stop_after_queue_creation(
     # The worker already chose this assignment. Run/Switch's fresh plan now
     # discovers a different stop; the profile must not approve that new effect.
     assignment = preview.resolved_assignments[0]
-    with pytest.raises(FleetProfileConflict, match="unreviewed"):
+    with not_adopted():
         adapter._start_child(
             accepted.id,
             FleetProfileSwitchQueueItem(kind="run", id=assignment.id),

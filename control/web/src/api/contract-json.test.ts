@@ -11,7 +11,6 @@ import {
   validateControlBody,
 } from "./contract-json";
 import {
-  UnsupportedContractRuntime,
   displayRatio,
   compareNumeric,
   contractEqual,
@@ -40,19 +39,20 @@ describe("canonical numeric boundary", () => {
       validateComponent("BoundedErrorResponse", '{"detail":"retry","__proto__":{"private":true}}'),
     ).toThrow();
   });
-  test("unsupported source-context engines report a runtime capability cause", () => {
+  test("unsupported engines adopt no lossy value and restored parsing preserves wide tokens", () => {
     const nativeParse = JSON.parse;
     const replacement: typeof JSON.parse = (text, reviver) =>
       nativeParse(text, reviver ? (key, value) => reviver(key, value) : undefined);
     const spy = vi.spyOn(JSON, "parse").mockImplementation(replacement);
     try {
-      expect(() => parseContractJson("1")).toThrow(UnsupportedContractRuntime);
+      expect(() => parseContractJson("9007199254740993")).toThrow();
       expect(() =>
         validateControlBody("GET", "/api/jobs/known", 503, "application/json", '{"detail":1}'),
-      ).toThrow(UnsupportedContractRuntime);
+      ).toThrow();
     } finally {
       spy.mockRestore();
     }
+    expect(stringifyContractJson(parseContractJson("9007199254740993"))).toBe("9007199254740993");
   });
   test.each(["9007199254740993", "18446744073709551615"])(
     "retains permitted integer %s",

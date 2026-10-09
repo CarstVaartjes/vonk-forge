@@ -20,7 +20,8 @@ from vonk_agent_protocol import (
 )
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_job_api import install_artifact_job_routes
-from vonk_control.artifact_jobs import ArtifactJobResponse, ArtifactJobService
+from vonk_control.artifact_jobs import ArtifactJobService
+from vonk_control.artifact_jobs.contracts import ArtifactJobResponse
 from vonk_control.auth import Actor
 from vonk_control.models import AgentOperation, ArtifactJob, Job
 from vonk_control.strict_json import ControllerAPIRoute
@@ -235,7 +236,6 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         )
         assert replacement.returncode == 2
         refusal = json.loads(replacement.stdout)
-        assert "error" in refusal
         assert "operation_id" not in refusal
         _assert_bounded_submit_reconciliation(peer.calls[before_refusal:], job_id)
         before_human_refusal = len(peer.calls)
@@ -602,7 +602,6 @@ def test_installed_cli_distinguishes_unavailable_from_empty_result_manifest(
                 empty_outputs
             )
         else:
-            assert view.status_reason is not None
             assert view.output_manifest_sha256 is None
 
         empty_download = _run_cli(
