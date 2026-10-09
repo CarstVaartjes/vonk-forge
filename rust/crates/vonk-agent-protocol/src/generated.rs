@@ -620,6 +620,8 @@ pub struct AgentIdentityMetadata {
     pub fingerprint: ::std::string::String,
     pub generation: u64,
     pub node_id: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub renewal_window: ::std::option::Option<RenewalWindow>,
     pub serial: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
@@ -1280,6 +1282,8 @@ pub struct BoundedErrorResponse {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub context: ::std::option::Option<ErrorContextResponse>,
     pub detail: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub outcome: ::std::option::Option<HttpFailureResponse>,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum CacheReferenceReason {
@@ -2774,15 +2778,6 @@ impl ::std::convert::TryFrom<::std::string::String> for ControllerErrorCode {
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
-}
-#[derive(::serde::Serialize, Clone, Debug, Default, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct ControllerRefusalBody {
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub code: ::std::option::Option<::std::string::String>,
-    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub detail: ::std::option::Option<::std::string::String>,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum DesiredAssignmentState {
@@ -4668,9 +4663,11 @@ pub struct HostHelperResponse {
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub diagnostic: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-    pub error_code: ::std::option::Option<::std::string::String>,
+    pub error_code: ::std::option::Option<HelperErrorCode>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub exit_code: ::std::option::Option<u32>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub failure: ::std::option::Option<HttpFailureResponse>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub installation_intent_nonce: ::std::option::Option<::std::string::String>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -5014,6 +5011,203 @@ impl ::std::convert::TryFrom<&str> for HostRuntimeRequestAction {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for HostRuntimeRequestAction {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct HttpFailureResponse {
+    pub failure: HttpFailureResponseFailure,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(untagged)]
+#[allow(clippy::large_enum_variant, clippy::enum_variant_names)]
+#[derive(Eq)]
+pub enum HttpFailureResponseFailure {
+    Transient(HttpTransient),
+    Refusal(HttpRefusal),
+}
+impl ::std::convert::From<HttpTransient> for HttpFailureResponseFailure {
+    fn from(value: HttpTransient) -> Self {
+        Self::Transient(value)
+    }
+}
+impl ::std::convert::From<HttpRefusal> for HttpFailureResponseFailure {
+    fn from(value: HttpRefusal) -> Self {
+        Self::Refusal(value)
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct HttpRefusal {
+    pub family: HttpRefusalFamily,
+    pub reason: HttpRefusalReason,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum HttpRefusalFamily {
+    #[serde(rename = "refusal")]
+    Refusal,
+}
+impl ::std::fmt::Display for HttpRefusalFamily {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Refusal => f.write_str("refusal"),
+        }
+    }
+}
+impl ::std::str::FromStr for HttpRefusalFamily {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "refusal" => Ok(Self::Refusal),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for HttpRefusalFamily {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for HttpRefusalFamily {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum HttpRefusalReason {
+    #[serde(rename = "authentication_required")]
+    AuthenticationRequired,
+    #[serde(rename = "authority_denied")]
+    AuthorityDenied,
+    #[serde(rename = "unknown_identity")]
+    UnknownIdentity,
+    #[serde(rename = "revoked_identity")]
+    RevokedIdentity,
+    #[serde(rename = "invalid_signature")]
+    InvalidSignature,
+    #[serde(rename = "invalid_digest")]
+    InvalidDigest,
+    #[serde(rename = "tampered_token")]
+    TamperedToken,
+    #[serde(rename = "expired_credential")]
+    ExpiredCredential,
+}
+impl ::std::fmt::Display for HttpRefusalReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::AuthenticationRequired => f.write_str("authentication_required"),
+            Self::AuthorityDenied => f.write_str("authority_denied"),
+            Self::UnknownIdentity => f.write_str("unknown_identity"),
+            Self::RevokedIdentity => f.write_str("revoked_identity"),
+            Self::InvalidSignature => f.write_str("invalid_signature"),
+            Self::InvalidDigest => f.write_str("invalid_digest"),
+            Self::TamperedToken => f.write_str("tampered_token"),
+            Self::ExpiredCredential => f.write_str("expired_credential"),
+        }
+    }
+}
+impl ::std::str::FromStr for HttpRefusalReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "authentication_required" => Ok(Self::AuthenticationRequired),
+            "authority_denied" => Ok(Self::AuthorityDenied),
+            "unknown_identity" => Ok(Self::UnknownIdentity),
+            "revoked_identity" => Ok(Self::RevokedIdentity),
+            "invalid_signature" => Ok(Self::InvalidSignature),
+            "invalid_digest" => Ok(Self::InvalidDigest),
+            "tampered_token" => Ok(Self::TamperedToken),
+            "expired_credential" => Ok(Self::ExpiredCredential),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for HttpRefusalReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for HttpRefusalReason {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct HttpTransient {
+    pub family: HttpTransientFamily,
+    pub reason: TransientReason,
+    pub resolution_window: u32,
+    pub retry_after: u32,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub suggested_window: ::std::option::Option<RenewalWindow>,
+}
+#[derive(
+    ::serde::Deserialize,
+    ::serde::Serialize,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+)]
+pub enum HttpTransientFamily {
+    #[serde(rename = "transient")]
+    Transient,
+}
+impl ::std::fmt::Display for HttpTransientFamily {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::Transient => f.write_str("transient"),
+        }
+    }
+}
+impl ::std::str::FromStr for HttpTransientFamily {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "transient" => Ok(Self::Transient),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for HttpTransientFamily {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for HttpTransientFamily {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -5997,6 +6191,8 @@ pub struct IssuedCertificateResponse {
     pub node_id: ::std::string::String,
     pub not_after: ::std::string::String,
     pub not_before: ::std::string::String,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub renewal_window: ::std::option::Option<RenewalWindow>,
     pub serial: ::std::string::String,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -11215,11 +11411,25 @@ pub struct RenewRequest {
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
+pub struct RenewalHealth {
+    pub certificate_digest: ::std::string::String,
+    pub failed: bool,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
 pub struct RenewalHelperManifest {
     pub binary_sha256: ::std::string::String,
     pub build_digest: ::std::string::String,
     pub source_inputs: ::std::collections::BTreeMap<::std::string::String, ::std::string::String>,
     pub source_sha: ::std::string::String,
+}
+#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+#[derive(Eq)]
+pub struct RenewalWindow {
+    pub end_seconds: u32,
+    pub start_seconds: u32,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -11261,6 +11471,8 @@ pub struct RequestValidationProblem {
     pub context: ::std::option::Option<ErrorContextResponse>,
     pub detail: ::std::string::String,
     pub issues: ::std::vec::Vec<RequestValidationIssue>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub outcome: ::std::option::Option<HttpFailureResponse>,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum ReservationState {
@@ -15831,6 +16043,8 @@ pub struct TelemetrySample {
     pub cpu_frequency_max_mhz: ::std::option::Option<u32>,
     #[serde(skip_serializing_if = "::std::option::Option::is_none")]
     pub cpu_frequency_min_mhz: ::std::option::Option<u32>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub credential_remaining_fraction: ::std::option::Option<f64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
     pub disk_free_bytes: ::std::option::Option<u64>,
     #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -15854,6 +16068,8 @@ pub struct TelemetrySample {
         deserialize_with = "crate::wire_datetime::deserialize"
     )]
     pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
+    #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+    pub renewal_failed: ::std::option::Option<bool>,
 }
 #[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(clippy::enum_variant_names)]
@@ -15902,6 +16118,65 @@ impl ::std::convert::TryFrom<&str> for TopologyCode {
     }
 }
 impl ::std::convert::TryFrom<::std::string::String> for TopologyCode {
+    type Error = self::error::ConversionError;
+    fn try_from(
+        value: ::std::string::String,
+    ) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TransientReason {
+    #[serde(rename = "ca_unavailable")]
+    CaUnavailable,
+    #[serde(rename = "controller_starting")]
+    ControllerStarting,
+    #[serde(rename = "admission_busy")]
+    AdmissionBusy,
+    #[serde(rename = "dependency_unavailable")]
+    DependencyUnavailable,
+    #[serde(rename = "rate_limited")]
+    RateLimited,
+    #[serde(rename = "peer_response_unavailable")]
+    PeerResponseUnavailable,
+    #[serde(rename = "local_state_unavailable")]
+    LocalStateUnavailable,
+}
+impl ::std::fmt::Display for TransientReason {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        match *self {
+            Self::CaUnavailable => f.write_str("ca_unavailable"),
+            Self::ControllerStarting => f.write_str("controller_starting"),
+            Self::AdmissionBusy => f.write_str("admission_busy"),
+            Self::DependencyUnavailable => f.write_str("dependency_unavailable"),
+            Self::RateLimited => f.write_str("rate_limited"),
+            Self::PeerResponseUnavailable => f.write_str("peer_response_unavailable"),
+            Self::LocalStateUnavailable => f.write_str("local_state_unavailable"),
+        }
+    }
+}
+impl ::std::str::FromStr for TransientReason {
+    type Err = self::error::ConversionError;
+    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        match value {
+            "ca_unavailable" => Ok(Self::CaUnavailable),
+            "controller_starting" => Ok(Self::ControllerStarting),
+            "admission_busy" => Ok(Self::AdmissionBusy),
+            "dependency_unavailable" => Ok(Self::DependencyUnavailable),
+            "rate_limited" => Ok(Self::RateLimited),
+            "peer_response_unavailable" => Ok(Self::PeerResponseUnavailable),
+            "local_state_unavailable" => Ok(Self::LocalStateUnavailable),
+            _ => Err("invalid value".into()),
+        }
+    }
+}
+impl ::std::convert::TryFrom<&str> for TransientReason {
+    type Error = self::error::ConversionError;
+    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
+        value.parse()
+    }
+}
+impl ::std::convert::TryFrom<::std::string::String> for TransientReason {
     type Error = self::error::ConversionError;
     fn try_from(
         value: ::std::string::String,
@@ -17022,6 +17297,8 @@ impl<'de> ::serde::Deserialize<'de> for AgentIdentityMetadata {
             pub fingerprint: ::std::string::String,
             pub generation: u64,
             pub node_id: ::std::string::String,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub renewal_window: ::std::option::Option<RenewalWindow>,
             pub serial: ::std::string::String,
         }
         #[allow(unused_variables)]
@@ -17030,6 +17307,7 @@ impl<'de> ::serde::Deserialize<'de> for AgentIdentityMetadata {
             fingerprint: raw.fingerprint,
             generation: raw.generation,
             node_id: raw.node_id,
+            renewal_window: raw.renewal_window,
             serial: raw.serial,
         })
     }
@@ -17953,12 +18231,15 @@ impl<'de> ::serde::Deserialize<'de> for BoundedErrorResponse {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub context: ::std::option::Option<ErrorContextResponse>,
             pub detail: ::std::string::String,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub outcome: ::std::option::Option<HttpFailureResponse>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
         Ok(Self {
             context: raw.context,
             detail: raw.detail,
+            outcome: raw.outcome,
         })
     }
 }
@@ -19876,29 +20157,6 @@ impl<'de> ::serde::Deserialize<'de> for ControllerErrorCode {
             Raw::SupersededOperationCancelled => Self::SupersededOperationCancelled,
             Raw::ControllerTimeout => Self::ControllerTimeout,
             Raw::ControllerUnavailable => Self::ControllerUnavailable,
-        })
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for ControllerRefusalBody {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = crate::wire_schema::deserialize_wire_value(
-            deserializer,
-            Some("ControllerRefusalBody"),
-        )?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, Default, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub code: ::std::option::Option<::std::string::String>,
-            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub detail: ::std::option::Option<::std::string::String>,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            code: raw.code,
-            detail: raw.detail,
         })
     }
 }
@@ -22101,9 +22359,11 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub diagnostic: ::std::option::Option<::std::string::String>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
-            pub error_code: ::std::option::Option<::std::string::String>,
+            pub error_code: ::std::option::Option<HelperErrorCode>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub exit_code: ::std::option::Option<u32>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub failure: ::std::option::Option<HttpFailureResponse>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub installation_intent_nonce: ::std::option::Option<::std::string::String>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
@@ -22121,6 +22381,7 @@ impl<'de> ::serde::Deserialize<'de> for HostHelperResponse {
             diagnostic: raw.diagnostic,
             error_code: raw.error_code,
             exit_code: raw.exit_code,
+            failure: raw.failure,
             installation_intent_nonce: raw.installation_intent_nonce,
             process_logs: raw.process_logs,
             process_running: raw.process_running,
@@ -22511,6 +22772,213 @@ impl ::std::cmp::PartialEq<str> for HostRuntimeRequestAction {
     }
 }
 impl ::std::cmp::PartialEq<&str> for HostRuntimeRequestAction {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HttpFailureResponse {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("HttpFailureResponse"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub failure: HttpFailureResponseFailure,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            failure: raw.failure,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HttpFailureResponseFailure {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(deserializer, None)?;
+        let object_keys = value
+            .as_object()
+            .map(|object| object.keys().map(String::as_str).collect::<Vec<_>>());
+        if crate::wire_schema::may_match_wire_model_shape("HttpTransient", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<HttpTransient>(value.clone())
+        {
+            return Ok(Self::Transient(payload));
+        }
+        if crate::wire_schema::may_match_wire_model_shape("HttpRefusal", object_keys.as_deref())
+            && let Ok(payload) = ::serde_json::from_value::<HttpRefusal>(value.clone())
+        {
+            return Ok(Self::Refusal(payload));
+        }
+        Err(::serde::de::Error::custom(concat!(
+            "invalid canonical union ",
+            stringify!(HttpFailureResponseFailure)
+        )))
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HttpRefusal {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = crate::wire_schema::deserialize_wire_value(deserializer, Some("HttpRefusal"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub family: HttpRefusalFamily,
+            pub reason: HttpRefusalReason,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            family: raw.family,
+            reason: raw.reason,
+        })
+    }
+}
+impl HttpRefusalFamily {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Refusal => "refusal",
+        }
+    }
+}
+impl ::std::ops::Deref for HttpRefusalFamily {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for HttpRefusalFamily {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for HttpRefusalFamily {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl HttpRefusalReason {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AuthenticationRequired => "authentication_required",
+            Self::AuthorityDenied => "authority_denied",
+            Self::UnknownIdentity => "unknown_identity",
+            Self::RevokedIdentity => "revoked_identity",
+            Self::InvalidSignature => "invalid_signature",
+            Self::InvalidDigest => "invalid_digest",
+            Self::TamperedToken => "tampered_token",
+            Self::ExpiredCredential => "expired_credential",
+        }
+    }
+}
+impl ::std::ops::Deref for HttpRefusalReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for HttpRefusalReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for HttpRefusalReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HttpRefusalReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("HttpRefusalReason"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "authentication_required")]
+            AuthenticationRequired,
+            #[serde(rename = "authority_denied")]
+            AuthorityDenied,
+            #[serde(rename = "unknown_identity")]
+            UnknownIdentity,
+            #[serde(rename = "revoked_identity")]
+            RevokedIdentity,
+            #[serde(rename = "invalid_signature")]
+            InvalidSignature,
+            #[serde(rename = "invalid_digest")]
+            InvalidDigest,
+            #[serde(rename = "tampered_token")]
+            TamperedToken,
+            #[serde(rename = "expired_credential")]
+            ExpiredCredential,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::AuthenticationRequired => Self::AuthenticationRequired,
+            Raw::AuthorityDenied => Self::AuthorityDenied,
+            Raw::UnknownIdentity => Self::UnknownIdentity,
+            Raw::RevokedIdentity => Self::RevokedIdentity,
+            Raw::InvalidSignature => Self::InvalidSignature,
+            Raw::InvalidDigest => Self::InvalidDigest,
+            Raw::TamperedToken => Self::TamperedToken,
+            Raw::ExpiredCredential => Self::ExpiredCredential,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for HttpTransient {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("HttpTransient"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub family: HttpTransientFamily,
+            pub reason: TransientReason,
+            pub resolution_window: u32,
+            pub retry_after: u32,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub suggested_window: ::std::option::Option<RenewalWindow>,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            family: raw.family,
+            reason: raw.reason,
+            resolution_window: raw.resolution_window,
+            retry_after: raw.retry_after,
+            suggested_window: raw.suggested_window,
+        })
+    }
+}
+impl HttpTransientFamily {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Transient => "transient",
+        }
+    }
+}
+impl ::std::ops::Deref for HttpTransientFamily {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for HttpTransientFamily {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for HttpTransientFamily {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
@@ -23748,6 +24216,8 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             pub node_id: ::std::string::String,
             pub not_after: ::std::string::String,
             pub not_before: ::std::string::String,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub renewal_window: ::std::option::Option<RenewalWindow>,
             pub serial: ::std::string::String,
         }
         #[allow(unused_variables)]
@@ -23760,6 +24230,7 @@ impl<'de> ::serde::Deserialize<'de> for IssuedCertificateResponse {
             node_id: raw.node_id,
             not_after: raw.not_after,
             not_before: raw.not_before,
+            renewal_window: raw.renewal_window,
             serial: raw.serial,
         })
     }
@@ -30632,6 +31103,25 @@ impl<'de> ::serde::Deserialize<'de> for RenewRequest {
         })
     }
 }
+impl<'de> ::serde::Deserialize<'de> for RenewalHealth {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("RenewalHealth"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub certificate_digest: ::std::string::String,
+            pub failed: bool,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            certificate_digest: raw.certificate_digest,
+            failed: raw.failed,
+        })
+    }
+}
 impl<'de> ::serde::Deserialize<'de> for RenewalHelperManifest {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = crate::wire_schema::deserialize_wire_value(
@@ -30655,6 +31145,25 @@ impl<'de> ::serde::Deserialize<'de> for RenewalHelperManifest {
             build_digest: raw.build_digest,
             source_inputs: raw.source_inputs,
             source_sha: raw.source_sha,
+        })
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for RenewalWindow {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("RenewalWindow"))?;
+        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
+        #[serde(deny_unknown_fields)]
+        #[derive(Eq)]
+        struct Raw {
+            pub end_seconds: u32,
+            pub start_seconds: u32,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(Self {
+            end_seconds: raw.end_seconds,
+            start_seconds: raw.start_seconds,
         })
     }
 }
@@ -30713,6 +31222,8 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
             pub context: ::std::option::Option<ErrorContextResponse>,
             pub detail: ::std::string::String,
             pub issues: ::std::vec::Vec<RequestValidationIssue>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub outcome: ::std::option::Option<HttpFailureResponse>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -30721,6 +31232,7 @@ impl<'de> ::serde::Deserialize<'de> for RequestValidationProblem {
             context: raw.context,
             detail: raw.detail,
             issues: raw.issues,
+            outcome: raw.outcome,
         })
     }
 }
@@ -35386,6 +35898,8 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             pub cpu_frequency_max_mhz: ::std::option::Option<u32>,
             #[serde(skip_serializing_if = "::std::option::Option::is_none")]
             pub cpu_frequency_min_mhz: ::std::option::Option<u32>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub credential_remaining_fraction: ::std::option::Option<f64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
             pub disk_free_bytes: ::std::option::Option<u64>,
             #[serde(deserialize_with = "::std::option::Option::deserialize")]
@@ -35409,6 +35923,8 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
                 deserialize_with = "crate::wire_datetime::deserialize"
             )]
             pub observed_at: ::chrono::DateTime<::chrono::FixedOffset>,
+            #[serde(skip_serializing_if = "::std::option::Option::is_none")]
+            pub renewal_failed: ::std::option::Option<bool>,
         }
         #[allow(unused_variables)]
         let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
@@ -35417,6 +35933,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             cpu_frequency_avg_mhz: raw.cpu_frequency_avg_mhz,
             cpu_frequency_max_mhz: raw.cpu_frequency_max_mhz,
             cpu_frequency_min_mhz: raw.cpu_frequency_min_mhz,
+            credential_remaining_fraction: raw.credential_remaining_fraction,
             disk_free_bytes: raw.disk_free_bytes,
             disk_total_bytes: raw.disk_total_bytes,
             gpu_memory_free_bytes: raw.gpu_memory_free_bytes,
@@ -35427,6 +35944,7 @@ impl<'de> ::serde::Deserialize<'de> for TelemetrySample {
             memory_available_bytes: raw.memory_available_bytes,
             memory_total_bytes: raw.memory_total_bytes,
             observed_at: raw.observed_at,
+            renewal_failed: raw.renewal_failed,
         })
     }
 }
@@ -35493,6 +36011,80 @@ impl<'de> ::serde::Deserialize<'de> for TopologyCode {
             Raw::TopologyPlacementInvalid => Self::TopologyPlacementInvalid,
             Raw::TopologyRoleMismatch => Self::TopologyRoleMismatch,
             Raw::TopologyRuntimeCapabilityMissing => Self::TopologyRuntimeCapabilityMissing,
+        })
+    }
+}
+impl TransientReason {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::CaUnavailable => "ca_unavailable",
+            Self::ControllerStarting => "controller_starting",
+            Self::AdmissionBusy => "admission_busy",
+            Self::DependencyUnavailable => "dependency_unavailable",
+            Self::RateLimited => "rate_limited",
+            Self::PeerResponseUnavailable => "peer_response_unavailable",
+            Self::LocalStateUnavailable => "local_state_unavailable",
+        }
+    }
+}
+impl ::std::ops::Deref for TransientReason {
+    type Target = str;
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl ::std::cmp::PartialEq<str> for TransientReason {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+impl ::std::cmp::PartialEq<&str> for TransientReason {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl<'de> ::serde::Deserialize<'de> for TransientReason {
+    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value =
+            crate::wire_schema::deserialize_wire_value(deserializer, Some("TransientReason"))?;
+        #[derive(
+            ::serde::Deserialize,
+            ::serde::Serialize,
+            Clone,
+            Copy,
+            Debug,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+        )]
+        enum Raw {
+            #[serde(rename = "ca_unavailable")]
+            CaUnavailable,
+            #[serde(rename = "controller_starting")]
+            ControllerStarting,
+            #[serde(rename = "admission_busy")]
+            AdmissionBusy,
+            #[serde(rename = "dependency_unavailable")]
+            DependencyUnavailable,
+            #[serde(rename = "rate_limited")]
+            RateLimited,
+            #[serde(rename = "peer_response_unavailable")]
+            PeerResponseUnavailable,
+            #[serde(rename = "local_state_unavailable")]
+            LocalStateUnavailable,
+        }
+        #[allow(unused_variables)]
+        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
+        Ok(match raw {
+            Raw::CaUnavailable => Self::CaUnavailable,
+            Raw::ControllerStarting => Self::ControllerStarting,
+            Raw::AdmissionBusy => Self::AdmissionBusy,
+            Raw::DependencyUnavailable => Self::DependencyUnavailable,
+            Raw::RateLimited => Self::RateLimited,
+            Raw::PeerResponseUnavailable => Self::PeerResponseUnavailable,
+            Raw::LocalStateUnavailable => Self::LocalStateUnavailable,
         })
     }
 }
@@ -35849,6 +36441,7 @@ impl From<&RequestValidationProblem> for BoundedErrorResponse {
         Self {
             context: value.context.clone(),
             detail: value.detail.clone(),
+            outcome: value.outcome.clone(),
         }
     }
 }

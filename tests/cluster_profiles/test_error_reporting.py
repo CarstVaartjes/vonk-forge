@@ -98,6 +98,10 @@ def test_http_denial_preserves_correlation_without_effect_then_fresh_read_works(
     headers = Message()
     headers["Content-Type"] = "application/json"
     headers["X-Request-ID"] = "00000000-0000-4000-8000-000000000099"
+    from vonk_agent_protocol.http_failure import HttpRefusalReason
+    from vonk_control.http_errors import refusal_header
+
+    headers["x-vonk-outcome"] = refusal_header(HttpRefusalReason.AUTHORITY_DENIED)
     denied = True
     calls = []
 

@@ -237,6 +237,7 @@ class MetricsRegistry:
                 float | None,
             ],
         ] = {}
+        self._renewal_health: dict[str, tuple[bool | None, float | None]] = {}
         self._jobs: dict[tuple[str, str], int] = {}
         self._runnable_job_ages: dict[str, float] = {}
         self._route_state = "unavailable"
@@ -314,6 +315,14 @@ class MetricsRegistry:
             )
         with self._lock:
             self._nodes = nodes
+            self._renewal_health = {
+                node.id: (
+                    node.telemetry.sample.renewal_failed,
+                    node.telemetry.sample.credential_remaining_fraction,
+                )
+                for node in snapshot.nodes
+                if node.telemetry is not None
+            }
 
     def set_job_count(self, kind: str, state: str, count: int) -> None:
         safe_kind = kind if kind in _JOB_KINDS else "other"
@@ -461,6 +470,7 @@ class MetricsRegistry:
         with self._lock:
             nodes, jobs = dict(self._nodes), dict(self._jobs)
             runnable_job_ages = dict(self._runnable_job_ages)
+            renewal_health = dict(self._renewal_health)
             route_state = self._route_state
             backup_age = self._backup_age
             backup_successful = self._backup_successful
@@ -670,6 +680,22 @@ class MetricsRegistry:
             lines.append(
                 f"vonk_api_request_duration_seconds_count{{{labels}}} {len(values)}"
             )
+        lines.extend(
+            (
+                "# HELP vonk_agent_renewal_failed Last credential renewal observation failed.",
+                "# TYPE vonk_agent_renewal_failed gauge",
+                "# HELP vonk_agent_credential_low_lifetime Less than one quarter credential lifetime remains.",
+                "# TYPE vonk_agent_credential_low_lifetime gauge",
+            )
+        )
+        for node_id, (failed, remaining) in sorted(renewal_health.items()):
+            label = f'node_id="{node_id}"'
+            if failed is not None:
+                lines.append(f"vonk_agent_renewal_failed{{{label}}} {int(failed)}")
+            if remaining is not None:
+                lines.append(
+                    f"vonk_agent_credential_low_lifetime{{{label}}} {int(remaining < 0.25)}"
+                )
         if worker_memory is not None:
             lines.extend(_worker_memory_lines(worker_memory, worker_memory_age))
         lines.append("# EOF")

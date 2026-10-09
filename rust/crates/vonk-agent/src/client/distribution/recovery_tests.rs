@@ -210,3 +210,105 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
         .unwrap();
     assert_eq!(peer.finish().unwrap().len(), 6);
 }
+
+#[tokio::test]
+#[cfg(target_os = "linux")]
+async fn full_filesystem_ends_without_publication_and_fresh_transfer_heals() {
+    use std::os::unix::fs::OpenOptionsExt;
+    let Some(root) = std::env::var_os("VONK_TEST_FAULT_FILESYSTEM") else {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap();
+        let owned = repository.join(".state");
+        std::fs::create_dir_all(&owned).unwrap();
+        let output = tokio::time::timeout(
+            Duration::from_secs(90),
+            tokio::process::Command::new("sudo")
+                .arg("-n")
+                .arg(repository.join("scripts/tests/run-disk-full-recovery"))
+                .arg(std::env::current_exe().unwrap())
+                .arg(owned)
+                .kill_on_drop(true)
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated fault process: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    };
+    let root = PathBuf::from(root);
+    let model = vec![42_u8; 16 * 1024];
+    let destination = root.join("model");
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(partial_path(&destination))
+        .unwrap();
+    let filler_path = root.join("filler");
+    let mut filler = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&filler_path)
+        .unwrap();
+    let block = [0_u8; 512 * 1024];
+    let mut written = 0;
+    let full = loop {
+        let remaining = 8 * 1024 * 1024 - written;
+        assert!(
+            remaining >= block.len(),
+            "fixture exceeded its protected allocation budget"
+        );
+        match filler.write_all(&block) {
+            Ok(()) => written += block.len(),
+            Err(error) => break error.kind() == std::io::ErrorKind::StorageFull,
+        }
+    };
+    assert!(full);
+    let mut objects = HashMap::new();
+    let digest = hex_sha256(&model);
+    objects.insert(digest.clone(), model.clone());
+    let (client, peer) = distribution_fixture_server(
+        distribution_assignment_fixture(&model),
+        objects,
+        2,
+        DistributionFixtureMode::Good,
+    );
+    let outcome = tokio::time::timeout(
+        PEER_BUDGET,
+        client.download_distribution_object(
+            TEST_PLAN_DIGEST,
+            &digest,
+            model.len() as u64,
+            &destination,
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(outcome.is_err());
+    assert!(!destination.exists());
+    drop(filler);
+    std::fs::remove_file(filler_path).unwrap();
+    tokio::time::timeout(
+        PEER_BUDGET,
+        client.download_distribution_object(
+            TEST_PLAN_DIGEST,
+            &digest,
+            model.len() as u64,
+            &destination,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), model);
+    assert!(!partial_path(&destination).exists());
+    assert_eq!(peer.finish().unwrap().len(), 2);
+}

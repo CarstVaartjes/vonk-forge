@@ -10,6 +10,9 @@ from vonk_agent_protocol import (
     ControllerErrorCode,
     SecurityRefusalReason,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from ..agent_upgrades import AgentUpgradeConflict
 from ..auth import MUTATION_ROLES, Actor, CursorError
@@ -125,4 +128,8 @@ def _require_mutation(actor: Actor, method: str, route: str) -> None:
 
     allowed = MUTATION_ROLES.get((method, route))
     if allowed is None or actor.role not in allowed:
-        raise HTTPException(status_code=403, detail="insufficient role")
+        raise SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHORITY_DENIED,
+            status_code=403,
+            detail="insufficient role",
+        )

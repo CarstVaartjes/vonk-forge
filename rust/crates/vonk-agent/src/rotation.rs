@@ -7,11 +7,10 @@ use crate::{
     config::AgentConfig,
     identity::{
         IdentityError, IdentityMaterial, active_identity_paths, clear_pending, identity_expired,
-        observe_staged_identity, prepare_pending, publish_staged, renewal_due,
+        observe_staged_identity, prepare_pending, publish_staged, renewal_time_with_fraction,
         retire_expired_staged, stage_identity, staged_identity_paths,
     },
     pair::{PairingError, validate_issued},
-    vocabulary,
 };
 
 #[derive(Debug, Error)]
@@ -30,7 +29,8 @@ pub enum RotationError {
 
 impl RotationError {
     pub fn retryable(&self) -> bool {
-        matches!(self, Self::Identity(_))
+        matches!(self, Self::Identity(_) | Self::ObservationEnded)
+            || matches!(self, Self::Issued(error) if !matches!(error, PairingError::Certificate | PairingError::Rejected))
             || matches!(self, Self::Client(error) if error.retryable())
     }
 
@@ -51,16 +51,16 @@ impl RotationError {
         }
     }
 
-    /// Errors that end the agent: the Controller refused this identity
-    /// (401/403, including revocation), the pinned server authority changed,
-    /// or an issued credential does not belong to this node/key. Local storage
-    /// loss ends a bounded observation attempt and preserves the other lanes.
+    /// Verified identity refusal pauses action until fresh credential content.
+    /// Unreadable peer replies and local storage remain bounded observations.
     pub fn fatal(&self) -> bool {
         match self {
             Self::ActiveIdentityExpired | Self::ObservationEnded | Self::Identity(_) => false,
             Self::Client(ClientError::Identity | ClientError::CredentialRead(_)) => false,
             Self::Client(error) => error.fatal(),
-            Self::Issued(_) => true,
+            Self::Issued(error) => {
+                matches!(error, PairingError::Certificate | PairingError::Rejected)
+            }
         }
     }
 
@@ -109,7 +109,7 @@ pub async fn rotate_if_due_at(
             return Ok(true);
         }
     }
-    if !renewal_due(&root, scheduling_now)? {
+    if scheduling_now < renewal_time_with_fraction(&root, config.renewal_fraction_basis_points)? {
         client.observe_active_identity(config).await?;
         return Ok(false);
     }
@@ -121,32 +121,13 @@ pub async fn rotate_if_due_at(
     } else {
         active_client.renew(&pending.csr_pem).await
     };
-    let issued = match renewal {
-        Ok(issued) => issued,
-        // A controller-side staged CSR conflict is a typed denial.  The
-        // recovery endpoint is authenticated with the same still-active
-        // source identity and is bounded to this one durable CSR.  Actual
-        // Only the exact Controller context emitted for a staged CSR
-        // conflict can enter recovery. Other authentication or rejection
-        // responses retain their original status, code, and decision.
-        Err(error)
-            if error.status() == Some(403)
-                && error.code().is_some_and(|code| {
-                    vocabulary::is(
-                        code,
-                        SecurityRefusalReason::AgentCertificateRotationConflict,
-                    )
-                }) =>
-        {
-            active_client.recover_renewal(&pending.csr_pem).await?
-        }
-        Err(error) => return Err(error.into()),
-    };
+    let issued = renewal?;
     validate_issued(&issued, &pending, &config.node_id)?;
     let generation = issued.generation;
     stage_identity(
         &root,
         &IdentityMaterial {
+            renewal_window: issued.renewal_window.clone(),
             node_id: issued.node_id,
             private_key_pem: pending.private_key_pem,
             certificate_pem: issued.certificate_pem.into_bytes(),
@@ -177,7 +158,7 @@ mod tests {
     #[test]
     fn expired_renewal_refused_for_revocation_never_retries_or_activates() {
         let error = RotationError::Client(ClientError::Controller(Box::new(
-            crate::client::ControllerError::from_status(403),
+            crate::client::ControllerError::refused_identity(403),
         )));
         assert!(error.fatal());
         assert!(!error.retryable());
@@ -187,7 +168,7 @@ mod tests {
     #[test]
     fn rotation_preserves_controller_status_code_and_decision() {
         let error = RotationError::Client(ClientError::Controller(Box::new(
-            crate::client::ControllerError::from_status(403),
+            crate::client::ControllerError::refused_identity(403),
         )));
         assert_eq!(error.code(), "controller.request_rejected");
         assert_eq!(error.decision(), "exit");

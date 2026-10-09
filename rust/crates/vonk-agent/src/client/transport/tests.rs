@@ -3,6 +3,54 @@
 use super::super::test_support::*;
 use super::*;
 
+// OrbStack probes forwarded listeners before application requests. The probe
+// carries no body and must not consume a protocol request in these fixtures.
+async fn framed_request(
+    listener: &tokio::net::TcpListener,
+    deadline: tokio::time::Instant,
+) -> (tokio::net::TcpStream, Vec<u8>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    tokio::time::timeout_at(deadline, async {
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let size = stream.read(&mut buffer).await.unwrap();
+                assert_ne!(size, 0, "fixture request ended before its body");
+                request.extend_from_slice(&buffer[..size]);
+                assert!(
+                    request.len() <= 1024 * 1024,
+                    "fixture request exceeded body budget"
+                );
+                if let Some(end) = request.windows(4).position(|v| v == b"\r\n\r\n") {
+                    let headers = std::str::from_utf8(&request[..end]).unwrap();
+                    if headers.starts_with("GET / HTTP/1.1\r\n") {
+                        stream
+                            .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                            .await
+                            .unwrap();
+                        break;
+                    }
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse().unwrap())
+                        })
+                        .expect("framed application request");
+                    if request.len() >= end + 4 + length {
+                        return (stream, request);
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .expect("owned peer exceeded request budget")
+}
+
 #[test]
 fn expired_renewal_proof_matches_the_controller_signed_wire_fixture() {
     let expected: vonk_agent_protocol::generated::ExpiredRenewRequest =
@@ -20,19 +68,6 @@ fn expired_renewal_proof_matches_the_controller_signed_wire_fixture() {
     )
     .unwrap();
     assert_eq!(actual, expected);
-}
-
-#[test]
-fn renewal_conflict_is_distinguished_from_revoked_identity() {
-    assert!(is_rotation_conflict(
-        br#"{"detail":"a different certificate rotation is already staged"}"#
-    ));
-    assert!(is_rotation_conflict(
-        &canonical_json(&vonk_agent_protocol::generated::ControllerRefusalBody { code: Some(vonk_agent_protocol::generated::SecurityRefusalReason::AgentCertificateRotationConflict.as_str().into()), detail: None }).unwrap()
-    ));
-    assert!(!is_rotation_conflict(
-        br#"{"detail":"agent certificate is not active"}"#
-    ));
 }
 
 #[test]
@@ -95,7 +130,7 @@ async fn cloned_operation_client_sends_through_replaced_transport() {
 #[tokio::test]
 async fn rotation_drains_requests_without_starving_heartbeats() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
     for activation_status in [204, 403] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
@@ -109,30 +144,12 @@ async fn rotation_drains_requests_without_starving_heartbeats() {
             spawn_async_peer(async move {
                 let mut handlers = Vec::new();
                 for index in 0..4 {
-                    let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept())
-                        .await
-                        .expect("fixture I/O deadline")
-                        .unwrap();
+                    let (mut stream, request) =
+                        framed_request(&listener, tokio::time::Instant::now() + PEER_BUDGET).await;
                     let first_received = first_received.clone();
                     let release_first = release_first.clone();
                     let first_finished = first_finished.clone();
                     handlers.push(spawn_async_peer(async move {
-                        let mut request = Vec::new();
-                        let mut buf = [0; 4096];
-                        loop {
-                            let size = tokio::time::timeout(PEER_BUDGET, stream.read(&mut buf)).await.expect("fixture I/O deadline").unwrap();
-                            assert_ne!(size, 0);
-                            request.extend_from_slice(&buf[..size]);
-                            if let Some(end) = request.windows(4).position(|b| b == b"\r\n\r\n") {
-                                let headers = String::from_utf8_lossy(&request[..end]);
-                                let length: usize = headers.lines().find_map(|line| {
-                                    let (name, value) = line.split_once(':')?;
-                                    name.eq_ignore_ascii_case("content-length")
-                                        .then(|| value.trim().parse().unwrap())
-                                }).unwrap();
-                                if request.len() >= end + 4 + length { break; }
-                            }
-                        }
                         let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
                         let activating = request.starts_with("post /agent/renew/activate ");
                         if index == 0 {
@@ -145,7 +162,7 @@ async fn rotation_drains_requests_without_starving_heartbeats() {
                             activation_status
                         } else { 204 };
                         stream.write_all(format!(
-                            "HTTP/1.1 {status} Test\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            "HTTP/1.1 {status} Test\r\nx-vonk-outcome: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", super::super::test_support::refusal_outcome()
                         ).as_bytes()).await.unwrap();
                         request
                     }));
@@ -247,26 +264,10 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
         tokio::time::timeout_at(deadline, async move {
             let mut requests = Vec::new();
             for index in 0..4 {
-                let (mut stream, _) = tokio::time::timeout(PEER_BUDGET, listener.accept()).await.expect("fixture I/O deadline").unwrap();
-                let mut request = Vec::new();
-                let mut buffer = [0_u8; 4096];
-                let header_end = loop {
-                    let size = tokio::time::timeout_at(deadline, stream.read(&mut buffer))
-                        .await.expect("rotation request read deadline").unwrap();
-                    assert_ne!(size, 0, "rotation request ended before its body");
-                    request.extend_from_slice(&buffer[..size]);
-                    if let Some(end) = request.windows(4).position(|v| v == b"\r\n\r\n") {
-                        let header_end = end + 4;
-                        let headers = std::str::from_utf8(&request[..end]).unwrap();
-                        let length: usize = headers.lines().find_map(|line| {
-                            let (name, value) = line.split_once(':')?;
-                            name.eq_ignore_ascii_case("content-length")
-                                .then(|| value.trim().parse().unwrap())
-                        }).unwrap_or_else(|| panic!("rotation fixture received an unframed request: {headers}"));
-                        if request.len() >= header_end + length { break header_end; }
-                    }
-                };
+                let (mut stream, request) = framed_request(&listener, deadline).await;
+                let header_end = request.windows(4).position(|v| v == b"\r\n\r\n").unwrap() + 4;
                 let headers = String::from_utf8_lossy(&request[..header_end]).to_ascii_lowercase();
+                let mut buffer = [0_u8; 4096];
                 assert!(headers.contains(if index == 1 {
                     "x-rotation-marker: old"
                 } else {

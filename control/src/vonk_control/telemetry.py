@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import uuid
@@ -87,8 +88,21 @@ class TelemetrySampleInput:
     cpu_frequency_avg_mhz: int | None = None
     cpu_frequency_min_mhz: int | None = None
     cpu_frequency_max_mhz: int | None = None
+    renewal_failed: bool | None = None
+    credential_remaining_fraction: float | None = None
 
     def __post_init__(self) -> None:
+        from vonk_agent_protocol.telemetry import TelemetrySample
+
+        TelemetrySample.model_validate_json(
+            json.dumps(
+                {
+                    "boot_id": str(self.boot_id),
+                    "observed_at": self.observed_at.isoformat(),
+                    **{name: getattr(self, name) for name in _SAMPLE_FIELDS},
+                }
+            )
+        )
         if not isinstance(self.boot_id, uuid.UUID) or self.boot_id.int == 0:
             raise ValueError("telemetry boot ID is invalid")
         if not isinstance(self.observed_at, datetime):
@@ -147,6 +161,8 @@ class TelemetrySampleView:
     cpu_frequency_avg_mhz: int | None = None
     cpu_frequency_min_mhz: int | None = None
     cpu_frequency_max_mhz: int | None = None
+    renewal_failed: bool | None = None
+    credential_remaining_fraction: float | None = None
 
 
 def _canonical_sample(
@@ -175,6 +191,8 @@ _SAMPLE_FIELDS = (
     "cpu_frequency_avg_mhz",
     "cpu_frequency_min_mhz",
     "cpu_frequency_max_mhz",
+    "renewal_failed",
+    "credential_remaining_fraction",
 )
 
 

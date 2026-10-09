@@ -1,10 +1,12 @@
 //! Bounded observations of standing certificate renewal intent.
 use super::jittered_backoff;
-use std::{future::Future, time::Duration};
+#[cfg(test)]
+use std::future::Future;
+use std::time::Duration;
 use vonk_agent::{
     client::AgentHttpClient,
     config::{AgentConfig, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
-    rotation::{RotationError, active_identity_is_valid, rotate_if_due},
+    rotation::{RotationError, rotate_if_due},
     systemd_notify,
 };
 
@@ -34,6 +36,7 @@ where
 /// Observe certificate rotation for at most four attempts within 300 seconds.
 /// Unknown replies retain the durable CSR; standing renewal schedules a fresh bounded attempt.
 /// Authentication and verified content failures end immediately.
+#[cfg(test)]
 pub(super) async fn rotate_until_settled<Rotate, RotateFuture, IdentityCheck, Delay>(
     rotate: Rotate,
     active_identity_is_valid: IdentityCheck,
@@ -54,6 +57,7 @@ where
     .await
 }
 
+#[cfg(test)]
 async fn rotate_until_settled_with_status<Rotate, RotateFuture, IdentityCheck, Delay, Status>(
     mut rotate: Rotate,
     mut active_identity_is_valid: IdentityCheck,
@@ -72,6 +76,10 @@ where
         let outcome = tokio::time::timeout_at(deadline, rotate())
             .await
             .map_err(|_| RotationError::ObservationEnded)?;
+        let retry_after = match &outcome {
+            Err(RotationError::Client(error)) => error.retry_after_seconds().unwrap_or(0),
+            _ => 0,
+        };
         let reason = match outcome {
             Ok(true) => {
                 status("Certificate renewal settled");
@@ -84,6 +92,7 @@ where
         };
         let wait = delay(failures)
             .min(Duration::from_secs(60))
+            .saturating_add(Duration::from_secs(u64::from(retry_after)))
             .min(deadline.saturating_duration_since(tokio::time::Instant::now()));
         if active_identity_is_valid().unwrap_or(false) {
             status("Degraded: certificate renewal unavailable before expiry");
@@ -110,24 +119,48 @@ pub(super) async fn run_rotation_lane(
     config: AgentConfig,
     client: AgentHttpClient,
 ) -> Result<(), RotationError> {
-    let minimum = POLL_MIN_SECONDS;
-    let interval = Duration::from_secs(minimum);
+    let mut failures = 0_u32;
     loop {
-        let outcome = rotate_until_settled(
-            || rotate_if_due(&config, &client),
-            || active_identity_is_valid(&config),
-            |failures| jittered_backoff(failures, minimum, POLL_MAX_SECONDS),
-        )
-        .await;
-        match outcome {
-            Err(error) if error.fatal() => return Err(error),
-            Err(error) => {
-                eprintln!("vonk-agent: rotation attempt ended; next observation scheduled: {error}")
+        // This lane is the sole renewal retry owner. Each observation ends in
+        // 300 seconds; the next one uses the same durable CSR and authority.
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(300), rotate_if_due(&config, &client))
+                .await
+                .unwrap_or(Err(RotationError::ObservationEnded));
+        let root = config.data_dir.join("credentials");
+        let _ = vonk_agent::identity::record_renewal_health(&root, outcome.is_err());
+        let wait = match outcome {
+            Err(error) if error.fatal() => {
+                systemd_notify::progress("Degraded: credential authority refused");
+                return Err(error);
             }
-            Ok(_) => {}
+            Err(error) => {
+                failures = failures.saturating_add(1);
+                systemd_notify::progress("Degraded: certificate renewal observation unavailable");
+                eprintln!("vonk-agent: certificate renewal observation ended: {error}");
+                match error {
+                    RotationError::Client(error) => error.retry_delay(failures),
+                    _ => jittered_backoff(failures, POLL_MIN_SECONDS, POLL_MAX_SECONDS),
+                }
+            }
+            Ok(renewed) => {
+                if renewed {
+                    systemd_notify::progress("Certificate renewal settled");
+                }
+                failures = 0;
+                Duration::from_secs(POLL_MIN_SECONDS)
+            }
+        };
+        if vonk_agent::identity::renewal_health(&root, chrono::Utc::now())
+            .is_some_and(|(_, remaining)| remaining < 0.25)
+        {
+            systemd_notify::progress(
+                "Degraded: certificate has less than one quarter lifetime remaining",
+            );
         }
-        // Standing renewal schedules a fresh bounded observation.
-        tokio::time::sleep(interval).await;
+        // Do not shorten the Controller's minimum across observation batches.
+        // Every wait has the bounded RetryInfo/backoff deadline above.
+        tokio::time::sleep(wait).await;
     }
 }
 

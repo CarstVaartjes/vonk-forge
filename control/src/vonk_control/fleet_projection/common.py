@@ -392,6 +392,8 @@ class TelemetryPoint(StrictModel):
     cpu_frequency_avg_mhz: int | None = Field(default=None, ge=1, le=20_000)
     cpu_frequency_min_mhz: int | None = Field(default=None, ge=1, le=20_000)
     cpu_frequency_max_mhz: int | None = Field(default=None, ge=1, le=20_000)
+    renewal_failed: bool | None = None
+    credential_remaining_fraction: float | None = Field(default=None, ge=0, le=1)
 
 
 class TelemetryState(StrictModel):
@@ -590,6 +592,8 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         cpu_frequency_avg_mhz=value.cpu_frequency_avg_mhz,
         cpu_frequency_min_mhz=value.cpu_frequency_min_mhz,
         cpu_frequency_max_mhz=value.cpu_frequency_max_mhz,
+        renewal_failed=value.renewal_failed,
+        credential_remaining_fraction=value.credential_remaining_fraction,
     )
 
 

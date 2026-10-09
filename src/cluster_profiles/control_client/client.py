@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from ..generated_control.types import Response as GeneratedResponse
 
 
-from .common import observation_delay, observation_unknown
+from .common import http_outcome, observation_delay, observation_unknown
 from .errors import (
     _STATUS_ERRORS,
     ControlClientError,
@@ -143,6 +143,8 @@ class ControlClient:
             httpx_args={"transport": transport},
         )
 
+    _http_outcome = staticmethod(http_outcome)
+
     def _raise_http_status(
         self,
         status_code: int,
@@ -154,7 +156,14 @@ class ControlClient:
     ) -> None:
         if status_code < 400:
             return
-        error_type = _STATUS_ERRORS.get(status_code, ControlHTTPError)
+        from ..cli_states_generated import HTTP_REFUSAL, HTTP_TRANSIENT
+
+        failure_family, typed_retry_after = self._http_outcome(headers)
+        error_type = (
+            _STATUS_ERRORS.get(status_code, ControlHTTPError)
+            if failure_family == HTTP_REFUSAL or status_code not in (401, 403)
+            else ControlHTTPError
+        )
         detail = getattr(parsed, "detail", "control API request failed")
         if not isinstance(detail, str):
             detail = "control API request failed"
@@ -194,9 +203,13 @@ class ControlClient:
         log_excerpt = getattr(parsed, "log_excerpt", None)
         if not isinstance(log_excerpt, str):
             log_excerpt = None
-        retryable = getattr(parsed, "retryable", False) is True
+        retryable = failure_family == HTTP_TRANSIENT
         candidates = getattr(parsed, "candidates", None)
-        retry_after = _retry_after_seconds(headers.get("retry-after"))
+        retry_after = (
+            typed_retry_after
+            if type(typed_retry_after) is int
+            else _retry_after_seconds(headers.get("retry-after"))
+        )
         if retry_after is None:
             parsed_retry_after = getattr(parsed, "retry_after_seconds", None)
             if type(parsed_retry_after) is int and parsed_retry_after >= 0:
@@ -209,6 +222,7 @@ class ControlClient:
             recovery=recovery,
             candidates=tuple(candidates) if isinstance(candidates, list) else (),
             retryable=retryable,
+            failure_family=failure_family,
             retry_time=retry_time,
             preserved=preserved,
             **numeric_fields,
@@ -486,11 +500,15 @@ class ControlClient:
                 received_retry_after = _retry_after_seconds(
                     response.headers.get("retry-after")
                 )
-                if status in (401, 403):
+                from ..cli_states_generated import HTTP_REFUSAL
+
+                family, typed_retry_after = http_outcome(response.headers)
+                if family == HTTP_REFUSAL:
                     raise _STATUS_ERRORS[status](
                         status,
                         "control API authorization denied",
-                        received_retry_after,
+                        typed_retry_after,
+                        failure_family=family,
                         code=response.headers.get("x-vonk-error-code"),
                         operation=f"GET {path}",
                         endpoint=path,
@@ -668,17 +686,30 @@ class ControlClient:
         problem_context = (
             problem.get("context") if isinstance(problem, Mapping) else None
         )
-        error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
+        from ..cli_states_generated import HTTP_REFUSAL, HTTP_TRANSIENT
+
+        failure_family, typed_retry_after = self._http_outcome(response_headers)
+        error_type = (
+            _STATUS_ERRORS.get(status, ControlHTTPError)
+            if failure_family == HTTP_REFUSAL or status not in (401, 403)
+            else ControlHTTPError
+        )
         fields, body_retry_after = _structured_http_error_fields(problem)
+        fields["retryable"] = failure_family == HTTP_TRANSIENT
         if fields.get("code") is None:
             fields["code"] = response_headers.get("x-vonk-error-code")
-        retry_after = _retry_after_seconds(response_headers.get("retry-after"))
+        retry_after = (
+            typed_retry_after
+            if typed_retry_after is not None
+            else _retry_after_seconds(response_headers.get("retry-after"))
+        )
         if retry_after is None and type(body_retry_after) is int:
             retry_after = body_retry_after
         raise error_type(
             status,
             detail if isinstance(detail, str) else "control API request failed",
             retry_after,
+            failure_family=failure_family,
             **fields,
             sensitive_values=(self._token,),
             operation=f"{method} {route_path}"[:160],

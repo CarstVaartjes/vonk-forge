@@ -16,6 +16,7 @@ from pathlib import Path
 
 import httpx2
 
+from ..cli_states_generated import HTTP_REFUSAL
 from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..error_reporting import (
     local_io_context,
@@ -24,10 +25,12 @@ from ..error_reporting import (
     safe_request_id,
     transport_context,
 )
+from .common import http_outcome
 from .errors import (
     _MAX_TOKEN,
     _STATUS_ERRORS,
     ControlClientError,
+    ControlHTTPError,
     ControlMalformedResponse,
     ControlResponseTooLarge,
     ControlTransportError,
@@ -130,13 +133,15 @@ def _read_control_response(
             received_retry_after = _retry_after_seconds(
                 response_headers.get("retry-after")
             )
-            if status in (401, 403):
+            family, typed_retry_after = http_outcome(response_headers)
+            if family == HTTP_REFUSAL:
                 # Authentication is decided by the owner, even if the denial's
                 # body is unreadable. Never retry it or wait on its body.
-                raise _STATUS_ERRORS[status](
+                raise _STATUS_ERRORS.get(status, ControlHTTPError)(
                     status,
                     "control API authorization denied",
-                    received_retry_after,
+                    typed_retry_after,
+                    failure_family=family,
                     code=response_headers.get("x-vonk-error-code"),
                     operation=operation,
                     endpoint=endpoint,

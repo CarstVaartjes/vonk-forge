@@ -77,7 +77,7 @@ fn short_lived_certificate_renews_before_expiry_across_upgrade_restart() {
     let root = temporary.path().join("credentials");
     // This fixture has a 24-hour validity, as opposed to the 30-day default.
     persist_identity(&root, &super::tests::certificate_material(1, true)).unwrap();
-    let due = Utc.with_ymd_and_hms(2026, 8, 1, 16, 0, 0).unwrap();
+    let due = renewal_time(&root).unwrap();
     assert!(!renewal_due(&root, due - chrono::Duration::seconds(1)).unwrap());
     assert!(renewal_due(&root, due).unwrap());
     let request = prepare_pending(&root, NODE_ID).unwrap();
@@ -88,4 +88,28 @@ fn short_lived_certificate_renews_before_expiry_across_upgrade_restart() {
         request.csr_pem
     );
     assert!(!identity_expired(&active_identity_paths(&root).unwrap(), due).unwrap());
+}
+
+#[test]
+fn renewal_status_is_disposable_and_bound_to_current_certificate_content() {
+    let temporary = tempdir().unwrap();
+    let root = temporary.path().join("credentials");
+    persist_identity(&root, &super::tests::certificate_material(1, true)).unwrap();
+    let now = renewal_time(&root).unwrap();
+    record_renewal_health(&root, true).unwrap();
+    assert_eq!(renewal_health(&root, now).unwrap().0, Some(true));
+    atomic_private_write(&root, "renewal-health.json", b"damaged").unwrap();
+    assert_eq!(renewal_health(&root, now).unwrap().0, None);
+    // Damaged monitoring bookkeeping never owns admission or the pending CSR.
+    assert!(!prepare_pending(&root, NODE_ID).unwrap().csr_pem.is_empty());
+    record_renewal_health(&root, false).unwrap();
+    assert_eq!(renewal_health(&root, now).unwrap().0, Some(false));
+    let paths = active_identity_paths(&root).unwrap();
+    let (_, end) = certificate_validity(&paths.certificate).unwrap();
+    assert!(
+        renewal_health(&root, end - chrono::Duration::seconds(1))
+            .unwrap()
+            .1
+            < 0.25
+    );
 }

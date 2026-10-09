@@ -3788,12 +3788,28 @@ def test_artifact_symlink_is_never_served(agent_system, tmp_path) -> None:
         "a" * 64,
         upgrade_payload(digest, len(b"artifact")),
     )
-    assert (
-        client.get(
-            f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
-        ).status_code
-        == 403
+    response = client.get(
+        f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
     )
+    from vonk_agent_protocol.http_failure import HttpFailureResponse, HttpTransient
+
+    assert isinstance(
+        HttpFailureResponse.model_validate_json(
+            response.headers["x-vonk-outcome"]
+        ).failure,
+        HttpTransient,
+    )
+    assert "x-vonk-file" not in response.headers
+    assert (tmp_path / "outside").read_bytes() == b"artifact"
+    # Clear the damaged provider record; the next request is admitted.
+    path = services.artifact_root / digest
+    path.unlink()
+    path.write_bytes(b"artifact")
+    fresh = client.get(
+        f"/agent/artifacts/{digest}", headers=agent_headers(NODE_A, "serial-a")
+    )
+    assert fresh.status_code == 200
+    assert "x-vonk-file" in fresh.headers
 
 
 def test_artifact_is_named_to_the_edge_without_hashing_or_reading_the_file(
@@ -3998,11 +4014,18 @@ def test_renewal_recovery_openapi_exposes_the_canonical_runtime_contract(
     assert components["RenewRequest"] == RenewRequest.model_json_schema(
         ref_template="#/components/schemas/{model}"
     )
-    assert components["IssuedCertificateResponse"] == (
-        IssuedCertificateResponse.model_json_schema(
-            ref_template="#/components/schemas/{model}"
-        )
+    expected = IssuedCertificateResponse.model_json_schema(
+        ref_template="#/components/schemas/{model}"
     )
+    # OpenAPI hoists definitions and omits unused nullable defaults; these
+    # annotations do not change omission/null acceptance at the wire boundary.
+    definitions = expected.pop("$defs", {})
+    for name, definition in definitions.items():
+        assert components[name] == definition
+    for name, field in IssuedCertificateResponse.model_fields.items():
+        if not field.is_required() and field.default is None:
+            expected["properties"][name].pop("default", None)
+    assert components["IssuedCertificateResponse"] == expected
 
 
 @pytest.mark.parametrize("lose_response", [False, True])
@@ -4351,9 +4374,8 @@ def test_verified_upload_publication_repairs_or_preserves_exact_bytes(
         pass
     assert outside.read_bytes() == payload
     if damage == "symlink":
-        assert destination.is_symlink()
-        assert temporary.read_bytes() == payload
-        destination.unlink()
+        assert not destination.is_symlink()
+        assert destination.read_bytes() == payload
     if not temporary.exists():
         temporary.write_bytes(payload)
     _commit_recipe_image_upload(temporary, destination, expected_bytes=len(payload))

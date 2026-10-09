@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 c5603c2f3fd994019bc39a82ecfe0b791dbe6e3e8808915a0343da57f76d82f2. Do not edit.
+// Generated from canonical OpenAPI SHA256 0a5bc914be4a4b7586d69f20dbe6060f62679a20da970adee1e11229201ec921. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -2302,6 +2302,7 @@ export interface components {
             context?: components["schemas"]["ErrorContextResponse"] | null;
             /** Detail */
             detail: string;
+            outcome?: components["schemas"]["HttpFailureResponse"] | null;
         };
         /** BuildCleanupPhaseOperation */
         BuildCleanupPhaseOperation: {
@@ -5173,6 +5174,39 @@ export interface components {
          * @enum {string}
          */
         HostHelperResponseStatus: "rejected" | "package-installed" | "package-activation-confirmed" | "container-runtime-request-executed" | "container-runtime-stop-uncertain";
+        /** HttpFailureResponse */
+        HttpFailureResponse: {
+            /** Failure */
+            failure: components["schemas"]["HttpTransient"] | components["schemas"]["HttpRefusal"];
+        };
+        /** HttpRefusal */
+        HttpRefusal: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            family: "refusal";
+            reason: components["schemas"]["HttpRefusalReason"];
+        };
+        /**
+         * HttpRefusalReason
+         * @enum {string}
+         */
+        HttpRefusalReason: "authentication_required" | "authority_denied" | "unknown_identity" | "revoked_identity" | "invalid_signature" | "invalid_digest" | "tampered_token" | "expired_credential";
+        /** HttpTransient */
+        HttpTransient: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            family: "transient";
+            reason: components["schemas"]["TransientReason"];
+            /** Resolution Window */
+            resolution_window: number;
+            /** Retry After */
+            retry_after: number;
+            suggested_window?: components["schemas"]["RenewalWindow"] | null;
+        };
         /**
          * ImageStoreCode
          * @description Refusals and damage found by the Controller OCI image store.
@@ -10442,6 +10476,16 @@ export interface components {
             removed: true;
         };
         /**
+         * RenewalWindow
+         * @description Offsets from issuance, in seconds; a client picks once per credential.
+         */
+        RenewalWindow: {
+            /** End Seconds */
+            end_seconds: number;
+            /** Start Seconds */
+            start_seconds: number;
+        };
+        /**
          * RequestValidationIssue
          * @description A structural input error without the submitted input or validator context.
          */
@@ -10462,6 +10506,7 @@ export interface components {
             detail: string;
             /** Issues */
             issues: components["schemas"]["RequestValidationIssue"][];
+            outcome?: components["schemas"]["HttpFailureResponse"] | null;
         };
         /**
          * ReservationState
@@ -12934,6 +12979,8 @@ export interface components {
             cpu_frequency_max_mhz?: number | null;
             /** Cpu Frequency Min Mhz */
             cpu_frequency_min_mhz?: number | null;
+            /** Credential Remaining Fraction */
+            credential_remaining_fraction?: number | null;
             /** Disk Free Bytes */
             disk_free_bytes?: number | null;
             /** Disk Total Bytes */
@@ -12965,6 +13012,8 @@ export interface components {
              * Format: date-time
              */
             received_at: string;
+            /** Renewal Failed */
+            renewal_failed?: boolean | null;
         };
         /** TelemetryState */
         TelemetryState: {
@@ -12983,6 +13032,11 @@ export interface components {
          * @enum {string}
          */
         TopologyCode: "topology.fabric_insufficient" | "topology.invalid" | "topology.placement_invalid" | "topology.role_mismatch" | "topology.runtime_capability_missing";
+        /**
+         * TransientReason
+         * @enum {string}
+         */
+        TransientReason: "ca_unavailable" | "controller_starting" | "admission_busy" | "dependency_unavailable" | "rate_limited" | "peer_response_unavailable" | "local_state_unavailable";
         /**
          * UnavailableFleetProfileView
          * @description Keep an authorized saved identity visible without inventing its contents.

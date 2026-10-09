@@ -199,6 +199,8 @@ def _https_api_peer(
                 "X-Request-ID",
                 "X-Content-SHA256",
                 "X-Vonk-Error-Code",
+                "X-Vonk-Outcome",
+                "Retry-After",
             ):
                 value = response.headers.get(name)
                 if value is not None:

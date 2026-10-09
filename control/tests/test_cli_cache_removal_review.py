@@ -11,6 +11,7 @@ import pytest
 
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_render import render_payload
+from cluster_profiles.cli_states_generated import HTTP_REFUSAL
 from cluster_profiles.control_client import (
     ControlForbidden,
     ControlNotFound,
@@ -378,7 +379,7 @@ def test_review_outage_observes_or_owner_denies_then_fresh_request_works(
     monkeypatch, denied
 ):
     error = (
-        ControlForbidden(403, "review permission denied")
+        ControlForbidden(403, "review permission denied", failure_family=HTTP_REFUSAL)
         if denied
         else ControlTransportError("review request timed out")
     )
@@ -448,7 +449,9 @@ def test_owner_authorization_refusal_is_surfaced_after_submit_and_fresh_load_wor
     client = _FakeController(review)
 
     def denied() -> None:
-        raise ControlForbidden(403, "Controller denied removal")
+        raise ControlForbidden(
+            403, "Controller denied removal", failure_family=HTTP_REFUSAL
+        )
 
     client.before_post = denied
     _accept_response_contracts(monkeypatch)

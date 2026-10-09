@@ -383,22 +383,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .cleanup_installation_cache(claim, installation_uuid)
             .await
         {
-            let authority_denied = match &error {
-                crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(
-                    reply,
-                )) => matches!(reply.status, 401 | 403),
-                crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
-                    matches!(
-                        code,
-                        HelperErrorCode::GrantInvalid
-                            | HelperErrorCode::GrantNodeMismatch
-                            | HelperErrorCode::GrantUnauthorized
-                            | HelperErrorCode::PeerIdentityInvalid
-                            | HelperErrorCode::RequestReplayed
-                    )
-                }
-                _ => false,
-            };
+            let authority_denied = error.security_edge();
             if authority_denied {
                 return failed_stage_owned(
                     "installed recipe could not be safely removed",

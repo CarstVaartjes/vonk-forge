@@ -1228,6 +1228,12 @@ def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
         def __init__(self, status: int, payload: object | None) -> None:
             super().__init__(status, payload)
             self.headers["X-Vonk-Error-Code"] = code
+            from vonk_agent_protocol.http_failure import HttpRefusalReason
+            from vonk_control.http_errors import refusal_header
+
+            self.headers["x-vonk-outcome"] = refusal_header(
+                HttpRefusalReason.AUTHORITY_DENIED
+            )
 
         def read(self, maximum: int) -> bytes:
             raise AssertionError("authorization denial waited for a body")

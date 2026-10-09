@@ -6,6 +6,8 @@ without the contract package, so it imports these instead of copying them."""
 
 from __future__ import annotations
 
+HTTP_TRANSIENT = "transient"
+HTTP_REFUSAL = "refusal"
 STOP_UNCONFIRMED = "unconfirmed"
 PROFILE_NOT_ISSUED = "not-issued"
 ENROLLMENT_PENDING = "pending"

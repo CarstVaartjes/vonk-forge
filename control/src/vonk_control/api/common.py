@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     SecurityRefusalReason,
     canonical_message,
 )
+from vonk_agent_protocol.http_failure import HttpFailureResponse
 from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
 from ..catalog_api import CatalogProblem
@@ -275,3 +276,43 @@ def refresh_fleet_metrics(
     """Refresh metrics from the single typed FleetProjection evidence path."""
 
     metrics.update_fleet(fleet_snapshot)
+
+
+def http_failure_response(
+    status_code: int, retry_after: str | None = None, declared: str | None = None
+) -> HttpFailureResponse:
+    """Publish one shared decision for every non-success, including middleware.
+
+    Request validation is still rejected before effects by the endpoint's
+    diagnostic contract. It is never promoted into a security refusal.
+    """
+    from vonk_agent_protocol.http_failure import (
+        HttpFailureFamily,
+        HttpFailureResponse,
+        HttpTransient,
+        TransientReason,
+    )
+
+    if declared is not None:
+        try:
+            return HttpFailureResponse.model_validate_json(declared)
+        except ValueError:
+            pass
+    delay = 1
+    if retry_after is not None and retry_after.isdecimal():
+        delay = min(int(retry_after), 3600)
+    reason = (
+        TransientReason.RATE_LIMITED
+        if status_code == 429
+        else TransientReason.ADMISSION_BUSY
+        if status_code == 409
+        else TransientReason.DEPENDENCY_UNAVAILABLE
+    )
+    return HttpFailureResponse(
+        failure=HttpTransient(
+            family=HttpFailureFamily.TRANSIENT,
+            reason=reason,
+            retry_after=delay,
+            resolution_window=max(300, delay),
+        )
+    )

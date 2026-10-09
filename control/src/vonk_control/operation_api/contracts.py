@@ -11,6 +11,7 @@ from typing import Annotated, Literal, Protocol
 
 from pydantic import Field, model_serializer
 from vonk_agent_protocol import OperationProgress, UnknownOutcomeError
+from vonk_agent_protocol.http_failure import HttpFailureResponse
 
 from ..auth import CursorCodec
 from ..fleet_profile_contract import (
@@ -60,6 +61,7 @@ class ErrorContextResponse(StrictModel):
 class BoundedErrorResponse(StrictModel):
     detail: str = Field(min_length=1, max_length=256)
     context: ErrorContextResponse | None = None
+    outcome: HttpFailureResponse | None = None
 
 
 class RequestValidationIssue(StrictModel):

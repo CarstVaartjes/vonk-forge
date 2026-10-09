@@ -136,8 +136,27 @@ def https_peer(tmp_path, monkeypatch):
             body = state.get("body", b'{"detail":"fixture response"}')
             status = state["status"]
             media_type = state.get("media_type", "application/json")
+            from vonk_agent_protocol.http_failure import (
+                HttpFailureFamily,
+                HttpFailureResponse,
+                HttpRefusal,
+                HttpRefusalReason,
+            )
+
+            outcome = ""
+            if status == 403:
+                outcome = (
+                    "X-Vonk-Outcome: "
+                    + HttpFailureResponse(
+                        failure=HttpRefusal(
+                            family=HttpFailureFamily.REFUSAL,
+                            reason=HttpRefusalReason.AUTHORITY_DENIED,
+                        )
+                    ).model_dump_json()
+                    + "\r\n"
+                )
             headers = (
-                f"HTTP/1.1 {status} Fixture\r\nContent-Type: {media_type}\r\n"
+                f"HTTP/1.1 {status} Fixture\r\n{outcome}Content-Type: {media_type}\r\n"
                 f"Content-Length: {len(body)}\r\nX-Request-ID: deadline-fixture\r\n"
                 f"X-Content-SHA256: {hashlib.sha256(body).hexdigest()}\r\n"
                 "Location: /redirected\r\n"
@@ -243,7 +262,7 @@ def test_elapsed_deadline_closes_slow_https_and_retains_received_evidence(
     assert context.http_status == (status if stage == "body" else None)
     assert context.request_id == ("deadline-fixture" if stage == "body" else None)
     assert cast(ControlTransportError, failure[0]).retry_after_seconds == (
-        120 if stage == "body" else None
+        120 if stage == "body" and status != 403 else None
     )
     closure_deadline = time.monotonic() + 1
     state["accepted"].wait(1)

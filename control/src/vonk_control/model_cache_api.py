@@ -11,6 +11,9 @@ from vonk_agent_protocol import (
     OperationProgress,
     SecurityRefusalError,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .auth import MUTATION_ROLES, Actor, CursorCodec
 from .bounded_json import require_integer, require_sequence
@@ -124,7 +127,11 @@ def install_model_operator_routes(
 
     def require_operator(actor: Actor, route: str) -> None:
         if actor.role not in MUTATION_ROLES[("POST", route)]:
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="insufficient role",
+            )
 
     def failure(error: BaseException) -> HTTPException:
         if isinstance(error, ModelCacheNotFound):

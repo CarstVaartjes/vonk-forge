@@ -137,6 +137,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ca_sha256: required(request.ca_sha256, "ca_sha256")?,
         data_dir: data_root.clone(),
         node_id: request.node_id.clone(),
+        renewal_fraction_basis_points: 5000,
         fabric_address: None,
         fabric_bandwidth_mbps: None,
     };

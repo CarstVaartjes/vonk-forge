@@ -34,8 +34,14 @@ pub struct AgentConfig {
     pub ca_sha256: String,
     pub data_dir: PathBuf,
     pub node_id: String,
+    #[serde(default = "default_renewal_fraction")]
+    pub renewal_fraction_basis_points: u16,
     pub fabric_address: Option<std::net::IpAddr>,
     pub fabric_bandwidth_mbps: Option<u64>,
+}
+
+fn default_renewal_fraction() -> u16 {
+    5000
 }
 
 impl AgentConfig {
@@ -60,6 +66,9 @@ impl AgentConfig {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
+        if !(2500..=7500).contains(&self.renewal_fraction_basis_points) {
+            return Err(ConfigError::Unsafe("renewal_fraction_basis_points"));
+        }
         validate_origin(&self.enrollment_url, "enrollment_url")?;
         validate_origin(&self.controller_url, "controller_url")?;
         for (path, name) in [(&self.ca_path, "ca_path"), (&self.data_dir, "data_dir")] {

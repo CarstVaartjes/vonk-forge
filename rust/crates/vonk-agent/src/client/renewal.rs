@@ -1,15 +1,14 @@
 //! Certificate renewal transports share the normal identity and error fences.
 use std::fs;
 
-use reqwest::{Certificate, Client, StatusCode};
+use reqwest::{Certificate, Client};
 use vonk_agent_protocol::generated::{
-    ExpiredRenewRequest, IssuedCertificateResponse, RenewRequest, SecurityRefusalReason,
+    ExpiredRenewRequest, IssuedCertificateResponse, RenewRequest,
 };
 use vonk_agent_protocol::{canonical_generated_json, hex_sha256, parse_strict};
 
 use super::{
     AgentHttpClient, ClientError, ROTATION_REQUEST_TIMEOUT, bounded_body, classify_response,
-    controller_error, is_rotation_conflict, valid_error_code, valid_error_token,
 };
 use crate::{config::AgentConfig, identity::active_identity_paths, pair::verify_ca_pin};
 
@@ -32,7 +31,11 @@ impl AgentHttpClient {
             crate::identity::active_certificate_serial(&root).map_err(|_| ClientError::Identity)?;
         let request = expired_renewal_request(&self.node_id, serial, csr, signed_at, &signer)?;
         let ca_pem = fs::read(&config.ca_path)?;
-        verify_ca_pin(&ca_pem, &config.ca_sha256).map_err(|_| ClientError::Pin)?;
+        verify_ca_pin(&ca_pem, &config.ca_sha256).map_err(|_| {
+            ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            )
+        })?;
         let ca = Certificate::from_pem(&ca_pem).map_err(|_| ClientError::Identity)?;
         // Server authentication is identical; no expired client identity is
         // sent to the public, proof-authenticated enrollment ingress.
@@ -81,40 +84,7 @@ impl AgentHttpClient {
             .body(body)
             .send()
             .await?;
-        if !response.status().is_success() {
-            // Renewal can identify one narrowly defined recovery case from
-            // its bounded, safe error body. Keep the status, path, request ID,
-            // and canonical code in the contextual Controller error for all
-            // outcomes; generic 401/403 responses remain rejections.
-            let status = response.status();
-            let endpoint = response.url().path().to_owned();
-            let operation = format!(
-                "{} {endpoint}",
-                vonk_agent_protocol::generated::AgentDiagnosticOperation::ControllerRequest
-                    .as_str()
-            );
-            let request_id = response
-                .headers()
-                .get("x-request-id")
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| valid_error_token(value))
-                .map(str::to_owned);
-            let header_code = response
-                .headers()
-                .get("x-vonk-error-code")
-                .and_then(|value| value.to_str().ok())
-                .filter(|value| valid_error_code(value))
-                .map(str::to_owned);
-            let body = bounded_body(response).await?;
-            let code = if status == StatusCode::FORBIDDEN && is_rotation_conflict(&body) {
-                Some(SecurityRefusalReason::AgentCertificateRotationConflict.to_string())
-            } else {
-                header_code
-            };
-            return Err(ClientError::Controller(Box::new(controller_error(
-                status, &endpoint, &operation, request_id, code,
-            ))));
-        }
+        classify_response(&response)?;
         let body = bounded_body(response).await?;
         let issued: IssuedCertificateResponse =
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;

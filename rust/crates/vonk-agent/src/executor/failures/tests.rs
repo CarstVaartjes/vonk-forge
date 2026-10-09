@@ -6,6 +6,7 @@ use super::*;
 #[test]
 fn host_memory_safety_stop_is_a_typed_capacity_failure() {
     let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        failure: None,
         code: HelperErrorCode::RuntimeProcessExited,
         diagnostic: Some("observed_at=2026-10-08T00:00:00+00:00 reason=workload.host_memory_exhausted exit_cause=host_memory_exhausted mem_available_bytes=1 memory_full_avg10=99 trigger=sustained_full_psi sustained_ms=3000".into()),
         process_logs: None,
@@ -126,7 +127,7 @@ fn failed_recipe_build_preserves_only_safe_classified_evidence() {
 fn recipe_build_client_failures_keep_typed_retry_and_refusal_evidence() {
     let mut unavailable = ControllerError::from_status(503);
     unavailable.retry_after_seconds = Some(19);
-    let denied = ControllerError::from_status(403);
+    let denied = ControllerError::refused_identity(403);
     let invalid_contract = ControllerError::from_status(422);
     let conflict = ControllerError::from_status(409);
     let cases = [
@@ -161,7 +162,9 @@ fn recipe_build_client_failures_keep_typed_retry_and_refusal_evidence() {
             Some(5),
         ),
         (
-            ClientError::Retryable,
+            ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            ),
             FailureStage::ImageUpload,
             AgentFailureKind::TemporaryDependency,
             Some(5),
@@ -235,6 +238,7 @@ fn a_denied_controller_request_keeps_bounded_denial_facts() {
         operation: "controller.request /agent/distribution/assignment".to_owned(),
         endpoint: "/agent/distribution/assignment".to_owned(),
         status: 403,
+        failure: None,
         code: vonk_agent_protocol::generated::SecurityRefusalReason::ControllerRequestRejected
             .as_str()
             .to_owned(),
@@ -261,6 +265,13 @@ fn an_invalid_authority_distribution_failure_preserves_denial_context() {
         operation: "controller.request /agent/distribution/assignment".to_owned(),
         endpoint: "/agent/distribution/assignment".to_owned(),
         status: 401,
+        failure: Some(vonk_agent_protocol::generated::HttpFailureResponse {
+            failure: vonk_agent_protocol::generated::HttpRefusal {
+                family: vonk_agent_protocol::generated::HttpRefusalFamily::Refusal,
+                reason: vonk_agent_protocol::generated::HttpRefusalReason::AuthenticationRequired,
+            }
+            .into(),
+        }),
         code:
             vonk_agent_protocol::generated::SecurityRefusalReason::ControllerAuthenticationRequired
                 .as_str()
@@ -302,6 +313,7 @@ fn an_exited_workload_failure_carries_the_captured_container_output() {
     // inspection gate admits that text precisely because the inspection
     // already proved the container's identity and sanitized it.
     let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        failure: None,
         code: HelperErrorCode::RuntimeProcessExited,
         diagnostic: None,
         process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {
@@ -343,6 +355,7 @@ fn an_exited_workload_failure_always_has_logs_or_a_typed_reason_and_the_exit_fac
     ];
     for (diagnostic, logs) in cases {
         let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            failure: None,
             code: HelperErrorCode::RuntimeProcessExited,
             diagnostic: diagnostic.map(str::to_owned),
             process_logs: logs.map(Box::new),
@@ -404,6 +417,7 @@ fn rank_launch_failure_keeps_sanitized_logs_in_the_controller_contract() {
     let mut start_claim = claim();
     start_claim.operation = AgentOperation::RecipeStart;
     let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        failure: None,
         code: HelperErrorCode::RuntimeProcessExited,
         diagnostic: None,
         process_logs: Some(Box::new(crate::failure_evidence::FailureProcessLogs {

@@ -12,6 +12,7 @@ import os
 import re
 import stat
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -38,9 +39,12 @@ from vonk_agent_protocol.host_helper import (
     ContainerRuntimeActionName,
     RecipeReconciliationIdentity,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
 from vonk_agent_protocol.optional_evidence import OptionalEvidenceModel
 from vonk_agent_protocol.package_upgrade import PackageActivationReceipt
 from vonk_agent_protocol.state_machines import EnrollmentPurpose
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from ..agent_jobs import AgentJobService
 from ..auth import (
@@ -369,7 +373,11 @@ def _require_enrollment(services: AgentApiServices) -> EnrollmentService:
 def _scope_identity(request: Request) -> AgentIdentity:
     identity = agent_identity_from_scope(dict(request.scope))
     if identity is None:
-        raise HTTPException(status_code=401, detail="verified agent identity required")
+        raise SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+            status_code=401,
+            detail="verified agent identity required",
+        )
     return identity
 
 
@@ -414,7 +422,11 @@ def _authenticated_identity(
 ) -> AgentIdentity:
     identity = _scope_identity(request)
     if not active_agent_identity(services, identity):
-        raise HTTPException(status_code=401, detail="agent certificate is not active")
+        raise SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+            status_code=401,
+            detail="agent certificate is not active",
+        )
     return identity
 
 
@@ -423,14 +435,20 @@ def _authenticated_activation_identity(
 ) -> AgentIdentity:
     identity = _scope_identity(request)
     if not activation_agent_identity(services, identity):
-        raise HTTPException(status_code=401, detail="agent certificate cannot activate")
+        raise SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+            status_code=401,
+            detail="agent certificate cannot activate",
+        )
     return identity
 
 
 def _body_node_matches(value: str, identity: AgentIdentity) -> None:
     if value != identity.node_id:
-        raise HTTPException(
-            status_code=403, detail="authenticated node identity cannot be overridden"
+        raise SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHORITY_DENIED,
+            status_code=403,
+            detail="authenticated node identity cannot be overridden",
         )
 
 
@@ -441,7 +459,11 @@ def _validated_authenticated_source(
 ) -> AgentSource:
     source = agent_source_from_scope(dict(request.scope))
     if source is None or source.identity != identity:
-        raise HTTPException(status_code=401, detail="verified agent source required")
+        raise SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+            status_code=401,
+            detail="verified agent source required",
+        )
     try:
         return services.presence.validate(source)
     except PresenceError as error:
@@ -517,19 +539,43 @@ def _prepare_recipe_image_upload(
     artifact_root.mkdir(mode=0o750, parents=True, exist_ok=True)
     temporary = artifact_root / f".{identity}.upload"
     try:
-        descriptor = os.open(temporary, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        metadata = temporary.lstat()
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None and (
+        not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
+    ):
+        temporary.rename(
+            temporary.with_name(f"{temporary.name}.damaged-{uuid.uuid4().hex}")
+        )
+    try:
+        descriptor = os.open(
+            temporary, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600
+        )
     except OSError as error:
-        if isinstance(error, PermissionError) or error.errno == errno.ELOOP:
-            raise HTTPException(
-                status_code=403, detail="upload storage access denied"
+        if error.errno == errno.ELOOP:
+            # Preserve the link itself; never follow it or modify its target.
+            temporary.rename(
+                temporary.with_name(f"{temporary.name}.damaged-{uuid.uuid4().hex}")
+            )
+            descriptor = os.open(
+                temporary, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600
+            )
+        else:
+            raise UnknownOutcomeError(
+                "upload storage observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from None
-        raise UnknownOutcomeError(
-            "upload storage observation is unavailable",
-            reason=WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from None
-    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
         os.close(descriptor)
-        raise HTTPException(status_code=403, detail="unsafe upload destination")
+        temporary.rename(
+            temporary.with_name(f"{temporary.name}.damaged-{uuid.uuid4().hex}")
+        )
+        raise UnknownOutcomeError(
+            "upload checkpoint was isolated",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -559,7 +605,7 @@ def _commit_recipe_image_upload(
     except OSError as error:
         if isinstance(error, PermissionError) or error.errno == errno.ELOOP:
             raise HTTPException(
-                status_code=403, detail="publication storage access denied"
+                status_code=503, detail="publication storage observation unavailable"
             ) from None
         raise UnknownOutcomeError(
             "publication storage observation is unavailable",
@@ -578,14 +624,14 @@ def _commit_recipe_image_upload(
         except FileNotFoundError:
             metadata = None
         if metadata is not None and not stat.S_ISREG(metadata.st_mode):
-            raise HTTPException(status_code=403, detail="unsafe image destination")
-        if metadata is not None and metadata.st_size == expected_bytes:
-            temporary.unlink()
-        else:
-            # Only ingress-verified bytes reach this publisher. Atomic replace
-            # repairs a damaged regular object without a missing-entry window.
-            os.chmod(temporary, 0o640)
-            os.replace(temporary, destination)
+            destination.rename(
+                destination.with_name(f".{destination.name}.damaged-{uuid.uuid4().hex}")
+            )
+            metadata = None
+        # A freshly verified replacement supersedes even a same-sized damaged
+        # object. Publication never adopts old bytes based on their size alone.
+        os.chmod(temporary, 0o640)
+        os.replace(temporary, destination)
         directory = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
@@ -593,7 +639,7 @@ def _commit_recipe_image_upload(
             os.close(directory)
     except PermissionError:
         raise HTTPException(
-            status_code=403, detail="image storage access denied"
+            status_code=503, detail="image storage observation unavailable"
         ) from None
     except OSError:
         raise UnknownOutcomeError(
@@ -660,12 +706,12 @@ def _owned_artifact(
             metadata = os.stat(path, follow_symlinks=False)
         except PermissionError:
             raise HTTPException(
-                status_code=403, detail="artifact access denied"
+                status_code=503, detail="artifact observation unavailable"
             ) from None
         except OSError:
             continue
         if not stat.S_ISREG(metadata.st_mode):
-            raise HTTPException(status_code=403, detail="unsafe artifact destination")
+            raise HTTPException(status_code=503, detail="unsafe artifact destination")
         if metadata.st_size > maximum:
             continue
         return path, metadata.st_size

@@ -168,6 +168,8 @@ class NodeTelemetrySample(Base):
     cpu_frequency_avg_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_min_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_max_mhz: Mapped[int | None] = mapped_column(Integer)
+    renewal_failed: Mapped[bool | None] = mapped_column(Boolean)
+    credential_remaining_fraction: Mapped[float | None] = mapped_column(Float)
 
 
 class NodeTelemetryLatest(Base):

@@ -12,6 +12,9 @@ from starlette.responses import Response
 from vonk_agent_protocol import (
     ModelCacheOperatorStatus,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from ..agent_upgrade_contract import AgentUpgradeRequestIntent
 from ..auth import Actor
@@ -129,7 +132,11 @@ def install_operator_projection_routes(
     )
     def fleet_locks(actor: Actor = authenticated) -> FleetLocksResponse:
         if actor.role != "administrator":
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="insufficient role",
+            )
         if fleet_services is None or fleet_services.sessions is None:
             raise HTTPException(status_code=503, detail="fleet locks unavailable")
         from ..admission_locking import report_admission_locks

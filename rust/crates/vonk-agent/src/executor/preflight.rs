@@ -149,63 +149,25 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let Some(mut result) = result else {
             return unavailable();
         };
-        let mut outcome = None;
-        for attempt in 0..3 {
-            if *cancellation.borrow() || Instant::now() >= deadline {
-                break;
-            }
-            match tokio::time::timeout(
-                deadline.saturating_duration_since(Instant::now()),
-                self.execute_host_runtime_outcome(
-                    claim,
-                    HostRuntimeAction::RuntimePreflight,
-                    vec![],
-                ),
-            )
-            .await
+        // The Controller scheduler owns retries of the signed helper request.
+        // This observation never adds a second RPC retry loop.
+        let observed = tokio::time::timeout(
+            deadline.saturating_duration_since(Instant::now()),
+            self.execute_host_runtime_outcome(claim, HostRuntimeAction::RuntimePreflight, vec![]),
+        )
+        .await;
+        let outcome = match observed {
+            Ok(Ok(value))
+                if value
+                    .exit_code
+                    .is_some_and(|code| matches!(code, 0 | 21..=25 | 30..=32)) =>
             {
-                Ok(Ok(value))
-                    if value
-                        .exit_code
-                        .is_some_and(|code| matches!(code, 0 | 21..=25 | 30..=32)) =>
-                {
-                    outcome = Some(value);
-                    break;
-                }
-                Ok(Err(error)) => {
-                    let denied = matches!(
-                        &error,
-                        crate::host_runtime::HostRuntimeError::HelperRejected {
-                            code: HelperErrorCode::GrantUnauthorized
-                                | HelperErrorCode::GrantInvalid
-                                | HelperErrorCode::PeerIdentityInvalid
-                                | HelperErrorCode::GrantNodeMismatch,
-                            ..
-                        }
-                    ) || matches!(&error, crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(value)) if matches!(value.status, 401 | 403))
-                        || matches!(
-                            &error,
-                            crate::host_runtime::HostRuntimeError::Controller(
-                                ClientError::Identity | ClientError::Pin
-                            )
-                        );
-                    if denied {
-                        return runtime_failure(
-                            "authenticated authority denied the preflight",
-                            &error,
-                        );
-                    }
-                }
-                _ => {}
+                value
             }
-            tokio::time::sleep(
-                Duration::from_millis(50 * (attempt + 1))
-                    .min(deadline.saturating_duration_since(Instant::now())),
-            )
-            .await;
-        }
-        let Some(outcome) = outcome else {
-            return unavailable();
+            Ok(Err(error)) => {
+                return runtime_failure("signed helper observation unavailable", &error);
+            }
+            _ => return unavailable(),
         };
         use RuntimePreflightFindingCode as Finding;
         let (passed, code) = match outcome.exit_code {

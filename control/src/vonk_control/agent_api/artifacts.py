@@ -18,6 +18,9 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from ..distribution import DistributionError, DistributionUnknown
 from ..download_contract import download_responses, upload_request_body
@@ -230,8 +233,10 @@ def install_artifacts_routes(
                 != headers.layout_sha256
             ):
                 await asyncio.to_thread(stream.truncate, 0)
-                raise HTTPException(
-                    status_code=422, detail="recipe image digest changed"
+                raise SecurityHTTPError(
+                    reason=HttpRefusalReason.INVALID_DIGEST,
+                    status_code=422,
+                    detail="recipe image digest changed",
                 )
             destination = (
                 required.artifact_root / IMAGE_CACHE_DIRECTORY / headers.layout_sha256
@@ -261,7 +266,7 @@ def install_artifacts_routes(
                 build.updated_at = _now(required.clock())
         except PermissionError:
             raise HTTPException(
-                status_code=403, detail="upload storage access denied"
+                status_code=503, detail="upload storage observation unavailable"
             ) from None
         except OSError:
             raise UnknownOutcomeError(
@@ -302,7 +307,12 @@ def install_artifacts_routes(
             DistributionCode.WRONG_NODE,
             DistributionCode.EXPIRED,
         }:
-            return HTTPException(status_code=403, detail=error.detail, headers=headers)
+            return SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=error.detail,
+                headers=headers,
+            )
         if error.code == DistributionCode.OBJECT_INVALID:
             return HTTPException(status_code=404, detail=error.detail, headers=headers)
         return HTTPException(status_code=503, detail=error.detail, headers=headers)
@@ -355,7 +365,11 @@ def install_artifacts_routes(
             )
         plan_digest = request.query_params.get("plan_digest")
         if plan_digest is None:
-            raise HTTPException(status_code=403, detail="assignment is required")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="assignment is required",
+            )
         try:
             _assignment, object_spec, stored = required.distribution.locate_object(
                 node_id=identity.node_id,

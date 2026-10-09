@@ -20,6 +20,7 @@ from .compiled_execution_plan import CompiledPlacement
 from .contracts import AgentClaim
 from .helper_response import HostHelperProcessLogs
 from .host_helper import RecipeReconciliationIdentity, Uuid4Text
+from .http_failure import RenewalWindow
 from .package_upgrade import (
     PackageActivationOutcome,
     PackageActivationPhase,
@@ -47,6 +48,7 @@ class AgentIdentityMetadata(WireModel):
     generation: U64
     node_id: str
     serial: str
+    renewal_window: RenewalWindow | None = None
 
 
 class AgentReadinessReceipt(WireModel):

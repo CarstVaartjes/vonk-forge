@@ -50,8 +50,6 @@ pub enum PairingError {
         maximum_bytes: usize,
         observed_bytes: u64,
     },
-    #[error("controller pairing returned unexpected HTTP status {0}")]
-    Status(u16),
     #[error("issued certificate is not bound to this node and key")]
     Certificate,
     #[error("local identity operation failed")]
@@ -102,58 +100,71 @@ pub async fn pair(
         grant_token: token.to_owned(),
     };
     let body = canonical_generated_json(&request).map_err(|_| PairingError::Response)?;
-    // Reconnect with the identical token and durable CSR.
+    // One retry owner reconnects with the identical token and durable CSR.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
     let mut issued = None;
+    let mut wait = Duration::ZERO;
     for attempt in 0..4_u32 {
-        if attempt != 0 {
-            tokio::time::sleep(Duration::from_secs(1 << (attempt - 1))).await;
+        tokio::time::sleep_until(deadline.min(tokio::time::Instant::now() + wait)).await;
+        if tokio::time::Instant::now() >= deadline {
+            break;
         }
-        let response = match client
-            .post(endpoint.clone())
-            .header("content-type", "application/json")
-            .body(body.clone())
-            .send()
-            .await
+        let response = match tokio::time::timeout_at(
+            deadline,
+            client
+                .post(endpoint.clone())
+                .header("content-type", "application/json")
+                .body(body.clone())
+                .send(),
+        )
+        .await
         {
-            Ok(response) => response,
-            Err(_) => continue,
-        };
-        let status = response.status().as_u16();
-        if status == 429 {
-            let resume = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(1);
-            if attempt < 3 {
-                tokio::time::sleep(Duration::from_secs(resume.min(60))).await;
+            Ok(Ok(response)) => response,
+            _ => {
+                wait = crate::client::ClientError::Unknown(
+                    vonk_agent_protocol::generated::TransientReason::PeerResponseUnavailable,
+                )
+                .retry_delay(attempt);
+                continue;
             }
-            continue;
-        }
-        if status != 200 && !matches!(status, 401 | 403 | 422) {
-            continue;
-        }
-        let observed = match bounded_pairing_body(response).await {
-            Ok(observed) => observed,
-            Err(_) => continue,
         };
-        if status == 200 && serde_json::from_slice::<IssuedCertificateResponse>(&observed).is_err()
+        if let Err(error) = crate::client::classify_response(&response) {
+            if !error.retryable() {
+                return Err(PairingError::Rejected);
+            }
+            wait = error.retry_delay(attempt);
+            continue;
+        }
+        let status = response.status().as_u16();
+        let observed = match tokio::time::timeout_at(deadline, bounded_pairing_body(response)).await
         {
-            continue;
-        }
-        issued = match validate_enrollment_response(status, &observed, &config.node_id) {
-            Ok(value) => Some(value),
-            Err(PairingError::Response) => continue,
-            Err(error) => return Err(error),
+            Ok(Ok(observed)) => observed,
+            _ => {
+                wait = crate::client::ClientError::Protocol.retry_delay(attempt);
+                continue;
+            }
         };
-        break;
+        match validate_enrollment_response(status, &observed, &config.node_id) {
+            Ok(value) => match validate_issued(&value, &pending, &config.node_id) {
+                Ok(()) => {
+                    issued = Some(value);
+                    break;
+                }
+                Err(error @ PairingError::Certificate) => return Err(error),
+                Err(_) => {
+                    wait = crate::client::ClientError::Protocol.retry_delay(attempt);
+                }
+            },
+            Err(_) => {
+                wait = crate::client::ClientError::Protocol.retry_delay(attempt);
+            }
+        }
     }
     let issued = issued.ok_or(PairingError::ObservationEnded)?;
-    validate_issued(&issued, &pending, &config.node_id)?;
     persist_paired_identity(
         &credential_root,
         &IdentityMaterial {
+            renewal_window: issued.renewal_window.clone(),
             node_id: issued.node_id,
             private_key_pem: pending.private_key_pem,
             certificate_pem: issued.certificate_pem.into_bytes(),
@@ -212,8 +223,7 @@ pub fn validate_enrollment_response(
             }
             Ok(issued)
         }
-        401 | 403 => Err(PairingError::Rejected),
-        _ => Err(PairingError::Status(status)),
+        _ => Err(PairingError::Response),
     }
 }
 
@@ -300,9 +310,9 @@ pub fn validate_issued(
     node_id: &str,
 ) -> Result<(), PairingError> {
     let (_, pem) =
-        parse_x509_pem(issued.certificate_pem.as_bytes()).map_err(|_| PairingError::Certificate)?;
+        parse_x509_pem(issued.certificate_pem.as_bytes()).map_err(|_| PairingError::Response)?;
     let (_, certificate) =
-        parse_x509_certificate(&pem.contents).map_err(|_| PairingError::Certificate)?;
+        parse_x509_certificate(&pem.contents).map_err(|_| PairingError::Response)?;
     let common_name_matches = certificate
         .subject()
         .iter_common_name()
@@ -310,7 +320,7 @@ pub fn validate_issued(
     let expected_uri = format!("spiffe://vonk-forge.local/node/{node_id}");
     let san_matches = certificate
         .subject_alternative_name()
-        .map_err(|_| PairingError::Certificate)?
+        .map_err(|_| PairingError::Response)?
         .is_some_and(|extension| {
             extension
                 .value
@@ -318,10 +328,17 @@ pub fn validate_issued(
                 .iter()
                 .any(|name| matches!(name, GeneralName::URI(value) if *value == expected_uri))
         });
-    let key = rcgen::KeyPair::from_pem(
-        std::str::from_utf8(&pending.private_key_pem).map_err(|_| PairingError::Certificate)?,
-    )
-    .map_err(|_| PairingError::Certificate)?;
+    let key =
+        rcgen::KeyPair::from_pem(std::str::from_utf8(&pending.private_key_pem).map_err(|_| {
+            PairingError::Identity(crate::identity::IdentityError::Io(std::io::Error::other(
+                "pending key observation unavailable",
+            )))
+        })?)
+        .map_err(|_| {
+            PairingError::Identity(crate::identity::IdentityError::Io(std::io::Error::other(
+                "pending key observation unavailable",
+            )))
+        })?;
     let fingerprint = hex::encode(Sha256::digest(&pem.contents));
     if !common_name_matches
         || !san_matches

@@ -297,7 +297,9 @@ class TrustedProxyAgentIdentityMiddleware:
                 or not validator(scoped_identity)
             )
         ):
-            await Response(status_code=401)(safe_scope, receive, send)
+            from .http_errors import authentication_response
+
+            await authentication_response()(safe_scope, receive, send)
             return
         await self.app(safe_scope, receive, send)
 

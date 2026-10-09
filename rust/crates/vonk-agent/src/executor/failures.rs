@@ -164,25 +164,13 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
     match error {
         // Socket/file observation loss is not authenticated authority denial.
         HostRuntimeError::Io(_) => true,
-        HostRuntimeError::Controller(ClientError::Protocol) => true,
-        HostRuntimeError::Controller(ClientError::CredentialRead(_) | ClientError::Identity) => {
-            true
-        }
-        HostRuntimeError::Controller(ClientError::Pin) => false,
-        HostRuntimeError::Controller(ClientError::Controller(error))
-            if matches!(error.status, 401 | 403) =>
-        {
-            false
-        }
-        HostRuntimeError::Controller(_) => true,
-        HostRuntimeError::HelperRejected { code, .. } => !matches!(
-            code,
-            HelperErrorCode::GrantInvalid
-                | HelperErrorCode::GrantNodeMismatch
-                | HelperErrorCode::GrantUnauthorized
-                | HelperErrorCode::PeerIdentityInvalid
-                | HelperErrorCode::PackageVerificationFailed
-        ),
+        HostRuntimeError::Controller(error) => error.retryable(),
+        HostRuntimeError::HelperRejected { failure, .. } => failure.as_ref().is_none_or(|answer| {
+            matches!(
+                answer.failure,
+                vonk_agent_protocol::generated::HttpFailureResponseFailure::Transient(_)
+            )
+        }),
         HostRuntimeError::HelperProtocol(_) => true,
         // Caller-supplied request bounds and an unbound reply still cannot
         // authorize any effect. Observation loss never fabricates a receipt.
@@ -326,12 +314,7 @@ pub(super) fn recipe_build_client_failure_kind(error: &ClientError) -> AgentFail
         // A fresh authorized claim renews the expired transfer grant.
         return AgentFailureKind::TemporaryDependency;
     }
-    if matches!(error.status(), Some(401 | 403))
-        || matches!(
-            error,
-            ClientError::CredentialRead(_) | ClientError::Identity | ClientError::Pin
-        )
-    {
+    if error.refused() {
         return AgentFailureKind::InvalidAuthority;
     }
     match error {
@@ -385,6 +368,18 @@ pub(super) fn runtime_failure(
     reason: &str,
     error: &crate::host_runtime::HostRuntimeError,
 ) -> ExecutionResult {
+    // The durable Controller scheduler is the only helper retry owner.
+    // Preserve RetryInfo rather than turning a known transient into an unknown.
+    if temporary_observation_error(error)
+        && let Some(delay) = error.retry_after_seconds()
+    {
+        return ExecutionResult::Failed(
+            Failure::new(reason)
+                .kind(AgentFailureKind::TemporaryDependency)
+                .retry_after(Some(delay))
+                .helper(runtime_helper_code(error), None),
+        );
+    }
     if temporary_observation_error(error)
         && !matches!(
             error,
@@ -428,7 +423,7 @@ pub(super) fn runtime_failure(
         // budget; every attempt re-observes through a fresh accepted grant.
         failure
             .kind(AgentFailureKind::TemporaryDependency)
-            .retry_after(Some(2))
+            .retry_after(error.retry_after_seconds().or(Some(2)))
     } else {
         failure
     };

@@ -81,7 +81,11 @@ impl WriteBehind {
         if let Some(pending) = self.pending.take() {
             tokio::time::timeout(CONTROLLER_REQUEST_TIMEOUT, pending)
                 .await
-                .map_err(|_| ClientError::Retryable)?
+                .map_err(|_| {
+                    ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    )
+                })?
                 .map_err(|error| std::io::Error::other(error.to_string()))??;
         }
         Ok(())

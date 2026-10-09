@@ -40,6 +40,7 @@ fn cli_version_and_self_test_share_the_compiled_semantic_identity() {
     persist_identity(
         &data.join("credentials"),
         &IdentityMaterial {
+            renewal_window: None,
             node_id: NODE_ID.to_owned(),
             private_key_pem: key.serialize_pem().into_bytes(),
             certificate_pem: certificate.pem().into_bytes(),

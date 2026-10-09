@@ -35,6 +35,7 @@ class TelemetryPoint:
             cpu_frequency_avg_mhz (int | None | Unset):
             cpu_frequency_max_mhz (int | None | Unset):
             cpu_frequency_min_mhz (int | None | Unset):
+            credential_remaining_fraction (float | None | Unset):
             disk_free_bytes (int | None | Unset):
             disk_total_bytes (int | None | Unset):
             gpu_memory_free_bytes (int | None | Unset):
@@ -44,6 +45,7 @@ class TelemetryPoint:
             gpu_utilization_percent (float | None | Unset):
             memory_available_bytes (int | None | Unset):
             memory_total_bytes (int | None | Unset):
+            renewal_failed (bool | None | Unset):
      """
 
     boot_id: str
@@ -54,6 +56,7 @@ class TelemetryPoint:
     cpu_frequency_avg_mhz: int | None | Unset = UNSET
     cpu_frequency_max_mhz: int | None | Unset = UNSET
     cpu_frequency_min_mhz: int | None | Unset = UNSET
+    credential_remaining_fraction: float | None | Unset = UNSET
     disk_free_bytes: int | None | Unset = UNSET
     disk_total_bytes: int | None | Unset = UNSET
     gpu_memory_free_bytes: int | None | Unset = UNSET
@@ -63,6 +66,7 @@ class TelemetryPoint:
     gpu_utilization_percent: float | None | Unset = UNSET
     memory_available_bytes: int | None | Unset = UNSET
     memory_total_bytes: int | None | Unset = UNSET
+    renewal_failed: bool | None | Unset = UNSET
 
 
 
@@ -96,6 +100,12 @@ class TelemetryPoint:
             cpu_frequency_min_mhz = UNSET
         else:
             cpu_frequency_min_mhz = self.cpu_frequency_min_mhz
+
+        credential_remaining_fraction: float | None | Unset
+        if isinstance(self.credential_remaining_fraction, Unset):
+            credential_remaining_fraction = UNSET
+        else:
+            credential_remaining_fraction = self.credential_remaining_fraction
 
         disk_free_bytes: int | None | Unset
         if isinstance(self.disk_free_bytes, Unset):
@@ -153,6 +163,12 @@ class TelemetryPoint:
         else:
             memory_total_bytes = self.memory_total_bytes
 
+        renewal_failed: bool | None | Unset
+        if isinstance(self.renewal_failed, Unset):
+            renewal_failed = UNSET
+        else:
+            renewal_failed = self.renewal_failed
+
 
         field_dict: dict[str, Any] = {}
 
@@ -169,6 +185,8 @@ class TelemetryPoint:
             field_dict["cpu_frequency_max_mhz"] = cpu_frequency_max_mhz
         if cpu_frequency_min_mhz is not UNSET:
             field_dict["cpu_frequency_min_mhz"] = cpu_frequency_min_mhz
+        if credential_remaining_fraction is not UNSET:
+            field_dict["credential_remaining_fraction"] = credential_remaining_fraction
         if disk_free_bytes is not UNSET:
             field_dict["disk_free_bytes"] = disk_free_bytes
         if disk_total_bytes is not UNSET:
@@ -187,6 +205,8 @@ class TelemetryPoint:
             field_dict["memory_available_bytes"] = memory_available_bytes
         if memory_total_bytes is not UNSET:
             field_dict["memory_total_bytes"] = memory_total_bytes
+        if renewal_failed is not UNSET:
+            field_dict["renewal_failed"] = renewal_failed
 
         return field_dict
 
@@ -239,6 +259,16 @@ class TelemetryPoint:
             return cast(int | None | Unset, data)
 
         cpu_frequency_min_mhz = _parse_cpu_frequency_min_mhz(d.pop("cpu_frequency_min_mhz", UNSET))
+
+
+        def _parse_credential_remaining_fraction(data: object) -> float | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(float | None | Unset, data)
+
+        credential_remaining_fraction = _parse_credential_remaining_fraction(d.pop("credential_remaining_fraction", UNSET))
 
 
         def _parse_disk_free_bytes(data: object) -> int | None | Unset:
@@ -341,6 +371,16 @@ class TelemetryPoint:
         memory_total_bytes = _parse_memory_total_bytes(d.pop("memory_total_bytes", UNSET))
 
 
+        def _parse_renewal_failed(data: object) -> bool | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(bool | None | Unset, data)
+
+        renewal_failed = _parse_renewal_failed(d.pop("renewal_failed", UNSET))
+
+
         telemetry_point = cls(
             boot_id=boot_id,
             id=id,
@@ -350,6 +390,7 @@ class TelemetryPoint:
             cpu_frequency_avg_mhz=cpu_frequency_avg_mhz,
             cpu_frequency_max_mhz=cpu_frequency_max_mhz,
             cpu_frequency_min_mhz=cpu_frequency_min_mhz,
+            credential_remaining_fraction=credential_remaining_fraction,
             disk_free_bytes=disk_free_bytes,
             disk_total_bytes=disk_total_bytes,
             gpu_memory_free_bytes=gpu_memory_free_bytes,
@@ -359,6 +400,7 @@ class TelemetryPoint:
             gpu_utilization_percent=gpu_utilization_percent,
             memory_available_bytes=memory_available_bytes,
             memory_total_bytes=memory_total_bytes,
+            renewal_failed=renewal_failed,
         )
 
         return telemetry_point

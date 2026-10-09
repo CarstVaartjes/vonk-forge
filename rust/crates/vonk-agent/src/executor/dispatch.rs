@@ -97,6 +97,13 @@ pub(crate) fn upgrade_outcome(
             UnknownEvidence::at(FailureStage::AgentUpgradeInstalled)
                 .because("the package is installed; the new agent's identity is not yet confirmed"),
         ),
+        Err(error) if !error.security_edge() && error.retry_after_seconds().is_some() => {
+            ExecutionResult::Failed(
+                Failure::new(error.to_string())
+                    .kind(AgentFailureKind::TemporaryDependency)
+                    .retry_after(error.retry_after_seconds()),
+            )
+        }
         Err(error)
             if !error.security_edge()
                 && !matches!(error, crate::agent_upgrade::AgentUpgradeError::InvalidClaim) =>
@@ -194,6 +201,7 @@ mod tests {
 
         // Preparation loss is recoverable bookkeeping, not a permanent refusal.
         let unavailable = upgrade_outcome(Err(AgentUpgradeError::HelperRejectedWithCode {
+            failure: None,
             code: HelperErrorCode::PackagePreparationUnavailable,
             exit_code: None,
             diagnostic: None,
@@ -207,11 +215,7 @@ mod tests {
         assert!(matches!(fresh.result, AgentResultResult::OutcomeUnknown(_)));
 
         // The same dispatch still refuses unverified package bytes at ingress.
-        let unverified = upgrade_outcome(Err(AgentUpgradeError::HelperRejectedWithCode {
-            code: HelperErrorCode::PackageVerificationFailed,
-            exit_code: None,
-            diagnostic: None,
-        }));
+        let unverified = upgrade_outcome(Err(AgentUpgradeError::DownloadIdentityInvalid));
         assert!(matches!(unverified, ExecutionResult::Failed(_)));
         assert!(matches!(
             upgrade_outcome(Ok(())),
@@ -262,6 +266,7 @@ mod tests {
                     status: HostHelperResponseStatus::PackageInstalled,
                     diagnostic: None,
                     process_logs: None,
+                    failure: None,
                     error_code: None,
                     exit_code: None,
                     process_running: None,

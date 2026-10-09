@@ -49,32 +49,44 @@ impl AgentHttpClient {
                     .send()
                     .await?;
                 classify_response(&response)?;
-                let body = bounded_body(response)
-                    .await
-                    .map_err(|_| ClientError::Retryable)?;
-                let assignment: DistributionAssignment =
-                    parse_strict(&body).map_err(|_| ClientError::Retryable)?;
-                assignment.validate().map_err(|_| ClientError::Retryable)?;
+                let body = bounded_body(response).await.map_err(|_| {
+                    ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    )
+                })?;
+                let assignment: DistributionAssignment = parse_strict(&body).map_err(|_| {
+                    ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    )
+                })?;
+                assignment.validate().map_err(|_| {
+                    ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    )
+                })?;
                 Ok::<_, ClientError>(assignment)
             })
             .await
-            .unwrap_or(Err(ClientError::Retryable));
+            .unwrap_or(Err(ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            )));
             match result {
                 Err(ref error)
                     if error.retryable()
                         && attempt < 2
                         && tokio::time::Instant::now() < deadline =>
                 {
-                    tokio::time::sleep_until(deadline.min(
-                        tokio::time::Instant::now()
-                            + Duration::from_millis(100 * u64::from(attempt + 1)),
-                    ))
+                    tokio::time::sleep_until(
+                        deadline.min(tokio::time::Instant::now() + error.retry_delay(attempt)),
+                    )
                     .await;
                 }
                 result => return result,
             }
         }
-        Err(ClientError::Retryable)
+        Err(ClientError::Unknown(
+            vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+        ))
     }
 
     /// Consume a complete assignment. Every model/configuration object is
@@ -259,7 +271,7 @@ impl AgentHttpClient {
             let metadata = output
                 .metadata()
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             let mut offset = metadata.len();
             if offset > expected_bytes {
                 // The checkpoint is disposable. Its handle has passed the
@@ -267,7 +279,7 @@ impl AgentHttpClient {
                 output
                     .set_len(0)
                     .await
-                    .map_err(|_| ClientError::Retryable)?;
+                    .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
                 offset = 0;
             }
             // TLS/network chunks can be much smaller than an efficient disk
@@ -294,7 +306,7 @@ impl AgentHttpClient {
                     // many ranges the agent keeps in flight at once.
                     let _stream = tokio::time::timeout_at(deadline, governor.acquire())
                         .await
-                        .map_err(|_| ClientError::Retryable)?;
+                        .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
                     let mut response = self
                         .current_client()
                         .await?
@@ -313,7 +325,7 @@ impl AgentHttpClient {
                     // A present substituted digest is an ingress identity failure.
                     // Missing/unreadable framing is only an unusable observation.
                     if etag.is_some_and(|value| value != expected_etag) {
-                        return Err(ClientError::Protocol);
+                        return Err(ClientError::Integrity(vonk_agent_protocol::generated::HttpRefusalReason::InvalidDigest));
                     }
                     if response.status() != StatusCode::PARTIAL_CONTENT
                         || response.content_length() != Some(end - offset + 1)
@@ -324,18 +336,18 @@ impl AgentHttpClient {
                             .and_then(|value| value.to_str().ok())
                             != Some(expected_range.as_str())
                     {
-                        return Err(ClientError::Retryable);
+                        return Err(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable));
                     }
                     while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
                         .await
-                        .map_err(|_| ClientError::Retryable)??
+                        .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))??
                     {
                         if chunk.len() as u64 > end + 1 - offset {
-                            return Err(ClientError::Retryable);
+                            return Err(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable));
                         }
                         tokio::time::timeout_at(deadline, output.write_all(&chunk))
                             .await
-                            .map_err(|_| ClientError::Retryable)??;
+                            .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))??;
                         // This writer survives network retries, so resume from
                         // its accepted bytes even within an interrupted range.
                         offset += chunk.len() as u64;
@@ -347,12 +359,12 @@ impl AgentHttpClient {
                         }
                     }
                     if offset != end + 1 {
-                        return Err(ClientError::Retryable);
+                        return Err(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable));
                     }
                     Ok::<(), ClientError>(())
                 })
                 .await
-                .unwrap_or(Err(ClientError::Retryable));
+                .unwrap_or(Err(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable)));
                 match attempt {
                     Ok(()) => retries = 0,
                     Err(error)
@@ -363,8 +375,7 @@ impl AgentHttpClient {
                         governor.throttled();
                         progress(offset, ProgressPhase::Copying);
                         tokio::time::sleep_until(request_deadline.min(
-                            tokio::time::Instant::now()
-                                + Duration::from_millis(500 * (1 << retries)),
+                            tokio::time::Instant::now() + error.retry_delay(retries),
                         ))
                         .await;
                         retries += 1;
@@ -376,36 +387,36 @@ impl AgentHttpClient {
                         let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
                         tokio::time::timeout_at(deadline, output.flush())
                             .await
-                            .map_err(|_| ClientError::Retryable)??;
+                            .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))??;
                         tokio::time::timeout_at(deadline, output.get_ref().sync_data())
                             .await
-                            .map_err(|_| ClientError::Retryable)??;
+                            .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))??;
                         return Err(error);
                     }
                 }
             }
             progress(offset, ProgressPhase::Copying);
             write_behind.finish().await?;
-            output.flush().await.map_err(|_| ClientError::Retryable)?;
+            output.flush().await.map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             output
                 .get_ref()
                 .sync_all()
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             let output = output.into_inner();
             let synced_metadata = output
                 .metadata()
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             let partial_metadata = tokio::fs::symlink_metadata(&partial)
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             if !validate_trusted_metadata(&synced_metadata, expected_bytes)
                 || !validate_trusted_metadata(&partial_metadata, expected_bytes)
                 || !same_file_metadata(&synced_metadata, &partial_metadata)
             {
                 isolate_managed_entry(&partial).await?;
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable));
             }
             // Bytes came over the assignment-bound mTLS channel from our own
             // Controller, so size and custody are checked here and the content is
@@ -415,33 +426,33 @@ impl AgentHttpClient {
             progress(expected_bytes, ProgressPhase::Finalizing);
             let before_rename = tokio::fs::symlink_metadata(&partial)
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             if !same_file_metadata(&synced_metadata, &before_rename) {
                 isolate_managed_entry(&partial).await?;
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable));
             }
             tokio::fs::rename(&partial, destination)
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             sync_parent(parent).await?;
             let final_file = inspect_trusted_final(destination, expected_bytes)
                 .await?
-                .ok_or(ClientError::Retryable)?;
+                .ok_or(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             let final_metadata = final_file
                 .metadata()
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             let output_after = output
                 .metadata()
                 .await
-                .map_err(|_| ClientError::Retryable)?;
+                .map_err(|_| ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable))?;
             // Rename changes ctime but cannot change the already-synced content
             // of this private inode. Bind the receipt to its post-rename ctime.
             if !same_file_content_identity(&synced_metadata, &output_after)
                 || !same_file_metadata(&output_after, &final_metadata)
             {
                 isolate_managed_entry(destination).await?;
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable));
             }
             // The transfer filled the page cache with an object of up to hundreds
             // of gigabytes. It stays on disk; the resident pages do not need to.
@@ -449,7 +460,7 @@ impl AgentHttpClient {
             Ok(())
         })
         .await
-        .unwrap_or(Err(ClientError::Retryable))
+        .unwrap_or(Err(ClientError::Unknown(vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable)))
     }
 }
 

@@ -247,6 +247,9 @@ CASES: list[
         TelemetrySample,
         _SAMPLE,
         {
+            "renewal_failed": _SAMPLE | {"renewal_failed": "damaged"},
+            "credential_remaining_fraction": _SAMPLE
+            | {"credential_remaining_fraction": 9},
             "gpu_temperature_c": _SAMPLE | {"gpu_temperature_c": 900},
             "cpu_frequency_avg_mhz": _SAMPLE
             | {"cpu_frequency_avg_mhz": 1000, "cpu_frequency_min_mhz": 2000},

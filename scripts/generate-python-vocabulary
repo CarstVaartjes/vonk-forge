@@ -40,9 +40,12 @@ def cli_words() -> str:
         StopOutcome,
     )
     from vonk_agent_protocol.agent_words import ProfileEffectState
+    from vonk_agent_protocol.http_failure import HttpFailureFamily
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
 
     words = {
+        "HTTP_TRANSIENT": HttpFailureFamily.TRANSIENT,
+        "HTTP_REFUSAL": HttpFailureFamily.REFUSAL,
         "STOP_UNCONFIRMED": StopOutcome.UNCONFIRMED,
         "PROFILE_NOT_ISSUED": ProfileEffectState.NOT_ISSUED,
         "ENROLLMENT_PENDING": EnrollmentGrantState.PENDING,

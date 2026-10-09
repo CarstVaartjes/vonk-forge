@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .auth import MUTATION_ROLES, Actor
 from .endpoint_contract import inference_gateway_api_base
@@ -65,7 +68,11 @@ def install_fleet_profile_routes(
 
     def require_mutation(actor: Actor, method: str, route: str) -> None:
         if actor.role not in MUTATION_ROLES[(method, route)]:
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="insufficient role",
+            )
 
     @app.get(
         "/api/profile",
@@ -227,7 +234,11 @@ def install_fleet_profile_routes(
                 ),
             )
         except FleetProfilePermissionDenied as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=str(error),
+            ) from None
         except KeyError:
             raise HTTPException(status_code=404, detail="Profile not found") from None
         except FleetProfileStalePlanConflict as error:
@@ -285,7 +296,11 @@ def install_fleet_profile_routes(
                 request_key, actor=actor.subject, number=number
             )
         except FleetProfilePermissionDenied as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=str(error),
+            ) from None
         except KeyError:
             raise HTTPException(
                 status_code=404, detail="Profile request not found"

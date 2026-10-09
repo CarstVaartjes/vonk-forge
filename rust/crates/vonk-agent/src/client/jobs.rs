@@ -24,11 +24,17 @@ impl AgentHttpClient {
             .await?;
         classify_response(&response)?;
         if response.content_length() != Some(expected_bytes) {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            ));
         }
         bounded_body_limit(response, expected_bytes as usize)
             .await
-            .map_err(|_| ClientError::Retryable)
+            .map_err(|_| {
+                ClientError::Unknown(
+                    vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                )
+            })
     }
 
     pub async fn download_recipe_job_input(
@@ -56,9 +62,13 @@ impl AgentHttpClient {
             .await?;
         classify_response(&response)?;
         if response.content_length() != Some(expected_bytes) {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            ));
         }
-        let parent = destination.parent().ok_or(ClientError::Retryable)?;
+        let parent = destination.parent().ok_or(ClientError::Unknown(
+            vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+        ))?;
         let temporary = parent.join(format!(".job-input-{}.tmp", uuid::Uuid::new_v4()));
         let result = async {
             let mut output = tokio::fs::OpenOptions::new()
@@ -71,18 +81,30 @@ impl AgentHttpClient {
             let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
             while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
                 .await
-                .map_err(|_| ClientError::Retryable)??
+                .map_err(|_| {
+                    ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    )
+                })??
             {
                 observed = observed
                     .checked_add(chunk.len() as u64)
                     .filter(|value| *value <= expected_bytes)
-                    .ok_or(ClientError::Retryable)?;
+                    .ok_or(ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    ))?;
                 tokio::time::timeout_at(deadline, output.write_all(&chunk))
                     .await
-                    .map_err(|_| ClientError::Retryable)??;
+                    .map_err(|_| {
+                        ClientError::Unknown(
+                            vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                        )
+                    })??;
             }
             if observed != expected_bytes {
-                return Err(ClientError::Retryable);
+                return Err(ClientError::Unknown(
+                    vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                ));
             }
             output.sync_all().await?;
             drop(output);
@@ -121,11 +143,17 @@ impl AgentHttpClient {
         }
         if tokio::fs::metadata(path)
             .await
-            .map_err(|_| ClientError::Retryable)?
+            .map_err(|_| {
+                ClientError::Unknown(
+                    vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                )
+            })?
             .len()
             != expected_bytes
         {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            ));
         }
         let deadline = tokio::time::Instant::now() + RECIPE_IMAGE_UPLOAD_TIMEOUT;
         for attempt in 0..3_u32 {
@@ -137,10 +165,20 @@ impl AgentHttpClient {
                     )
                     .open(path)
                     .await
-                    .map_err(|_| ClientError::Retryable)?;
-                let metadata = file.metadata().await.map_err(|_| ClientError::Retryable)?;
+                    .map_err(|_| {
+                        ClientError::Unknown(
+                            vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                        )
+                    })?;
+                let metadata = file.metadata().await.map_err(|_| {
+                    ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    )
+                })?;
                 if !metadata.is_file() || metadata.len() != expected_bytes {
-                    return Err(ClientError::Retryable);
+                    return Err(ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    ));
                 }
                 let response = self
                     .current_client()
@@ -157,11 +195,15 @@ impl AgentHttpClient {
                     Ok(())
                 } else {
                     classify_response(&response)?;
-                    Err(ClientError::Retryable)
+                    Err(ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    ))
                 }
             })
             .await
-            .unwrap_or(Err(ClientError::Retryable));
+            .unwrap_or(Err(ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            )));
             match result {
                 Err(ref error)
                     if error.retryable()
@@ -172,16 +214,17 @@ impl AgentHttpClient {
                     // attaches the same content receipt idempotently. Repeating
                     // it reconciles a lost acknowledgement without running the
                     // job again or changing the output identity.
-                    tokio::time::sleep_until(deadline.min(
-                        tokio::time::Instant::now()
-                            + Duration::from_millis(100 * u64::from(attempt + 1)),
-                    ))
+                    tokio::time::sleep_until(
+                        deadline.min(tokio::time::Instant::now() + error.retry_delay(attempt)),
+                    )
                     .await;
                 }
                 result => return result,
             }
         }
-        Err(ClientError::Retryable)
+        Err(ClientError::Unknown(
+            vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+        ))
     }
 
     pub async fn upload_recipe_image<F>(
@@ -206,11 +249,17 @@ impl AgentHttpClient {
         }
         if tokio::fs::metadata(path)
             .await
-            .map_err(|_| ClientError::Retryable)?
+            .map_err(|_| {
+                ClientError::Unknown(
+                    vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                )
+            })?
             .len()
             != image_bytes
         {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            ));
         }
         use tokio::io::AsyncSeekExt;
         let endpoint = self.endpoint(&format!("/agent/recipe-builds/{build_id}/image"))?;
@@ -227,11 +276,15 @@ impl AgentHttpClient {
                     .send()
                     .await?;
                 if status.status() == StatusCode::CONFLICT {
-                    return Err(ClientError::Retryable);
+                    return Err(ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    ));
                 }
                 if status.status() != StatusCode::OK {
                     classify_response(&status)?;
-                    return Err(ClientError::Retryable);
+                    return Err(ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    ));
                 }
                 let offset = status
                     .headers()
@@ -239,7 +292,9 @@ impl AgentHttpClient {
                     .and_then(|value| value.to_str().ok())
                     .and_then(|value| value.parse::<u64>().ok())
                     .filter(|value| *value <= image_bytes)
-                    .ok_or(ClientError::Retryable)?;
+                    .ok_or(ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    ))?;
                 match status
                     .headers()
                     .get("x-vonk-upload-complete")
@@ -250,7 +305,11 @@ impl AgentHttpClient {
                         return Ok(());
                     }
                     Some("false") => (),
-                    _ => return Err(ClientError::Retryable),
+                    _ => {
+                        return Err(ClientError::Unknown(
+                            vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                        ));
+                    }
                 }
                 progress(offset);
                 let mut file = tokio::fs::File::open(path).await?;
@@ -280,10 +339,14 @@ impl AgentHttpClient {
                 if response.status() == StatusCode::NO_CONTENT {
                     Ok(())
                 } else if response.status() == StatusCode::CONFLICT {
-                    Err(ClientError::Retryable)
+                    Err(ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    ))
                 } else {
                     classify_response(&response)?;
-                    Err(ClientError::Retryable)
+                    Err(ClientError::Unknown(
+                        vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                    ))
                 }
             }
             .await;
@@ -292,12 +355,14 @@ impl AgentHttpClient {
                     // An unreadable upload acknowledgement is observation loss.
                     // Re-enter through HEAD for the exact content identity;
                     // accepted bytes are reused before another PUT is possible.
-                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
+                    tokio::time::sleep(error.retry_delay(attempt)).await;
                 }
                 result => return result,
             }
         }
-        Err(ClientError::Retryable)
+        Err(ClientError::Unknown(
+            vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+        ))
     }
 }
 

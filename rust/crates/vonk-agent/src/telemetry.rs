@@ -144,7 +144,11 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .as_ref()
             .filter(|value| !shared_memory_pool(Some(value.name.as_str())))
             .and_then(|value| value.memory);
+        let health =
+            crate::identity::renewal_health(&self.paths.store.join("credentials"), observed_at);
         TelemetrySample {
+            renewal_failed: health.and_then(|(failed, _)| failed),
+            credential_remaining_fraction: health.map(|(_, remaining)| remaining),
             boot_id: self.boot_id,
             observed_at: observed_at.fixed_offset(),
             memory_total_bytes: memory.map(|value| value.0),

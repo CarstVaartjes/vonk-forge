@@ -76,6 +76,13 @@ class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
         ),
     )
 
+    EVIDENCE_GROUPS += (
+        EvidenceGroup(
+            AgentEvidenceCode.TELEMETRY_READING_DROPPED,
+            (("renewal_failed",), ("credential_remaining_fraction",)),
+        ),
+    )
+
     boot_id: str = Field(
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
@@ -103,6 +110,10 @@ class TelemetrySample(OptionalEvidenceModel, TelemetryWireModel):
     )
     cpu_frequency_max_mhz: int | None = Field(
         default=None, ge=1, le=20_000, exclude_if=lambda value: value is None
+    )
+    renewal_failed: bool | None = None
+    credential_remaining_fraction: float | None = Field(
+        default=None, ge=0, le=1, allow_inf_nan=False
     )
     _parse_observed_at = field_validator("observed_at", mode="before")(
         _rfc3339_datetime

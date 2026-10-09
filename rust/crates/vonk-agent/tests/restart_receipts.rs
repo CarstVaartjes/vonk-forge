@@ -157,6 +157,7 @@ fn ingress_refusal() -> ControllerError {
         operation: "controller.request /agent/result".to_owned(),
         endpoint: "/agent/result".to_owned(),
         status: 422,
+        failure: None,
         code: "controller.invalid_request".to_owned(),
         request_id: Some("req-422".to_owned()),
         decision: "exit",

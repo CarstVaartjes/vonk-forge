@@ -3305,6 +3305,16 @@
             "minLength": 1,
             "title": "Detail",
             "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HttpFailureResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -12323,6 +12333,112 @@
         ],
         "title": "HostHelperResponseStatus",
         "type": "string"
+      },
+      "HttpFailureResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "failure": {
+            "discriminator": {
+              "mapping": {
+                "refusal": "#/components/schemas/HttpRefusal",
+                "transient": "#/components/schemas/HttpTransient"
+              },
+              "propertyName": "family"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HttpTransient"
+              },
+              {
+                "$ref": "#/components/schemas/HttpRefusal"
+              }
+            ],
+            "title": "Failure"
+          }
+        },
+        "required": [
+          "failure"
+        ],
+        "title": "HttpFailureResponse",
+        "type": "object"
+      },
+      "HttpRefusal": {
+        "additionalProperties": false,
+        "properties": {
+          "family": {
+            "const": "refusal",
+            "title": "Family",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "reason": {
+            "$ref": "#/components/schemas/HttpRefusalReason"
+          }
+        },
+        "required": [
+          "family",
+          "reason"
+        ],
+        "title": "HttpRefusal",
+        "type": "object"
+      },
+      "HttpRefusalReason": {
+        "enum": [
+          "authentication_required",
+          "authority_denied",
+          "unknown_identity",
+          "revoked_identity",
+          "invalid_signature",
+          "invalid_digest",
+          "tampered_token",
+          "expired_credential"
+        ],
+        "title": "HttpRefusalReason",
+        "type": "string"
+      },
+      "HttpTransient": {
+        "additionalProperties": false,
+        "properties": {
+          "family": {
+            "const": "transient",
+            "title": "Family",
+            "type": "string",
+            "x-vonk-typed-tag": true
+          },
+          "reason": {
+            "$ref": "#/components/schemas/TransientReason"
+          },
+          "resolution_window": {
+            "maximum": 3600,
+            "minimum": 1,
+            "title": "Resolution Window",
+            "type": "integer"
+          },
+          "retry_after": {
+            "maximum": 3600,
+            "minimum": 0,
+            "title": "Retry After",
+            "type": "integer"
+          },
+          "suggested_window": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RenewalWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "family",
+          "reason",
+          "retry_after",
+          "resolution_window"
+        ],
+        "title": "HttpTransient",
+        "type": "object"
       },
       "ImageStoreCode": {
         "description": "Refusals and damage found by the Controller OCI image store.",
@@ -28411,6 +28527,30 @@
         "title": "RemovedRecipeNodeResult",
         "type": "object"
       },
+      "RenewalWindow": {
+        "additionalProperties": false,
+        "description": "Offsets from issuance, in seconds; a client picks once per credential.",
+        "properties": {
+          "end_seconds": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "title": "End Seconds",
+            "type": "integer"
+          },
+          "start_seconds": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "title": "Start Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start_seconds",
+          "end_seconds"
+        ],
+        "title": "RenewalWindow",
+        "type": "object"
+      },
       "RequestValidationIssue": {
         "additionalProperties": false,
         "description": "A structural input error without the submitted input or validator context.",
@@ -28487,6 +28627,16 @@
             },
             "title": "Issues",
             "type": "array"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HttpFailureResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -36223,6 +36373,19 @@
             ],
             "title": "Cpu Frequency Min Mhz"
           },
+          "credential_remaining_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Remaining Fraction"
+          },
           "disk_free_bytes": {
             "anyOf": [
               {
@@ -36356,6 +36519,17 @@
             "format": "date-time",
             "title": "Received At",
             "type": "string"
+          },
+          "renewal_failed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Renewal Failed"
           }
         },
         "required": [
@@ -36408,6 +36582,19 @@
           "topology.runtime_capability_missing"
         ],
         "title": "TopologyCode",
+        "type": "string"
+      },
+      "TransientReason": {
+        "enum": [
+          "ca_unavailable",
+          "controller_starting",
+          "admission_busy",
+          "dependency_unavailable",
+          "rate_limited",
+          "peer_response_unavailable",
+          "local_state_unavailable"
+        ],
+        "title": "TransientReason",
         "type": "string"
       },
       "UnavailableFleetProfileView": {

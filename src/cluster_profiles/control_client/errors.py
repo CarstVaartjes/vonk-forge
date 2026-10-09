@@ -218,6 +218,7 @@ class ControlHTTPError(ControlClientError):
         code: str | None = None,
         recovery: tuple[str, ...] = (),
         retryable: bool = False,
+        failure_family: str | None = None,
         retry_time: str | None = None,
         preserved: str | None = None,
         required_bytes: int | None = None,
@@ -234,6 +235,7 @@ class ControlHTTPError(ControlClientError):
         self.code = safe_code(code, f"http.{status_code}")
         self.recovery = recovery
         self.retryable = retryable
+        self.failure_family = failure_family
         self.retry_time = retry_time
         self.preserved = preserved
         self.required_bytes = required_bytes

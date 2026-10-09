@@ -161,7 +161,7 @@ async fn exact_snapshot_inspection_failure_preserves_other_runs_without_reportin
             crate::host_runtime::HelperProtocolCause::InspectionOutcome,
         ),
         crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(Box::new(
-            crate::client::ControllerError::from_status(403),
+            crate::client::ControllerError::refused_identity(403),
         ))),
     ] {
         let server = ObservationServer::new(Some(204));

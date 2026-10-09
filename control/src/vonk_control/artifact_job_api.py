@@ -13,6 +13,9 @@ from vonk_agent_protocol import (
     RecipeJobOutputLimits,
     UnknownOutcomeError,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_jobs import (
@@ -63,7 +66,11 @@ def _service(service: ArtifactJobService | None) -> ArtifactJobService:
 
 def _mutating(actor: Actor) -> None:
     if actor.role not in {"operator", "administrator"}:
-        raise HTTPException(status_code=403, detail="insufficient role")
+        raise SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHORITY_DENIED,
+            status_code=403,
+            detail="insufficient role",
+        )
 
 
 def _view(value: ArtifactJobView) -> ArtifactJobResponse:
@@ -361,8 +368,10 @@ def install_artifact_job_routes(
     def agent_input(request: Request, job_id: str, sha256: str) -> Response:
         identity = agent_identity_from_scope(dict(request.scope))
         if identity is None:
-            raise HTTPException(
-                status_code=401, detail="verified agent identity required"
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                status_code=401,
+                detail="verified agent identity required",
             )
         try:
             path, media_type, size_bytes = _service(service).input_blob(
@@ -402,8 +411,10 @@ def install_artifact_job_routes(
     ) -> Response:
         identity = agent_identity_from_scope(dict(request.scope))
         if identity is None:
-            raise HTTPException(
-                status_code=401, detail="verified agent identity required"
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                status_code=401,
+                detail="verified agent identity required",
             )
         try:
             await _service(service).put_output_stream(

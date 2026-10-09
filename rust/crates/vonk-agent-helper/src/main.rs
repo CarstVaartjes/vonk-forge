@@ -343,7 +343,8 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
         request_id,
         status: HostHelperResponseStatus::Rejected,
         exit_code,
-        error_code: Some(error.error_code.to_string()),
+        failure: Some(vonk_agent_helper::failure::outcome(error.error_code)),
+        error_code: Some(error.error_code),
         process_running: None,
         installation_intent_nonce: error.installation_intent_nonce.clone(),
     };
@@ -404,6 +405,7 @@ fn handle(
                 request_id: Some(inspection.request_id),
                 status: HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
                 exit_code: None,
+                failure: None,
                 error_code: None,
                 process_running: Some(inspected.running),
             },
@@ -454,6 +456,7 @@ fn handle(
                     "invalid operation exit code",
                 )
             })?,
+        failure: None,
         error_code: None,
         process_running: None,
     };
@@ -798,7 +801,10 @@ mod tests {
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: HostHelperResponseStatus::Rejected,
             exit_code: None,
-            error_code: Some(HelperErrorCode::OperationFailed.as_str().to_owned()),
+            failure: Some(vonk_agent_helper::failure::outcome(
+                HelperErrorCode::OperationFailed,
+            )),
+            error_code: Some(HelperErrorCode::OperationFailed),
             process_running: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
@@ -818,6 +824,7 @@ mod tests {
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             status: HostHelperResponseStatus::PackageInstalled,
             exit_code: None,
+            failure: None,
             error_code: None,
             process_running: None,
         };

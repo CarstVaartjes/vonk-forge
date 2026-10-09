@@ -559,7 +559,7 @@ async fn distribution_acceptance_resumes_partial_object_and_rejects_corruption()
         corrupt_client
             .download_distribution(TEST_PLAN_DIGEST, corrupt_root.path())
             .await,
-        Err(ClientError::Protocol)
+        Err(ClientError::Integrity(_))
     ));
     assert_eq!(corrupt_server.finish().unwrap().len(), 2);
 }
@@ -880,7 +880,7 @@ async fn direct_distribution_retries_service_unavailability_but_not_bad_identity
         if succeeds {
             result.unwrap();
         } else {
-            assert!(matches!(result, Err(ClientError::Protocol)));
+            assert!(matches!(result, Err(ClientError::Integrity(_))));
         }
         assert_eq!(server.finish().unwrap().len(), request_count);
     }

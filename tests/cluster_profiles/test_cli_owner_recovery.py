@@ -10,8 +10,14 @@ import pytest
 from test_controller_cli import FakeClient, run
 
 from cluster_profiles import cli, controller_cli
-from cluster_profiles.cli_states_generated import OBSERVING, QUEUED, SUCCEEDED
+from cluster_profiles.cli_states_generated import (
+    HTTP_REFUSAL,
+    OBSERVING,
+    QUEUED,
+    SUCCEEDED,
+)
 from cluster_profiles.control_client import (
+    ControlForbidden,
     ControlHTTPError,
     ControlMalformedResponse,
     ControlTransportError,
@@ -221,12 +227,7 @@ def test_read_answer_reobserves_except_actual_authorization_denial(denied):
         "state": QUEUED,
     }
     answer = (
-        ControlMalformedResponse(
-            "unreadable authorization response",
-            context=replace(
-                protocol_context(operation="lookup", endpoint=lookup), http_status=403
-            ),
-        )
+        ControlForbidden(403, "authority denied", failure_family=HTTP_REFUSAL)
         if denied
         else ControlHTTPError(400, "projection temporarily unreadable")
     )

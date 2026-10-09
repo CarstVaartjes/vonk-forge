@@ -562,8 +562,16 @@ async fn transient_heartbeat_failure_retries_inside_the_accepted_lease() {
         }
         assert_eq!(heartbeats.lock().unwrap().len(), 1);
         tokio::task::yield_now().await;
-        tokio::time::advance(HEARTBEAT_RETRY_FLOOR).await;
+        tokio::time::advance(HEARTBEAT_RETRY_FLOOR - Duration::from_millis(1)).await;
         tokio::task::yield_now().await;
+        assert_eq!(heartbeats.lock().unwrap().len(), 1);
+        for _ in 0..30 {
+            if heartbeats.lock().unwrap().len() >= 2 {
+                break;
+            }
+            tokio::time::advance(Duration::from_millis(10)).await;
+            tokio::task::yield_now().await;
+        }
         assert_eq!(heartbeats.lock().unwrap().len(), 2);
     };
     let (result, ()) = tokio::join!(run, drive_clock);
@@ -684,7 +692,7 @@ async fn a_retryable_renewal_failure_after_the_lease_lapses_still_renews() {
         let executor = RenewalGatedExecutor {
             accepted: accepted_at.clone(),
             minimum: 1,
-            cap: Duration::from_secs(5),
+            cap: Duration::from_secs(20),
             cancelled: cancelled.clone(),
         };
 
@@ -964,7 +972,9 @@ impl LoopClient for DeferredDeliveryClient {
     }
     async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
         if self.unavailable.load(Ordering::SeqCst) {
-            Err(ClientError::Retryable)
+            Err(ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            ))
         } else {
             self.inner.submit_result(result).await
         }

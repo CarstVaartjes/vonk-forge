@@ -105,9 +105,9 @@ def test_unverified_identity_never_has_a_persisted_effect(service, monkeypatch):
         )
 
 
-def test_exhausted_submit_ends_and_admits_same_node(service, monkeypatch):
-    """Catches retained issuing owners and retrying the old effect under a new key."""
-    enrollment, sessions, _, authority = service
+def test_exhausted_submit_replays_exact_binding_after_recovery(service, monkeypatch):
+    """Catches a transient provider outage permanently consuming the bearer grant."""
+    enrollment, _, _, authority = service
     original = authority.issue_node
     bindings = []
 
@@ -122,26 +122,19 @@ def test_exhausted_submit_ends_and_admits_same_node(service, monkeypatch):
     enrollment.submit(grant.token, request, evidence(request))
     assert len(bindings) == 4
     assert all(binding == bindings[0] for binding in bindings)
-    with sessions() as session:
-        accepted = session.scalar(
-            select(AgentEnrollment).where(AgentEnrollment.grant_id == grant.id)
-        )
-        assert accepted.state == EnrollmentRecordState.ENDED
-        assert session.get(AgentCertificate, bindings[0].serial) is None
-        assert (
-            session.get(AgentIssuedCertificateRevocation, bindings[0].serial)
-            is not None
-        )
-    # Replaying an ended request cannot reissue its certificate.
-    enrollment.submit(grant.token, request, evidence(request))
-    assert len(bindings) == 4
     monkeypatch.setattr(authority, "issue_node", original)
-    fresh = enrollment.create(NODE_ID, "admin", 600)
-    assert isinstance(fresh, EnrollmentGrant)
-    issued = enrollment.submit(fresh.token, request, evidence(request))
+    issued = enrollment.submit(grant.token, request, evidence(request))
     assert isinstance(issued, IssuedCertificate)
-    assert issued.node_id == NODE_ID
-    assert len(authority.calls) == 1
+    assert issued.serial == bindings[0].serial
+    fresh = enrollment.create_reenrollment(
+        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
+    )
+    assert isinstance(fresh, EnrollmentGrant)
+    next_request = csr()
+    assert isinstance(
+        enrollment.submit(fresh.token, next_request, evidence(next_request)),
+        IssuedCertificate,
+    )
 
 
 def test_exhausted_rotation_releases_gate_and_reconciles_late_effect(
@@ -304,7 +297,7 @@ def test_damaged_rotation_projection_releases_owner(service, damage):
 @pytest.mark.parametrize(
     "reply", ["unavailable", "missing-fields", "oversized", "malformed-json"]
 )
-def test_real_ca_reply_unknown_ends_then_fresh_same_node_is_admitted(
+def test_real_ca_reply_unknown_replays_then_fresh_same_node_is_admitted(
     service, tmp_path, reply
 ):
     """Catches parsed 503/schema/reader failures being treated as bad authority."""
@@ -359,19 +352,18 @@ def test_real_ca_reply_unknown_ends_then_fresh_same_node_is_admitted(
     assert isinstance(grant, EnrollmentGrant)
     enrollment.submit(grant.token, request, evidence(request))
     assert len(requests) == 4
-    with sessions() as session:
-        assert session.get(AgentCertificate, NODE_ID) is None
-        assert (
-            session.scalar(select(AgentEnrollment)).state == EnrollmentRecordState.ENDED
-        )
     fault = False
-    fresh = enrollment.create(NODE_ID, "admin", 600)
-    assert isinstance(fresh, EnrollmentGrant)
-    issued = enrollment.submit(fresh.token, request, evidence(request))
+    issued = enrollment.submit(grant.token, request, evidence(request))
     assert isinstance(issued, IssuedCertificate)
-    assert issued.node_id == NODE_ID
-    with sessions() as session:
-        assert session.get(AgentCertificate, issued.serial).revoked_at is None
+    fresh = enrollment.create_reenrollment(
+        NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
+    )
+    assert isinstance(fresh, EnrollmentGrant)
+    next_request = csr()
+    assert isinstance(
+        enrollment.submit(fresh.token, next_request, evidence(next_request)),
+        IssuedCertificate,
+    )
     provider.close()
 
 

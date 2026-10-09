@@ -130,6 +130,7 @@ impl HostRuntimeBoundary<'_> {
         let permit = background_inspection_slots(self.helper_socket)
             .try_acquire_owned()
             .map_err(|_| HostRuntimeError::HelperRejected {
+                failure: None,
                 code: HelperErrorCode::ConcurrencyLimit,
                 diagnostic: None,
                 process_logs: None,
@@ -386,7 +387,7 @@ impl HostRuntimeBoundary<'_> {
                 })??;
                 require_bound_response(&response, &request_id)?;
                 if response.status == HostHelperResponseStatus::Rejected
-                    && response.error_code.as_deref()
+                    && response.error_code.as_ref().map(|code| code.as_str())
                         == Some(HelperErrorCode::InstallationIntentObservationRequired.as_str())
                     && matches!(
                         action,
@@ -409,6 +410,7 @@ impl HostRuntimeBoundary<'_> {
             }
             let Some((response, request_id)) = accepted_response else {
                 return Err(HostRuntimeError::HelperRejected {
+                    failure: None,
                     code: HelperErrorCode::InstallationReconciliationStorageUnavailable,
                     diagnostic: None,
                     process_logs: None,

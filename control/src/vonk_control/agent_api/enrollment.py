@@ -14,6 +14,9 @@ from vonk_agent_protocol.enrollment import (
     EnrollmentSubmitRequest,
     IssuedCertificateResponse,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from ..contract_graph import raw_json_body
 from ..enrollment import (
@@ -144,7 +147,11 @@ def install_enrollment_routes(
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
         except EnrollmentDenied as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=str(error),
+            ) from None
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         if isinstance(outcome, UnknownError):

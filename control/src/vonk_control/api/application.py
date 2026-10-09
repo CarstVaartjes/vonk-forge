@@ -31,8 +31,10 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import CatalogCode, ControllerErrorCode, canonical_message
+from vonk_agent_protocol.http_failure import HttpRefusalReason
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
+from vonk_control.http_errors import SecurityHTTPError
 
 from ..agent_api import (
     MAX_RECIPE_IMAGE_BYTES,
@@ -430,6 +432,21 @@ def create_app(
                 media_type="application/json",
             )
             response.headers["x-vonk-error-code"] = ControllerErrorCode.INTERNAL_ERROR
+        if response.status_code >= 400:
+            from vonk_agent_protocol.http_failure import HttpTransient
+
+            from .common import http_failure_response
+
+            outcome = http_failure_response(
+                response.status_code,
+                response.headers.get("retry-after"),
+                response.headers.get("x-vonk-outcome"),
+            )
+            response.headers["x-vonk-outcome"] = outcome.model_dump_json(
+                exclude_none=True
+            )
+            if isinstance(outcome.failure, HttpTransient):
+                response.headers["retry-after"] = str(outcome.failure.retry_after)
         response.headers["x-request-id"] = request_id
         response.headers["x-content-type-options"] = "nosniff"
         if response.status_code >= 400 and "x-vonk-error-code" not in response.headers:
@@ -450,38 +467,62 @@ def create_app(
         if authorization.startswith("Bearer "):
             encoded = authorization.removeprefix("Bearer ")
             if not encoded:
-                raise HTTPException(status_code=401, detail="authentication required")
+                raise SecurityHTTPError(
+                    reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                    status_code=401,
+                    detail="authentication required",
+                )
             try:
                 authenticated = tokens.verify(encoded, now=now())
             except AuthError:
-                raise HTTPException(
-                    status_code=401, detail="authentication failed"
+                raise SecurityHTTPError(
+                    reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                    status_code=401,
+                    detail="authentication failed",
                 ) from None
         else:
             encoded = request.cookies.get("vonk_session", "")
             cookie_auth = bool(encoded)
             if not encoded:
-                raise HTTPException(status_code=401, detail="authentication required")
+                raise SecurityHTTPError(
+                    reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                    status_code=401,
+                    detail="authentication required",
+                )
             if browser_auth is None:
-                raise HTTPException(status_code=401, detail="authentication failed")
+                raise SecurityHTTPError(
+                    reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                    status_code=401,
+                    detail="authentication failed",
+                )
             try:
                 authenticated = browser_auth.resolve(encoded).actor
             except BrowserAuthenticationError:
-                raise HTTPException(
-                    status_code=401, detail="authentication failed"
+                raise SecurityHTTPError(
+                    reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                    status_code=401,
+                    detail="authentication failed",
                 ) from None
         if cookie_auth and request.method not in {"GET", "HEAD", "OPTIONS"}:
             cookie = request.cookies.get("vonk_csrf")
             header = request.headers.get("x-csrf-token")
             if not cookie or not header or not secrets.compare_digest(cookie, header):
-                raise HTTPException(status_code=403, detail="CSRF validation failed")
+                raise SecurityHTTPError(
+                    reason=HttpRefusalReason.AUTHORITY_DENIED,
+                    status_code=403,
+                    detail="CSRF validation failed",
+                )
         return authenticated
 
     def require_mutation_role(
         authenticated: Actor, path: str, method: str = "POST"
     ) -> None:
         if authenticated.role not in MUTATION_ROLES[(method, path)]:
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="insufficient role",
+            )
 
     install_agent_routes(
         app,
@@ -609,7 +650,11 @@ def create_app(
         if not secrets.compare_digest(
             authorization, f"Bearer {expected_metrics_token}"
         ):
-            raise HTTPException(status_code=401, detail="authentication required")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                status_code=401,
+                detail="authentication required",
+            )
         if metrics_refresh is not None:
             metrics_refresh()
         return Response(

@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .auth import MUTATION_ROLES, Actor
 from .logging import redact_text
@@ -53,7 +56,11 @@ def install_installation_reconciliation_routes(
 
     def require_mutation(actor: Actor, route: str) -> None:
         if actor.role not in MUTATION_ROLES[("POST", route)]:
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="insufficient role",
+            )
 
     def refusal_detail(error: RunSwitchOperationConflict) -> str:
         detail = redact_text(str(error))[:256]

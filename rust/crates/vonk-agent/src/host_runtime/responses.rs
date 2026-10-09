@@ -15,7 +15,8 @@ pub(super) fn require_bound_response(
     if response.request_id.is_none()
         && response
             .error_code
-            .as_deref()
+            .as_ref()
+            .map(|code| code.as_str())
             .is_some_and(unbound_rejection_is_expected)
     {
         return Ok(());
@@ -74,7 +75,8 @@ pub(super) fn runtime_rejection(
 ) -> HostRuntimeError {
     let Some(code) = response
         .error_code
-        .as_deref()
+        .as_ref()
+        .map(|code| code.as_str())
         .and_then(crate::helper_codes::runtime_rejection)
     else {
         return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);
@@ -89,6 +91,7 @@ pub(super) fn runtime_rejection(
         return HostRuntimeError::HelperProtocol(HelperProtocolCause::RejectionMalformed);
     }
     HostRuntimeError::HelperRejected {
+        failure: response.failure.clone().map(Box::new),
         code,
         diagnostic: response
             .diagnostic

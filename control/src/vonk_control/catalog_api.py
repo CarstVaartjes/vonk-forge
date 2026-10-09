@@ -8,6 +8,9 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import Field
 from starlette.responses import JSONResponse
 from vonk_agent_protocol import CatalogSyncCode
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .auth import Actor
 from .catalog_service import (
@@ -142,7 +145,11 @@ def install_catalog_routes(
 
     def administrator(actor: Actor) -> None:
         if actor.role != "administrator":
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="insufficient role",
+            )
 
     def sync_service() -> ManagedRecipeCatalogSync:
         if managed_sync is None:

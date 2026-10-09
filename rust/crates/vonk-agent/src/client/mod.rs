@@ -34,10 +34,10 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::generated::{
     ActivateRequest, AgentEvidenceCode, AgentUpgradeGrantRequest, BoundedErrorResponse,
-    ClaimRequest, ControllerErrorCode, ControllerRefusalBody, HostHelperGrantResponse,
-    HostRuntimeGrantRequest, HostRuntimeGrantRequestAction, IssuedCertificateResponse,
-    PackageActivationGrantRequest, ProgressPhase, RenewRequest, RequestValidationIssueLocItem,
-    RequestValidationProblem, SecurityRefusalReason, TelemetryRequest,
+    ClaimRequest, ControllerErrorCode, HostHelperGrantResponse, HostRuntimeGrantRequest,
+    HostRuntimeGrantRequestAction, PackageActivationGrantRequest, ProgressPhase,
+    RequestValidationIssueLocItem, RequestValidationProblem, SecurityRefusalReason,
+    TelemetryRequest,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
@@ -56,7 +56,6 @@ use crate::{
     pair::verify_ca_pin,
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
-    vocabulary,
 };
 
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -97,12 +96,8 @@ const DISTRIBUTION_RANGE_BYTES: u64 = 64 * 1024 * 1024;
 const WRITE_BEHIND_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Longest a single heartbeat request may spend before it is treated as lost.
-/// The renewal loop reserves lease margin against the same budget, so one
-/// slow or dropped request cannot consume the whole accepted lease.
+/// The owning observation deadline bounds retries after a lost response.
 pub(crate) const HEARTBEAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-/// Part of the accepted lease the renewal loop keeps in hand to schedule the
-/// next authorised attempt rather than discovering the expiry while sending.
-pub(crate) const HEARTBEAT_LEASE_MARGIN: Duration = Duration::from_secs(1);
 
 /// The one Controller<->agent protocol version this agent speaks.
 pub const AGENT_PROTOCOL_VERSION: u32 = 4;
@@ -177,6 +172,7 @@ pub struct AgentHttpClient {
 }
 
 use reporting::*;
+pub(crate) use response::classify_response;
 pub use response::parse_claim_response;
 use response::*;
 use storage::*;

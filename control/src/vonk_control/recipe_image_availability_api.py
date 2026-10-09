@@ -20,6 +20,9 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     state_adopter,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .auth import MUTATION_ROLES
 from .bounded_json import require_integer, require_sequence
@@ -350,7 +353,11 @@ def _service(
 
 def _mutating(actor: Any, route: str) -> None:
     if getattr(actor, "role", None) not in MUTATION_ROLES[("POST", route)]:
-        raise HTTPException(status_code=403, detail="insufficient role")
+        raise SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHORITY_DENIED,
+            status_code=403,
+            detail="insufficient role",
+        )
 
 
 # One refusal leaves the Controller as evidence, so its detail names the stable
@@ -397,7 +404,11 @@ def _recipe_error(error: BaseException) -> HTTPException:
     if code.endswith("selector_missing"):
         return HTTPException(status_code=404, detail=str(error))
     if code.endswith("authority_denied"):
-        return HTTPException(status_code=403, detail=str(error))
+        return SecurityHTTPError(
+            reason=HttpRefusalReason.AUTHORITY_DENIED,
+            status_code=403,
+            detail=str(error),
+        )
     if code.endswith(("selector_ambiguous", "request_key_reused", "not_cancellable")):
         return HTTPException(status_code=409, detail=str(error))
     if code.endswith("invalid"):

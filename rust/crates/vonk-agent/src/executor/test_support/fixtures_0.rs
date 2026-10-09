@@ -65,6 +65,13 @@ impl ObservationServer {
                     }
                 };
                 let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+                // OrbStack probes newly forwarded fixture ports independently.
+                if headers.starts_with("GET / HTTP/1.1\r\n") {
+                    stream
+                        .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                        .unwrap();
+                    continue;
+                }
                 if let Some(path) = headers
                     .strip_prefix("GET ")
                     .and_then(|line| line.split_once(" HTTP/1.1\r\n"))
@@ -161,7 +168,9 @@ impl LoopClient for RecordingClient {
     async fn heartbeat(&self, progress: &AgentProgress) -> Result<AgentDirective, ClientError> {
         self.heartbeats.lock().unwrap().push(progress.clone());
         if self.fail_heartbeat && self.heartbeats.lock().unwrap().len() == 1 {
-            return Err(ClientError::Retryable);
+            return Err(ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            ));
         }
         Ok(AgentDirective {
             cancel_requested: self.cancel_requested,
@@ -200,6 +209,7 @@ impl LoopClient for SupersededCancellationClient {
             operation: "controller.request /agent/heartbeat".to_owned(),
             endpoint: "/agent/heartbeat".to_owned(),
             status: 409,
+            failure: None,
             code: vonk_agent_protocol::generated::ControllerErrorCode::SupersededOperationCancelled
                 .as_str()
                 .to_owned(),
@@ -240,8 +250,10 @@ impl LoopClient for TerminalHeartbeatClient {
             return self.inner.heartbeat(progress).await;
         }
         assert!(!self.panic, "heartbeat task failed unexpectedly");
-        // Local identity loss is recoverable; a CA-pin mismatch is a refusal.
-        Err(ClientError::Pin)
+        // The peer explicitly refuses the current authenticated identity.
+        Err(ClientError::Controller(Box::new(
+            ControllerError::refused_identity(403),
+        )))
     }
 
     async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
@@ -552,6 +564,7 @@ pub(in crate::executor) fn ingress_refusal() -> ControllerError {
         operation: "controller.request /agent/result".to_owned(),
         endpoint: "/agent/result".to_owned(),
         status: 422,
+        failure: None,
         code: vonk_agent_protocol::generated::ControllerErrorCode::ControllerInvalidRequest
             .as_str()
             .to_owned(),

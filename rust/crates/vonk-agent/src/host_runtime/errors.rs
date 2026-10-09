@@ -25,6 +25,7 @@ pub enum HostRuntimeError {
     StopUncertain,
     #[error("host runtime helper rejected request: {code}")]
     HelperRejected {
+        failure: Option<Box<vonk_agent_protocol::generated::HttpFailureResponse>>,
         code: HelperErrorCode,
         diagnostic: Option<String>,
         /// The rejected container's own retained output, per stream, when the
@@ -152,17 +153,45 @@ impl HelperProtocolCause {
 }
 
 impl HostRuntimeError {
+    pub fn security_edge(&self) -> bool {
+        match self {
+            Self::Controller(error) => error.refused(),
+            Self::HelperRejected {
+                failure: Some(answer),
+                ..
+            } => matches!(
+                answer.failure,
+                vonk_agent_protocol::generated::HttpFailureResponseFailure::Refusal(_)
+            ),
+            _ => false,
+        }
+    }
+
+    pub fn retry_after_seconds(&self) -> Option<u32> {
+        match self {
+            Self::Controller(error) => error.retry_after_seconds(),
+            Self::HelperRejected {
+                failure: Some(answer),
+                ..
+            } => match &answer.failure {
+                vonk_agent_protocol::generated::HttpFailureResponseFailure::Transient(value) => {
+                    Some(value.retry_after)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// The closed finding code this failure reports in a runtime preflight
     /// result and, spelled without the finding prefix, in admission evidence.
     pub fn finding_code(&self) -> RuntimePreflightFindingCode {
         match self {
             Self::Io(_) => RuntimePreflightFindingCode::PreflightFindingHelperIoFailed,
             Self::Controller(ClientError::Protocol) => {
-                RuntimePreflightFindingCode::PreflightFindingHelperGrantInvalid
+                RuntimePreflightFindingCode::PreflightFindingHelperGrantUnavailable
             }
-            Self::Controller(ClientError::Controller(error))
-                if matches!(error.status, 401 | 403) =>
-            {
+            Self::Controller(error) if error.refused() => {
                 RuntimePreflightFindingCode::PreflightFindingHelperGrantUnauthorized
             }
             Self::Controller(_) => {

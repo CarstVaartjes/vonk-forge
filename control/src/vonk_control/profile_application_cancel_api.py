@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Path, status
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .auth import MUTATION_ROLES, Actor
 from .fleet_profile_contract import (
@@ -46,7 +49,11 @@ def install_profile_application_cancel_route(
         actor: Actor = actor_dependency,
     ) -> FleetProfileApplicationView:
         if actor.role not in MUTATION_ROLES[("POST", _CANCEL_PATH)]:
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="insufficient role",
+            )
         if profiles is None:
             raise HTTPException(status_code=503, detail="Profiles unavailable")
         try:
@@ -56,7 +63,11 @@ def install_profile_application_cancel_route(
                 actor=actor.subject,
             )
         except FleetProfilePermissionDenied as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=str(error),
+            ) from None
         except KeyError:
             raise HTTPException(
                 status_code=404, detail="Profile cancellation receipt not found"
@@ -83,7 +94,11 @@ def install_profile_application_cancel_route(
         actor: Actor = actor_dependency,
     ) -> FleetProfileApplicationView:
         if actor.role not in MUTATION_ROLES[("POST", _CANCEL_PATH)]:
-            raise HTTPException(status_code=403, detail="insufficient role")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="insufficient role",
+            )
         if profiles is None:
             raise HTTPException(status_code=503, detail="Profiles unavailable")
         try:
@@ -94,7 +109,11 @@ def install_profile_application_cancel_route(
                 actor=actor.subject,
             )
         except FleetProfilePermissionDenied as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=str(error),
+            ) from None
         except KeyError:
             raise HTTPException(
                 status_code=404, detail="Profile application not found"

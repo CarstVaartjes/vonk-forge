@@ -51,6 +51,7 @@ pub struct IdentityMaterial {
     pub serial: String,
     pub fingerprint: String,
     pub generation: u64,
+    pub renewal_window: Option<vonk_agent_protocol::generated::RenewalWindow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +106,7 @@ pub fn persist_identity(root: &Path, material: &IdentityMaterial) -> Result<(), 
 
 fn identity_metadata(material: &IdentityMaterial) -> Result<Vec<u8>, IdentityError> {
     Ok(serde_json::to_vec(&IdentityMetadata {
+        renewal_window: material.renewal_window.clone(),
         fingerprint: material.fingerprint.clone(),
         generation: material.generation,
         node_id: material.node_id.clone(),
@@ -457,13 +459,51 @@ pub fn renewal_due(root: &Path, now: DateTime<Utc>) -> Result<bool, IdentityErro
 
 /// The scheduling boundary owned by the active signed certificate's validity.
 pub fn renewal_time(root: &Path) -> Result<DateTime<Utc>, IdentityError> {
+    renewal_time_with_fraction(root, 5000)
+}
+
+pub fn renewal_time_with_fraction(
+    root: &Path,
+    fraction: u16,
+) -> Result<DateTime<Utc>, IdentityError> {
     let paths = active_identity_paths(root)?;
     let (not_before, not_after) = certificate_validity(&paths.certificate)?;
     let lifetime = not_after - not_before;
     if lifetime <= chrono::Duration::zero() {
         return Err(std::io::Error::other("active certificate validity is invalid").into());
     }
-    Ok(not_after - lifetime / 3)
+    // Certificate bytes provide stable entropy per issuance, without a local
+    // scheduling journal that can latch after damage or an upgrade.
+    let digest = vonk_agent_protocol::hex_sha256(&read_private(&paths.certificate)?);
+    let entropy = u64::from_str_radix(&digest[..16], 16).unwrap_or(0);
+    // Suggested timing is disposable evidence bound to the signed leaf. A
+    // damaged record is a miss and cannot defer renewal beyond certificate life.
+    let suggested = paths.certificate.parent().and_then(|directory| {
+        let metadata: IdentityMetadata =
+            serde_json::from_slice(&read_private(&directory.join("identity.json")).ok()?).ok()?;
+        let raw = read_private(&paths.certificate).ok()?;
+        let (_, leaf) = parse_x509_pem(&raw).ok()?;
+        if metadata.fingerprint != vonk_agent_protocol::hex_sha256(&leaf.contents) {
+            return None;
+        }
+        metadata.renewal_window.filter(|window| {
+            window.start_seconds <= window.end_seconds
+                && i64::from(window.end_seconds) < lifetime.num_seconds()
+        })
+    });
+    if let Some(window) = suggested {
+        let width = u64::from(window.end_seconds - window.start_seconds) + 1;
+        return Ok(not_before
+            + chrono::Duration::seconds(
+                i64::from(window.start_seconds) + (entropy % width) as i64,
+            ));
+    }
+    let width = (lifetime.num_seconds() / 10).max(1);
+    let offset = (entropy % width as u64) as i64;
+    Ok(
+        not_before + lifetime * i32::from(fraction) / 10000 - lifetime / 20
+            + chrono::Duration::seconds(offset),
+    )
 }
 
 fn certificate_validity(path: &Path) -> Result<(DateTime<Utc>, DateTime<Utc>), IdentityError> {
@@ -634,6 +674,7 @@ mod tests {
 
     fn material(generation: u64, marker: u8) -> IdentityMaterial {
         IdentityMaterial {
+            renewal_window: None,
             node_id: NODE_ID.to_owned(),
             private_key_pem: vec![marker, b'k'],
             certificate_pem: vec![marker, b'c'],
@@ -655,12 +696,13 @@ mod tests {
         };
         let certificate = parameters.self_signed(&key).unwrap();
         IdentityMaterial {
+            renewal_window: None,
             node_id: NODE_ID.to_owned(),
             private_key_pem: key.serialize_pem().into_bytes(),
             certificate_pem: certificate.pem().into_bytes(),
             chain_pem: certificate.pem().into_bytes(),
             serial: format!("serial-{generation}"),
-            fingerprint: format!("fingerprint-{generation}"),
+            fingerprint: vonk_agent_protocol::hex_sha256(certificate.der()),
             generation,
         }
     }
@@ -693,13 +735,44 @@ mod tests {
         persist_identity(&root, &certificate_material(1, false)).unwrap();
         let path = active_identity_paths(&root).unwrap().certificate;
         let before = fs::read(&path).unwrap();
-        let due = Utc.with_ymd_and_hms(2026, 8, 3, 0, 0, 0).unwrap();
+        let due = renewal_time(&root).unwrap();
 
-        assert_eq!(renewal_time(&root).unwrap(), due);
+        let paths = active_identity_paths(&root).unwrap();
+        let (begin, end) = certificate_validity(&paths.certificate).unwrap();
+        assert!(due >= begin + (end - begin) * 45 / 100);
+        assert!(due <= begin + (end - begin) * 55 / 100);
         assert!(!renewal_due(&root, due - chrono::Duration::seconds(1)).unwrap());
         assert!(renewal_due(&root, due).unwrap());
         assert!(renewal_due(&root, due + chrono::Duration::seconds(1)).unwrap());
         assert_eq!(fs::read(path).unwrap(), before);
+    }
+
+    #[test]
+    fn renewal_suggestion_survives_restart_and_damaged_metadata_is_a_miss() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("credentials");
+        let mut material = certificate_material(1, false);
+        material.renewal_window = Some(vonk_agent_protocol::generated::RenewalWindow {
+            start_seconds: 100,
+            end_seconds: 200,
+        });
+        persist_identity(&root, &material).unwrap();
+        let paths = active_identity_paths(&root).unwrap();
+        let (begin, end) = certificate_validity(&paths.certificate).unwrap();
+        let due = renewal_time(&root).unwrap();
+        assert!(due >= begin + chrono::Duration::seconds(100));
+        assert!(due <= begin + chrono::Duration::seconds(200));
+        assert_eq!(renewal_time(&root).unwrap(), due);
+        fs::write(
+            paths.certificate.parent().unwrap().join("identity.json"),
+            b"interrupted publication",
+        )
+        .unwrap();
+        let recovered = renewal_time(&root).unwrap();
+        assert!(recovered >= begin + (end - begin) * 45 / 100);
+        assert!(recovered <= begin + (end - begin) * 55 / 100);
+        assert!(renewal_due(&root, recovered).unwrap());
+        assert!(prepare_pending(&root, NODE_ID).is_ok());
     }
 
     #[test]
@@ -925,3 +998,36 @@ mod tests {
 #[cfg(test)]
 #[path = "identity_renewal_tests.rs"]
 mod renewal_tests;
+
+/// Best-effort status is bound to certificate content and never gates work.
+pub fn record_renewal_health(root: &Path, failed: bool) -> Result<(), IdentityError> {
+    let paths = active_identity_paths(root)?;
+    let health = vonk_agent_protocol::generated::RenewalHealth {
+        certificate_digest: vonk_agent_protocol::hex_sha256(&read_private(&paths.certificate)?),
+        failed,
+    };
+    atomic_private_write(root, "renewal-health.json", &serde_json::to_vec(&health)?)?;
+    Ok(())
+}
+
+pub fn renewal_health(root: &Path, now: DateTime<Utc>) -> Option<(Option<bool>, f64)> {
+    let paths = active_identity_paths(root).ok()?;
+    let (start, end) = certificate_validity(&paths.certificate).ok()?;
+    let lifetime = (end - start).num_seconds();
+    if lifetime <= 0 {
+        return None;
+    }
+    let remaining = ((end - now).num_seconds() as f64 / lifetime as f64).clamp(0.0, 1.0);
+    let digest = vonk_agent_protocol::hex_sha256(&read_private(&paths.certificate).ok()?);
+    let failed = read_private(&root.join("renewal-health.json"))
+        .ok()
+        .and_then(|bytes| {
+            vonk_agent_protocol::parse_strict::<vonk_agent_protocol::generated::RenewalHealth>(
+                &bytes,
+            )
+            .ok()
+        })
+        .filter(|health| health.certificate_digest == digest)
+        .map(|health| health.failed);
+    Some((failed, remaining))
+}

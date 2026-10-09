@@ -39,6 +39,9 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .auth import MUTATION_ROLES, Actor
 from .operation_api import bounded_error_responses
@@ -975,7 +978,11 @@ def install_gateway_key_routes(
 
     def authorize(actor: Actor, path: str) -> None:
         if actor.role not in MUTATION_ROLES[("POST", path)]:
-            raise HTTPException(status_code=403, detail=SecurityRefusalReason.FORBIDDEN)
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=SecurityRefusalReason.FORBIDDEN,
+            )
 
     @app.get(
         _KEY_PATH,

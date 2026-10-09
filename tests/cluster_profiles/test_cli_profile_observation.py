@@ -7,6 +7,7 @@ from typing import cast
 import pytest
 
 from cluster_profiles import cli
+from cluster_profiles.cli_states_generated import HTTP_REFUSAL
 from cluster_profiles.control_client import (
     ControlConflict,
     ControlHTTPError,
@@ -231,7 +232,9 @@ def test_owner_authorization_denial_does_not_replay_and_a_new_request_is_admitte
             ("GET", "/api/recipe/vision/remove-review"): _removal_review(
                 "recipe", selector, with_model=False
             ),
-            ("POST", "/api/recipe/vision/remove"): ControlForbidden(403, "denied"),
+            ("POST", "/api/recipe/vision/remove"): ControlForbidden(
+                403, "denied", failure_family=HTTP_REFUSAL
+            ),
         }
     )
     argv = ("recipe", "remove", selector, "--keep-model", "--yes", "--detach", "--json")

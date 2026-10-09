@@ -525,39 +525,29 @@ class EnrollmentService(RotationService):
     def submit(
         self, token: str, csr: bytes, evidence: Mapping[str, str]
     ) -> IssuedCertificate | UnknownError:
-        """Bounded bookkeeping retries; issuance uncertainty preserves its typed handoff."""
-        end_owner = False
+        """Bounded observation preserves the accepted identity through recovery."""
         for delay in (0.0, 0.05, 0.1, 0.2):
             if delay:
                 time.sleep(delay)
             try:
                 return self._submit_once(token, csr, evidence)
-            except (RenewalInProgress, StepCAIssuancePending):
-                # A follower ends observation, not the CA owner's accepted work.
-                pass
             except (
                 SQLAlchemyError,
                 EnrollmentIssuanceUncertain,
+                RenewalInProgress,
+                StepCAIssuancePending,
                 RenewalIssuanceUncertain,
                 RenewalConflictRevocationUncertain,
                 RemoteRevocationUncertain,
             ):
-                end_owner = True
-        ended = False
-        for delay in (0.0, 0.05, 0.1, 0.2):
-            if delay:
-                time.sleep(delay)
-            try:
-                if end_owner:
-                    self._end_submission(token)
-                    ended = True
-                break
-            except (SQLAlchemyError, EnrollmentIssuanceUncertain):
+                # Ending this observation never ends the accepted binding. Replay
+                # observes the exact CA result; newer authorized intent fences its
+                # old publisher. The worker retains the original expiry budget.
                 pass
         return EnrollmentObservationOutcome(
             category=ErrorCategory.UNKNOWN,
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            state=LifecycleState.FAILED if ended else LifecycleState.OBSERVING,
+            state=LifecycleState.OBSERVING,
         )
 
     def renew(

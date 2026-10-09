@@ -6,14 +6,43 @@ use super::*;
 #[test]
 fn only_refused_identity_is_fatal_for_the_agent() {
     for status in [401, 403] {
-        let error = ClientError::Controller(Box::new(ControllerError::from_status(status)));
+        let error = ClientError::Controller(Box::new(ControllerError::refused_identity(status)));
         assert!(error.fatal());
         assert_eq!(
             error.decision(),
             vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str()
         );
     }
-    assert!(ClientError::Pin.fatal());
+    assert!(
+        !ClientError::Unknown(
+            vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable
+        )
+        .fatal()
+    );
+}
+
+#[test]
+fn typed_owner_answer_controls_retry_independently_of_http_status() {
+    for status in [401, 403, 503] {
+        let unknown = ClientError::Controller(Box::new(ControllerError::from_status(status)));
+        assert!(unknown.retryable());
+        assert!(!unknown.fatal());
+    }
+    let denied = ClientError::Controller(Box::new(ControllerError::refused_identity(503)));
+    let mut owner = ControllerError::refused_identity(503);
+    assert!(!denied.retryable());
+    assert!(denied.fatal());
+    owner.failure = Some(vonk_agent_protocol::generated::HttpFailureResponse {
+        failure: vonk_agent_protocol::generated::HttpRefusal {
+            family: vonk_agent_protocol::generated::HttpRefusalFamily::Refusal,
+            reason: vonk_agent_protocol::generated::HttpRefusalReason::InvalidDigest,
+        }
+        .into(),
+    });
+    let integrity = ClientError::Controller(Box::new(owner));
+    assert!(!integrity.retryable());
+    assert!(integrity.refused());
+    assert!(!integrity.fatal());
 }
 
 #[tokio::test]
@@ -89,6 +118,10 @@ async fn controller_rejection_preserves_safe_status_code_and_request_id() {
         403,
         vec![
             "X-Request-ID: 00000000-0000-4000-8000-000000000099".to_owned(),
+            format!(
+                "x-vonk-outcome: {}",
+                super::super::test_support::refusal_outcome()
+            ),
             format!(
                 "X-Vonk-Error-Code: {}",
                 vonk_agent_protocol::generated::SecurityRefusalReason::ControllerRequestRejected

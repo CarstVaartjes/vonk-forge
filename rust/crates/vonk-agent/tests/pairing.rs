@@ -84,6 +84,7 @@ fn config_rejects_unsafe_enrollment_and_controller_origins() {
 fn identity_is_persisted_atomically_with_private_modes() {
     let directory = tempdir().unwrap();
     let material = IdentityMaterial {
+        renewal_window: None,
         node_id: NODE_ID.to_owned(),
         private_key_pem: b"PRIVATE".to_vec(),
         certificate_pem: b"CERTIFICATE".to_vec(),
@@ -173,6 +174,7 @@ async fn pairing_rejects_controller_url_before_any_identity_material_is_written(
         ca_sha256: hex::encode(Sha256::digest(ca.der())),
         data_dir: data_dir.clone(),
         node_id: NODE_ID.to_owned(),
+        renewal_fraction_basis_points: 5000,
         fabric_address: None,
         fabric_bandwidth_mbps: None,
     };
@@ -211,6 +213,7 @@ fn issued_certificate_must_bind_the_generated_key_and_node_identity() {
     )];
     let certificate = parameters.self_signed(&key).unwrap();
     let response = IssuedCertificateResponse {
+        renewal_window: None,
         node_id: NODE_ID.to_owned(),
         certificate_pem: certificate.pem(),
         chain_pem: certificate.pem(),
@@ -263,6 +266,7 @@ fn issued_certificate_response_uses_the_exact_generated_wire_shape() {
 fn staged_generation_survives_restart_and_publishes_with_one_pointer_write() {
     let directory = tempdir().unwrap();
     let active = IdentityMaterial {
+        renewal_window: None,
         node_id: NODE_ID.to_owned(),
         private_key_pem: b"ACTIVE-PRIVATE".to_vec(),
         certificate_pem: b"ACTIVE-CERTIFICATE".to_vec(),
@@ -273,6 +277,7 @@ fn staged_generation_survives_restart_and_publishes_with_one_pointer_write() {
     };
     persist_identity(directory.path(), &active).unwrap();
     let staged = IdentityMaterial {
+        renewal_window: None,
         node_id: NODE_ID.to_owned(),
         private_key_pem: b"STAGED-PRIVATE".to_vec(),
         certificate_pem: b"STAGED-CERTIFICATE".to_vec(),
@@ -313,6 +318,7 @@ fn renewal_due_is_derived_from_active_certificate_validity() {
     persist_identity(
         directory.path(),
         &IdentityMaterial {
+            renewal_window: None,
             node_id: NODE_ID.to_owned(),
             private_key_pem: key.serialize_pem().into_bytes(),
             certificate_pem: certificate.pem().into_bytes(),

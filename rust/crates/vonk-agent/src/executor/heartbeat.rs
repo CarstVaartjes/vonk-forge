@@ -31,14 +31,14 @@ pub(super) fn phase_progress(phase: ProgressPhase) -> OperationProgress {
 pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailure {
     match error {
         ClientError::Transport(_)
-        | ClientError::Retryable
+        | ClientError::Unknown(_)
         | ClientError::Protocol
         | ClientError::ResultSuperseded
         | ClientError::ResultRejected(_) => HeartbeatFailure::Retryable,
         ClientError::Controller(controller) => {
             if controller.status == 409 && controller.code == vonk_agent_protocol::generated::ControllerErrorCode::SupersededOperationCancelled.as_str() {
                 HeartbeatFailure::SupersededCancellation
-            } else if matches!(controller.status, 401 | 403) {
+            } else if error.fatal() {
                 HeartbeatFailure::Terminal
             } else {
                 // Missing or inconsistent renewal evidence is unknown. Re-observe
@@ -49,7 +49,7 @@ pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailur
         // Unavailable local credentials are observations; only a pinned CA
         // refusal terminates this authority check.
         ClientError::CredentialRead(_) | ClientError::Identity => HeartbeatFailure::Retryable,
-        ClientError::Pin => HeartbeatFailure::Terminal,
+        ClientError::Integrity(_) => HeartbeatFailure::Terminal,
     }
 }
 
@@ -87,17 +87,24 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
     let observation_end = tokio::time::Instant::now() + remaining;
     let mut cancellation_observed = false;
     let mut delay = schedule.interval;
+    let mut failures = 0_u32;
     loop {
         tokio::select! {
             _ = &mut stop => return Ok(cancellation_observed),
             _ = tokio::time::sleep(delay.min(observation_end.saturating_duration_since(tokio::time::Instant::now()))) => {}
+        }
+        if tokio::time::Instant::now() >= observation_end {
+            cancellation.send_replace(true);
+            return Ok(true);
         }
         let progress = AgentProgress {
             fence: claim.fence,
             progress: None,
         };
         let observed = tokio::time::timeout_at(observation_end, client.heartbeat(&progress)).await;
-        let observed = observed.unwrap_or(Err(ClientError::Retryable));
+        let observed = observed.unwrap_or(Err(ClientError::Unknown(
+            vonk_agent_protocol::generated::TransientReason::PeerResponseUnavailable,
+        )));
         let directive = match observed {
             Ok(directive) if directive.deadline >= deadline || directive.cancel_requested => {
                 directive
@@ -126,28 +133,20 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
                 }
                 HeartbeatFailure::Terminal => return Err(error.into()),
                 HeartbeatFailure::Retryable => {
-                    let now = Utc::now();
                     if tokio::time::Instant::now() >= observation_end {
                         // The immutable attempt budget is spent. Settlement
                         // owns its outcome; renewal cannot extend this budget.
                         cancellation.send_replace(true);
                         return Ok(true);
                     }
-                    // Retry promptly while the accepted lease can still be
-                    // extended in time, then settle onto the ordinary renewal
-                    // cadence: a lapsed lease bounds how often we may ask, not
-                    // whether we may ask.  The loop stays alive so a renewal
-                    // that lands inside the Controller's allowance still
-                    // re-acquires the attempt, and so the agent keeps observing
-                    // the Controller's cancellation.
-                    delay = if now < deadline.with_timezone(&Utc) {
-                        schedule
-                            .retry_interval
-                            .min(remaining_lease(deadline).saturating_sub(HEARTBEAT_LEASE_MARGIN))
-                            .max(HEARTBEAT_RETRY_FLOOR)
-                    } else {
-                        schedule.interval
-                    };
+                    failures = failures.saturating_add(1);
+                    // RetryInfo is a minimum even if the old lease lapses.
+                    // The immutable observation deadline ends this wait; a
+                    // future owner reconciles the exact effect and fresh fence.
+                    delay = error
+                        .retry_delay(failures)
+                        .max(schedule.retry_interval)
+                        .max(HEARTBEAT_RETRY_FLOOR);
                     continue;
                 }
             },
@@ -155,6 +154,7 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
         // The accepted lease advanced, so the ordinary renewal cadence
         // applies again until the next transient failure.
         delay = schedule.interval;
+        failures = 0;
         // Correlation is validated by the HTTP client before this boundary.
         if directive.cancel_requested {
             cancellation.send_replace(true);

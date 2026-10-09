@@ -9,6 +9,9 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from vonk_agent_protocol.http_failure import HttpRefusalReason
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from .auth import ADMIN_ROLE, Actor, AdministratorRole, TokenCodec
 from .browser_auth import (
@@ -90,7 +93,11 @@ def install_auth_routes(
         # and refuses anything else instead of emitting a non-administrator
         # session or an opaque response-model failure.
         if actor.role != ADMIN_ROLE:
-            raise HTTPException(status_code=401, detail="authentication failed")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                status_code=401,
+                detail="authentication failed",
+            )
         return AuthSession(
             subject=actor.subject,
             role=actor.role,
@@ -102,15 +109,21 @@ def install_auth_routes(
         try:
             return service.resolve(token)
         except BrowserAuthenticationError:
-            raise HTTPException(
-                status_code=401, detail="authentication failed"
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                status_code=401,
+                detail="authentication failed",
             ) from None
 
     def require_csrf(request: Request) -> None:
         cookie = request.cookies.get(_CSRF_COOKIE)
         header = request.headers.get("x-csrf-token")
         if not cookie or not header or not secrets.compare_digest(cookie, header):
-            raise HTTPException(status_code=403, detail="CSRF validation failed")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="CSRF validation failed",
+            )
 
     @app.post(
         "/api/auth/login",
@@ -127,7 +140,11 @@ def install_auth_routes(
     def login(body: LoginRequest, request: Request, response: Response) -> AuthSession:
         host = request.headers.get("host")
         if host is None or request.headers.get("origin") != f"https://{host}":
-            raise HTTPException(status_code=403, detail="origin validation failed")
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail="origin validation failed",
+            )
         try:
             issued = service.login(body.subject, body.password)
         except BrowserAuthenticationThrottledError:
@@ -136,8 +153,10 @@ def install_auth_routes(
                 detail="authentication temporarily unavailable",
             ) from None
         except BrowserAuthenticationError:
-            raise HTTPException(
-                status_code=401, detail="authentication failed"
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHENTICATION_REQUIRED,
+                status_code=401,
+                detail="authentication failed",
             ) from None
         response.headers.append(
             "set-cookie",

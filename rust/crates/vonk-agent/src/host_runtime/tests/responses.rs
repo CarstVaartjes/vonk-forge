@@ -15,7 +15,7 @@ fn runtime_rejection_binds_and_redacts_captured_process_logs() {
             .diagnostic()
             .is_none()
     );
-    response.error_code = Some(HelperErrorCode::OperationUnsafePath.to_string());
+    response.error_code = Some(HelperErrorCode::OperationUnsafePath);
     assert!(
         super::super::runtime_rejection(&response, HostRuntimeAction::RunInspect)
             .diagnostic()
@@ -255,9 +255,15 @@ fn malformed_helper_rejection_names_the_rejection_contract() {
     assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
 
     // A code outside the stable set.
-    let mut response = baseline.clone();
-    response.error_code = Some("untrusted_response_detail".into());
-    assert_rejection_malformed(&response, HostRuntimeAction::RunInspect);
+    let response = baseline.clone();
+    let mut document = serde_json::to_value(&response).unwrap();
+    document["error_code"] = serde_json::Value::String("untrusted_response_detail".into());
+    assert!(
+        vonk_agent_protocol::parse_strict::<super::super::HelperResponse>(
+            &serde_json::to_vec(&document).unwrap()
+        )
+        .is_err()
+    );
 
     // A diagnostic is only meaningful for
     // `(RunInspect, runtime_process_exited)`.

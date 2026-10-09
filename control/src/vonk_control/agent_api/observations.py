@@ -22,7 +22,10 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import ClaimRequest
+from vonk_agent_protocol.http_failure import HttpRefusalReason
 from vonk_agent_protocol.telemetry import TelemetryRequest
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
@@ -488,7 +491,8 @@ def install_observations_routes(
                 break
             except SourceBundleError as error:
                 if isinstance(error, SecurityRefusalError):
-                    raise HTTPException(
+                    raise SecurityHTTPError(
+                        reason=HttpRefusalReason.AUTHORITY_DENIED,
                         status_code=403,
                         detail="source bundle access was denied",
                         headers={"x-vonk-error-code": error.code},

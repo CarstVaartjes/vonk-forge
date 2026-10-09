@@ -12,6 +12,7 @@ import pytest
 from test_controller_cli import FakeClient, run
 
 from cluster_profiles import cli, controller_cli
+from cluster_profiles.cli_states_generated import HTTP_REFUSAL
 from cluster_profiles.control_client import (
     ControlClient,
     ControlConflict,
@@ -105,7 +106,7 @@ def test_only_authoritative_absence_allows_one_identical_replay(second_lost):
 @pytest.mark.parametrize(
     "failure",
     [
-        ControlForbidden(403, "no read access"),
+        ControlForbidden(403, "no read access", failure_family=HTTP_REFUSAL),
         ControlUnavailable(503, "offline"),
         receipt("model") | {"request_key": "22222222-2222-4222-8222-222222222222"},
         receipt("model") | {"action": "remove"},
@@ -158,7 +159,7 @@ def test_definite_refusal_is_not_looked_up_or_retried():
     client = SubmissionClient(
         {
             ("POST", "/api/model/chosen/download"): ControlForbidden(
-                403, "no mutation access"
+                403, "no mutation access", failure_family=HTTP_REFUSAL
             ),
         }
     )
@@ -362,6 +363,19 @@ def test_received_403_remains_a_refusal_when_its_body_is_lost(
         headers = Message()
         headers["Content-Type"] = "application/json"
         headers["X-Request-ID"] = "refused-original"
+        from vonk_agent_protocol.http_failure import (
+            HttpFailureFamily,
+            HttpFailureResponse,
+            HttpRefusal,
+            HttpRefusalReason,
+        )
+
+        headers["x-vonk-outcome"] = HttpFailureResponse(
+            failure=HttpRefusal(
+                family=HttpFailureFamily.REFUSAL,
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+            )
+        ).model_dump_json()
         body = (
             BrokenBody()
             if failure == "lost"

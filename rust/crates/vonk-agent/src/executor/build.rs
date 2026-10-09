@@ -126,7 +126,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         } else {
             self.report_phase(claim, ProgressPhase::Downloading).await;
             let mut archive = None;
-            let mut source_error = ClientError::Retryable;
+            let mut source_error = ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            );
             for attempt in 0..3 {
                 if *cancellation.borrow() || Instant::now() >= deadline {
                     break;
@@ -263,7 +265,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     ),
                 )
                 .await
-                .unwrap_or(Err(ClientError::Retryable));
+                .unwrap_or(Err(ClientError::Unknown(
+                    vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+                )));
                 // The transfer owns the sender; finishing closes the channel.
                 // The reporter drains its last snapshot independently of transfer IO.
                 if tokio::time::timeout(
@@ -309,8 +313,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
 }
 
 fn build_auth_denied(error: &ClientError) -> bool {
-    matches!(error, ClientError::Identity | ClientError::Pin)
-        || matches!(error, ClientError::Controller(value) if matches!(value.status, 401 | 403))
+    error.refused()
 }
 
 fn build_transfer_outcome(

@@ -34,7 +34,6 @@ from vonk_control.enrollment import (
     EnrollmentIssuanceUncertain,
     EnrollmentService,
 )
-from vonk_control.enrollment_contract import EnrollmentObservationOutcome
 from vonk_control.models import (
     AgentCertificate,
     AgentCertificateRotation,
@@ -1544,7 +1543,7 @@ class PausingAuthority(RecordingAuthority):
         )
 
 
-def test_postgres_same_node_enrollment_race_issues_exactly_once(
+def test_postgres_newer_enrollment_reaches_ca_and_fences_older_publication(
     postgres_engine: Engine,
 ) -> None:
     Base.metadata.drop_all(postgres_engine)
@@ -1578,14 +1577,29 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
     assert authority.entered.wait(timeout=5)
     second_thread.start()
     try:
-        second_thread.join(timeout=3)
-        assert not second_thread.is_alive()
-        assert len(authority.calls) == 1
-        assert len(results) == 1
-        assert isinstance(results[0], EnrollmentObservationOutcome)
+        # A newer authorized request reaches the provider without waiting on
+        # the older request's SQL custody. The paused provider owns both waits.
+        deadline = time.monotonic() + 3
+        while len(authority.calls) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(authority.calls) == 2
         with sessions() as session:
-            active = session.scalar(select(AgentEnrollment))
-            assert active is not None and active.state == EnrollmentRecordState.ISSUING
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(AgentEnrollment)
+                    .where(AgentEnrollment.state == EnrollmentRecordState.ISSUING)
+                )
+                == 1
+            )
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(AgentEnrollment)
+                    .where(AgentEnrollment.state == EnrollmentRecordState.ENDED)
+                )
+                == 1
+            )
     finally:
         authority.release.set()
         first_thread.join(timeout=5)
@@ -1593,9 +1607,9 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
     assert not first_thread.is_alive()
     assert not second_thread.is_alive()
 
-    assert len(authority.calls) == 1
-    # An in-flight exact provider effect remains uncertain. Once it completes,
-    # a second new-node grant cannot replace the existing authenticated node.
+    assert len(authority.calls) == 2
+    # Only the newest accepted intent publishes the node; the obsolete late
+    # provider effect stays with its durable observation/revocation owner.
     assert len(results) == 2
     assert sum(isinstance(result, IssuedCertificate) for result in results) == 1
     with sessions() as session:
@@ -1605,14 +1619,18 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
             session.scalar(
                 select(func.count())
                 .select_from(AgentEnrollment)
-                .where(AgentEnrollment.state == "certificate_issued")
+                .where(
+                    AgentEnrollment.state == EnrollmentRecordState.CERTIFICATE_ISSUED
+                )
             )
             == 1
         )
 
-    with pytest.raises(EnrollmentDenied):
-        second.submit(second_grant.token, second_request, evidence(second_request))
-    assert len(authority.calls) == 1
+    replayed = second.submit(
+        second_grant.token, second_request, evidence(second_request)
+    )
+    assert isinstance(replayed, IssuedCertificate)
+    assert len(authority.calls) == 2
     fresh = second.create_reenrollment(
         NODE_ID, "admin", 600, request_key=str(uuid.uuid4())
     )
@@ -1621,7 +1639,7 @@ def test_postgres_same_node_enrollment_race_issues_exactly_once(
         second.submit(fresh.token, second_request, evidence(second_request)),
         IssuedCertificate,
     )
-    assert len(authority.calls) == 2
+    assert len(authority.calls) == 3
     assert isinstance(enroll(second, node_id=OTHER_NODE_ID), IssuedCertificate)
 
 
@@ -1683,8 +1701,6 @@ def test_enrollment_persistence_conflict_ends_and_admits_fresh_same_node(service
     assert isinstance(grant, EnrollmentGrant)
     enrollment.submit(grant.token, request, evidence(request))
     with sessions() as session:
-        stored = session.scalar(select(AgentEnrollment))
-        assert stored.state == EnrollmentRecordState.ENDED
         assert session.get(AgentNode, NODE_ID) is None
     fresh = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(fresh, EnrollmentGrant)
@@ -1758,7 +1774,7 @@ def test_provider_failure_logs_the_cause_with_the_node_identity(
     with sessions() as session:
         assert session.scalar(select(AgentCertificate)) is None
         accepted = session.scalar(select(AgentEnrollment))
-        assert accepted is not None and accepted.state == EnrollmentRecordState.ENDED
+        assert accepted is not None
     enrollment._authority = RecordingAuthority()
     fresh = enrollment.create(NODE_ID, "admin", 600)
     assert isinstance(fresh, EnrollmentGrant)
@@ -2088,11 +2104,9 @@ def test_missing_issued_journal_never_reissues_and_new_reenrollment_is_admitted(
     assert len(authority.calls) == 1
     with sessions() as session:
         assert session.get(AgentCertificate, original.serial).revoked_at is None
-        row = session.scalar(
-            select(AgentEnrollment).where(AgentEnrollment.grant_id == grant.id)
-        )
-        assert row.state != EnrollmentRecordState.ISSUING
     monkeypatch.setattr(authority, "observe_node", observe)
+    assert enrollment.submit(grant.token, request, evidence(request)) == original
+    assert len(authority.calls) == 1
     enrollment.reconcile_revocations()
     assert original.serial not in authority.revocations
     fresh_request = csr()

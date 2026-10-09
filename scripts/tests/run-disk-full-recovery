@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# One isolated filesystem fault; never fill the runner's actual storage.
+set -euo pipefail
+(($# == 2)) || { echo 'usage: run-disk-full-recovery TEST_BINARY ROOT_PARENT' >&2; exit 2; }
+[[ $EUID == 0 ]] || { echo 'disposable root authority is absent' >&2; exit 1; }
+[[ -x $1 && -d $2 ]] || { echo 'compiled test or owned temporary storage is unavailable' >&2; exit 1; }
+fault_root=$(mktemp -d "$2/vonk-full-fs.XXXXXX")
+cleanup() {
+    timeout 10s umount "${fault_root:?}"
+    rmdir "${fault_root:?}"
+}
+if ! timeout 10s mount -t tmpfs -o size=2m,nodev,nosuid tmpfs "$fault_root"; then
+    rmdir "${fault_root:?}"
+    exit 1
+fi
+trap cleanup EXIT
+chmod 0700 "$fault_root"
+timeout --kill-after=2s 60s env VONK_TEST_FAULT_FILESYSTEM="$fault_root" "$1" \
+    client::distribution::recovery_tests::full_filesystem_ends_without_publication_and_fresh_transfer_heals \
+    --exact --nocapture

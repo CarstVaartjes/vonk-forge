@@ -35,7 +35,7 @@ pub(super) fn classify_status(status: StatusCode) -> Result<(), ClientError> {
     ))))
 }
 
-pub(super) fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
+pub(crate) fn classify_response(response: &reqwest::Response) -> Result<(), ClientError> {
     if response.status().is_success() {
         return Ok(());
     }
@@ -79,6 +79,25 @@ pub(super) fn response_controller_error(response: &reqwest::Response) -> Control
                 u32::try_from(delay.max(0)).ok()
             })
         });
+    error.failure = response.headers().get("x-vonk-outcome").and_then(|value| {
+        parse_strict::<vonk_agent_protocol::generated::HttpFailureResponse>(value.as_bytes()).ok()
+    });
+    if let Some(envelope) = &error.failure
+        && let vonk_agent_protocol::generated::HttpFailureResponseFailure::Transient(transient) =
+            &envelope.failure
+    {
+        error.retry_after_seconds = Some(transient.retry_after);
+    }
+    error.decision = if error.failure.as_ref().is_some_and(|envelope| {
+        matches!(
+            envelope.failure,
+            vonk_agent_protocol::generated::HttpFailureResponseFailure::Refusal(_)
+        )
+    }) {
+        vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str()
+    } else {
+        vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
+    };
     error
 }
 
@@ -196,19 +215,14 @@ pub(super) fn controller_error(
         408 => ControllerErrorCode::ControllerTimeout.to_string(),
         429 => ControllerErrorCode::ControllerRateLimited.to_string(),
         500..=599 => ControllerErrorCode::ControllerUnavailable.to_string(),
-        _ => format!("{}{status_code}", ControllerErrorCode::ControllerHttp),
+        _ => ControllerErrorCode::ControllerUnavailable.to_string(),
     });
-    let decision = match status_code {
-        408 | 429 | 500..=599 => {
-            vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str()
-        }
-        401 | 403 => vonk_agent_protocol::generated::AgentClientDecision::Exit.as_str(),
-        _ => vonk_agent_protocol::generated::AgentClientDecision::Defer.as_str(),
-    };
+    let decision = vonk_agent_protocol::generated::AgentClientDecision::Retry.as_str();
     ControllerError {
         operation: operation.to_owned(),
         endpoint: endpoint.to_owned(),
         status: status_code,
+        failure: None,
         code,
         request_id,
         decision,
@@ -235,29 +249,6 @@ pub(super) fn valid_error_code(value: &str) -> bool {
         })
 }
 
-pub(super) fn is_rotation_conflict(body: &[u8]) -> bool {
-    const STAGED: &str = "a different certificate rotation is already staged";
-    if let Ok(refusal) = parse_strict::<BoundedErrorResponse>(body) {
-        return refusal.detail == STAGED
-            || refusal.context.is_some_and(|context| {
-                vocabulary::is(
-                    &context.code,
-                    SecurityRefusalReason::AgentCertificateRotationConflict,
-                )
-            });
-    }
-    // An older Controller answered with a bare code and/or detail.
-    parse_strict::<ControllerRefusalBody>(body).is_ok_and(|refusal| {
-        refusal.detail.as_deref() == Some(STAGED)
-            || refusal.code.as_deref().is_some_and(|code| {
-                vocabulary::is(
-                    code,
-                    SecurityRefusalReason::AgentCertificateRotationConflict,
-                ) || code == "agent_certificate_rotation_conflict"
-            })
-    })
-}
-
 pub(super) async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
     bounded_body_limit(response, MAX_BODY_BYTES).await
 }
@@ -282,7 +273,11 @@ pub(super) async fn bounded_body_limit(
     let deadline = tokio::time::Instant::now() + CONTROLLER_REQUEST_TIMEOUT;
     while let Some(chunk) = tokio::time::timeout_at(deadline, response.chunk())
         .await
-        .map_err(|_| ClientError::Retryable)??
+        .map_err(|_| {
+            ClientError::Unknown(
+                vonk_agent_protocol::generated::TransientReason::LocalStateUnavailable,
+            )
+        })??
     {
         if body.len().saturating_add(chunk.len()) > maximum_bytes {
             return Err(ClientError::Protocol);

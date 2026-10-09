@@ -784,3 +784,47 @@ response parser and exact-byte download. Artifact transport tests additionally
 consume actual JSON with the generated client and verify declared optional
 null/omission equivalence. Other consumer and storage edges still require their
 own connected evidence; raw engine extensions are not exhaustively enumerated.
+
+### HTTP failure and renewal behavior
+
+Every Controller HTTP non-success response carries `X-Vonk-Outcome`, the JSON
+serialization of `vonk_agent_protocol.http_failure.HttpFailureResponse`. This
+header also covers middleware, byte transfers and streams before consumers read
+the body. Endpoint bodies retain their typed diagnostic contract. The complete
+OpenAPI graph exports the envelope through `BoundedErrorResponse.outcome`.
+
+The envelope contains exactly one family: `HttpTransient` with a closed reason,
+required `retry_after` and `resolution_window`, or `HttpRefusal` with a closed
+security-edge reason. Only explicit security producers use `SecurityHTTPError`;
+status alone never proves refused authority. Missing or unreadable peer evidence
+is an unknown observation. The outer application boundary supplies the envelope
+for unexpected failures and responses from inner middleware. Provider-state and
+producer guards live in `control/tests/test_http_failure_contract.py`.
+
+One owning observation loop performs retries, within its existing operation
+budget, using the server minimum plus capped exponential full jitter. HTTP
+transport calls have individual timeouts. Helper answers carry the same envelope;
+the Controller scheduler owns their retries. Distribution does not add another
+retry loop around the client's transfer observation. An identity refusal ends
+remote action with that credential; the daemon remains alive to observe fresh
+certificate content from re-enrollment and report status.
+
+Renewal is standing desired state derived from the signed active certificate,
+not a persisted failed attempt. `renewal_fraction_basis_points` defaults to 5000
+and allows 2500–7500; stable entropy from certificate content selects a point
+within a ten-percent lifetime window. An optional issued `renewal_window` is
+persisted with certificate metadata and honored only when bound to that exact
+leaf and inside its validity. Damaged metadata is a miss and uses the normal
+half-lifetime schedule. A pending CSR survives observation failure and restart.
+The rotation lane owns bounded attempts and retry timing, while independent
+control and inventory lanes keep progressing.
+
+The monitor sends optional `renewal_failed` and
+`credential_remaining_fraction` evidence. Controller metrics export
+`vonk_agent_renewal_failed` and `vonk_agent_credential_low_lifetime` per node;
+missing evidence is omitted, never fabricated as healthy. Systemd status reports
+failure and less than one quarter lifetime remaining. The disposable local health
+record is bound to certificate content and never controls admission. The two
+nullable telemetry columns are adopted by normal Controller startup schema
+reconciliation; this change requires the explicit schema merge decision and does
+not reset existing data.

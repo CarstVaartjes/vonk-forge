@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from ..cli_outcome import (
     Submission,
 )
-from ..cli_states_generated import PROFILE_REVIEW_STALE
+from ..cli_states_generated import HTTP_REFUSAL, PROFILE_REVIEW_STALE
 from ..control_client import (
     ControlClientError,
     ControlHTTPError,
@@ -41,8 +41,16 @@ def _known_http_refusal_status(error: ControlClientError) -> int | None:
         status
         if status is not None
         and (
-            status in {401, 403}
-            or (isinstance(error, ControlHTTPError) and 400 <= status <= 499)
+            (
+                status in {401, 403}
+                and isinstance(error, ControlHTTPError)
+                and error.failure_family == HTTP_REFUSAL
+            )
+            or (
+                isinstance(error, ControlHTTPError)
+                and status not in {401, 403}
+                and 400 <= status <= 499
+            )
         )
         else None
     )

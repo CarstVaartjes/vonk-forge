@@ -317,7 +317,7 @@ pub(super) fn distribution_fixture_server(
             if !authorized {
                 write!(
                     stream,
-                    "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    "HTTP/1.1 401 Unauthorized\r\nx-vonk-outcome: {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", refusal_outcome()
                 )
                 .unwrap();
                 continue;
@@ -657,7 +657,7 @@ pub(super) fn accept_peer(
             "fixture accept deadline"
         );
         match listener.accept() {
-            Ok((stream, _)) => {
+            Ok((mut stream, _)) => {
                 stream
                     .set_read_timeout(Some(
                         deadline.saturating_duration_since(std::time::Instant::now()),
@@ -668,6 +668,12 @@ pub(super) fn accept_peer(
                         deadline.saturating_duration_since(std::time::Instant::now()),
                     ))
                     .unwrap();
+                let mut probe = [0_u8; 32];
+                let size = stream.peek(&mut probe).unwrap();
+                if probe[..size].starts_with(b"GET / HTTP/1.1\r\n") {
+                    stream.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                    continue;
+                }
                 return stream;
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -716,4 +722,18 @@ pub(super) fn spawn_async_peer<T: Send + 'static>(
                 .expect("fixture task deadline")
         }),
     }
+}
+
+pub(super) fn refusal_outcome() -> String {
+    use vonk_agent_protocol::generated::{
+        HttpFailureResponse, HttpRefusal, HttpRefusalFamily, HttpRefusalReason,
+    };
+    serde_json::to_string(&HttpFailureResponse {
+        failure: HttpRefusal {
+            family: HttpRefusalFamily::Refusal,
+            reason: HttpRefusalReason::AuthorityDenied,
+        }
+        .into(),
+    })
+    .unwrap()
 }

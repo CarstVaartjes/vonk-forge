@@ -313,7 +313,11 @@ def test_denied_enrollment_is_not_retried_or_reclassified_as_pending(tmp_path, c
     class DeniedClient(EnrollmentClient):
         def request(self, method, path, payload=None, **kwargs):
             self.calls.append((method, path, payload))
-            raise ControlForbidden(403, "permission denied " + TOKEN)
+            from cluster_profiles.cli_states_generated import HTTP_REFUSAL
+
+            raise ControlForbidden(
+                403, "permission denied " + TOKEN, failure_family=HTTP_REFUSAL
+            )
 
     client = DeniedClient(destination)
     assert run(client, destination, "--json") == 2

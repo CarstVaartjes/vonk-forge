@@ -17,7 +17,8 @@ fn valid_executed_response() -> super::HelperResponse {
     super::HelperResponse {
         schema_version: 1, request_id: Some(Uuid::new_v4()), installation_intent_nonce: None,
         status: vonk_agent_protocol::generated::HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
-        error_code: None, diagnostic: None, process_logs: None, exit_code: Some(0), process_running: None,
+        failure: None,
+                    error_code: None, diagnostic: None, process_logs: None, exit_code: Some(0), process_running: None,
     }
 }
 

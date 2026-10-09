@@ -673,6 +673,17 @@
           "title": "Node Id",
           "type": "string"
         },
+        "renewal_window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RenewalWindow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "serial": {
           "title": "Serial",
           "type": "string"
@@ -1254,6 +1265,17 @@
           "minLength": 1,
           "title": "Detail",
           "type": "string"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpFailureResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2397,40 +2419,6 @@
       ],
       "title": "ControllerErrorCode",
       "type": "string"
-    },
-    "ControllerRefusalBody": {
-      "additionalProperties": false,
-      "description": "The refusal body an older Controller returned: a bare code and/or detail.\n\nA current Controller answers with its bounded error response; an agent that\nmeets an older Controller still has to recognise its refusal, so this shape\nstays declared (and generated) instead of being read as an untyped document.",
-      "properties": {
-        "code": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Code"
-        },
-        "detail": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Detail"
-        }
-      },
-      "title": "ControllerRefusalBody",
-      "type": "object"
     },
     "DesiredAssignmentState": {
       "description": "What a fleet-profile assignment is asked to become on its Sparks.",
@@ -3684,15 +3672,13 @@
         "error_code": {
           "anyOf": [
             {
-              "pattern": "^[a-z][a-z0-9_]{0,63}$",
-              "type": "string"
+              "$ref": "#/$defs/HelperErrorCode"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Error Code"
+          "default": null
         },
         "exit_code": {
           "anyOf": [
@@ -3707,6 +3693,17 @@
           ],
           "default": null,
           "title": "Exit Code"
+        },
+        "failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpFailureResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "installation_intent_nonce": {
           "anyOf": [
@@ -4199,6 +4196,113 @@
         "arguments"
       ],
       "title": "HostRuntimeRequest",
+      "type": "object"
+    },
+    "HttpFailureResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "failure": {
+          "discriminator": {
+            "mapping": {
+              "refusal": "#/$defs/HttpRefusal",
+              "transient": "#/$defs/HttpTransient"
+            },
+            "propertyName": "family"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HttpTransient"
+            },
+            {
+              "$ref": "#/$defs/HttpRefusal"
+            }
+          ],
+          "title": "Failure"
+        }
+      },
+      "required": [
+        "failure"
+      ],
+      "title": "HttpFailureResponse",
+      "type": "object"
+    },
+    "HttpRefusal": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "const": "refusal",
+          "title": "Family",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "reason": {
+          "$ref": "#/$defs/HttpRefusalReason"
+        }
+      },
+      "required": [
+        "family",
+        "reason"
+      ],
+      "title": "HttpRefusal",
+      "type": "object"
+    },
+    "HttpRefusalReason": {
+      "enum": [
+        "authentication_required",
+        "authority_denied",
+        "unknown_identity",
+        "revoked_identity",
+        "invalid_signature",
+        "invalid_digest",
+        "tampered_token",
+        "expired_credential"
+      ],
+      "title": "HttpRefusalReason",
+      "type": "string"
+    },
+    "HttpTransient": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "const": "transient",
+          "title": "Family",
+          "type": "string",
+          "x-vonk-typed-tag": true
+        },
+        "reason": {
+          "$ref": "#/$defs/TransientReason"
+        },
+        "resolution_window": {
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Resolution Window",
+          "type": "integer"
+        },
+        "retry_after": {
+          "maximum": 3600,
+          "minimum": 0,
+          "title": "Retry After",
+          "type": "integer"
+        },
+        "suggested_window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RenewalWindow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "family",
+        "reason",
+        "retry_after",
+        "resolution_window"
+      ],
+      "title": "HttpTransient",
       "type": "object"
     },
     "ImageStoreCode": {
@@ -5171,6 +5275,17 @@
           "minLength": 1,
           "title": "Not Before",
           "type": "string"
+        },
+        "renewal_window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RenewalWindow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "serial": {
           "minLength": 1,
@@ -9888,6 +10003,27 @@
       "title": "RenewRequest",
       "type": "object"
     },
+    "RenewalHealth": {
+      "additionalProperties": false,
+      "description": "Disposable status bound to the exact certificate content, never admission.",
+      "properties": {
+        "certificate_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Certificate Digest",
+          "type": "string"
+        },
+        "failed": {
+          "title": "Failed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "certificate_digest",
+        "failed"
+      ],
+      "title": "RenewalHealth",
+      "type": "object"
+    },
     "RenewalHelperManifest": {
       "additionalProperties": false,
       "description": "Content closure of the hosted renewal peer.",
@@ -9922,6 +10058,30 @@
         "source_inputs"
       ],
       "title": "RenewalHelperManifest",
+      "type": "object"
+    },
+    "RenewalWindow": {
+      "additionalProperties": false,
+      "description": "Offsets from issuance, in seconds; a client picks once per credential.",
+      "properties": {
+        "end_seconds": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "End Seconds",
+          "type": "integer"
+        },
+        "start_seconds": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Start Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_seconds",
+        "end_seconds"
+      ],
+      "title": "RenewalWindow",
       "type": "object"
     },
     "RequestValidationIssue": {
@@ -10002,6 +10162,17 @@
           },
           "title": "Issues",
           "type": "array"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HttpFailureResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -11582,6 +11753,20 @@
           "default": null,
           "title": "Cpu Frequency Min Mhz"
         },
+        "credential_remaining_fraction": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Credential Remaining Fraction"
+        },
         "disk_free_bytes": {
           "anyOf": [
             {
@@ -11702,6 +11887,18 @@
           "format": "date-time",
           "title": "Observed At",
           "type": "string"
+        },
+        "renewal_failed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Renewal Failed"
         }
       },
       "required": [
@@ -11728,6 +11925,19 @@
         "topology.runtime_capability_missing"
       ],
       "title": "TopologyCode",
+      "type": "string"
+    },
+    "TransientReason": {
+      "enum": [
+        "ca_unavailable",
+        "controller_starting",
+        "admission_busy",
+        "dependency_unavailable",
+        "rate_limited",
+        "peer_response_unavailable",
+        "local_state_unavailable"
+      ],
+      "title": "TransientReason",
       "type": "string"
     },
     "UninstallPlanCode": {
@@ -11884,7 +12094,6 @@
     "CompiledSecurityMount": "vonk_agent_protocol.compiled_execution_plan.CompiledSecurityMount",
     "CompiledTopology": "vonk_agent_protocol.compiled_execution_plan.CompiledTopology",
     "ConfirmPackageActivationOperation": "vonk_agent_protocol.host_helper.ConfirmPackageActivationOperation",
-    "ControllerRefusalBody": "vonk_agent_protocol.enrollment.ControllerRefusalBody",
     "DistributionAssignment": "vonk_agent_protocol.distribution.DistributionAssignment",
     "DistributionObject": "vonk_agent_protocol.distribution.DistributionObject",
     "EnrollmentBootstrapResponse": "vonk_agent_protocol.enrollment.EnrollmentBootstrapResponse",
@@ -11908,6 +12117,9 @@
     "HostRuntimeGrantRequest": "vonk_control.agent_api.common.HostRuntimeGrantRequest",
     "HostRuntimeImageReceipt": "vonk_agent_protocol.agent_state.HostRuntimeImageReceipt",
     "HostRuntimeRequest": "vonk_agent_protocol.host_helper.HostRuntimeRequest",
+    "HttpFailureResponse": "vonk_agent_protocol.http_failure.HttpFailureResponse",
+    "HttpRefusal": "vonk_agent_protocol.http_failure.HttpRefusal",
+    "HttpTransient": "vonk_agent_protocol.http_failure.HttpTransient",
     "InstallVonkDebOperation": "vonk_agent_protocol.host_helper.InstallVonkDebOperation",
     "InstallationIntentFence": "vonk_agent_protocol.agent_state.InstallationIntentFence",
     "InstallationMetadataEntry": "vonk_agent_protocol.agent_state.InstallationMetadataEntry",
@@ -12001,7 +12213,9 @@
     "RecipeUninstallPayload": "vonk_agent_protocol.recipe_operations.RecipeUninstallPayload",
     "RecipeUninstallResult": "vonk_agent_protocol.recipe_operations.RecipeUninstallResult",
     "RenewRequest": "vonk_agent_protocol.enrollment.RenewRequest",
+    "RenewalHealth": "vonk_agent_protocol.http_failure.RenewalHealth",
     "RenewalHelperManifest": "vonk_agent_protocol.agent_state.RenewalHelperManifest",
+    "RenewalWindow": "vonk_agent_protocol.http_failure.RenewalWindow",
     "RequestValidationProblem": "vonk_control.operation_api.contracts.RequestValidationProblem",
     "RunLifecycleRecord": "vonk_agent_protocol.agent_state.RunLifecycleRecord",
     "RuntimeGenerationFence": "vonk_agent_protocol.agent_state.RuntimeGenerationFence",
@@ -12073,7 +12287,6 @@
     "CompiledSecurityMount": "#/$defs/CompiledSecurityMount",
     "CompiledTopology": "#/$defs/CompiledTopology",
     "ConfirmPackageActivationOperation": "#/$defs/ConfirmPackageActivationOperation",
-    "ControllerRefusalBody": "#/$defs/ControllerRefusalBody",
     "DistributionAssignment": "#/$defs/DistributionAssignment",
     "DistributionObject": "#/$defs/DistributionObject",
     "EnrollmentBootstrapResponse": "#/$defs/EnrollmentBootstrapResponse",
@@ -12097,6 +12310,9 @@
     "HostRuntimeGrantRequest": "#/$defs/HostRuntimeGrantRequest",
     "HostRuntimeImageReceipt": "#/$defs/HostRuntimeImageReceipt",
     "HostRuntimeRequest": "#/$defs/HostRuntimeRequest",
+    "HttpFailureResponse": "#/$defs/HttpFailureResponse",
+    "HttpRefusal": "#/$defs/HttpRefusal",
+    "HttpTransient": "#/$defs/HttpTransient",
     "InstallVonkDebOperation": "#/$defs/InstallVonkDebOperation",
     "InstallationIntentFence": "#/$defs/InstallationIntentFence",
     "InstallationMetadataEntry": "#/$defs/InstallationMetadataEntry",
@@ -12190,7 +12406,9 @@
     "RecipeUninstallPayload": "#/$defs/RecipeUninstallPayload",
     "RecipeUninstallResult": "#/$defs/RecipeUninstallResult",
     "RenewRequest": "#/$defs/RenewRequest",
+    "RenewalHealth": "#/$defs/RenewalHealth",
     "RenewalHelperManifest": "#/$defs/RenewalHelperManifest",
+    "RenewalWindow": "#/$defs/RenewalWindow",
     "RequestValidationProblem": "#/$defs/RequestValidationProblem",
     "RunLifecycleRecord": "#/$defs/RunLifecycleRecord",
     "RuntimeGenerationFence": "#/$defs/RuntimeGenerationFence",

@@ -99,7 +99,6 @@ from .types import (
     EnrollmentDenied,
     EnrollmentGrant,
     EnrollmentIssuanceUncertain,
-    RenewalInProgress,
     _IssuanceClaim,
 )
 
@@ -115,35 +114,6 @@ def _submission_input(csr: bytes, evidence_error: str | None = None) -> None:
 
 
 class EnrollmentCore:
-    def _end_submission(self, token: str) -> None:
-        now = _utc(self._clock())
-        with self._transaction() as session:
-            grant = session.scalar(
-                select(AgentEnrollmentGrant)
-                .where(
-                    AgentEnrollmentGrant.token_digest == _digest(_decode_token(token))
-                )
-                .with_for_update(of=AgentEnrollmentGrant)
-            )
-            if grant is None:
-                return
-            enrollment = session.scalar(
-                select(AgentEnrollment)
-                .where(AgentEnrollment.grant_id == grant.id)
-                .with_for_update(of=AgentEnrollment)
-            )
-            if (
-                enrollment is not None
-                and enrollment.state == EnrollmentRecordState.ISSUING
-            ):
-                retain_ended_effect(
-                    session,
-                    _issuance_binding(enrollment.provider_request),
-                    enrollment.csr_pem,
-                    now,
-                )
-                enrollment.state = EnrollmentRecordState.ENDED
-
     def _end_rotation(
         self, node_id: str, *, csr: bytes | None = None, serial: str | None = None
     ) -> None:
@@ -816,31 +786,18 @@ class EnrollmentCore:
         if purpose == EnrollmentPurpose.RE_ENROLL:
             self._end_rotation(node_id)
         if competing is not None:
-            try:
-                self._wait_for_issuance(competing)
-            except StepCAIssuancePending:
-                # A live CA owner retains its exact effect. The follower's
-                # bounded observation must not end that owner or issue anew.
-                raise
-            except (
-                EnrollmentDenied,
-                EnrollmentIssuanceUncertain,
-                RenewalInProgress,
-            ):
-                # The fresh grant has its own authority. An obsolete owner's
-                # denial never becomes a denial of this newer intent.
-                with self._transaction() as session:
-                    ended = session.get(
-                        AgentEnrollment, competing, with_for_update=True
+            # This fresh, validated grant is newer authorized intent. Fence the
+            # old publisher before exposing the new request. Do not issue the
+            # obsolete request merely to observe it: that could create a node
+            # and then reject this new request as already enrolled. The durable
+            # ended-effect owner observes and revokes any exact late CA result.
+            with self._transaction() as session:
+                ended = session.get(AgentEnrollment, competing, with_for_update=True)
+                if ended is not None and ended.state == EnrollmentRecordState.ISSUING:
+                    retain_ended_effect(
+                        session,
+                        _issuance_binding(ended.provider_request),
+                        ended.csr_pem,
+                        now,
                     )
-                    if (
-                        ended is not None
-                        and ended.state == EnrollmentRecordState.ISSUING
-                    ):
-                        retain_ended_effect(
-                            session,
-                            _issuance_binding(ended.provider_request),
-                            ended.csr_pem,
-                            now,
-                        )
-                        ended.state = EnrollmentRecordState.ENDED
+                    ended.state = EnrollmentRecordState.ENDED

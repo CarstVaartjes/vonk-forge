@@ -29,7 +29,10 @@ from vonk_agent_protocol.enrollment import (
     IssuedCertificateResponse,
     RenewRequest,
 )
+from vonk_agent_protocol.http_failure import HttpRefusalReason
 from vonk_agent_protocol.reason_codes import ControllerErrorCode as Code
+
+from vonk_control.http_errors import SecurityHTTPError
 
 from ..agent_jobs import CLAIM_LEASE_SECONDS, StaleAgentAttempt
 from ..auth import AgentIdentity
@@ -90,8 +93,10 @@ def install_authority_routes(
                 except (KeyError, TypeError, ValueError, SQLAlchemyError):
                     continue
                 # The authority's denied binding remains a security refusal.
-                raise HTTPException(
-                    status_code=403, detail="grant authority denied"
+                raise SecurityHTTPError(
+                    reason=HttpRefusalReason.AUTHORITY_DENIED,
+                    status_code=403,
+                    detail="grant authority denied",
                 ) from None
             except (KeyError, TypeError, ValueError, SQLAlchemyError):
                 continue
@@ -323,18 +328,22 @@ def install_authority_routes(
             )
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except (EnrollmentDenied, ValueError) as error:
+        except ValueError:
+            raise HTTPException(
+                status_code=503, detail="credential observation unavailable"
+            ) from None
+        except EnrollmentDenied as error:
             code = (
                 error.reason_code
                 if isinstance(error, ExpiredRenewalGraceExhausted)
                 else SecurityRefusalReason.AGENT_EXPIRED_RENEWAL_REFUSED
             )
-            response = _json_response(
-                {"detail": {"reason_code": code, "message": str(error)}},
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.EXPIRED_CREDENTIAL,
                 status_code=403,
-            )
-            response.headers["X-Vonk-Error-Code"] = code
-            return response
+                detail=str(error),
+                headers={"x-vonk-error-code": code},
+            ) from None
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -359,8 +368,16 @@ def install_authority_routes(
             ) from None
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+        except ValueError:
+            raise HTTPException(
+                status_code=503, detail="credential observation unavailable"
+            ) from None
+        except EnrollmentDenied as error:
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=str(error),
+            ) from None
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -391,8 +408,16 @@ def install_authority_routes(
             ) from None
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+        except ValueError:
+            raise HTTPException(
+                status_code=503, detail="credential observation unavailable"
+            ) from None
+        except EnrollmentDenied as error:
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=str(error),
+            ) from None
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -413,8 +438,16 @@ def install_authority_routes(
                 identity.certificate_serial,
                 body.generation,
             )
-        except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+        except ValueError:
+            raise HTTPException(
+                status_code=503, detail="credential observation unavailable"
+            ) from None
+        except EnrollmentDenied as error:
+            raise SecurityHTTPError(
+                reason=HttpRefusalReason.AUTHORITY_DENIED,
+                status_code=403,
+                detail=str(error),
+            ) from None
         if isinstance(outcome, UnknownError):
             return unknown_response(outcome)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
