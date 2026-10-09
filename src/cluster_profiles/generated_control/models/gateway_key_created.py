@@ -22,7 +22,7 @@ T = TypeVar("T", bound="GatewayKeyCreated")
 
 @_attrs_define
 class GatewayKeyCreated:
-    """ The only response that carries the key. It is not shown again.
+    """ The retained key for this mutation; the exact receipt can be replayed.
 
         Attributes:
             key (str):

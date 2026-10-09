@@ -9,6 +9,7 @@ import urllib.error
 from datetime import UTC, datetime
 from email.message import Message
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -156,12 +157,21 @@ def test_transport_loss_is_reobserved_and_fresh_read_is_admitted(
 def test_transport_error_preserves_source_at_deadline_then_fresh_read_works(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Exercise the real bounded retry loop without spending its deadline asleep.
     now = [100.0]
+    delays: list[float] = []
     attempts = 0
     unavailable = True
     fault = socket.gaierror(-2, "no such host")
-    monkeypatch.setattr(time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+
+    def sleep(seconds: float) -> None:
+        delays.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(
+        "cluster_profiles.control_client.client.time",
+        SimpleNamespace(monotonic=lambda: now[0], sleep=sleep),
+    )
 
     def opener(*_args, **_kwargs):
         nonlocal attempts
@@ -180,6 +190,8 @@ def test_transport_error_preserves_source_at_deadline_then_fresh_read_works(
     assert raised.value.context.retryable is True
     assert attempts > 1
     assert now[0] == pytest.approx(100.0 + client.request_timeout_seconds)
+    assert len(delays) > 1
+    assert all(delay > 0 for delay in delays)
     ended_attempts = attempts
     unavailable = False
     assert client.request("GET", "/api/fleet")["nodes"] == []

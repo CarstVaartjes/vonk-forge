@@ -869,6 +869,7 @@ async def run_automatic_sync(
     *,
     interval_seconds: int,
     settle_seconds: float = 10.0,
+    reconcile: Callable[[], object] | None = None,
 ) -> None:
     """Run the automatic library sync until ``stop`` is set; it never dies.
 
@@ -887,28 +888,35 @@ async def run_automatic_sync(
         pass
     failures = 0
     while not stop.is_set():
+        # Each tick reconciles standing key intent independently of discovery.
+        # A failed observation must not suppress the other recovery path.
+        errors: list[Exception] = []
+        if reconcile is not None:
+            try:
+                await asyncio.to_thread(reconcile)
+            except Exception as error:  # noqa: BLE001 - independent recovery path
+                errors.append(error)
         try:
             observation = await asyncio.to_thread(lambda: service.automatic())
-            if observation.state == CatalogSyncState.CURRENT:
-                failures = 0
-            else:
-                failures += 1
-                _log_automatic_failure(
+            if observation.state != CatalogSyncState.CURRENT:
+                errors.append(
                     CatalogSyncUnsettled(
                         CatalogSyncCode.FAILED,
                         observation.problems[0].detail
                         if observation.problems
                         else "managed catalog observation unavailable",
-                    ),
-                    failures,
-                    interval_seconds,
+                    )
                 )
         except (CatalogSyncError, RecipeLibraryError, OSError) as error:
-            failures += 1
-            _log_automatic_failure(error, failures, interval_seconds)
+            errors.append(error)
         except Exception as error:  # noqa: BLE001 - the loop must never die
+            errors.append(error)
+        if errors:
             failures += 1
-            _log_automatic_failure(error, failures, interval_seconds)
+            for error in errors:
+                _log_automatic_failure(error, failures, interval_seconds)
+        else:
+            failures = 0
         try:
             await asyncio.wait_for(
                 stop.wait(),

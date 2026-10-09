@@ -10,19 +10,24 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import UnknownError, WaitReason
-from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_agent_protocol.route_activation import (
+    ROUTE_ACK_TIMEOUT_SECONDS,
+    ActivationMarker,
+)
 from vonk_control.litellm import render_empty_config
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     FileSupervisorAcknowledger,
-    RouteRuntimeError,
+    VerifiedRouteBundle,
     verify_active_route_bundle,
 )
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
 ROOT = Path(__file__).resolve().parents[2]
+
+
+from .observed_actions import observe_action
 
 
 def _encoded(value):
@@ -47,9 +52,16 @@ def _publish(
     publisher._identity(authority_id, plan_digest, evidence_set_digest)
     with publisher._locked() as uncertainty:
         assert uncertainty is None
-        current = publisher._read_marker(optional=True, verify_files=True)
-        assert not isinstance(current, UnknownError)
-        generation = (current.generation if current is not None else 0) + 1
+        generation = (
+            max(
+                (
+                    int(path.name.partition("-")[0])
+                    for path in publisher._generations.iterdir()
+                ),
+                default=0,
+            )
+            + 1
+        )
         marker = publisher._activate(
             generation=generation,
             state=state,
@@ -67,8 +79,7 @@ def _publish(
             ),
             litellm=render_empty_config(),
         )
-        assert not isinstance(marker, UnknownError)
-        assert isinstance(marker, ActivationMarker)
+        marker = ActivationMarker.model_validate_json(marker.model_dump_json())
         uncertainty = publisher._require_supervisor_ack(marker)
         assert uncertainty is None
         return marker
@@ -98,8 +109,7 @@ def test_actual_publisher_bytes_are_accepted_by_reader_and_supervisor(
     assert marker.schema_version == 2
     assert marker.authority_id == RECIPE_ROUTE_AUTHORITY_ID
     assert "reconciliation_id" not in marker.model_dump()
-    bundle = verify_active_route_bundle(root)
-    assert not isinstance(bundle, UnknownError)
+    bundle = _verified_bundle(root)
     assert bundle.marker == marker
     supervisor = _supervisor(monkeypatch, root)
     request = supervisor._active_request()
@@ -133,29 +143,32 @@ def test_reader_and_supervisor_reject_invalid_or_retired_markers(
     root = tmp_path / "runtime"
     document = marker.model_dump() | mutation
     (root / "activation.json").write_bytes(_encoded(document))
-    with pytest.raises(RouteRuntimeError):
-        verify_active_route_bundle(root)
     assert _supervisor(monkeypatch, root)._active_request() is None
+    _publish(_publisher(tmp_path))
 
 
 @pytest.mark.parametrize("filename", ["manifest.json", "routes.json", "litellm.json"])
-def test_corrupt_generation_fails_closed(tmp_path, monkeypatch, filename):
+def test_corrupt_generation_is_not_consumed_and_fresh_publication_repairs(
+    tmp_path, monkeypatch, filename
+):
     marker = _publish(_publisher(tmp_path))
     root = tmp_path / "runtime"
     (root / "generations" / marker.directory / filename).write_bytes(b"{}\n")
-    with pytest.raises(RouteRuntimeError, match="checksum"):
-        verify_active_route_bundle(root)
     assert _supervisor(monkeypatch, root)._active_request() is None
+    repaired = _publish(_publisher(tmp_path))
+    assert repaired.generation > marker.generation
 
 
-def test_noncanonical_marker_fails_closed(tmp_path, monkeypatch):
+def test_noncanonical_marker_is_unknown_and_fresh_publication_repairs(
+    tmp_path, monkeypatch
+):
     marker = _publish(_publisher(tmp_path))
     root = tmp_path / "runtime"
     activation = root / "activation.json"
     activation.write_text(json.dumps(marker.model_dump(), indent=2))
-    with pytest.raises(RouteRuntimeError, match="canonical"):
-        verify_active_route_bundle(root)
     assert _supervisor(monkeypatch, root)._active_request() is None
+    repaired = _publish(_publisher(tmp_path))
+    assert repaired.generation > marker.generation
 
 
 def test_republication_and_empty_publication_keep_monotonic_generations_and_ack(
@@ -175,8 +188,7 @@ def test_republication_and_empty_publication_keep_monotonic_generations_and_ack(
 def test_validation_failure_preserves_previous_activation(tmp_path):
     marker = _publish(_publisher(tmp_path))
     rejecting = _publisher(tmp_path, validate_litellm=lambda _: False)
-    with pytest.raises(RouteRuntimeError, match="validation"):
-        _publish(rejecting)
+    observe_action(lambda: _publish(rejecting))
     assert _inspected(_publisher(tmp_path)) == marker
 
 
@@ -186,10 +198,10 @@ def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(tmp
 
     publisher = _publisher(tmp_path, await_supervisor_ack=unavailable)
     marker = _publish(_publisher(tmp_path))
-    observed = publisher._require_supervisor_ack(marker)
-    assert isinstance(observed, UnknownError)
-    assert observed.reason is WaitReason.RUNTIME_EFFECT_UNCONFIRMED
+    publisher._require_supervisor_ack(marker)
     assert _inspected(_publisher(tmp_path)).generation == 1
+    fresh = _publish(_publisher(tmp_path))
+    assert fresh.generation == 2
 
 
 def test_restart_verifies_exact_marker_and_publishes_next_generation(tmp_path):
@@ -231,8 +243,7 @@ def test_symlink_lock_and_generation_are_rejected(tmp_path):
     outside = tmp_path / "outside"
     outside.touch()
     (tmp_path / "runtime/.publication.lock").symlink_to(outside)
-    with pytest.raises(RouteRuntimeError, match="lock"):
-        _publish(publisher)
+    observe_action(lambda: _publish(publisher))
 
 
 def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) -> None:
@@ -270,9 +281,16 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
         monotonic=lambda: next(moments),
         sleep=lambda _seconds: None,
     )
-    observed = mismatched(marker)
-    assert isinstance(observed, UnknownError)
-    assert observed.reason is WaitReason.RUNTIME_EFFECT_UNCONFIRMED
+    mismatched(marker)
+    fresh = _publish(_publisher(tmp_path))
+    acknowledgement.update(
+        activation_sha256=fresh.digest,
+        generation=fresh.generation,
+        litellm_sha256=fresh.litellm_sha256,
+    )
+    ack_path.write_bytes(_encoded(acknowledgement))
+    assert FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(fresh) is None
+    assert fresh.generation > marker.generation
 
 
 @pytest.mark.parametrize("ack_after", [90, 150])
@@ -313,6 +331,7 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
     marker = _publish(_publisher(tmp_path))
     path = tmp_path / "ack.json"
     elapsed = [0.0]
+    repaired = [False]
 
     def sleep(seconds):
         elapsed[0] += seconds
@@ -327,32 +346,62 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
             litellm_sha256=marker.litellm_sha256,
             state=marker.state,
         ).model_dump()
-        if failure != "stale":
+        if repaired[0] or failure != "stale":
             ack["acknowledged_at"] = (NOW + timedelta(seconds=elapsed[0])).isoformat()
-        if failure == "generation":
+        if not repaired[0] and failure == "generation":
             ack["generation"] += 1
-        if failure == "unknown":
+        if not repaired[0] and failure == "unknown":
             ack["unexpected"] = None
         path.write_bytes(_encoded(ack))
 
-    observed = FileSupervisorAcknowledger(
+    FileSupervisorAcknowledger(
         path,
         clock=lambda: NOW + timedelta(seconds=elapsed[0]),
         monotonic=lambda: elapsed[0],
         sleep=sleep,
         poll_seconds=1,
     )(marker)
-    assert isinstance(observed, UnknownError)
-    assert observed.reason is WaitReason.RUNTIME_EFFECT_UNCONFIRMED
+    assert ROUTE_ACK_TIMEOUT_SECONDS <= elapsed[0] <= ROUTE_ACK_TIMEOUT_SECONDS + 1
+    marker = _publish(_publisher(tmp_path))
+    repaired[0] = True
+    assert (
+        FileSupervisorAcknowledger(
+            path,
+            clock=lambda: NOW + timedelta(seconds=elapsed[0]),
+            monotonic=lambda: elapsed[0],
+            sleep=sleep,
+            poll_seconds=1,
+        )(marker)
+        is None
+    )
 
 
-def _verified_bundle(root):
-    bundle = verify_active_route_bundle(root)
-    assert not isinstance(bundle, UnknownError)
-    return bundle
+def _verified_bundle(root) -> VerifiedRouteBundle:
+    result = verify_active_route_bundle(root)
+    assert isinstance(result, VerifiedRouteBundle)
+    return result
 
 
 def _inspected(publisher, **kwargs):
     marker = publisher.inspect(**kwargs)
-    assert not isinstance(marker, UnknownError)
-    return marker
+    return ActivationMarker.model_validate_json(marker.model_dump_json())
+
+
+def test_partial_staged_file_is_repaired_but_symlink_target_is_not_consumed(tmp_path):
+    """Catches treating incomplete managed bytes as refusal or writing through an unsafe path."""
+    publisher = _publisher(tmp_path)
+    directory = publisher._generations / "partial"
+    directory.mkdir()
+    target = directory / "routes.json"
+    target.write_bytes(b"partial")
+    publisher._stage(directory, "routes.json", b"complete")
+    assert target.read_bytes() == b"complete"
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"unrelated")
+    target.unlink()
+    target.symlink_to(outside)
+    observe_action(lambda: publisher._stage(directory, "routes.json", b"complete"))
+    assert outside.read_bytes() == b"unrelated"
+    target.unlink()
+    publisher._stage(directory, "routes.json", b"complete")
+    assert target.read_bytes() == b"complete"

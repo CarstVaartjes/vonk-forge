@@ -462,6 +462,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 managed_catalog_sync,
                 automatic_sync_stop,
                 interval_seconds=RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS,
+                reconcile=lambda: gateway_keys.ensure_default(),
             )
         )
         default_key_task = asyncio.create_task(

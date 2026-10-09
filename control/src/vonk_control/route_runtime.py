@@ -389,15 +389,12 @@ class AtomicRouteBundlePublisher:
         directory.chmod(0o750)
         target = directory / name
         if target.exists():
-            if (
-                target.is_symlink()
-                or not target.is_file()
-                or target.read_bytes() != content
-            ):
+            if target.is_symlink() or not target.is_file():
                 raise RouteRuntimeError(
                     "staged route generation conflicts with existing bytes"
                 )
-            return
+            if target.read_bytes() == content:
+                return
         self._atomic_write(target, content, mode=0o640)
 
     def inspect(
@@ -427,13 +424,6 @@ class AtomicRouteBundlePublisher:
             if isinstance(bundle, UnknownError)
             else (None if bundle is None else bundle.marker)
         )
-
-    @staticmethod
-    def _validate_marker(marker: ActivationMarker) -> None:
-        if marker.directory != f"{marker.generation:08d}-{marker.manifest_sha256}":
-            raise RouteRuntimeError(
-                "route activation marker directory binding is invalid"
-            )
 
 
 def verify_active_route_bundle(root: Path) -> VerifiedRouteBundle | UnknownError:
@@ -469,21 +459,23 @@ def _read_active_route_bundle(
             return None
         return _unknown(WaitReason.RECEIPT_MISSING)
     if active.is_symlink() or not active.is_file():
-        raise RouteRuntimeError("route activation marker is unsafe")
+        return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
     try:
         marker_content = active.read_bytes()
         raw: Any = json.loads(marker_content)
     except OSError:
         return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
-    except json.JSONDecodeError as error:
-        raise RouteRuntimeError("route activation marker is invalid JSON") from error
+    except (json.JSONDecodeError, UnicodeError):
+        return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
     try:
         marker = read_stored_model(ActivationMarker, raw)
-    except ValidationError as error:
-        raise RouteRuntimeError("route activation marker fields are invalid") from error
-    AtomicRouteBundlePublisher._validate_marker(marker)
-    if marker_content != marker.canonical_bytes():
-        raise RouteRuntimeError("route activation marker is not canonical")
+    except ValidationError:
+        return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
+    if (
+        marker.directory != f"{marker.generation:08d}-{marker.manifest_sha256}"
+        or marker_content != marker.canonical_bytes()
+    ):
+        return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
 
     routes_document: RouteBundleDocument | None = None
     litellm_document: LiteLlmConfig | None = None
@@ -503,13 +495,13 @@ def _read_active_route_bundle(
         for name, (digest, exact) in expected_files.items():
             target = directory / name
             if target.is_symlink() or not target.is_file():
-                raise RouteRuntimeError("active route generation file is unsafe")
+                return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
             try:
                 content = target.read_bytes()
             except OSError:
                 return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
             if _sha256(content) != digest or (exact is not None and content != exact):
-                raise RouteRuntimeError("active route generation checksum mismatch")
+                return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
             if validate_documents and name in {"routes.json", "litellm.json"}:
                 try:
                     if name == "routes.json":
@@ -518,10 +510,8 @@ def _read_active_route_bundle(
                         )
                     else:
                         litellm_document = LiteLlmConfig.model_validate_json(content)
-                except ValueError as error:
-                    raise RouteRuntimeError(
-                        "active route generation document is invalid"
-                    ) from error
+                except ValueError:
+                    return _unknown(WaitReason.OBSERVATION_UNAVAILABLE)
 
     return VerifiedRouteBundle(
         marker=marker,

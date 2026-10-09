@@ -1,1 +1,1 @@
-"""Authentication and verified-byte ingress boundaries."""
+"""Authentication and explicitly denied enrollment and route authority boundaries."""

@@ -424,6 +424,49 @@ test("gateway uncertainty preserves its reason and a fresh observation succeeds"
   await expect(client.gatewayKeys()).resolves.toEqual({ keys: [] });
 });
 
+test.each(["create", "roll"])(
+  "gateway %s reconnects to the exact request after a lost response",
+  async (action) => {
+    const receipts = new Map<string, string>();
+    let effects = 0;
+    let loseReply = true;
+    setCsrfCookie();
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request =
+        input instanceof Request
+          ? input
+          : new Request(new URL(String(input), location.origin), init);
+      const identity =
+        action === "create"
+          ? (await request.json()).request_id
+          : new URL(request.url).searchParams.get("request_id");
+      if (!receipts.has(identity)) receipts.set(identity, `sk-generation-${++effects}`);
+      if (loseReply) {
+        loseReply = false;
+        throw new Error("response lost after effect");
+      }
+      return new Response(
+        JSON.stringify({ name: "client", models: [], key: receipts.get(identity) }),
+        {
+          status: action === "create" ? 201 : 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    });
+    const client = new ApiClient();
+    const invoke = (identity: string) =>
+      action === "create"
+        ? client.createGatewayKey("client", [], undefined, identity)
+        : client.rollGatewayKey("client", identity);
+    await invoke("first").catch(() => undefined);
+    const first = await invoke("first");
+    expect(first.key).toBe(receipts.get("first"));
+    expect(effects).toBe(1);
+    const second = await invoke("second");
+    expect(second.key).not.toBe(first.key);
+    expect(effects).toBe(2);
+  },
+);
 test("an unknown enrollment revocation preserves observation and admits a fresh revocation", async () => {
   setCsrfCookie();
   const grantId = "00000000-0000-4000-8000-000000000101";

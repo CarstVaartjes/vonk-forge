@@ -312,6 +312,21 @@ Native renewal acceptance uses `NativeRenewalEvidence` and `RenewalHelperManifes
 from the registered `vonk_agent_protocol.agent_state` module. The source journal
 is persisted before rotation; an absent replacement is an observation miss.
 
+Gateway mutation recovery uses `gateway_keys.GatewayMutationReceipt` to bind
+a request identity and durable completion to the exact `_KeyGenerateRequest`.
+Completed receipts remain independent of alias history; a fresh request ID
+creates a new secret and a repeated ID reuses its original receipt. The proposed alias, scope, lifetime, and secret are persisted before
+LiteLLM mutation in `/gateway-secrets/mutations`, the Controller's writable,
+persistent gateway secret bind mount. Records and claim files are private
+(mode 0600, directory mode 0700); normalized administrative secrets remain
+read-only. These records do not grant authority: every API mutation retains
+its role check and every remote request authenticates with the master key.
+Malformed records are misses; current requests replace them before effects.
+
+`recipe_execution_contract.RouteWithdrawalFollowUp` constrains the generated
+`OperatorActionName.STOP` and `OperatorActionName.RETRY` choices for stop and
+recovery follow-ups after recipe route withdrawal.
+
 `control/src/vonk_control/runtime_asset_contract.py` owns `RuntimeAssetInventory`, the complete public-kit membership assembled into the Controller image. Staging validates every member before removing retired projections.
 
 `job_documents.AvailabilityUnknownEnd` records a preparation owner ended after unreadable intent; it grants no execution or publication authority. `runtime_image_preparation/contracts.RuntimeImageReceiptObservation` distinguishes a readable damaged receipt from an unavailable read, so scans never delete a file on an unknown observation.

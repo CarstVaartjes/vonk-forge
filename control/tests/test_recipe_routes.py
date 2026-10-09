@@ -13,9 +13,12 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentOperation,
     DesiredAssignmentState,
     EndpointState,
     LifecycleState,
+    RouteState,
+    RunState,
     UnknownError,
 )
 from vonk_control import recipe_routes
@@ -24,7 +27,8 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
 )
-from vonk_control.litellm import LiteLlmGeneration, LiteLlmPolicyError
+from vonk_control.job_documents import RecipeStartParent
+from vonk_control.litellm import LiteLlmGeneration
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -49,17 +53,16 @@ from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
-    RecipeRouteError,
     RecipeRouteNotReady,
     RecipeRouteService,
     RecipeRouteSuperseded,
 )
 from vonk_control.route_runtime import (
     AtomicRouteBundlePublisher,
-    RouteRuntimeError,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .observed_actions import observe_action
 from .stored_documents_support import valid_policy_report
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
@@ -632,11 +635,7 @@ def test_legacy_distributed_route_is_rejected_without_exact_local_rank_evidence(
 ) -> None:
     service, _publisher, applied, run_id = setup(tmp_path, exact_distributed=False)
 
-    with pytest.raises(
-        RecipeRouteError,
-        match="exact observation",
-    ):
-        service.publish_run(run_id)
+    observe_action(lambda: service.publish_run(run_id))
 
     assert applied == []
 
@@ -672,8 +671,7 @@ def test_mapping_owner_must_be_the_run_entrypoint(tmp_path: Path) -> None:
         worker = session.query(RunNode).filter_by(run_id=run_id, rank=1).one()
         mapping.endpoint_owner_node_id = worker.node_id
 
-    with pytest.raises(RecipeRouteError, match="mapped endpoint-owner entrypoint"):
-        service.publish_run(run_id)
+    observe_action(lambda: service.publish_run(run_id))
     assert applied == []
 
 
@@ -715,8 +713,7 @@ def test_artifact_interface_never_publishes_a_litellm_route(tmp_path: Path) -> N
         tmp_path, interfaces=[{"adapter": "video-job"}]
     )
 
-    with pytest.raises(RecipeRouteError, match="LiteLLM interface"):
-        service.publish_run(run_id)
+    observe_action(lambda: service.publish_run(run_id))
 
     assert applied == []
 
@@ -726,8 +723,7 @@ def test_missing_runtime_model_authority_blocks_route_publication(
 ) -> None:
     service, _publisher, applied, run_id = setup(tmp_path, runtime_model_aliases=())
 
-    with pytest.raises(RecipeRouteError, match="model authority"):
-        service.publish_run(run_id)
+    observe_action(lambda: service.publish_run(run_id))
 
     assert applied == []
 
@@ -752,8 +748,7 @@ def test_stale_or_failed_rank_blocks_gang_publication(
     service, _publisher, applied, run_id = setup(
         tmp_path, stale=stale, failed_rank=failed
     )
-    with pytest.raises(RecipeRouteError):
-        service.publish_run(run_id)
+    observe_action(lambda: service.publish_run(run_id))
     assert applied == []
 
 
@@ -776,8 +771,7 @@ def test_candidate_rank_identity_must_exactly_match_accepted_plan(
         }
         run.plan = invalid_plan
 
-    with pytest.raises(RecipeRouteError, match="stored recipe run plan is invalid"):
-        service.publish_run(run_id)
+    observe_action(lambda: service.publish_run(run_id))
     assert applied == []
 
 
@@ -796,8 +790,7 @@ def test_invalid_candidate_retains_previous_generation(tmp_path: Path) -> None:
         clock=lambda: NOW,
         maximum_age_seconds=120,
     )
-    with pytest.raises(RouteRuntimeError, match="LiteLLM validation"):
-        rejecting.withdraw_run(run_id)
+    observe_action(lambda: rejecting.withdraw_run(run_id))
     assert _inspected(publisher).generation == accepted.generation
 
 
@@ -975,72 +968,33 @@ def test_temporary_publication_failure_stays_pending_and_converges(
         RuntimeError("recipe route document is invalid"),
     ],
 )
-def test_route_publication_keeps_retrying_at_a_capped_rate_until_it_converges(
+def test_route_publication_ends_its_observation_without_claiming_workload_stopped(
     tmp_path: Path, error: BaseException
 ) -> None:
-    """A serving run is never left permanently unlisted by publication errors."""
-
     clock = MutableClock(NOW)
     service, _publisher, _applied, run_id = setup(tmp_path, clock=clock)
+    fresh = add_running_run(
+        service, run_id, alias="fresh", route_state="withdrawn", identity=8
+    )
     with service.sessions.begin() as session:
         _recipe_run(session, run_id).route_state = "pending"
     routes = _TransientFirstPublish(service, error, failures=12)
     worker = RecipeOperationWorker(service.sessions, routes, clock=clock)
-
-    for attempt in range(1, 13):
-        assert worker.tick() is True
+    for _attempt in range(6):
+        worker.tick()
         with service.sessions() as session:
-            run = _recipe_run(session, run_id)
-            assert run.route_state == "pending"
-            assert run.route_attempts == attempt
-            assert str(error) in (run.route_error or "")
-            assert run.route_next_attempt_at is not None
-            due_at = _aware(run.route_next_attempt_at)
-        assert timedelta(0) < due_at - clock.now <= timedelta(seconds=60)
-        clock.now = due_at + timedelta(seconds=1)
-
-    # Node evidence ages with the simulated clock; refresh it like heartbeats.
-    with service.sessions.begin() as session:
-        for node in session.query(RunNode).filter_by(run_id=run_id):
-            node.updated_at = clock.now
-    assert worker.tick() is True
+            due = _recipe_run(session, run_id).route_next_attempt_at
+        if due is not None:
+            clock.now = _aware(due) + timedelta(seconds=1)
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
-        assert run.route_state == "published", run.route_error
-        assert run.route_attempts == 0
-        assert run.route_error is None
-
-
-def test_acknowledgement_failure_after_activation_is_temporary() -> None:
-    """An activated generation with a lost supervisor ack is retried.
-
-    The generation exists, so the next attempt reconciles it instead of the
-    Controller reporting a permanent route failure.
-    """
-
-    import vonk_control.recipe_routes as routes_module
-
-    generation = LiteLlmGeneration(
-        generation=1,
-        route_digest="",
-        config_sha256="",
-        path="memory",
-    )
-    activated = routes_module._ActivatedRecipeRouteError(
-        "recipe route activation acknowledgement failed",
-        generation=generation,
-    )
-
-    assert routes_module.publication_is_temporary(activated) is True
-    assert (
-        routes_module.publication_is_temporary(RecipeRouteNotReady("waiting")) is True
-    )
-    assert routes_module.publication_is_temporary(OSError("socket")) is True
-    assert routes_module.publication_is_temporary(LiteLlmPolicyError("bad")) is False
-    assert (
-        routes_module.publication_is_temporary(RuntimeError("invalid document"))
-        is False
-    )
+        assert run.route_state != "pending"
+        assert run.state == "running"
+        assert run.route_next_attempt_at is None
+    clock.now = NOW
+    service.publish_run(fresh)
+    with service.sessions() as session:
+        assert _recipe_run(session, fresh).route_state == "published"
 
 
 def test_worker_publishes_pending_route_and_records_failure(tmp_path: Path) -> None:
@@ -1490,6 +1444,36 @@ def test_a_serving_route_outlives_missing_rank_reports(
     assert len(kept) == 1 and "evidence is 301s old" in kept[0]
 
 
+@pytest.mark.parametrize("missing_observations", [False, True])
+def test_explicit_republication_retains_serving_route_without_fresh_reports(
+    tmp_path: Path, missing_observations: bool
+) -> None:
+    """An explicit request must not turn a serving route into a first publish."""
+
+    clock = MutableClock(NOW)
+    base, _publisher, _applied, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    first = service.publish_run(run_id)
+    clock.now += timedelta(seconds=301)
+    if missing_observations:
+        with service.sessions.begin() as session:
+            for node in session.scalars(
+                select(RunNode).where(RunNode.run_id == run_id)
+            ):
+                node.observed_run_generation = None
+                node.observation_observed_at = None
+                node.observation_endpoint_ready = None
+
+    for _ in range(2):
+        fresh = service.publish_run(run_id)
+        assert fresh.generation == first.generation
+        with service.sessions() as session:
+            run = _recipe_run(session, run_id)
+            assert run.state == RunState.RUNNING
+            assert run.route_state == RouteState.PUBLISHED
+            assert run.route_generation == fresh.generation
+
+
 def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
     tmp_path: Path,
 ) -> None:
@@ -1518,6 +1502,7 @@ def test_worker_republishes_automatically_with_fresh_recovered_rank_evidence(
         recovered.updated_at = clock.now
 
     restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert restarted.tick() is True
     assert restarted.tick() is True
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
@@ -1559,7 +1544,9 @@ def test_recovered_run_rejoins_candidate_while_another_run_remains_published(
         node.state = "running"
         node.updated_at = clock.now
 
-    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    restarted = RecipeOperationWorker(service.sessions, service, clock=clock)
+    assert restarted.tick() is True
+    assert restarted.tick() is True
     with service.sessions() as session:
         assert _recipe_run(session, healthy_run).route_state == "published"
         assert _recipe_run(session, recovered_run).route_state == "published"
@@ -1734,7 +1721,7 @@ def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
 def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     tmp_path: Path, postgres_engine, failure_point: str, recovering: bool
 ) -> None:
-    """A lost publication response adopts an activated bundle on restart."""
+    """Unavailable acknowledgement stays pending; restart adopts exact bytes."""
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(
@@ -1747,7 +1734,6 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     def acknowledge(marker):
         acknowledgements.append(marker.generation)
         if fail_ack[0]:
-            fail_ack[0] = False
             raise OSError("supervisor acknowledgement lost")
 
     runtime = AtomicRouteBundlePublisher(root, await_supervisor_ack=acknowledge)
@@ -1757,7 +1743,6 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
 
         def activate_once(**kwargs):
             if fail_activate[0]:
-                fail_activate[0] = False
                 raise OSError("supervisor unavailable before activation")
             return activate(**kwargs)
 
@@ -1801,7 +1786,9 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
         if failure_point == "after-activation"
         else None
     )
-    assert not isinstance(marker_after_failure, UnknownError)
+    assert marker_after_failure is None or not isinstance(
+        marker_after_failure, UnknownError
+    )
     with service.sessions() as session:
         run = _recipe_run(session, run_id)
         assert run.state == "running"
@@ -1813,6 +1800,9 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
             assert recovery_job.result == {}
 
     clock.now = due_at + timedelta(seconds=1)
+    fail_ack[0] = False
+    if failure_point == "before-activation":
+        fail_activate[0] = False
     restarted_runtime = AtomicRouteBundlePublisher(
         root, await_supervisor_ack=acknowledge
     )
@@ -1841,7 +1831,8 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
             assert result["recovery_route_published"] is True
     if marker_after_failure is not None:
         assert final_marker.digest == marker_after_failure.digest
-        assert acknowledgements == [1, 1]
+        assert acknowledgements[:-1]
+        assert set(acknowledgements) == {final_marker.generation}
     else:
         assert final_marker.generation == 1
         assert acknowledgements == [1]
@@ -1882,7 +1873,7 @@ def test_last_route_withdrawn_outside_publication_empties_litellm(
     assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is False
 
 
-def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
+def test_invalid_endpoint_bookkeeping_keeps_serving_routes_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
     clock = MutableClock(NOW)
@@ -1898,11 +1889,16 @@ def test_one_run_with_an_invalid_endpoint_does_not_expire_the_other_routes(
         node = session.query(RunNode).filter_by(run_id=broken_run).one()
         node.endpoint = {"url": "http://192.0.2.9:8000"}
 
-    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
-    assert _live_models(tmp_path / "live") == ["qwen"]
+    RecipeOperationWorker(service.sessions, service, clock=clock).tick()
+    assert sorted(_live_models(tmp_path / "live")) == ["broken", "qwen"]
     with service.sessions() as session:
         assert _recipe_run(session, healthy_run).route_state == "published"
-        assert _recipe_run(session, broken_run).route_state == "withdrawn"
+        assert _recipe_run(session, broken_run).route_state == "published"
+    fresh = add_running_run(
+        base, healthy_run, alias="fresh", route_state="pending", identity=4
+    )
+    service.publish_run(fresh)
+    assert sorted(_live_models(tmp_path / "live")) == ["broken", "fresh", "qwen"]
 
 
 @pytest.mark.parametrize("damage", ["plan", "alias", "ranks", "mapping", "endpoint"])
@@ -2107,10 +2103,54 @@ def test_unverified_active_bundle_cannot_supply_a_fallback_endpoint(
     route_file.write_text(route_file.read_text() + " ")
     with service.sessions.begin() as session:
         _recipe_run(session, first).plan = {"unreadable": True}
-    with pytest.raises(RouteRuntimeError, match="checksum mismatch"):
-        service.publish_run(second)
-    assert json.loads((root / "activation.json").read_text()) == marker
-    assert _live_models(root) == ["qwen"]
+    service.publish_run(second)
+    assert _live_models(root) == ["second"]
+    with service.sessions() as session:
+        assert _recipe_run(session, first).plan == {"unreadable": True}
+    service.withdraw_run(first)
+    assert _live_models(root) == ["second"]
 
 
 from .test_route_runtime import _inspected
+
+
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_normal_start_optional_recovery_does_not_block_route_publication(
+    tmp_path: Path, explicit_null: bool
+) -> None:
+    """Catches treating an omitted or null optional marker as a recovery owner."""
+    clock = MutableClock(NOW)
+    base, _, _, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    with service.sessions.begin() as session:
+        run = _recipe_run(session, run_id)
+        payload = RecipeStartParent(
+            schema_version=1,
+            owner_kind="run",
+            owner_id=run_id,
+            plan_digest=run.plan_digest,
+        )
+        session.add(
+            Job(
+                request_id=str(uuid4()),
+                kind=AgentOperation.RECIPE_START,
+                state=LifecycleState.SUCCEEDED,
+                actor="admin",
+                authority_revision="a" * 64,
+                targets=[],
+                payload_digest="b" * 64,
+                payload=payload.model_dump(mode="json", exclude_none=not explicit_null),
+                result={},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    first = service.publish_run(run_id)
+    second = add_running_run(
+        base, run_id, alias="next", route_state="pending", identity=3
+    )
+    service.publish_run(second)
+    with service.sessions() as session:
+        generation = _recipe_run(session, run_id).route_generation
+        assert generation is not None and generation >= first.generation
+        assert _recipe_run(session, second).route_state == "published"

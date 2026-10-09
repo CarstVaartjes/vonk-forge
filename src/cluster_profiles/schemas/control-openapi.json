@@ -11941,6 +11941,19 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$",
             "title": "Name",
             "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
           }
         },
         "required": [
@@ -11951,7 +11964,7 @@
       },
       "GatewayKeyCreated": {
         "additionalProperties": false,
-        "description": "The only response that carries the key. It is not shown again.",
+        "description": "The retained key for this mutation; the exact receipt can be replayed.",
         "properties": {
           "created_at": {
             "anyOf": [
@@ -35912,6 +35925,20 @@
             "const": 1,
             "title": "Schema Version",
             "type": "integer"
+          },
+          "upstream_model": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Upstream Model"
           }
         },
         "required": [
@@ -39749,16 +39776,6 @@
             },
             "description": "Forbidden"
           },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
           "422": {
             "content": {
               "application/json": {
@@ -39927,6 +39944,22 @@
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$",
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Request Id"
             }
           }
         ],

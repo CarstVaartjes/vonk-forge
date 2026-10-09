@@ -100,4 +100,13 @@ class RoutePublicationOwner(Base):
         nullable=False,
         default=0,
     )
+    reconciliation_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+    reconciliation_next_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    reconciliation_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
