@@ -116,6 +116,7 @@ impl<R: ProcessRunner> Executor for ControlExecutor<'_, R> {
 mod tests {
     use super::*;
     use crate::executor::test_support::{NoProcess, claim};
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn superseded_distribution_yields_without_network_or_host_effects() {
@@ -141,7 +142,7 @@ mod tests {
                     plan_digest: "a".repeat(64),
                 },
             );
-        let (_, deadline) = tokio::sync::watch::channel(obsolete.deadline);
+        let (_lease, deadline) = tokio::sync::watch::channel(obsolete.deadline);
         let (cancel, cancellation) = tokio::sync::watch::channel(true);
         let result = tokio::time::timeout(
             Duration::from_secs(1),
@@ -149,13 +150,20 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(result, ExecutionResult::Unknown(_)));
+        // Before any transfer or helper effect, cancellation is confirmed;
+        // there is no unknown effect for the Controller to reconcile.
+        let ExecutionResult::Failed(failure) = result else {
+            panic!("expected confirmed cancellation before distribution effects");
+        };
+        assert_eq!(failure.code, Some(FailureCode::OperationCancelled));
         assert!(std::fs::read_dir(data.path()).unwrap().next().is_none());
+        assert!(std::fs::read_dir(runtime.path()).unwrap().next().is_none());
         // Cancellation ownership is per request; ending an obsolete transfer
         // leaves a new operation free to execute on the normal dispatch path.
         drop(cancel);
-        let current = claim();
-        let (_, deadline) = tokio::sync::watch::channel(current.deadline);
+        let mut current = obsolete.clone();
+        current.fence = Uuid::new_v4();
+        let (_lease, deadline) = tokio::sync::watch::channel(current.deadline);
         let (_cancel, cancellation) = tokio::sync::watch::channel(false);
         let result = tokio::time::timeout(
             Duration::from_secs(1),
@@ -163,6 +171,16 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(result, ExecutionResult::Failed(_)));
+        // The fresh transfer reaches the unavailable Controller, rather than
+        // inheriting cancellation or being refused by stale local ownership.
+        let ExecutionResult::Failed(failure) = result else {
+            panic!("expected the fresh distribution to reach its network dependency");
+        };
+        assert_eq!(failure.code, None);
+        assert_eq!(failure.stage, Some(FailureStage::ArtifactDistribution));
+        assert_eq!(
+            failure.failure_kind,
+            Some(AgentFailureKind::TemporaryDependency)
+        );
     }
 }
