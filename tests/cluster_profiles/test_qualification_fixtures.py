@@ -25,7 +25,7 @@ from cluster_profiles.qualification_fixtures import (
     _validate_synchronized_media_receipt,
     validate_outputs,
 )
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 from tests.cluster_profiles.test_glb_validation import Glb
 
 PNG = base64.b64decode(

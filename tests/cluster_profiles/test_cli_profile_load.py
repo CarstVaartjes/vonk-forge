@@ -8,7 +8,7 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlNotFound
-from tests.cluster_profiles.consumer_outcomes import not_adopted
+from control.tests.consumer_outcomes import not_adopted
 
 KEY = "11111111-1111-4111-8111-111111111111"
 DIGEST = "c" * 64

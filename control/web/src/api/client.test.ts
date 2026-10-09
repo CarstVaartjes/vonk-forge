@@ -387,10 +387,16 @@ test.each(["bespoke", "generated"])(
   "%s JSON consumer uses the same producer-owned streaming budget",
   async (path) => {
     const cancel = vi.fn();
+    let oversized = true;
     vi.stubGlobal(
       "fetch",
-      async () =>
-        new Response(
+      async () => {
+        if (!oversized) {
+          return new Response(JSON.stringify(modelLibrary), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response(
           new ReadableStream<Uint8Array>(
             {
               pull(controller) {
@@ -401,13 +407,16 @@ test.each(["bespoke", "generated"])(
             { highWaterMark: 0 },
           ),
           { headers: { "content-type": "application/json" } },
-        ),
+        );
+      },
     );
     const client = new ApiClient();
     const request = path === "bespoke" ? client.request("/api/operations") : client.operations();
     expect(await request.then(() => true, () => false)).toBe(false);
     expect(cancel).toHaveBeenCalledOnce();
-    stubFetch(modelLibrary);
+    // The generated transport captures fetch at construction. Recover the
+    // same transport so this proves a failed read does not poison the client.
+    oversized = false;
     await expect(client.modelLibrary()).resolves.toEqual(modelLibrary);
   },
 );
