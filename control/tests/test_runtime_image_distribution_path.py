@@ -123,7 +123,7 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     executor._ensure_child = ensure_child
     # The memory source has no image layout to read the config id from.
     monkeypatch.setattr(
-        executor, "_stored_config_digest", lambda _address: "sha256:" + "d" * 64
+        executor, "_stored_config_digest", lambda _address, _bytes: "sha256:" + "d" * 64
     )
     phase = RunSwitchPhase(
         index=0,
@@ -248,7 +248,9 @@ def test_archive_is_identified_by_content_for_any_revision(tmp_path: Path) -> No
     }
     assert executor._archive(**call).address == ARCHIVE_DIGEST
     # Another build's bytes are not this build's.
-    with pytest.raises(RuntimeError, match="build authority changed"):
+    with pytest.raises(
+        RuntimeError, match="verified OCI runtime image identity is unavailable"
+    ):
         executor._archive(**{**call, "image_bytes": receipt.image_bytes + 1})
 
 

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import AssetAvailability, canonical_message
+from vonk_agent_protocol import (
+    AssetAvailability,
+    ModelCacheCode,
+    canonical_message,
+)
 from vonk_control import cache_removal_review as review_contract
 from vonk_control.cache_removal_review import (
     CacheRemovalAsset,
@@ -138,19 +142,19 @@ def test_complete_review_wire_budget_reports_limit_and_observed_size(
         seal_cache_removal_review(content)
 
 
-def test_in_use_removal_waits_for_active_work_but_saved_profiles_refuse() -> None:
+def test_saved_draft_does_not_add_an_admission_blocker() -> None:
     in_use = CacheRemovalBlocker(
-        code="model_cache.removal_referenced",
+        code=ModelCacheCode.REMOVAL_REFERENCED,
         detail="model cache set is still referenced",
         retryable=True,
     )
     other = CacheRemovalBlocker(
-        code="runtime_image.removal_path_unsafe", detail="unsafe", retryable=False
+        code=ModelCacheCode.REMOVAL_PATH_UNSAFE, detail="unsafe", retryable=False
     )
     profile_review = seal_cache_removal_review(
         _content().model_copy(update={"blockers": [in_use, other]})
     )
-    assert refusing_removal_blockers(profile_review) == [in_use, other]
+    assert refusing_removal_blockers(profile_review) == [other]
 
     active_review = seal_cache_removal_review(
         _content().model_copy(

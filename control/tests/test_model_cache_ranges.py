@@ -74,6 +74,15 @@ def test_rejects_incorrect_range_without_publishing(tmp_path, header, body):
             workers=1,
         )
     assert not target.exists()
+    assert download_ranges(
+        target,
+        10,
+        lambda start, end: response(start, end, 10, b"0123456789"),
+        Event(),
+        lambda value: None,
+        workers=1,
+    )
+    assert target.read_bytes() == b"0123456789"
 
 
 def test_truncated_response_resumes_its_valid_prefix(tmp_path):
@@ -159,6 +168,15 @@ def test_oversize_after_complete_prefix_cannot_be_reused(tmp_path):
         )
     assert range_partial_bytes(target, size, workers=1) == 0
     assert not target.exists()
+    assert download_ranges(
+        target,
+        size,
+        lambda s, e: response(s, e, size, b"a" * size),
+        Event(),
+        lambda value: None,
+        workers=1,
+    )
+    assert target.read_bytes() == b"a" * size
 
 
 def test_precancelled_download_never_opens_http(tmp_path):
@@ -172,6 +190,14 @@ def test_precancelled_download_never_opens_http(tmp_path):
         download_ranges(
             tmp_path / "model.part", 100, unexpected, stop, lambda value: None
         )
+    stop.clear()
+    assert download_ranges(
+        tmp_path / "model.part",
+        100,
+        lambda s, e: response(s, e, 100, b"a" * (e - s + 1)),
+        stop,
+        lambda value: None,
+    )
 
 
 @pytest.mark.parametrize(
@@ -181,15 +207,16 @@ def test_symlink_cache_paths_cannot_touch_external_file(tmp_path, name):
     outside = tmp_path / "outside"
     outside.write_bytes(b"keep")
     (tmp_path / name).symlink_to(outside)
-    with pytest.raises(RangeResponseError, match="symlink"):
-        download_ranges(
-            tmp_path / "model.part",
-            100,
-            lambda s, e: response(s, e, 100, b"a" * (e - s + 1)),
-            Event(),
-            lambda value: None,
-        )
+    assert range_partial_bytes(tmp_path / "model.part", 100) == 0
+    assert download_ranges(
+        tmp_path / "model.part",
+        100,
+        lambda s, e: response(s, e, 100, b"a" * (e - s + 1)),
+        Event(),
+        lambda value: None,
+    )
     assert outside.read_bytes() == b"keep"
+    assert (tmp_path / "model.part").read_bytes() == b"a" * 100
 
 
 @pytest.mark.parametrize("resume_prefix", [0, 3 * 1024 * 1024 // 2])
@@ -229,3 +256,58 @@ def test_resumed_range_peak_growth_fits_two_object_reservation(
     assert observed_peak[0] - initial_bytes == 2 * len(data) - retained_segment
     assert observed_peak[0] - initial_bytes <= 2 * len(data)
     assert list(tmp_path.iterdir()) == [target]
+
+
+def test_lost_range_at_assembly_is_a_miss_and_fresh_attempt_repairs(tmp_path):
+    target = tmp_path / "model.part"
+    segment = target.with_name("model.part.range-0-9")
+
+    def damage_after_transfer(count):
+        if count == 10:
+            segment.write_bytes(b"torn")
+
+    assert not download_ranges(
+        target,
+        10,
+        lambda s, e: response(s, e, 10, b"0123456789"),
+        Event(),
+        damage_after_transfer,
+        workers=1,
+    )
+    assert not target.exists()
+    assert download_ranges(
+        target,
+        10,
+        lambda s, e: response(s, e, 10, b"0123456789"),
+        Event(),
+        lambda count: None,
+        workers=1,
+    )
+    assert target.read_bytes() == b"0123456789"
+
+
+def test_lost_contiguous_prefix_is_refetched(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    target = tmp_path / "model.part"
+    target.write_bytes(b"01234")
+    original_open = Path.open
+    damaged = False
+
+    def lose_prefix(path, mode="r", *args, **kwargs):
+        nonlocal damaged
+        if path == target and mode == "rb" and not damaged:
+            damaged = True
+            target.write_bytes(b"")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", lose_prefix)
+    requested = []
+
+    def fetch(s, e):
+        requested.append((s, e))
+        return response(s, e, 10, b"0123456789"[s : e + 1])
+
+    assert download_ranges(target, 10, fetch, Event(), lambda count: None, workers=1)
+    assert requested == [(0, 9)]
+    assert target.read_bytes() == b"0123456789"

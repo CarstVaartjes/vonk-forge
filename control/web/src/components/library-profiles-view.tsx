@@ -856,6 +856,7 @@ export function LibraryProfilesView({
                 connection={observer.connection}
                 lastSuccessAt={observer.lastSuccessAt}
                 background={observer.background}
+                onResume={observer.resume}
                 subject="this profile load"
               />
             ) : undefined

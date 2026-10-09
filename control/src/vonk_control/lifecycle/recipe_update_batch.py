@@ -379,7 +379,9 @@ class RecipeUpdateBatchAdapter:
         return self.settled(
             job,
             None,
-            Reported(Outcome.FAILED, retryable=False, reason=reason),
+            Reported(
+                Outcome.FAILED, retryable=False, effect=Effect.UNKNOWN, reason=reason
+            ),
             now,
             reason=reason,
         ).row

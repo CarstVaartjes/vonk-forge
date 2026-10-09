@@ -19,14 +19,12 @@ rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 vonk-agent-protocol = { path = "../vonk-agent-protocol" }
 time.workspace = true
 url.workspace = true
 x509-parser.workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true
 
 [lib]
 name = "vonk_nas_setup"

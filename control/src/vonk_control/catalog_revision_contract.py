@@ -253,11 +253,8 @@ def read_catalog_document(
             raise CatalogRevisionContractError(
                 f"catalog revision {revision.id} has unknown kind {revision.kind!r}"
             )
-        if (
-            document_sha256(document) != revision.content_digest
-            or parsed.identity.publisher != revision.publisher
-            or parsed.identity.slug != revision.slug
-        ):
+        stored_digest = revision.content_digest
+        if document_sha256(document) != stored_digest:
             raise CatalogRevisionContractError(
                 f"catalog revision {revision.id} document identity does not match"
             )

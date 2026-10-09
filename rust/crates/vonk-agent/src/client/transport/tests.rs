@@ -262,7 +262,7 @@ async fn rotation_silent_activation_retries_same_generation_and_repairs_heartbea
                             let (name, value) = line.split_once(':')?;
                             name.eq_ignore_ascii_case("content-length")
                                 .then(|| value.trim().parse().unwrap())
-                        }).unwrap();
+                        }).unwrap_or_else(|| panic!("rotation fixture received an unframed request: {headers}"));
                         if request.len() >= header_end + length { break header_end; }
                     }
                 };

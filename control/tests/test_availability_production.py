@@ -186,9 +186,10 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
                 )
             )
         ]
-        source_digest = session.get(CatalogDocumentRevision, revision.id).projected[
-            "source_bundle_sha256"
-        ]
+        current = session.get(CatalogDocumentRevision, revision.id)
+        assert current is not None
+        source_digest = current.projected["source_bundle_sha256"]
+        assert isinstance(source_digest, str)
     catalog = CatalogService(
         sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
     )
@@ -220,6 +221,7 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
 
         with sessions.begin() as session:
             current = session.get(CatalogDocumentRevision, revision.id)
+            assert current is not None
             session.execute(
                 update(CatalogDocumentRevision)
                 .where(CatalogDocumentRevision.id == revision.id)

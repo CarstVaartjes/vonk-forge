@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
+from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
+    ModelCacheCode,
+)
 
 from ..artifact_lifecycle import (
     ArtifactIdentity,
@@ -24,7 +27,6 @@ from ..artifact_lifecycle import (
     reserve_removal,
 )
 from ..categorized_errors import InvalidValue
-from ..lifecycle.evidence import Residue
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
     ModelCacheCounters,
@@ -35,18 +37,17 @@ from ..model_cache_contract import (
 )
 from ..model_cache_progress import cache_progress, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
+from ..operation_contract import AvailabilityRecoveryAction
 from ..strict_json import serialize_json_value
 from .constants import SCHEMA_VERSION, SOURCE_POLICY
 from .errors import (
     ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
-    ModelCacheDeletionFenceLost,
     ModelCacheStorageRefused,
     _ArtifactWriterBusy,
 )
 from .persistence import (
     _model_removal_intent_digest,
-    _removal_checkpoint,
     _write_operation_payload,
 )
 from .views import CacheOperationView, ModelCacheRemovalScope
@@ -108,6 +109,7 @@ class RemovalAcceptanceMixin:
         gates_reserved: bool = False,
         expected_scope: ModelCacheRemovalScope | None = None,
         verify: Callable[[Session, tuple[str, ...]], None] | None = None,
+        defer_scope: bool | None = None,
     ) -> ModelCacheOperation:
         cache = cast("ModelCacheService", self)
         existing = session.scalar(
@@ -119,6 +121,8 @@ class RemovalAcceptanceMixin:
             cache._replay_model_removal(existing, actor=actor, selector=selector)
             return existing
 
+        if defer_scope is None:
+            defer_scope = not gates_reserved and verify is None
         if selected_sets is None:
             selected = tuple(
                 session.scalars(
@@ -132,26 +136,43 @@ class RemovalAcceptanceMixin:
             if len(supplied) != len(set(supplied)):
                 raise InvalidValue("model removal scope contains duplicate sets")
             selected = tuple(sorted(supplied))
-        # Read and validate exact SQL membership before the ordered gate
-        # acquisition, then re-read it after the fences are held.
-        scope = cache._model_removal_scope_for_sets(session, selected)
-        if expected_scope is not None and scope != expected_scope:
-            raise ModelCacheConflictUnknown(
-                ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
-                "model removal scope changed before parent acceptance",
-            )
         operation_id = operation_id or str(uuid.uuid4())
         fence = removal_fence or str(uuid.uuid4())
         now = cache._clock()
-        identities = (
-            *(ArtifactIdentity("model-set", digest) for digest in scope.selected_sets),
-            *(
-                ArtifactIdentity("model-object", digest)
-                for digest in scope.delete_objects
-            ),
-        )
-        assignments: tuple[tuple[ArtifactIdentity, RemovalOwnerKind, str, str], ...] = (
-            tuple(
+        if defer_scope:
+            scope = ModelCacheRemovalScope(
+                selected_sets=selected,
+                memberships=(),
+                selected_objects=(),
+                delete_objects=(),
+                shared_memberships=(),
+            )
+            delete_objects = ()
+        else:
+            # Read and validate exact SQL membership before the ordered gate
+            # acquisition, then re-read it after the fences are held.
+            scope = cache._model_removal_scope_for_sets(session, selected)
+            if expected_scope is not None and scope != expected_scope:
+                raise ModelCacheConflictUnknown(
+                    ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
+                    "model removal scope changed before parent acceptance",
+                )
+            operation_id = operation_id or str(uuid.uuid4())
+            fence = removal_fence or str(uuid.uuid4())
+            now = cache._clock()
+            identities = (
+                *(
+                    ArtifactIdentity("model-set", digest)
+                    for digest in scope.selected_sets
+                ),
+                *(
+                    ArtifactIdentity("model-object", digest)
+                    for digest in scope.delete_objects
+                ),
+            )
+            assignments: tuple[
+                tuple[ArtifactIdentity, RemovalOwnerKind, str, str], ...
+            ] = tuple(
                 (
                     identity,
                     "model-cache-operation",
@@ -160,64 +181,65 @@ class RemovalAcceptanceMixin:
                 )
                 for identity in identities
             )
-        )
-        try:
-            if gates_reserved:
-                if not removal_fences_match(session, assignments, now=now):
-                    raise ModelCacheDeletionFenceLost(
-                        ArtifactLifecycleCode.DELETION_FENCE_LOST,
-                        "parent did not reserve every model identity for this child",
+            try:
+                if gates_reserved:
+                    if not removal_fences_match(session, assignments, now=now):
+                        raise ModelCacheConflictUnknown(
+                            ArtifactLifecycleCode.DELETION_FENCE_LOST,
+                            "parent did not reserve every model identity for this child",
+                        )
+                else:
+                    reserve_removal(
+                        session,
+                        (identity for identity, _kind, _owner, _fence in assignments),
+                        owner_kind="model-cache-operation",
+                        owner_id=operation_id,
+                        fence=fence,
+                        now=now,
                     )
-            else:
-                reserve_removal(
-                    session,
-                    (identity for identity, _kind, _owner, _fence in assignments),
-                    owner_kind="model-cache-operation",
-                    owner_id=operation_id,
-                    fence=fence,
-                    now=now,
+                locked_scope = cache._model_removal_scope_for_sets(session, selected)
+                if locked_scope != scope:
+                    raise ModelCacheConflictUnknown(
+                        ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
+                        "model-set membership changed while removal ownership was reserved",
+                    )
+                # Sets still in use do not refuse the request: the accepted fence
+                # stops new consumers and each destructive step waits until the
+                # current owners have released the set.
+            except ArtifactLifecycleError as error:
+                raise ModelCacheConflictUnknown(
+                    error.code,
+                    error.detail,
+                    recovery=AvailabilityRecoveryAction.RETRY
+                    if error.retryable
+                    else None,
+                ) from error
+            if verify is not None:
+                # An unattended removal re-proves the sets unused with every gate
+                # held; raising rolls the reservation back with this transaction.
+                verify(session, scope.selected_sets)
+
+            external_memberships = set(
+                session.scalars(
+                    select(ModelCacheSetArtifact.artifact_sha256).where(
+                        ModelCacheSetArtifact.artifact_set_sha256.not_in(
+                            scope.selected_sets
+                        )
+                        if scope.selected_sets
+                        else ModelCacheSetArtifact.artifact_set_sha256.is_not(None)
+                    )
                 )
-            locked_scope = cache._model_removal_scope_for_sets(session, selected)
-            if locked_scope != scope:
+            )
+            delete_objects = tuple(
+                digest
+                for digest in scope.selected_objects
+                if digest not in external_memberships
+            )
+            if delete_objects != scope.delete_objects:
                 raise ModelCacheConflictUnknown(
                     ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
-                    "model-set membership changed while removal ownership was reserved",
+                    "model object sharing changed while removal ownership was reserved",
                 )
-            # Sets still in use do not refuse the request: the accepted fence
-            # stops new consumers and each destructive step waits until the
-            # current owners have released the set.
-        except ArtifactLifecycleError as error:
-            raise ModelCacheConflictUnknown(
-                error.code,
-                error.detail,
-                recovery="retry" if error.retryable else None,
-            ) from error
-        if verify is not None:
-            # An unattended removal re-proves the sets unused with every gate
-            # held; raising rolls the reservation back with this transaction.
-            verify(session, scope.selected_sets)
-
-        external_memberships = set(
-            session.scalars(
-                select(ModelCacheSetArtifact.artifact_sha256).where(
-                    ModelCacheSetArtifact.artifact_set_sha256.not_in(
-                        scope.selected_sets
-                    )
-                    if scope.selected_sets
-                    else ModelCacheSetArtifact.artifact_set_sha256.is_not(None)
-                )
-            )
-        )
-        delete_objects = tuple(
-            digest
-            for digest in scope.selected_objects
-            if digest not in external_memberships
-        )
-        if delete_objects != scope.delete_objects:
-            raise ModelCacheConflictUnknown(
-                ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
-                "model object sharing changed while removal ownership was reserved",
-            )
         plan = ModelCacheRemovalPayload(
             schema_version=SCHEMA_VERSION,
             source_policy=SOURCE_POLICY,
@@ -226,6 +248,8 @@ class RemovalAcceptanceMixin:
             operator_action="remove-model",
             review_digest=review_digest,
             removal_fence=fence,
+            scope_pending=defer_scope,
+            scope_from_content=selected_sets is None and defer_scope,
             selected=list(scope.selected_sets),
             selected_objects=list(scope.selected_objects),
             delete_objects=list(delete_objects),
@@ -247,9 +271,6 @@ class RemovalAcceptanceMixin:
             now=now,
         )
         stored_plan = _write_operation_payload("remove", plan)
-        removal_checkpoint = _removal_checkpoint(stored_plan)
-        # The plan was written one statement ago, so it reads back.
-        assert not isinstance(removal_checkpoint, Residue)
         operation = ModelCacheAdapter.new_operation(
             id=operation_id,
             request_key=request_key,
@@ -258,7 +279,7 @@ class RemovalAcceptanceMixin:
             attempt=1,
             artifact_set_sha256=None,
             plan_digest=_model_removal_intent_digest(
-                removal_checkpoint,
+                plan,
                 actor=actor,
                 request_key=request_key,
             ),
@@ -270,7 +291,7 @@ class RemovalAcceptanceMixin:
         )
         session.add(operation)
         session.flush()
-        if not selected:
+        if not selected and not defer_scope:
             cache._finish_model_removal_in_session(session, operation, now=now)
         return operation
 

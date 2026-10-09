@@ -26,7 +26,6 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
-    WaitReason,
     canonical_message,
     recipe_job_manifest_sha256,
     state_adopter,
@@ -120,10 +119,9 @@ def _translate_blob_error(error: ArtifactBlobStoreError) -> NoReturn:
             reason=error.typed_reason or SecurityRefusalReason.FORBIDDEN,
         ) from error
     if isinstance(error, UnknownOutcomeError):
-        raise ArtifactJobUnavailableError(
-            str(error),
-            reason=error.typed_reason or WaitReason.OBSERVATION_UNAVAILABLE,
-        ) from error
+        # Preserve the typed observation handoff through the API boundary.
+        # Rewrapping it as ArtifactJobError lets broad conflict catches refuse it.
+        raise error
     reason = (
         error.typed_reason
         if isinstance(error, InvalidRequestError) and error.typed_reason is not None
@@ -231,10 +229,10 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     #: When a cancel was requested; the state stays the core's (it completes by itself).
     cancel_requested_at: datetime | None = None
     contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    compiled_contract: CompiledArtifactContract
+    compiled_contract: CompiledArtifactContract | None
     input_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     input_total_bytes: int = Field(ge=0)
-    input_declarations: tuple[ArtifactFileDeclaration, ...]
+    input_declarations: tuple[ArtifactFileDeclaration, ...] | None
     input_files: tuple[ArtifactFileDeclaration, ...]
     output_limits: OutputLimits
     output_manifest_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -268,6 +266,8 @@ class ArtifactJobResponse(ArtifactJobContractModel):
                     reason=InvalidRequestReason.CONFLICT,
                 )
             try:
+                if self.compiled_contract is None:
+                    return self
                 _validate_outputs_against_contract(
                     self.compiled_contract,
                     tuple(
@@ -362,10 +362,10 @@ class ArtifactJobView:
     preparation: str | None
     cancel_requested_at: datetime | None
     contract_sha256: str
-    compiled_contract: CompiledArtifactContract
+    compiled_contract: CompiledArtifactContract | None
     input_manifest_sha256: str
     input_total_bytes: int
-    input_declarations: tuple[ArtifactFileDeclaration, ...]
+    input_declarations: tuple[ArtifactFileDeclaration, ...] | None
     input_files: tuple[ArtifactFileDeclaration, ...]
     output_limits: OutputLimits
     output_manifest_sha256: str | None

@@ -1467,6 +1467,7 @@ def test_submission_recompiles_through_the_owner_and_releases_failed_attempts(
     plan = service.preview_install(mapping, build)
     admission = service._install_admission
     compile_owner = admission._compiled_plan_provider
+    assert compile_owner is not None
     with sessions() as session:
         initial_operations = tuple(sorted(session.scalars(select(AgentOperation.id))))
     calls = []
@@ -1506,9 +1507,11 @@ def test_submission_recompiles_through_the_owner_and_releases_failed_attempts(
     accepted = submit()
     assert len(calls) == (5 if exhaust else 3)
     if prepare_only:
+        assert isinstance(accepted, str)
         accepted = service.start_installation(
             accepted, actor="admin", request_id=str(uuid.uuid4())
         )
+    assert not isinstance(accepted, str)
     for node in nodes:
         service.record_node_result(
             accepted.id, node, succeeded=True, evidence={"installed_bytes": 120}

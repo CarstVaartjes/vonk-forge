@@ -1123,8 +1123,9 @@ class RunSwitchDistributionChildResult(StrictModel):
     members: list[RunSwitchMemberReceipt] = Field(min_length=1, max_length=32)
     evidence: list[ArtifactVerificationEvidence] = Field(max_length=32)
     reason: Annotated[str, StringConstraints(max_length=512)] | None = None
-    # Aggregate of the failed members: the parent retries only when every
-    # failed member reports a temporary dependency.
+    # Incomplete or mixed peer evidence is observed under the parent deadline.
+    uncertain: bool = False
+    # Exact authority denials remain distinct from unavailable bookkeeping.
     failure_kind: _FailureText | None = None
     error_code: _FailureText | None = None
 
@@ -1136,6 +1137,7 @@ class RunSwitchDistributionEndedResult(_RunSwitchPhaseBase):
     subphase: Literal[ProfileChildPhase.TARGET_COPY]
     reason: WaitReason
     error_code: DistributionCode
+    uncertain: bool = True
 
 
 RunSwitchPhaseResult = (
@@ -1226,6 +1228,8 @@ class RunSwitchOperationResult(StrictModel):
     retry_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     observation_due_at: datetime | None = None
     observation_deadline_at: datetime | None = None
+    recovery_deadline_at: datetime | None = None
+    recovery_child_operation_id: UuidId | None = None
     startup_budget_seconds: int | None = Field(default=None, ge=1)
     start_deadline: datetime | None = None
     failed_phase: RunSwitchPhaseKind | None = None

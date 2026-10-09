@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import AgentOperation as AgentOperationKind
 from vonk_agent_protocol import (
     DistributionCode,
     LifecycleState,
@@ -15,12 +15,15 @@ from vonk_agent_protocol import (
     ProgressPhase,
     WaitReason,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
+from vonk_agent_protocol.agent_words import (
+    FailureStage,
+    ProfileChildPhase,
+    ProfileEffectState,
+)
 
 from ..agent_jobs import abandon_idempotent_job_in_session
-from ..bounded_json import sequence
-from ..distribution_assignment import NodeDistributionAssignment
-from ..lifecycle.job import JobAdapter
+from ..failure_classification import is_security_failure
+from ..job_documents import DistributionJobPayload
 from ..models import (
     AgentOperation,
     AgentOperationAttempt,
@@ -28,20 +31,26 @@ from ..models import (
 )
 from ..operation_progress import aggregate_progress, project_progress
 from ..run_switch_contract import (
+    ArtifactVerificationEvidence,
+    RunSwitchCachedTransferResult,
+    RunSwitchChildProgress,
+    RunSwitchCleanupResult,
+    RunSwitchDistributionChildResult,
     RunSwitchDistributionEndedResult,
+    RunSwitchMemberReceipt,
     RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPlan,
+    RunSwitchTargetTransferResult,
 )
 from ..run_switch_operations import PhaseExecution
-from ..strict_json import read_stored_model, serialize_json_value
+from ..strict_json import read_stored_model
 from .children import DistributionChildren
 from .receipts import (
     _child_receipt,
     _ChildView,
     _evidence_projection,
     _phase_receipt,
-    _typed_failure,
 )
 
 
@@ -64,14 +73,13 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
         }:
             return PhaseExecution(
                 result=_phase_receipt(
-                    {
-                        "scope": "spark-local",
-                        "reclaimed_bytes": 0,
-                        "protected_referenced_bytes": 0,
-                        "reclaimed_digests": [],
-                        "protected_digests": [],
-                        "nas_evicted": False,
-                    },
+                    RunSwitchCleanupResult(
+                        phase=ProfileChildPhase.CLEANUP.value,
+                        subphase=phase.subphase,
+                        scope="spark-local",
+                        reclaimed_bytes=0,
+                        nas_evicted=False,
+                    ),
                     phase=phase,
                 )
             )
@@ -116,29 +124,26 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
         cached = self._cached_targets(plan, targets)
         missing = tuple(node_id for node_id in targets if node_id not in cached)
         if not missing:
+            image_digest, archive_digest, _bytes, build_id = self._runtime_identity(
+                plan, progress
+            )
             return PhaseExecution(
                 result=_phase_receipt(
-                    {
-                        "skipped": True,
-                        "verified": phase.kind == ProfileChildPhase.VERIFY.value,
-                        "verified_digests": list(plan.storage.artifact_digests),
-                        "verified_build_id": self._runtime_identity(plan, progress)[3],
-                        "verified_image_digest": (
-                            plan.preparation.runtime_image.image_digest
-                            if plan.preparation is not None
-                            else plan.image_digest
-                        ),
-                        "verified_oci_layout_sha256": (
-                            plan.preparation.runtime_image.oci_layout_sha256
-                            if plan.preparation is not None
-                            else plan.build.oci_layout_sha256
-                        ),
-                        "cached_nodes": list(targets),
-                        "cached_target_totals": {
+                    RunSwitchCachedTransferResult(
+                        phase=ProfileChildPhase.TRANSFER.value,
+                        subphase=ProfileChildPhase.TARGET_COPY.value,
+                        skipped=True,
+                        verified=False,
+                        verified_digests=list(plan.storage.artifact_digests),
+                        verified_build_id=build_id,
+                        verified_image_digest=image_digest,
+                        verified_oci_layout_sha256=archive_digest,
+                        cached_nodes=list(targets),
+                        cached_target_totals={
                             node_id: self._target_bytes(plan, node_id)
                             for node_id in targets
                         },
-                    },
+                    ),
                     phase=phase,
                 )
             )
@@ -178,19 +183,17 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             # only the layers the node lacks.
             target_bytes=model_set_bytes,
             workload_intent_ordinal=intent_ordinal,
+            recovered_child_id=progress.recovery_child_operation_id,
         )
         return PhaseExecution(
             operation_id=child_id,
             result=_phase_receipt(
-                {
-                    "cached_nodes": list(cached),
-                    # Persist the exact assignment already verified against the
-                    # succeeded build and cache manifest for the verify phase.
-                    "assignments": {
-                        node_id: assignment.to_mapping()
-                        for node_id, assignment in assignments.items()
-                    },
-                },
+                RunSwitchTargetTransferResult(
+                    phase=ProfileChildPhase.TRANSFER.value,
+                    subphase=ProfileChildPhase.TARGET_COPY.value,
+                    cached_nodes=list(cached),
+                    assignments=assignments,
+                ),
                 phase=phase,
             ),
         )
@@ -205,16 +208,69 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
         """
 
         child = session.get(Job, operation_id)
-        if child is None or child.kind != "artifact-distribution":
+        if child is None or child.kind != FailureStage.ARTIFACT_DISTRIBUTION:
             return False
         return abandon_idempotent_job_in_session(session, child.id, now, reason=reason)
+
+    def expire(
+        self,
+        session: Session,
+        operation_id: str | None,
+        now: datetime,
+        *,
+        plan_digest: str,
+    ) -> None:
+        """Fence outstanding transfer attempts without claiming remote cleanup.
+
+        Successful effects and their exact receipts survive; queued or uncertain
+        orders cease owning claims. A late receipt cannot revive an expired attempt.
+        """
+        if operation_id is None:
+            return
+        from ..agent_jobs.endings import end_unobserved_order
+        from ..agent_jobs.retirement import release_owned_reservations_in_session
+
+        child = session.get(Job, operation_id)
+        if child is not None and child.kind != FailureStage.ARTIFACT_DISTRIBUTION:
+            child = None
+        operations = session.scalars(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == operation_id,
+                AgentOperation.kind == AgentOperationKind.ARTIFACT_DISTRIBUTION,
+                AgentOperation.authority_revision == plan_digest,
+            )
+        )
+        for operation in operations:
+            if operation.state in {
+                LifecycleState.SUCCEEDED,
+                LifecycleState.FAILED,
+                LifecycleState.CANCELLED,
+            }:
+                continue
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+            )
+            end_unobserved_order(
+                self._operations,
+                session,
+                operation,
+                attempt,
+                child,
+                now,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                note="distribution observation window exhausted",
+            )
+        release_owned_reservations_in_session(session, "job", operation_id, now)
 
     def get(self, operation_id: str) -> _ChildView:
         with self._sessions() as session:
             child = session.get(Job, operation_id)
-            if child is None or child.kind != "artifact-distribution":
+            if child is None or child.kind != FailureStage.ARTIFACT_DISTRIBUTION:
                 return _ChildView(
-                    state=LifecycleState.FAILED,
+                    state=ProfileEffectState.UNKNOWN.value,
                     result=RunSwitchDistributionEndedResult(
                         phase=ProfileChildPhase.TRANSFER,
                         subphase=ProfileChildPhase.TARGET_COPY,
@@ -222,250 +278,202 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
                         error_code=DistributionCode.UNASSIGNED,
                     ),
                 )
-            # AgentJobService owns the parent state transition. Reconcile the
-            # durable child before projecting it so a restart cannot leave a
-            # completed set of node operations looking queued.
-            self._operations._aggregate_parent(session, child.id)
-            operations = list(
-                session.scalars(
-                    select(AgentOperation)
-                    .where(AgentOperation.parent_job_id == child.id)
-                    .order_by(AgentOperation.node_id)
+            try:
+                return self.project_child(session, child, self._clock())
+            except (TypeError, ValueError, RuntimeError):
+                return _ChildView(
+                    state=ProfileEffectState.UNKNOWN.value,
+                    result=RunSwitchDistributionEndedResult(
+                        phase=ProfileChildPhase.TRANSFER,
+                        subphase=ProfileChildPhase.TARGET_COPY,
+                        reason=WaitReason.RECEIPT_MISSING,
+                        error_code=DistributionCode.UNASSIGNED,
+                    ),
                 )
-            )
-            members = []
-            measured_members = []
-            evidence = []
-            cached_nodes = tuple(
-                value
-                for value in sequence(child.payload.get("cached_nodes")) or ()
-                if isinstance(value, str)
-            )
-            cached_totals = child.payload.get("target_totals", {})
-            if not isinstance(cached_totals, Mapping):
-                cached_totals = {}
-            assignments = child.payload.get("assignments", {})
-            if not isinstance(assignments, Mapping):
-                assignments = {}
 
-            def target_total(node_id: str) -> int | None:
-                declared = self._int(cached_totals.get(node_id))
-                assignment = assignments.get(node_id)
-                if not isinstance(assignment, Mapping):
-                    return declared
-                try:
-                    parsed = NodeDistributionAssignment.parse(assignment)
-                except (TypeError, ValueError):
-                    return None
-                if parsed.node_id != node_id:
-                    return None
-                assigned = sum(item.bytes for item in parsed.objects)
-                if declared is not None and assigned != declared:
-                    return None
-                return declared if declared is not None else assigned
-
-            for node_id in cached_nodes:
-                total = self._int(cached_totals.get(node_id))
+    @staticmethod
+    def project_child(session: Session, child: Job, now: datetime) -> _ChildView:
+        """Pure projection: missing measurements cannot reverse an issued effect."""
+        try:
+            payload = read_stored_model(
+                DistributionJobPayload, child.payload, from_json=True
+            )
+        except (TypeError, ValueError):
+            payload = None
+        members: list[RunSwitchMemberReceipt] = []
+        measured_members: list[OperationMemberProgress] = []
+        evidence: list[ArtifactVerificationEvidence] = []
+        if payload is not None:
+            for node_id in payload.cached_nodes:
+                total = payload.target_totals.get(node_id)
                 members.append(
-                    {
-                        "node_id": node_id,
-                        "phase": ProgressPhase.TRANSFER,
-                        "state": LifecycleState.SUCCEEDED.value,
-                        "completed_bytes": total or 0,
-                        "total_bytes": total,
-                        "error": None,
-                        "cached": True,
-                    }
-                )
-            for operation in operations:
-                attempt = session.scalar(
-                    select(AgentOperationAttempt).where(
-                        AgentOperationAttempt.operation_id == operation.id,
-                        AgentOperationAttempt.attempt == operation.current_attempt,
+                    RunSwitchMemberReceipt(
+                        node_id=node_id,
+                        phase=ProfileChildPhase.TRANSFER.value,
+                        state=LifecycleState.SUCCEEDED.value,
+                        completed_bytes=total or 0,
+                        total_bytes=total,
+                        cached=True,
                     )
                 )
-                raw = (attempt.progress if attempt is not None else None) or {}
-                result = (attempt.result if attempt is not None else None) or {}
-                member_state = self._member_state(operation.state)
-                if (
-                    member_state
-                    in {
-                        ProfileEffectState.PENDING.value,
-                        ProfileEffectState.UNKNOWN.value,
-                    }
-                    and attempt is not None
-                ):
-                    # A terminal result is the durable handoff even when a
-                    # restart observed the parent operation row before its
-                    # aggregate state was reconciled.
-                    member_state = self._member_state(attempt.state)
-                expected_total = target_total(operation.node_id)
-                terminal_downloaded = self._int(result.get("downloaded_bytes"))
-                evidence_error = None
-                if member_state == LifecycleState.SUCCEEDED.value and (
-                    expected_total is None or terminal_downloaded != expected_total
-                ):
-                    member_state = LifecycleState.FAILED.value
-                    evidence_error = "distributed transfer byte evidence mismatch"
-                members.append(
-                    {
-                        "node_id": operation.node_id,
-                        "phase": ProgressPhase.TRANSFER,
-                        "state": member_state,
-                        # The agent's terminal distribution evidence reports the
-                        # aggregate payload under ``downloaded_bytes``. Preserve
-                        # that exact handoff in the durable child projection;
-                        # otherwise a successful import appears pending with zero
-                        # bytes even though its result body is complete.
-                        "completed_bytes": (
-                            (
-                                self._int(raw.get("bytes"))
-                                or self._int(raw.get("completed_bytes"))
-                                if member_state != LifecycleState.SUCCEEDED.value
-                                else terminal_downloaded
-                            )
-                            or 0
-                        ),
-                        "total_bytes": self._int(raw.get("total_bytes"))
-                        or expected_total,
-                        "error": evidence_error
-                        or (
-                            result.get("reason")
-                            if isinstance(result, Mapping)
-                            else None
-                        ),
-                        **(
-                            _typed_failure(result)
-                            if member_state == LifecycleState.FAILED.value
-                            and isinstance(result, Mapping)
-                            else {}
-                        ),
-                    }
-                )
-                if raw:
-                    measured = project_progress(
-                        read_stored_model(OperationProgress, raw), self._clock()
-                    )
-                    values = {
-                        key: value
-                        for key, value in measured.model_dump(mode="python").items()
-                        if key in OperationMemberProgress.model_fields
-                    }
-                    if member_state not in {
-                        LifecycleState.RUNNING.value,
-                        ProfileEffectState.PENDING.value,
-                    }:
-                        values.update(
-                            bytes_per_second=None,
-                            smoothed_bytes_per_second=None,
-                            eta_seconds=None,
-                            activity=None,
-                        )
-                    values.update(
-                        member_id=operation.node_id,
-                        state=member_state,
-                        completed_bytes=members[-1]["completed_bytes"],
-                        total_bytes=members[-1]["total_bytes"],
-                    )
-                    measured_members.append(
-                        read_stored_model(OperationMemberProgress, values)
-                    )
-                else:
-                    measured_members.append(
-                        OperationMemberProgress(
-                            member_id=operation.node_id,
-                            phase=ProgressPhase.PENDING
-                            if member_state == ProfileEffectState.PENDING.value
-                            else ProgressPhase.TRANSFER,
-                            state=member_state,
-                            completed_bytes=members[-1]["completed_bytes"],
-                            total_bytes=members[-1]["total_bytes"],
-                        )
-                    )
-                if isinstance(result, Mapping) and result:
-                    evidence.append(_evidence_projection(operation.node_id, result))
-            by_node = {str(item["node_id"]): item for item in members}
-            target_order = child.payload.get("target_order", list(by_node))
-            if isinstance(target_order, list):
-                members = [
-                    by_node[node_id]
-                    for node_id in target_order
-                    if isinstance(node_id, str) and node_id in by_node
-                ]
-            state = child.state
-            if state == LifecycleState.SUCCEEDED.value and any(
-                item.get("state") == LifecycleState.FAILED.value for item in members
-            ):
-                state = LifecycleState.FAILED.value
-            projection_reason = next(
-                (
-                    item.get("error")
-                    for item in members
-                    if isinstance(item.get("error"), str) and item.get("error")
-                ),
-                None,
-            )
-            completed = sum(
-                self._int(item.get("completed_bytes")) or 0 for item in members
-            )
-            totals = [self._int(item.get("total_bytes")) for item in members]
-            total = (
-                sum(value for value in totals if value is not None)
-                if all(value is not None for value in totals)
-                else None
-            )
-            payload = {
-                "progress": {
-                    "phase": ProgressPhase.TRANSFER,
-                    "completed_bytes": completed,
-                    "total_bytes": total,
-                    "total_bytes_known": total is not None,
-                    "members": members,
-                },
-                "members": members,
-                "evidence": evidence,
-            }
-            for node_id in cached_nodes:
-                item = by_node[node_id]
                 measured_members.append(
                     OperationMemberProgress(
                         member_id=node_id,
-                        phase=ProgressPhase.TRANSFER,
+                        phase=ProgressPhase.TRANSFER.value,
                         state=LifecycleState.SUCCEEDED.value,
-                        completed_bytes=item["completed_bytes"],
-                        total_bytes=item["total_bytes"],
+                        completed_bytes=total or 0,
+                        total_bytes=total,
                     )
                 )
-            payload["progress"]["operation"] = aggregate_progress(
-                measured_members
-            ).model_dump(mode="json", exclude_none=True)
-            if child.status_reason or projection_reason:
-                payload["reason"] = child.status_reason or projection_reason
-            failed = [
-                item
-                for item in members
-                if item.get("state") == LifecycleState.FAILED.value
-            ]
-            if failed:
-                kinds = {item.get("failure_kind") for item in failed}
-                # One kind for all failed members is that kind; anything mixed
-                # or unknown stays for the parent's fail-closed classifier.
-                if len(kinds) == 1 and isinstance(next(iter(kinds)), str):
-                    payload["failure_kind"] = next(iter(kinds))
-                code = next(
-                    (
-                        item["error_code"]
-                        for item in failed
-                        if isinstance(item.get("error_code"), str)
-                    ),
-                    None,
+        operations = session.scalars(
+            select(AgentOperation)
+            .where(AgentOperation.parent_job_id == child.id)
+            .order_by(AgentOperation.node_id)
+        )
+        for operation in operations:
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
                 )
-                if code is not None:
-                    payload["error_code"] = code
-            if state != child.state:
-                JobAdapter.amend_ended(child, payload.get("reason"), self._clock())
-            payload = _child_receipt(payload)
-            child.result = serialize_json_value(payload)
-            child.updated_at = self._clock()
-            session.commit()
-            return _ChildView(state=state, result=payload)
+            )
+            state = DurableDistributionPhaseExecutor._member_state(operation.state)
+            if (
+                state in {ProfileEffectState.PENDING, ProfileEffectState.UNKNOWN}
+                and attempt is not None
+            ):
+                state = DurableDistributionPhaseExecutor._member_state(attempt.state)
+            result = (attempt.result if attempt is not None else None) or {}
+            observed = _evidence_projection(operation.node_id, result)
+            if not result:
+                observed.uncertain = True
+            evidence.append(observed)
+            try:
+                measured = project_progress(
+                    read_stored_model(
+                        OperationProgress,
+                        (attempt.progress if attempt is not None else None) or {},
+                    ),
+                    now,
+                )
+            except (TypeError, ValueError):
+                measured = OperationProgress(phase=ProgressPhase.TRANSFER.value)
+            total = (
+                payload.target_totals.get(operation.node_id)
+                if payload is not None
+                else None
+            )
+            if payload is not None:
+                assignment = payload.assignments.get(operation.node_id)
+                if assignment is not None:
+                    assigned = sum(item.bytes for item in assignment.objects)
+                    if assignment.node_id != operation.node_id or (
+                        total is not None and assigned != total
+                    ):
+                        total = None
+                    elif total is None:
+                        total = assigned
+            if state == LifecycleState.SUCCEEDED:
+                completed = observed.downloaded_bytes or 0
+                if observed.downloaded_bytes != total:
+                    total = None
+            else:
+                completed = measured.completed_bytes
+                total = (
+                    measured.total_bytes if measured.total_bytes is not None else total
+                )
+                if total is not None and completed > total:
+                    total = None
+            failed = state == LifecycleState.FAILED
+            members.append(
+                RunSwitchMemberReceipt(
+                    node_id=operation.node_id,
+                    phase=ProfileChildPhase.TRANSFER.value,
+                    state=state,
+                    completed_bytes=completed,
+                    total_bytes=total,
+                    error=observed.error or observed.reason,
+                    failure_kind=observed.failure_kind if failed else None,
+                    error_code=observed.error_code if failed else None,
+                    diagnostic=observed.diagnostic if failed else None,
+                )
+            )
+            measured_members.append(
+                OperationMemberProgress(
+                    member_id=operation.node_id,
+                    phase=ProgressPhase.TRANSFER.value,
+                    state=state,
+                    completed_bytes=completed,
+                    total_bytes=total,
+                    bytes_per_second=measured.bytes_per_second
+                    if state == LifecycleState.RUNNING
+                    else None,
+                    smoothed_bytes_per_second=measured.smoothed_bytes_per_second
+                    if state == LifecycleState.RUNNING
+                    else None,
+                    eta_seconds=measured.eta_seconds
+                    if state == LifecycleState.RUNNING
+                    else None,
+                    activity=measured.activity
+                    if state == LifecycleState.RUNNING
+                    else None,
+                )
+            )
+        if not members:
+            return _ChildView(
+                state=ProfileEffectState.UNKNOWN.value,
+                result=RunSwitchDistributionEndedResult(
+                    phase=ProfileChildPhase.TRANSFER,
+                    subphase=ProfileChildPhase.TARGET_COPY,
+                    reason=WaitReason.RECEIPT_MISSING,
+                    error_code=DistributionCode.UNASSIGNED,
+                ),
+            )
+        if payload is not None:
+            by_node = {member.node_id: member for member in members}
+            members = [
+                by_node[node_id]
+                for node_id in payload.target_order
+                if node_id in by_node
+            ]
+            if not members:
+                members = list(by_node.values())
+        total = (
+            sum(
+                member.total_bytes
+                for member in members
+                if member.total_bytes is not None
+            )
+            if all(member.total_bytes is not None for member in members)
+            else None
+        )
+        failed = [member for member in members if member.state == LifecycleState.FAILED]
+        kinds = {member.failure_kind for member in failed}
+        denied = next(
+            (
+                member.error_code
+                for member in failed
+                if is_security_failure(member.error_code)
+            ),
+            None,
+        )
+        receipt = RunSwitchDistributionChildResult(
+            phase=ProfileChildPhase.TRANSFER.value,
+            subphase=ProfileChildPhase.TARGET_COPY.value,
+            progress=RunSwitchChildProgress(
+                phase=ProgressPhase.TRANSFER.value,
+                completed_bytes=sum(member.completed_bytes for member in members),
+                total_bytes=total,
+                total_bytes_known=total is not None,
+                members=members,
+                operation=aggregate_progress(measured_members),
+            ),
+            members=members,
+            evidence=evidence,
+            reason=child.status_reason
+            or next((member.error for member in members if member.error), None),
+            failure_kind=next(iter(kinds)) if len(kinds) == 1 else None,
+            error_code=denied,
+            uncertain=bool(failed) or any(item.uncertain for item in evidence),
+        )
+        return _ChildView(state=child.state, result=_child_receipt(receipt))

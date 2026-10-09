@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 2ee123785e5d97c421875d1f20a75551e5b0db824742a78977951bb8963b770a. Do not edit.
+// Generated from canonical OpenAPI SHA256 cbf347296412dbdd5df22812acc9dc713cdcf5bb77ab5147ffbfb5b653bcbb36. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -1620,7 +1620,7 @@ export interface components {
         ArtifactJobResponse: {
             /** Cancel Requested At */
             cancel_requested_at?: string | null;
-            compiled_contract: components["schemas"]["CompiledArtifactContract"];
+            compiled_contract: components["schemas"]["CompiledArtifactContract"] | null;
             /** Contract Sha256 */
             contract_sha256: string;
             /**
@@ -1631,7 +1631,7 @@ export interface components {
             /** Id */
             id: string;
             /** Input Declarations */
-            input_declarations: components["schemas"]["ArtifactFileDeclaration"][];
+            input_declarations: components["schemas"]["ArtifactFileDeclaration"][] | null;
             /** Input Files */
             input_files: components["schemas"]["ArtifactFileDeclaration"][];
             /** Input Manifest Sha256 */
@@ -3127,7 +3127,7 @@ export interface components {
         DistributionCode: "distribution.assignment_conflict" | "distribution.expired" | "distribution.model_set_identity_unavailable" | "distribution.model_set_mismatch" | "distribution.object_invalid" | "distribution.object_unavailable" | "distribution.runtime_image_mismatch" | "distribution.unassigned" | "distribution.wrong_node";
         /**
          * DistributionJobPayload
-         * @description One target-copy child: the plan it serves and what each Spark must receive.
+         * @description One target-copy child and its exact per-node content binding.
          */
         DistributionJobPayload: {
             /** Assignments */
@@ -6438,6 +6438,16 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Scope From Content
+             * @default false
+             */
+            scope_from_content?: boolean;
+            /**
+             * Scope Pending
+             * @default false
+             */
+            scope_pending?: boolean;
             /** Selected */
             selected: string[];
             /** Selected Objects */
@@ -7495,6 +7505,11 @@ export interface components {
             max_total_bytes: number;
         };
         /**
+         * PackageActivationOutcome
+         * @enum {string}
+         */
+        PackageActivationOutcome: "awaiting_controller_activation" | "candidate_install_failed" | "controller_confirmed_activation" | "restoring_captured_source" | "source_restored_and_restarted" | "source_restore_failed";
+        /**
          * PackageActivationPhase
          * @description Where a package activation transaction stands.
          * @enum {string}
@@ -7517,8 +7532,7 @@ export interface components {
             created_at: number | ExactNumber;
             /** Node Id */
             node_id: string;
-            /** Outcome */
-            outcome: string;
+            outcome: components["schemas"]["PackageActivationOutcome"];
             phase: components["schemas"]["PackageActivationPhase"];
             /**
              * Schema Version
@@ -8354,6 +8368,11 @@ export interface components {
              * @constant
              */
             schema_version: number | ExactNumber;
+            /**
+             * Scope Pending
+             * @default false
+             */
+            scope_pending?: boolean;
         };
         /**
          * RecipeCacheRemovalIntent
@@ -10957,6 +10976,11 @@ export interface components {
              * @constant
              */
             subphase: "target-copy";
+            /**
+             * Uncertain
+             * @default false
+             */
+            uncertain?: boolean;
         };
         /**
          * RunSwitchDistributionEndedResult
@@ -10975,6 +10999,11 @@ export interface components {
              * @constant
              */
             subphase: "target-copy";
+            /**
+             * Uncertain
+             * @default true
+             */
+            uncertain?: boolean;
         };
         /** RunSwitchFinalVerifyResult */
         RunSwitchFinalVerifyResult: {
@@ -11371,6 +11400,10 @@ export interface components {
             preflight?: components["schemas"]["LifecyclePreflightCheckpoint"] | null;
             /** Profile Application Id */
             profile_application_id?: string | null;
+            /** Recovery Child Operation Id */
+            recovery_child_operation_id?: string | null;
+            /** Recovery Deadline At */
+            recovery_deadline_at?: string | null;
             /** Retry Attempt */
             retry_attempt?: (number | ExactNumber) | null;
             /** Retry Reason */

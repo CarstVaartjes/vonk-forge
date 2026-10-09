@@ -958,6 +958,10 @@ class AgentClaim(_ProtocolEnvelopeModel):
     operation: AgentOperation
     payload: AgentPayload
     deadline: datetime
+    # Immutable per-attempt observation/effect budget, independent of lease
+    # renewals. Expiry ends observation with uncertain custody, never replay
+    # authorization. The Controller normalizes this value into every claim.
+    observation_budget_seconds: int = Field(default=3600, ge=1, le=86400)
 
     @model_validator(mode="before")
     @classmethod
@@ -974,7 +978,11 @@ class AgentClaim(_ProtocolEnvelopeModel):
                 pass
         operation = document.get("operation")
         payload = document.get("payload")
-        expected_model = PAYLOAD_MODELS.get(operation)
+        expected_model = (
+            PAYLOAD_MODELS.get(operation)
+            if isinstance(operation, AgentOperation)
+            else None
+        )
         if expected_model is not None and isinstance(payload, Mapping):
             document["payload"] = expected_model.model_validate(payload)
         if "deadline" in document:

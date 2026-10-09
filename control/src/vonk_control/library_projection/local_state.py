@@ -75,19 +75,33 @@ def _assessed(
 
 def _local_state_snapshot(
     self: LibraryProjection,
-) -> Mapping[str, Mapping[str, object]] | None:
-    snapshot = None
+) -> Mapping[str, LibraryLocalState] | None:
+    snapshot: dict[str, LibraryLocalState] | None = None
     deadline = time.monotonic() + self._request_budget
     for _attempt in range(3):
         try:
             candidate = self._local_state()
             if not isinstance(candidate, Mapping):
                 continue
-            snapshot = candidate
-            for raw in candidate.values():
+            snapshot = {}
+            unreadable = False
+            for digest, raw in candidate.items():
                 if raw:
-                    LibraryLocalState.model_validate_json(canonical_message(raw))
-            return snapshot
+                    try:
+                        snapshot[digest] = LibraryLocalState.model_validate_json(
+                            canonical_message(raw)
+                        )
+                    except (TypeError, ValueError):
+                        unreadable = True
+                        snapshot[digest] = LibraryLocalState(
+                            controller=cast(
+                                LibraryControllerState, AssetAvailability.UNKNOWN.value
+                            )
+                        )
+            if not unreadable:
+                return snapshot
+            if time.monotonic() >= deadline:
+                break
         except SecurityRefusalError:
             raise
         except (OSError, RuntimeError, TypeError, ValueError):
@@ -102,13 +116,14 @@ def _local(
     digest: str,
     *,
     kind: str,
-    snapshot: Mapping[str, Mapping[str, object]] | None,
+    snapshot: Mapping[str, LibraryLocalState] | None,
 ) -> LibraryLocalState:
     if snapshot is None:
         return LibraryLocalState(
             controller=cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
         )
-    raw = snapshot.get(digest, {})
+    observed = snapshot.get(digest)
+    raw = observed.model_dump(mode="json") if observed is not None else {}
     try:
         if not isinstance(raw, Mapping):
             raise TypeError("local observation is not a mapping")
