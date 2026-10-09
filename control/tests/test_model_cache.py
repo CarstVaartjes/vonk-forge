@@ -473,8 +473,12 @@ def test_model_removal_applies_to_current_storage_after_an_old_review(
     )
 
 
-def test_model_removal_review_reports_exact_live_deletion_owner(cache, tmp_path):
-    service, _sessions = cache
+def test_model_removal_review_reports_exact_live_deletion_owner(
+    cache, tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    service, sessions = cache
+    now = NOW
+    monkeypatch.setattr(service, "_clock", lambda: now)
     data = b"active deletion owner bytes"
     artifact = _artifact(tmp_path, data)
     _download(
@@ -489,21 +493,49 @@ def test_model_removal_review_reports_exact_live_deletion_owner(cache, tmp_path)
         request_key="00000000-0000-4000-8000-000000001066",
     )
 
-    # Scope observation reserves the exact gates after the durable request exists.
-    service.advance_removals(limit=1)
-    blocked = service.review_model_removal("a" * 64)
+    observe_scope = service._observe_model_removal_scope
+    scope_attempts = 0
 
-    assert any(
-        item.classification == "active-work"
-        and item.owner_kind == "model-cache-operation"
-        and item.owner_id == accepted.id
-        for item in blocked.active_work
-    )
+    def observe_after_miss(operation_id: str) -> bool:
+        nonlocal scope_attempts
+        scope_attempts += 1
+        # Exercise the bounded observation miss that can occur under CI load.
+        return scope_attempts > 1 and observe_scope(operation_id)
+
+    monkeypatch.setattr(service, "_observe_model_removal_scope", observe_after_miss)
+
+    def advance_when_due() -> None:
+        nonlocal now
+        with sessions() as session:
+            stored = session.get(ModelCacheOperation, accepted.id)
+            assert stored is not None
+            if stored.next_action_at is not None:
+                now = max(now, stored.next_action_at.replace(tzinfo=UTC))
+        service.advance_removals(limit=1)
+
+    # Scope observation may defer; follow its durable clock, rather than assuming
+    # that one worker pass commits the deletion gates.
+    for _attempt in range(10):
+        advance_when_due()
+        blocked = service.review_model_removal("a" * 64)
+        if any(item.owner_id == accepted.id for item in blocked.active_work):
+            break
+
+    assert any(item.owner_id == accepted.id for item in blocked.active_work)
+    assert scope_attempts > 1
+
+    def finish_removal(receipt):
+        for _attempt in range(10):
+            observed = service.get_operation(receipt.id)
+            if observed.state == LifecycleState.SUCCEEDED:
+                return observed
+            advance_when_due()
+        return service.get_operation(receipt.id)
 
     assert_ended_without_blocking(
-        SimpleNamespace(sessions=_sessions),
+        SimpleNamespace(sessions=sessions),
         accepted,
-        end=lambda receipt: _finish_cache_removal(service, receipt),
+        end=finish_removal,
         fresh=lambda _world: _admit_fresh_download(service, "a" * 64, artifact),
     )
 

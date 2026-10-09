@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RunState,
+    UnknownOutcomeError,
     WaitReason,
     recipe_job_manifest_sha256,
 )
@@ -22,11 +23,13 @@ from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
 from .. import artifact_job_states as ajs
 from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
+from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..cluster_mappings import mapping_option_choices
 from ..compiled_artifact_contract import ParameterScalar
 from ..execution_plan_service import compile_job_invocation
-from ..lifecycle import CancelRequested
+from ..lifecycle import CancelRequested, Effect, Outcome
+from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Damaged, Residue
 from ..models import (
@@ -39,7 +42,12 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
-from ..recipe_operations import RecipeOperationConflict
+from ..recipe_execution_contract import RecipeExecutionContractError
+from ..recipe_operations import (
+    RecipeArtifactJobCancellationPending,
+    RecipeOperationConflict,
+    RecipeRetryLater,
+)
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -54,6 +62,7 @@ from .contracts import (
     StorageReconciliation,
     _active_recipe_revision,
     _artifact_submission_in_session,
+    _canonical_declared_parameters,
     _compile_contract,
     _effective_output_limits,
     _effective_parameters,
@@ -169,6 +178,38 @@ class ArtifactJobService(OutputService):
         actor: str,
         request_id: str,
     ) -> ArtifactJobView:
+        unavailable: ArtifactJobUnavailableError | None = None
+        for _attempt in bounded_attempts():
+            try:
+                return self._create_once(
+                    run_id,
+                    interface=interface,
+                    parameters=parameters,
+                    inputs=inputs,
+                    output_limits=output_limits,
+                    timeout_seconds=timeout_seconds,
+                    actor=actor,
+                    request_id=request_id,
+                )
+            except UnknownOutcomeError as error:
+                unavailable = ArtifactJobUnavailableError(
+                    str(error), reason=error.typed_reason
+                )
+        assert unavailable is not None
+        raise unavailable
+
+    def _create_once(
+        self,
+        run_id: str,
+        *,
+        interface: str,
+        parameters: Mapping[str, ParameterScalar],
+        inputs: Sequence[RecipeJobInputFile],
+        output_limits: RecipeJobOutputLimits,
+        timeout_seconds: int,
+        actor: str,
+        request_id: str,
+    ) -> ArtifactJobView:
         parsed_inputs = tuple(
             sorted(inputs, key=lambda item: item.name.encode("utf-8"))
         )
@@ -230,9 +271,9 @@ class ArtifactJobService(OutputService):
                     select(ArtifactJob).where(ArtifactJob.request_id == request_id)
                 )
                 if existing is None:
-                    raise ArtifactJobInvalid(
-                        "artifact job request key collision",
-                        reason=InvalidRequestReason.CONFLICT,
+                    raise ArtifactJobUnavailableError(
+                        "artifact request identity observation is unavailable",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     ) from None
                 return self._create_in_session(
                     session,
@@ -274,6 +315,20 @@ class ArtifactJobService(OutputService):
             .where(ArtifactJob.request_id == request_id)
             .with_for_update()
         )
+        if existing is not None:
+            # The replay supplies the same declaration, never replacement bytes.
+            # Either the retained digest or the canonical declaration proves its
+            # binding before repairing the other damaged projections.
+            if existing.operation_id is None and (
+                existing.input_manifest_sha256 == manifest_digest
+                or existing.input_manifest == manifest.model_dump(mode="json")
+            ):
+                existing.input_manifest = manifest.model_dump(mode="json")
+                existing.input_manifest_sha256 = manifest_digest
+                existing.input_total_bytes = total
+            recovered = self._stored_input_manifest(session, existing, repair=True)
+            if isinstance(recovered, Residue):
+                return self._end_preparation(session, existing)
         if existing is not None and (
             existing.run_id != run_id
             or existing.interface != interface
@@ -289,9 +344,9 @@ class ArtifactJobService(OutputService):
             )
         run = session.get(RecipeRun, run_id)
         if run is None or existing is None and run.state != RunState.RUNNING:
-            raise ArtifactJobInvalid(
-                "recipe run is not accepting jobs",
-                reason=InvalidRequestReason.NOT_READY,
+            raise ArtifactJobUnavailableError(
+                "recipe run observation is unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         installation = session.get(RecipeInstallation, run.installation_id)
         resolved = (
@@ -350,10 +405,20 @@ class ArtifactJobService(OutputService):
                     "artifact contract evidence is unavailable",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
+            existing_limits = self._stored_output_limits(session, existing, repair=True)
+            if isinstance(existing_limits, Residue):
+                return self._end_preparation(session, existing)
+            try:
+                existing_parameters = _canonical_declared_parameters(
+                    existing_contract, existing.parameters
+                )
+            except (ArtifactJobError, TypeError, ValueError):
+                return self._end_preparation(session, existing)
+            if existing_contract.sha256() != contract_digest:
+                return self._end_preparation(session, existing)
             if (
-                existing.parameters != parameters_copy
-                or existing.output_limits != effective_limits
-                or existing_contract.sha256() != contract_digest
+                existing_parameters != parameters_copy
+                or existing_limits.to_mapping() != effective_limits
             ):
                 raise ArtifactJobInvalid(
                     "request key was already used differently",
@@ -399,6 +464,69 @@ class ArtifactJobService(OutputService):
         )
 
     def submit(self, job_id: str, *, actor: str, request_id: str) -> ArtifactJobView:
+        # Each pass releases its transaction before the shared bounded backoff.
+        # The draft is already durable intent. Unknown old effects drive exact
+        # cleanup, never dispatch over occupied capacity or inherit a spent wait.
+        for _attempt in bounded_attempts():
+            try:
+                return self._submit_once(job_id, actor=actor, request_id=request_id)
+            except UnknownOutcomeError:
+                self._reconcile_run_for_submission(
+                    job_id, actor=actor, request_id=request_id
+                )
+        with self._sessions.begin() as session:
+            job = session.get(ArtifactJob, job_id, with_for_update=True)
+            if job is None:
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
+            return self._end_preparation(session, job)
+
+    def _reconcile_run_for_submission(
+        self, job_id: str, *, actor: str, request_id: str
+    ) -> None:
+        with self._sessions() as session:
+            job = session.get(ArtifactJob, job_id)
+            if job is None:
+                return
+            run_id = job.run_id
+            adapter = ArtifactJobAdapter(session, clock=self._clock)
+            occupied = any(
+                prior.operation_id is not None
+                and (
+                    prior.state in ajs.LIVE
+                    or adapter.adopt(prior).effect is Effect.UNKNOWN
+                    or (
+                        prior.result_evidence is not None
+                        and read_result_evidence(prior.result_evidence) is None
+                    )
+                )
+                for prior in session.scalars(
+                    select(ArtifactJob).where(
+                        ArtifactJob.run_id == run_id,
+                        ArtifactJob.id != job_id,
+                    )
+                )
+            )
+        if not occupied:
+            return
+        # The run's Stop authority freezes and fences the exact JobRun targets.
+        # Its durable worker survives this request's bounded observation ending.
+        key = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"artifact-stop:{job_id}:{request_id}")
+        )
+        try:
+            plan = self._recipe_operations.preview_stop(run_id)
+            self._recipe_operations.stop(
+                run_id,
+                plan_digest=plan.plan_digest,
+                actor=actor,
+                request_id=key,
+            )
+        except (RecipeArtifactJobCancellationPending, RecipeRetryLater):
+            return
+
+    def _submit_once(
+        self, job_id: str, *, actor: str, request_id: str
+    ) -> ArtifactJobView:
         now = self._clock()
         with self._sessions.begin() as session:
             artifact_job = session.get(ArtifactJob, job_id, with_for_update=True)
@@ -414,18 +542,55 @@ class ArtifactJobService(OutputService):
                         reason=InvalidRequestReason.CONFLICT,
                     )
                 return self._view_in_session(session, artifact_job)
+            if ajs.is_ended(artifact_job):
+                return self._view_in_session(session, artifact_job)
             if ajs.preparation_of(artifact_job) != ajs.READY:
-                raise ArtifactJobInvalid(
-                    "artifact job is not ready", reason=InvalidRequestReason.NOT_READY
+                raise ArtifactJobUnavailableError(
+                    "artifact input preparation is incomplete",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             run = session.get(RecipeRun, artifact_job.run_id, with_for_update=True)
             if run is None or run.state != RunState.RUNNING:
-                raise ArtifactJobInvalid(
-                    "recipe run is not accepting jobs",
-                    reason=InvalidRequestReason.NOT_READY,
+                raise ArtifactJobUnavailableError(
+                    "recipe run observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            # Queue ownership and physical execution slots belong to agent_jobs.
-            # A prior request cannot become a second admission mutex here.
+            adapter = ArtifactJobAdapter(session, clock=self._clock)
+            for prior in session.scalars(
+                select(ArtifactJob).where(
+                    ArtifactJob.run_id == run.id,
+                    ArtifactJob.id != artifact_job.id,
+                )
+            ):
+                recorded = adapter.adopt(prior)
+                parent, operation, attempt = adapter.order_of(session, prior)
+                if operation is not None and operation.current_attempt == 0:
+                    # New intent fences an unissued old order in this transaction.
+                    AgentOperationAdapter(session).record_outcome(
+                        operation,
+                        attempt,
+                        parent,
+                        Outcome.CANCELLED,
+                        now,
+                    )
+                    if parent is not None:
+                        set_parent_state(parent, ajs.CANCELLED, None, now)
+                    adapter.confirm_stopped(prior, WaitReason.SCOPE_CHANGED, now)
+                    continue
+                uncertain = recorded.effect is Effect.UNKNOWN or (
+                    prior.operation_id is not None
+                    and prior.result_evidence is not None
+                    and read_result_evidence(prior.result_evidence) is None
+                )
+                if uncertain:
+                    observed = adapter.observe(recorded).effect
+                    if observed not in {Effect.STOPPED, Effect.ESTABLISHED}:
+                        # New intent drives exact cleanup under its own bounded
+                        # attempt; healthy execution remains queued independently.
+                        raise ArtifactJobUnavailableError(
+                            "artifact run effect observation is unavailable",
+                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                        )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (
                 _active_recipe_revision(session, installation.recipe_revision_id)
@@ -433,22 +598,26 @@ class ArtifactJobService(OutputService):
                 else None
             )
             if installation is None or resolved is None:
-                # The run's installation or recipe revision no longer exists:
-                # a genuine absence, refused request-led with its own code.
-                raise ArtifactJobInvalid(
+                # Missing workload evidence is observed again under this request's
+                # bounded recovery, never classified as malformed caller input.
+                raise ArtifactJobUnavailableError(
                     "recipe job workload identity is unavailable",
-                    reason=InvalidRequestReason.NOT_FOUND,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             revision, _recipe = resolved
             node = self._job_node_in_session(session, run)
             launch = self._job_launch(session, artifact_job, run, installation, node)
             if launch is None:
-                # The run's or the job's stored evidence is damaged and nothing
-                # re-derives it (each case is recorded as residue): the run is
-                # not accepting this job now, and the submit is asked again.
-                raise ArtifactJobInvalid(
-                    "recipe run is not accepting jobs",
-                    reason=InvalidRequestReason.NOT_READY,
+                # Repairable launch projections are rebuilt by _job_launch;
+                # unavailable authority is observed within this request's bound.
+                raise ArtifactJobUnavailableError(
+                    "recipe run observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            if not self._available_inputs(session, artifact_job):
+                raise ArtifactJobUnavailableError(
+                    "artifact input bytes are unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             contract = launch.contract
             floor = launch.memory_floor_bytes
@@ -459,48 +628,56 @@ class ArtifactJobService(OutputService):
                 if run.mapping_id is not None
                 else None
             )
-            invocation = compile_job_invocation(
-                session,
-                revision=revision,
-                installed=installed_plan,
-                build=(
-                    session.get(RecipeBuild, installation.recipe_build_id)
-                    if installation.recipe_build_id is not None
-                    else None
-                ),
-                parameters=parameters,
-                timeout_seconds=artifact_job.timeout_seconds,
-                memory_floor_bytes=floor,
-                reserved_memory_bytes=node.reserved_memory_bytes,
-                option_choices=mapping_option_choices(
-                    mapping.parameters if mapping is not None else {}
-                ),
-            )
-            raw_files = [file.model_dump(mode="json") for file in launch.input_files]
-            payload = {
-                "job_id": artifact_job.id,
-                "run_id": run.id,
-                "installation_id": installation.id,
-                "recipe_revision_id": revision.id,
-                "plan_digest": run.plan_digest,
-                "mapping_id": run.mapping_id,
-                "input_manifest_sha256": artifact_job.input_manifest_sha256,
-                "input_total_bytes": artifact_job.input_total_bytes,
-                "inputs": raw_files,
-                "compiled_execution_plan": invocation.model_dump(mode="json"),
-                "run_generation": run.run_generation,
-                "output_mappings": [
-                    item.model_dump(mode="json") for item in _output_mappings(contract)
-                ],
-                "output_limits": artifact_job.output_limits,
-            }
-            RecipeJobRunRequest.parse(payload)
+            limits = self._stored_output_limits(session, artifact_job, repair=True)
+            if isinstance(limits, Residue):
+                raise ArtifactJobUnavailableError(
+                    "artifact output limits observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            try:
+                invocation = compile_job_invocation(
+                    session,
+                    revision=revision,
+                    installed=installed_plan,
+                    build=(
+                        session.get(RecipeBuild, installation.recipe_build_id)
+                        if installation.recipe_build_id is not None
+                        else None
+                    ),
+                    parameters=parameters,
+                    timeout_seconds=artifact_job.timeout_seconds,
+                    memory_floor_bytes=floor,
+                    reserved_memory_bytes=node.reserved_memory_bytes,
+                    option_choices=mapping_option_choices(
+                        mapping.parameters if mapping is not None else {}
+                    ),
+                )
+                payload = RecipeJobRunRequest(
+                    job_id=artifact_job.id,
+                    run_id=run.id,
+                    installation_id=installation.id,
+                    recipe_revision_id=revision.id,
+                    plan_digest=run.plan_digest,
+                    mapping_id=run.mapping_id,
+                    input_manifest_sha256=artifact_job.input_manifest_sha256,
+                    input_total_bytes=artifact_job.input_total_bytes,
+                    inputs=tuple(launch.input_files),
+                    compiled_execution_plan=invocation,
+                    run_generation=run.run_generation,
+                    output_mappings=tuple(_output_mappings(contract)),
+                    output_limits=limits,
+                )
+            except (RecipeExecutionContractError, TypeError, ValueError) as error:
+                raise ArtifactJobUnavailableError(
+                    "artifact invocation observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             operation = self._recipe_operations.enqueue_one_shot_job_in_session(
                 session,
                 artifact_job_id=artifact_job.id,
                 run_id=run.id,
                 node_id=node.node_id,
-                payload=payload,
+                payload=payload.model_dump(mode="json"),
                 actor=actor,
                 request_id=request_id,
                 authority_digest=revision.content_digest,
@@ -557,13 +734,16 @@ class ArtifactJobService(OutputService):
             if job is None:
                 raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             operation_id = job.operation_id
+            parent_missing = (
+                operation_id is not None and session.get(Job, operation_id) is None
+            )
             state = ajs.state_of(job)
             evidence = read_result_evidence(job.result_evidence)
         if state in {ajs.SUCCEEDED, ajs.FAILED}:
-            raise ArtifactJobInvalid(
-                "artifact job is not cancellable", reason=InvalidRequestReason.CONFLICT
-            )
+            return self.get(job_id)
         if state == ajs.CANCELLED and operation_id is None:
+            if evidence is None or evidence.cancel_request_id is None:
+                return self.get(job_id)
             if (
                 evidence is not None
                 and evidence.cancel_request_id == request_id
@@ -575,7 +755,7 @@ class ArtifactJobService(OutputService):
                 "cancellation request key was already used differently",
                 reason=InvalidRequestReason.CONFLICT,
             )
-        if operation_id is not None:
+        if operation_id is not None and not parent_missing:
             try:
                 self._recipe_operations.cancel(
                     operation_id, actor=actor, request_id=request_id, reason=reason
@@ -595,8 +775,13 @@ class ArtifactJobService(OutputService):
                     cancel_actor=actor,
                     cancel_reason=cancellation_reason,
                 )
-                if job.operation_id is None:
-                    # Nothing was ever issued: the core cancels it at once.
+                if parent_missing:
+                    evidence = evidence.merged(
+                        ArtifactJobResultEvidence(active_scope_may_remain=True)
+                    )
+                if job.operation_id is None or parent_missing:
+                    # The core ends unissued work; missing ownership retains its
+                    # unknown physical scope until bounded reconciliation.
                     adapter.settle(
                         job,
                         CancelRequested(request_id, cancellation_reason),

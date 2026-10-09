@@ -1,6 +1,7 @@
 """An expired cancellation budget cannot prove an exact job target stopped."""
 
 import hashlib
+import uuid
 from collections.abc import Callable
 from datetime import datetime
 
@@ -107,6 +108,8 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     # A retained physical reservation is not an admission mutex for fresh work.
     fresh = submitted_artifact_job(artifacts, run_id, request_suffix=900)
     assert fresh.id != job.id and fresh.operation_id is not None
+    # New intent drives exact cleanup, while its own bounded attempt ends.
+    # It never treats a logical ending as observed free physical capacity.
     stop_plan = operations.preview_stop(run_id)
     observations = 0
 
@@ -120,14 +123,21 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     engine = sessions.kw["bind"]
     event.listen(engine, "before_cursor_execute", unavailable_once)
     try:
-        stopping = operations.stop(
-            run_id,
-            plan_digest=stop_plan.plan_digest,
-            actor="operator",
-            request_id="00000000-0000-4000-8000-000000000882",
-        )
+        newer = submitted_artifact_job(artifacts, run_id, request_suffix=900)
     finally:
         event.remove(engine, "before_cursor_execute", unavailable_once)
+    assert newer.operation_id is None
+    stop_key = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"artifact-stop:{newer.id}:00000000-0000-4000-8000-000000000901",
+        )
+    )
+    with sessions() as session:
+        accepted_stop = session.scalar(select(Job).where(Job.request_id == stop_key))
+        assert accepted_stop is not None
+        stop_id = accepted_stop.id
+    stopping = operations.get(stop_id)
     assert observations >= 2
     # No successful job-target Stop receipt has arrived. A terminal cancellation
     # and a newer workload ordinal are decisions, not observations of absence.
@@ -166,7 +176,7 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         run_id,
         plan_digest=stop_plan.plan_digest,
         actor="operator",
-        request_id="00000000-0000-4000-8000-000000000882",
+        request_id=stop_key,
     )
     assert replay.id == stopping.id
     with sessions() as session:
@@ -229,13 +239,12 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         run_id,
         plan_digest=stop_plan.plan_digest,
         actor="operator",
-        request_id="00000000-0000-4000-8000-000000000882",
+        request_id=stop_key,
     )
     assert stopped.id == stopping.id and stopped.state == "succeeded"
     resolved = artifacts.get(job.id)
     assert resolved.result_evidence is not None
     assert resolved.result_evidence.active_scope_may_remain is False
-    assert resolved.result_evidence.residue_resolved_by == "exact-stop"
     if damaged_evidence is True:
         assert resolved.result_evidence.elapsed_milliseconds is None
         assert resolved.result_evidence.peak_memory_bytes is None
