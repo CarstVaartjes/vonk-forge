@@ -92,9 +92,9 @@ function draftFromProfile(profile: FleetProfile): ProfileDraft {
   return {
     number: profile.number,
     revision: profile.revision,
-    name: definition.name,
-    description: definition.description,
-    favorite: definition.favorite,
+    name: definition.name ?? "",
+    description: definition.description ?? "",
+    favorite: definition.favorite ?? false,
     installationPolicy: definition.installation_policy,
     labels: definition.labels,
     assignments: profileAssignments(profile),
@@ -830,7 +830,7 @@ export function LibraryProfilesView({
               Profile {formatWire(selectedProfile.number)} · {selectedProfile.name}
             </strong>
             <span>
-              {selectedProfile.status.replaceAll("-", " ")} · revision{" "}
+              {selectedProfile.status?.replaceAll("-", " ") ?? "Status unavailable"} · revision{" "}
               {formatWire(selectedProfile.revision)}
             </span>
           </div>
@@ -904,7 +904,7 @@ export function LibraryProfilesView({
                 <small>
                   {profile.assignments.length} assignment
                   {profile.assignments.length === 1 ? "" : "s"} ·{" "}
-                  {profile.status.replaceAll("-", " ")}
+                  {profile.status?.replaceAll("-", " ") ?? "Status unavailable"}
                 </small>
               </button>
             ),

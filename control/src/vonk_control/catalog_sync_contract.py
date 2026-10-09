@@ -46,6 +46,7 @@ _SyncResultState = Annotated[
 
 
 class ManagedCatalogSyncResult(StrictModel):
+    reviewed_content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     schema_version: Literal[1]
     state: _SyncResultState
     imported_count: int = Field(ge=0)

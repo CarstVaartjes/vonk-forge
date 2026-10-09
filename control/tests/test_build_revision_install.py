@@ -41,7 +41,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_forge_contracts import read_model
 
 from .preflight_fixtures import record_passing_preflight
-from .runtime_image_fixtures import remove_test_image
+from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_recipe_builds import (
     RecordingQueue,
     _json_array,
@@ -443,7 +443,7 @@ def test_install_rechecks_the_stored_image_after_preview(tmp_path):
         assert session.scalar(select(RecipeInstallation)) is None
 
 
-def test_installation_replay_adopts_accepted_effect_before_cache_refresh(tmp_path):
+def test_installation_replay_reuses_accepted_effect_after_cache_recovery(tmp_path):
     fixture = _prepared_successor(tmp_path)
     assert isinstance(fixture, tuple)
     (
@@ -467,4 +467,15 @@ def test_installation_replay_adopts_accepted_effect_before_cache_refresh(tmp_pat
     plan = admission.plan_install(mapping, build_id, now=now)
     installation_id = operations.prepare_installation(plan, actor="admin")
     remove_test_image(storage, receipt.oci_archive_sha256)
+    with sessions() as session:
+        assert tuple(session.scalars(select(RecipeInstallation.id))) == (
+            installation_id,
+        )
+    place_test_image(storage, receipt.oci_archive_sha256, receipt.image_bytes)
     assert operations.prepare_installation(plan, actor="admin") == installation_id
+    assert (
+        operations.prepare_installation(
+            operations.preview_install(mapping, build_id), actor="admin"
+        )
+        == installation_id
+    )

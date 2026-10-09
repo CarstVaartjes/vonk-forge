@@ -11,10 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     RecipeStartPayload,
     RunState,
+    SecurityRefusalError,
     UnknownOutcomeError,
     canonical_message,
 )
@@ -193,8 +195,10 @@ class StartMixin:
                 )
             except RunAdmissionBusy:
                 raise
+            except (SecurityRefusalError, InvalidRequestError, UnknownOutcomeError):
+                raise
             except (RuntimeError, ValueError) as error:
-                raise RecipeRequestInvalid(str(error)) from error
+                raise RecipeRetryLater(str(error)) from error
             run = session.get(RecipeRun, run_id)
             revision = _active_recipe_revision(session, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)

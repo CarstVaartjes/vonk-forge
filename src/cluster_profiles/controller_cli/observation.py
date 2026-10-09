@@ -279,8 +279,8 @@ def _poll_path(
             ControlTransportError,
             OSError,
         ) as error:
-            if isinstance(error, BrokenPipeError):
-                raise
+            # This pipe belongs to the peer request. Local output interruption
+            # is handled separately at the watcher/publication boundary.
             observation.error = _observation_reason(error)
             interval = _observation_delay(error, interval, deadline - time.monotonic())
             continue

@@ -286,11 +286,17 @@ impl LoopClient for LeaseLapseClient {
             if self.unreadable {
                 return Err(ClientError::Protocol);
             }
-            return Ok(AgentDirective {
+            let directive = AgentDirective {
                 cancel_requested: true,
                 deadline: (Utc::now() + ChronoDuration::seconds(30)).fixed_offset(),
                 fence: Uuid::new_v4(),
-            });
+            };
+            // Match HttpLoopClient: a reply for another fence is unreadable
+            // evidence, never cancellation of the operation being observed.
+            if directive.fence != progress.fence {
+                return Err(ClientError::Protocol);
+            }
+            return Ok(directive);
         }
         self.accepted_at.lock().unwrap().push(Utc::now());
         Ok(AgentDirective {

@@ -288,8 +288,9 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         assert not cleanup.stopped(selected_pending)
         assert _claims(sessions, nodes[0]) == before_claims
 
-        # A valid TLS/JSON response with missing canonical authority is rejected
-        # by the installed raw OpenAPI boundary, before recipes sees any output.
+        # An unreadable TLS/JSON projection is observed within a bounded budget,
+        # without publishing it to recipes. Allow real TLS and schema loading
+        # time so the injected fault, rather than startup latency, is exercised.
         corrupt_projection[0] = True
         malformed = run(
             "profile",
@@ -297,13 +298,13 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
             "--application",
             original.id,
             "--timeout-seconds",
-            "0.1",
+            "5",
             "--interval-seconds",
-            "0.01",
+            "0.05",
             "--json",
         )
         assert malformed.returncode != 0
-        assert injected_responses
+        assert injected_responses, malformed.stdout + malformed.stderr
         injected = injected_responses[0]
         assert injected[0] == 200
         bad_document = json.loads(injected[1])
