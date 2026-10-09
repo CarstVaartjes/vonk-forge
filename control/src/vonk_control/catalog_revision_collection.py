@@ -718,7 +718,9 @@ def streamed_tokens(
     """
     if not require_complete:
         return tokens(
-            session.scalars(statement.execution_options(yield_per=_SCAN_BATCH))
+            session.execute(
+                statement.execution_options(yield_per=_SCAN_BATCH)
+            ).scalars()
         )
     column = next(iter(statement.selected_columns))
     binding = binding_for(column.table.name, column.name)

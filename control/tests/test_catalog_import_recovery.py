@@ -49,7 +49,7 @@ def catalog() -> CatalogService:
     )
 
 
-def _import(catalog: CatalogService, document) -> RecipeRevisionView:
+def _request_import(catalog: CatalogService, document) -> RecipeRevisionView:
     return catalog.import_recipe_library(
         "test",
         library_commit="a" * 40,
@@ -80,7 +80,7 @@ def _cores(session: Session, identity: str) -> int:
 def test_poisoned_candidate_releases_head_and_accepts_two_fresh_imports(
     catalog: CatalogService, damage, missing_root
 ):
-    first = _import(catalog, _recipe(_model()))
+    first = _request_import(catalog, _recipe(_model()))
     changed = _recipe(_model())
     _metadata(changed)["description"] = "older pending content"
     pending = catalog.entities.revise(first.recipe_id, changed, actor="test")
@@ -97,7 +97,7 @@ def test_poisoned_candidate_releases_head_and_accepts_two_fresh_imports(
     for description in ("new accepted content", "newer accepted content"):
         document = _recipe(_model())
         _metadata(document)["description"] = description
-        imported = _import(catalog, document)
+        imported = _request_import(catalog, document)
         with catalog._sessions() as session:
             head = session.scalar(
                 select(CatalogDocumentHead).where(
@@ -120,7 +120,7 @@ def test_poisoned_candidate_releases_head_and_accepts_two_fresh_imports(
 def test_history_projection_failure_cannot_hold_candidate_ownership(
     catalog: CatalogService, monkeypatch, missing_root
 ):
-    first = _import(catalog, _recipe(_model()))
+    first = _request_import(catalog, _recipe(_model()))
     changed = _recipe(_model())
     _metadata(changed)["description"] = "pending"
     catalog.entities.revise(first.recipe_id, changed, actor="test")
@@ -138,8 +138,8 @@ def test_history_projection_failure_cannot_hold_candidate_ownership(
         patch.setattr(entities, "read_catalog_projection", unavailable_history)
         catalog.entities.fail_candidate(first.recipe_id, reason="superseded")
     monkeypatch.setattr(entities, "read_catalog_projection", real_read)
-    accepted = _import(catalog, changed)
-    assert _import(catalog, changed).id == accepted.id
+    accepted = _request_import(catalog, changed)
+    assert _request_import(catalog, changed).id == accepted.id
 
 
 def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
@@ -148,7 +148,7 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
     documents = [
         _recipe(_model(), slug=slug) for slug in ("policy-broken", "policy-healthy")
     ]
-    views = [_import(catalog, document) for document in documents]
+    views = [_request_import(catalog, document) for document in documents]
     with catalog._sessions.begin() as session:
         for view in views:
             row = session.get(CatalogDocumentRevision, view.id)
@@ -183,7 +183,7 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
         assert views[0].content_sha256 is not None
         assert views[0].content_sha256 in str(deferred[0].recipe_uri)
         # A fresh request runs through the normal importer despite the old miss.
-        _import(catalog, _recipe(_model(), slug="fresh-during-policy-fault"))
+        _request_import(catalog, _recipe(_model(), slug="fresh-during-policy-fault"))
     assert failed_calls == 1
     with catalog._sessions() as session:
         broken, healthy = [
@@ -196,7 +196,7 @@ def test_policy_fault_preserves_one_projection_and_repairs_healthy_siblings(
     with catalog._sessions() as session:
         repaired = session.get(CatalogDocumentRevision, views[0].id)
         assert repaired is not None and _cores(session, repaired.id) == 8
-    assert _import(catalog, documents[0]).id == views[0].id
+    assert _request_import(catalog, documents[0]).id == views[0].id
 
 
 def test_projection_write_fault_rolls_back_only_its_savepoint(
@@ -206,7 +206,7 @@ def test_projection_write_fault_rolls_back_only_its_savepoint(
     from sqlalchemy.exc import OperationalError
 
     views = [
-        _import(catalog, _recipe(_model(), slug=slug))
+        _request_import(catalog, _recipe(_model(), slug=slug))
         for slug in ("write-broken", "write-healthy")
     ]
     # Force recompilation without altering accepted source bytes.
@@ -251,12 +251,14 @@ def test_projection_write_fault_rolls_back_only_its_savepoint(
     catalog.refresh_build_policy()
     with catalog._sessions() as session:
         assert _cores(session, views[0].id) == 8
-    assert _import(catalog, _recipe(_model(), slug="fresh-after-write-fault")).id
+    assert _request_import(
+        catalog, _recipe(_model(), slug="fresh-after-write-fault")
+    ).id
 
 
 def test_partial_pin_observation_preserves_omitted_revisions(catalog: CatalogService):
     views = [
-        _import(catalog, _recipe(_model(), slug=slug))
+        _request_import(catalog, _recipe(_model(), slug=slug))
         for slug in ("pin-one", "pin-two")
     ]
     image = PrebuiltImage(
@@ -291,13 +293,15 @@ def test_partial_pin_observation_preserves_omitted_revisions(catalog: CatalogSer
             and second.prebuilt_image == image
         )
     catalog.record_prebuilt_images({keys[0]: image})
-    assert _import(catalog, _recipe(_model(), slug="fresh-after-pin-withdrawal")).id
+    assert _request_import(
+        catalog, _recipe(_model(), slug="fresh-after-pin-withdrawal")
+    ).id
 
 
 def test_kit_topology_change_promotes_head_and_preserves_exact_prior_revision(
     catalog: CatalogService,
 ):
-    first = _import(catalog, _recipe(_model()))
+    first = _request_import(catalog, _recipe(_model()))
     workloads = Catalog(catalog._sessions.kw["bind"])
     installation_id, run_id = workloads.workload(first.id)
     with catalog._sessions() as session:
@@ -309,11 +313,11 @@ def test_kit_topology_change_promotes_head_and_preserves_exact_prior_revision(
     dual["identity"] = single["identity"]
     _model_reference(dual)["content_sha256"] = document_sha256(_model())
     RecipeDefinition.model_validate(dual)
-    second = _import(catalog, dual)
+    second = _request_import(catalog, dual)
     assert catalog.get_recipe(first.recipe_id).id == second.id
     assert catalog.get_recipe(first.id).document == first.document
     assert RecipeDefinition.model_validate(second.document).topology.node_count == 2
-    assert _import(catalog, dual).id == second.id
+    assert _request_import(catalog, dual).id == second.id
     with catalog._sessions() as session:
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, installation_id)

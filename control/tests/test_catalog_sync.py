@@ -49,6 +49,7 @@ from vonk_forge_contracts import (
     ModelDefinition,
     RecipeDefinition,
     document_sha256,
+    read_model,
 )
 
 from tests.recipe_library_source import recipe_library_root
@@ -978,8 +979,8 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     assert len(snapshot.problems) == 2
     assert (skipped_model["publisher"], skipped_model["slug"]) not in {
         (
-            str(ModelDefinition.model_validate(document).identity.publisher),
-            str(ModelDefinition.model_validate(document).identity.slug),
+            str(read_model(document).identity.publisher),
+            str(read_model(document).identity.slug),
         )
         for document in snapshot.catalog_entities
     }

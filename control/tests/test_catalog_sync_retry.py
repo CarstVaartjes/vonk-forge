@@ -107,10 +107,18 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
     stop = asyncio.Event()
     checks = []
     delay = catalog_sync.catalog_sync_retry_delay
+    wait_for = asyncio.wait_for
+    scheduled_delay = None
 
     def observe_delay(failures, interval_seconds):
-        checks.append(failures)
+        nonlocal scheduled_delay
+        scheduled_delay = failures
         return delay(failures, interval_seconds)
+
+    async def observe_wait(awaitable, *, timeout):
+        if scheduled_delay is not None:
+            checks.append(scheduled_delay)
+        return await wait_for(awaitable, timeout=timeout)
 
     class Service:
         attempts = 0
@@ -124,6 +132,7 @@ def test_partial_receipts_back_off_then_success_resets_the_retry_episode(
 
     service = Service()
     monkeypatch.setattr(catalog_sync, "catalog_sync_retry_delay", observe_delay)
+    monkeypatch.setattr(asyncio, "wait_for", observe_wait)
 
     async def run():
         await asyncio.wait_for(

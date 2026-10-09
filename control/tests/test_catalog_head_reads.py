@@ -137,7 +137,9 @@ def test_stable_recipe_reads_follow_promotion_and_ignore_failed_successor(catalo
         assert catalog.get_recipe(first.document_id).id == second.id
     with catalog._sessions() as session:
         assert session.get(CatalogDocumentRevision, first.id).state == "active"
-    fresh = catalog.entities.revise(first.document_id, second.document, actor="test")
+    fresh_document = copy.deepcopy(second.document)
+    _document_section(fresh_document, "metadata")["description"] = "Fresh after failure"
+    fresh = catalog.entities.revise(first.document_id, fresh_document, actor="test")
     accepted = catalog.entities.resolve(fresh.id, actor="test")
     _assert_current(catalog, first, accepted)
 

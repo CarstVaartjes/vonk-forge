@@ -144,7 +144,7 @@ class CatalogEntityService:
                     )
                 )
             )
-            if (heads - {None}) - {revision.id for revision in revisions}:
+            if (heads - {None}) - {row.id for row in revisions}:
                 problems.append(
                     ManagedCatalogSyncProblem(
                         recipe_uri=None,
@@ -152,32 +152,30 @@ class CatalogEntityService:
                         detail="build policy head observation unavailable",
                     )
                 )
-            for revision in revisions:
+            for row in revisions:
                 try:
                     with session.begin_nested():
                         try:
-                            recipe = read_catalog_document(revision)
+                            recipe = read_catalog_document(row)
                         except CatalogRevisionContractError as error:
                             # Written under an earlier contract. Nothing can read the
                             # document, so there is nothing to derive a projection
                             # from; a superseded revision is simply history. One such
                             # row must not stop the rest of the catalog.
                             _LOGGER.log(
-                                logging.WARNING
-                                if revision.id in heads
-                                else logging.DEBUG,
+                                logging.WARNING if row.id in heads else logging.DEBUG,
                                 "skipping build policy refresh for revision %s: %s",
-                                revision.id,
+                                row.id,
                                 error,
                             )
-                            if revision.id in heads:
-                                problems.append(_build_policy_problem(revision, error))
-                            session.expunge(revision)
+                            if row.id in heads:
+                                problems.append(_build_policy_problem(row, error))
+                            session.expunge(row)
                             continue
                         assert isinstance(recipe, RecipeDefinition)
                         try:
                             projected = RecipeRevisionProjection.model_validate_json(
-                                canonical_message(revision.projected)
+                                canonical_message(row.projected)
                             ).model_dump(
                                 mode="json",
                                 exclude_none=True,
@@ -191,27 +189,23 @@ class CatalogEntityService:
                             # The document is readable but the stored projection is
                             # not (it predates the current projection contract).
                             try:
-                                projected = _rederive_projection(
-                                    session, revision, recipe
-                                )
+                                projected = _rederive_projection(session, row, recipe)
                             except CatalogRevisionContractError as failure:
                                 _LOGGER.warning(
                                     "skipping build policy refresh for revision %s: %s; "
                                     "it cannot be re-derived: %s",
-                                    revision.id,
+                                    row.id,
                                     error,
                                     failure,
                                 )
-                                if revision.id in heads:
-                                    problems.append(
-                                        _build_policy_problem(revision, failure)
-                                    )
+                                if row.id in heads:
+                                    problems.append(_build_policy_problem(row, failure))
                                 continue
                             healed = True
                             _LOGGER.info(
                                 "re-derived the catalog projection of revision %s from "
                                 "its document",
-                                revision.id,
+                                row.id,
                             )
                         policy = build_policy_projection(recipe)
                         if not healed and all(
@@ -222,23 +216,23 @@ class CatalogEntityService:
                         session.execute(
                             update(CatalogDocumentRevision)
                             .where(
-                                CatalogDocumentRevision.id == revision.id,
+                                CatalogDocumentRevision.id == row.id,
                             )
                             .values(
                                 projected=write_catalog_projection(
-                                    projected, kind=revision.kind
+                                    projected, kind=row.kind
                                 )
                             )
                         )
-                        session.expire(revision, ["projected"])
+                        session.expire(row, ["projected"])
                 except Exception as error:  # noqa: BLE001 - one derived row cannot abort imports
                     _LOGGER.warning(
                         "build policy observation deferred for revision %s: %s",
-                        revision.id,
+                        row.id,
                         error,
                     )
-                    if revision.id in heads:
-                        problems.append(_build_policy_problem(revision, error))
+                    if row.id in heads:
+                        problems.append(_build_policy_problem(row, error))
         return tuple(problems)
 
     def record_prebuilt_images(
@@ -438,15 +432,23 @@ class CatalogEntityService:
             if root is None:
                 # The candidate/head identities are sufficient to retire the
                 # gate even when its disposable lookup root is unavailable.
-                head = session.scalar(
-                    select(CatalogDocumentHead)
-                    .join(
-                        CatalogDocumentRevision,
-                        CatalogDocumentRevision.id
-                        == CatalogDocumentHead.candidate_revision_id,
-                    )
+                # History supplies only the catalog selector, never a selected
+                # revision. The locked head still owns candidate retirement.
+                row = session.scalar(
+                    select(CatalogDocumentRevision)
                     .where(CatalogDocumentRevision.document_id == document_id)
-                    .with_for_update(skip_locked=True)
+                    .limit(1)
+                )
+                head = (
+                    session.scalar(
+                        select(CatalogDocumentHead)
+                        .filter_by(
+                            kind=row.kind, publisher=row.publisher, slug=row.slug
+                        )
+                        .with_for_update(skip_locked=True)
+                    )
+                    if row is not None
+                    else None
                 )
             else:
                 head = _head(session, root)
