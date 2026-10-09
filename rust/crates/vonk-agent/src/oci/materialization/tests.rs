@@ -509,6 +509,59 @@ fn linkable_bytes_count_only_complete_store_objects() {
 }
 
 #[test]
+fn cancelled_copy_yields_without_publishing_and_fresh_preparation_converges() {
+    let data = tempdir().unwrap();
+    let plan: crate::workloads::CompiledExecutionPlan =
+        serde_json::from_value(compiled_plan()).unwrap();
+    let store = stock_store(data.path(), &plan);
+    let checks = std::cell::Cell::new(0);
+    let cancelled = || {
+        let count = checks.get() + 1;
+        checks.set(count);
+        count > 2
+    };
+    assert!(
+        materialize_compiled_models_controlled(
+            data.path(),
+            &plan,
+            FIRST,
+            false,
+            &mut |_, _| {},
+            &cancelled,
+        )
+        .is_err()
+    );
+    assert!(
+        !data
+            .path()
+            .join("installations")
+            .join(FIRST)
+            .join("models/primary/config.json")
+            .exists()
+    );
+    assert!(store.iter().all(|path| path.exists()));
+    materialize_compiled_models_controlled(
+        data.path(),
+        &plan,
+        FIRST,
+        false,
+        &mut |_, _| {},
+        &|| false,
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(
+            data.path()
+                .join("installations")
+                .join(FIRST)
+                .join("models/primary/config.json")
+        )
+        .unwrap(),
+        b"primary"
+    );
+}
+
+#[test]
 fn in_flight_model_copy_cancels_at_checkpoint_and_fresh_copy_reuses_verified_sources() {
     use std::cell::Cell;
     const LARGE: u64 = MATERIALIZE_PROGRESS_STEP * 2;
