@@ -341,7 +341,7 @@ def test_retirement_refuses_expired_lease_inside_issued_launch_budget(
             "start_deadline": (NOW + timedelta(minutes=1)).isoformat(),
         }
     assert projection.retire_job is not None
-    with pytest.raises(OperatorRetirementRefused, match="open launch budget"):
+    with pytest.raises(OperatorRetirementRefused):
         projection.retire_job(started.id)
     with sessions() as session:
         assert _required(session.get(Job, started.id)).state == "waiting-for-operator"

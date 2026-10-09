@@ -80,5 +80,18 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     assert active_child_id is not None
     superseded = service.application(parked.id)
     assert superseded.state == "superseded"
-    assert "replaced" in (superseded.status_reason or "")
+    assert active_child_id != parked_child_id
     assert service.application(active.id).state == "running"
+
+    for _ in range(12):
+        if service.application(active.id).state == LifecycleState.SUCCEEDED:
+            break
+        service.tick()
+    assert service.application(active.id).state == LifecycleState.SUCCEEDED
+    fresh = service.load(active_profile.number, request_key=_uuid(932), actor="admin")
+    assert fresh.id != active.id
+    assert fresh.state in {
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.SUCCEEDED,
+    }

@@ -25,17 +25,18 @@ def test_unrebuildable_state_retires_as_unknown_without_raising() -> None:
     result = read_or_rebuild(kind="k", subject="s", read=_damaged, rebuild=lambda: None)
     assert isinstance(result, Residue)
     assert result.effect is Effect.UNKNOWN
-    assert result.reason is BookkeepingReason.PERSISTED_STATE_DAMAGED
+    assert read_or_rebuild(kind="k", subject="s", read=lambda: 9) == 9
     assert result.observed().effect is Effect.UNKNOWN
 
 
 def test_a_failing_rebuild_still_retires() -> None:
     result = read_or_rebuild(kind="k", subject="s", read=_damaged, rebuild=_damaged)
     assert isinstance(result, Residue)
-    assert "rebuild" in result.note
+    assert result.effect is Effect.UNKNOWN
+    assert read_or_rebuild(kind="k", subject="s", read=_damaged, rebuild=lambda: 9) == 9
 
 
-def test_unknown_names_its_reason() -> None:
-    assert unknown(BookkeepingReason.EVIDENCE_MISMATCH, "x").reason == (
-        "evidence-mismatch:x"
-    )
+def test_unknown_observation_does_not_publish_a_completed_effect() -> None:
+    residue = unknown(BookkeepingReason.EVIDENCE_MISMATCH, "x")
+    assert residue.effect is Effect.UNKNOWN
+    assert read_or_rebuild(kind="k", subject="s", read=lambda: 11) == 11

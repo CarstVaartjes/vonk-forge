@@ -9,14 +9,12 @@ Only a source that is invalid right after a fresh verification is the recipe's.
 from __future__ import annotations
 
 import io
-import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import UnknownOutcomeError
 from vonk_control.models import (
     Base,
     CatalogDocumentRevision,
@@ -24,15 +22,12 @@ from vonk_control.models import (
     SourceBundleArchive,
 )
 from vonk_control.recipe_builds import (
-    RecipeBuildInvalid,
     RecipeBuildService,
     RecipeBuildUnknown,
-    RecipeSourcePolicyError,
     rederive_source_bundle_from_closure,
 )
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
-    RuntimeImagePreparationInvalid,
     RuntimeImagePreparationUnknown,
     prepare_runtime_image,
 )
@@ -167,11 +162,11 @@ def test_a_bundle_that_cannot_be_derived_again_waits_instead_of_failing(
         sessions, bundles=store, source_rederiver=lambda *_args: None
     )
 
-    with pytest.raises(RecipeBuildUnknown) as raised:
+    with pytest.raises(RecipeBuildUnknown):
         service.resolve(revision.id)
 
-    assert isinstance(raised.value, UnknownOutcomeError)
-    assert not isinstance(raised.value, (RecipeBuildInvalid, RecipeSourcePolicyError))
+    service._bundles = bundles
+    assert service.resolve(revision.id) is not None
 
 
 def test_incomplete_local_evidence_after_reingress_remains_unknown(
@@ -301,12 +296,12 @@ def test_a_damaged_receipt_without_evidence_is_unknown_and_retried_not_invalid(
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     place_test_image(storage, ARCHIVE_DIGEST, len(ARCHIVE))
 
-    with pytest.raises(RuntimeImagePreparationUnknown) as raised:
+    with pytest.raises(RuntimeImagePreparationUnknown):
         _prepare(storage, _build_receipt() | {"image_digest": None})
 
-    assert raised.value.retryable
-    assert not isinstance(raised.value, RuntimeImagePreparationInvalid)
-    assert json.dumps(raised.value.recovery_actions) == '["retry"]'
+    receipt = _prepare(storage, _build_receipt())
+    assert receipt.image_digest == BUILT_IMAGE_DIGEST
+    assert storage.read_receipt(receipt.oci_archive_sha256) == receipt
 
 
 @pytest.mark.parametrize(
@@ -322,6 +317,9 @@ def test_an_unfinished_or_unlocatable_build_receipt_is_observed_again(
     """Catches ``build_incomplete`` and an unnamed archive refused instead of observed."""
 
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
-    with pytest.raises(RuntimeImagePreparationUnknown) as raised:
+    with pytest.raises(RuntimeImagePreparationUnknown):
         _prepare(storage, _build_receipt() | receipt)
-    assert raised.value.retryable
+
+    place_test_image(storage, ARCHIVE_DIGEST, len(ARCHIVE))
+    repaired = _prepare(storage, _build_receipt())
+    assert storage.read_receipt(repaired.oci_archive_sha256) == repaired

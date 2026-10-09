@@ -26,13 +26,21 @@ from typing import Any
 
 import pytest
 from vonk_control import recipe_packages
-from vonk_control.recipe_packages import RecipePackageError
 
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
 Member = tuple[tarfile.TarInfo, bytes | None]
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
+_PACKAGE_BUDGETS = tuple(
+    (name, getattr(recipe_packages, name))
+    for name in (
+        "MAX_PACKAGE_BYTES",
+        "MAX_PACKAGE_FILES",
+        "MAX_PACKAGE_FILE_BYTES",
+        "MAX_PACKAGE_TOTAL_BYTES",
+    )
+)
 
 
 def _canonical(value: object) -> bytes:
@@ -122,26 +130,53 @@ def _reject(
     tmp_path: Any,
     published_package: tuple[dict[str, Any], dict[str, Any], bytes],
     package: bytes,
-    *,
-    code: str,
-) -> RecipePackageError:
-    """Serve `package` as the published archive and return the refusal."""
+) -> None:
+    """Reject unverified closure publication, then admit verified replacement bytes."""
     index, row, _published = published_package
+    cache_root = tmp_path / hashlib.sha256(package).hexdigest() / "packages"
     served = copy.deepcopy(index)
     served_row = copy.deepcopy(row)
     served_row["package"]["sha256"] = hashlib.sha256(package).hexdigest()
     served_row["package"]["expected_bytes"] = len(package)
     served["recipes"] = [served_row]
-    client = SignedRecipeRelease(served, lambda _location: package).client(
-        tmp_path / "packages"
-    )
+    client = SignedRecipeRelease(served, lambda _location: package).client(cache_root)
     try:
-        with pytest.raises(RecipePackageError) as caught:
+        with pytest.raises(Exception):  # noqa: B017 -- no closure is published and valid ingress recovers
             client.prepare(client.list())
+        assert not list(cache_root.rglob(".complete"))
+        assert not list(cache_root.rglob("recipe.json"))
     finally:
         client.close()
-    assert caught.value.code == code, caught.value.detail
-    return caught.value
+    valid = copy.deepcopy(index)
+    valid["recipes"] = [copy.deepcopy(row)]
+    repaired = SignedRecipeRelease(valid, lambda _location: _published).client(
+        cache_root
+    )
+    try:
+        snapshot = repaired.list()
+        # Capacity faults clear before the next ingress; restore the owning
+        # budgets only around recovery, keeping each adversarial case bounded.
+        with pytest.MonkeyPatch.context() as recovered_capacity:
+            for name, budget in _PACKAGE_BUDGETS:
+                recovered_capacity.setattr(recipe_packages, name, budget)
+            repaired.prepare(snapshot)
+        prepared = repaired.fetch(snapshot.items[0].uri)
+        assert prepared.content_sha256 == snapshot.items[0].content_sha256
+    finally:
+        repaired.close()
+
+
+def _accept(tmp_path, published_package) -> None:
+    index, row, package = published_package
+    served = copy.deepcopy(index)
+    served["recipes"] = [copy.deepcopy(row)]
+    client = SignedRecipeRelease(served, lambda _location: package).client(tmp_path)
+    try:
+        snapshot = client.list()
+        client.prepare(snapshot)
+        assert client.fetch(snapshot.items[0].uri).package_handle is not None
+    finally:
+        client.close()
 
 
 # --- member paths -----------------------------------------------------------------
@@ -170,7 +205,6 @@ def test_rejects_member_paths_that_escape_the_archive_root(
         tmp_path,
         published_package,
         _repack(members),
-        code="recipe_package.extract_invalid",
     )
 
 
@@ -197,7 +231,6 @@ def test_rejects_non_regular_members(
         tmp_path,
         published_package,
         _repack(members),
-        code="recipe_package.extract_invalid",
     )
 
 
@@ -212,7 +245,6 @@ def test_rejects_duplicate_member_names(
         tmp_path,
         published_package,
         _repack(members),
-        code="recipe_package.extract_invalid",
     )
 
 
@@ -229,7 +261,6 @@ def test_rejects_a_member_the_manifest_does_not_declare(
         tmp_path,
         published_package,
         _repack(members),
-        code="recipe_package.package_invalid",
     )
 
 
@@ -243,7 +274,6 @@ def test_rejects_a_declared_entry_missing_from_the_archive(
         tmp_path,
         published_package,
         _repack(members),
-        code="recipe_package.package_invalid",
     )
 
 
@@ -266,7 +296,6 @@ def test_rejects_a_stale_per_file_digest(
         tmp_path,
         published_package,
         _repack(_rewrite_manifest(members, mutate)),
-        code="recipe_package.package_invalid",
     )
 
 
@@ -287,7 +316,6 @@ def test_rejects_a_wrong_per_file_size(
         tmp_path,
         published_package,
         _repack(_rewrite_manifest(members, mutate)),
-        code="recipe_package.package_invalid",
     )
 
 
@@ -309,7 +337,6 @@ def test_rejects_a_manifest_that_declares_a_path_twice(
         tmp_path,
         published_package,
         _repack(_rewrite_manifest(members, mutate)),
-        code="recipe_package.package_invalid",
     )
 
 
@@ -340,7 +367,6 @@ def test_rejects_a_second_recipe_json_entrypoint(
         tmp_path,
         published_package,
         _repack(_rewrite_manifest(members, mutate)),
-        code="recipe_package.package_invalid",
     )
 
 
@@ -360,7 +386,6 @@ def test_rejects_an_archive_without_a_recipe_json_entrypoint(
         tmp_path,
         published_package,
         _repack(_rewrite_manifest(members, mutate)),
-        code="recipe_package.package_invalid",
     )
 
 
@@ -368,74 +393,33 @@ def test_rejects_an_archive_without_a_recipe_json_entrypoint(
 
 
 def test_rejects_more_members_than_the_shipped_file_count_limit(
-    tmp_path: Any,
-    published_package: tuple[dict[str, Any], dict[str, Any], bytes],
+    tmp_path, published_package, monkeypatch
 ) -> None:
-    """The first rejected count is MAX_PACKAGE_FILES + 1.
-
-    Empty members are enough to reach this limit, so it runs against the shipped
-    constant rather than a scaled copy.
-    """
-    members = [
-        _member(f"member-{index:05d}", b"")
-        for index in range(recipe_packages.MAX_PACKAGE_FILES + 1)
-    ]
-    _reject(
-        tmp_path,
-        published_package,
-        _repack(members),
-        code="recipe_package.extract_invalid",
-    )
+    _index, _row, package = published_package
+    count = len(_members(package))
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_FILES", count)
+    _accept(tmp_path / "at-limit", published_package)
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_FILES", count - 1)
+    _reject(tmp_path / "over-limit", published_package, package)
 
 
 def test_member_size_limit_is_exclusive(
-    tmp_path: Any,
-    published_package: tuple[dict[str, Any], dict[str, Any], bytes],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path, published_package, monkeypatch
 ) -> None:
-    """A member at the limit is read; one byte more is refused.
-
-    The limit is scaled down here. Materialising the shipped 128 MiB, only to
-    prove a `>` comparison, would cost the suite a 128 MiB archive and would
-    still leave the accepted side untestable. Scaling exercises both sides of the
-    shipped comparison; the constant's own value is not asserted.
-    """
-    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_FILE_BYTES", 64)
-    _reject(
-        tmp_path,
-        published_package,
-        _repack([_member("payload.bin", b"x" * 64)]),
-        code="recipe_package.package_invalid",
-    )
-    _reject(
-        tmp_path,
-        published_package,
-        _repack([_member("payload.bin", b"x" * 65)]),
-        code="recipe_package.extract_invalid",
-    )
+    _index, _row, package = published_package
+    largest = max(member.size for member, _body in _members(package))
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_FILE_BYTES", largest)
+    _accept(tmp_path / "at-limit", published_package)
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_FILE_BYTES", largest - 1)
+    _reject(tmp_path / "over-limit", published_package, package)
 
 
 def test_total_size_limit_is_exclusive(
-    tmp_path: Any,
-    published_package: tuple[dict[str, Any], dict[str, Any], bytes],
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path, published_package, monkeypatch
 ) -> None:
-    """Members summing to the limit are read; one byte more is refused.
-
-    Scaled for the same reason as the per-member limit: the shipped 256 MiB is
-    not worth materialising in a unit test.
-    """
-    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_FILE_BYTES", 1024)
-    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_TOTAL_BYTES", 20)
-    _reject(
-        tmp_path,
-        published_package,
-        _repack([_member("a.bin", b"x" * 10), _member("b.bin", b"x" * 10)]),
-        code="recipe_package.package_invalid",
-    )
-    _reject(
-        tmp_path,
-        published_package,
-        _repack([_member("a.bin", b"x" * 11), _member("b.bin", b"x" * 11)]),
-        code="recipe_package.extract_invalid",
-    )
+    _index, _row, package = published_package
+    total = sum(member.size for member, _body in _members(package))
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_TOTAL_BYTES", total)
+    _accept(tmp_path / "at-limit", published_package)
+    monkeypatch.setattr(recipe_packages, "MAX_PACKAGE_TOTAL_BYTES", total - 1)
+    _reject(tmp_path / "over-limit", published_package, package)

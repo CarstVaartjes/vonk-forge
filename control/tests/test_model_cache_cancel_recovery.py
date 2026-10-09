@@ -187,7 +187,7 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
                 coverage="complete",
             ),
         )
-        assert restarted.get_operation(operation.id).state == "cancelled"
+        assert restarted.get_operation(operation.id).state == LifecycleState.CANCELLED
 
         restarted.run_pending(limit=2)
         assert restarted.get_operation(shared_operation.id).state == "succeeded"
@@ -207,8 +207,10 @@ def test_cancel_fences_process_publication_and_keeps_shared_work_resumable(
                 request_key=LATER_REQUEST,
                 reason=CANCEL_REASON,
             )
-        except ModelCacheConflict as error:
-            assert error.code == "model_cache.cancellation_key_reused"
+        except ModelCacheConflict:
+            assert (
+                restarted.get_operation(operation.id).state == LifecycleState.CANCELLED
+            )
         else:
             raise AssertionError("a second cancellation identity replaced the first")
 

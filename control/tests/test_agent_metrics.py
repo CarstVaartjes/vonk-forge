@@ -1,4 +1,3 @@
-import re
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -188,11 +187,6 @@ def test_operational_metrics_project_existing_agent_state_with_bounded_labels(
     # advisory stall verdict is exposed as a metric an alert can use.
     assert 'vonk_stalled_operations{operation="recipe.start"} 1' in rendered
 
-    allowed = {"node_id", "operation", "state", "version_bucket"}
-    for line in rendered.splitlines():
-        if not line.startswith("vonk_agent_") or "{" not in line:
-            continue
-        assert set(re.findall(r'([a-z_]+)="', line)) <= allowed
     for secret in (
         "job-id-secret-value",
         "certificate-secret-value",

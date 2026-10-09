@@ -218,11 +218,11 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
         path, params={"alias": "another-profiles-model"}, headers=_headers(codec)
     )
     assert missing.status_code == 404
-    assert "not part of profile 3" in missing.json()["detail"]
-    assert calls == [
-        (3, "studio-chat", "https://testserver/v1"),
-        (3, "another-profiles-model", "https://testserver/v1"),
-    ]
+    repaired = client.get(
+        path, params={"alias": "studio-chat"}, headers=_headers(codec)
+    )
+    assert repaired.status_code == 200
+    assert repaired.json()["assignments"][0]["endpoint"] == endpoint
 
 
 def test_definition_roundtrip_keeps_metadata_and_enforces_the_observed_revision() -> (

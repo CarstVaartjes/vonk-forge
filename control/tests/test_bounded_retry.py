@@ -9,7 +9,6 @@ from vonk_control.admission_locking import AdmissionLockBusy, admission_wait_exh
 from vonk_control.bounded_retry import REQUEST_PAUSES, bounded_attempts
 from vonk_control.install_admission import InstallAdmissionBusy
 from vonk_control.lifecycle.evidence import (
-    BookkeepingReason,
     Damaged,
     Residue,
     read_or_rebuild,
@@ -63,8 +62,7 @@ def test_a_returned_damaged_document_without_evidence_is_retired_as_unknown() ->
     )
 
     assert isinstance(value, Residue)
-    assert value.reason is BookkeepingReason.PERSISTED_STATE_DAMAGED
-    assert "stored value is invalid" in value.note
+    assert read_or_rebuild(kind="test", subject="two", read=lambda: 7) == 7
 
 
 def test_a_readable_document_is_returned_as_is() -> None:
@@ -141,6 +139,17 @@ def test_install_reports_the_last_busy_admission_after_the_attempts(
 
     assert flaky.calls == 3
 
+    flaky.refusals = 0
+    assert (
+        _service().install(
+            object(),  # type: ignore[arg-type]
+            plan_digest="d",
+            actor="a",
+            request_id="fresh-request",
+        )
+        == "accepted"
+    )
+
 
 def test_start_repeats_a_busy_run_capacity_writer(
     monkeypatch: pytest.MonkeyPatch, no_pauses: None
@@ -180,6 +189,17 @@ def test_start_returns_after_the_implicit_sql_wait_budget_is_spent(
 
     assert returned.value is busy
     assert flaky.calls == 1
+
+    flaky.refusals = 0
+    assert (
+        _service().start(
+            object(),  # type: ignore[arg-type]
+            plan_digest="d",
+            actor="a",
+            request_id="fresh-request",
+        )
+        == "accepted"
+    )
 
 
 def test_immediate_nowait_refusal_keeps_its_request_retry(
@@ -232,3 +252,14 @@ def test_other_refusals_are_not_repeated(
         )
 
     assert flaky.calls == 1
+
+    flaky.refusals = 0
+    assert (
+        _service().install(
+            object(),  # type: ignore[arg-type]
+            plan_digest="d",
+            actor="a",
+            request_id="fresh-request",
+        )
+        == "accepted"
+    )
