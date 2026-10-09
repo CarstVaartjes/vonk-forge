@@ -35,6 +35,6 @@ pub enum CompiledOciError {
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod mount_equivalence_tests;
+#[cfg(test)]
+mod tests;

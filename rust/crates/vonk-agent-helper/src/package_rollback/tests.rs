@@ -4,8 +4,10 @@ use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::time::{Duration, Instant};
 
-use vonk_agent_protocol::{PackageActivationPhase as Phase, PackageRollbackAuthority, parse_strict};
 use vonk_agent_protocol::generated::PackageActivationOutcome as Outcome;
+use vonk_agent_protocol::{
+    PackageActivationPhase as Phase, PackageRollbackAuthority, parse_strict,
+};
 
 use super::recovery::{retry_process_proof, rollback_retry_budget};
 use super::{ROLLBACK_RETRY_TIMEOUT, Store, Transaction};

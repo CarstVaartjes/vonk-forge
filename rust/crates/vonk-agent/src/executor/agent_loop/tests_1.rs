@@ -115,8 +115,6 @@ async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled(
         // The initial heartbeat cancels before execution. No job ran, so
         // neither output nor a synthetic exit receipt may be invented.
         assert!(outcome.receipt.is_none());
-
-
     }
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();

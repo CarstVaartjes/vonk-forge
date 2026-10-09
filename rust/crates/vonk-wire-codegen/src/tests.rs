@@ -40,8 +40,7 @@ fn byte_representation_requires_canonical_byte_bounds() {
 
 #[test]
 fn committed_generated_types_match_the_committed_wire_schema() {
-    let protocol =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../vonk-agent-protocol");
+    let protocol = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../vonk-agent-protocol");
     let rendered = render(protocol.join("schema/wire.json").to_str().unwrap()).unwrap();
     let committed = fs::read_to_string(protocol.join("src/generated.rs")).unwrap();
     assert!(
