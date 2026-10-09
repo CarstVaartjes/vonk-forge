@@ -82,6 +82,14 @@ class FleetProfileService:
             if self._follow_newest_recipe_revisions(waiting_id, waiting_actor):
                 return True
         with self._sessions() as session:
+            retry_at = func.replace(
+                FleetProfileApplication.progress["admission_retry_at"].as_string(),
+                "Z",
+                "+00:00",
+            )
+            expiry_cutoff = _aware(now) - timedelta(
+                seconds=PROFILE_ADMISSION_OBSERVATION_WAIT_SECONDS
+            )
             rows = session.scalars(
                 select(FleetProfileApplication)
                 .where(
@@ -92,6 +100,14 @@ class FleetProfileService:
                     ),
                     FleetProfileApplication.current_operation_id.is_(None),
                     FleetProfileApplication.current_step == 0,
+                    # Backoff rows cannot crowd due work out of the batch.
+                    # Expired ownership remains observable even if its retry
+                    # projection is damaged or points into the future.
+                    or_(
+                        FleetProfileApplication.created_at <= expiry_cutoff,
+                        retry_at.is_(None),
+                        retry_at <= _aware(now).isoformat(),
+                    ),
                 )
                 .order_by(
                     FleetProfileApplication.created_at.desc(),
