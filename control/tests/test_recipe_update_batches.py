@@ -7,6 +7,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -34,6 +35,7 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .non_blocking import assert_ended_without_blocking
 from .runtime_image_fixtures import place_test_image
 from .test_recipe_image_availability import (
     ARCHIVE,
@@ -208,8 +210,12 @@ def test_unknown_child_admission_retries_even_without_retryable_hint(
     assert len(calls) == 2
 
 
-def test_changed_frozen_revision_is_refused_before_child_commit(update_env):
-    sessions, recipes, _, fresh = update_env
+def test_changed_frozen_revision_is_observed_without_unverified_child_commit(
+    update_env,
+):
+    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
+
+    sessions, recipes, now, fresh = update_env
     service = fresh()
     revision_id = next(iter(recipes))
     parent = _start(service, [revision_id])
@@ -239,8 +245,12 @@ def test_changed_frozen_revision_is_refused_before_child_commit(update_env):
             "changed identity was admitted as a child"
         )
     observed = service.get_operator_operation(parent.id)
-    assert observed.state == "failed"
-    assert observed.children[0].failure.code == "recipe_update.operation_invalid"
+    assert observed.children[0].retry_at is not None
+    now[0] += CANCEL_BUDGET
+    service.run_update_claim(service.claim_update(owner="worker"))
+    assert service.get_operator_operation(parent.id).state == LifecycleState.FAILED
+    admitted = _start(service, [revision_id])
+    assert admitted.id != parent.id and admitted.state == LifecycleState.QUEUED
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -413,9 +423,25 @@ def test_one_admission_failure_does_not_suppress_other_children(update_env):
     now[0] += timedelta(seconds=3)
     service.run_update_claim(service.claim_update(owner="worker"))
     result = service.get_operator_operation(parent.id)
+    assert result.state == LifecycleState.RUNNING
+    assert service.get_operator_operation(child_id).state == LifecycleState.SUCCEEDED
+    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
+
+    now[0] += CANCEL_BUDGET
+    for _ in range(4):
+        claim = service.claim_update(owner="worker")
+        if claim is None:
+            break
+        service.run_update_claim(claim)
+        now[0] += timedelta(seconds=3)
+    result = service.get_operator_operation(parent.id)
     assert result.state == LifecycleState.FAILED and result.partial is True
     assert [child.state for child in result.children] == ["failed", "succeeded"]
     assert result.progress.completed_items == 2
+    service._authority = normal_authority
+    fresh_request = _start(service, [first, second])
+    assert fresh_request.id != parent.id
+    assert fresh_request.state == LifecycleState.QUEUED
 
 
 def test_all_uses_complete_verified_cache_not_job_history_and_replay_keeps_scope(
@@ -1275,3 +1301,173 @@ def test_update_cancellation_recovers_child_committed_before_parent_checkpoint(
             session.scalars(select(Job).where(Job.request_id == child_request_key))
         )
         assert len(matching) == 1 and matching[0].id == child.id
+
+
+def test_update_reconnects_by_exact_child_request_despite_damaged_row_pointer(
+    update_env,
+):
+    """A stale child row pointer cannot veto an exact current content receipt."""
+    from vonk_control.strict_json import serialize_json_value
+
+    sessions, recipes, _, fresh = update_env
+    service = fresh()
+    parent = _start(service, [next(iter(recipes))])
+    with sessions.begin() as session:
+        job = session.get(Job, parent.id)
+        document = service._updates._document(job)
+        document.children[0].operation_id = str(uuid.uuid4())
+        job.payload = serialize_json_value(document)
+    service.run_update_claim(service.claim_update(owner="worker"))
+    child = service.get_operator_operation(parent.id).children[0]
+    assert child.operation_id is not None
+    observed = service.get_operator_request(child.request_key, actor="operator")
+    assert child.operation_id == observed.id
+    assert child.failure is None
+
+
+def test_invalid_child_observation_repairs_then_has_a_bounded_end_and_fresh_admission(
+    update_env, monkeypatch
+):
+    """Invalid local receipts are retried; exhausted observers cannot hold new intent."""
+    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
+
+    _, recipes, now, fresh = update_env
+    service = fresh()
+    parent = _start(service, [next(iter(recipes))])
+    observe = service.get_operator_request
+    monkeypatch.setattr(service, "get_operator_request", lambda *_args, **_kwargs: None)
+    service.run_update_claim(service.claim_update(owner="worker"))
+    waiting = service.get_operator_operation(parent.id)
+    assert waiting.children[0].retry_at is not None
+    assert waiting.children[0].failure.retryable
+    monkeypatch.setattr(service, "get_operator_request", observe)
+    now[0] = waiting.children[0].retry_at
+    service.run_update_claim(service.claim_update(owner="worker"))
+    assert (
+        service.get_operator_operation(parent.id).children[0].operation_id is not None
+    )
+    # A separate unknown observer ends at its durable owning budget; no child
+    # is executed from the invalid sample, and the next batch is accepted.
+    broken = _start(service, [next(iter(recipes))])
+    monkeypatch.setattr(service, "get_operator_request", lambda *_args, **_kwargs: None)
+    service.run_update_claim(service.claim_update(owner="worker"))
+    now[0] += CANCEL_BUDGET
+    for _ in range(2):
+        claim = service.claim_update(owner="worker")
+        if claim is not None:
+            service.run_update_claim(claim)
+    assert service.get_operator_operation(broken.id).state == LifecycleState.FAILED
+    admitted = _start(service, [next(iter(recipes))])
+    assert admitted.id != broken.id and admitted.state == LifecycleState.QUEUED
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "code",
+        "detail",
+        "request",
+        "recipe_content_sha256",
+        "id",
+        "state",
+        "peer-error",
+        "peer-invalid",
+    ],
+)
+@pytest.mark.parametrize("repair", [False, True])
+def test_unreadable_child_failure_reobserves_exact_request_across_restart(
+    update_env, monkeypatch, missing_field, repair
+):
+    """Missing peer failure fields cannot adopt terminal state or duplicate work."""
+    from vonk_agent_protocol import RecipeUpdateCode
+    from vonk_control.lifecycle.recipe_update_batch import CANCEL_BUDGET
+    from vonk_control.operation_contract import AvailabilityOperationFailure
+
+    sessions, recipes, now, fresh = update_env
+    service = fresh()
+    parent = _start(service, [next(iter(recipes))])
+    service.run_update_claim(service.claim_update(owner="worker"))
+    child = service.get_operator_operation(parent.id).children[0]
+    assert child.operation_id is not None
+    observed = service.get_operator_request(child.request_key, actor="operator")
+    failure = AvailabilityOperationFailure(
+        code=RecipeUpdateCode.OBSERVATION_INVALID,
+        detail="child evidence unavailable",
+    ).model_dump(mode="json")
+    if missing_field in {"code", "detail"}:
+        del failure[missing_field]
+    damaged = observed.model_copy(
+        update={
+            "state": LifecycleState.FAILED.value,
+            "failure_evidence": AvailabilityOperationFailure.model_construct(**failure),
+        }
+    )
+    if missing_field in {"request", "recipe_content_sha256", "id", "state"}:
+        delattr(damaged, missing_field)
+
+    def unreadable(*_args, **_kwargs):
+        from vonk_control.recipe_image_availability import (
+            RecipeImageAvailabilityError,
+            RecipeImageAvailabilityInvalid,
+        )
+
+        if missing_field == "peer-error":
+            raise RecipeImageAvailabilityError(
+                RecipeUpdateCode.OBSERVATION_INVALID,
+                "peer bookkeeping is unreadable",
+                retryable=False,
+            )
+        if missing_field == "peer-invalid":
+            raise RecipeImageAvailabilityInvalid(
+                RecipeUpdateCode.OBSERVATION_INVALID,
+                "peer bookkeeping is unreadable",
+                retryable=False,
+            )
+        return damaged
+
+    with sessions() as session:
+        identities = set(session.scalars(select(Job.id)))
+
+    # A new service reads the same persisted parent and exact child request.
+    service = fresh()
+    monkeypatch.setattr(service, "get_operator_request", unreadable)
+    now[0] += timedelta(seconds=2) if repair else CANCEL_BUDGET - timedelta(seconds=1)
+    service.run_update_claim(service.claim_update(owner="worker"))
+    waiting = service.get_operator_operation(parent.id)
+    assert waiting.children[0].state != LifecycleState.FAILED
+    assert waiting.children[0].operation_id == child.operation_id
+    assert waiting.children[0].retry_at is not None
+    assert waiting.children[0].retry_at <= parent.created_at + CANCEL_BUDGET
+    with sessions() as session:
+        assert set(session.scalars(select(Job.id))) == identities
+
+    service = fresh()
+    if repair:
+        now[0] = waiting.children[0].retry_at
+        service.run_update_claim(service.claim_update(owner="worker"))
+        repaired = service.get_operator_operation(parent.id).children[0]
+        assert repaired.operation_id == child.operation_id
+        assert repaired.retry_at is None and repaired.failure is None
+    else:
+        monkeypatch.setattr(service, "get_operator_request", unreadable)
+        now[0] += CANCEL_BUDGET
+        service.run_update_claim(service.claim_update(owner="worker"))
+        ended = service.get_operator_operation(parent.id)
+        assert ended.state == LifecycleState.FAILED
+        assert ended.children[0].retry_at is None
+
+        def failure_evidence(receipt):
+            assert receipt.children[0].failure is not None
+            assert receipt.children[0].failure.code
+            assert not receipt.children[0].failure.retryable
+
+        _, admitted = assert_ended_without_blocking(
+            SimpleNamespace(sessions=sessions),
+            parent,
+            end=lambda _operation: ended,
+            fresh=lambda _world: _start(service, [next(iter(recipes))]),
+            assert_reason=failure_evidence,
+        )
+        assert admitted.id != parent.id and admitted.state == LifecycleState.QUEUED
+    with sessions() as session:
+        assert set(session.scalars(select(Job.id))).issuperset(identities)

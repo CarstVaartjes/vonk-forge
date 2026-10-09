@@ -44654,6 +44654,9 @@
     "run_nodes.observation_failure_diagnostics": [
       "FailureDiagnostics"
     ],
+    "run_switch_journal_repair_pending.cancellation": [
+      "RunSwitchCancellation"
+    ],
     "run_switch_journal_repair_pending.progress": [
       "RunSwitchJournalRepairPendingState"
     ],

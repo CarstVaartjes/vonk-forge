@@ -247,6 +247,13 @@ def test_postgres_new_review_keeps_the_reconciled_rank_after_a_cancelled_rank(
         clock=lambda: NOW,
         result_consumer=lifecycle.consume_agent_result,
     ).record_result(cancelled)
+    from vonk_control.run_switch_operations.constants import (
+        _FINAL_VERIFICATION_MAX_SECONDS,
+    )
+
+    service._clock = lambda: (
+        NOW + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS + 1)
+    )
     for _ in range(6):
         if service.get(first.operation_id).state not in {"queued", "running"}:
             break

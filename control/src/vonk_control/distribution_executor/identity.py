@@ -20,9 +20,6 @@ from ..agent_jobs import AgentJobService
 from ..content_identity import ImageContent, same_image
 from ..distribution import DistributionService
 from ..distribution_assignment import NodeDistributionAssignment
-from ..models import (
-    RecipeBuild,
-)
 from ..oci_image_store import StoreUnknown
 from ..run_switch_contract import (
     RunSwitchOperationResult,
@@ -171,43 +168,27 @@ class DistributionIdentity:
     ) -> RuntimeImagePull:
         """The stored archive of a succeeded build, identified by its content.
 
-        The bytes were verified at ingress and managed storage holds the image.
-        The plan names the build, and the build's recorded result must equal
-        the archive being copied; which recipe revision asks for it does not
-        matter.
+        Managed storage verified the bytes at ingress. Producer history is
+        optional evidence and cannot veto reuse of this accepted content.
         """
 
         if not image_digest or not layout_digest or image_bytes < 1:
             raise RuntimeError("verified OCI runtime image identity is unavailable")
-        if build_id is None:
-            raise RuntimeError("verified OCI runtime image build is unavailable")
-        with self._sessions() as session:
-            build = session.get(RecipeBuild, build_id)
-            if (
-                build is None
-                or build.state != LifecycleState.SUCCEEDED.value
-                or build.image_bytes is None
-                or not same_image(
-                    build,
-                    ImageContent(
-                        image_digest=image_digest,
-                        archive_sha256=layout_digest,
-                        image_bytes=image_bytes,
-                    ),
-                )
-            ):
-                raise RuntimeError("OCI build authority changed")
         return RuntimeImagePull(
             image_digest=image_digest,
-            config_digest=self._stored_config_digest(layout_digest),
+            config_digest=self._stored_config_digest(layout_digest, image_bytes),
             address=layout_digest,
         )
 
-    def _stored_config_digest(self, address: str) -> str:
+    def _stored_config_digest(self, address: str, image_bytes: int) -> str:
         storage = self._source_runtime_storage(self._distribution.source)
         layout = getattr(storage, "layout", None)
         image = layout.read(f"sha256:{address}") if layout is not None else None
-        if image is None or isinstance(image, StoreUnknown):
+        if (
+            image is None
+            or isinstance(image, StoreUnknown)
+            or image.stored_bytes != image_bytes
+        ):
             raise RuntimeError("verified OCI runtime image identity is unavailable")
         return image.config_digest
 

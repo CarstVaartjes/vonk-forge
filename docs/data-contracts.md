@@ -279,9 +279,12 @@ phase measurements to their native owner. Historical samples are never promoted
 to fresh evidence by this normalization.
 Later attempts or changed samples cannot authorize measurement repair. Foreign
 children/scopes or ambiguous identity defer as unknown while the raw journal
-remains untouched. A typed `run_switch_journal_repair_pending.progress` record
-owns a fixed two-minute observation deadline, capped exponential backoff, and
-monotonic cancellation intent. Cancellation commits before proof or observation.
+remains untouched. The immutable `run_switch_journal_repair_pending.deadline_at` column owns the
+two-minute observation deadline from first discovery. The independent typed
+`cancellation` column owns acknowledged cancellation. Mutable typed `progress`
+projects those facts and owns capped backoff; corrupt progress is reconstructed
+without changing the deadline or losing cancellation. Cancellation commits
+before proof or observation.
 Immutable end evidence retains that intent when the pending record is removed.
 Repair and its pending-state handoff commit atomically. Expiry ends with
 `run-switch.journal-repair-exhausted`, fences the accepted installation's native

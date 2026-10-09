@@ -48,6 +48,7 @@ from .contracts import (
     ArtifactJobInvalid,
     ArtifactJobStorageCapabilities,
     ArtifactJobTransportCapabilities,
+    ArtifactJobUnavailableError,
     ArtifactJobView,
     StorageReconciliation,
     _active_recipe_revision,
@@ -425,14 +426,19 @@ class ArtifactJobService(OutputService):
                 damaged_evidence = (
                     prior.result_evidence is not None and evidence is None
                 )
-                if (
-                    prior.state in ajs.LIVE
-                    or adapter.adopt(prior).effect is Effect.UNKNOWN
-                    or (prior.operation_id is not None and damaged_evidence)
-                ):
-                    raise ArtifactJobInvalid(
-                        "another artifact job already owns this run reservation",
-                        reason=InvalidRequestReason.CONFLICT,
+                recorded = adapter.adopt(prior)
+                uncertain = recorded.effect is Effect.UNKNOWN or (
+                    prior.operation_id is not None and damaged_evidence
+                )
+                if prior.state not in ajs.LIVE and uncertain:
+                    # The native fenced receipt is current effect evidence. A
+                    # damaged historical projection cannot veto confirmed end.
+                    observed = adapter.observe(recorded).effect
+                    if observed in {Effect.STOPPED, Effect.ESTABLISHED}:
+                        continue
+                if prior.state in ajs.LIVE or uncertain:
+                    raise ArtifactJobUnavailableError(
+                        "another artifact job already owns this run reservation"
                     )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (

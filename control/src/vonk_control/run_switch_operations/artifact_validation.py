@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from pydantic import BaseModel, ValidationError
 from vonk_agent_protocol import (
     RunSwitchCode,
-    SecurityRefusalReason,
     WaitReason,
     canonical_message,
 )
@@ -25,7 +24,7 @@ from ..run_switch_observation_contract import (
     RunSwitchArtifactGuardEvidence,
     RunSwitchObservedImageIdentity,
 )
-from .errors import RunSwitchRefused, RunSwitchRetryLater
+from .errors import RunSwitchRetryLater
 from .image_receipts import _require_profile_runtime_image
 from .result_helpers import _phase_result
 
@@ -87,8 +86,9 @@ def _validate_artifact_execution(
             receipt,
         )
         if "image_digest" in differing:
-            raise RunSwitchRefused(
-                SecurityRefusalReason.RUN_SWITCH_RUNTIME_IMAGE_PREPARATION_DIGEST_MISMATCH.value
+            raise RunSwitchRetryLater(
+                RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
+                reason=WaitReason.SCOPE_CHANGED,
             )
         if "archive_sha256" in differing:
             raise RunSwitchRetryLater(
@@ -145,27 +145,21 @@ def _validate_artifact_execution(
                 _phase_result(result, phase=phase), strict=True
             )
         except (TypeError, ValidationError, RunSwitchRetryLater) as error:
-            if (
-                plan.recipe_build_id is not None
-                and isinstance(raw_result, Mapping)
-                and evidence.verified_build_id != plan.recipe_build_id
-            ):
-                raise RunSwitchRetryLater(
-                    RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
-                    reason=WaitReason.SCOPE_CHANGED,
-                ) from error
             raise RunSwitchRetryLater(
                 RunSwitchCode.ARTIFACT_VERIFICATION_RESULT_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
-        if verification.verified is not True:
-            raise RunSwitchRefused(
-                SecurityRefusalReason.RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED.value
-            )
-        if verification.verified_build_id != plan.recipe_build_id:
-            # A build performed by the same high-level operation has no OCI
-            # output digest at preview time.  The distribution adapter must
-            # bind its verification receipt to the exact durable build row.
+        # Build row IDs identify producers, not image bytes. Bind verification
+        # to the reviewed content whenever that content was known at acceptance.
+        verified_image = ImageContent(
+            image_digest=verification.verified_image_digest,
+            archive_sha256=verification.verified_oci_layout_sha256,
+        )
+        wanted_image = expected_image or ImageContent(
+            image_digest=plan.image_digest,
+            archive_sha256=plan.build.oci_layout_sha256,
+        )
+        if differing_image_fields(wanted_image, verified_image):
             raise RunSwitchRetryLater(
                 RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
                 reason=WaitReason.SCOPE_CHANGED,
@@ -176,8 +170,9 @@ def _validate_artifact_execution(
                 RunSwitchCode.CLEANUP_SCOPE_INVALID, reason=WaitReason.SCOPE_CHANGED
             )
         if evidence.nas_evicted is True:
-            raise RunSwitchRefused(
-                SecurityRefusalReason.RUN_SWITCH_CLEANUP_NAS_EVICTION_FORBIDDEN.value
+            raise RunSwitchRetryLater(
+                RunSwitchCode.CLEANUP_SCOPE_INVALID,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         reclaimed = evidence.reclaimed_bytes
         if type(reclaimed) is not int or reclaimed < 0:
@@ -212,8 +207,9 @@ def _validate_artifact_execution(
         allowed_reclaimable = set(plan.storage.reclaimable_digests)
         allowed_reclaimable.update(plan.runtime_storage.reclaimable_digests)
         if not reclaimed_digests <= allowed_reclaimable:
-            raise RunSwitchRefused(
-                SecurityRefusalReason.RUN_SWITCH_CLEANUP_RECLAIMED_DIGEST_NOT_PLANNED.value
+            raise RunSwitchRetryLater(
+                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         maximum_reclaimable = (
             plan.storage.reclaimable_bytes + plan.runtime_storage.reclaimable_bytes

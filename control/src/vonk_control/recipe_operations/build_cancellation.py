@@ -185,7 +185,7 @@ class BuildCancellationMixin:
                 try:
                     consumers = current_build_consumers(session, build)
                 except BuildConsumerError as error:
-                    raise RecipeRequestInvalid(f"{error.code}: {error}") from error
+                    raise RecipeBuildOwnershipBusy(f"{error.code}: {error}") from error
                 if consumers:
                     if only_if_unneeded:
                         return False
@@ -305,7 +305,7 @@ class BuildCancellationMixin:
                 try:
                     consumers = current_build_consumers(session, build)
                 except BuildConsumerError as error:
-                    raise RecipeRequestInvalid(f"{error.code}: {error}") from error
+                    raise RecipeBuildOwnershipBusy(f"{error.code}: {error}") from error
                 if consumers:
                     if only_if_unneeded:
                         return False
