@@ -420,6 +420,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      packages: read
     secrets: inherit
     with:
       channel: ${{ needs.authority.outputs.channel }}
