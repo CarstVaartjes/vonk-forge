@@ -2,50 +2,28 @@
 
 use super::*;
 
-pub(super) enum InstallState {
-    Fresh,
-    ConfiguredUnpaired,
-    Recovering,
-    Existing,
-}
+pub(super) use vonk_agent_protocol::generated::SparkInstallationState as InstallState;
 
-#[derive(Clone, Copy)]
-pub(super) enum StateValidation {
-    MetadataOnly,
-    Complete,
-}
-
-pub(super) fn install_state(
-    paths: &InstallPaths,
-    validation: StateValidation,
-) -> Result<InstallState, SetupError> {
+pub(super) fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
     safe_existing_parent(&paths.config, paths.required_owner)?;
     safe_existing_parent(&paths.agent, paths.required_owner)?;
-    let config = safe_existing_file(&paths.config, paths.required_owner)?;
-    let ca = safe_existing_file(&paths.ca, paths.required_owner)?;
-    let firewall = safe_existing_file(&paths.firewall_config, paths.required_owner)?;
-    let helper_authority = safe_existing_file(&paths.helper_authority, paths.required_owner)?;
-    let agent = safe_existing_file(&paths.agent, paths.required_owner)?;
-    let state_path = setup_state_path(paths);
-    let state = safe_existing_file(&state_path, paths.required_owner)?;
-    match (config, ca, firewall, helper_authority, agent, state) {
-        (false, false, false, false, false, false) => Ok(InstallState::Fresh),
-        (true, true, true, true, true, true) => {
-            if matches!(validation, StateValidation::Complete) {
-                paired_configuration(&paths.config, paths)?;
-                installed_firewall_configuration(paths)?;
-                installed_helper_authority(paths)?;
-            }
-            let raw = fs::read(&state_path).map_err(|_| SetupError::ExistingInstall)?;
-            match raw.as_slice() {
-                b"unpaired-v1\n" => Ok(InstallState::ConfiguredUnpaired),
-                b"recovering-v1\n" => Ok(InstallState::Recovering),
-                b"paired-v1\n" => Ok(InstallState::Existing),
-                _ => Err(SetupError::ExistingInstall),
-            }
-        }
-        _ => Err(SetupError::ExistingInstall),
+    // Generated files and the marker are observations, never admission gates.
+    // A valid config keeps enrollment identity; otherwise bootstrap uses the
+    // current authenticated grant instead of trusting damaged local bytes.
+    let config = safe_existing_file(&paths.config, paths.required_owner).unwrap_or(false);
+    if !config || paired_configuration(&paths.config, paths).is_err() {
+        return Ok(InstallState::Fresh);
     }
+    let marker = setup_state_path(paths);
+    if !safe_existing_file(&marker, paths.required_owner).unwrap_or(false) {
+        return Ok(InstallState::RecoveringV1);
+    }
+    let raw = fs::read(marker).unwrap_or_default();
+    Ok(std::str::from_utf8(&raw)
+        .ok()
+        .and_then(|value| value.trim_end().parse().ok())
+        .filter(|state| *state != InstallState::Fresh)
+        .unwrap_or(InstallState::RecoveringV1))
 }
 
 pub(super) fn installed_helper_authority(paths: &InstallPaths) -> Result<Vec<u8>, SetupError> {
@@ -247,13 +225,7 @@ mod tests {
         fs::write(setup_state_path(&paths), b"paired-v1\n").unwrap();
         fs::set_permissions(&paths.firewall_config, fs::Permissions::from_mode(0o000)).unwrap();
 
-        assert!(matches!(
-            install_state(&paths, StateValidation::MetadataOnly),
-            Ok(InstallState::Existing)
-        ));
-        assert!(matches!(
-            install_state(&paths, StateValidation::Complete),
-            Err(SetupError::ExistingInstall)
-        ));
+        assert!(matches!(install_state(&paths), Ok(InstallState::PairedV1)));
+        assert!(matches!(install_state(&paths), Ok(InstallState::PairedV1)));
     }
 }

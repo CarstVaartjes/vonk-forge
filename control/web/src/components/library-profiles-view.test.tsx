@@ -391,6 +391,7 @@ test("a profile running an older recipe revision shows an update badge and reloa
   await user.click(within(dialog).getByRole("button", { name: "Reload profile" }));
   expect(api.loadProfile).toHaveBeenCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    review: { effects_digest: preview.effects_digest },
   });
 });
 
@@ -590,6 +591,7 @@ test("selects the maximum canonical URL profile and loads that identity", async 
     expect(api.previewProfile).toHaveBeenCalledWith(upper, expect.any(AbortSignal));
     expect(api.loadProfile).toHaveBeenCalledWith(upper, {
       request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      review: { effects_digest: preview.effects_digest },
     });
   } finally {
     history.replaceState(null, "", originalUrl);

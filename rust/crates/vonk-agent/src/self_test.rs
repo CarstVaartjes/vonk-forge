@@ -14,8 +14,6 @@ const HELPER_UPGRADE_PENDING: &str = "/var/lib/vonk-forge/helper-upgrade.pending
 pub enum SelfTestError {
     #[error("agent runtime path is unsafe: {0}")]
     UnsafePath(&'static str),
-    #[error("agent package helper upgrade activation is pending")]
-    HelperUpgradePending,
     #[error(transparent)]
     Client(#[from] ClientError),
     #[error(transparent)]
@@ -29,43 +27,27 @@ pub fn run(
     executable: &Path,
     runtime_directory: &Path,
 ) -> Result<AgentRuntimeIdentity, SelfTestError> {
-    verify_private_directory(&config.data_dir, "data")?;
-    verify_private_directory(runtime_directory, "runtime")?;
-    verify_no_helper_upgrade_pending(Path::new(HELPER_UPGRADE_PENDING))?;
+    verify_runtime_directories(&config.data_dir, runtime_directory)?;
+    // Upgrade markers are disposable bookkeeping, not executable identity.
+    // Runtime identity and the Controller activation receipt remain the proof;
+    // observation/recovery must stay available even with a stale marker.
+    observe_helper_upgrade_pending(Path::new(HELPER_UPGRADE_PENDING));
     AgentHttpClient::from_config(config)?;
     Ok(PreparedRuntimeIdentity::from_executable(executable)?.mark_self_test_passed()?)
 }
 
-fn verify_no_helper_upgrade_pending(path: &Path) -> Result<(), SelfTestError> {
-    observe_helper_upgrade_marker(
-        || fs::symlink_metadata(path),
-        || {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        },
-    )
-}
-
-fn verify_helper_upgrade_marker_state(
-    metadata: std::io::Result<fs::Metadata>,
-) -> Result<(), SelfTestError> {
-    match metadata {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Ok(_) => Err(SelfTestError::HelperUpgradePending),
-        Err(error) => Err(SelfTestError::Io(error)),
+fn observe_helper_upgrade_pending(path: &Path) {
+    if !matches!(fs::symlink_metadata(path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+    {
+        eprintln!(
+            "vonk-agent: helper activation unconfirmed; package owner reconciliation pending"
+        );
     }
 }
 
-fn observe_helper_upgrade_marker(
-    mut read: impl FnMut() -> std::io::Result<fs::Metadata>,
-    mut backoff: impl FnMut(),
-) -> Result<(), SelfTestError> {
-    for _ in 0..2 {
-        match verify_helper_upgrade_marker_state(read()) {
-            Err(SelfTestError::Io(_) | SelfTestError::HelperUpgradePending) => backoff(),
-            result => return result,
-        }
-    }
-    verify_helper_upgrade_marker_state(read())
+fn verify_runtime_directories(data: &Path, runtime: &Path) -> Result<(), SelfTestError> {
+    verify_private_directory(data, "data")?;
+    verify_private_directory(runtime, "runtime")
 }
 
 fn verify_private_directory(path: &Path, name: &'static str) -> Result<(), SelfTestError> {
@@ -103,8 +85,9 @@ fn inspect_private_directory(path: &Path, name: &'static str) -> Result<(), Self
 
 #[cfg(test)]
 mod tests {
-    use super::{SelfTestError, verify_no_helper_upgrade_pending};
-    use std::{fs, io, os::unix::fs::symlink};
+    use super::*;
+    use std::io;
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
     fn private_directory_observation_repairs_without_changing_host_permissions() {
@@ -151,84 +134,28 @@ mod tests {
     }
 
     #[test]
-    fn absent_helper_upgrade_marker_is_normal() {
+    fn stale_markers_do_not_disable_verified_runtime_observation() {
         let temporary = tempfile::tempdir().unwrap();
-        let marker = temporary.path().join("helper-upgrade.pending");
-        assert!(verify_no_helper_upgrade_pending(&marker).is_ok());
-    }
-
-    #[test]
-    fn every_existing_marker_type_blocks_self_test() {
-        let temporary = tempfile::tempdir().unwrap();
-        let regular = temporary.path().join("regular");
-        fs::write(&regular, b"pending\n").unwrap();
-        let directory = temporary.path().join("directory");
-        fs::create_dir(&directory).unwrap();
-        let link = temporary.path().join("link");
-        symlink(&regular, &link).unwrap();
-
-        for marker in [&regular, &directory, &link] {
-            assert!(verify_no_helper_upgrade_pending(marker).is_err());
-            assert!(fs::symlink_metadata(marker).is_ok());
-        }
-        // The activation owner clearing its marker admits the next self-test.
-        fs::remove_file(&link).unwrap();
-        fs::remove_file(&regular).unwrap();
-        fs::remove_dir(&directory).unwrap();
-        for marker in [&regular, &directory, &link] {
-            assert!(verify_no_helper_upgrade_pending(marker).is_ok());
-        }
-    }
-
-    #[test]
-    fn helper_activation_finishes_within_the_same_self_test_budget() {
-        let temporary = tempfile::tempdir().unwrap();
-        let marker = temporary.path().join("helper-upgrade.pending");
-        fs::write(&marker, b"activation intent").unwrap();
-        let mut waits = 0;
-        let outcome = super::observe_helper_upgrade_marker(
-            || fs::symlink_metadata(&marker),
-            || {
-                waits += 1;
-                // Model the existing package activation owner, not an operator.
-                fs::remove_file(&marker).unwrap();
-            },
-        );
-        assert!(outcome.is_ok() && waits == 1);
-        assert!(verify_no_helper_upgrade_pending(&marker).is_ok());
-    }
-
-    #[test]
-    fn unreadable_marker_recovers_or_ends_then_a_fresh_self_test_is_admitted() {
-        for repair in [true, false] {
-            let mut calls = 0;
-            let mut waits = 0;
-            let outcome = super::observe_helper_upgrade_marker(
-                || {
-                    calls += 1;
-                    Err(io::Error::new(
-                        if repair && calls > 1 {
-                            io::ErrorKind::NotFound
-                        } else {
-                            io::ErrorKind::Interrupted
-                        },
-                        "private host detail",
-                    ))
-                },
-                || waits += 1,
-            );
-            assert_eq!(outcome.is_ok(), repair);
-            assert!(calls <= 3 && waits <= 2);
-            if let Err(error) = outcome {
-                assert!(!error.to_string().contains("private host detail"));
+        let data = temporary.path();
+        let runtime = tempfile::tempdir().unwrap();
+        fs::set_permissions(data, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(runtime.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let marker = data.join("helper-upgrade.pending");
+        for kind in 0..3 {
+            match kind {
+                0 => fs::write(&marker, b"damaged journal").unwrap(),
+                1 => fs::create_dir(&marker).unwrap(),
+                _ => symlink(data.join("missing"), &marker).unwrap(),
             }
-            assert!(
-                super::observe_helper_upgrade_marker(
-                    || Err(io::Error::from(io::ErrorKind::NotFound)),
-                    || panic!("readable absence needs no backoff"),
-                )
-                .is_ok()
-            );
+            observe_helper_upgrade_pending(&marker);
+            verify_runtime_directories(data, runtime.path()).unwrap();
+            assert!(fs::symlink_metadata(&marker).is_ok());
+            if kind == 1 {
+                fs::remove_dir(&marker).unwrap();
+            } else {
+                fs::remove_file(&marker).unwrap();
+            }
+            verify_runtime_directories(data, runtime.path()).unwrap();
         }
     }
 }

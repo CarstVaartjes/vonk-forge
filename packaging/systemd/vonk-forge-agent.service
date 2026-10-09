@@ -2,9 +2,9 @@
 Description=Vonk Forge outbound agent
 Wants=network-online.target nvidia-persistenced.service
 After=network-online.target vonk-forge-package-helper.socket nvidia-persistenced.service
-# Order after driver startup. The agent restarts itself if GPU devices are
-# missing from its private namespace, recreating that namespace on restart.
-# RestartSec bounds the rate without a start-limit latch preventing recovery.
+# Observe the live device namespace so driver recovery is visible without
+# restarting control or rotation. DevicePolicy retains the kernel access gate.
+# RestartSec bounds service recovery without a start-limit latch.
 StartLimitIntervalSec=0
 
 [Service]
@@ -34,19 +34,21 @@ AmbientCapabilities=
 # The bounding set is the tested minimum required by the distribution's setuid
 # newuidmap/newgidmap helpers. The agent itself receives no ambient capabilities.
 PrivateTmp=yes
-PrivateDevices=yes
+PrivateDevices=no
 DevicePolicy=closed
 DeviceAllow=/dev/fuse rw
 DeviceAllow=/dev/nvidiactl rw
 DeviceAllow=/dev/nvidia-uvm rw
 DeviceAllow=/dev/nvidia-uvm-tools rw
 DeviceAllow=/dev/nvidia-modeset rw
-DeviceAllow=/dev/nvidia0 rw
-DeviceAllow=char-231:* rw
+DeviceAllow=/dev/char/195:0 rw
+DeviceAllow=/dev/char/195:255 rw
+DeviceAllow=/dev/char/195:254 rw
+DeviceAllow=char-nvidia-uvm rw
+DeviceAllow=char-nvidia-caps rw
 # NVIDIA visibility is retained for trusted inventory collection only. Recipe
 # builds cannot declare devices; accepted workloads use the signed Docker
 # helper boundary. Raw InfiniBand devices are intentionally not exposed.
-BindPaths=-/dev/fuse -/dev/nvidiactl -/dev/nvidia-uvm -/dev/nvidia-uvm-tools -/dev/nvidia-modeset -/dev/nvidia0
 InaccessiblePaths=/home /root -/run/docker.sock
 ProtectSystem=strict
 # Rootless Podman must update its own mode-0700 /run/user/<uid> runtime while

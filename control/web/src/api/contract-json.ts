@@ -5,19 +5,8 @@ import {
   UnsupportedContractRuntime,
 } from "./contract-numeric";
 
-export class ContractViolation extends Error {
-  readonly path: string;
-  constructor(
-    readonly method: string,
-    path: string,
-    readonly status: number,
-  ) {
-    const pathname = new URL(path, "http://control.invalid").pathname;
-    super(`Invalid Control API contract: ${method} ${pathname} (${status})`);
-    this.path = pathname;
-    this.name = "ContractViolation";
-  }
-}
+import { ContractViolation } from "./errors";
+export { ContractViolation } from "./errors";
 function routeFor(method: string, path: string) {
   const pathname = new URL(path, "http://control.invalid").pathname;
   return generated.contractRoutes.find(

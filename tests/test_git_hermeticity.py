@@ -16,7 +16,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 # These are executable workflow checks, never exceptions for tests/helpers.
 WORKFLOW_ONLY = {
-    "scripts/check-principle-history": "compare reviewed allowances to the fetched PR base",
     "tests/nodes/test_agent_upgrade_repair_systemd.sh": "native package provenance in the systemd acceptance workflow",
     "tests/nodes/test_agent_upgrade_recovery_systemd.sh": "native upgrade package provenance in the systemd acceptance workflow",
 }

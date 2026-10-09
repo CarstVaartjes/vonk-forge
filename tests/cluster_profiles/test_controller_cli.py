@@ -4332,6 +4332,7 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
                 return {
                     "allowed": reason_code is None,
                     "plan_digest": "b" * 64,
+                    "effects_digest": "c" * 64,
                     "reasons": []
                     if reason_code is None
                     else [{"code": reason_code, "detail": "Spark is not ready"}],
@@ -4348,6 +4349,8 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
                 }
             if path == f"/api/profile/applications/{application_id}":
                 return {"id": application_id, "state": "succeeded"}
+            if path == "/api/profile/1/endpoints":
+                return self.profile_endpoints(1).to_dict()
             raise AssertionError((method, path, payload))
 
         def profile_endpoints(self, number, alias=None):

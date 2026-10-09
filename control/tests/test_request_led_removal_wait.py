@@ -53,6 +53,7 @@ def test_accepted_model_request_supersedes_removal_without_crossing_other_lock(
         request_key=str(uuid.uuid4()),
         model_content_sha256=digest,
     )
+    assert service._observe_model_removal_scope(removal.id)
     accepted = _force_model_request(
         service,
         selector=selector,
@@ -114,6 +115,7 @@ def test_accepted_image_request_waits_for_exact_lock_and_recovers_after_restart(
     removal = remove_after_review(
         service, recipe.identity.slug, actor="operator", request_id=str(uuid.uuid4())
     )
+    assert service._observe_recipe_removal(str(removal["operation_id"]))
     accepted = service.start(
         revision_id, actor="operator", request_id=str(uuid.uuid4()), force=True
     )
@@ -167,6 +169,7 @@ def test_persisted_model_manifest_recovers_through_removal_gates_after_restart(
         request_key=str(uuid.uuid4()),
         model_content_sha256=digest,
     )
+    assert service._observe_model_removal_scope(removal.id)
     accepted = _force_model_request(
         service,
         selector=selector,

@@ -494,7 +494,7 @@ def test_zero_budget_has_reconnect_receipt_and_a_fresh_observer_is_admitted(
         (("profile", "--json"), "GET", "/api/profile/1", {"id": "profile-1"}),
         (("profile", "list", "--json"), "GET", "/api/profile", {"profiles": []}),
         (
-            ("profile", "load", "--review", "--json"),
+            ("--profile", "1", "profile", "load", "--review", "--json"),
             "POST",
             "/api/profile/1/preview",
             {"allowed": True},

@@ -1159,7 +1159,7 @@ def test_conflict_observes_original_owner_receipt_without_effect_replay(
     ]
     assert calls[: len(submission_calls)] == submission_calls
     assert all(method == "GET" for method, _path in calls[len(submission_calls) :])
-    assert len(calls) <= 5
+    assert len(calls) - len(submission_calls) <= 4
     with sessions() as session:
         [accepted] = list(session.scalars(select(FleetProfileApplication)))
         assert accepted.request_key == key

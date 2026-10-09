@@ -190,7 +190,7 @@ def _poll_path(
     *,
     query: Mapping[str, object] | None = None,
     terminal: Callable[[Mapping[str, object]], bool] | None = None,
-    validate: Callable[[Mapping[str, object]], object] | None = None,
+    validate: Callable[[Mapping[str, object]], None] | None = None,
     deadline: float | None = None,
     fetch_initial: bool = False,
     fetch: Callable[[float], object] | None = None,
@@ -279,6 +279,8 @@ def _poll_path(
             ControlTransportError,
             OSError,
         ) as error:
+            if isinstance(error, BrokenPipeError):
+                raise
             observation.error = _observation_reason(error)
             interval = _observation_delay(error, interval, deadline - time.monotonic())
             continue

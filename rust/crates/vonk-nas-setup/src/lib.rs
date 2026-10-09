@@ -5,7 +5,6 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64ct::{Base64, Base64UrlUnpadded, Encoding};
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
@@ -20,7 +19,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const CONTROLLER_CERTIFICATE_VALIDITY_DAYS: i64 = 397;
 const CONTROLLER_CERTIFICATE_RENEWAL_THRESHOLD_DAYS: i64 = 30;
 
@@ -65,8 +63,7 @@ use prompts::{
 pub use secrets::{OsSecretGenerator, SecretGenerationError, SecretGenerator};
 pub use template::parse_template_payload;
 use template::{
-    generated_secrets, is_safe_secret_component, step_ca_files, valid_hostname,
-    valid_required_value, validate_env_name,
+    generated_secrets, step_ca_files, valid_hostname, valid_required_value, validate_env_name,
 };
 use upgrade::{ControllerLeafReplacement, upgrade};
 

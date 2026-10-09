@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
@@ -529,3 +530,104 @@ def test_result_evidence_preserves_current_values_without_field_presence() -> No
     assert document["recoverable"] is False
     assert document["active_scope_may_remain"] is False
     assert read_result_evidence(json.loads(json.dumps(document))) == evidence
+
+
+def test_capacity_unknown_releases_upload_and_fresh_draft_is_admitted(tmp_path):
+    """Catches translating storage shortage into a conflict at the HTTP boundary."""
+    from vonk_control.artifact_blob_store import ArtifactBlobStore
+
+    from .test_artifact_jobs import (
+        artifact_create_request,
+        create_artifact_job,
+        running_artifact_service,
+    )
+
+    _, _, _, service, run_id, _ = running_artifact_service(tmp_path)
+    store = ArtifactBlobStore(tmp_path / "quota", max_stored_bytes=4)
+    service._blob_store = store
+    occupied = store.put_bytes(
+        hashlib.sha256(b"xx").hexdigest(), b"xx", maximum_bytes=4
+    )
+    draft = create_artifact_job(service, **artifact_create_request(run_id, REQUEST_ID))
+    app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
+    install_artifact_job_routes(
+        app,
+        actor_dependency=Depends(lambda: Actor("operator", "operator")),
+        service=service,
+    )
+    client = TestClient(app)
+    payload = b"png"
+    headers = {
+        "Content-Type": "image/png",
+        "Content-Length": str(len(payload)),
+        "X-Content-SHA256": hashlib.sha256(payload).hexdigest(),
+    }
+    unavailable = client.put(
+        f"/api/artifact-jobs/{draft.id}/inputs/input.png",
+        content=payload,
+        headers=headers,
+    )
+    assert unavailable.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    assert store.usage().in_flight_uploads == 0
+    assert not service.get(draft.id).input_files
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(
+            run_id,
+            "00000000-0000-4000-8000-000000000004",
+        ),
+    )
+    assert fresh.id != draft.id
+    store.delete(occupied.storage_key, occupied.sha256)
+    recovered = client.put(
+        f"/api/artifact-jobs/{fresh.id}/inputs/input.png",
+        content=payload,
+        headers=headers,
+    )
+    assert recovered.status_code == 200
+    assert (
+        service.get(fresh.id).input_files[0].sha256
+        == hashlib.sha256(payload).hexdigest()
+    )
+    assert store.usage().in_flight_uploads == 0
+
+
+def test_library_upload_reobserves_capacity_after_releasing_holds(
+    tmp_path, monkeypatch
+):
+    """Catches an ended library upload with no automatic bounded observation."""
+    from vonk_control.artifact_blob_store import ArtifactBlobStore
+    from vonk_control.artifact_jobs import inputs
+    from vonk_control.bounded_retry import bounded_attempts
+
+    from .test_artifact_jobs import (
+        artifact_create_request,
+        create_artifact_job,
+        running_artifact_service,
+    )
+
+    _, _, _, service, run_id, _ = running_artifact_service(tmp_path)
+    store = ArtifactBlobStore(tmp_path / "quota", max_stored_bytes=4)
+    service._blob_store = store
+    occupied = store.put_bytes(
+        hashlib.sha256(b"xx").hexdigest(), b"xx", maximum_bytes=4
+    )
+    draft = create_artifact_job(service, **artifact_create_request(run_id, REQUEST_ID))
+
+    def capacity_recovers(_pause):
+        assert store.usage().in_flight_uploads == 0
+        store.delete(occupied.storage_key, occupied.sha256)
+
+    monkeypatch.setattr(
+        inputs, "bounded_attempts", lambda: bounded_attempts(sleep=capacity_recovers)
+    )
+    uploaded = service.put_input(
+        draft.id,
+        name="input.png",
+        media_type="image/png",
+        expected_sha256=hashlib.sha256(b"png").hexdigest(),
+        content=b"png",
+    )
+    assert uploaded.input_files[0].sha256 == hashlib.sha256(b"png").hexdigest()
+    assert store.usage().in_flight_uploads == 0

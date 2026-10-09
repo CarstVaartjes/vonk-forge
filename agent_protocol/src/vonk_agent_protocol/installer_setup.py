@@ -13,7 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from .wire_model import Digest, WireModel, typed_tag
+from .wire_model import Digest, WireEnum, WireModel, typed_tag
 
 U16 = Annotated[int, Field(ge=0, le=65535)]
 U32 = Annotated[int, Field(ge=0, le=2**32 - 1)]
@@ -164,6 +164,17 @@ class SparkHostMapping(WireModel):
     hostnames: list[str]
 
 
+class SparkInstallationState(WireEnum):
+    FRESH = "fresh"
+    CONFIGURED_UNPAIRED = "unpaired-v1"
+    RECOVERING = "recovering-v1"
+    EXISTING = "paired-v1"
+
+
+class SparkInstallationObservation(WireModel):
+    state: SparkInstallationState
+
+
 class SparkFirewallConfig(WireModel):
     nas_management_ip: Annotated[str, Field(json_schema_extra={"format": "ip"})]
     node_management_ip: Annotated[str, Field(json_schema_extra={"format": "ip"})]
@@ -228,3 +239,6 @@ class SparkApplyEnvelope(WireModel):
     release_manifest: HexBytes
     release_signature: HexBytes
     plan: SparkApplyOperation
+    repair_firewall: SparkFirewallConfig | None = None
+    repair_ca_pem: HexBytes | None = None
+    repair_helper_authority: HexBytes | None = None

@@ -33,12 +33,14 @@ def cli_words() -> str:
     from vonk_agent_protocol import (
         EndpointState,
         LifecycleState,
+        OutcomeKind,
         ProfileReasonCode,
         StateAlias,
     )
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
 
     words = {
+        "UNKNOWN": OutcomeKind.UNKNOWN,
         "PROFILE_REVIEW_STALE": ProfileReasonCode.REVIEW_STALE,
         "NEEDS_OPERATOR": LifecycleState.NEEDS_OPERATOR,
         "QUEUED": LifecycleState.QUEUED,

@@ -2485,8 +2485,9 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "ProtectProc=default" in unit
     assert "ProcSubset=all" in unit
     assert "DeviceAllow=/dev/fuse rw" in unit
-    assert "DeviceAllow=char-231:* rw" in unit
-    assert "BindPaths=-/dev/fuse" in unit
+    assert "DeviceAllow=char-nvidia-caps rw" in unit
+    assert "PrivateDevices=no" in unit
+    assert "DeviceAllow=/dev/char/195:0 rw" in unit
     assert "Delegate=yes" in unit
     assert "RestrictSUIDSGID=yes" not in unit
     assert "NoNewPrivileges=no" in unit

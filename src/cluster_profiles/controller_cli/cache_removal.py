@@ -228,6 +228,14 @@ def _existing_cache_removal(
         OSError,
     ):
         existing = {}
+
+    def validate_receipt(observed: object) -> None:
+        if not isinstance(observed, Mapping):
+            raise ControlMalformedResponse("removal receipt is unreadable")
+        _validate_cache_removal_receipt(
+            noun, selector, key, observed, expected_with_model=with_model
+        )
+
     result = _poll_path(
         client,
         lookup,
@@ -236,13 +244,7 @@ def _existing_cache_removal(
         terminal=lambda _: True,
         attempts=3,
         deadline=deadline,
-        validate=lambda observed: _validate_cache_removal_receipt(
-            noun,
-            selector,
-            key,
-            observed,
-            expected_with_model=with_model,
-        ),
+        validate=validate_receipt,
     )
     if args.observation.status != "complete":
         return result

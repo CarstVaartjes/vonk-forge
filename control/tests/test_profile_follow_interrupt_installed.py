@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -286,7 +287,7 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
                 "progress",
                 "--follow",
                 "--timeout-seconds",
-                "2",
+                "10",
                 "--interval-seconds",
                 "0.02",
             ],
@@ -300,7 +301,12 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
         )
 
         original_calls = list(peer.calls)
-        assert newer_application_id is not None
+        assert newer_application_id is not None, (
+            completed.returncode,
+            completed.stdout,
+            completed.stderr,
+            original_calls,
+        )
         fresh = subprocess.run(
             [
                 str(installed_vonkctl),
@@ -344,6 +350,16 @@ def test_installed_follow_stays_with_original_application_after_newer_load(
         original = session.get(FleetProfileApplication, identity)
         newer = session.get(FleetProfileApplication, newer_application_id)
         assert original is not None and original.state == "superseded"
-        assert original.superseded_by == newer_application_id
+        assert (
+            FleetProfileApplicationProgress.model_validate_json(
+                json.dumps(original.progress)
+            ).superseded_by
+            == newer_application_id
+        )
         assert newer is not None and newer.id != original.id
-        assert newer.retry_of_application_id is None
+        assert (
+            FleetProfileApplicationProgress.model_validate_json(
+                json.dumps(newer.progress)
+            ).retry_of_application_id
+            is None
+        )

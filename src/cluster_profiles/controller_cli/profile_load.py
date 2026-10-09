@@ -11,7 +11,7 @@ from contextlib import redirect_stdout
 from typing import cast
 
 from ..cli_render import render_payload
-from ..cli_states_generated import PROFILE_REVIEW_STALE
+from ..cli_states_generated import PROFILE_REVIEW_STALE, UNKNOWN
 from ..control_client import (
     ControlClientError,
     ControlConflict,
@@ -33,8 +33,10 @@ _REVIEW_STALE_CODE = PROFILE_REVIEW_STALE
 _MAX_REVIEW_ROUNDS = 3
 
 
-def _reviewed_effects_digest(preview: Mapping[str, object]) -> str:
+def _reviewed_effects_digest(preview: object) -> str:
     """Forward the Controller binding unchanged; admission belongs to its owner."""
+    if not isinstance(preview, Mapping):
+        raise ControlMalformedResponse("profile review binding is unreadable")
     digest = preview.get("effects_digest")
     if isinstance(digest, str):
         # This is peer metadata, validated inside the owning observation retry.
@@ -80,6 +82,9 @@ def _review_and_submit_profile_load(
                 "POST", f"/api/profile/{number}/preview", timeout_seconds=remaining
             )
 
+        def validate_preview(observed: object) -> None:
+            _reviewed_effects_digest(observed)
+
         preview = _poll_path(
             client,
             f"/api/profile/{number}/preview",
@@ -89,7 +94,7 @@ def _review_and_submit_profile_load(
             fetch=observe_preview,
             attempts=_MAX_REVIEW_ROUNDS,
             terminal=lambda _: True,
-            validate=_reviewed_effects_digest,
+            validate=validate_preview,
         )
         if args.observation.status != "complete":
             return preview
@@ -227,7 +232,7 @@ def _observe_profile_load_request(
 ):
     # Observe only this request; a conflict does not license an effect replay.
     key = args.submission.request_key
-    args.submission.acceptance = "unknown"
+    args.submission.acceptance = UNKNOWN
 
     def same_request(observed: object) -> None:
         if not isinstance(observed, Mapping):

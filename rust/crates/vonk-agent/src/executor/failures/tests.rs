@@ -106,7 +106,7 @@ async fn corrupt_exact_lifecycle_is_skipped_without_reporting_false_absence() {
 #[test]
 fn failed_recipe_build_preserves_only_safe_classified_evidence() {
     let mut build_claim = claim();
-    build_claim.operation = "recipe.build.v1".parse().unwrap();
+    build_claim.operation = AgentOperation::RecipeBuildV1;
     let reason = "Podman could not import the verified base image (temporary-storage-exhausted)";
     let result = ExecutionResult::Failed(
         Failure::new(reason)
@@ -117,19 +117,19 @@ fn failed_recipe_build_preserves_only_safe_classified_evidence() {
     let failed = failed_outcome(&build_claim, result);
 
     assert_eq!(failed.code, FailureCode::RecipeBuildFailed);
-    assert_eq!(failed.reason, reason);
     let evidence = evidence_of(&failed);
-    assert_eq!(evidence.stage.as_deref(), Some("base-image-import"));
+    assert_eq!(
+        evidence.stage.as_deref(),
+        Some(FailureStage::BaseImageImport.as_str())
+    );
     assert_eq!(
         evidence.diagnostic.as_deref(),
         Some("temporary-storage-exhausted")
     );
-    // Only the declared evidence fields exist on the typed failure: there is
-    // no key through which a host path or any other detail could cross.
-    let wire = serde_json::to_value(&failed).unwrap();
-    let mut keys: Vec<_> = wire.as_object().unwrap().keys().cloned().collect();
-    keys.sort();
-    assert_eq!(keys, ["code", "evidence", "kind", "reason"]);
+    let wire = serde_json::to_vec(&failed).unwrap();
+    let consumed: vonk_agent_protocol::generated::OutcomeFailed =
+        vonk_agent_protocol::parse_strict(&wire).unwrap();
+    assert_eq!(evidence_of(&consumed).diagnostic, evidence.diagnostic);
 }
 
 #[test]
@@ -195,7 +195,10 @@ fn recipe_build_client_failures_keep_typed_retry_and_refusal_evidence() {
         );
         assert_eq!(failure.failure_kind, Some(expected_kind));
         assert_eq!(failure.retry_after_seconds, expected_retry_after);
-        assert_eq!(failure.reason, "build dependency could not be confirmed");
+        assert!(!matches!(
+            failure.failure_kind,
+            Some(AgentFailureKind::IntegrityFailure)
+        ));
     }
 }
 

@@ -73,7 +73,7 @@ pub(super) fn claim_start_deadline(claim: &AgentClaim) -> Option<DateTime<FixedO
 
 pub(super) async fn run_heartbeats<C: LoopClient>(
     client: C,
-    mut state: StateStore,
+    mut state: Option<StateStore>,
     claim: AgentClaim,
     lease_deadline: tokio::sync::watch::Sender<DateTime<FixedOffset>>,
     cancellation: tokio::sync::watch::Sender<bool>,
@@ -81,24 +81,38 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
     schedule: HeartbeatSchedule,
 ) -> Result<bool, LoopError> {
     let mut deadline = claim.deadline;
-    // Both sides of the wire agree on this one budget: the Controller lets a
-    // lapsed renewal re-acquire while the start budget is still open, and the
-    // loop retries until the same instant.  An operation that binds no start
-    // deadline is bounded by its own work, which is what ``stop`` already is.
-    let renewal_budget_end = claim_start_deadline(&claim);
+    // This owning budget is immutable even when the lease advances. A start
+    // additionally clips it to its accepted phase deadline.
+    let remaining = Duration::from_secs(u64::from(claim.observation_budget_seconds))
+        .min(claim_start_deadline(&claim).map_or(Duration::MAX, remaining_lease));
+    let observation_end = tokio::time::Instant::now() + remaining;
     let mut cancellation_observed = false;
     let mut delay = schedule.interval;
     loop {
         tokio::select! {
             _ = &mut stop => return Ok(cancellation_observed),
-            _ = tokio::time::sleep(delay) => {}
+            _ = tokio::time::sleep(delay.min(observation_end.saturating_duration_since(tokio::time::Instant::now()))) => {}
         }
         let progress = AgentProgress {
             fence: claim.fence,
             progress: None,
         };
-        let directive = match client.heartbeat(&progress).await {
-            Ok(directive) => directive,
+        let observed = tokio::time::timeout_at(observation_end, client.heartbeat(&progress)).await;
+        let observed = observed.unwrap_or(Err(ClientError::Retryable));
+        let directive = match observed {
+            Ok(directive) if directive.deadline >= deadline || directive.cancel_requested => {
+                directive
+            }
+            Ok(_) => {
+                // A stale projection cannot renew authority or revoke it. Ask
+                // the owner again within the original observation budget.
+                if tokio::time::Instant::now() >= observation_end {
+                    cancellation.send_replace(true);
+                    return Ok(true);
+                }
+                delay = schedule.retry_interval;
+                continue;
+            }
             Err(error) => match classify_heartbeat_failure(&error) {
                 HeartbeatFailure::SupersededCancellation => {
                     // The Controller has already invalidated this exact old
@@ -114,13 +128,11 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
                 HeartbeatFailure::Terminal => return Err(error.into()),
                 HeartbeatFailure::Retryable => {
                     let now = Utc::now();
-                    if let Some(budget_end) = renewal_budget_end
-                        && now >= budget_end.with_timezone(&Utc)
-                    {
-                        // The start's own immutable budget is spent, so no
-                        // renewal can restore this attempt; the executor's own
-                        // phase-deadline failure owns the outcome instead.
-                        return Err(error.into());
+                    if tokio::time::Instant::now() >= observation_end {
+                        // The immutable attempt budget is spent. Settlement
+                        // owns its outcome; renewal cannot extend this budget.
+                        cancellation.send_replace(true);
+                        return Ok(true);
                     }
                     // Retry promptly while the accepted lease can still be
                     // extended in time, then settle onto the ordinary renewal
@@ -144,14 +156,15 @@ pub(super) async fn run_heartbeats<C: LoopClient>(
         // The accepted lease advanced, so the ordinary renewal cadence
         // applies again until the next transient failure.
         delay = schedule.interval;
-        if let Err(error) = state.apply_heartbeat(&progress, &directive) {
-            // A mismatched or unstored projection cannot renew the accepted
-            // lease or cancel the executor. Observe this exact fence again.
-            if renewal_budget_end.is_some_and(|end| Utc::now() >= end.with_timezone(&Utc)) {
-                return Err(error.into());
-            }
-            delay = schedule.interval.max(HEARTBEAT_RETRY_FLOOR);
-            continue;
+        // Correlation is validated by the HTTP client before this boundary.
+        if directive.cancel_requested {
+            cancellation.send_replace(true);
+            return Ok(true);
+        }
+        if let Some(state) = state.as_mut()
+            && let Err(error) = state.apply_heartbeat(&progress, &directive)
+        {
+            eprintln!("vonk-agent: heartbeat journal projection deferred: {error}");
         }
         lease_deadline.send_replace(directive.deadline);
         (schedule.renewed)();

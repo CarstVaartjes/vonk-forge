@@ -240,6 +240,15 @@ to renew its lease. A terminal heartbeat
 failure, panic, or task cancellation stops the executing process even when its
 executor is blocked in synchronous process polling.
 
+Every agent claim carries `observation_budget_seconds`, an immutable elapsed
+budget for that attempt's observation and effects. Lease renewal cannot reset
+it. A start also retains its accepted start deadline and uses the earlier bound.
+An unusable renewal response is re-observed within that budget; it never
+fabricates lease authority. At expiry the agent signals cancellation, gives the
+executor a bounded settlement interval, and reports unconfirmed surviving
+effects for Controller reconciliation. Durable verified transfer bytes remain
+available to a fresh authorized attempt.
+
 Removing a recipe cache requests cancellation of any source build. A build
 that never started releases its reservation immediately. A claimed build keeps
 its reservation until the Controller receives a typed `recipe.build.cleanup.v1`
@@ -369,14 +378,14 @@ The closed words of the lifecycle core and of an agent's result have one
 definition: `agent_protocol/src/vonk_agent_protocol/lifecycle_vocabulary.py`
 (states, effects, outcome kinds, event kinds, operator actions, wait reasons,
 failure codes, the security-refusal and invalid-request reason codes, the error
-categories, and the categories the CI ratchets use). `scripts/generate-agent-wire`
+categories, and the typed outcome categories). `scripts/generate-agent-wire`
 carries them into `wire.json` and the Rust declarations, and
 `scripts/generate-control-clients` into the OpenAPI document, the generated
 TypeScript types and the runtime constants in
 `control/web/src/api/vocabulary.generated.ts`. `vonk_control/lifecycle/types.py`,
-the adapters, `failure_classification` and the allowlist scanners import them;
+the adapters, `failure_classification` and the syntax guards import them;
 none keeps a second list. Add a word to the contract and regenerate; never spell
-one by hand (the vocabulary-literal ratchet in
+one by hand (the added-line vocabulary guard in
 [testing and CI](testing-and-ci.md) fails the change).
 
 The stored `state` of a lifecycle subject speaks the nine words of
@@ -452,7 +461,7 @@ and the kebab-case podman build diagnostic is derived from the finding code
 (`PodmanBuildDiagnostic::finding_code`), so one fact has one spelling; the `diagnostic`
 sentence stays text.
 
-The vocabulary ratchet keeps this flat at zero: a literal equal to a member, and
+The added-line vocabulary guard rejects new occurrences: a literal equal to a member, and
 any string constant in a code position (see [testing and CI](testing-and-ci.md)),
 fails. A new code is added to its domain enum first.
 The stored records that are not lifecycle subjects have their own closed state
@@ -468,8 +477,7 @@ the Rust declarations, the OpenAPI document and the generated TypeScript. The
 Controller's CHECK constraints are generated from them (`machine_check`), models
 and projections validate through `vonk_control.machine_states` (which adopts an
 old spelling through `MACHINE_ALIASES`, empty until a word is renamed), and the
-vocabulary ratchet's `machine_state` tier fails a hand-spelled word with no
-baseline and no exception list.
+added-line vocabulary guard rejects new hand-spelled contract words.
 
 Every agent operation result is one `OperationOutcome`
 (`agent_protocol/src/vonk_agent_protocol/outcome.py`), tagged by `kind`:

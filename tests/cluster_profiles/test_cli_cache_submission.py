@@ -513,10 +513,53 @@ def test_uncertain_cancellation_reconnect_preserves_cancellation_identity(noun):
     reconcile = result["observation"]
     assert isinstance(reconcile, dict)
     assert reconcile["reconnect_command"] == (
-        f"vonkctl {noun} cancel {operation_id} --yes --request-key {KEY} "
-        "--reason 'Stop this request'"
+        f"vonkctl {noun} progress {operation_id} --follow"
     )
     assert client.calls[0][0] == "POST"
     assert all(call[0] == "GET" for call in client.calls[1:])
     assert len(client.calls) <= 5
     _fresh_observation(client, noun)
+
+
+@pytest.mark.parametrize("repairs", [True, False])
+def test_malformed_poll_keeps_original_snapshot_and_bounded_observation(
+    monkeypatch, repairs
+):
+    """Unreadable peer data cannot replace identity or end observation early."""
+    elapsed = [0.0]
+    monkeypatch.setattr(
+        controller_cli.observation.time, "monotonic", lambda: elapsed[0]
+    )
+    monkeypatch.setattr(
+        controller_cli.observation.time,
+        "sleep",
+        lambda seconds: elapsed.__setitem__(0, elapsed[0] + seconds),
+    )
+    identity = {"operation_id": "original", "state": "running"}
+    malformed = ControlMalformedResponse("peer document is unreadable")
+    responses = (
+        [identity, malformed, identity | {"state": "succeeded"}]
+        if repairs
+        else [identity, malformed, malformed, malformed]
+    )
+    client = SubmissionClient({("GET", "/api/model/operations/original"): responses})
+    status, result = run(
+        (
+            "model",
+            "progress",
+            "original",
+            "--follow",
+            "--timeout-seconds",
+            "3",
+            "--json",
+        ),
+        client,
+    )
+    assert elapsed[0] <= 3
+    if repairs:
+        assert status == 0
+        assert result["operation_id"] == "original" and result["state"] == "succeeded"
+    else:
+        assert status == 2
+        assert result["result"] == identity
+    assert {path for _, path, *_ in client.calls} == {"/api/model/operations/original"}

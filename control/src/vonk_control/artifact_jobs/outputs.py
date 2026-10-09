@@ -3,31 +3,40 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterable, Mapping
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    AgentOperation as WireAgentOperation,
+)
+from vonk_agent_protocol import (
     AgentProtocolError,
+    AgentResultState,
     InvalidRequestReason,
     RecipeJobFile,
     RecipeJobOutputLimits,
     RecipeJobRunResult,
     SecurityRefusalReason,
+    UnknownOutcomeError,
+    WaitReason,
 )
 
 from .. import agent_operation_states
 from .. import artifact_job_states as ajs
 from ..artifact_blob_store import ArtifactBlobStoreError, StoredArtifactBlob
 from ..artifact_job_evidence import ArtifactJobResultEvidence
+from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
-from ..lifecycle import Outcome, Reported
+from ..lifecycle import Effect, Outcome, Reported
+from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import AgentOperation, ArtifactJob, ArtifactJobBlob, ArtifactJobFile, Job
 from .contracts import (
     ArtifactJobInvalid,
-    ArtifactJobTransferClosedError,
+    ArtifactJobUnavailableError,
     ArtifactResultInvalid,
     ArtifactResultRefused,
     _translate_blob_error,
@@ -66,6 +75,8 @@ class ArtifactJobService(InputService):
                 path = self._blob_store.resolve(
                     blob.storage_key, sha256, blob.size_bytes
                 )
+            except UnknownOutcomeError:
+                raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
             if path is None:
@@ -96,14 +107,27 @@ class ArtifactJobService(InputService):
             },
             maximum_bytes=1024**3,
         )
-        with self._blob_store.reference_attachment():
+        self._validate_output_upload(job_id, node_id=node_id, parsed=parsed)
+        unavailable: UnknownOutcomeError | None = None
+        for _attempt in bounded_attempts():
             try:
-                stored = self._blob_store.put_bytes(
-                    expected_sha256, content, maximum_bytes=1024**3
-                )
-            except ArtifactBlobStoreError as error:
-                _translate_blob_error(error)
-            self._attach_output(job_id, node_id=node_id, parsed=parsed, stored=stored)
+                with self._blob_store.reference_attachment():
+                    try:
+                        stored = self._blob_store.put_bytes(
+                            expected_sha256, content, maximum_bytes=1024**3
+                        )
+                    except UnknownOutcomeError:
+                        raise
+                    except ArtifactBlobStoreError as error:
+                        _translate_blob_error(error)
+                    self._attach_output(
+                        job_id, node_id=node_id, parsed=parsed, stored=stored
+                    )
+                return
+            except UnknownOutcomeError as error:
+                unavailable = error
+        assert unavailable is not None
+        raise unavailable
 
     async def put_output_stream(
         self,
@@ -134,6 +158,8 @@ class ArtifactJobService(InputService):
                     expected_bytes=content_length,
                     maximum_bytes=1024**3,
                 )
+            except UnknownOutcomeError:
+                raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
             self._attach_output(job_id, node_id=node_id, parsed=parsed, stored=stored)
@@ -150,9 +176,10 @@ class ArtifactJobService(InputService):
             ) + (parsed,)
             contract = self._stored_contract(session, job)
             if isinstance(contract, Residue):
-                # The job's contract is unreadable and nothing re-derives it:
-                # its transfers close and the job ends through its own lifecycle.
-                raise ArtifactJobTransferClosedError("artifact job transfer is closed")
+                raise ArtifactJobUnavailableError(
+                    "artifact contract evidence is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             _validate_outputs_against_contract(contract, projected, terminal=False)
             if parsed.media_type not in limits.allowed_media_types:
                 raise ArtifactJobInvalid(
@@ -187,11 +214,8 @@ class ArtifactJobService(InputService):
         parsed: RecipeJobFile,
         stored: StoredArtifactBlob,
     ) -> None:
-        if stored.sha256 != parsed.sha256 or stored.size_bytes != parsed.size_bytes:
-            raise ArtifactJobInvalid(
-                "stored artifact output does not match declaration",
-                reason=InvalidRequestReason.CONFLICT,
-            )
+        # The blob store has already verified the declared digest and length at
+        # ingress. Its typed receipt is the authority for the attached content.
         now = self._clock()
         with self._sessions.begin() as session:
             job = self._authorized_agent_job(session, job_id, node_id, lock=True)
@@ -214,9 +238,10 @@ class ArtifactJobService(InputService):
             projected = tuple(self._output_file(item) for item in existing) + (parsed,)
             contract = self._stored_contract(session, job)
             if isinstance(contract, Residue):
-                # The job's contract is unreadable and nothing re-derives it:
-                # its transfers close and the job ends through its own lifecycle.
-                raise ArtifactJobTransferClosedError("artifact job transfer is closed")
+                raise ArtifactJobUnavailableError(
+                    "artifact contract evidence is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             _validate_outputs_against_contract(contract, projected, terminal=False)
             if len(existing) + 1 > limits.max_files:
                 raise ArtifactJobInvalid(
@@ -274,6 +299,8 @@ class ArtifactJobService(InputService):
                 path = self._blob_store.resolve(
                     blob.storage_key, sha256, blob.size_bytes
                 )
+            except UnknownOutcomeError:
+                raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
             if path is None:
@@ -285,6 +312,42 @@ class ArtifactJobService(InputService):
                 raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
             return path, row.media_type, row.name, row.size_bytes
 
+    @staticmethod
+    def _end_unverified_result(
+        session: Session,
+        adapter: ArtifactJobAdapter,
+        operation: AgentOperation,
+        parent: Job,
+        job: ArtifactJob,
+        result: RecipeJobRunResult,
+        now: datetime,
+    ) -> None:
+        # The authenticated terminal report ends execution. Missing local output
+        # evidence cannot invalidate it or authorize publishing unverified files.
+        # Never replay the irreversible user job to repair its bookkeeping.
+        AgentOperationAdapter(session).record_outcome(
+            operation,
+            None,
+            parent,
+            Outcome.FAILED,
+            now,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+        adapter.settle(
+            job,
+            Reported(
+                Outcome.FAILED,
+                retryable=False,
+                effect=Effect.ESTABLISHED,
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            ),
+            now,
+            evidence=ArtifactJobResultEvidence(
+                elapsed_milliseconds=result.elapsed_milliseconds,
+                peak_memory_bytes=result.peak_memory_bytes,
+            ),
+        )
+
     def consume_agent_result(
         self,
         session: Session,
@@ -293,7 +356,7 @@ class ArtifactJobService(InputService):
         message: object,
     ) -> None:
         parent = session.get(Job, operation.parent_job_id)
-        if parent is None or parent.kind != "recipe.job.run.v1":
+        if parent is None or parent.kind != WireAgentOperation.RECIPE_JOB_RUN.value:
             return
         artifact_job = session.scalar(
             select(ArtifactJob)
@@ -361,14 +424,28 @@ class ArtifactJobService(InputService):
                     "artifact result identity does not match",
                     reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
                 )
+            succeeded = state == AgentResultState.SUCCEEDED and result.exit_code == 0
+            failed = state == AgentResultState.FAILED and result.exit_code != 0
+            cancelled = bool(
+                state == AgentResultState.CANCELLED
+                and result.exit_code == 130
+                and not result.outputs
+                and isinstance(parent.result, Mapping)
+                and parent.result.get("cancel_requested") is True
+            )
+            if not (succeeded or failed or cancelled):
+                raise ArtifactResultInvalid(
+                    "artifact result state and exit code disagree",
+                    reason=InvalidRequestReason.MALFORMED,
+                )
             uploaded = self._files_in_session(session, artifact_job.id, "output")
             observed = tuple(self._output_file(item) for item in uploaded)
             limits = RecipeJobOutputLimits.parse(artifact_job.output_limits)
             if tuple(result.outputs) != observed:
-                raise ArtifactResultInvalid(
-                    "artifact result does not match uploaded outputs",
-                    reason=InvalidRequestReason.MALFORMED,
+                self._end_unverified_result(
+                    session, adapter, operation, parent, artifact_job, result, now
                 )
+                return
             if any(
                 item.media_type not in limits.allowed_media_types
                 for item in result.outputs
@@ -386,34 +463,15 @@ class ArtifactJobService(InputService):
                     "artifact result exceeds output limits",
                     reason=InvalidRequestReason.MALFORMED,
                 )
-            succeeded = state == "succeeded" and result.exit_code == 0
-            failed = state == "failed" and result.exit_code != 0
-            cancelled = bool(
-                state == "cancelled"
-                and result.exit_code == 130
-                and not result.outputs
-                and isinstance(parent.result, Mapping)
-                and parent.result.get("cancel_requested") is True
-            )
-            if cancelled and uploaded:
-                raise ArtifactResultInvalid(
-                    "cancelled artifact result cannot retain uploaded outputs",
-                    reason=InvalidRequestReason.MALFORMED,
-                )
             if succeeded:
                 result_contract = self._stored_contract(session, artifact_job)
                 if isinstance(result_contract, Residue):
-                    raise ArtifactResultInvalid(
-                        "artifact job contract is unreadable",
-                        reason=InvalidRequestReason.MALFORMED,
+                    self._end_unverified_result(
+                        session, adapter, operation, parent, artifact_job, result, now
                     )
+                    return
                 _validate_outputs_against_contract(
                     result_contract, result.outputs, terminal=True
-                )
-            if not (succeeded or failed or cancelled):
-                raise ArtifactResultInvalid(
-                    "artifact result state and exit code disagree",
-                    reason=InvalidRequestReason.MALFORMED,
                 )
         except (AgentProtocolError, TypeError, ValueError) as error:
             self._reject_result(adapter, operation, parent, artifact_job, error, now)

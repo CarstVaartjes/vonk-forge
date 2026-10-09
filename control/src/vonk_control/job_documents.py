@@ -449,14 +449,19 @@ class DistributionTransferProgress(_Document):
     members: list[RunSwitchMemberReceipt]
 
 
-class DistributionJobPayload(_Document):
-    """One target-copy child: the plan it serves and what each Spark must receive."""
+class DistributionJobIdentity(_Document):
+    """Immutable accepted identity of one target-copy child."""
 
     plan_digest: DigestText
     workload_intent_ordinal: int | None = Field(
         le=MAX_DATABASE_INTEGER, default=None, ge=1
     )
     phase: RunSwitchPhaseKind
+
+
+class DistributionJobPayload(DistributionJobIdentity):
+    """One target-copy child and its exact per-node content binding."""
+
     progress: DistributionTransferProgress
     cached_nodes: list[NodeText]
     target_order: list[NodeText]

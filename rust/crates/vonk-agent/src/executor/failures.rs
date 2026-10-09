@@ -154,6 +154,7 @@ pub(super) fn host_runtime_evidence(
 pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRuntimeError) -> bool {
     use crate::host_runtime::HostRuntimeError;
     match error {
+        // Socket/file observation loss is not authenticated authority denial.
         HostRuntimeError::Io(_) => true,
         HostRuntimeError::Controller(ClientError::Protocol) => true,
         HostRuntimeError::Controller(
@@ -165,14 +166,17 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
             false
         }
         HostRuntimeError::Controller(_) => true,
-        HostRuntimeError::HelperRejected { code, .. } => {
-            matches!(
-                code,
-                HelperErrorCode::OperationIo
-                    | HelperErrorCode::InstallationReconciliationStorageUnavailable
-            )
-        }
+        HostRuntimeError::HelperRejected { code, .. } => !matches!(
+            code,
+            HelperErrorCode::GrantInvalid
+                | HelperErrorCode::GrantNodeMismatch
+                | HelperErrorCode::GrantUnauthorized
+                | HelperErrorCode::PeerIdentityInvalid
+                | HelperErrorCode::PackageVerificationFailed
+        ),
         HostRuntimeError::HelperProtocol(_) => true,
+        // Caller-supplied request bounds and an unbound reply still cannot
+        // authorize any effect. Observation loss never fabricates a receipt.
         HostRuntimeError::HelperProtocolBound { .. } => true,
         HostRuntimeError::StopUncertain => true,
     }

@@ -7,6 +7,7 @@ import re
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from vonk_agent_protocol.enrollment import (
     EnrollmentBootstrapResponse,
     EnrollmentSubmitRequest,
@@ -15,7 +16,6 @@ from vonk_agent_protocol.enrollment import (
 
 from ..contract_graph import raw_json_body
 from ..enrollment import (
-    CertificateResponseCapacityRefused,
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
 )
@@ -84,7 +84,9 @@ def install_enrollment_routes(
         required = _require_services(services)
         if not limiter.admit():
             raise HTTPException(
-                status_code=429, detail="enrollment rate limit exceeded"
+                status_code=429,
+                detail="enrollment rate limit exceeded",
+                headers={"retry-after": str(limiter.retry_after_seconds())},
             )
         raw = await _bounded_enrollment_body(request, required)
         scan = _scan_enrollment_grants(raw)
@@ -97,7 +99,6 @@ def install_enrollment_routes(
             )
             is None
         ):
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=415,
                 detail="enrollment content type must be application/json",
@@ -105,52 +106,37 @@ def install_enrollment_routes(
         try:
             body = json.loads(raw.decode("utf-8"))
         except (TypeError, UnicodeDecodeError, ValueError, RecursionError):
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=422, detail="enrollment request must be JSON"
             ) from None
         if not isinstance(body, dict):
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=422, detail="enrollment request must be a JSON object"
             )
         if scan.top_level_keys != 1:
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=422, detail="enrollment grant is ambiguous")
         try:
             submitted = EnrollmentSubmitRequest.model_validate(body)
         except ValidationError:
-            _consume_enrollment_denial(required, scan.tokens)
-            if scan.tokens:
-                # Keep the enrollment oracle closed: a discoverable grant is
-                # consumed and reported as denied even when the request shape
-                # is malformed.  The canonical model handles valid requests;
-                # this branch preserves the bounded burn-on-invalid policy.
-                raise HTTPException(
-                    status_code=403, detail="enrollment denied"
-                ) from None
             raise HTTPException(
                 status_code=422, detail="enrollment request is invalid"
             ) from None
         try:
             csr_bytes = submitted.csr.encode("ascii")
         except UnicodeEncodeError:
-            _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
         try:
-            outcome = _require_enrollment(required).submit(
-                submitted.grant_token, csr_bytes, submitted.evidence.model_dump()
-            )
-        except CertificateResponseCapacityRefused as error:
-            return _json_response(
-                {"detail": {"reason_code": error.reason_code, "message": str(error)}},
-                status_code=422,
+            outcome = await run_in_threadpool(
+                _require_enrollment(required).submit,
+                submitted.grant_token,
+                csr_bytes,
+                submitted.evidence.model_dump(),
             )
         except EnrollmentIssuanceUncertain as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
-            _consume_enrollment_denial(required, scan.tokens)
+            _consume_enrollment_denial(required, (submitted.grant_token,))
             raise HTTPException(status_code=403, detail=str(error)) from None
         return _json_response(_issued_response(outcome))
