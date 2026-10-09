@@ -344,7 +344,10 @@ class InventoryMixin:
             for digest in direct_model_digests:
                 cache._collect_model_definitions(session, digest, model_rows)
         except ModelCacheError:
-            return False
+            # An unreadable live reference cannot prove these bytes unused.
+            # Retain them until exact content is observable; reads and new
+            # preparation continue without adopting a different catalog head.
+            return True
         return bool(cache_model_digests.intersection(model_rows))
 
     def _profile_references_cache(

@@ -1488,7 +1488,7 @@ def test_artifact_cancel_stop_failure_ends_cancelled_with_residue(tmp_path) -> N
         )
 
 
-def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
+def test_artifact_lease_expiry_ends_and_a_fresh_request_is_admitted(tmp_path) -> None:
     """A lapsed one-shot job is observed, then waits only with Stop to offer."""
 
     sessions, recipe_operations, _queue, service, run_id, node_id = (
@@ -1521,30 +1521,20 @@ def test_artifact_lease_expiry_is_observed_then_stoppable(tmp_path) -> None:
             )
         )
     for _ in range(40):
-        if service.get(submitted.id).state == ajs.NEEDS_OPERATOR:
-            break
-        clock.advance(seconds=120)
-        agent_jobs.reconcile_orders()
-    waiting = service.get(submitted.id)
-    assert waiting.state == ajs.NEEDS_OPERATOR
-    assert waiting.supported_actions == ("stop",)
-
-    # Stop completes it: cancelled, the effect unknown, the residue recorded.
-    service.cancel(
-        submitted.id,
-        actor="operator",
-        request_id="00000000-0000-4000-8000-000000000156",
-        reason="operator stopped the lost job",
-    )
-    for _ in range(40):
-        if service.get(submitted.id).state == "cancelled":
+        if service.get(submitted.id).state == ajs.FAILED:
             break
         clock.advance(seconds=120)
         agent_jobs.reconcile_orders()
     ended = service.get(submitted.id)
-    assert ended.state == "cancelled"
+    assert ended.state == ajs.FAILED
+    assert ended.supported_actions == ()
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000158"),
+    )
+    assert fresh.id != submitted.id
 
 
 def test_draft_artifact_cancel_idempotency_rejects_mismatched_replay(tmp_path) -> None:

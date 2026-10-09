@@ -32,6 +32,7 @@ from vonk_control.lifecycle import (
     transition,
 )
 from vonk_control.lifecycle.model_cache import (
+    RECOVERY_BUDGET,
     adopt_legacy_operations,
     legacy_claim,
     legacy_retry_due,
@@ -663,3 +664,29 @@ def test_a_background_transfer_with_an_unknown_outcome_is_kept_and_retried(
     now[0] = now[0] + timedelta(hours=1)
     _settle_background(service)
     assert service.get_operation(operation.id).state == "succeeded"
+
+
+def test_lifecycle_reads_preserve_the_owners_pending_transaction(cache, tmp_path):
+    """Catches nested readers rolling back writes or missing uncommitted intent."""
+    service, sessions = cache
+    operation, _ = _queue(service, tmp_path, str(uuid.uuid4()))
+    with service._session(write=True) as session:
+        stored = session.get(ModelCacheOperation, operation.id)
+        assert stored is not None
+        original_created_at = stored.created_at
+        stored.created_at += timedelta(seconds=1)
+        session.flush()
+        row = service._lifecycle.lifecycle(stored, service._clock())
+        deadline = service._lifecycle.recovery_deadline(row)
+        assert deadline is not None
+        assert deadline == stored.created_at.replace(tzinfo=UTC) + RECOVERY_BUDGET
+        with service._session() as reader:
+            assert reader is session
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, operation.id)
+        assert persisted is not None
+        assert _aware(persisted.created_at) == original_created_at.replace(
+            tzinfo=UTC
+        ) + timedelta(seconds=1)
+    service.run_pending()
+    assert service.get_operation(operation.id).state == State.SUCCEEDED

@@ -590,8 +590,9 @@ def test_denied_source_never_transfers_and_new_authorized_request_progresses(
             service, digest, "00000000-0000-4000-8000-000000000081"
         )
         service.run_pending()
+        assert service.get_operation(_operation.id).state == LifecycleState.FAILED
         assert not service._object_path(hashlib.sha256(data).hexdigest()).exists()
-        assert all(str(request.url) == RELEASE_URL for request in requests)
+        assert all(str(request.url) == ASSET_URL for request in requests)
         denied = False
         _, fresh = _preview_and_start(
             service, digest, "00000000-0000-4000-8000-000000000082"

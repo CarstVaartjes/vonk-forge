@@ -308,7 +308,7 @@ def _after_the_observation_budget(adapter, sessions, clock, operation_id: str):
     return transition(observing, Tick(), adapter, clock.now + timedelta(hours=1))
 
 
-def test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists(
+def test_an_irreversible_unknown_ends_without_operator_parking(
     agent_service,
 ) -> None:
     jobs, sessions, clock = agent_service
@@ -319,9 +319,10 @@ def test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists(
     _park_like_a_legacy_wait(sessions, operation.id)
     adapter = _bound_adapter(sessions, clock)
 
-    # an action exists (resume/retire): the wait is real
+    # Advertised actions do not turn uncertainty into an operator wait.
     with_action = _after_the_observation_budget(adapter, sessions, clock, operation.id)
-    assert with_action.row.state is State.NEEDS_OPERATOR
+    assert with_action.row.state is State.FAILED
+    assert with_action.row.next_action_at is None
 
     # the job was cancelled: the endpoints refuse, so there is no action, and the
     # core does not wait for one (it ends the cancel instead)
@@ -330,6 +331,9 @@ def test_an_irreversible_wait_needs_an_operator_only_where_an_action_exists(
         adapter, sessions, clock, operation.id
     )
     assert without_action.row.state is not State.NEEDS_OPERATOR
+    fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    assert fresh.id != operation.id
+    assert fresh.state == State.QUEUED
 
 
 # ----------------------------------------------------- rule 4: a cancel completes

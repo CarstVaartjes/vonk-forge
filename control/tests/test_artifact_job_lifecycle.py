@@ -19,10 +19,11 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeKind,
     RecipeStopResult,
+    RunState,
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobError, ArtifactJobResponse
+from vonk_control.artifact_jobs import ArtifactJobResponse
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -37,7 +38,6 @@ from vonk_control.models import (
     RecipeRun,
 )
 from vonk_control.recipe_operations import (
-    RecipeArtifactJobCancellationPending,
     RecipeOperationView,
 )
 
@@ -47,6 +47,7 @@ from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
     NOW,
     MutableClock,
+    artifact_create_request,
     cancellation_result,
     create_artifact_job,
     running_artifact_service,
@@ -209,33 +210,28 @@ def test_waiting_for_operator_must_advertise_stop(tmp_path) -> None:
     assert ok.supported_actions == ("stop",)
 
 
-def test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it(tmp_path) -> None:
-    _sessions, _ops, service, agent_jobs, clock, submitted, _claim, _run = _issued_job(
-        tmp_path, 320
+def test_a_lapsed_job_ends_and_a_fresh_request_is_admitted(tmp_path) -> None:
+    _sessions, _ops, service, agent_jobs, clock, submitted, _claim, run_id = (
+        _issued_job(tmp_path, 320)
     )
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
-    # The agent can no longer report: observed first, never a bare wait.
-    state = _drive(service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR)
-    waiting = service.get(submitted.id)
-    assert state == ajs.NEEDS_OPERATOR
-    assert waiting.supported_actions == ("stop",)
-
-    service.cancel(
-        submitted.id, actor="operator", request_id=CANCEL_KEY, reason="lost job"
-    )
-    assert _cancelling(service.get(submitted.id))
-    assert _drive(service, agent_jobs, clock, submitted.id, until="cancelled") == (
-        "cancelled"
+    assert (
+        _drive(service, agent_jobs, clock, submitted.id, until=ajs.FAILED) == ajs.FAILED
     )
     ended = service.get(submitted.id)
     assert ended.supported_actions == ()
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
+    fresh = create_artifact_job(
+        service,
+        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000322"),
+    )
+    assert fresh.id != submitted.id
 
 
 def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp_path):
-    """Lease loss cannot release claims; the exact late Stop acknowledgement can."""
+    """Unknown work ends; exact Stop receipts release physical runtime ownership."""
     sessions, operations, service, agent_jobs, clock, submitted, claim, run_id = (
         _issued_job(tmp_path, 900)
     )
@@ -243,13 +239,11 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     service._clock = clock
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
-    assert _drive(
-        service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR
-    ) == (ajs.NEEDS_OPERATOR)
-    waiting = service.get(submitted.id)
-    assert waiting.supported_actions == ("stop",)
-    with pytest.raises(ArtifactJobError, match="owns this run reservation"):
-        submitted_artifact_job(service, run_id, request_suffix=902)
+    assert (
+        _drive(service, agent_jobs, clock, submitted.id, until=ajs.FAILED) == ajs.FAILED
+    )
+    ended = service.get(submitted.id)
+    assert ended.supported_actions == ()
 
     # A restarted Controller retains the same authoritative rows and receipt fence.
     restarted = AgentJobService(sessions, clock=clock)
@@ -261,17 +255,16 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     restarted.set_result_consumer(consume)
     operations._agent_jobs = restarted
     restarted.reconcile_orders()
-    assert service.get(submitted.id).state == ajs.NEEDS_OPERATOR
+    assert service.get(submitted.id).state == ajs.FAILED
     plan = operations.preview_stop(run_id)
     assert plan.allowed
     stop_key = "00000000-0000-4000-8000-000000000905"
-    with pytest.raises(RecipeArtifactJobCancellationPending):
-        operations.stop(
-            run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
-        )
+    stopped = operations.stop(
+        run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
+    )
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
+        assert run is not None and run.state == RunState.STOPPING
         installation_id = run.installation_id
         order = session.scalar(
             select(AgentOperation).where(
@@ -282,14 +275,6 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
         node_id = order.node_id
         old_order_id = order.id
 
-    acknowledged = cancellation_result(
-        claim, submitted, state="cancelled", reason="controller cancellation requested"
-    )
-    assert restarted.record_late_result(acknowledged)
-    assert service.get(submitted.id).state == "cancelled"
-    stopped = operations.stop(
-        run_id, plan_digest=plan.plan_digest, actor="operator", request_id=stop_key
-    )
     assert stopped.state == "running"
     exact, stop_payload, _grant = _issue_exact_stop_grant(
         sessions,

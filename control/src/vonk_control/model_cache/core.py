@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -40,6 +41,11 @@ if TYPE_CHECKING:
     from .service import ModelCacheService
 
 
+_CACHE_SESSION: ContextVar[tuple[ModelCacheService, Session, bool] | None] = ContextVar(
+    "model_cache_session", default=None
+)
+
+
 class CoreMixin:
     """Core behavior of the cache service."""
 
@@ -70,12 +76,20 @@ class CoreMixin:
     @contextmanager
     def _session(self, *, write: bool = False) -> Iterator[Session]:
         cache = cast("ModelCacheService", self)
-        if write:
-            with cache._sessions.begin() as session:
+        active = _CACHE_SESSION.get()
+        if active is not None and active[0] is cache and (active[2] or not write):
+            # Lifecycle observations share their owner's short transaction.
+            # A second reader can roll back a shared connection's pending writes
+            # and cannot observe the owner's uncommitted rows on PostgreSQL.
+            yield active[1]
+            return
+        scope = cache._sessions.begin() if write else cache._sessions()
+        with scope as session:
+            token = _CACHE_SESSION.set((cache, session, write))
+            try:
                 yield session
-        else:
-            with cache._sessions() as session:
-                yield session
+            finally:
+                _CACHE_SESSION.reset(token)
 
     def running_here(self) -> frozenset[str]:
         """Operations this process is transferring right now (``CacheEffects``)."""

@@ -184,22 +184,14 @@ def test_terminal_rows_never_move_and_a_cancel_flag_never_clears() -> None:
             assert decision.row.cancel_request_key == row.cancel_request_key, where
 
 
-def test_never_needs_operator_without_an_advertised_action() -> None:
-    """Rule 3, over the whole table."""
-
-    parked = 0
+def test_unknown_outcomes_never_create_operator_waits() -> None:
+    """The whole transition table forbids newly parked operator work."""
     for row, event, adapter, decision in _table():
-        if decision.row.state is not State.NEEDS_OPERATOR:
-            continue
-        where = _describe(row, event, adapter)
         if row.state is State.NEEDS_OPERATOR and decision.row == row:
-            continue  # an input row left alone; it is only re-evaluated by a Tick
-        parked += 1
-        assert adapter.is_irreversible, where
-        assert adapter.advertised, where
-        assert decision.row.effect in {Effect.UNKNOWN, Effect.ISSUED}, where
-        assert decision.row.attempt > 0, where
-    assert parked > 0  # the table does reach the state it guards
+            continue  # untouched input; its next tick must reconcile it
+        assert decision.row.state is not State.NEEDS_OPERATOR, _describe(
+            row, event, adapter
+        )
 
 
 def test_an_unadvertised_operator_action_changes_nothing() -> None:
@@ -269,7 +261,9 @@ def test_parked_legacy_rows_are_reevaluated_on_their_first_tick() -> None:
 
     with_action = FakeAdapter(is_irreversible=True, advertised=("resume",))
     kept = transition(parked, Tick(), with_action, NOW)
-    assert kept.row.state is State.NEEDS_OPERATOR and kept.row.next_action_at is None
+    assert kept.row.state is State.OBSERVING
+    assert kept.commands == (Observe(),)
+    assert kept.row.next_action_at is not None
 
 
 def test_an_irreversible_uncertain_effect_is_observed_first() -> None:
@@ -308,16 +302,19 @@ def _tick_until(
         yield row
 
 
-def test_an_unknown_effect_waits_for_an_operator_only_with_an_action() -> None:
+@pytest.mark.parametrize("advertised", [(), ("resume", "retire")])
+def test_an_unknown_effect_ends_within_its_budget_and_fresh_work_is_claimable(
+    advertised,
+) -> None:
     row = _row(state=State.OBSERVING, next_action_at=NOW, observe_count=0)
-    with_action = FakeAdapter(is_irreversible=True, advertised=("resume", "retire"))
-    states = [r.state for r in _tick_until(row, with_action, 40, Effect.UNKNOWN)]
-    assert State.NEEDS_OPERATOR in states
-    assert states[-1] is State.NEEDS_OPERATOR
-
-    without = FakeAdapter(is_irreversible=True, advertised=())
-    states = [r.state for r in _tick_until(row, without, 200, Effect.UNKNOWN)]
-    assert set(states) == {State.OBSERVING}  # observed forever, at a bounded rate
+    adapter = FakeAdapter(is_irreversible=True, advertised=advertised)
+    rows = list(_tick_until(row, adapter, 200, Effect.UNKNOWN))
+    assert State.NEEDS_OPERATOR not in {item.state for item in rows}
+    assert rows[-1].state is State.FAILED
+    assert rows[-1].next_action_at is None
+    fresh = replace(_row(state=State.QUEUED), id="fresh", attempt=0)
+    claimed = transition(fresh, Claimed(1, "fresh-fence", LATER), adapter, NOW)
+    assert claimed.row.state is State.RUNNING
 
 
 def test_an_operator_chooses_among_the_advertised_actions() -> None:

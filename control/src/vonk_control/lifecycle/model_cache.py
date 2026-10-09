@@ -486,6 +486,7 @@ class ModelCacheAdapter:
             # none, so the same attempt resumes.
             put("attempt", max(int(operation.attempt), after.retry_count + 1))
         put("state", state)
+        put("last_error", after.reason)
         put("next_action_at", next_action)
         put("lease_deadline", lease)
         put(

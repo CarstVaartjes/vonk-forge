@@ -4238,11 +4238,11 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
             fixture_sources=True,
             clock=lambda: NOW,
         )
-        for _ in range(2):
+        for _ in range(model_cache_module._SOURCE_GONE_ATTEMPTS - 2):
             service.run_pending()
             assert service.get_operation(operation.id).state == "queued"
         service.run_pending()
-        assert served["/second.bin"] == 4
+        assert served["/second.bin"] == model_cache_module._SOURCE_GONE_ATTEMPTS
         gone = service.get_operation(operation.id)
         assert gone.state == "failed"
         assert gone.failure is not None
