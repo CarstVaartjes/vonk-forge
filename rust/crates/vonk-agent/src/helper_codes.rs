@@ -27,6 +27,7 @@ fn is_runtime_rejection(code: Code) -> bool {
             | Code::RuntimeImageIdentityInvalid
             | Code::RequestReplayed
             | Code::OperationFailed
+            | Code::InstallationIntentObservationRequired
             | Code::InstallationReconciliationBusy
             | Code::OperationInvalid
             | Code::OperationUnsafePath
@@ -92,6 +93,7 @@ pub fn upgrade_rejection(value: &str) -> Option<Code> {
                 | Code::OperationFailed
                 | Code::RequestInvalid
                 | Code::RequestLedgerFailed
+                | Code::PackagePreparationUnavailable
                 | Code::PackagePreflightFailed
                 | Code::PackageVerificationFailed
                 | Code::PackageMetadataFailed
@@ -154,7 +156,8 @@ pub fn is_distribution_evidence(code: Code) -> bool {
 pub fn is_upgrade_evidence(code: Code) -> bool {
     matches!(
         code,
-        Code::PackageVerificationFailed
+        Code::PackagePreparationUnavailable
+            | Code::PackageVerificationFailed
             | Code::PackageMetadataFailed
             | Code::PackageCustodyFailed
             | Code::PackageInstallFailed

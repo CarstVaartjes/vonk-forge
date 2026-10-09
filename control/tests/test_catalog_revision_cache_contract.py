@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_revision_contract import (
-    CatalogRevisionContractError,
     ModelRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
@@ -45,8 +44,9 @@ def test_catalog_revision_projection_is_persisted_and_read_as_canonical_model(
         assert isinstance(projection, ModelRevisionProjection)
         assert projection.artifact_count == len(raw["files"])
         stored.projected = {**stored.projected, "artifact_count": "malformed"}
-        with pytest.raises(CatalogRevisionContractError):
-            read_catalog_projection(stored)
+        repaired = read_catalog_projection(stored)
+        assert isinstance(repaired, ModelRevisionProjection)
+        assert repaired.artifact_count == len(raw["files"])
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
