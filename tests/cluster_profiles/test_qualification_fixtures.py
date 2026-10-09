@@ -727,7 +727,7 @@ def test_serving_unknown_reobserves_then_quality_is_measured_and_new_case_runs(
         check,
         timeout_seconds=1,
         opener=lambda request, timeout: Reply(
-            b'{"choices":[{"message":{"content":"restored"}}]}'
+            b'{"choices":[{"message":{"content":"restored"}}],"usage":{"completion_tokens":1}}'
         ),
     )
     assert fresh["choices"] == 1

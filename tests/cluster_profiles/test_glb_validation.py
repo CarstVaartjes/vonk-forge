@@ -241,11 +241,12 @@ def load_validator(_context: str) -> ModuleType:
 class ThreeDGlbValidationTests(unittest.TestCase):
     def test_qualification_wrapper_uses_the_byte_identical_validator(self) -> None:
         builder = Glb()
-        metadata = _glb_metadata(builder.bytes(builder.document()), "triangle-mesh")
+        content = builder.bytes(builder.document())
+        metadata = _glb_metadata(content, "triangle-mesh")
         self.assertEqual((metadata["mesh_count"], metadata["primitive_count"]), (1, 1))
         with self.assertRaises(FixtureError):
             _glb_metadata(b"not-a-glb", "triangle-mesh")
-        repaired = _glb_metadata(builder.bytes(builder.document()), "triangle-mesh")
+        repaired = _glb_metadata(content, "triangle-mesh")
         self.assertEqual(repaired, metadata)
 
     def validate(self, document: dict[str, object], builder: Glb, profile: str) -> None:

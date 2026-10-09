@@ -732,11 +732,30 @@ def _prepare_signed_update_tool(
         "NO_PROXY": "127.0.0.1,localhost",
         "UV_CACHE_DIR": str(cache),
     }
+    old_root = prior_root or root
+    if prior_root is None:
+        # Provenance stamps alone do not change package content. Give the old
+        # fixture a real package difference so this lane exercises replacement.
+        old_root = workspace / "old-source"
+        for directory in ("src", "schemas"):
+            shutil.copytree(root / directory, old_root / directory)
+        for relative in (
+            "pyproject.toml",
+            "tools/hatch_build.py",
+            "install/installer-release-public.pem",
+            "rust/crates/vonk-agent-protocol/schema/wire.json",
+        ):
+            target = old_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(root / relative, target)
+        (old_root / "src/cluster_profiles/update_fixture_marker.py").write_text(
+            '"""Package member present only in the old update fixture."""\n'
+        )
     wheels = []
     for name, build_root, source, version in (
         (
             "old",
-            prior_root or root,
+            old_root,
             _source_revision(prior_root) if prior_root else "c" * 40,
             "0.1.1",
         ),
@@ -929,6 +948,11 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
     }
     receipt_path = python.parent.parent / "uv-receipt.toml"
     before_tool_receipt = receipt_path.read_bytes()
+    marker = (
+        python.parent.parent
+        / "lib/python3.14/site-packages/cluster_profiles/update_fixture_marker.py"
+    )
+    assert marker.is_file()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert_path, tls_key_path)
     with ThreadingHTTPServer(("127.0.0.1", 0), PublicationHost) as server:
@@ -965,6 +989,7 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
                     "control_contract_sha256"
                 ],
             }
+            assert not marker.exists()
             assert receipt["updated"] is True
             assert receipt["compatibility"] == "compatible"
             assert receipt["previous"] == {
