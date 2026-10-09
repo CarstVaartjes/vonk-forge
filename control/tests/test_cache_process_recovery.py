@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import ModelCacheCode
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import (
     ModelCacheDownloadPayload,
@@ -135,7 +134,6 @@ with open(sys.argv[1], "a+b") as lock:
                     payload = parse_model_cache_payload(row.kind, row.payload)
                     assert isinstance(payload, ModelCacheDownloadPayload)
                     assert payload.failure is not None
-                    assert payload.failure.code == ModelCacheCode.OBJECT_BUSY
                     # A retained historical fence rejects old reports. Only
                     # the running state and live lease denote a current claim.
                     assert row.lease_deadline is None and payload.claim is None

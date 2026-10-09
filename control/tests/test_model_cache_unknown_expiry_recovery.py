@@ -179,7 +179,10 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
         assert cancelled.state == "cancelled"
         with sessions() as session:
             ended = session.get(ModelCacheOperation, confirmed.id)
-            assert ended is not None and ended.last_error is None
+            assert ended is not None
+            assert (
+                restarted._lifecycle.lifecycle(ended, now[0]).effect is Effect.STOPPED
+            )
             assert_no_orphaned_holds(session)
         restarted.close()
         restarted = ModelCacheService(
