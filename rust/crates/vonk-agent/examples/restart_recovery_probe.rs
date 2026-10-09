@@ -34,10 +34,21 @@ struct NoBuildProcess;
 impl ProcessRunner for NoBuildProcess {
     fn run(
         &self,
-        _program: Program,
-        _arguments: &[String],
+        program: Program,
+        arguments: &[String],
         _timeout: std::time::Duration,
     ) -> Result<ProcessOutput, ProcessError> {
+        // Exact cleanup observes absent pre-existing units before source fetch.
+        // Permit only that read; any build or runtime mutation still fails.
+        if program == Program::Systemctl
+            && arguments.get(1).map(String::as_str) == Some("list-units")
+        {
+            return Ok(ProcessOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            });
+        }
         panic!("source failure must be reported before any build process starts")
     }
 }

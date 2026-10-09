@@ -107,7 +107,9 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
     assert held
     # A retained physical reservation is not an admission mutex for fresh work.
     fresh = submitted_artifact_job(artifacts, run_id, request_suffix=900)
-    assert fresh.id != job.id and fresh.operation_id is not None
+    assert fresh.id != job.id
+    # Accepted intent waits on exact cleanup; acceptance is not dispatch.
+    assert fresh.operation_id is None
     # New intent drives exact cleanup, while its own bounded attempt ends.
     # It never treats a logical ending as observed free physical capacity.
     stop_plan = operations.preview_stop(run_id)

@@ -228,4 +228,3 @@ fn empty_support_file_remains_a_read_only_mount() {
         std::path::Path::new("/run/vonk/models/primary/tokenizer_config.json")
     );
 }
-

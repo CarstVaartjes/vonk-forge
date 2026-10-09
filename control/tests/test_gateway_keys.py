@@ -714,3 +714,51 @@ def test_unavailable_capability_read_ends_without_http_refusal_and_recovers():
     assert client.get("/api/key").json() == {"keys": []}
     client.post("/api/key", json={"name": "fresh", "request_id": "fresh"})
     assert set(peer.keys) == {"fresh"}
+
+
+@pytest.mark.parametrize("exhausted", [False, True])
+@pytest.mark.parametrize("http_status", [500, 502, 503, 504])
+def test_default_key_http_unavailable_reobserves_and_fresh_attempt_enters(
+    exhausted, http_status
+):
+    """Catches treating HTTP 503 as a security denial or retaining a busy gate."""
+    import asyncio
+
+    from fastapi import HTTPException
+    from vonk_control.gateway_keys import keep_default_key
+
+    class Service:
+        def __init__(self):
+            self.attempts = 0
+            self.unavailable = True
+            self.effects = 0
+
+        def ensure_default(self, path):
+            self.attempts += 1
+            if self.unavailable:
+                if not exhausted and self.attempts == 3:
+                    self.unavailable = False
+                else:
+                    raise HTTPException(http_status)
+            self.effects += 1
+            return True
+
+    service = Service()
+
+    async def observe():
+        await asyncio.wait_for(
+            keep_default_key(
+                service,  # type: ignore[arg-type]
+                asyncio.Event(),
+                first_delay=0.001,
+                maximum_delay=0.002,
+            ),
+            timeout=1,
+        )
+
+    asyncio.run(observe())
+    assert service.attempts == (6 if exhausted else 3)
+    assert service.effects == (0 if exhausted else 1)
+    service.unavailable = False
+    asyncio.run(observe())
+    assert service.effects == (1 if exhausted else 2)
