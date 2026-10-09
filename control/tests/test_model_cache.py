@@ -1078,10 +1078,14 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
 
     with monkeypatch.context() as scoped:
         scoped.setattr(os, "open", deny_model_object)
-        with pytest.raises(PermissionError, match="model object is inaccessible"):
-            service.resolve_latest_cached(
-                recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
-            )
+        unavailable = service.resolve_latest_cached(
+            recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        )
+        assert unavailable.blockers
+    restored = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert not restored.blockers
     with monkeypatch.context() as scoped:
         scoped.setattr(
             service,
@@ -1510,6 +1514,7 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
         "truncated",
         "receipt_missing",
         "unreadable",
+        "close_unavailable",
     ],
 )
 def test_preview_uses_durable_verified_cache_metadata_without_reading_model_bytes(
@@ -1554,8 +1559,9 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         raise AssertionError("preview reread cached model bytes")
 
     monkeypatch.setattr(service, "_verify_file", reject_byte_scan)
+    open_file = os.open
+    close_file = os.close
     if stored_state == "unreadable":
-        open_file = os.open
 
         def deny_cache_object(file, *args, **kwargs):
             if file == path:
@@ -1563,13 +1569,47 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
             return open_file(file, *args, **kwargs)
 
         monkeypatch.setattr(os, "open", deny_cache_object)
-        with pytest.raises(PermissionError):
-            service.download_preview(model_content_sha256=model, artifacts=[artifact])
-        return
+
+    if stored_state == "close_unavailable":
+        observed_fds: set[int] = set()
+
+        def observe_object(file, *args, **kwargs):
+            descriptor = open_file(file, *args, **kwargs)
+            if file == path:
+                observed_fds.add(descriptor)
+            return descriptor
+
+        def unavailable_close(descriptor):
+            close_file(descriptor)
+            if descriptor in observed_fds:
+                observed_fds.remove(descriptor)
+                raise OSError("object close observation unavailable")
+
+        monkeypatch.setattr(os, "open", observe_object)
+        monkeypatch.setattr(os, "close", unavailable_close)
+
     preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     expected = len(data) if stored_state == "verified" else 0
     assert preview["already_cached_bytes"] == expected
     assert preview["new_bytes"] == len(data) - expected
+    if stored_state in ("unreadable", "close_unavailable"):
+        admitted = service.start_download(
+            actor="test",
+            request_key=str(uuid.uuid4()),
+            plan_digest=str(preview["plan_digest"]),
+            model_content_sha256=model,
+            artifacts=[artifact],
+        )
+        assert admitted.state == LifecycleState.QUEUED
+        monkeypatch.setattr(os, "open", open_file)
+        monkeypatch.setattr(os, "close", close_file)
+        service.run_pending()
+        assert service.get_operation(admitted.id).state == LifecycleState.SUCCEEDED
+        recovered = service.download_preview(
+            model_content_sha256=model, artifacts=[artifact]
+        )
+        assert recovered["already_cached_bytes"] == len(data)
+        assert recovered["new_bytes"] == 0
 
 
 def test_stored_bytes_without_a_receipt_are_not_admitted(cache, tmp_path: Path) -> None:

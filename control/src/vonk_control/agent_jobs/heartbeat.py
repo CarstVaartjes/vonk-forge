@@ -171,7 +171,13 @@ def heartbeat(
             and column_field(parent, "result", "cancel_requested") is True
         )
         if (
-            operation.kind == AgentOperation.ARTIFACT_DISTRIBUTION.value
+            operation.kind
+            in {
+                AgentOperation.ARTIFACT_DISTRIBUTION.value,
+                AgentOperation.RECIPE_INSTALL.value,
+                AgentOperation.RECIPE_START.value,
+                AgentOperation.RECIPE_JOB_RUN.value,
+            }
             and not cancel_requested
         ):
             # Large model copies outlive their initial one-hour grant.

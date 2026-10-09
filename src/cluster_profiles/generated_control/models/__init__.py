@@ -69,6 +69,7 @@ from .availability_retry import AvailabilityRetry
 from .availability_runtime import AvailabilityRuntime
 from .availability_runtime_placement_environment_type_0 import AvailabilityRuntimePlacementEnvironmentType0
 from .availability_supersession import AvailabilitySupersession
+from .availability_unknown_end import AvailabilityUnknownEnd
 from .blocker_category import BlockerCategory
 from .bookkeeping_reason import BookkeepingReason
 from .boolean_parameter import BooleanParameter
@@ -971,6 +972,7 @@ __all__ = (
     "AvailabilityRuntime",
     "AvailabilityRuntimePlacementEnvironmentType0",
     "AvailabilitySupersession",
+    "AvailabilityUnknownEnd",
     "BlockerCategory",
     "BookkeepingReason",
     "BooleanParameter",

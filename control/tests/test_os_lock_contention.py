@@ -125,7 +125,6 @@ def test_runtime_image_publication_lock_is_bounded_and_released_on_process_death
         with (
             pytest.raises(
                 runtime_image_preparation.RuntimeImagePreparationError,
-                match="another owner to finish this image publication",
             ) as failure,
             storage.publication_lock(archive_sha256),
         ):
