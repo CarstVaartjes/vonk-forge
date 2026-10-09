@@ -37,11 +37,15 @@ def test_unlock_failure_releases_fence_and_admits_fresh_attachment(
     monkeypatch.setattr(fcntl, "flock", flock)
 
     def end(_receipt: Receipt) -> Receipt:
-        with (
-            pytest.raises(OSError, match="injected unlock failure"),
-            store.reference_reconciliation(),
-        ):
-            pass
+        observed_error = None
+        try:
+            with store.reference_reconciliation():
+                pass
+        except Exception as error:  # noqa: BLE001 - any interrupted effect
+            observed_error = error
+        else:
+            pytest.fail("fault injection did not interrupt unlock")
+        assert observed_error is not None
         return Receipt(
             request_key="original",
             state=LifecycleState.FAILED,

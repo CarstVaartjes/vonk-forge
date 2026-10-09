@@ -1065,10 +1065,11 @@ def test_not_ready_pending_run_does_not_starve_later_run_or_maintenance(
     worker = RecipeOperationWorker(service.sessions, routes, clock=lambda: NOW)
     assert worker.tick() is True
     assert routes.published == [second_run]
+    assert routes.maintained == 1
 
     routes.ready.clear()
     assert worker.tick() is True
-    assert routes.maintained == 1
+    assert routes.maintained == 2
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
