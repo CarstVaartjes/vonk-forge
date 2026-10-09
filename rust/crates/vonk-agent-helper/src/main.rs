@@ -859,7 +859,9 @@ mod tests {
     fn package_failure_evidence_redacts_details_and_bounds_exit_codes() {
         let operation = HostOperation::InstallVonkDebOperation(
             vonk_agent_protocol::generated::InstallVonkDebOperation {
-                type_: vonk_agent_protocol::generated::HostOperationKind::InstallVonkDeb.as_str().into(),
+                type_: vonk_agent_protocol::generated::HostOperationKind::InstallVonkDeb
+                    .as_str()
+                    .into(),
                 rollback: vonk_agent_protocol::PackageRollbackAuthority {
                     source: vonk_agent_protocol::PackageRollbackSource {
                         package_sha256: "a".repeat(64),
@@ -896,5 +898,4 @@ mod tests {
         );
         assert_eq!(unbounded.exit_code, None);
     }
-
 }

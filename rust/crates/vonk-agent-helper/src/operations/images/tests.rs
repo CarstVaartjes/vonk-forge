@@ -110,9 +110,12 @@ fn image_pull_refuses_another_image_a_failed_pull_and_foreign_registries() {
         ..PullRunner::default()
     };
     let roots = ManagedRoots::under(temp.path());
-    let executor =
-        OperationExecutor::new(roots.clone(), &[0; 32], failing.clone(), None).unwrap();
-    assert!(executor.runtime_image_pull(&pull_arguments(&manifest, &config)).is_err());
+    let executor = OperationExecutor::new(roots.clone(), &[0; 32], failing.clone(), None).unwrap();
+    assert!(
+        executor
+            .runtime_image_pull(&pull_arguments(&manifest, &config))
+            .is_err()
+    );
     assert!(
         !failing
             .images
@@ -125,8 +128,12 @@ fn image_pull_refuses_another_image_a_failed_pull_and_foreign_registries() {
         ..PullRunner::default()
     };
     let fresh = OperationExecutor::new(roots, &[0; 32], repaired.clone(), None).unwrap();
-    fresh.runtime_image_pull(&pull_arguments(&manifest, &config)).unwrap();
-    fresh.runtime_image_pull(&pull_arguments(&manifest, &config)).unwrap();
+    fresh
+        .runtime_image_pull(&pull_arguments(&manifest, &config))
+        .unwrap();
+    fresh
+        .runtime_image_pull(&pull_arguments(&manifest, &config))
+        .unwrap();
     assert_eq!(
         repaired
             .calls

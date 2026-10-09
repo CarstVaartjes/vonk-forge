@@ -67,7 +67,11 @@ fn installation_cleanup_rejects_symlinked_managed_roots() {
     let roots = ManagedRoots::under(&linked);
     let executor = OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
 
-    assert!(executor.runtime_installation_cleanup(installation_id).is_err());
+    assert!(
+        executor
+            .runtime_installation_cleanup(installation_id)
+            .is_err()
+    );
     assert_eq!(fs::read(cache.join("sentinel")).unwrap(), b"outside");
 }
 
@@ -379,7 +383,11 @@ fn installation_cleanup_rejects_symlinked_installation_path_components() {
 
         let executor =
             OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
-        assert!(executor.runtime_installation_cleanup(installation_id).is_err());
+        assert!(
+            executor
+                .runtime_installation_cleanup(installation_id)
+                .is_err()
+        );
         assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
     }
 }

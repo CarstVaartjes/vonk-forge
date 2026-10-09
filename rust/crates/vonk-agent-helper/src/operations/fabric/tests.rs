@@ -11,6 +11,7 @@ fn signed_endpoint_placement_is_not_vetoed_by_stale_firewall_observation() {
         Policy,
         Missing,
         Unapplied,
+        ApplyFailed,
     }
     struct EndpointRunner(Answer);
     impl CommandRunner for EndpointRunner {
@@ -19,13 +20,14 @@ fn signed_endpoint_placement_is_not_vetoed_by_stale_firewall_observation() {
             if arguments[2] == "apply" {
                 return match self.0 {
                     Answer::Missing => Err("compiled command could not start".to_owned()),
+                    Answer::ApplyFailed => Ok(docker_output(false, "", 1)),
                     _ => Ok(docker_output(true, "", 0)),
                 };
             }
             assert_eq!(arguments[2], "check-endpoint-port");
             match self.0 {
                 Answer::Missing => Err("compiled command could not start".to_owned()),
-                Answer::Unapplied => Ok(CommandOutput {
+                Answer::Unapplied | Answer::ApplyFailed => Ok(CommandOutput {
                     success: false,
                     stdout: Vec::new(),
                     stderr: b"vonk-forge-docker-firewall: managed firewall chain is unavailable\n"
@@ -82,7 +84,8 @@ fn signed_endpoint_placement_is_not_vetoed_by_stale_firewall_observation() {
     assert!(accepted.is_ok());
     assert_eq!(run.published_endpoint_port, Some(8101));
     assert!(run_for(Answer::Policy, "30000").0.is_ok());
-    assert!(run_for(Answer::Missing, "30000").0.is_err());
+    assert!(run_for(Answer::Missing, "30000").0.is_ok());
+    assert!(run_for(Answer::ApplyFailed, "30000").0.is_ok());
     assert!(run_for(Answer::Policy, "30000").0.is_ok());
     assert!(run_for(Answer::Unapplied, "30000").0.is_ok());
     assert!(run_for(Answer::Policy, "8101").0.is_ok());
@@ -184,8 +187,13 @@ fn firewall_unknown_ends_boundedly_then_kernel_repair_admits_fresh_binding() {
         executor.bind_native_fabric(&mut run, &sysfs).unwrap();
         let before = applications.load(std::sync::atomic::Ordering::SeqCst);
         let mut inspected = validate_docker_run(&arguments, &roots, None).unwrap();
-        executor.observe_native_fabric(&mut inspected, &sysfs).unwrap();
-        assert_eq!(applications.load(std::sync::atomic::Ordering::SeqCst), before);
+        executor
+            .observe_native_fabric(&mut inspected, &sysfs)
+            .unwrap();
+        assert_eq!(
+            applications.load(std::sync::atomic::Ordering::SeqCst),
+            before
+        );
         assert_eq!(inspected.arguments, run.arguments);
         assert!(
             run.arguments
@@ -332,7 +340,9 @@ fn native_fabric_requires_complete_bounded_shape_without_publications() {
     let mut started = validate_docker_run(&arguments, &roots, None).unwrap();
     executor.bind_native_fabric(&mut started, &sysfs).unwrap();
     let mut inspected = validate_docker_run(&arguments, &roots, None).unwrap();
-    executor.observe_native_fabric(&mut inspected, &sysfs).unwrap();
+    executor
+        .observe_native_fabric(&mut inspected, &sysfs)
+        .unwrap();
     assert_eq!(started.arguments, inspected.arguments);
     assert!(
         started

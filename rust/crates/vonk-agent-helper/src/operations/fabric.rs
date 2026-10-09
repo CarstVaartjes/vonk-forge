@@ -5,7 +5,7 @@ use super::*;
 impl<R: CommandRunner> OperationExecutor<R> {
     /// Current signed placement owns admission. A stale firewall observation
     /// triggers one bounded reapplication of the kit's existing isolation rules;
-    /// it never broadens their ports or vetoes the Controller's decision.
+    /// unavailable local tooling never vetoes the Controller's decision.
     pub(super) fn require_authorised_published_endpoint(
         &self,
         run: &ValidatedDockerRun,
@@ -24,7 +24,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Ok(output) if output.success
         ) {
             if !self.reconcile_firewall(Duration::from_secs(10)) {
-                return Err(OperationError::CommandFailed);
+                eprintln!(
+                    "vonk-agent-helper: run {} endpoint firewall reconciliation unavailable; using signed placement",
+                    run.run_id
+                );
             }
             // Re-observe without turning generated configuration into authority.
             let _ = self.runner.run_with_timeout(

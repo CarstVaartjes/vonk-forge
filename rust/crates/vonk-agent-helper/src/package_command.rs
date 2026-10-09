@@ -89,8 +89,14 @@ fn run_inner(command: &mut Command, timeout: Duration) -> Result<Output, String>
         .map_err(|e| format!("package command could not start: {e}"))?;
     let group = rustix::process::Pid::from_raw(child.id() as i32);
     let result = (|| {
-        let mut stdout = child.stdout.take().ok_or("package output custody unavailable")?;
-        let mut stderr = child.stderr.take().ok_or("package error custody unavailable")?;
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or("package output custody unavailable")?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or("package error custody unavailable")?;
         for pipe in [
             &stdout as &dyn std::os::fd::AsFd,
             &stderr as &dyn std::os::fd::AsFd,
@@ -129,9 +135,7 @@ fn run_inner(command: &mut Command, timeout: Duration) -> Result<Output, String>
                 let status = match status {
                     Some(status) => status,
                     None => child
-                        .wait_timeout(
-                            settlement_deadline.saturating_duration_since(Instant::now()),
-                        )
+                        .wait_timeout(settlement_deadline.saturating_duration_since(Instant::now()))
                         .map_err(|e| e.to_string())?
                         .ok_or("package process settlement is unknown")?,
                 };
@@ -184,7 +188,8 @@ fn observe_group_settlement(
             Err(rustix::io::Errno::SRCH) => return Ok(()),
             Ok(()) if Instant::now() < deadline => {
                 std::thread::sleep(
-                    Duration::from_millis(1).min(deadline.saturating_duration_since(Instant::now())),
+                    Duration::from_millis(1)
+                        .min(deadline.saturating_duration_since(Instant::now())),
                 );
             }
             _ => return Err("package process settlement is unknown".to_owned()),

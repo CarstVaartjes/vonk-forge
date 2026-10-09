@@ -368,28 +368,30 @@ fn newer_generation_survives_failed_start_and_old_exact_stop_without_rewinding_f
     // invoking Docker. Force it to fail at the malformed launch boundary,
     // then prove the old named container is still rejected as generation
     // 1 and can only be removed by its own exact Stop.
-    assert!(executor
-        .runtime_start_authorized(
-            &[],
-            current,
-            current.runtime_id,
-            &current_plan_digest,
-            &format!("sha256:{}", "c".repeat(64)),
-            &RuntimeRequestGrantBinding {
-                fence: &uuid::Uuid::new_v4(),
-                installation_intent_nonce: Some(&nonce),
-                installation_intent_ordinal: Some(1),
-                installation_id: None,
-                reconciliation_identity: None,
-                start_plan_sha256: None,
-                stop_plan_sha256: None,
-                run_generation: None,
-                runtime_run_id: None,
-                runtime_target_id: None,
-                runtime_installation_id: None,
-            },
-        )
-        .is_err());
+    assert!(
+        executor
+            .runtime_start_authorized(
+                &[],
+                current,
+                current.runtime_id,
+                &current_plan_digest,
+                &format!("sha256:{}", "c".repeat(64)),
+                &RuntimeRequestGrantBinding {
+                    fence: &uuid::Uuid::new_v4(),
+                    installation_intent_nonce: Some(&nonce),
+                    installation_intent_ordinal: Some(1),
+                    installation_id: None,
+                    reconciliation_identity: None,
+                    start_plan_sha256: None,
+                    stop_plan_sha256: None,
+                    run_generation: None,
+                    runtime_run_id: None,
+                    runtime_target_id: None,
+                    runtime_installation_id: None,
+                },
+            )
+            .is_err()
+    );
 
     // The old container cannot be mistaken for generation 2 or removed
     // by a Stop for that generation.
@@ -436,7 +438,11 @@ fn stop_deadline_never_reports_success_while_a_slow_start_remains_active() {
     let active = fence.begin(identity).unwrap();
     fence.cancel(identity).unwrap();
 
-    assert!(fence.wait_for_active_start(identity, Instant::now()).is_err());
+    assert!(
+        fence
+            .wait_for_active_start(identity, Instant::now())
+            .is_err()
+    );
     drop(active);
     let fresh = fence
         .begin(RuntimeEffectIdentity {

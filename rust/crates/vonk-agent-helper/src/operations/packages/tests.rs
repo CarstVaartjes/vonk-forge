@@ -89,7 +89,9 @@ fn scan_overlap_and_expired_copy_release_custody_before_fresh_signed_install() {
     };
     let bytes = canonical_json(&observation).unwrap();
     let observation_digest = hex_sha256(&bytes);
-    let observation_path = roots.runtime_requests.join(format!("{observation_digest}.json"));
+    let observation_path = roots
+        .runtime_requests
+        .join(format!("{observation_digest}.json"));
     fs::write(&observation_path, bytes).unwrap();
     fs::set_permissions(observation_path, fs::Permissions::from_mode(0o600)).unwrap();
     let runner = InstallRunner::default();

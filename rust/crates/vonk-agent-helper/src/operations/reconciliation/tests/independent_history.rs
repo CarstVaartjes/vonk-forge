@@ -54,7 +54,10 @@ fn damaged_independent_docker_history_does_not_block_target_cleanup() {
     for _ in 0..2 {
         executor.runtime_reconcile_installation(&identity).unwrap();
         assert!(!runtime_cache.exists());
-        assert!(*neighbor.lock().unwrap(), "unbound stopped neighbor was removed");
+        assert!(
+            *neighbor.lock().unwrap(),
+            "unbound stopped neighbor was removed"
+        );
         assert_eq!(
             fs::read(&independent).unwrap(),
             b"unproven independent effect"

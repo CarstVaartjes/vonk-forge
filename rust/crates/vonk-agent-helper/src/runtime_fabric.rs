@@ -64,8 +64,7 @@ pub fn resolve_address(root: &Path, address: Ipv4Addr) -> Result<Binding, Fabric
                 if observed != Some(address.to_ipv6_mapped()) {
                     continue;
                 }
-                let interface =
-                    read(&port.path().join("gid_attrs/ndevs").join(gid.file_name()))?;
+                let interface = read(&port.path().join("gid_attrs/ndevs").join(gid.file_name()))?;
                 if valid_interface(&interface) {
                     interfaces.insert(interface);
                 }

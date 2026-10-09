@@ -272,13 +272,9 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
             .count(),
         2
     );
-    let run_fence = roots
-        .data
-        .join(RUNTIME_GENERATION_FENCE_DIRECTORY)
-        .join(runtime_generation_fence_filename(
-            plan.installation_id,
-            plan.run_id,
-        ));
+    let run_fence = roots.data.join(RUNTIME_GENERATION_FENCE_DIRECTORY).join(
+        runtime_generation_fence_filename(plan.installation_id, plan.run_id),
+    );
     let mut generation = 2;
     for damage in [Some(b"broken fence".as_slice()), None] {
         if let Some(bytes) = damage {
