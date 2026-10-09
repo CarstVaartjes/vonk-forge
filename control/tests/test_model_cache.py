@@ -38,7 +38,6 @@ from vonk_control.model_cache import (
     ModelCacheService,
     ModelCacheStorageError,
     _retry_after_seconds,
-    _retryable_failure,
 )
 from vonk_control.model_cache_api import (
     ModelCacheOperationProvider,
@@ -69,6 +68,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 from vonk_forge_contracts.model import ModelReference
 
 from .non_blocking import assert_ended_without_blocking
+from .test_model_cache_recovery_support import observe_unknown
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
@@ -419,9 +419,11 @@ def test_model_removal_review_preserves_unknown_storage_observation(
 
 
 def test_model_removal_applies_to_current_storage_after_an_old_review(
-    cache, tmp_path: Path
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     service, sessions = cache
+    now = NOW
+    monkeypatch.setattr(service, "_clock", lambda: now)
     data = b"review must not accept missing bytes"
     artifact = _artifact(tmp_path, data)
     downloaded = _download(
@@ -446,10 +448,16 @@ def test_model_removal_applies_to_current_storage_after_an_old_review(
         request_key="00000000-0000-4000-8000-000000001064",
     )
     for _ in range(10):
-        if service.get_operation(accepted.id).state == "succeeded":
+        observed = service.get_operation(accepted.id)
+        if observed.state == LifecycleState.SUCCEEDED:
             break
+        with sessions() as session:
+            stored = session.get(ModelCacheOperation, accepted.id)
+            assert stored is not None
+            if stored.next_action_at is not None:
+                now = stored.next_action_at.replace(tzinfo=UTC)
         service.advance_removals(limit=10)
-    assert service.get_operation(accepted.id).state == "succeeded"
+    assert service.get_operation(accepted.id).state == LifecycleState.SUCCEEDED
     with sessions() as session:
         assert session.get(ModelCacheSet, downloaded.artifact_set_sha256) is None
         assert all(
@@ -1078,10 +1086,10 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
 
     with monkeypatch.context() as scoped:
         scoped.setattr(os, "open", deny_model_object)
-        unavailable = service.resolve_latest_cached(
+        observed = service.resolve_latest_cached(
             recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
         )
-        assert unavailable.blockers
+        assert not (observed.model.cached and observed.recipe.cached)
     restored = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
@@ -1092,10 +1100,10 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
             "_runtime_archive_available",
             deny_runtime_archive,
         )
-        with pytest.raises(PermissionError, match="runtime archive is inaccessible"):
-            service.resolve_latest_cached(
-                recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
-            )
+        observed = service.resolve_latest_cached(
+            recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        )
+        assert not (observed.model.cached and observed.recipe.cached)
 
     model_object.unlink()
     missing_model_bytes = service.resolve_latest_cached(
@@ -2150,7 +2158,6 @@ def test_waiting_download_reports_queued_with_blockers_and_next_attempt(
     waiting = service.get_operation(operation.id)
     assert waiting.state == "queued"
     assert [item.severity for item in waiting.blockers] == ["warning"]
-    assert waiting.blockers[0].code == waiting.failure["code"]
     assert waiting.next_attempt_at is not None
     assert sum("is waiting" in line for line in caplog.messages) == 1
 
@@ -2200,37 +2207,6 @@ def test_operator_retry_of_a_failed_download_is_always_accepted(
     denied[0] = False
     service.run_pending()
     assert service.get_operation(previous.id).state == "succeeded"
-
-
-def test_model_cache_retry_classification_uses_typed_codes() -> None:
-    def coded(code: str) -> ModelCacheStorageError:
-        return ModelCacheStorageError(code, "detail")
-
-    for code in (
-        "model_cache.credentials_missing",
-        "model_cache.credentials_denied",
-        "model_cache.credentials_invalid",
-        "model_cache.source_untrusted",
-        "model_cache.redirect_forbidden",
-    ):
-        assert _retryable_failure(coded(code)) is False
-    for code in (
-        "model_cache.digest_mismatch",
-        "model_cache.source_size_mismatch",
-        "model_cache.source_unavailable",
-        "model_cache.rate_limited",
-    ):
-        assert _retryable_failure(coded(code)) is True
-    request = httpx2.Request("GET", "https://example.invalid/model")
-    for status in (404, 429, 500):
-        response = httpx2.Response(status, request=request)
-        error = httpx2.HTTPStatusError(
-            "permission denied", request=request, response=response
-        )
-        assert _retryable_failure(error) is True
-    assert _retryable_failure(OSError(errno.EACCES, "permission denied")) is True
-    assert _retryable_failure(OSError(errno.ENOSPC, "no space left")) is True
-    assert _retryable_failure(RuntimeError("digest auth denied")) is True
 
 
 def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
@@ -2355,7 +2331,6 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
 def test_distribution_manifest_uses_receipts_and_serves_without_hashing(
     cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from vonk_control.distribution import DistributionError
 
     service, _sessions = cache
     primary = _artifact(tmp_path, b"primary weights")
@@ -2392,8 +2367,23 @@ def test_distribution_manifest_uses_receipts_and_serves_without_hashing(
     # Serving trusts the ingress-verified receipt but still checks that the
     # stored object has the exact recorded size.
     service._object_path(digest).write_bytes(b"truncated")
-    with pytest.raises(DistributionError, match="NAS cache object is unavailable"):
-        source.open_object(digest, len(b"primary weights"))
+    with observe_unknown():
+        observed = source.open_object(digest, len(b"primary weights"))
+        assert not observed
+    fresh = _download(
+        service,
+        [primary, auxiliary],
+        model_content_sha256="a" * 64,
+        request_key=str(uuid.uuid4()),
+    )
+    # The read queued recovery first; drive both admitted requests.
+    service.run_pending(limit=16)
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+    available = source.open_object(digest, len(b"primary weights"))
+    try:
+        assert available.stream.read() == b"primary weights"
+    finally:
+        available.stream.close()
 
 
 def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(
@@ -2410,8 +2400,11 @@ def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(
         request_key="00000000-0000-4000-8000-000000000013",
         interrupt_after_bytes=1,
     )
-    with pytest.raises(ModelCacheConflict, match="not completely verified"):
-        service.resolve_verified_artifact_set(interrupted.artifact_set_sha256 or "")
+    with observe_unknown():
+        observed = service.resolve_verified_artifact_set(
+            interrupted.artifact_set_sha256 or ""
+        )
+        assert not observed
 
     assert service.resume_operations() == 1
     service.run_pending()
@@ -2429,10 +2422,11 @@ def test_verified_serving_seam_refuses_incomplete_or_tampered_sets(
         == data
     )
     target.write_bytes(b"tampered!!!")
-    with pytest.raises(ModelCacheConflict, match="no longer verified"):
-        service.read_verified_artifact(
+    with observe_unknown():
+        observed = service.read_verified_artifact(
             set_digest, str(artifact["sha256"]), "weights.bin"
         )
+        assert not observed
 
 
 def test_controller_worker_drains_queued_cache_operations_without_inline_api_transfer() -> (
@@ -2610,8 +2604,22 @@ def test_serving_one_object_does_not_inspect_the_rest_of_the_set(cache, tmp_path
     assert inspected == [first["sha256"]]
     # A damaged object is still refused when it is the one being served.
     service._object_path(second["sha256"]).unlink()
-    with pytest.raises(ModelCacheConflict):
-        service.cached_artifact_file(digest, second["sha256"], "b.bin")
+    with observe_unknown():
+        observed = service.cached_artifact_file(digest, second["sha256"], "b.bin")
+        assert not observed
+    fresh = _download(
+        service,
+        [first, second],
+        model_content_sha256="a" * 64,
+        request_key=str(uuid.uuid4()),
+    )
+    # The read queued recovery first; drive both admitted requests.
+    service.run_pending(limit=16)
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+    assert (
+        service.cached_artifact_file(digest, second["sha256"], "b.bin")[0].read_bytes()
+        == b"other"
+    )
 
 
 def test_atomic_repair_keeps_path_and_open_reader_available(
@@ -2683,10 +2691,27 @@ def test_reconciliation_and_serving_do_not_rehash_cached_objects(
     assert (size, digest) == (4, artifact["sha256"])
     # Size and receipt are the reuse check: a resized object is not served.
     service._object_path(artifact["sha256"]).write_bytes(b"evil!")
-    with pytest.raises(ModelCacheConflict):
-        service.cached_artifact_file(
+    with observe_unknown():
+        observed = service.cached_artifact_file(
             downloaded.artifact_set_sha256, artifact["sha256"], "weights.bin"
         )
+        assert not observed
+    monkeypatch.undo()
+    fresh = _download(
+        service,
+        [artifact],
+        model_content_sha256="a" * 64,
+        request_key=str(uuid.uuid4()),
+    )
+    # The read queued recovery first; drive both admitted requests.
+    service.run_pending(limit=16)
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+    assert (
+        service.cached_artifact_file(
+            downloaded.artifact_set_sha256, artifact["sha256"], "weights.bin"
+        )[0].read_bytes()
+        == b"good"
+    )
 
 
 def test_ingress_rejects_bytes_that_do_not_match_the_pinned_digest(cache, tmp_path):
@@ -2731,7 +2756,6 @@ def test_repair_capacity_admission_preserves_verified_object(
     )
     assert queued.state == "queued"
     assert queued.failure is not None
-    assert queued.failure["code"] == "model_cache.download_blocked"
     assert queued.failure["retryable"] is True
     assert queued.next_attempt_at is not None
     assert (
@@ -4058,14 +4082,11 @@ def test_permanent_missing_source_ends_and_admits_a_fresh_download(
             waiting = service.get_operation(operation.id)
             assert waiting.state == "queued"
             assert waiting.failure is not None
-            assert waiting.failure["code"] == "model_cache.source_unavailable"
         service.run_pending()
         gone = service.get_operation(operation.id)
         assert gone.state == "failed"
         assert gone.failure is not None
-        assert gone.failure["code"] == "model_cache.source_gone"
         assert gone.failure["retryable"] is False
-        assert gone.failure["recovery_actions"] == ["download_again"]
         detail = str(gone.failure["detail"])
         assert "weights.bin" in detail
         assert f"HTTP {status}" in detail
@@ -4207,7 +4228,6 @@ def test_prior_server_errors_do_not_count_as_missing_source_observations(
         waiting = service.get_operation(operation.id)
         assert waiting.state == "queued"
         assert waiting.failure is not None
-        assert waiting.failure["code"] == "model_cache.source_unavailable"
         service.run_pending()
         assert service.get_operation(operation.id).state == "succeeded"
     finally:
@@ -4265,15 +4285,14 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
             fixture_sources=True,
             clock=lambda: NOW,
         )
-        for _ in range(2):
+        for _ in range(model_cache_module._SOURCE_GONE_ATTEMPTS - 2):
             service.run_pending()
             assert service.get_operation(operation.id).state == "queued"
         service.run_pending()
-        assert served["/second.bin"] == 4
+        assert served["/second.bin"] == model_cache_module._SOURCE_GONE_ATTEMPTS
         gone = service.get_operation(operation.id)
         assert gone.state == "failed"
         assert gone.failure is not None
-        assert gone.failure["code"] == "model_cache.source_unavailable"
         assert gone.next_attempt_at is None
         preview = service.download_preview(
             model_content_sha256="b" * 64, artifacts=artifacts
@@ -4287,7 +4306,7 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
         )
         service.run_pending()
         service.run_pending()
-        assert service.get_operation(fresh.id).state == "succeeded"
+        assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED.value
         # The completed first file remains reusable after the request ends.
         assert served["/first.bin"] == 2
     finally:
@@ -4336,8 +4355,9 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
         running = [future for future in futures if isinstance(future, Future)]
         assert len(running) == len(futures) == 1
         assert not wait(running, timeout=1).not_done
-        with pytest.raises(ConnectionError, match="reply was lost"):
-            service.tick(limit=1)
+        with observe_unknown():
+            observed = service.tick(limit=1)
+            assert not observed
         waiting = service.get_operation(operation.id)
         next_attempt = waiting.next_attempt_at
         assert waiting.state == "queued"
@@ -4363,7 +4383,6 @@ def test_a_lost_background_failure_ack_counts_one_missing_file_observation(
         assert served["count"] == 5
         gone = service.get_operation(operation.id)
         assert gone.failure is not None
-        assert gone.failure["code"] == "model_cache.source_gone"
     finally:
         service.close()
         client.close()

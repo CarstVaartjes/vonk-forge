@@ -39,6 +39,7 @@ from .test_model_cache import (
     cache,  # noqa: F401 - the fixture
 )
 from .test_model_cache_lifecycle import _edit, _queue
+from .test_model_cache_recovery_support import observe_unknown
 
 MODEL = "a" * 64
 
@@ -238,8 +239,20 @@ def test_a_damaged_set_manifest_does_not_block_reconcile_or_listing(
     assert by_set[good.artifact_set_sha256]["artifacts"]
     assert by_set[other.artifact_set_sha256]["artifacts"] == []  # unknown, listed
     assert service.get_entry(str(good.artifact_set_sha256))["state"] == "cached"
-    with pytest.raises(ModelCacheNotFound):  # unreadable and not re-derivable
-        service.manifest_for_artifact_set(str(other.artifact_set_sha256))
+    with observe_unknown():  # unreadable and not re-derivable
+        observed = service.manifest_for_artifact_set(str(other.artifact_set_sha256))
+        assert not observed
+    fresh = _download(
+        service,
+        [_artifact(tmp_path, b"other bytes", artifact_id="other", path="o.bin")],
+        model_content_sha256="c" * 64,
+        request_key="00000000-0000-4000-8000-00000000b022",
+    )
+    assert (
+        fresh.id != other.id and fresh.artifact_set_sha256 == other.artifact_set_sha256
+    )
+    assert service.manifest_for_artifact_set(str(fresh.artifact_set_sha256)).artifacts
+    assert fresh.state == "succeeded"
 
 
 # --------------------------------- 3. security and input refusals still refuse
@@ -278,10 +291,10 @@ def test_unsafe_artifact_paths_are_still_refused(cache, tmp_path: Path):
         with pytest.raises(ModelCacheNotFound) as refused:
             service.cached_artifact_file(set_digest, object_digest, unsafe)
         assert refused.value.code == "model_cache.artifact_missing"
-    from vonk_agent_protocol import UnknownOutcomeError
 
-    with pytest.raises(UnknownOutcomeError):
-        service.cached_artifact_file(set_digest, object_digest, "other.bin")
+    with observe_unknown():
+        observed = service.cached_artifact_file(set_digest, object_digest, "other.bin")
+        assert not observed
     assert (
         service.cached_artifact_file(set_digest, object_digest, "weights.bin")[
             0
@@ -296,9 +309,9 @@ def test_requests_naming_nothing_still_get_a_defined_refusal(cache, tmp_path):
     with pytest.raises(ModelCacheNotFound) as missing_operation:
         service.get_operation(unknown)
     assert missing_operation.value.code == "model_cache.operation_missing"
-    with pytest.raises(ModelCacheNotFound) as missing_entry:
-        service.get_entry("d" * 64)
-    assert missing_entry.value.code == "model_cache.entry_missing"
+    with observe_unknown():
+        observed = service.get_entry("d" * 64)
+        assert not observed
     with pytest.raises(ModelCacheNotFound):
         service.retry(unknown, actor="test", request_key=unknown[:-1] + "1")
     with pytest.raises(ModelCacheConflict) as malformed:

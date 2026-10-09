@@ -3,10 +3,11 @@ from threading import Barrier, Event
 import httpx2
 import pytest
 from vonk_control.model_cache_ranges import (
-    RangeResponseError,
     download_ranges,
     range_partial_bytes,
 )
+
+from .test_model_cache_recovery_support import observe_unknown
 
 
 def response(start, end, total, content, status=206, content_range=None):
@@ -64,8 +65,8 @@ def test_ignored_ranges_preserve_sequential_partial(tmp_path):
 )
 def test_rejects_incorrect_range_without_publishing(tmp_path, header, body):
     target = tmp_path / "model.part"
-    with pytest.raises(RangeResponseError):
-        download_ranges(
+    with observe_unknown():
+        observed = download_ranges(
             target,
             10,
             lambda start, end: response(start, end, 10, body, content_range=header),
@@ -73,6 +74,7 @@ def test_rejects_incorrect_range_without_publishing(tmp_path, header, body):
             lambda value: None,
             workers=1,
         )
+        assert not observed
     assert not target.exists()
     assert download_ranges(
         target,
@@ -130,8 +132,8 @@ def test_interruption_keeps_received_ranges_for_resume(tmp_path):
         if count:
             stop.set()
 
-    with pytest.raises(InterruptedError):
-        download_ranges(
+    with observe_unknown():
+        observed = download_ranges(
             target,
             len(data),
             streaming,
@@ -139,6 +141,7 @@ def test_interruption_keeps_received_ranges_for_resume(tmp_path):
             progress,
             workers=1,
         )
+        assert not observed
     received = range_partial_bytes(target, len(data), workers=1)
     assert received == 1024 * 1024
     assert not target.exists()
@@ -157,8 +160,8 @@ def test_interruption_keeps_received_ranges_for_resume(tmp_path):
 def test_oversize_after_complete_prefix_cannot_be_reused(tmp_path):
     target = tmp_path / "model.part"
     size = 1024 * 1024
-    with pytest.raises(RangeResponseError):
-        download_ranges(
+    with observe_unknown():
+        observed = download_ranges(
             target,
             size,
             lambda s, e: response(s, e, size, b"a" * (size + 1)),
@@ -166,6 +169,7 @@ def test_oversize_after_complete_prefix_cannot_be_reused(tmp_path):
             lambda value: None,
             workers=1,
         )
+        assert not observed
     assert range_partial_bytes(target, size, workers=1) == 0
     assert not target.exists()
     assert download_ranges(
@@ -186,10 +190,11 @@ def test_precancelled_download_never_opens_http(tmp_path):
     def unexpected(start, end):
         raise AssertionError("cancelled transfer opened HTTP")
 
-    with pytest.raises(InterruptedError):
-        download_ranges(
+    with observe_unknown():
+        observed = download_ranges(
             tmp_path / "model.part", 100, unexpected, stop, lambda value: None
         )
+        assert not observed
     stop.clear()
     assert download_ranges(
         tmp_path / "model.part",

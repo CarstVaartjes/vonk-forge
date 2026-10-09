@@ -790,7 +790,22 @@ if __name__ == "__main__":
         model_cache,
         runtime_image_resolver=stored_runtime_image_resolver(runtime_image_storage),
     )
+    from .agent_services import build_enrollment_service
+    from .enrollment import EnrollmentService
+
+    enrollment = capabilities.guard(
+        ControllerCapability.CERTIFICATE_AUTHORITY,
+        EnrollmentService,
+        lambda: build_enrollment_service(settings, sessions, clock),
+    )
+
+    def reconcile_enrollment() -> bool:
+        if not settings.agent_runtime_enabled:
+            return False
+        return enrollment.reconcile_revocations()
+
     worker = assemble_production_worker(
+        background_services=(reconcile_enrollment,),
         capabilities=capabilities,
         distributed_start_timeout_seconds=DISTRIBUTED_START_TIMEOUT_SECONDS,
         jobs=jobs,

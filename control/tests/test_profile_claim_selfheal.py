@@ -11,12 +11,11 @@ reason that the profile and the Fleet both show, and resumes once room returns.
 
 from __future__ import annotations
 
-import uuid
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import RunSwitchCode
+from vonk_agent_protocol import LifecycleState, ReservationState, RunSwitchCode
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import (
     FleetProfileApplication,
@@ -108,15 +107,10 @@ def test_a_load_reserves_disk_again_when_its_claim_is_gone_or_stale(
     assert installation.state == "installed"
 
 
-def test_a_resumed_load_reserves_what_its_transient_failure_released(
+def test_a_transient_child_observation_retains_claims_and_recovers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The live trigger: a transient fault while advancing a live child.
-
-    That marks the application failed, which releases its unassigned claims;
-    resuming the still-live child (the retry) returns the same application to
-    running without them. The child then looped on the missing claim.
-    """
+    """A lost child observation preserves ownership until exact effects settle."""
 
     load = _load(tmp_path)
     assert _loop(load, lambda: _switch(load) is not None, complete=False, rounds=3)
@@ -134,22 +128,13 @@ def test_a_resumed_load_reserves_what_its_transient_failure_released(
     load.profiles.tick()
     with load.sessions() as session:
         row = session.get(FleetProfileApplication, load.application.id)
-        assert faults and row is not None and row.state == "failed"
+        assert faults and row is not None and row.state == LifecycleState.RUNNING
+        assert row.current_operation_id == faults[0]
     claims = _claims(load, owner_kind="fleet-profile", kind="disk")
-    assert claims and all(claim.state == "released" for claim in claims)
-
-    resumed = load.profiles.retry(
-        load.application.id, request_key=str(uuid.uuid4()), actor="admin"
-    )
-    assert resumed.id == load.application.id and resumed.state == "running"
-    # Every claim the failure released is back, so the strict start checks
-    # (reviewed ports and memory) find the promises they were reviewed with.
-    restored = _claims(load, owner_kind="fleet-profile")
-    assert {(claim.kind, claim.state) for claim in restored} == {
-        ("disk", "active"),
-        ("port", "promised"),
-        ("unified-memory", "promised"),
-    }
+    assert claims and all(claim.state == ReservationState.ACTIVE for claim in claims)
+    # Unknown observations retain claims and the exact child. Recovery follows
+    # its persisted due time, without an operator retry or replacement receipt.
+    _follow_due(load)
     assert _settle(load), _application(load).status_reason
     (installation,) = _installed(load)
     assert installation.state == "installed"

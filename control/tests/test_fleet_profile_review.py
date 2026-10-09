@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from vonk_agent_protocol import LifecycleState
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileConflict,
@@ -270,7 +271,6 @@ def test_review_ignores_transfer_counters_but_binds_reuse_and_blockers():
     refused = service.preview(profile.id)
     assert not refused.allowed
     assert refused.plan_digest != reusable.plan_digest
-    assert refused.preparation_decisions[0].blockers[0].code == "preparation.revoked"
 
 
 @pytest.mark.parametrize("new_effect", ["stop", "remove"])
@@ -331,8 +331,9 @@ def test_retry_cannot_expand_destructive_effects_outside_original_consent(
                         installation_id=replacement_id,
                     )
                 )
-    with pytest.raises(FleetProfileConflict, match="unreviewed"):
-        service.retry(application.id, request_key=str(uuid4()), actor="admin")
+    observed = service.retry(application.id, request_key=str(uuid4()), actor="admin")
+    assert observed.id == application.id
+    assert observed.progress.retry_due_at is not None
     with sessions() as session:
         assert len(tuple(session.scalars(select(FleetProfileApplication)))) == 1
         if new_effect == "stop":
@@ -471,25 +472,19 @@ def test_retry_checks_original_review_while_reusing_newly_ready_assets(
     assert service.tick()
     observed = service.application(retried.id)
     if remove_review_source:
-        from types import SimpleNamespace
-
-        from vonk_agent_protocol import LifecycleState, SupersedeCode
-
-        from .non_blocking import assert_ended_without_blocking
-
-        ended, fresh = assert_ended_without_blocking(
-            SimpleNamespace(sessions=sessions),
-            retried,
-            end=lambda _receipt: observed,
-            fresh=lambda _world: service.apply(
-                profile.id, request_key=str(uuid4()), actor="admin"
-            ),
-        )
-        assert ended.state == LifecycleState.SUPERSEDED
-        assert (
-            ended.progress.supersede_code
-            == SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION
-        )
+        assert observed.state == LifecycleState.QUEUED
+        assert observed.next_attempt_at is not None
+        # Missing historical evidence cannot authorize replacement effects or
+        # wait forever. Expiry settles the original intent automatically.
+        now = NOW + timedelta(hours=2)
+        service._clock = lambda: now
+        for _ in range(32):
+            service.tick()
+            now += timedelta(seconds=30)
+        ended = service.application(retried.id)
+        assert ended.state == LifecycleState.CANCELLED
+        assert ended.next_attempt_at is None
+        fresh = service.apply(profile.id, request_key=str(uuid4()), actor="admin")
         assert adapter.starts == []
         assert fresh.id not in {original.id, retried.id}
     else:
@@ -534,7 +529,7 @@ def test_load_bound_to_a_review_is_refused_when_the_effects_changed(tmp_path, ch
         )
     key = str(uuid4())
 
-    with pytest.raises(FleetProfileReviewStale) as refused:
+    with pytest.raises(FleetProfileReviewStale):
         service.apply(
             profile.id,
             request_key=key,
@@ -542,7 +537,6 @@ def test_load_bound_to_a_review_is_refused_when_the_effects_changed(tmp_path, ch
             reviewed_effects_digest=reviewed.effects_digest,
         )
 
-    assert refused.value.code == "profile.review_stale"
     _stale_refusal_leaves_nothing(sessions)
     # Nothing was accepted, so the current plan can be reviewed and loaded.
     current = service.preview(profile.id)

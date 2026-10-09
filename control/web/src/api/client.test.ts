@@ -1,3 +1,10 @@
+import {
+  EnrollmentGrantState,
+  ErrorCategory,
+  LifecycleState,
+  WaitReason,
+} from "./vocabulary.generated";
+import { ApiError } from "./errors";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiClient } from "./client";
 import { ContractResponseTooLarge, validateComponent } from "./contract-json";
@@ -108,7 +115,7 @@ test("creates a Fleet enrollment grant through the current operator endpoint", a
     return new Response(
       JSON.stringify({
         action: "enroll",
-        state: "created",
+        state: EnrollmentGrantState.PENDING,
         grant: {
           id: "00000000-0000-4000-8000-000000000101",
           expires_at: SINCE,
@@ -415,4 +422,37 @@ test("gateway uncertainty preserves its reason and a fresh observation succeeds"
   });
   unavailable = false;
   await expect(client.gatewayKeys()).resolves.toEqual({ keys: [] });
+});
+
+test("an unknown enrollment revocation preserves observation and admits a fresh revocation", async () => {
+  setCsrfCookie();
+  const grantId = "00000000-0000-4000-8000-000000000101";
+  const replies = [
+    {
+      category: ErrorCategory.UNKNOWN,
+      reason: WaitReason.OBSERVATION_UNAVAILABLE,
+      state: LifecycleState.FAILED,
+    },
+    {
+      id: grantId,
+      state: EnrollmentGrantState.REVOKED,
+      purpose: null,
+      node_id: null,
+      display_name: null,
+      consumed_at: null,
+      revoked_at: SINCE,
+      expires_at: SINCE,
+    },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    async () =>
+      new Response(JSON.stringify(replies.shift()), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
+  const client = new ApiClient();
+  await expect(client.revokeEnrollment(grantId)).rejects.toBeInstanceOf(ApiError);
+  expect((await client.revokeEnrollment(grantId)).state).toBe(EnrollmentGrantState.REVOKED);
 });

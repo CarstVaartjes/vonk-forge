@@ -42,9 +42,6 @@ from ..recipe_operations import RecipeOperationConflict
 from ..reservation_owners import release_dead_owner_reservations
 from ..run_switch_contract import RunSwitchStopResult
 from ..strict_json import read_stored_model
-from .activity import (
-    retry_disposition_of,
-)
 from .contracts import (
     FleetProfileChildPlanBlocked,
     FleetProfileConflict,
@@ -55,8 +52,6 @@ from .contracts import (
 from .dependencies import (
     _CHILD_FAILED_STATES,
     _CHILD_PENDING_STATES,
-    RETRY_SUPERSEDE,
-    RETRY_WAIT,
 )
 from .persistence import (
     _persisted_profile_plan,
@@ -130,56 +125,45 @@ class FleetProfileService:
                         recovery_deferred = True
                 # No replacement intent or unknown-output build was admitted.
                 # The existing backoff revisits this receipt after cache repair.
-            except (FleetProfileConflict, FleetProfilePermissionDenied) as error:
+            except (
+                UnknownOutcomeError,
+                FleetProfileConflict,
+                FleetProfilePermissionDenied,
+            ) as error:
                 preparation_blockers = (
                     self._request_recovery_preparations(application_id)
-                    if retry_disposition_of(error) == RETRY_WAIT
-                    and not is_security_failure(error_code(error))
+                    if not is_security_failure(error_code(error))
                     else []
                 )
                 with self._sessions.begin() as session:
                     row = session.get(
                         FleetProfileApplication, application_id, with_for_update=True
                     )
-                    disposition = retry_disposition_of(error)
-                    if (
-                        row is not None
-                        and disposition == RETRY_SUPERSEDE
-                        and self._lifecycle.retry_pending(row)
-                    ):
-                        # What waiting cannot change (a stale review, a lost
-                        # selection, a superseded intent) never becomes valid:
-                        # end the application so the client re-reviews and
-                        # re-submits instead of parking it forever.
-                        self._lifecycle.supersede(
-                            row,
-                            str(error),
-                            _aware(self._clock()),
-                            code=error.supersede_code
-                            if isinstance(error, FleetProfileConflict)
-                            else SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION,
-                            session=session,
-                        )
-                        recovery_deferred = True
-                    elif (
-                        row is not None
-                        and disposition == RETRY_WAIT
-                        and not is_security_failure(error_code(error))
-                        and self._retry_eligible(session, row)
-                    ):
-                        self._park_for_retry(
-                            row,
-                            _persisted_profile_progress(row),
-                            [
-                                make_blocker(
-                                    error_code(error)
-                                    or ProfileReasonCode.RETRY_CONFLICT,
-                                    str(error) or "The profile could not be retried",
-                                ),
-                                *preparation_blockers,
-                            ],
-                            because=error,
-                        )
+                    if row is not None and self._lifecycle.retry_pending(row):
+                        progress = _persisted_profile_progress(row)
+                        if self._superseding_intent(session, row, progress):
+                            self._lifecycle.supersede(
+                                row,
+                                str(error),
+                                _aware(self._clock()),
+                                code=SupersedeCode.SUPERSEDED_BY_INTENT,
+                                session=session,
+                            )
+                        else:
+                            self._park_for_retry(
+                                row,
+                                progress,
+                                [
+                                    make_blocker(
+                                        error_code(error)
+                                        or ProfileReasonCode.RETRY_CONFLICT,
+                                        str(error)
+                                        or "Profile effect observation is unavailable",
+                                    ),
+                                    *preparation_blockers,
+                                ],
+                                because=error,
+                            )
                         recovery_deferred = True
             else:
                 return True
@@ -262,14 +246,7 @@ class FleetProfileService:
             if progress.intended_profile is not None:
                 intended = self._intended_profile(row, session=session)
                 if isinstance(intended, Residue):
-                    self._lifecycle.supersede(
-                        row,
-                        intended.note,
-                        now,
-                        code=SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION,
-                        effect=_LifecycleEffect.UNKNOWN,
-                        session=session,
-                    )
+                    self._defer_exact_step(row, progress, intended.note, now)
                     return True
             if (
                 progress.retry_due_at is not None
@@ -288,6 +265,13 @@ class FleetProfileService:
                 # Defensive parity with the SQL exclusion above. Never let a
                 # malformed query or dialect quirk monopolize ordinary work.
                 return cancellation_observed
+            if not self._application_is_current_selection(
+                session, row, progress
+            ) and not self._superseding_intent(session, row, progress):
+                self._defer_exact_step(
+                    row, progress, "Selected intent observation is unavailable", now
+                )
+                return True
             if not self._application_is_current_selection(session, row, progress):
                 self._lifecycle.supersede(
                     row,
@@ -326,28 +310,16 @@ class FleetProfileService:
                     )
                     return True
                 except UnknownOutcomeError as error:
-                    if retry_disposition_of(error) == RETRY_WAIT:
-                        self._defer_exact_step(
-                            row, _persisted_profile_progress(row), str(error), now
-                        )
-                    else:
-                        self._lifecycle.cancelled(
-                            row,
-                            str(error),
-                            now,
-                            effect=_LifecycleEffect.UNKNOWN,
-                            session=session,
-                        )
+                    self._defer_exact_step(
+                        row, _persisted_profile_progress(row), str(error), now
+                    )
                     return True
                 except (KeyError, RuntimeError, ValueError) as error:
-                    # A damaged persisted document is retained as the evidence of
-                    # what was issued (a missing child record is reconciled before
-                    # this point, by issuing the step again).
-                    self._lifecycle.fail(
+                    self._defer_exact_step(
                         row,
-                        str(error) or "Child operation is unavailable",
+                        _persisted_profile_progress(row),
+                        str(error) or "Child observation is unavailable",
                         now,
-                        session=session,
                     )
                     return True
                 # The adapter may have checkpointed its child in this same
@@ -598,6 +570,7 @@ class FleetProfileService:
                 actor=actor,
             )
         except (
+            UnknownOutcomeError,
             KeyError,
             RecipeOperationConflict,
             FleetProfileChildPlanBlocked,
@@ -628,55 +601,41 @@ class FleetProfileService:
                             "Cancellation is reconciling the profile child: "
                             + (str(error)[:360] or "child start was interrupted")
                         )[:512]
-                    elif isinstance(error, FleetProfilePermissionDenied) or (
-                        isinstance(error, UnknownOutcomeError)
-                        and retry_disposition_of(error) == RETRY_WAIT
+                    elif isinstance(
+                        error, FleetProfilePermissionDenied | UnknownOutcomeError
                     ):
                         failed_progress = _persisted_profile_progress(failed)
-                        if self._application_is_current_selection(
-                            session, failed, failed_progress
-                        ):
+                        if self._superseding_intent(session, failed, failed_progress):
+                            self._lifecycle.supersede(
+                                failed,
+                                "A newer accepted intent owns the effects",
+                                _aware(self._clock()),
+                                code=SupersedeCode.SUPERSEDED_BY_INTENT,
+                                session=session,
+                            )
+                        else:
                             self._defer_exact_step(
                                 failed,
                                 failed_progress,
                                 str(error),
                                 _aware(self._clock()),
-                                code=(
-                                    ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE
-                                    if isinstance(error, FleetProfilePermissionDenied)
-                                    else ProfileReasonCode.RETRY_CONFLICT
-                                ),
+                                code=ProfileReasonCode.SWITCH_AUTHORITY_UNAVAILABLE
+                                if isinstance(error, FleetProfilePermissionDenied)
+                                else ProfileReasonCode.RETRY_CONFLICT,
                             )
-                        else:
-                            self._lifecycle.supersede(
-                                failed,
-                                "A newer selected intent replaced the retry",
-                                _aware(self._clock()),
-                                code=SupersedeCode.SUPERSEDED_BY_INTENT,
-                                session=session,
-                            )
-                    elif isinstance(
-                        error, FleetProfileReviewStale | UnknownOutcomeError
-                    ):
-                        # The reviewed plan no longer matches what the child
-                        # would do, or an admission owner is busy or evidence is
-                        # unavailable: end the load (superseded) so it never
-                        # blocks other work, and the client loads again. The
-                        # oldest row is otherwise picked again at once, so a
-                        # retry here would starve the rest of the queue.
-                        self._lifecycle.supersede(
+                    elif isinstance(error, FleetProfileReviewStale):
+                        self._defer_exact_step(
                             failed,
+                            _persisted_profile_progress(failed),
                             str(error),
                             _aware(self._clock()),
-                            code=SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION,
-                            session=session,
                         )
                     else:
-                        self._lifecycle.fail(
+                        self._defer_exact_step(
                             failed,
-                            str(error) or "Profile operation could not be started",
+                            _persisted_profile_progress(failed),
+                            str(error) or "Profile child observation is unavailable",
                             _aware(self._clock()),
-                            session=session,
                         )
                     failed.updated_at = _aware(self._clock())
             return True

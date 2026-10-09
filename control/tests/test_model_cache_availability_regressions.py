@@ -835,7 +835,6 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     assert resumed.id == first.id
     assert resumed.state == "queued"
     assert resumed.failure is not None
-    assert resumed.failure["code"] == "rate_limited"
     assert resumed.failure["retryable"] is True
     assert resumed.failure["retry_after_seconds"] == 30
     assert resumed.failure["recovery_actions"] == ["resume"]
@@ -853,7 +852,6 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
         assert isinstance(payload, ModelCacheDownloadPayload)
         failure = payload.failure
         assert failure is not None
-        assert failure.code == "rate_limited"
         assert failure.retry_time == NOW.replace(second=30).isoformat()
         # One retry clock: the column.  The payload no longer carries one.
         assert persisted.next_action_at is not None

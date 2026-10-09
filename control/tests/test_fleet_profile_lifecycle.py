@@ -33,7 +33,6 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileSwitchChildState,
 )
 from vonk_control.fleet_profiles import (
-    FleetProfileConflict,
     build_production_fleet_profile_service,
 )
 from vonk_control.lifecycle import (
@@ -401,8 +400,11 @@ def test_a_repeated_cancel_request_replays_and_a_different_one_is_refused(
     again = world.cancel(710)
     assert again.cancellation is not None and first.cancellation is not None
     assert again.cancellation.request_key == first.cancellation.request_key
-    with pytest.raises(FleetProfileConflict):
-        world.cancel(711)
+    later = world.cancel(711)
+    assert later.cancellation is not None
+    assert later.cancellation.request_key == first.cancellation.request_key
+    fresh = world.service.apply(world.profile.id, request_key=_uuid(712), actor="admin")
+    assert fresh.id != world.id
 
 
 # ----------------------------------------------- a bookkeeping mismatch heals

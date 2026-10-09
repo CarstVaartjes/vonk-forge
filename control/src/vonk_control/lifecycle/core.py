@@ -70,8 +70,8 @@ OBSERVE_BUDGET = 8
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
 #: to ``STOP_BUDGET`` ticks.
 STOP_BUDGET = 6
-#: Stable jittered backoff and a finite failure budget. The durable retry
-#: counter survives restart; exhaustion ends this request without banning new work.
+#: Stable jittered backoff, shared with the rest of the Controller. The rate is
+#: bounded; lifetime is bounded by the adapter deadline or persisted attempts.
 RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
 _RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
@@ -86,6 +86,39 @@ def transition(
         return Decision(row)
     if _stale(row, event):
         return Decision(row)
+    # Adapters may supply a request-owned absolute recovery deadline. Keeping
+    # this optional preserves continuing intent adapters; they bound each child.
+    deadline_reader = getattr(adapter, "recovery_deadline", None)
+    deadline = deadline_reader(row) if deadline_reader is not None else None
+    if (
+        deadline is not None
+        and now >= deadline
+        and not row.cancel_requested
+        and not isinstance(event, CancelRequested)
+    ):
+        if isinstance(event, Observed):
+            established = event.effect is Effect.ESTABLISHED
+            return Decision(
+                replace(
+                    row,
+                    state=State.SUCCEEDED if established else State.FAILED,
+                    effect=event.effect,
+                    next_action_at=None,
+                    lease_deadline=None,
+                    reason=event.reason or row.reason,
+                )
+            )
+        return Decision(
+            replace(
+                row,
+                state=State.OBSERVING,
+                next_action_at=now,
+                lease_deadline=None,
+                observe_count=row.observe_count + 1,
+                effect=Effect.UNKNOWN,
+            ),
+            (Observe(),),
+        )
     match event:
         case CancelRequested():
             return _cancel(row, event, now)
@@ -156,8 +189,10 @@ def _due(
     scheduled = RECOVERY.next_attempt(
         row.id, max(count, 1), now, retry_after=not_before, ongoing_intent=True
     )
-    assert scheduled is not None  # ongoing_intent never exhausts
-    return scheduled
+    scheduled = scheduled or now
+    deadline_reader = getattr(adapter, "recovery_deadline", None)
+    deadline = deadline_reader(row) if deadline_reader is not None else None
+    return scheduled if deadline is None else min(scheduled, deadline)
 
 
 def _retry(
@@ -172,7 +207,9 @@ def _retry(
     """Rule 1: schedule the next attempt; never an operator wait."""
 
     count = row.retry_count + 1
-    if count >= RECOVERY.max_failures:
+    deadline_reader = getattr(adapter, "recovery_deadline", None)
+    deadline = deadline_reader(row) if deadline_reader is not None else None
+    if deadline is None and count >= RECOVERY.max_failures:
         why = reason or row.reason or "operation recovery attempts exhausted"
         return Decision(
             replace(
@@ -262,7 +299,7 @@ def _unknown_after_observation(
     if not adapter.irreversible(row) or blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=reason)
     if row.observe_count >= OBSERVE_BUDGET:
-        return _end_recovery(row, Effect.UNKNOWN)
+        return _end_recovery(replace(row, reason=reason or row.reason), Effect.UNKNOWN)
     return Decision(
         replace(
             row,
@@ -462,6 +499,23 @@ def _observed(
         )
     if row.state not in {State.OBSERVING, State.NEEDS_OPERATOR}:
         return Decision(row)
+    deadline_reader = getattr(adapter, "recovery_deadline", None)
+    deadline = deadline_reader(row) if deadline_reader is not None else None
+    if (
+        deadline is None
+        and row.retry_count >= RECOVERY.max_failures
+        and event.effect is not Effect.ESTABLISHED
+    ):
+        return Decision(
+            replace(
+                row,
+                state=State.FAILED,
+                effect=event.effect,
+                next_action_at=None,
+                lease_deadline=None,
+                reason=event.reason or row.reason,
+            )
+        )
     match event.effect:
         case Effect.ESTABLISHED:
             return Decision(

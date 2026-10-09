@@ -22,7 +22,11 @@ from .artifacts import (
     _validate_artifact,
 )
 from .catalog_helpers import _source_for_catalog_artifact
-from .errors import ModelCacheResolutionInvalid, ModelCacheResolutionRefused
+from .errors import (
+    ModelCacheResolutionInvalid,
+    ModelCacheResolutionRefused,
+    ModelCacheStorageUnknown,
+)
 from .input_contracts import CatalogArtifact, FixtureArtifact
 
 if TYPE_CHECKING:
@@ -33,29 +37,21 @@ class CatalogMixin:
     """Catalog behavior of the cache service."""
 
     @staticmethod
-    def _newest_readable_revision(
+    def _readable_content_revision(
         session: Session, row: CatalogDocumentRevision
     ) -> CatalogDocumentRevision | None:
-        """Newest active revision of the same document this Controller can read.
-
-        A revision written under another contract, or since replaced, is not
-        usable but must not stop a manifest: the same recipe or model is
-        resolved from its newest readable revision instead.
-        """
-
+        """Recover exact content from another provenance record, never a head."""
+        if (
+            not isinstance(row.content_digest, str)
+            or not _is_hex(row.content_digest)
+            or len(row.content_digest) != 64
+        ):
+            return None
         for candidate in session.scalars(
-            select(CatalogDocumentRevision)
-            .where(
+            select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == row.kind,
-                CatalogDocumentRevision.document_id == row.document_id,
-                CatalogDocumentRevision.state == "active",
+                CatalogDocumentRevision.content_digest == row.content_digest,
             )
-            .order_by(
-                CatalogDocumentRevision.revision_number.desc(),
-                CatalogDocumentRevision.created_at.desc(),
-                CatalogDocumentRevision.id.desc(),
-            )
-            .limit(16)
         ):
             try:
                 read_catalog_document(candidate)
@@ -69,45 +65,35 @@ class CatalogMixin:
         session: Session,
         digest: str | None,
         revision_id: str | None,
-        *,
-        tolerant: bool = False,
     ) -> tuple[RecipeDefinition, str, str]:
         cache = cast("ModelCacheService", self)
         if revision_id is not None:
             revision = session.get(CatalogDocumentRevision, revision_id)
-            if tolerant and revision is not None and revision.kind == "recipe":
-                readable = revision.state == "active"
-                if readable:
-                    try:
-                        read_catalog_document(revision)
-                    except CatalogRevisionContractError:
-                        readable = False
-                if not readable:
-                    revision = cache._newest_readable_revision(session, revision)
+            if revision is not None:
+                revision = cache._readable_content_revision(session, revision)
         else:
-            revision = session.scalar(
+            candidates = session.scalars(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.kind == "recipe",
                     CatalogDocumentRevision.content_digest == digest,
-                    CatalogDocumentRevision.state == "active",
                 )
             )
-        if (
-            revision is None
-            or revision.kind != "recipe"
-            or revision.state != "active"
-            or not isinstance(revision.content_digest, str)
-        ):
-            raise ModelCacheResolutionInvalid(
+            revision = None
+            for candidate in candidates:
+                revision = cache._readable_content_revision(session, candidate)
+                if revision is not None:
+                    break
+        if revision is None or revision.kind != "recipe":
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.RECIPE_REVISION_MISSING,
-                "exact recipe revision is not resolved",
+                "exact recipe content is not observable",
             )
         try:
             recipe = read_catalog_document(revision)
             if not isinstance(recipe, RecipeDefinition):
                 raise InvalidType("catalog revision is not a recipe")
         except (TypeError, ValueError) as error:
-            raise ModelCacheResolutionInvalid(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.RECIPE_INVALID, "canonical recipe definition is invalid"
             ) from error
         return recipe, revision.id, revision.content_digest
@@ -119,23 +105,22 @@ class CatalogMixin:
         rows: dict[str, CatalogDocumentRevision],
         *,
         visiting: set[str] | None = None,
-        aliases: dict[str, str] | None = None,
     ) -> None:
         cache = cast("ModelCacheService", self)
         if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != 64:
-            raise ModelCacheResolutionInvalid(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.MODEL_PIN_INVALID, "model dependency pin is invalid"
             )
         if digest in rows:
             if visiting is not None and digest in visiting:
-                raise ModelCacheResolutionInvalid(
+                raise ModelCacheStorageUnknown(
                     ModelCacheCode.MODEL_DEPENDENCY_CYCLE,
                     "canonical model dependency graph contains a cycle",
                 )
             return
         active = visiting if visiting is not None else set()
         if digest in active:
-            raise ModelCacheResolutionInvalid(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.MODEL_DEPENDENCY_CYCLE,
                 "canonical model dependency graph contains a cycle",
             )
@@ -144,35 +129,16 @@ class CatalogMixin:
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.content_digest == digest,
-                CatalogDocumentRevision.state == "active",
             )
         )
+        if row is not None:
+            row = cache._readable_content_revision(session, row)
         if row is None:
             active.remove(digest)
-            raise ModelCacheResolutionInvalid(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.MODEL_DEFINITION_MISSING,
-                "exact model definition is not resolved",
+                "exact model content is not observable",
             )
-        if aliases is not None:
-            try:
-                read_catalog_document(row)
-            except CatalogRevisionContractError:
-                # Tolerant resolution: the same model's newest readable
-                # revision stands in, keyed by its own digest.
-                substitute = cache._newest_readable_revision(session, row)
-                if substitute is not None and isinstance(
-                    substitute.content_digest, str
-                ):
-                    aliases[digest] = substitute.content_digest
-                    active.remove(digest)
-                    cache._collect_model_definitions(
-                        session,
-                        substitute.content_digest,
-                        rows,
-                        visiting=active,
-                        aliases=aliases,
-                    )
-                    return
         try:
             definition = read_catalog_document(row)
             if not isinstance(definition, ModelDefinition):
@@ -184,10 +150,9 @@ class CatalogMixin:
                     dependency.content_sha256,
                     rows,
                     visiting=active,
-                    aliases=aliases,
                 )
         except (TypeError, ValueError) as error:
-            raise ModelCacheResolutionInvalid(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.MODEL_DEFINITION_INVALID,
                 "canonical model definition is invalid",
             ) from error
@@ -212,7 +177,7 @@ class CatalogMixin:
             or not isinstance(raw_path, str)
             or not isinstance(raw_kind, str)
         ):
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.ARTIFACT_INVALID,
                 "catalog artifact identity is incomplete",
             )
@@ -221,7 +186,7 @@ class CatalogMixin:
             or not isinstance(raw_bytes, int)
             or not isinstance(roles, list)
         ):
-            raise ModelCacheResolutionRefused(
+            raise ModelCacheStorageUnknown(
                 ModelCacheCode.ARTIFACT_INVALID,
                 "catalog artifact integrity metadata is incomplete",
             )
@@ -297,7 +262,10 @@ class CatalogMixin:
         source = artifact.source or (
             repository if kind in {"http.file", "file"} else None
         )
-        assert source is not None  # the ingress contract requires a source
+        if source is None:
+            raise ModelCacheResolutionInvalid(
+                ModelCacheCode.ARTIFACT_INVALID, "cache artifact source is required"
+            )
         revision = artifact.revision
         digest = artifact.sha256
         expected_bytes = artifact.download_bytes
