@@ -11,8 +11,9 @@ use url::Url;
 use vonk_agent::{
     config::AgentConfig,
     identity::{
-        IdentityMaterial, active_identity_paths, generate_pending, persist_identity, persist_pending,
-        prepare_pending, publish_staged, renewal_due, stage_identity, staged_identity_paths,
+        IdentityMaterial, active_identity_paths, generate_pending, persist_identity,
+        persist_pending, prepare_pending, publish_staged, renewal_due, stage_identity,
+        staged_identity_paths,
     },
     pair::{
         EnrollmentEvidence, IssuedCertificateResponse, PairingError, pair,

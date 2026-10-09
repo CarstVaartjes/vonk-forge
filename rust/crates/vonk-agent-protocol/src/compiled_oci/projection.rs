@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use crate::compiled_execution_plan::CompiledExecutionPlan;
 
 use super::validation::{
-    model_source, model_target, ordered_environment, publications, validate_paths, validate_security,
+    model_source, model_target, ordered_environment, publications, validate_paths,
+    validate_security,
 };
 use super::{
     CompiledOciError, CompiledOciInvocation, CompiledOciPaths, OciImageReceipt, OciMount,

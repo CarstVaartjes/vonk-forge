@@ -7,8 +7,8 @@ use crate::{
     config::AgentConfig,
     identity::{
         IdentityError, IdentityMaterial, active_identity_paths, clear_pending, identity_expired,
-        observe_staged_identity, prepare_pending, publish_staged, renewal_due, retire_expired_staged,
-        stage_identity, staged_identity_paths,
+        observe_staged_identity, prepare_pending, publish_staged, renewal_due,
+        retire_expired_staged, stage_identity, staged_identity_paths,
     },
     pair::{PairingError, validate_issued},
     vocabulary,

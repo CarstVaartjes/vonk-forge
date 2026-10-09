@@ -55,8 +55,7 @@ fn exec_accounting_accepts_empty_and_multiline_arguments_at_exact_limit() {
         total_bytes: u64::MAX,
         string_bytes: u64::MAX,
     };
-    let usage =
-        measure_exec_invocation("/usr/bin/docker", &args, &environment, unbounded).unwrap();
+    let usage = measure_exec_invocation("/usr/bin/docker", &args, &environment, unbounded).unwrap();
     let exact = ExecInvocationLimits {
         total_bytes: usage.total_bytes,
         string_bytes: usage.largest_string_bytes,

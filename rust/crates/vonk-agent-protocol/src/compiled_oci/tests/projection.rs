@@ -13,9 +13,7 @@ fn fixture_projects_colliding_selection_files_without_flattening() {
     assert_eq!(invocation.mounts[0].target, "/models/target/config.json");
     assert_eq!(
         invocation.mounts[1].source,
-        std::path::Path::new(
-            "/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json"
-        )
+        std::path::Path::new("/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json")
     );
     assert_eq!(invocation.mounts[1].target, "/models/draft/config.json");
     assert!(invocation.mounts[0].read_only && invocation.mounts[1].read_only);
@@ -205,9 +203,7 @@ fn identical_receipts_may_be_reused_by_separate_selections() {
     );
     assert_eq!(
         invocation.mounts[1].source,
-        std::path::Path::new(
-            "/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json"
-        )
+        std::path::Path::new("/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json")
     );
 }
 

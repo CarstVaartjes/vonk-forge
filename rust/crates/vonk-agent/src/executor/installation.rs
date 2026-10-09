@@ -349,7 +349,8 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             ) {
                 // An absent installation still needs privileged runtime cleanup.
                 // Other repair failures preserve bytes until custody is proven.
-                if !matches!(&error, OciError::Io(io) if io.kind() == std::io::ErrorKind::NotFound) {
+                if !matches!(&error, OciError::Io(io) if io.kind() == std::io::ErrorKind::NotFound)
+                {
                     return unconfirmed(
                         WaitReason::CleanupUnconfirmed,
                         "installation discovery repair is unconfirmed",
@@ -384,9 +385,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             .await
         {
             let authority_denied = match &error {
-                crate::host_runtime::HostRuntimeError::Controller(
-                    ClientError::Controller(reply),
-                ) => matches!(reply.status, 401 | 403),
+                crate::host_runtime::HostRuntimeError::Controller(ClientError::Controller(
+                    reply,
+                )) => matches!(reply.status, 401 | 403),
                 crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
                     matches!(
                         code,

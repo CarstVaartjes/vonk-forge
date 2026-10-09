@@ -487,7 +487,8 @@ def test_recipe_installation_reconcile_submits_without_a_preview() -> None:
     )
 
     assert status == 2
-    assert len(client.calls) <= 5
+    assert isinstance(_result["observation"], dict)
+    assert sum(call[0] == "POST" for call in client.calls) == 1
     assert all(call[0] == "GET" for call in client.calls[2:])
     assert client.calls[1][2] == {"request_key": key}
 
@@ -939,9 +940,7 @@ def test_recipe_sync_status_treats_a_missing_sync_as_never_run() -> None:
     assert status == 0 and payload == {"state": "never-run"}
 
 
-def test_fleet_resume_requires_owner_advertised_action_and_posts_explicit_intent() -> (
-    None
-):
+def test_fleet_resume_forwards_explicit_intent_without_projection_gate() -> None:
     job_id = "11111111-1111-4111-8111-111111111111"
     detail = {
         "id": job_id,
@@ -960,7 +959,6 @@ def test_fleet_resume_requires_owner_advertised_action_and_posts_explicit_intent
 
     assert status == 0 and payload == accepted
     assert client.calls == [
-        ("GET", f"/api/jobs/{job_id}", None, None),
         ("POST", f"/api/jobs/{job_id}/resume", {"disposition": "resume"}, None),
     ]
 
@@ -1702,7 +1700,12 @@ def test_cache_remove_rejects_receipt_for_another_intent_before_follow(
     assert isinstance(observation, dict) and observation["status"] == "timed_out"
     assert payload["result"] == {}
     methods = [call[0] for call in client.calls]
-    assert methods.count("POST") == (0 if model_receipt_only_reconnect else 1)
+    assert methods.count("POST") == 1
+    if model_receipt_only_reconnect:
+        # Damaged lookup bookkeeping replays the same keyed owner request.
+        assert next(call[2] for call in client.calls if call[0] == "POST") == {
+            "request_key": request_key
+        }
     assert methods.count("GET") >= 4
     # A distinct request is admitted immediately after the bounded observer ends.
     repaired = receipt | {
@@ -2086,7 +2089,6 @@ def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
     assert "ambiguous spark selector" in ambiguous_error
     assert [call[1] for call in client.calls] == [
         "/api/profile/1/definition",
-        "/api/recipe/library",
         "/api/fleet",
     ]
 
@@ -3106,7 +3108,7 @@ def test_profile_revision_conflict_is_reported_without_a_second_write() -> None:
     )
     assert status == 2
     assert payload["error"] == "profile revision conflict"
-    assert [call[0] for call in client.calls] == ["GET", "GET", "GET", "PUT"]
+    assert [call[0] for call in client.calls] == ["GET", "GET", "PUT"]
 
 
 def test_ambiguous_mutation_error_is_not_retried_or_fuzzily_resolved() -> None:
@@ -4527,6 +4529,11 @@ def _run_responses(**overrides: object) -> dict[tuple[str, str], object]:
         ("GET", "/api/recipe/library"): {
             "recipes": [_recipe_projection("vonk-forge/qwen-code", "Qwen Code")],
             "next_cursor": None,
+        },
+        ("GET", "/api/recipe/vonk-forge%2Fqwen-code"): {
+            "document": _recipe_projection("vonk-forge/qwen-code", "Qwen Code")[
+                "document"
+            ]
         },
         ("GET", "/api/fleet"): {
             "nodes": [{"id": "spk_" + "a" * 32, "display_name": "Atlas"}]
