@@ -32,20 +32,21 @@ async fn failed_execution_emits_the_controller_failure_contract() {
     .await
     .unwrap();
 
-    let results = client.results.lock().unwrap();
-    assert_eq!(results[0].state, AgentResultState::Failed);
-    let AgentResultResult::OutcomeFailed(failed) = &results[0].result else {
-        panic!("a failed executor reports a typed failure");
-    };
-    vonk_agent_protocol::revalidate(failed).unwrap();
-    failed
-        .evidence
-        .as_ref()
-        .and_then(|evidence| evidence.diagnostics.as_ref())
-        .expect("bounded diagnostics")
-        .validate()
-        .unwrap();
-    drop(results);
+    {
+        let results = client.results.lock().unwrap();
+        assert_eq!(results[0].state, AgentResultState::Failed);
+        let AgentResultResult::OutcomeFailed(failed) = &results[0].result else {
+            panic!("a failed executor reports a typed failure");
+        };
+        vonk_agent_protocol::revalidate(failed).unwrap();
+        failed
+            .evidence
+            .as_ref()
+            .and_then(|evidence| evidence.diagnostics.as_ref())
+            .expect("bounded diagnostics")
+            .validate()
+            .unwrap();
+    }
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
     *client.claim.lock().unwrap() = Some(fresh.clone());
@@ -102,22 +103,23 @@ async fn artifact_job_heartbeat_cancellation_is_preserved_as_terminal_cancelled(
     .await
     .unwrap();
 
-    let results = client.results.lock().unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0].state, AgentResultState::Cancelled);
-    let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) =
-        &results[0].result
-    else {
-        panic!("expected a typed cancelled outcome");
-    };
-    let result = outcome.receipt.as_ref().expect("the job receipt is kept");
-    result.validate().unwrap();
-    assert_eq!(result.job_id, request.job_id);
-    assert_eq!(result.run_id, request.run_id);
-    assert!(result.output_manifest.files.is_empty());
-    assert_eq!(result.output_manifest.total_bytes, 0);
-    assert_eq!(result.exit_code, 130);
-    drop(results);
+    {
+        let results = client.results.lock().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].state, AgentResultState::Cancelled);
+        let vonk_agent_protocol::generated::AgentResultResult::OutcomeFailed(outcome) =
+            &results[0].result
+        else {
+            panic!("expected a typed cancelled outcome");
+        };
+        let result = outcome.receipt.as_ref().expect("the job receipt is kept");
+        result.validate().unwrap();
+        assert_eq!(result.job_id, request.job_id);
+        assert_eq!(result.run_id, request.run_id);
+        assert!(result.output_manifest.files.is_empty());
+        assert_eq!(result.output_manifest.total_bytes, 0);
+        assert_eq!(result.exit_code, 130);
+    }
     let mut fresh = claim();
     fresh.fence = Uuid::new_v4();
     *client.claim.lock().unwrap() = Some(fresh.clone());

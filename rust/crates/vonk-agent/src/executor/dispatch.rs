@@ -358,6 +358,16 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(matches!(result, ExecutionResult::Failed(_)));
+        // The fresh request reaches image observation. An unavailable helper
+        // ends with uncertainty, rather than declaring an unobserved effect failed.
+        assert!(matches!(result, ExecutionResult::Unknown(_)));
+        let finished = result.finish(&current);
+        AgentResult {
+            fence: current.fence,
+            result: finished.result,
+            state: finished.state,
+        }
+        .validate_for_operation(&current.operation)
+        .unwrap();
     }
 }

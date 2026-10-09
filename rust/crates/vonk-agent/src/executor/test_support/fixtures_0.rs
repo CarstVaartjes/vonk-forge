@@ -240,7 +240,8 @@ impl LoopClient for TerminalHeartbeatClient {
             return self.inner.heartbeat(progress).await;
         }
         assert!(!self.panic, "heartbeat task failed unexpectedly");
-        Err(ClientError::Identity)
+        // Local identity loss is recoverable; a CA-pin mismatch is a refusal.
+        Err(ClientError::Pin)
     }
 
     async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {

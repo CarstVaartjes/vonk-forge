@@ -99,14 +99,12 @@ impl ControllerError {
 }
 
 impl ClientError {
+    // Protocol failures can name an ingress integrity mismatch. Observation
+    // callers retry them under their own budget; byte transfers must refuse them.
     pub fn retryable(&self) -> bool {
         matches!(
             self,
-            Self::Transport(_)
-                | Self::Retryable
-                | Self::Protocol
-                | Self::CredentialRead(_)
-                | Self::Identity
+            Self::Transport(_) | Self::Retryable | Self::CredentialRead(_) | Self::Identity
         ) || matches!(self, Self::Controller(error) if error.retryable())
     }
 
