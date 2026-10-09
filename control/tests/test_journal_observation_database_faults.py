@@ -3,13 +3,13 @@
 import pytest
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import canonical_message
-from vonk_control import run_switch_journal_repair as repair
 from vonk_control.job_documents import RunSwitchRunIntent
 from vonk_control.models import RunSwitchJournalRepairPending
 from vonk_control.run_switch_journal_contract import (
     JournalRepairDisposition,
     RunSwitchJournalRepairPendingState,
 )
+from vonk_control.run_switch_journal_repair import observation as repair
 
 from .test_run_switch_zero_transfer_journal_repair_postgres import (
     faulty_install,  # noqa: F401

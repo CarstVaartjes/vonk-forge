@@ -653,7 +653,7 @@ def test_fault_cancel_preserves_issued_child_until_late_exact_fenced_receipts(
             60,
         )
     else:
-        from vonk_control import run_switch_journal_repair as repair_owner
+        from vonk_control.run_switch_journal_repair import pending as repair_owner
 
         original_record = repair_owner.record_repair_cancellation
 
@@ -830,7 +830,7 @@ def test_native_lease_expiry_reconciles_same_owner_when_sample_repair_is_deferre
 def test_new_native_identity_after_discovery_aborts_declared_lock_set(
     faulty_install, monkeypatch
 ):
-    from vonk_control import run_switch_journal_repair as repair_owner
+    from vonk_control.run_switch_journal_repair import repair as repair_owner
 
     (
         sessions,
