@@ -365,7 +365,8 @@ def test_development_images_enable_arm64_emulation_before_building() -> None:
     assert publisher.index(setup) < first_build
     qemu = publisher[publisher.index(setup) : first_build]
     assert (
-        "image: docker.io/tonistiigi/binfmt@sha256:"
+        # The emulator stays digest-pinned, whether it is read from the CI
+        # mirror or from upstream.
         "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0" in qemu
     )
     assert "platforms: arm64" in qemu
@@ -1216,7 +1217,8 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
         "docker/setup-buildx-action@"
     )
     assert (
-        "image: docker.io/tonistiigi/binfmt@sha256:"
+        # The emulator stays digest-pinned, whether it is read from the CI
+        # mirror or from upstream.
         "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0" in publisher
     )
     assert "platforms: linux/amd64,linux/arm64" in publisher

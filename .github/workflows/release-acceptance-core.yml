@@ -24,6 +24,7 @@ on:
 permissions:
   actions: write
   contents: read
+  packages: read
 
 jobs:
   nas-lane-acceptance:
@@ -53,6 +54,7 @@ jobs:
     permissions:
       actions: write
       contents: read
+      packages: read
     steps:
       - name: Stop when main has moved past this development generation
         if: inputs.channel == 'dev' && !inputs.premerge
@@ -184,6 +186,15 @@ jobs:
           python scripts/tailscale-acceptance-tailnet delete \
             --state "$RUNNER_TEMP/vonk-acceptance-tailnet.json"
 
+      - name: Authenticate CI image mirror reads
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Prepare digest-pinned compatibility daemon mirror
+        if: matrix.lane == 'docker-29.4.3'
+        run: scripts/pull-test-images --image docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495
       - name: Start Docker 29.4.3 compatibility daemon
         if: matrix.lane == 'docker-29.4.3'
         shell: bash
@@ -200,7 +211,7 @@ jobs:
             --network host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" \
             --env DOCKER_TLS_CERTDIR= \
-            docker:29.4.3-dind@sha256:685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495 \
+            "$CI_IMAGE_685b91dca8eab7de1dce1c303dbb7a763e4082d6a60db10968adf3295fbd2495" \
             dockerd --host=tcp://127.0.0.1:2375
           daemon_ready=false
           for _ in $(seq 1 60); do
