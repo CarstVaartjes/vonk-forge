@@ -202,7 +202,6 @@ pub fn prepare_setup_with_authority(
         &release.package.sha256,
         &release.version,
         &release.architecture,
-        true,
     )?;
     let plan = match (install_state(paths)?, request.enroll) {
         (InstallState::Fresh, _) => {
@@ -284,8 +283,9 @@ pub fn prepare_setup_with_authority(
     let mut repair_firewall = None;
     let mut repair_ca_pem = None;
     let mut repair_helper_authority = None;
-    if !matches!(plan, ApplyOperation::Fresh { .. }) {
-        let config = paired_configuration(&paths.config, paths)?;
+    if !matches!(plan, ApplyOperation::Fresh { .. })
+        && let Ok(config) = paired_configuration(&paths.config, paths)
+    {
         // The firewall is deliberately root-private. Its absence or readable
         // damage needs repair; a permission-limited observation is deferred to
         // the privileged consumer, which validates it before using it.
@@ -301,9 +301,6 @@ pub fn prepare_setup_with_authority(
                 prompt,
                 runner,
             )?;
-            if firewall.node_fabric_ip != config.fabric_address {
-                return Err(SetupError::UnsafeInput("Spark fabric address"));
-            }
             repair_firewall = Some(SparkFirewallConfig {
                 nas_management_ip: firewall.nas_management_ip.into(),
                 node_management_ip: firewall.node_management_ip.into(),
@@ -317,7 +314,8 @@ pub fn prepare_setup_with_authority(
         }
         if !safe_existing_file(&paths.ca, paths.required_owner).unwrap_or(false)
             || !safe_existing_file(&paths.helper_authority, paths.required_owner).unwrap_or(false)
-            || !fs::read(&paths.ca).is_ok_and(|ca| verify_ca(&ca, &config.ca_sha256).is_ok())
+            || !installation::read_generated(&paths.ca, MAX_CA_BYTES, paths.required_owner)
+                .is_some_and(|ca| verify_ca(&ca, &config.ca_sha256).is_ok())
             || installed_helper_authority(paths).is_err()
         {
             // Re-observe through the pinned CA ingress, never invent authority.
@@ -469,40 +467,32 @@ pub(super) fn verified_release(
     // The canonical publication graph declares its target independently of
     // the reader host; actual system entry points enforce native execution.
     let (platform, architecture) = ("linux-arm64", "arm64");
-    let (package, setup, setup_signature, channel, generation, version, acceptance_only) =
-        match document {
-            InstallerReleaseManifest::CandidateRelease(document) => {
-                if !valid_package_release_identity(
-                    &document.artifacts.agent_package_linux_arm64,
-                    platform,
-                    &document.version,
-                ) {
-                    return Err(SetupError::ReleaseSignature);
-                }
-                (
-                    ReleaseArtifact::from(&document.artifacts.agent_package_linux_arm64),
-                    document.artifacts.spark_setup_linux_arm64,
-                    document.artifacts.spark_setup_signature_linux_arm64,
-                    document.channel.to_string(),
-                    document.generation,
-                    document.version,
-                    false,
-                )
+    let (package, setup, setup_signature, version) = match document {
+        InstallerReleaseManifest::CandidateRelease(document) => {
+            if !valid_package_release_identity(
+                &document.artifacts.agent_package_linux_arm64,
+                platform,
+                &document.version,
+            ) {
+                return Err(SetupError::ReleaseSignature);
             }
-            InstallerReleaseManifest::AcceptanceBaselineRelease(document) => (
-                document.artifacts.agent_package_linux_arm64,
+            (
+                ReleaseArtifact::from(&document.artifacts.agent_package_linux_arm64),
                 document.artifacts.spark_setup_linux_arm64,
                 document.artifacts.spark_setup_signature_linux_arm64,
-                document.channel.to_string(),
-                document.generation,
                 document.version,
-                true,
-            ),
-        };
-    let prefix = release_artifact_prefix(&channel, &generation, platform, acceptance_only);
-    if package.path != format!("{prefix}vonk-forge-agent.deb")
-        || setup.path != format!("{prefix}vonk-spark-setup")
-        || setup_signature.path != format!("{prefix}vonk-spark-setup.sig")
+            )
+        }
+        InstallerReleaseManifest::AcceptanceBaselineRelease(document) => (
+            document.artifacts.agent_package_linux_arm64,
+            document.artifacts.spark_setup_linux_arm64,
+            document.artifacts.spark_setup_signature_linux_arm64,
+            document.version,
+        ),
+    };
+    if !safe_artifact_address(&package.path)
+        || !safe_artifact_address(&setup.path)
+        || !safe_artifact_address(&setup_signature.path)
         || !valid_sha256(&package.sha256)
         || !valid_sha256(&setup.sha256)
         || !valid_sha256(&setup_signature.sha256)
@@ -536,18 +526,13 @@ pub(super) fn valid_package_release_identity(
         && valid_package_version(&artifact.package_version)
 }
 
-pub(super) fn release_artifact_prefix(
-    channel: &str,
-    generation: &str,
-    platform: &str,
-    acceptance_only: bool,
-) -> String {
-    let baseline = if acceptance_only {
-        "acceptance-baseline/"
-    } else {
-        ""
-    };
-    format!("artifacts/{channel}/releases/{generation}/{baseline}spark/current/{platform}/")
+fn safe_artifact_address(value: &str) -> bool {
+    !value.is_empty()
+        && !value.contains(['\\', '\0', '\n', '\r', '?', '#', '%'])
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+        && !value.contains(':')
 }
 
 #[cfg(test)]
@@ -580,21 +565,18 @@ mod tests {
     }
 
     #[test]
-    fn acceptance_only_release_resolves_only_its_immutable_baseline_graph() {
-        assert_eq!(
-            release_artifact_prefix("dev", &"a".repeat(64), "linux-arm64", true,),
-            format!(
-                "artifacts/dev/releases/{}/acceptance-baseline/spark/current/linux-arm64/",
-                "a".repeat(64)
-            )
-        );
-        assert_eq!(
-            release_artifact_prefix("stable", &"b".repeat(64), "linux-amd64", false,),
-            format!(
-                "artifacts/stable/releases/{}/spark/current/linux-amd64/",
-                "b".repeat(64)
-            )
-        );
+    fn signed_artifact_addresses_are_safe_independent_of_publication_layout() {
+        assert!(safe_artifact_address("relocated/packages/agent.deb"));
+        for unsafe_path in [
+            "/absolute",
+            "../outside",
+            "a/../b",
+            "a//b",
+            "https://peer/a",
+            "a/%2e%2e/b",
+        ] {
+            assert!(!safe_artifact_address(unsafe_path));
+        }
     }
 
     #[test]

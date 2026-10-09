@@ -194,8 +194,8 @@ fn root_rejects_a_setup_binary_changed_after_unprivileged_verification() {
 }
 
 #[test]
-fn package_format_identity_and_release_name_are_verified_before_prompt_or_sudo() {
-    for case in ["format", "identity", "name"] {
+fn package_format_and_platform_are_verified_before_prompt_or_sudo() {
+    for case in ["format", "identity"] {
         let temporary = tempdir().unwrap();
         let install_paths = paths(temporary.path());
         fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
@@ -290,7 +290,7 @@ fn semantic_plan_validation_precedes_any_root_artifact_processing() {
 }
 
 #[test]
-fn pairing_plan_must_match_root_owned_configuration_before_package_processing() {
+fn stale_pairing_projection_uses_current_retained_enrollment() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
     let ca = controller_ca();
@@ -322,15 +322,43 @@ fn pairing_plan_must_match_root_owned_configuration_before_package_processing() 
 
     let result = apply_setup_from(
         frame.as_slice(),
-        &temporary.path().join("missing-package.deb"),
+        prepared.package_path(),
         prepared.executable_path(),
         &install_paths,
         &mut runner,
         CallerIdentity::sudo_root(1000),
     );
 
-    assert!(matches!(result, Err(SetupError::PrivilegedInput)));
-    assert!(runner.commands.is_empty());
+    result.unwrap();
+    let pair = runner
+        .commands
+        .iter()
+        .find(|command| command.args.iter().any(|argument| argument == "pair"))
+        .unwrap();
+    let pin = pair
+        .args
+        .iter()
+        .position(|argument| argument == "--ca-sha256")
+        .unwrap();
+    assert_eq!(
+        pair.args[pin + 1],
+        hex::encode(Sha256::digest(
+            rustls_pemfile::certs(&mut std::io::BufReader::new(ca.as_slice()))
+                .next()
+                .unwrap()
+                .unwrap()
+        ))
+    );
+    assert!(
+        prepare_setup(
+            &request(temporary.path()),
+            &install_paths,
+            &mut NoPrompt,
+            &mut RecordingRunner::default(),
+            CallerIdentity::unprivileged(1000)
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -356,7 +384,7 @@ fn system_path_operations_cannot_use_a_synthetic_caller_identity() {
 }
 
 #[test]
-fn setup_state_below_a_symlinked_configuration_directory_fails_before_prompting() {
+fn symlinked_configuration_is_isolated_without_blocking_a_fresh_setup() {
     let temporary = tempdir().unwrap();
     let real_directory = temporary.path().join("real-configuration");
     fs::create_dir_all(&real_directory).unwrap();
@@ -376,19 +404,77 @@ fn setup_state_below_a_symlinked_configuration_directory_fails_before_prompting(
         required_owner: None,
     };
     let ca = controller_ca();
-    configured_install(&install_paths, &ca, "paired-v1\n");
+    configured_install(
+        &install_paths,
+        &ca,
+        &format!(
+            "{}\n",
+            vonk_agent_protocol::generated::SparkInstallationState::PairedV1
+        ),
+    );
+    let original_config = fs::read(real_directory.join("agent.toml")).unwrap();
     let mut prompt = TokenOnlyPrompt { secrets: 0 };
     let mut runner = RecordingRunner::default();
 
-    let result = prepare_setup(
+    let prepared = prepare_setup(
         &request(temporary.path()),
         &install_paths,
         &mut prompt,
         &mut runner,
         CallerIdentity::unprivileged(1000),
-    );
+    )
+    .unwrap();
 
-    assert!(result.is_err());
     assert_eq!(prompt.secrets, 0);
     assert!(runner.commands.is_empty());
+    let mut handoff = RecordingRunner::default();
+    handoff_to_root_with_authority(&prepared, &mut handoff, &ReleaseAuthority::canonical())
+        .unwrap();
+    let result = apply_setup_from(
+        handoff.commands[0].stdin.as_slice(),
+        prepared.package_path(),
+        prepared.executable_path(),
+        &install_paths,
+        &mut runner,
+        CallerIdentity::sudo_root(1000),
+    );
+    assert!(matches!(result, Err(SetupError::ObservationUnavailable(_))));
+    assert!(runner.commands.is_empty());
+    assert_eq!(
+        fs::read(real_directory.join("agent.toml")).unwrap(),
+        original_config
+    );
+    assert!(
+        !fs::symlink_metadata(&unsafe_directory)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+
+    // The bounded unknown outcome leaves no gate behind. A new authenticated
+    // bootstrap succeeds without following or overwriting the symlink target.
+    let (fresh, handoff) = fresh_prepared(temporary.path(), &install_paths);
+    apply_setup_from(
+        handoff.commands[0].stdin.as_slice(),
+        fresh.package_path(),
+        fresh.executable_path(),
+        &install_paths,
+        &mut RecordingRunner::default(),
+        CallerIdentity::sudo_root(1000),
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(real_directory.join("agent.toml")).unwrap(),
+        original_config
+    );
+    assert!(
+        prepare_setup(
+            &request(temporary.path()),
+            &install_paths,
+            &mut NoPrompt,
+            &mut RecordingRunner::default(),
+            CallerIdentity::unprivileged(1000)
+        )
+        .is_ok()
+    );
 }

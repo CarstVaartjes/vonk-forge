@@ -5,20 +5,25 @@ use super::*;
 pub(super) use vonk_agent_protocol::generated::SparkInstallationState as InstallState;
 
 pub(super) fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupError> {
-    safe_existing_parent(&paths.config, paths.required_owner)?;
-    safe_existing_parent(&paths.agent, paths.required_owner)?;
     // Generated files and the marker are observations, never admission gates.
     // A valid config keeps enrollment identity; otherwise bootstrap uses the
     // current authenticated grant instead of trusting damaged local bytes.
-    let config = safe_existing_file(&paths.config, paths.required_owner).unwrap_or(false);
-    if !config || paired_configuration(&paths.config, paths).is_err() {
-        return Ok(InstallState::Fresh);
+    if paired_configuration(&paths.config, paths).is_err() {
+        let retained = paths.config.with_file_name("enrollment.toml");
+        let absent = |path: &Path| {
+            fs::symlink_metadata(path).is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+        };
+        return Ok(if absent(&paths.config) && absent(&retained) {
+            InstallState::Fresh
+        } else {
+            InstallState::RecoveringV1
+        });
     }
     let marker = setup_state_path(paths);
     if !safe_existing_file(&marker, paths.required_owner).unwrap_or(false) {
         return Ok(InstallState::RecoveringV1);
     }
-    let raw = fs::read(marker).unwrap_or_default();
+    let raw = read_generated(&marker, 4096, paths.required_owner).unwrap_or_default();
     Ok(std::str::from_utf8(&raw)
         .ok()
         .and_then(|value| value.trim_end().parse().ok())
@@ -27,7 +32,8 @@ pub(super) fn install_state(paths: &InstallPaths) -> Result<InstallState, SetupE
 }
 
 pub(super) fn installed_helper_authority(paths: &InstallPaths) -> Result<Vec<u8>, SetupError> {
-    let raw = fs::read(&paths.helper_authority).map_err(|_| SetupError::ExistingInstall)?;
+    let raw = read_generated(&paths.helper_authority, 65, paths.required_owner)
+        .ok_or(SetupError::ExistingInstall)?;
     if raw.len() != 65 || raw.last() != Some(&b'\n') {
         return Err(SetupError::ExistingInstall);
     }
@@ -45,8 +51,26 @@ pub(super) fn valid_helper_authority(value: &[u8]) -> bool {
 pub(super) fn installed_firewall_configuration(
     paths: &InstallPaths,
 ) -> Result<FirewallConfig, SetupError> {
-    let raw =
-        fs::read_to_string(&paths.firewall_config).map_err(|_| SetupError::ExistingInstall)?;
+    let retained = paths
+        .firewall_config
+        .with_file_name("enrollment-firewall.conf");
+    for path in [&paths.firewall_config, &retained] {
+        if let Some(bytes) = read_generated(path, 16 * 1024, paths.required_owner)
+            && let Ok(raw) = String::from_utf8(bytes)
+            && let Ok(config) = parse_firewall_configuration(paths, &raw)
+        {
+            return Ok(config);
+        }
+    }
+    Err(SetupError::ObservationUnavailable(
+        vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+    ))
+}
+
+fn parse_firewall_configuration(
+    paths: &InstallPaths,
+    raw: &str,
+) -> Result<FirewallConfig, SetupError> {
     if raw.len() > 16 * 1024 {
         return Err(SetupError::ExistingInstall);
     }
@@ -146,19 +170,51 @@ pub(super) fn safe_existing_parent(
     }
 }
 
+pub(super) fn read_generated(path: &Path, maximum: usize, owner: Option<u32>) -> Option<Vec<u8>> {
+    if !safe_existing_parent(path, owner).unwrap_or(false)
+        || !safe_existing_file(path, owner).unwrap_or(false)
+    {
+        return None;
+    }
+    let mut file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc_nofollow())
+        .open(path)
+        .ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file()
+        || metadata.len() > maximum as u64
+        || owner.is_some_and(|owner| metadata.uid() != owner)
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return None;
+    }
+    let mut raw = Vec::new();
+    Read::by_ref(&mut file)
+        .take((maximum + 1) as u64)
+        .read_to_end(&mut raw)
+        .ok()?;
+    (raw.len() <= maximum).then_some(raw)
+}
+
 pub(super) fn paired_configuration(
     path: &Path,
     paths: &InstallPaths,
 ) -> Result<WrittenConfig, SetupError> {
-    let raw = fs::read(path).map_err(|_| SetupError::ExistingInstall)?;
-    if raw.len() > 64 * 1024 {
-        return Err(SetupError::ExistingInstall);
+    let retained = paths.config.with_file_name("enrollment.toml");
+    for candidate in [path, retained.as_path()] {
+        let Some(raw) = read_generated(candidate, 64 * 1024, paths.required_owner) else {
+            continue;
+        };
+        if let Ok(config) = toml::from_slice::<WrittenConfig>(&raw)
+            && valid_written_config(&config, paths)
+        {
+            return Ok(config);
+        }
     }
-    let config: WrittenConfig = toml::from_slice(&raw).map_err(|_| SetupError::ExistingInstall)?;
-    if !valid_written_config(&config, paths) {
-        return Err(SetupError::ExistingInstall);
-    }
-    Ok(config)
+    Err(SetupError::ObservationUnavailable(
+        vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+    ))
 }
 
 pub(super) fn safe_existing_file(
