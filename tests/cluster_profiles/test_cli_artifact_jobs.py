@@ -12,6 +12,7 @@ import urllib.error
 from collections.abc import Mapping
 from email.message import Message
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from test_control_client_requests import (
@@ -21,7 +22,7 @@ from test_control_client_requests import (
     _token,
 )
 
-from cluster_profiles import cli
+from cluster_profiles import cli, cli_artifact_jobs
 from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import (
     ControlClient,
@@ -43,15 +44,31 @@ OUTPUT_LIMITS = {
     "max_total_bytes": 1,
     "allowed_media_types": ["image/png"],
 }
+_REAL_MONOTONIC = time.monotonic
+_REAL_SLEEP = time.sleep
 
 
 @pytest.fixture(autouse=True)
 def artifact_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """Exercise retry deadlines without sleeping against simulated transports."""
     now = [100.0]
-    monkeypatch.setattr(time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+    monkeypatch.setattr(
+        cli_artifact_jobs,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        ),
+    )
     return now
+
+
+def test_artifact_retry_clock_preserves_infrastructure_time(artifact_clock) -> None:
+    """Catches a virtual retry clock leaking into subprocess and pytest workers."""
+    cli_artifact_jobs.time.sleep(1.0)
+    assert cli_artifact_jobs.time.monotonic() == artifact_clock[0] == 101.0
+    assert time.monotonic is _REAL_MONOTONIC
+    assert time.sleep is _REAL_SLEEP
 
 
 def _job(
