@@ -19,18 +19,6 @@ pub(super) fn errno_io(error: rustix::io::Errno) -> std::io::Error {
     std::io::Error::from_raw_os_error(error.raw_os_error())
 }
 
-pub(super) fn retryable_reconciliation_storage_io(error: &std::io::Error) -> bool {
-    matches!(
-        error.kind(),
-        std::io::ErrorKind::Interrupted
-            | std::io::ErrorKind::WouldBlock
-            | std::io::ErrorKind::TimedOut
-    ) || error.raw_os_error().is_some_and(|code| {
-        code == rustix::io::Errno::IO.raw_os_error()
-            || code == rustix::io::Errno::NOSPC.raw_os_error()
-    })
-}
-
 pub(super) fn remove_directory_contents(
     directory: &impl std::os::fd::AsFd,
     expected_device: u64,
@@ -231,13 +219,13 @@ pub(super) fn sync_directory(path: &Path) -> Result<(), OperationError> {
     Ok(())
 }
 
-pub(super) fn read_helper_reconciliation_receipt(
+fn read_helper_reconciliation_receipt_strict(
     path: &Path,
     owner_uid: Option<u32>,
 ) -> Result<Option<InstallationReconciliationReceipt>, OperationError> {
     let mut file = match OpenOptions::new()
         .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32)
         .open(path)
     {
         Ok(file) => file,
@@ -270,6 +258,13 @@ pub(super) fn read_helper_reconciliation_receipt(
         return Err(OperationError::InvalidArtifact);
     }
     Ok(Some(receipt))
+}
+
+pub(super) fn read_helper_reconciliation_receipt(
+    path: &Path,
+    owner_uid: Option<u32>,
+) -> Result<Option<InstallationReconciliationReceipt>, OperationError> {
+    Ok(read_helper_reconciliation_receipt_strict(path, owner_uid).unwrap_or(None))
 }
 
 pub(super) fn write_helper_reconciliation_receipt(

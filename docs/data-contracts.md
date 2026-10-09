@@ -22,7 +22,7 @@ that no longer occurs fails as stale.
 | Controller to Spark messages (claims, directives, results, progress, inventory, telemetry, enrollment, recipe jobs and builds, host-helper grants) | `agent_protocol/src/vonk_agent_protocol/*.py` | `vonk-agent-protocol` `generated.rs`, from `schema/wire.json` (`scripts/generate-agent-wire`) | none | Controller (the models themselves) |
 | Agent client decisions, transport classifications and OCI diagnostic vocabulary | `agent_words.py`, published by `LifecycleVocabulary` | `generated.rs` | vocabulary generator | diagnostic consumers |
 | Compiled launch plan | `compiled_execution_plan.py` in `agent_protocol` | `generated.rs` | none | Controller, tests |
-| Files the Spark agent and helper persist (identity pointers, readiness receipt, reconciliation checkpoints and receipts, installation metadata, run lifecycle, runtime image receipts, generation fence, package rollback transaction) | `agent_protocol/.../agent_state.py` | `generated.rs` (`AgentGenerationPointer`, `AgentReadinessReceipt`, `RunLifecycleRecord`, `HostRuntimeImageReceipt`, ...) | none | none yet; the models document the files |
+| Files the Spark agent and helper persist (identity pointers, readiness receipt, reconciliation checkpoints and receipts, installation metadata, run lifecycle, runtime image receipts, generation and installation intent fences, package rollback transaction) | `agent_protocol/.../agent_state.py` | `generated.rs` (`AgentGenerationPointer`, `AgentReadinessReceipt`, `RunLifecycleRecord`, `HostRuntimeImageReceipt`, ...) | none | none yet; the models document the files |
 | Installer documents (NAS install template, Spark site ports, Spark setup apply frame) | `agent_protocol/.../installer_setup.py` | `generated.rs` (`NasInstallTemplate`, `SitePorts`, `SparkApplyEnvelope`, ...) | none | `scripts/build-nas-compose-bundle` validates its payload with the model; the Controller reads `site-ports.json` through `SitePorts` |
 | CLI release projection | `installer_release.py` | `src/cluster_profiles/schemas/cli-release-projection.schema.json` | none | CLI self-updater |
 | Installer release manifest | `installer_release.py` | `generated.rs`; `schemas/install-release-manifest.schema.json` | none | publisher scripts |
@@ -149,7 +149,7 @@ module defines its own.
 
 | Module | Kind | Models | Purpose |
 | --- | --- | --- | --- |
-| `agent_protocol/src/vonk_agent_protocol/agent_state.py` | agent-protocol | 14 | Records the Rust agent and its privileged helper persist beside their work. |
+| `agent_protocol/src/vonk_agent_protocol/agent_state.py` | agent-protocol | 15 | Records the Rust agent and its privileged helper persist beside their work. |
 | `agent_protocol/src/vonk_agent_protocol/build_import.py` | agent-protocol | 13 | Typed recipe build request/result wire contracts. |
 | `agent_protocol/src/vonk_agent_protocol/claims.py` | agent-protocol | 2 | Canonical current-agent identity and work-claim request. |
 | `agent_protocol/src/vonk_agent_protocol/compiled_execution_plan.py` | agent-protocol | 18 | Typed compiled launch plan shared by Controller and agents. |

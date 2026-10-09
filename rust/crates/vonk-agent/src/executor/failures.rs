@@ -410,9 +410,12 @@ pub(super) fn runtime_failure(
         observed,
     }));
     let failure = if temporary_observation_error(error) {
+        // Peer observations do not become permanent admission decisions.
+        // The Controller's durable recovery counter owns the retry-to-end
+        // budget; every attempt re-observes through a fresh accepted grant.
         failure
             .kind(AgentFailureKind::TemporaryDependency)
-            .retry_after(Some(5))
+            .retry_after(Some(2))
     } else {
         failure
     };
