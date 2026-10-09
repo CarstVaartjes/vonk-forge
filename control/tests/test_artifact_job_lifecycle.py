@@ -22,7 +22,11 @@ from vonk_agent_protocol import (
 )
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs import ArtifactJobError, ArtifactJobResponse
+from vonk_control.artifact_jobs import (
+    ArtifactJobError,
+    ArtifactJobResponse,
+    ArtifactJobView,
+)
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -209,29 +213,62 @@ def test_waiting_for_operator_must_advertise_stop(tmp_path) -> None:
     assert ok.supported_actions == ("stop",)
 
 
-def test_a_lapsed_job_waits_only_with_stop_and_stop_completes_it(tmp_path) -> None:
-    _sessions, _ops, service, agent_jobs, clock, submitted, _claim, _run = _issued_job(
-        tmp_path, 320
+def test_a_lapsed_job_is_stoppable_without_operator_wait_and_allows_fresh_work(
+    tmp_path,
+) -> None:
+    sessions, operations, service, agent_jobs, clock, submitted, _claim, run_id = (
+        _issued_job(tmp_path, 320)
     )
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
-    # The agent can no longer report: observed first, never a bare wait.
-    state = _drive(service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR)
-    waiting = service.get(submitted.id)
-    assert state == ajs.NEEDS_OPERATOR
-    assert waiting.supported_actions == ("stop",)
-
+    assert service.get(submitted.id).state == ajs.OBSERVING
     service.cancel(
         submitted.id, actor="operator", request_id=CANCEL_KEY, reason="lost job"
     )
-    assert _cancelling(service.get(submitted.id))
-    assert _drive(service, agent_jobs, clock, submitted.id, until="cancelled") == (
-        "cancelled"
+    assert (
+        _drive(service, agent_jobs, clock, submitted.id, until=ajs.CANCELLED)
+        == ajs.CANCELLED
     )
     ended = service.get(submitted.id)
     assert ended.supported_actions == ()
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is True
+    # Ending an uncertain one-shot job must not block the fresh exact Stop.
+    plan = operations.preview_stop(run_id)
+    assert plan.allowed
+
+    def request_key(view: ArtifactJobView | RecipeOperationView) -> str:
+        if isinstance(view, ArtifactJobView):
+            assert view.submit_request_id is not None
+            return view.submit_request_id
+        with sessions() as session:
+            parent = session.get(Job, view.id)
+            assert parent is not None
+            return parent.request_id
+
+    def assert_released() -> None:
+        with sessions() as session:
+            assert_no_orphaned_holds(session)
+
+    def end_job(
+        _view: ArtifactJobView | RecipeOperationView,
+    ) -> ArtifactJobView | RecipeOperationView:
+        return service.get(submitted.id)
+
+    _ended, fresh = assert_ended_without_blocking(
+        sessions,
+        submitted,
+        end=end_job,
+        fresh=lambda _: operations.stop(
+            run_id,
+            plan_digest=plan.plan_digest,
+            actor="operator",
+            request_id=OTHER_KEY,
+        ),
+        request_key=request_key,
+        assert_released=assert_released,
+    )
+    assert fresh.id != submitted.operation_id
 
 
 def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp_path):
@@ -243,9 +280,9 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     service._clock = clock
     clock.advance(seconds=31)
     agent_jobs.reconcile_orders()
-    assert _drive(
-        service, agent_jobs, clock, submitted.id, until=ajs.NEEDS_OPERATOR
-    ) == (ajs.NEEDS_OPERATOR)
+    assert _drive(service, agent_jobs, clock, submitted.id, until=ajs.OBSERVING) == (
+        ajs.OBSERVING
+    )
     waiting = service.get(submitted.id)
     assert waiting.supported_actions == ("stop",)
     with pytest.raises(ArtifactJobError, match="owns this run reservation"):
@@ -261,7 +298,7 @@ def test_lost_irreversible_job_exact_stop_receipt_allows_fresh_run_and_claim(tmp
     restarted.set_result_consumer(consume)
     operations._agent_jobs = restarted
     restarted.reconcile_orders()
-    assert service.get(submitted.id).state == ajs.NEEDS_OPERATOR
+    assert service.get(submitted.id).state == ajs.OBSERVING
     plan = operations.preview_stop(run_id)
     assert plan.allowed
     stop_key = "00000000-0000-4000-8000-000000000905"

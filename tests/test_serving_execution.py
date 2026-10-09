@@ -6,10 +6,12 @@ from threading import Thread
 
 import pytest
 
+from cluster_profiles.cli_states import FAILED, SUCCEEDED
 from cluster_profiles.serving_execution import (
     MAX_HTTP_RESPONSE_BYTES,
     HttpObservation,
     ServingExecutionError,
+    ServingObservationUnknown,
     evaluate_http_response,
     evaluate_job_result,
     execute_http_check,
@@ -91,8 +93,8 @@ def test_http_evaluator_rejects_output_cap() -> None:
     "usage",
     [{}, {"completion_tokens": -1}, {"completion_tokens": "1"}],
 )
-def test_output_cap_requires_nonnegative_integer_usage(
-    usage: dict[str, object],
+def test_unavailable_token_usage_is_unknown_and_fresh_response_is_evaluated(
+    usage: object,
 ) -> None:
     check = {
         "kind": "openai.chat",
@@ -103,10 +105,15 @@ def test_output_cap_requires_nonnegative_integer_usage(
     }
     response = {"choices": [{"message": {"content": "done"}}], "usage": usage}
 
-    with pytest.raises(ServingExecutionError, match="output cap"):
+    with pytest.raises(ServingObservationUnknown):
         evaluate_http_response(
             HttpObservation(200, {}, json.dumps(response).encode()), check
         )
+    response["usage"] = {"completion_tokens": 1}
+    observed = evaluate_http_response(
+        HttpObservation(200, {}, json.dumps(response).encode()), check
+    )
+    assert observed["choices"] == 1
 
 
 def test_http_execution_rejects_oversized_content_length_before_read() -> None:
@@ -154,9 +161,16 @@ def test_job_evaluator_requires_declared_output_slot() -> None:
     assert observed["output_count"] == 1
 
 
-@pytest.mark.parametrize("state", ["failed", "completed"])
-def test_job_evaluator_rejects_non_succeeded_completion_with_outputs(
+@pytest.mark.parametrize(
+    ("state", "error"),
+    [
+        (FAILED, ServingExecutionError),
+        ("unrecognized-peer-state", ServingObservationUnknown),
+    ],
+)
+def test_job_evaluator_distinguishes_failure_from_unknown_and_accepts_fresh_result(
     state: str,
+    error: type[ServingExecutionError],
 ) -> None:
     check = {
         "kind": "artifact-job.output",
@@ -164,7 +178,12 @@ def test_job_evaluator_rejects_non_succeeded_completion_with_outputs(
         "assertions": ["inference.completed", "artifact.output"],
     }
 
-    with pytest.raises(ServingExecutionError, match="successful completion"):
+    with pytest.raises(error) as caught:
         evaluate_job_result(
             {"state": state, "outputs": [{"slot": "result", "bytes": 1}]}, check
         )
+    assert type(caught.value) is error
+    observed = evaluate_job_result(
+        {"state": SUCCEEDED, "outputs": [{"slot": "result", "bytes": 1}]}, check
+    )
+    assert observed["output_count"] == 1

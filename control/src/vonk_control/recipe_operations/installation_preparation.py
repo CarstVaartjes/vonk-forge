@@ -88,7 +88,9 @@ class InstallationPreparationMixin:
         workload_intent_ordinal: int | None = None,
     ) -> str:
         service = typing_cast("RecipeOperationService", self)
-        unknown: UnknownOutcomeError | None = None
+        last_error: UnknownOutcomeError = RecipeRetryLater(
+            "installation preparation observation exhausted"
+        )
         for _attempt in admission_attempts():
             try:
                 return service._prepare_installation_once(
@@ -98,11 +100,16 @@ class InstallationPreparationMixin:
                     workload_intent_ordinal=workload_intent_ordinal,
                 )
             except UnknownOutcomeError as error:
-                unknown = error
+                if service._install_preparation is not None:
+                    service._install_preparation(
+                        plan,
+                        actor,
+                        f"{plan.plan_digest}:{profile_application_id}:{workload_intent_ordinal}",
+                    )
+                last_error = error
                 if admission_wait_exhausted(error):
                     break
-        assert unknown is not None
-        raise unknown
+        raise last_error
 
     def _prepare_installation_once(
         self,
@@ -178,7 +185,8 @@ class InstallationPreparationMixin:
             except (RuntimeError, ValueError, TypeError, OSError) as error:
                 raise RecipeRetryLater(str(error)) from error
             installation = session.get(RecipeInstallation, installation_id)
-            assert installation is not None
+            if installation is None:
+                raise RecipeRetryLater("installation evidence is unavailable")
             # The row was written by this very transaction: its plan must carry
             # the compiled documents before anything can commit it.
             try:
