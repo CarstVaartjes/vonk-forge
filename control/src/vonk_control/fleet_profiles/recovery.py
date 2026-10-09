@@ -11,7 +11,7 @@ from typing import cast as _typing_cast
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import InvalidRequestReason, LifecycleState, RecipeImageCode
+from vonk_agent_protocol import LifecycleState, RecipeImageCode
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
     ProfileProjectionKind,
@@ -28,14 +28,13 @@ from ..fleet_profile_contract import (
 from ..lifecycle.core import RECOVERY
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..lifecycle.fleet_profile import FleetProfileAdapter
-from ..models import AgentNode, FleetProfile, FleetProfileApplication
+from ..models import AgentNode, FleetProfileApplication, FleetProfileSelection
 from ..operation_blockers import OperationBlocker, make_blocker
 from .assessment_support import (
     _progress_with_blockers,
 )
 from .contracts import (
     FleetProfileConflict,
-    FleetProfileInvalid,
 )
 from .dependencies import (
     _LOGGER,
@@ -49,8 +48,6 @@ from .persistence import (
 )
 from .projection_support import (
     _aware,
-    _digest,
-    _profile_document,
 )
 
 if TYPE_CHECKING:
@@ -337,25 +334,20 @@ class FleetProfileService:
 
         intended = progress.intended_profile
         if intended is None:
-            return True
-        if row.selection_generation is not None:
-            if not FleetProfileService._application_is_current_selection(
+            return False
+        selection = session.get(FleetProfileSelection, 1)
+        if (
+            row.selection_generation is not None
+            and selection is not None
+            and selection.generation > row.selection_generation
+            and not FleetProfileService._application_is_current_selection(
                 session, row, progress
-            ):
-                return True
-        else:
-            profile = session.get(FleetProfile, row.profile_id)
-            if (
-                profile is None
-                or _digest(_profile_document(profile)) != intended.profile_digest
-            ):
-                return True
+            )
+        ):
+            return True
         plan = _persisted_profile_plan(row)
         if isinstance(plan, Residue):
-            # Without its reviewed plan the order cannot show what it still owns:
-            # it is retired as superseded (its issued effects keep their own
-            # cancellation receipts).
-            return True
+            return False
         adopted_scope = FleetProfileService._adopted_application_scope(session, row)
         scope = (
             set(adopted_scope)
@@ -366,13 +358,11 @@ class FleetProfileService:
             return False
         ordinal = progress.workload_intent_ordinal
         if ordinal is None:
-            return True
+            return False
         nodes = list(
             session.scalars(select(AgentNode).where(AgentNode.node_id.in_(scope)))
         )
-        return len(nodes) != len(scope) or any(
-            node.workload_intent_ordinal != ordinal for node in nodes
-        )
+        return any(node.workload_intent_ordinal > ordinal for node in nodes)
 
     def _start_step(
         self,
@@ -431,7 +421,9 @@ class FleetProfileService:
                     "the Run/Switch executor returned no child operation",
                 )
             return child.id, False, child
-        raise FleetProfileInvalid(
-            "Fleet profile step kind is unsupported",
-            reason=InvalidRequestReason.UNSUPPORTED,
+        return retire_as_unknown(
+            ProfileProjectionKind.STEP.value,
+            application_id,
+            BookkeepingReason.PERSISTED_STATE_DAMAGED,
+            "Accepted Fleet profile step is unavailable",
         )

@@ -14,7 +14,7 @@ from ..agent_operation_facts import aware as _aware
 from ..artifact_lifecycle import ArtifactIdentity, has_pending_removal
 from ..bounded_json import require_integer
 from ..categorized_errors import InvalidValue
-from ..lifecycle import Outcome, Reported, State
+from ..lifecycle import Outcome, Reported, State, Tick
 from ..model_cache_contract import ModelCacheDownloadPayload, ModelCacheDownloadResult
 from ..models import ModelCacheOperation, ModelCacheSet
 from .artifacts import ArtifactSetManifest, _unique_artifacts
@@ -429,6 +429,14 @@ class SchedulerMixin:
                 if operation is None:
                     continue
                 row = cache._lifecycle.lifecycle(operation, now)
+                deadline = cache._lifecycle.recovery_deadline(row)
+                if (
+                    deadline is not None
+                    and now >= deadline
+                    and not row.cancel_requested
+                ):
+                    cache._lifecycle.settle(operation, Tick(), now)
+                    continue
                 if row.state is State.OBSERVING:
                     continue  # a cancel is being settled
                 if (

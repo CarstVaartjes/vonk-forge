@@ -6,7 +6,13 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState, canonical_message
+from vonk_agent_protocol import (
+    LifecycleState,
+    ReservationState,
+    RunState,
+    UnknownOutcomeError,
+    canonical_message,
+)
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.inventory_repository import (
@@ -25,7 +31,6 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.platform_ports import ENDPOINT_HOST_PORTS
-from vonk_control.recipe_operations import RecipeOperationConflict
 from vonk_control.run_admission import RunAdmissionBusy
 
 from .test_profile_capacity_admission import _capacity_profile
@@ -366,7 +371,7 @@ def test_restart_adopts_committed_start_before_reassessing_its_owned_ports(
 
 
 @pytest.mark.parametrize("change", ["released", "amount", "intent"])
-def test_run_cannot_consume_changed_profile_port_authority(
+def test_run_repairs_changed_profile_port_bookkeeping(
     tmp_path, postgres_engine, change
 ):
     sessions, _, planner, profile, api, headers, nodes, installation_id = (
@@ -402,17 +407,41 @@ def test_run_cannot_consume_changed_profile_port_authority(
             node = session.get(AgentNode, nodes[0])
             assert node is not None
             node.workload_intent_ordinal += 1
-    with pytest.raises(RecipeOperationConflict):
-        lifecycle.start(
+    request_id = str(uuid4())
+
+    def start():
+        return lifecycle.start(
             plan,
             plan_digest=plan.plan_digest,
             actor="admin",
-            request_id=str(uuid4()),
+            request_id=request_id,
             profile_application_id=application_id,
             workload_intent_ordinal=ordinal,
         )
+
+    if change in ("intent",):
+        with pytest.raises(UnknownOutcomeError):
+            start()
+        with sessions.begin() as session:
+            assert not tuple(session.scalars(select(RecipeRun)))
+            node = session.get(AgentNode, nodes[0])
+            assert node is not None
+            node.workload_intent_ordinal = ordinal
+    child = start()
     with sessions() as session:
-        assert not tuple(session.scalars(select(RecipeRun)))
+        run = session.get(RecipeRun, child.owner_id)
+        assert run is not None and run.state == RunState.STARTING
+        claims = tuple(
+            session.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.owner_id == child.owner_id,
+                    ResourceReservation.kind == "port",
+                )
+            )
+        )
+        assert claims and all(
+            claim.state == ReservationState.ACTIVE for claim in claims
+        )
 
 
 @pytest.mark.parametrize("kind", ["port", "unified-memory"])
