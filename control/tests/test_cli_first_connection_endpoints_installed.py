@@ -348,6 +348,7 @@ def _seed_profile_application_for_run(
             generated_at=ROUTE_NOW,
             assessments=[],
             plan_digest="a" * 64,
+            effects_digest="a" * 64,
         )
         plan_digest = hashlib.sha256(
             canonical_message(plan.reviewed_decision())

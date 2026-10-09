@@ -159,10 +159,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         run_once(&loop_client, &mut state, &executor, None, 0, None).await?;
         let results = loop_client.results.lock().expect("result lock");
-        let result = results.first().ok_or("executor probe produced no result")?;
-        // Receipt delivery may precede replay of the same accepted fence.
-        if results.iter().any(|delivered| delivered != result) {
-            return Err("executor probe produced conflicting results".into());
+        // Reconciliation can redeliver older attempts alongside this claim.
+        // Observe the exact requested fence, allowing identical redelivery only.
+        let result = results
+            .iter()
+            .find(|result| result.fence == claim.fence)
+            .ok_or("build probe must produce the requested result")?;
+        if results
+            .iter()
+            .any(|item| item.fence == claim.fence && item != result)
+        {
+            return Err("build probe must preserve one exact outcome across redelivery".into());
         }
         println!("{}", serde_json::to_string(result)?);
         return Ok(());

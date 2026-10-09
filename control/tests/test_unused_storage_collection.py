@@ -932,6 +932,7 @@ def _application(
                     "generated_at": OLD,
                     "assessments": [],
                     "plan_digest": plan_digest,
+                    "effects_digest": "2" * 64,
                 }
             ).model_dump(mode="json")
         application = FleetProfileApplication(
