@@ -159,3 +159,29 @@ def test_web_assertions_are_not_production_contract_literals():
     assert check_source(
         "control/web/src/hooks/observer.tsx", source, {1}, words=frozenset({"running"})
     )
+
+
+def test_rust_test_files_are_not_production_contract_literals():
+    assert not check_source(
+        "rust/crates/vonk-agent/src/executor/tests.rs",
+        'let fixture = "running";\n',
+        {1},
+        modes=("vocabulary",),
+        words=frozenset({"running"}),
+    )
+
+
+def test_rust_inline_test_exemption_does_not_hide_following_production():
+    source = """#[cfg(test)]
+mod tests {
+    fn fixture() { let value = "running"; let brace = "}"; }
+}
+fn production() { let value = "running"; }
+"""
+    path = "rust/crates/vonk-agent/src/example.rs"
+    assert not check_source(
+        path, source, {3}, modes=("vocabulary",), words=frozenset({"running"})
+    )
+    assert check_source(
+        path, source, {5}, modes=("vocabulary",), words=frozenset({"running"})
+    )

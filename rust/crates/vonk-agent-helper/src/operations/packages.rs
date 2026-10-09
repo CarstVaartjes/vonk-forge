@@ -4,10 +4,15 @@ use super::*;
 
 impl<R: CommandRunner> OperationExecutor<R> {
     pub fn prepare_package_custody(&self) -> Result<(), OperationError> {
+        self.observe_package_custody(|| {})
+    }
+
+    fn observe_package_custody(&self, observing: impl FnOnce()) -> Result<(), OperationError> {
         let _install_guard = self
             .package_install
-            .lock()
-            .map_err(|_| OperationError::CommandFailed)?;
+            .try_lock()
+            .map_err(|_| OperationError::PackagePreparationUnavailable)?;
+        observing();
         if !self.roots.package_custody.is_absolute() {
             return Err(OperationError::UnsafePath);
         }
@@ -23,35 +28,44 @@ impl<R: CommandRunner> OperationExecutor<R> {
             fs::read_dir(&self.roots.package_custody)?.collect::<Result<Vec<_>, _>>()?;
         invocations.sort_by_key(fs::DirEntry::file_name);
         for invocation in invocations {
-            let name = invocation.file_name();
-            let name = name.to_str().ok_or(OperationError::UnsafePath)?;
-            if !lower_hex(name, 32) {
-                return Err(OperationError::UnsafePath);
+            // An unproven entry remains inert. It must not veto cleanup of an
+            // independent entry or admission into a fresh private namespace.
+            if let Err(error) = self.clean_package_candidate(&invocation) {
+                eprintln!("package custody entry observation unavailable: {error}");
             }
-            let directory = invocation.path();
-            require_exact_directory(&directory, self.required_owner_uid, 0o700)?;
-            let mut candidates = fs::read_dir(&directory)?.collect::<Result<Vec<_>, _>>()?;
-            if candidates.len() > 1 {
-                return Err(OperationError::UnsafePath);
-            }
-            if let Some(candidate) = candidates.pop() {
-                let candidate_name = candidate.file_name();
-                let candidate_name = candidate_name
-                    .to_str()
-                    .and_then(|value| value.strip_suffix(".deb"))
-                    .ok_or(OperationError::UnsafePath)?;
-                if !lower_hex(candidate_name, 64) {
-                    return Err(OperationError::UnsafePath);
-                }
-                let metadata = fs::symlink_metadata(candidate.path())?;
-                if !safe_custody_file(&metadata, self.required_owner_uid, metadata.len()) {
-                    return Err(OperationError::UnsafePath);
-                }
-                fs::remove_file(candidate.path())?;
-            }
-            fs::remove_dir(directory)?;
         }
         sync_directory(&self.roots.package_custody)
+    }
+
+    fn clean_package_candidate(&self, invocation: &fs::DirEntry) -> Result<(), OperationError> {
+        let name = invocation.file_name();
+        let name = name.to_str().ok_or(OperationError::UnsafePath)?;
+        if !lower_hex(name, 32) {
+            return Err(OperationError::UnsafePath);
+        }
+        let directory = invocation.path();
+        require_exact_directory(&directory, self.required_owner_uid, 0o700)?;
+        let mut candidates = fs::read_dir(&directory)?.collect::<Result<Vec<_>, _>>()?;
+        if candidates.len() > 1 {
+            return Err(OperationError::UnsafePath);
+        }
+        if let Some(candidate) = candidates.pop() {
+            let name = candidate.file_name();
+            let name = name
+                .to_str()
+                .and_then(|value| value.strip_suffix(".deb"))
+                .ok_or(OperationError::UnsafePath)?;
+            if !lower_hex(name, 64) {
+                return Err(OperationError::UnsafePath);
+            }
+            let metadata = fs::symlink_metadata(candidate.path())?;
+            if !safe_custody_file(&metadata, self.required_owner_uid, metadata.len()) {
+                return Err(OperationError::UnsafePath);
+            }
+            fs::remove_file(candidate.path())?;
+        }
+        fs::remove_dir(directory)?;
+        Ok(())
     }
 }
 
@@ -65,8 +79,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
     ) -> Result<(), OperationError> {
         let _install_guard = self
             .package_install
-            .lock()
-            .map_err(|_| OperationError::CommandFailed)?;
+            .try_lock()
+            .map_err(|_| OperationError::PackagePreparationUnavailable)?;
         require_safe_directory(&self.roots.incoming, self.package_owner_uid)?;
         let incoming = self.roots.incoming.join(format!("{digest}.deb"));
         let package = self.take_package_custody(&incoming, digest, detached_signature)?;
@@ -118,6 +132,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
         expected_digest: &str,
         detached_signature: &str,
     ) -> Result<CustodiedPackage, OperationError> {
+        self.take_package_custody_until(
+            incoming,
+            expected_digest,
+            detached_signature,
+            Instant::now() + Duration::from_secs(120),
+        )
+    }
+
+    fn take_package_custody_until(
+        &self,
+        incoming: &Path,
+        expected_digest: &str,
+        detached_signature: &str,
+        deadline: Instant,
+    ) -> Result<CustodiedPackage, OperationError> {
         if !self.roots.package_custody.is_absolute() {
             return Err(OperationError::UnsafePath);
         }
@@ -146,12 +175,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
         let mut source = OpenOptions::new()
             .read(true)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-            .open(incoming)
-            .map_err(|_| OperationError::InvalidArtifact)?;
-        let source_before = source
-            .metadata()
-            .map_err(|_| OperationError::InvalidArtifact)?;
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
+            .open(incoming)?;
+        let source_before = source.metadata()?;
         require_agent_artifact(&source_before, self.package_owner_uid)?;
         let mut destination = OpenOptions::new()
             .write(true)
@@ -162,10 +190,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let mut digest = Sha256::new();
         let mut consumed = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
+        // Bound copy observations between regular-file I/O calls.
         loop {
-            let count = source
-                .read(&mut buffer)
-                .map_err(|_| OperationError::InvalidArtifact)?;
+            if Instant::now() >= deadline {
+                return Err(OperationError::PackagePreparationUnavailable);
+            }
+            let count = source.read(&mut buffer)?;
             if count == 0 {
                 break;
             }
@@ -177,9 +207,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             destination.write_all(&buffer[..count])?;
         }
         destination.sync_all()?;
-        let source_after = source
-            .metadata()
-            .map_err(|_| OperationError::InvalidArtifact)?;
+        let source_after = source.metadata()?;
         let destination_metadata = destination.metadata()?;
         let observed_digest = hex::encode(digest.finalize());
         if artifact_identity(&source_before) != artifact_identity(&source_after)
@@ -268,3 +296,6 @@ impl Drop for CustodiedPackage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
