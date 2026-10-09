@@ -127,6 +127,7 @@ def _profile_operation_plan(
         ],
         reasons=[],
         plan_digest=plan_digest,
+        effects_digest=plan_digest,
     ).model_dump(mode="json")
 
 

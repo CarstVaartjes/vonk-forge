@@ -77,6 +77,7 @@ const preview = {
   effects: { runs: [], installations: [], superseded: [], adopted: [] },
   allowed: true,
   plan_digest: "b".repeat(64),
+  effects_digest: "c".repeat(64),
   steps: [{ index: 0, kind: "switch", label: "Switch to Qwen Code", node_ids: [nodeA] }],
   reasons: [],
 } as unknown as FleetProfilePreview;
@@ -109,6 +110,7 @@ test("reads and loads a numbered profile without legacy status or application ro
   expect(api.previewProfile).toHaveBeenCalledWith(2, expect.any(AbortSignal));
   expect(api.loadProfile).toHaveBeenCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    review: { effects_digest: preview.effects_digest },
   });
   expect(await screen.findByRole("region", { name: "Profile load progress" })).toBeVisible();
 });
@@ -139,7 +141,7 @@ test("a load names the reviewed effects, and a changed plan is refused with the 
 
   expect(loadProfile).toHaveBeenCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
-    reviewed_effects_digest: "e".repeat(64),
+    review: { effects_digest: "e".repeat(64) },
   });
   await vi.waitFor(() => expect(previewProfile).toHaveBeenCalledTimes(2));
   await act(async () => {
@@ -149,7 +151,7 @@ test("a load names the reviewed effects, and a changed plan is refused with the 
   await user.click(await screen.findByRole("button", { name: "Apply profile" }));
   expect(loadProfile).toHaveBeenLastCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
-    reviewed_effects_digest: "f".repeat(64),
+    review: { effects_digest: "f".repeat(64) },
   });
 });
 
@@ -173,6 +175,7 @@ test("reconciles an ambiguous profile load with the same request key", async () 
   expect(loadProfile.mock.calls[0]).toEqual(loadProfile.mock.calls[1]);
   expect(loadProfile.mock.calls[0]?.[1]).toEqual({
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    review: { effects_digest: preview.effects_digest },
   });
 });
 
@@ -388,6 +391,7 @@ test("a profile running an older recipe revision shows an update badge and reloa
   await user.click(within(dialog).getByRole("button", { name: "Reload profile" }));
   expect(api.loadProfile).toHaveBeenCalledWith(2, {
     request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    review: { effects_digest: preview.effects_digest },
   });
 });
 
@@ -587,6 +591,7 @@ test("selects the maximum canonical URL profile and loads that identity", async 
     expect(api.previewProfile).toHaveBeenCalledWith(upper, expect.any(AbortSignal));
     expect(api.loadProfile).toHaveBeenCalledWith(upper, {
       request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      review: { effects_digest: preview.effects_digest },
     });
   } finally {
     history.replaceState(null, "", originalUrl);
