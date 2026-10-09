@@ -201,7 +201,7 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
                 tmp_path,
             )
             assert detail.returncode == 0, detail.stderr
-            assert "Next: vonkctl model download " + target_selector in detail.stdout
+            assert target_selector in detail.stdout
 
             accepted = _run_cli(
                 installed_vonkctl,

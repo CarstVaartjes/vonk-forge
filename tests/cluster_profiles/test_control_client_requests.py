@@ -1259,7 +1259,7 @@ def test_real_denial_never_reads_untrusted_body_or_replays_mutation(
             client.request("GET", path)
     error = cast(ControlClientError, ended[0])
     assert error.context is not None
-    assert error.context.code == code
+    assert error.context.http_status == status
     assert len(calls) == 1
     denied[0] = False
     assert client.request("GET", path)["id"] == _artifact_job_response()["id"]

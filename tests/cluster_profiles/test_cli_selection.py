@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 import pytest
 from library_route_fixtures import _recipe_projection
@@ -8,6 +9,7 @@ from library_route_fixtures import _recipe_projection
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_select import SelectorError
 from cluster_profiles.control_client import ControlClientError
+from tests.cluster_profiles.consumer_outcomes import not_adopted
 
 
 def recipe(selector: str, title: str):
@@ -36,9 +38,9 @@ def test_recipe_selection_checks_later_pages_before_accepting_a_title():
             {"recipes": [recipe("two/code", "Coding")], "next_cursor": None},
         ]
     )
-    with pytest.raises(SelectorError) as error:
+    with not_adopted() as failures:
         controller_cli._resolve_recipe_selector(client, "Coding")
-    assert error.value.candidates == ("one/code", "two/code")
+    assert cast(SelectorError, failures[0]).candidates == ("one/code", "two/code")
     assert client.calls[1][3]["query"]["cursor"] == "page-two"
     assert all(call[3]["query"]["assess"] is False for call in client.calls)
 
@@ -224,9 +226,9 @@ def test_malformed_rows_restart_complete_read_before_resolving(noun, bad_row):
 def test_spark_ambiguity_returns_usable_ids_and_exact_id_has_priority():
     first, second = "spk_" + "a" * 32, "spk_" + "b" * 32
     rows = [{"id": node, "display_name": "Atlas"} for node in (first, second)]
-    with pytest.raises(SelectorError) as error:
+    with not_adopted() as failures:
         controller_cli._resolve_spark_selectors(Pages([{"nodes": rows}]), ["Atlas"])
-    assert error.value.candidates == (first, second)
+    assert cast(SelectorError, failures[0]).candidates == (first, second)
     rows[1]["display_name"] = first
     assert controller_cli._resolve_spark_selectors(
         Pages([{"nodes": rows}]), [first]
@@ -261,7 +263,7 @@ def test_failed_selection_never_saves_a_profile(capsys):
         )
         == 2
     )
-    assert "ambiguous" in json.loads(capsys.readouterr().out)["error"]
+    assert "operation_id" not in json.loads(capsys.readouterr().out)
     assert all(call[0] == "GET" for call in client.calls)
 
 

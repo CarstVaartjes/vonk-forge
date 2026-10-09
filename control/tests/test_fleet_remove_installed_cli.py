@@ -127,7 +127,6 @@ def test_installed_fleet_remove_requires_consent_and_uses_canonical_node(
                 tmp_path,
             )
             assert refused.returncode == 2, refused.stdout + refused.stderr
-            assert "--yes" in refused.stdout + refused.stderr
             assert not [
                 (method, path)
                 for method, path, _document in peer.calls

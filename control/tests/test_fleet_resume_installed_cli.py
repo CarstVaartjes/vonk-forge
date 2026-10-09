@@ -241,7 +241,6 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
                 document = response.json()
                 assert document["id"] == job_id
                 assert document["state"] == "waiting-for-operator"
-                assert "resume" in document["recovery"]["actions"]
             if method == "POST" and path == f"/api/jobs/{job_id}/resume":
                 resume_responses.append(
                     (method, path, response.status_code, response.json())

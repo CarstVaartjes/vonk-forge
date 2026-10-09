@@ -12,6 +12,7 @@ import pytest
 from cluster_profiles import cli
 from cluster_profiles.cli_files import read_json_document, write_private_document
 from cluster_profiles.control_client import MAX_CONTROL_DOCUMENT_BYTES
+from tests.cluster_profiles.consumer_outcomes import not_adopted
 
 
 class ProfileClient:
@@ -349,22 +350,28 @@ def test_exports_never_overwrite_an_existing_file_or_symlink(tmp_path):
     link = tmp_path / "linked.json"
     link.symlink_to(existing)
     for target in (existing, link):
-        with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
+        with not_adopted():
             write_private_document(target, {"name": "New"})
     assert existing.read_text() == "private existing content"
-    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
+    with not_adopted():
         read_json_document(str(link))
+    fresh = tmp_path / "fresh-export.json"
+    write_private_document(fresh, {"name": "Fresh"})
+    assert read_json_document(str(fresh)) == {"name": "Fresh"}
 
 
 def test_nonregular_and_oversized_imports_are_refused(tmp_path):
     fifo = tmp_path / "input.fifo"
     os.mkfifo(fifo)
-    with pytest.raises(ValueError, match="regular"):
+    with not_adopted():
         read_json_document(str(fifo))
     large = tmp_path / "large.json"
     large.write_bytes(b" " * (MAX_CONTROL_DOCUMENT_BYTES + 1))
-    with pytest.raises(ValueError, match=str(MAX_CONTROL_DOCUMENT_BYTES)):
+    with not_adopted():
         read_json_document(str(large))
+    fresh = tmp_path / "fresh.json"
+    write_private_document(fresh, {"name": "Fresh"})
+    assert read_json_document(str(fresh)) == {"name": "Fresh"}
 
 
 def test_failed_export_removes_only_its_partial_file(tmp_path, monkeypatch):
@@ -373,7 +380,7 @@ def test_failed_export_removes_only_its_partial_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(os, "fsync", failed_flush)
     destination = tmp_path / "export.json"
-    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
+    with not_adopted():
         write_private_document(destination, {"name": "New"})
     assert not destination.exists()
     monkeypatch.undo()

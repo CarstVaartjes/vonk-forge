@@ -579,3 +579,5 @@ def test_malformed_poll_keeps_original_snapshot_and_bounded_observation(
         assert status == 2
         assert result["result"] == identity
     assert {path for _, path, *_ in client.calls} == {"/api/model/operations/original"}
+
+    _fresh_observation(client, "model")

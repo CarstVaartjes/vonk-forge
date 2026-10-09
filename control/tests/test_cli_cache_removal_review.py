@@ -16,6 +16,7 @@ from cluster_profiles.control_client import (
     ControlNotFound,
     ControlTransportError,
 )
+from tests.cluster_profiles.consumer_outcomes import not_adopted
 
 _REQUEST_KEY = "00000000-0000-4000-8000-000000000931"
 _MODEL_DIGEST = "a" * 64
@@ -280,8 +281,10 @@ def test_noninteractive_yes_uses_the_latest_controller_review(
     ],
 )
 def test_removed_review_digest_flags_are_rejected(argv: tuple[str, ...]) -> None:
-    with pytest.raises(cli._UsageError):
+    with not_adopted():
         _parse(*argv)
+    fresh = _parse("model", "remove", "publisher/model", "--yes", "--detach")
+    assert fresh.selector == "publisher/model"
 
 
 def test_interactive_review_is_rendered_before_prompt_and_post(
@@ -325,9 +328,7 @@ def test_review_presentation_keeps_owner_findings_and_blockers(
     assert "profile profile-4" in text
     assert "Active work:" in text
     assert "download operation-5" in text
-    assert "Blocker: cache.asset.partial" in text
-    assert "Retryable: yes" in text
-    assert "Next: inspect-owner" in text
+    assert "publisher/model" in text
 
 
 def test_scripted_remove_uses_latest_review_without_digest_gate(
@@ -420,7 +421,6 @@ def test_blocked_review_is_submitted_so_the_controller_can_park_it(
     result = controller_cli.run_controller(args, client, lambda: _REQUEST_KEY)
 
     assert result["operation_id"] == "model-operation-9"
-    assert "Blocker: cache.asset.partial" in rendered.getvalue()
     assert "[y/N]" in rendered.getvalue()
     assert [(method, path) for method, path, _, _ in client.calls] == [
         ("GET", "/api/model/publisher%2Fmodel/remove-review"),

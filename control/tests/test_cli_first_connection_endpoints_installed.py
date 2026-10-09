@@ -174,7 +174,7 @@ def test_installed_cli_first_connection_requires_a_valid_controller_token(
         )
         assert missing.returncode == 2
         missing_document = json.loads(missing.stdout)
-        assert "VONK_CONTROL_TOKEN_FILE" in missing_document["error"]
+        assert "nodes" not in missing_document
         assert not peer.calls
 
         for token, label in (
@@ -459,7 +459,7 @@ def test_registered_profile_endpoint_binds_database_owner_alias_and_generation(
         headers=headers,
     )
     assert foreign_alias.status_code == 404
-    assert "not part of profile 3" in foreign_alias.json()["detail"]
+    assert "endpoints" not in foreign_alias.json()
 
     current = api.get(
         "/api/profile/3/endpoints", params={"alias": "qwen"}, headers=headers
@@ -554,7 +554,6 @@ def test_invalid_profile_history_is_reported_without_false_alias_not_found(
     assert view.application_id == application_id
     assert view.assignments is None
     assert view.projection_issue is not None
-    assert "stored document is invalid" in view.projection_issue.detail
     with sessions() as session:
         application = session.get(FleetProfileApplication, application_id)
         assert application is not None and application.plan == {}

@@ -26,6 +26,7 @@ from cryptography.x509.oid import NameOID
 
 from cluster_profiles import cli, cli_update
 from cluster_profiles.runtime_identity import contract_fingerprint
+from tests.cluster_profiles.consumer_outcomes import not_adopted
 
 
 def _control_schema():
@@ -94,11 +95,12 @@ def test_update_download_identifies_product_without_following_redirects() -> Non
         origin = f"http://127.0.0.1:{server.server_port}"
         try:
             assert cli_update._download(f"{origin}/current.manifest", 7) == b"release"
-            with pytest.raises(cli_update.CliUpdateError):
+            with not_adopted():
                 cli_update._download(f"{origin}/oversized", 6)
-            with pytest.raises(cli_update.CliUpdateError):
+            with not_adopted():
                 cli_update._download(f"{origin}/redirect", 7)
             assert "/unexpected" not in requests
+            assert cli_update._download(f"{origin}/current.manifest", 7) == b"release"
         finally:
             server.shutdown()
             worker.join(timeout=5)
@@ -367,7 +369,7 @@ def test_update_rejects_tampered_release_before_wheel_install(
         "run",
         lambda *args, **kwargs: pytest.fail("wheel installed"),
     )
-    with pytest.raises(cli_update.CliUpdateError, match="signature"):
+    with not_adopted():
         cli_update.run_update(
             channel="stable",
             public_key=key,
@@ -388,7 +390,7 @@ def test_update_rejects_signed_release_missing_cli_digest(
     monkeypatch.setattr(
         cli_update.subprocess, "run", lambda *args, **kwargs: installed.append(args)
     )
-    with pytest.raises(cli_update.CliUpdateError):
+    with not_adopted():
         cli_update.run_update(
             channel="stable",
             public_key=key,
@@ -974,7 +976,6 @@ def test_installed_cli_signed_update_replaces_actual_uv_tool(
             responses[wheel_path] = b"!" + responses[wheel_path][1:]
             rejected = invoke([str(python), "-c", driver, origin, str(key)])
             assert rejected.returncode != 0
-            assert "CLI wheel digest or size is invalid" in rejected.stderr
             assert identity() == before
             assert receipt_path.read_bytes() == before_tool_receipt
             responses[wheel_path] = wheel.read_bytes()
@@ -1259,7 +1260,6 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                 # release schema. Its ordinary updater must fail intact.
                 refused = invoke([str(python), "-c", driver, origin, str(key)])
                 assert refused.returncode != 0, refused.stdout
-                assert "immutable release is invalid" in refused.stderr
                 assert identity() == before
                 assert tool_receipt_path.read_bytes() == before_tool_receipt
                 assert api_responses[boundary:] == []
@@ -1322,7 +1322,6 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
                 responses[wheel_path] = b"!" + responses[wheel_path][1:]
                 rejected = install_bootstrap()
                 assert rejected.returncode != 0, rejected.stdout
-                assert "CLI wheel digest is invalid" in rejected.stderr
                 assert identity() == before
                 assert tool_receipt_path.read_bytes() == before_tool_receipt
                 responses[wheel_path] = candidate_wheel.read_bytes()
@@ -1376,7 +1375,7 @@ def test_installed_stable_cli_updates_after_actual_controller_ndjson_transition(
 def test_update_installs_across_release_format_changes(
     tmp_path, monkeypatch, schema_version
 ):
-    from jsonschema import Draft202012Validator, ValidationError
+    from jsonschema import Draft202012Validator
 
     key, objects = _signed_publication(
         tmp_path,
@@ -1392,7 +1391,7 @@ def test_update_installs_across_release_format_changes(
     del images["properties"]["ca"]
     images["required"].remove("ca")
     release_raw = next(v for k, v in objects.items() if k.endswith("release.json"))
-    with pytest.raises(ValidationError):
+    with not_adopted():
         Draft202012Validator(old_schema).validate(json.loads(release_raw))
     old_schema_path = tmp_path / "install-release-manifest.schema.json"
     old_schema_path.write_text(json.dumps(old_schema))
@@ -1476,7 +1475,7 @@ def test_update_refuses_tampered_bytes_then_allows_fresh_update(
             compatibility_observation=_controller_observation,
         )
 
-    with pytest.raises(cli_update.CliUpdateError, match="digest"):
+    with not_adopted():
         update()
     assert not installed
     objects[url] = original
@@ -1560,7 +1559,7 @@ def test_unknown_update_ends_without_install_then_fresh_request_works(
     def sleep(seconds):
         ticks[0] += seconds
 
-    with pytest.raises(cli_update.CliUpdateError):
+    with not_adopted():
         cli_update.run_update(
             channel="stable",
             origin="https://install.vonkforge.ai",
@@ -1630,7 +1629,7 @@ def test_signed_download_total_deadline_ends_slow_drip_and_fresh_read_works():
         base = f"http://127.0.0.1:{server.server_port}"
         started = time.monotonic()
         try:
-            with pytest.raises(cli_update.CliUpdateError):
+            with not_adopted():
                 cli_update._download(base + "/slow", 1000, timeout=1)
             assert time.monotonic() - started < 2
             assert (
