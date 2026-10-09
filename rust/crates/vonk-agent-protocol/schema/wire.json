@@ -11633,7 +11633,7 @@
     "PackageRollbackAuthority": "vonk_agent_protocol.package_upgrade.PackageRollbackAuthority",
     "PackageRollbackSource": "vonk_agent_protocol.package_upgrade.PackageRollbackSource",
     "PackageRollbackTransaction": "vonk_agent_protocol.agent_state.PackageRollbackTransaction",
-    "ReasonCodeVocabulary": "vonk_agent_protocol.reason_codes.ReasonCodeVocabulary",
+    "ReasonCodeVocabulary": "vonk_agent_protocol.reason_codes.vocabulary.ReasonCodeVocabulary",
     "RecipeBuildAdapter": "vonk_agent_protocol.build_import.RecipeBuildAdapter",
     "RecipeBuildAdapterDefinition": "vonk_agent_protocol.build_import.RecipeBuildAdapterDefinition",
     "RecipeBuildAdditionalContext": "vonk_agent_protocol.build_import.RecipeBuildAdditionalContext",
