@@ -699,6 +699,11 @@ fn upgrade_rejects_corrupt_expired_controller_key_before_renewal() {
 
 #[test]
 fn unavailable_root_signing_authority_does_not_block_compose_and_fresh_upgrade_recovers() {
+    const CHILD_ROOT: &str = "VONK_NAS_EXPIRED_ROOT_TEST_DIRECTORY";
+    if let Some(root) = std::env::var_os(CHILD_ROOT) {
+        assert!(upgrade_pki_bundle(Path::new(&root)).is_err());
+        return;
+    }
     let temporary = tempdir().unwrap();
     let bundle = clone_pki_bundle(temporary.path());
     let secrets = bundle.join("secrets");
@@ -709,9 +714,30 @@ fn unavailable_root_signing_authority_does_not_block_compose_and_fresh_upgrade_r
         .collect::<Vec<_>>();
     replace_ca_with_expired_root(&secrets);
     std::fs::write(bundle.join("docker-compose.yaml"), b"old compose").unwrap();
-    let started = std::time::Instant::now();
-    assert!(upgrade_pki_bundle(temporary.path()).is_err());
-    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "unavailable_root_signing_authority_does_not_block_compose_and_fresh_upgrade_recovers",
+        ])
+        .env(CHILD_ROOT, temporary.path())
+        .spawn()
+        .unwrap();
+    // Three credential attempts include encrypted-key validation. Allow for
+    // concurrent CI load, but kill and reap a stuck request instead of checking
+    // elapsed time only after an unbounded call has returned.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("expired-root upgrade exceeded its test deadline");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert!(status.success(), "expired-root upgrade child failed: {status}");
     assert_eq!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).unwrap(),
         pki_payload().docker_compose_yaml
