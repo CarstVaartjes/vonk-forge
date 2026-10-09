@@ -37,11 +37,13 @@ def _plan() -> RunSwitchPlan:
 
 def test_terminal_handoff_retains_diagnostic_and_verifies_after_restart() -> None:
     receipt = _phase_receipt(
-        {
-            "node_id": NODE,
-            "downloaded_bytes": 7,
-            "diagnostic": "exact transfer completed after resumed checkpoint",
-        },
+        RunSwitchTargetTransferEvidenceResult(
+            phase="transfer",
+            subphase="target-copy",
+            node_id=NODE,
+            downloaded_bytes=7,
+            diagnostic="exact transfer completed after resumed checkpoint",
+        ),
         phase=RunSwitchPhase.model_construct(kind="transfer", subphase="target-copy"),
     )
     assert isinstance(receipt, RunSwitchTargetTransferEvidenceResult)

@@ -62,6 +62,8 @@ class RunSwitchObservedEvidence(BaseModel):
     child_state: str | None = None
     status_reason: str | None = None
     reason: str | None = None
+    error: str | None = None
+    diagnostic: str | None = None
 
 
 class RunSwitchEffectiveBuildReceipt(BaseModel):
@@ -175,3 +177,15 @@ class RunSwitchStoredLifecycle(RunSwitchStoredChildIdentity):
         int | None, readable_or_none(TypeAdapter(Annotated[int, Field(ge=2)]))
     ] = None
     retry_reason: Annotated[str | None, readable_or_none(TypeAdapter(str))] = None
+
+
+class RuntimeImageBuildInput(BaseModel):
+    """The content inputs used to compile a runtime image's execution spec."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    image_reference: str
+    build_input_sha256: (
+        Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")] | None
+    )
+    platform: str

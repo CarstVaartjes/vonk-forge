@@ -4015,7 +4015,8 @@ def test_run_switch_failure_classification_is_terminal_only_for_authentication()
         assert is_security_failure(_failure_code_of(status_error(status))) is True
     for status in (404, 429, 500, 503):
         assert is_security_failure(_failure_code_of(status_error(status))) is False
-    for number in (errno.EPERM, errno.ENOSPC, errno.ECONNRESET):
+    assert is_security_failure(_failure_code_of(PermissionError(errno.EPERM, "x")))
+    for number in (errno.ENOSPC, errno.ECONNRESET):
         assert is_security_failure(_failure_code_of(OSError(number, "x"))) is False
 
 

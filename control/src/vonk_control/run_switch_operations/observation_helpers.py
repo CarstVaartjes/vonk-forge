@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     RouteState,
     RunState,
     RunSwitchCode,
+    SecurityRefusalReason,
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 
@@ -114,6 +115,8 @@ def _failure_code_of(error: BaseException) -> str | None:
     (HTTP 401/403) is a real security boundary and the only terminal case; every
     other error is an unknown that is observed again."""
 
+    if isinstance(error, PermissionError):
+        return SecurityRefusalReason.PERMISSION_DENIED.value
     if isinstance(error, httpx2.HTTPError):
         status = (
             error.response.status_code

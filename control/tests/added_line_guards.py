@@ -138,7 +138,11 @@ def check_source(
     """Old findings cannot fail the change; only a reported added line can."""
     if not added or "generated_control" in path or "/generated/" in path:
         return []
-    is_test = "/tests/" in path or path.startswith("tests/")
+    is_test = (
+        "/tests/" in path
+        or path.startswith("tests/")
+        or path.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"))
+    )
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]
     )

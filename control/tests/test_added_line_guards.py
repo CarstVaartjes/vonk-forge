@@ -146,3 +146,16 @@ def test_other_languages_and_principle_modes_only_check_additions(
         modes=(mode,),
         words=frozenset({"running"}),
     )
+
+
+def test_web_assertions_are_not_production_contract_literals():
+    source = 'expect(state).toBe("running");\n'
+    assert not check_source(
+        "control/web/src/hooks/observer.test.tsx",
+        source,
+        {1},
+        words=frozenset({"running"}),
+    )
+    assert check_source(
+        "control/web/src/hooks/observer.tsx", source, {1}, words=frozenset({"running"})
+    )

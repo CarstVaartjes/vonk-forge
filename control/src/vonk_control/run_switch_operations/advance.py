@@ -13,7 +13,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileEffectState
 
 from .. import job_states
 from ..admission_locking import (
@@ -175,6 +175,8 @@ class AdvanceMixin:
                     continue
                 return True
             return False
+        if service._expire_distribution_observation(operation_id, now):
+            return True
         if service._refresh_blocked_plan(operation_id, now):
             return True
         with service._sessions() as session:
@@ -205,6 +207,26 @@ class AdvanceMixin:
                 session.commit()
                 return True
             progress = _read_progress(read_row_column(job, "result"))
+            phase = (
+                plan.phases[progress.phase_index]
+                if progress.phase_index < len(plan.phases)
+                else None
+            )
+            if (
+                phase is not None
+                and phase.kind
+                in {
+                    ProfileChildPhase.PREPARE,
+                    ProfileChildPhase.TRANSFER,
+                    ProfileChildPhase.VERIFY,
+                }
+                and progress.recovery_deadline_at is None
+            ):
+                # One window owns unattended transfer and observation;
+                # changing symptoms and restarting cannot renew it.
+                progress.recovery_deadline_at = now + timedelta(hours=1)
+                job.result = _persisted_result(progress)
+                session.commit()
             intent_status = service._scope_intent_status(session, job)
             if intent_status == "invalid":
                 service._mark_failed(
@@ -431,6 +453,9 @@ class AdvanceMixin:
                 return True
             if child is None:
                 fail("run-switch child operation disappeared", clear_child=True)
+                return True
+            if child.state == ProfileEffectState.UNKNOWN:
+                fail("run-switch child observation is unavailable", clear_child=True)
                 return True
             if child.state in {
                 LifecycleState.QUEUED.value,

@@ -5782,7 +5782,7 @@
       },
       "DistributionJobPayload": {
         "additionalProperties": false,
-        "description": "One target-copy child: the plan it serves and what each Spark must receive.",
+        "description": "One target-copy child and its exact per-node content binding.",
         "properties": {
           "assignments": {
             "additionalProperties": {
@@ -30101,6 +30101,11 @@
             "const": "target-copy",
             "title": "Subphase",
             "type": "string"
+          },
+          "uncertain": {
+            "default": false,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
@@ -30132,6 +30137,11 @@
             "const": "target-copy",
             "title": "Subphase",
             "type": "string"
+          },
+          "uncertain": {
+            "default": true,
+            "title": "Uncertain",
+            "type": "boolean"
           }
         },
         "required": [
@@ -31476,6 +31486,30 @@
               }
             ],
             "title": "Profile Application Id"
+          },
+          "recovery_child_operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Child Operation Id"
+          },
+          "recovery_deadline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Deadline At"
           },
           "retry_attempt": {
             "anyOf": [
