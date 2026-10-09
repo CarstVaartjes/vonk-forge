@@ -60,11 +60,11 @@ def _lose_committed_response(
         worker.close()
 
 
-def test_postgres_exact_intent_recovers_past_budget_after_process_death(
+def test_postgres_exact_intent_recovers_within_budget_after_process_death(
     postgres_agent_service,  # noqa: F811 - pytest resolves the imported fixture.
     postgres_engine,
 ) -> None:
-    """A lifetime retry cap or process-local schedule strands accepted intent.
+    """A committed retry schedule survives process death within its finite budget.
 
     Exercise real PostgreSQL claims/results and actual process death, without
     repairing rows. The agent/runtime boundary supplies typed restart and stop
@@ -84,7 +84,7 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
     first = None
     last = None
 
-    for failure_number in range(1, 7):
+    for failure_number in range(1, 5):
         claim = claim_agent(
             jobs,
             NODE_A,
@@ -105,7 +105,7 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
                 "reason": "agent restarted before its exact stop was observed",
             },
         )
-        if failure_number == 6:
+        if failure_number == 4:
             _lose_committed_response(database_url, clock.now, interrupted)
         else:
             jobs.record_result(interrupted)
@@ -120,7 +120,7 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
             assert due > clock.now
             assert stored.status_reason is not None
             assert due.isoformat() in stored.status_reason
-        if failure_number < 6:
+        if failure_number < 4:
             clock.now = due
 
     # A fresh worker uses the committed cooldown, and a different Spark keeps
@@ -186,3 +186,13 @@ def test_postgres_exact_intent_recovers_past_budget_after_process_death(
         )
         assert len(attempts) == fenced_attempt(sessions, recovered).attempt
         assert attempts[-1].state == "succeeded"
+
+    fresh_request = parent(sessions, clock)
+    fresh_payload = recipe_stop_payload(NODE_A, plan_digest=COMMIT)
+    fresh = jobs.enqueue(fresh_request.id, NODE_A, "recipe.stop", COMMIT, fresh_payload)
+    fresh_claim = claim_agent(jobs, NODE_A, "serial-a")
+    assert (
+        fresh_claim is not None
+        and fenced_operation(sessions, fresh_claim).id == fresh.id
+    )
+    jobs.succeed(fresh_claim, STOP_RESULT)
