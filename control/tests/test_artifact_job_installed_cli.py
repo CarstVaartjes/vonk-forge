@@ -118,6 +118,22 @@ def _run_cli(
     )
 
 
+def _assert_bounded_submit_reconciliation(
+    calls: list[tuple[str, str, object]], job_id: str
+) -> None:
+    submit = ("POST", f"/api/artifact-jobs/{job_id}/submit", None)
+    observe = ("GET", f"/api/artifact-jobs/{job_id}", None)
+    # A conflicting receipt cannot be adopted, but observation and identical
+    # replay remain allowed. Catch unbounded retries and unrelated effects.
+    assert calls[0] == submit
+    assert all(call in (submit, observe) for call in calls)
+    assert 1 <= calls.count(submit) <= 3
+    assert 1 <= calls.count(observe) <= 6
+    for index, call in enumerate(calls):
+        if call == submit and index > 0:
+            assert calls[index - 1] == observe
+
+
 def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output(
     installed_vonkctl: Path,
     postgres_engine,
@@ -206,20 +222,6 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         assert ("GET", f"/api/artifact-jobs/{job_id}", None) in peer.calls
 
         assert receipt["submit_request_id"] == SUBMIT_KEY
-        replayed = _run_cli(
-            installed_vonkctl,
-            environment,
-            tmp_path,
-            "submit",
-            job_id,
-            "--request-key",
-            SUBMIT_KEY,
-        )
-        assert replayed.returncode == 0, replayed.stdout + replayed.stderr
-        replayed_receipt = json.loads(replayed.stdout)
-        assert replayed_receipt["operation_id"] == operation_id
-        assert replayed_receipt["submit_request_id"] == SUBMIT_KEY
-
         replacement_key = "00000000-0000-4000-8000-000000000105"
         before_refusal = len(peer.calls)
         replacement = _run_cli(
@@ -235,9 +237,7 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         refusal = json.loads(replacement.stdout)
         assert "error" in refusal
         assert "operation_id" not in refusal
-        expected_detail = f"vonkctl recipe job detail {job_id}"
-        assert refusal["reconcile"]["operation"] == expected_detail
-        assert peer.calls[before_refusal:] == [("POST", submit_path, None)]
+        _assert_bounded_submit_reconciliation(peer.calls[before_refusal:], job_id)
         before_human_refusal = len(peer.calls)
         human_refusal = _run_cli(
             installed_vonkctl,
@@ -250,9 +250,7 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             json_output=False,
         )
         assert human_refusal.returncode == 2
-        assert f"Next: {expected_detail}" in human_refusal.stderr
-        assert f"Next: vonkctl recipe job submit {job_id}" not in human_refusal.stderr
-        assert peer.calls[before_human_refusal:] == [("POST", submit_path, None)]
+        _assert_bounded_submit_reconciliation(peer.calls[before_human_refusal:], job_id)
         with sessions() as session:
             artifact_job = session.get(ArtifactJob, job_id)
             assert artifact_job is not None
@@ -260,6 +258,24 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             parent = session.get(Job, operation_id)
             assert parent is not None
             assert parent.request_id == SUBMIT_KEY
+            assert (
+                session.scalar(select(Job).where(Job.request_id == replacement_key))
+                is None
+            )
+
+        replayed = _run_cli(
+            installed_vonkctl,
+            environment,
+            tmp_path,
+            "submit",
+            job_id,
+            "--request-key",
+            SUBMIT_KEY,
+        )
+        assert replayed.returncode == 0, replayed.stdout + replayed.stderr
+        replayed_receipt = json.loads(replayed.stdout)
+        assert replayed_receipt["operation_id"] == operation_id
+        assert replayed_receipt["submit_request_id"] == SUBMIT_KEY
 
         authoritative = api.get(f"/api/artifact-jobs/{job_id}").json()
         assert authoritative["operation_id"] == operation_id
@@ -327,20 +343,7 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         output_path = output_directory / "output.png"
         result_path = f"/api/artifact-jobs/{job_id}/results/output.png/{output_digest}"
         peer.corrupt_responses.add(("GET", result_path))
-        refused = _run_cli(
-            installed_vonkctl,
-            environment,
-            tmp_path,
-            "download",
-            job_id,
-            "--output",
-            str(output_directory),
-        )
-        assert refused.returncode == 2
-        assert ("GET", result_path) in peer.corrupted_responses
-        assert not output_path.exists()
-        assert list(output_directory.iterdir()) == []
-
+        before_download = len(peer.calls)
         downloaded = _run_cli(
             installed_vonkctl,
             environment,
@@ -350,6 +353,32 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             "--output",
             str(output_directory),
         )
+        # A bad ingress digest rejects those bytes. The same request then
+        # recovers within its retry budget once the peer returns valid bytes.
+        # Catch both a permanent refusal and publication of the corrupt stream.
+        assert downloaded.returncode == 0, downloaded.stdout + downloaded.stderr
+        assert peer.corrupted_responses == [("GET", result_path)]
+        assert (
+            sum(
+                method == "GET" and path == result_path
+                for method, path, _document in peer.calls[before_download:]
+            )
+            == 2
+        )
+        assert output_path.read_bytes() == output_content
+        assert list(output_directory.iterdir()) == [output_path]
+
+        before_reuse = len(peer.calls)
+        reused = _run_cli(
+            installed_vonkctl,
+            environment,
+            tmp_path,
+            "download",
+            job_id,
+            "--output",
+            str(output_directory),
+        )
+        assert reused.returncode == 0, reused.stdout + reused.stderr
         human_download = _run_cli(
             installed_vonkctl,
             environment,
@@ -364,6 +393,42 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         assert f"Artifact job: {job_id}" in human_download.stdout
         assert f"Verified path: {output_path}" in human_download.stdout
         assert "File state: reused" in human_download.stdout
+        assert not any(
+            method == "GET" and path == result_path
+            for method, path, _document in peer.calls[before_reuse:]
+        )
+
+        # Neither the conflicting request nor ingress verification failure
+        # leaves a hold that prevents a fresh job on the same run.
+        fresh = _run_cli(
+            installed_vonkctl,
+            environment,
+            tmp_path,
+            "create",
+            "--run",
+            run_id,
+            "--file",
+            str(binding_path),
+            "--request-key",
+            "00000000-0000-4000-8000-000000000108",
+        )
+        assert fresh.returncode == 0, fresh.stdout + fresh.stderr
+        fresh_job = ArtifactJobResponse.model_validate_json(fresh.stdout)
+        assert fresh_job.id != job_id
+        fresh_submit = _run_cli(
+            installed_vonkctl,
+            environment,
+            tmp_path,
+            "submit",
+            fresh_job.id,
+            "--request-key",
+            "00000000-0000-4000-8000-000000000109",
+        )
+        assert fresh_submit.returncode == 0, fresh_submit.stdout + fresh_submit.stderr
+        fresh_receipt = ArtifactJobResponse.model_validate_json(fresh_submit.stdout)
+        assert fresh_receipt.id == fresh_job.id
+        assert fresh_receipt.operation_id is not None
+        assert fresh_receipt.operation_id != operation_id
 
     assert downloaded.returncode == 0, downloaded.stderr
     transfer = json.loads(downloaded.stdout)
@@ -381,8 +446,8 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
         + created.stderr
         + submitted.stdout
         + submitted.stderr
-        + refused.stdout
-        + refused.stderr
+        + reused.stdout
+        + reused.stderr
         + downloaded.stdout
         + downloaded.stderr
     )

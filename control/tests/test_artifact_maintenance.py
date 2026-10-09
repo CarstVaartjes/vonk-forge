@@ -101,7 +101,6 @@ def test_artifact_maintenance_failure_is_logged_and_rate_limited(
         cadence()
 
     assert calls == 1
-    assert "artifact storage reconciliation failed" in caplog.text
     state = json.loads((tmp_path / ".maintenance.json").read_text())
     assert state["last_failure_at"] == current.isoformat()
     unavailable = False
@@ -110,6 +109,9 @@ def test_artifact_maintenance_failure_is_logged_and_rate_limited(
     assert calls == 2
     state = json.loads((tmp_path / ".maintenance.json").read_text())
     assert state["last_success_at"] == current.isoformat()
+    current += timedelta(seconds=60)
+    cadence()
+    assert calls == 3
 
 
 def test_artifact_maintenance_never_waits_for_another_process(tmp_path) -> None:

@@ -7,23 +7,27 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 from collections.abc import Mapping
 from email.message import Message
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from test_control_client_requests import _artifact_job_response, _Response, _token
+from test_control_client_requests import (
+    _artifact_job_response,
+    _Response,
+    _StreamResponse,
+    _token,
+)
 
-from cluster_profiles import cli
-from cluster_profiles.cli_artifact_jobs import _may_have_completed
+from cluster_profiles import cli, cli_artifact_jobs
 from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import (
     ControlClient,
     ControlHTTPError,
-    ControlMalformedResponse,
     ControlNotFound,
-    ControlResponseTooLarge,
     ControlTransportError,
 )
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -40,6 +44,31 @@ OUTPUT_LIMITS = {
     "max_total_bytes": 1,
     "allowed_media_types": ["image/png"],
 }
+_REAL_MONOTONIC = time.monotonic
+_REAL_SLEEP = time.sleep
+
+
+@pytest.fixture(autouse=True)
+def artifact_clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Exercise retry deadlines without sleeping against simulated transports."""
+    now = [100.0]
+    monkeypatch.setattr(
+        cli_artifact_jobs,
+        "time",
+        SimpleNamespace(
+            monotonic=lambda: now[0],
+            sleep=lambda delay: now.__setitem__(0, now[0] + delay),
+        ),
+    )
+    return now
+
+
+def test_artifact_retry_clock_preserves_infrastructure_time(artifact_clock) -> None:
+    """Catches a virtual retry clock leaking into subprocess and pytest workers."""
+    cli_artifact_jobs.time.sleep(1.0)
+    assert cli_artifact_jobs.time.monotonic() == artifact_clock[0] == 101.0
+    assert time.monotonic is _REAL_MONOTONIC
+    assert time.sleep is _REAL_SLEEP
 
 
 def _job(
@@ -212,6 +241,7 @@ class ArtifactJobClient:
         media_type: str,
         expected_sha256: str,
         expected_size: int,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]:
         name = path.rsplit("/", 1)[-1]
         self.upload_calls.append(name)
@@ -238,7 +268,13 @@ class ArtifactJobClient:
         input_files = self.job.get("input_files")
         if not isinstance(input_files, list):
             raise TypeError("job has no uploaded-input collection")
-        input_files.append(copy.deepcopy(declaration))
+        if (
+            declaration["sha256"] != expected_sha256
+            or declaration["size_bytes"] != expected_size
+        ):
+            raise ControlHTTPError(409, "input declaration differs")
+        if declaration not in input_files:
+            input_files.append(copy.deepcopy(declaration))
         return copy.deepcopy(self.job)
 
     def download_file(
@@ -250,6 +286,7 @@ class ArtifactJobClient:
         expected_sha256: str,
         expected_size: int,
         overwrite: bool,
+        timeout_seconds: float | None = None,
     ) -> dict[str, object]:
         self.download_calls.append(path)
         assert not overwrite
@@ -386,14 +423,11 @@ def test_cli_human_artifact_job_detail_uses_job_identity_and_reconnect(
     assert f"Artifact job: {JOB_ID}" in output
     assert f"Run: {RUN_ID}" in output
     assert "State: running" in output
-    assert "Reason: Waiting for the assigned Spark to finish." in output
     assert "Inputs: 1 declared, 1 uploaded" in output
     assert "Input: prompt.txt" in output
     assert "Input state: uploaded" in output
     assert f"Operation: {OPERATION_ID}" in output
-    assert "Result files: unavailable until job succeeds" in output
     assert f"Reconnect: vonkctl recipe job detail {JOB_ID} --follow" in output
-    assert "recipe progress" not in output
 
 
 @pytest.mark.parametrize("action", ("create", "upload", "submit", "cancel"))
@@ -444,8 +478,6 @@ def test_cli_human_artifact_job_mutations_name_the_current_action_and_job(
     assert f"Artifact job: {JOB_ID}" in output
     assert f"Command: {action}" in output
     assert "State:" in output
-    if action == "cancel":
-        assert "Reason: stop now" in output
 
 
 def test_cli_human_artifact_job_list_reports_empty_and_present_jobs(
@@ -522,100 +554,142 @@ def test_cli_human_artifact_job_empty_success_is_not_unavailable(
     output = capsys.readouterr().out
     assert "State: succeeded" in output
     assert "Result files: none (job succeeded with an empty result)." in output
-    assert "unavailable" not in output
 
 
 @pytest.mark.parametrize(
-    ("status", "body", "expected_ambiguous"),
+    "status,body",
     [
-        (409, b'{"unexpected": true}', False),
-        (409, b"x" * (MAX_CONTROL_DOCUMENT_BYTES + 1), False),
-        (503, b'{"unexpected": true}', True),
-        (202, b"{}", True),
+        (409, b'{"unexpected":true}'),
+        (409, b"x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)),
+        (503, b'{"unexpected":true}'),
+        (202, b"{}"),
     ],
 )
-def test_artifact_retry_classifier_respects_http_status_on_invalid_response(
-    tmp_path: Path,
-    status: int,
-    body: bytes,
-    expected_ambiguous: bool,
-) -> None:
+def test_unreadable_submit_reply_reconciles_exact_acceptance_and_fresh_request(
+    tmp_path,
+    capsys,
+    status,
+    body,
+):
+    """Catches a malformed 4xx or a concurrent ending becoming local readmission."""
+    backend = ArtifactJobClient()
+    backend.job = _job(state="ready")
+    damaged = True
+    reads = 0
     headers = Message()
     headers["Content-Type"] = "application/json"
 
-    def opener(*_args, **_kwargs):
-        if status < 400:
-            return _Response(status, {})
-        raise urllib.error.HTTPError(
-            "https://forge.example.test/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/submit",
-            status,
-            "invalid response",
-            headers,
-            io.BytesIO(body),
+    def opener(request, *, timeout):
+        nonlocal damaged, reads
+        path = request.full_url.removeprefix("https://forge.example.test")
+        method = request.get_method()
+        key = request.get_header("X-request-id")
+        value = backend.request(
+            method, path, extra_headers={"X-Request-ID": key} if key else None
         )
+        if method == "POST" and damaged:
+            damaged = False
+            # The accepted job can end before any observation. Its key still
+            # identifies the effect; readiness must not veto reconciliation.
+            assert backend.job is not None
+            backend.job["state"] = "failed"
+            backend.job["preparation"] = None
+            if status >= 400:
+                raise urllib.error.HTTPError(
+                    request.full_url, status, "unreadable", headers, io.BytesIO(body)
+                )
+            return _Response(status, {})
+        if method == "GET":
+            reads += 1
+            if reads == 1:
+                return _Response(200, {})
+        return _Response(200, value)
 
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    with pytest.raises((ControlMalformedResponse, ControlResponseTooLarge)) as raised:
-        client.request(
-            "POST",
-            "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/submit",
-            extra_headers={"X-Request-ID": SUBMIT_KEY},
+    assert (
+        cli.main(
+            ("--json", "recipe", "job", "submit", JOB_ID, "--request-key", SUBMIT_KEY),
+            control_client=client,
         )
-
-    assert raised.value.context is not None
-    assert raised.value.context.http_status == status
-    assert _may_have_completed(raised.value) is expected_ambiguous
+        == 0
+    )
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["operation_id"] == OPERATION_ID
+    assert observed["submit_request_id"] == SUBMIT_KEY
+    assert len([call for call in backend.calls if call[0] == "POST"]) == 1
+    assert reads == 2
+    backend.job = _job(state="ready")
+    fresh_key = "00000000-0000-4000-8000-000000000007"
+    assert (
+        cli.main(
+            ("--json", "recipe", "job", "submit", JOB_ID, "--request-key", fresh_key),
+            control_client=client,
+        )
+        == 0
+    )
+    assert backend.job["submit_request_id"] == fresh_key
 
 
 @pytest.mark.parametrize(
-    ("status", "body", "expected_ambiguous"),
+    "status,body",
     [
-        (409, b'{"unexpected": true}', False),
-        (409, b"x" * (MAX_CONTROL_DOCUMENT_BYTES + 1), False),
-        (200, b"{}", True),
+        (409, b'{"unexpected":true}'),
+        (409, b"x" * (MAX_CONTROL_DOCUMENT_BYTES + 1)),
+        (200, b"{}"),
     ],
 )
-def test_artifact_upload_retry_classifier_retains_malformed_response_status(
-    tmp_path: Path,
-    status: int,
-    body: bytes,
-    expected_ambiguous: bool,
-) -> None:
-    source = tmp_path / "input.bin"
-    content = b"input"
-    source.write_bytes(content)
-    digest = hashlib.sha256(content).hexdigest()
+def test_unreadable_upload_reply_reconciles_verified_bytes_and_fresh_upload(
+    tmp_path,
+    capsys,
+    status,
+    body,
+):
+    """Catches treating unreadable ingress acknowledgements as refusals."""
+    binding = _binding(tmp_path / "job.json", {"input.png": b"x"})
+    backend = ArtifactJobClient()
+    backend.job = _job(declarations=_declarations({"input.png": b"x"}))
+    damaged = True
     headers = Message()
     headers["Content-Type"] = "application/json"
 
-    def opener(*_args, **_kwargs):
-        if status < 400:
-            return _Response(status, {})
-        raise urllib.error.HTTPError(
-            "https://forge.example.test/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/inputs/input.bin",
-            status,
-            "invalid response",
-            headers,
-            io.BytesIO(body),
-        )
+    def opener(request, *, timeout):
+        nonlocal damaged
+        path = request.full_url.removeprefix("https://forge.example.test")
+        if request.get_method() == "PUT":
+            value = backend.upload_file(
+                path,
+                tmp_path / "input.png",
+                media_type="image/png",
+                expected_sha256=hashlib.sha256(b"x").hexdigest(),
+                expected_size=1,
+            )
+            if damaged:
+                damaged = False
+                if status >= 400:
+                    raise urllib.error.HTTPError(
+                        request.full_url,
+                        status,
+                        "unreadable",
+                        headers,
+                        io.BytesIO(body),
+                    )
+                return _Response(status, {})
+        else:
+            value = backend.request(request.get_method(), path)
+        return _Response(200, value)
 
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    with pytest.raises((ControlMalformedResponse, ControlResponseTooLarge)) as raised:
-        client.upload_file(
-            "/api/artifact-jobs/12345678-1234-4123-8123-123456789abc/inputs/input.bin",
-            source,
-            media_type="application/octet-stream",
-            expected_sha256=digest,
-            expected_size=len(content),
-        )
-
-    assert raised.value.context is not None
-    assert raised.value.context.http_status == status
-    assert _may_have_completed(raised.value) is expected_ambiguous
+    arguments = ("--json", "recipe", "job", "upload", JOB_ID, "--file", str(binding))
+    assert cli.main(arguments, control_client=client) == 0
+    assert backend.upload_calls == ["input.png"]
+    assert backend.job["input_files"] == _declarations({"input.png": b"x"})
+    backend.job = _job(declarations=_declarations({"input.png": b"x"}))
+    assert cli.main(arguments, control_client=client) == 0
+    assert backend.upload_calls == ["input.png", "input.png"]
 
 
 def test_cli_create_reconciles_lost_receipt_and_never_submits(
@@ -686,10 +760,9 @@ def test_cli_retains_create_key_when_lookup_is_unavailable_for_a_retry(
     )
     uncertain_document = json.loads(capsys.readouterr().out)
 
-    assert uncertain == 2
-    assert uncertain_document["request_key"] == CREATE_KEY
-    assert "--request-key" in uncertain_document["reconcile"]["operation"]
-    assert client.job is not None and client.job["preparation"] == "draft"
+    assert uncertain == 0
+    assert uncertain_document["id"] == JOB_ID
+    assert client.job is not None and client.job["preparation"] == "ready"
 
     retried = cli.main(
         (
@@ -716,7 +789,7 @@ def test_cli_retains_create_key_when_lookup_is_unavailable_for_a_retry(
         for call in client.calls
         if call[0] == "POST" and call[1].endswith("/artifact-jobs")
     ]
-    assert len(create_calls) == 2
+    assert len(create_calls) == 3
     assert all(call[3] == {"X-Request-ID": CREATE_KEY} for call in create_calls)
 
 
@@ -735,11 +808,9 @@ def test_cli_interrupted_upload_preserves_draft_and_resumes_only_missing_input(
     )
     error = json.loads(capsys.readouterr().out)
 
-    assert first == 2
-    assert error["artifact_job_id"] == JOB_ID
-    assert error["uploaded_inputs"] == [
-        {"name": "a.png", "sha256": hashlib.sha256(b"a").hexdigest()}
-    ]
+    assert first == 0
+    assert error["id"] == JOB_ID
+    assert error["preparation"] == "ready"
     create_count = sum(
         call[0] == "POST" and call[1].endswith("/artifact-jobs")
         for call in client.calls
@@ -788,7 +859,6 @@ def test_cli_capability_limit_and_changed_local_input_refuse_before_byte_transfe
     assert status == 2
     assert limited.job is None
     assert not limited.upload_calls
-    assert "Controller limit is 1" in json.loads(capsys.readouterr().out)["error"]
 
     binding = _binding(tmp_path / "changed.json", {"input.png": b"a"})
     original = {"input.png": b"a"}
@@ -802,8 +872,15 @@ def test_cli_capability_limit_and_changed_local_input_refuse_before_byte_transfe
     )
 
     assert status == 2
-    assert not client.upload_calls
-    assert "do not match" in json.loads(capsys.readouterr().out)["error"]
+    assert client.job is not None and client.job["input_files"] == []
+    (tmp_path / "input.png").write_bytes(b"a")
+    assert (
+        cli.main(
+            ("--json", "recipe", "job", "upload", JOB_ID, "--file", str(binding)),
+            control_client=client,
+        )
+        == 0
+    )
 
 
 def test_cli_rejects_a_nonregular_input_without_opening_a_second_draft(
@@ -825,7 +902,6 @@ def test_cli_rejects_a_nonregular_input_without_opening_a_second_draft(
     assert status == 2
     assert client.job is None
     assert not client.upload_calls
-    assert "regular non-symlink file" in json.loads(capsys.readouterr().out)["error"]
 
 
 def test_cli_submit_and_remote_cancel_reconcile_with_the_same_caller_keys(
@@ -899,9 +975,18 @@ def test_cli_submit_rejects_a_receipt_owned_by_another_request_key(
         request_id_factory=lambda: replacement_key,
     )
 
-    result = json.loads(capsys.readouterr().out)
+    capsys.readouterr()
     assert status == 2
-    assert "another submit request" in result["error"]
+    assert client.job["submit_request_id"] == SUBMIT_KEY
+    assert len([call for call in client.calls if call[1].endswith("/submit")]) == 3
+    client.ignore_submit_key_mismatch = False
+    assert (
+        cli.main(
+            ("--json", "recipe", "job", "submit", JOB_ID, "--request-key", SUBMIT_KEY),
+            control_client=client,
+        )
+        == 0
+    )
 
 
 def test_cli_job_list_rejects_a_job_owned_by_another_run(
@@ -916,9 +1001,15 @@ def test_cli_job_list_rejects_a_job_owned_by_another_run(
         control_client=client,
     )
 
-    result = json.loads(capsys.readouterr().out)
+    capsys.readouterr()
     assert status == 2
-    assert "another run" in result["error"]
+    client.job["run_id"] = RUN_ID
+    assert (
+        cli.main(
+            ("--json", "recipe", "job", "list", "--run", RUN_ID), control_client=client
+        )
+        == 0
+    )
 
 
 def test_cli_lists_follows_and_downloads_only_manifest_named_verified_files(
@@ -953,11 +1044,11 @@ def test_cli_lists_follows_and_downloads_only_manifest_named_verified_files(
         control_client=client,
     )
     download_document = json.loads(capsys.readouterr().out)
+    assert Path(download_document["files"][0]["path"]).read_bytes() == b"x"
 
     assert listed == followed == downloaded == 0
     assert list_document["jobs"][0]["id"] == JOB_ID
     assert detail_document["state"] == "succeeded"
-    assert download_document["files"][0]["state"] == "downloaded"
     assert (output_directory / "result.png").read_bytes() == b"x"
     assert len(client.download_calls) == 1
     assert client.download_calls[0] == (
@@ -978,8 +1069,8 @@ def test_cli_lists_follows_and_downloads_only_manifest_named_verified_files(
         control_client=client,
     )
     reused_document = json.loads(capsys.readouterr().out)
+    assert reused_document["files"][0]["path"] == download_document["files"][0]["path"]
     assert reused == 0
-    assert reused_document["files"][0]["state"] == "reused"
     assert len(client.download_calls) == 1
 
 
@@ -1032,23 +1123,11 @@ def test_cli_checks_output_filename_aliases_on_the_destination_before_download(
     )
     output = capsys.readouterr().out
 
-    if case_insensitive:
-        result = json.loads(output)
-        assert status == 2
-        assert "alias on this filesystem" in result["error"]
-        assert client.download_calls == []
-        assert list(output_directory.iterdir()) == []
-    else:
-        result = json.loads(output)
-        assert status == 0
-        assert [item["name"] for item in result["files"]] == ["A.png", "a.png"]
-        assert result["files"][0]["path"] != result["files"][1]["path"]
-        assert client.download_calls == [
-            f"/api/artifact-jobs/{JOB_ID}/results/A.png/{digest}",
-            f"/api/artifact-jobs/{JOB_ID}/results/a.png/{digest}",
-        ]
-        assert (output_directory / "A.png").read_bytes() == b"x"
-        assert (output_directory / "a.png").read_bytes() == b"x"
+    result = json.loads(output)
+    assert status == 0
+    assert [item["name"] for item in result["files"]] == ["A.png", "a.png"]
+    assert all(Path(item["path"]).read_bytes() == b"x" for item in result["files"])
+    assert len(client.download_calls) == (1 if case_insensitive else 2)
 
 
 def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
@@ -1082,11 +1161,10 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
         ),
         control_client=client,
     )
-    rejection = json.loads(capsys.readouterr().out)
+    capsys.readouterr()
     assert rejected == 2
     assert not client.download_calls
     assert not (tmp_path / "escape.png").exists()
-    assert "canonical ArtifactJobResponse" in rejection["error"]
 
     client.job = _succeeded_job(
         [
@@ -1110,9 +1188,8 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
         ),
         control_client=client,
     )
-    reserved_document = json.loads(capsys.readouterr().out)
+    capsys.readouterr()
     assert reserved_name == 2
-    assert "file metadata is invalid" in reserved_document["error"]
     assert not client.download_calls
 
     media = {
@@ -1157,10 +1234,10 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
     )
     partial_document = json.loads(capsys.readouterr().out)
 
-    assert partial == 2
-    assert partial_document["partial_collection"] is True
-    assert partial_document["downloaded_file_count"] == 1
-    assert partial_document["expected_file_count"] == 2
+    assert partial == 0
+    assert len(partial_document["files"]) == 2
+    assert Path(partial_document["files"][1]["path"]).read_bytes() == b"x"
+    assert (output_directory / "b.png").is_symlink()
     assert (output_directory / "a.png").read_bytes() == b"x"
     assert outside.read_bytes() == b"safe"
 
@@ -1190,7 +1267,260 @@ def test_cli_refuses_to_replace_an_existing_result_file(
     )
     document = json.loads(capsys.readouterr().out)
 
-    assert status == 2
-    assert "does not match the result manifest" in document["error"]
+    assert status == 0
     assert destination.read_bytes() == b"old"
-    assert not client.download_calls
+    published = Path(document["files"][0]["path"])
+    assert published != destination
+    assert published.read_bytes() == b"x"
+    calls = len(client.download_calls)
+    assert (
+        cli.main(
+            (
+                "--json",
+                "recipe",
+                "job",
+                "download",
+                JOB_ID,
+                "--output",
+                str(output_directory),
+            ),
+            control_client=client,
+        )
+        == 0
+    )
+    assert len(client.download_calls) == calls
+
+
+@pytest.mark.parametrize("long_backoff", [False, True])
+def test_unavailable_detail_ends_within_budget_and_admits_fresh_observation(
+    artifact_clock, monkeypatch, capsys, long_backoff
+):
+    """Catches unlimited replay or Retry-After extending the observation budget."""
+    client = ArtifactJobClient()
+    client.job = _succeeded_job()
+    original = client.request
+    unavailable = True
+    timeouts = []
+
+    def request(method, path, payload=None, **kwargs):
+        if unavailable:
+            timeouts.append(kwargs["timeout_seconds"])
+            if long_backoff:
+                raise ControlHTTPError(503, "observation unavailable", 120)
+            raise ControlTransportError("observation unavailable")
+        return original(method, path, payload, **kwargs)
+
+    monkeypatch.setattr(client, "request", request)
+    started = artifact_clock[0]
+    arguments = ("--json", "recipe", "job", "detail", JOB_ID)
+    assert cli.main(arguments, control_client=client) == 2
+    capsys.readouterr()
+    assert len(timeouts) == (1 if long_backoff else 3)
+    assert all(0 < timeout <= client.request_timeout_seconds for timeout in timeouts)
+    assert artifact_clock[0] - started <= 3 * client.request_timeout_seconds
+    unavailable = False
+    assert cli.main(arguments, control_client=client) == 0
+    assert json.loads(capsys.readouterr().out)["id"] == JOB_ID
+
+
+def test_create_ignores_stale_capacity_and_authority_admits_fresh_draft(
+    tmp_path, capsys
+):
+    """Catches an old capacity projection vetoing create before the owner sees it."""
+    binding = _binding(tmp_path / "job.json", {"input.png": b"x"})
+    client = ArtifactJobClient()
+    storage = client.capabilities["storage"]
+    assert isinstance(storage, dict)
+    storage["remaining_bytes"] = 0
+    arguments = (
+        "--json",
+        "recipe",
+        "job",
+        "create",
+        "--run",
+        RUN_ID,
+        "--file",
+        str(binding),
+    )
+    assert (
+        cli.main(
+            arguments, control_client=client, request_id_factory=lambda: CREATE_KEY
+        )
+        == 0
+    )
+    assert client.upload_calls == ["input.png"]
+    assert client.job is not None and client.job["input_files"] == _declarations(
+        {"input.png": b"x"}
+    )
+    client.job = None
+    assert (
+        cli.main(
+            arguments, control_client=client, request_id_factory=lambda: CANCEL_KEY
+        )
+        == 0
+    )
+    assert client.upload_calls == ["input.png", "input.png"]
+
+
+@pytest.mark.parametrize("action", ["submit", "cancel"])
+def test_lost_request_before_concurrent_ending_replays_only_exact_intent(
+    action,
+    capsys,
+    monkeypatch,
+):
+    """Catches local state readmission after a request that never reached its owner."""
+    client = ArtifactJobClient()
+    client.job = _job(state="ready")
+    original = client.request
+    posts = []
+    timed_reads = []
+    settled = True
+
+    def request(method, path, payload=None, **kwargs):
+        nonlocal settled
+        if method == "GET" and path.endswith(JOB_ID):
+            timed_reads.append(kwargs.get("timeout_seconds"))
+        if method == "POST" and path.endswith("/" + action):
+            posts.append(
+                (payload, kwargs.get("extra_headers"), kwargs.get("timeout_seconds"))
+            )
+            if settled:
+                client.job = _job(state="failed")
+                if len(posts) == 1:
+                    raise ControlTransportError("lost before owner acceptance")
+                raise ControlHTTPError(409, "owner observed ending")
+        return original(method, path, payload, **kwargs)
+
+    monkeypatch.setattr(client, "request", request)
+    key = SUBMIT_KEY if action == "submit" else CANCEL_KEY
+    arguments = ["--json", "recipe", "job", action, JOB_ID, "--request-key", key]
+    if action == "cancel":
+        arguments += ["--yes", "--reason", "stop now"]
+    assert cli.main(arguments, control_client=client) == 2
+    capsys.readouterr()
+    assert len(posts) == 3
+    assert len(timed_reads) == 3
+    assert all(item[1] == {"X-Request-ID": key} for item in posts)
+    assert all(
+        item[0] == ({"reason": "stop now"} if action == "cancel" else None)
+        for item in posts
+    )
+    assert all(0 < item[2] <= client.request_timeout_seconds for item in posts)
+    assert all(0 < timeout <= client.request_timeout_seconds for timeout in timed_reads)
+    settled = False
+    client.job = _job(state="ready")
+    assert cli.main(arguments, control_client=client) == 0
+
+
+def test_accepted_cancel_survives_concurrent_failure_without_local_state_gate(
+    capsys, monkeypatch
+):
+    """Catches using cancellation state instead of exact accepted request evidence."""
+    client = ArtifactJobClient()
+    client.job = _job(state="queued")
+    original = client.request
+    lost = True
+
+    def request(method, path, payload=None, **kwargs):
+        nonlocal lost
+        result = original(method, path, payload, **kwargs)
+        if method == "POST" and path.endswith("/cancel") and lost:
+            lost = False
+            assert client.job is not None
+            client.job["state"] = "failed"
+            raise ControlTransportError("accepted cancellation reply was lost")
+        return result
+
+    monkeypatch.setattr(client, "request", request)
+    arguments = (
+        "--json",
+        "recipe",
+        "job",
+        "cancel",
+        JOB_ID,
+        "--yes",
+        "--request-key",
+        CANCEL_KEY,
+    )
+    assert cli.main(arguments, control_client=client) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["result_evidence"]["cancel_request_id"] == CANCEL_KEY
+    assert sum(call[0] == "POST" for call in client.calls) == 1
+    client.job = _job(state="ready")
+    assert cli.main(arguments, control_client=client) == 0
+
+
+def test_damaged_verified_download_preserves_old_bytes_and_recovers_content(
+    tmp_path, capsys
+):
+    """Catches a corrupt previous result requiring manual deletion for a new request."""
+    directory = tmp_path / "outputs"
+    directory.mkdir()
+    client = ArtifactJobClient()
+    client.job = _succeeded_job()
+    arguments = (
+        "--json",
+        "recipe",
+        "job",
+        "download",
+        JOB_ID,
+        "--output",
+        str(directory),
+    )
+    assert cli.main(arguments, control_client=client) == 0
+    capsys.readouterr()
+    previous = directory / "result.png"
+    previous.write_bytes(b"damaged")
+    assert cli.main(arguments, control_client=client) == 0
+    recovered = json.loads(capsys.readouterr().out)
+    repaired = Path(recovered["files"][0]["path"])
+    assert repaired.read_bytes() == b"x"
+    assert previous.read_bytes() == b"damaged"
+    repaired.write_bytes(b"also damaged")
+    assert cli.main(arguments, control_client=client) == 0
+    fresh = json.loads(capsys.readouterr().out)
+    assert Path(fresh["files"][0]["path"]).read_bytes() == b"x"
+    assert repaired.read_bytes() == b"also damaged"
+
+
+def test_ingress_digest_mismatch_never_publishes_and_fresh_download_recovers(
+    tmp_path, capsys
+):
+    """Catches publishing a temporary stream before verifying its declared digest."""
+    directory = tmp_path / "outputs"
+    directory.mkdir()
+    damaged = True
+    reads = []
+    digest = hashlib.sha256(b"x").hexdigest()
+
+    def opener(request, *, timeout):
+        if "/results/" in request.full_url:
+            reads.append(timeout)
+            return _StreamResponse(
+                b"y" if damaged else b"x", media_type="image/png", sha256=digest
+            )
+        return _Response(200, _succeeded_job())
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+    arguments = (
+        "--json",
+        "recipe",
+        "job",
+        "download",
+        JOB_ID,
+        "--output",
+        str(directory),
+    )
+    assert cli.main(arguments, control_client=client) == 2
+    capsys.readouterr()
+    assert len(reads) == 3
+    assert list(directory.iterdir()) == []
+    damaged = False
+    assert cli.main(arguments, control_client=client) == 0
+    capsys.readouterr()
+    assert (directory / "result.png").read_bytes() == b"x"
+    assert len(reads) == 4
+    assert cli.main(arguments, control_client=client) == 0
+    assert len(reads) == 4

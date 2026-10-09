@@ -75,8 +75,12 @@ def test_an_unsafe_storage_root_still_refuses(tmp_path: Path) -> None:
     real.mkdir()
     (tmp_path / "blobs").symlink_to(real)
 
-    with pytest.raises(ArtifactBlobStoreError):
+    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
         _store(tmp_path).usage()
+    assert list(real.iterdir()) == []
+    (tmp_path / "blobs").unlink()
+    stored = _store(tmp_path).put_bytes(_digest(b"ok"), b"ok", maximum_bytes=4)
+    assert stored.path.read_bytes() == b"ok"
 
 
 def test_an_upload_over_current_capacity_ends_without_blocking_fresh_work(

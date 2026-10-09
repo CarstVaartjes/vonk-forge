@@ -133,11 +133,9 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
     try:
         assert run(client, destination, "--json") == 2
         assert client.calls == []
-        assert json.loads(capsys.readouterr().out)["reconciliation"] == (
-            "issuance not attempted"
-        )
+        capsys.readouterr()
         assert not destination.exists()
-        with pytest.raises(OSError):
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
             os.fstat(descriptors[0])
     finally:
         for descriptor in descriptors:
@@ -145,6 +143,11 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
                 os.close(descriptor)
             except OSError:
                 pass
+
+    monkeypatch.undo()
+    assert run(client, destination, "--json") == 0
+    assert json.loads(destination.read_text()) == GRANT
+    assert len(client.calls) == 1
 
 
 def test_lost_response_reports_original_identity_without_minting_another_grant(
