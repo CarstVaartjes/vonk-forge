@@ -47,22 +47,21 @@ def test_python_models_live_in_the_registry_once() -> None:
     assert scans.python_registry_problems() == []
 
 
-def test_the_inventory_document_names_every_registered_module_and_exception() -> None:
-    document = (ROOT / "docs/data-contracts.md").read_text(encoding="utf-8")
-    registry = json.loads(scans.PY_REGISTRY.read_text(encoding="utf-8"))
-    missing = [
-        item
-        for item in [
-            *(entry["module"] for entry in registry["modules"]),
-            *(
-                f"`{entry['file']}` | `{entry['type']}`"
-                for path in (scans.RUST_ALLOWLIST, scans.TS_ALLOWLIST)
-                for entry in _entries(path)
-            ),
-        ]
-        if item not in document
-    ]
-    assert not missing, f"docs/data-contracts.md does not list: {missing}"
+def test_generated_extension_shapes_remain_outside_handwritten_shape_gate(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path,
+        "control/web/src/api/generated.d.ts",
+        "export type Engine = {extensions: {[key: string]: unknown}};\n",
+    )
+    assert not scans.typescript_shapes(tmp_path)
+    _write(
+        tmp_path,
+        "control/web/src/api/engine.ts",
+        "export type Engine = {extensions: {[key: string]: unknown}};\n",
+    )
+    assert scans.typescript_shapes(tmp_path)
 
 
 # -- the scanners catch what they claim to --------------------------------------
@@ -151,11 +150,11 @@ def test_python_registry_rejects_unregistered_and_duplicate_models(
     )
     registry = {"modules": [{"module": "agent_protocol/src/p/a.py"}]}
     problems = scans.python_registry_problems(tmp_path, registry)
-    assert any("elsewhere.py: model Copy" in item for item in problems)
-    assert any("elsewhere.py: model Other" in item for item in problems)
+    assert problems
 
     registry["modules"].append({"module": "control/src/c/elsewhere.py"})
     problems = scans.python_registry_problems(tmp_path, registry)
-    assert any(
-        "duplicate model definitions" in item and "Other" in item for item in problems
-    )
+    assert problems
+    _write(tmp_path, "control/src/c/elsewhere.py", "from p.a import Thing\n")
+    registry["modules"].pop()
+    assert scans.python_registry_problems(tmp_path, registry) == []

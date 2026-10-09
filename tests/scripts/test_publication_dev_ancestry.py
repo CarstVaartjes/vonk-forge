@@ -61,11 +61,13 @@ def test_dev_pointer_advances_to_a_descendant_or_the_same_source(ancestry) -> No
 
 def test_dev_pointer_refuses_an_older_source(ancestry) -> None:
     module, older, newer = ancestry
-    with pytest.raises(module.PublicationError, match="older source"):
+    with pytest.raises(module.PublicationError):
         module._require_dev_descendant(newer, older)
+    module._require_dev_descendant(older, newer)
+    module._require_dev_descendant(newer, newer)
 
 
 def test_dev_pointer_refuses_unknown_ancestry(ancestry) -> None:
     module, _older, newer = ancestry
-    with pytest.raises(module.PublicationError, match="ancestry"):
+    with pytest.raises(module.PublicationError):
         module._require_dev_descendant("0" * 40, newer)

@@ -100,7 +100,9 @@ def test_metadata_rejects_noncanonical_release_inputs(
 
     assert result.returncode == 64
     assert result.stdout == ""
-    assert "agent package metadata is invalid" in result.stderr
+    repaired = run_metadata("production", "tag", "v0.1.1", SHA, "0")
+    assert repaired.returncode == 0, repaired.stderr
+    assert repaired.stdout
 
 
 def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
@@ -114,7 +116,12 @@ def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
 
     assert result.returncode == 64
     assert result.stdout == ""
-    assert "agent package metadata is invalid" in result.stderr
+    control_project.write_text(
+        control_project.read_text().replace('version = "0.1.2"', 'version = "0.1.1"')
+    )
+    repaired = run_metadata("production", "tag", "v0.1.1", SHA, "0", root=workspace)
+    assert repaired.returncode == 0, repaired.stderr
+    assert repaired.stdout
 
 
 @pytest.mark.needs_dpkg

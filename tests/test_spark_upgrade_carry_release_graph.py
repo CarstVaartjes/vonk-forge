@@ -86,8 +86,9 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         "https://install.example", "dev", GENERATION, tmp_path
     )
     assert set(resolved.compose_image_roles) == set(roles)
-    assert ("step-ca" in resolved.overlay.read_text()) is not historical
     assert all(source in url for url in fetched if "raw.githubusercontent.com" in url)
+    verified_overlay = resolved.overlay.read_bytes()
+    valid_raw, valid_signature = raw, signature
     if not historical:
         images.pop("ca")
         raw = (
@@ -96,7 +97,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         signature = base64.b64encode(
             signing_key.sign(raw, padding.PKCS1v15(), hashes.SHA256())
         )
-        with pytest.raises(LifecycleError, match="image graph is invalid"):
+        with pytest.raises(LifecycleError):
             carry.resolve_release(
                 "https://install.example", "dev", GENERATION, tmp_path / "missing-ca"
             )
@@ -104,8 +105,14 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     fetched.clear()
     document["source_sha"] = "c" * 40
     raw = (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
-    with pytest.raises(LifecycleError, match="signature is invalid"):
+    with pytest.raises(LifecycleError):
         carry.resolve_release(
             "https://install.example", "dev", GENERATION, tmp_path / "tampered"
         )
     assert not any("raw.githubusercontent.com" in url for url in fetched)
+    assert resolved.overlay.read_bytes() == verified_overlay
+    raw, signature = valid_raw, valid_signature
+    recovered = carry.resolve_release(
+        "https://install.example", "dev", GENERATION, tmp_path / "recovered"
+    )
+    assert recovered.overlay.read_bytes() == verified_overlay

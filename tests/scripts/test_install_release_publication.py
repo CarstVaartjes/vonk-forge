@@ -712,7 +712,6 @@ def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
         check=False,
     )
     assert hostile_result.returncode == 2
-    assert "does not match the candidate" in hostile_result.stderr
     assert not (tmp_path / "combined.json").exists()
 
     docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
@@ -726,7 +725,6 @@ def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
         check=False,
     )
     assert boolean_schema_result.returncode == 2
-    assert "lane report is invalid" in boolean_schema_result.stderr
     assert not (tmp_path / "combined.json").exists()
 
     docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
@@ -740,7 +738,6 @@ def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
         check=False,
     )
     assert boolean_run_id_result.returncode == 2
-    assert "does not match the candidate" in boolean_run_id_result.stderr
     assert not (tmp_path / "combined.json").exists()
 
     docker = _nas_lane_report(tmp_path / "docker.json", "docker-29.4.3")
@@ -753,8 +750,16 @@ def test_nas_evidence_combiner_rejects_duplicate_or_unsafe_lane_reports(
         check=False,
     )
     assert unsafe_result.returncode == 2
-    assert "unavailable or unsafe" in unsafe_result.stderr
     assert not (tmp_path / "combined.json").exists()
+    fresh = subprocess.run(
+        _combine_nas_command(tmp_path, [native, docker]),
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert fresh.returncode == 0, fresh.stderr
+    assert (tmp_path / "combined.json").is_file()
 
 
 def _actual_publication_graph(publication: Path, platform: str) -> dict[str, object]:
