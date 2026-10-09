@@ -45,7 +45,9 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
         parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
     )
     policy = RecoveryPolicy()
-    for ordinal in range(1, policy.max_failures + 1):
+    original_deadline = None
+    # A request-owned deadline permits retries beyond the fallback count budget.
+    for ordinal in range(1, policy.max_failures + 2):
         jobs = AgentJobService(sessions, clock=clock)
         claim = claim_agent(jobs, NODE_A, "serial-a")
         assert claim is not None
@@ -63,10 +65,10 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
         )
         stored = _stored(sessions, operation.id)
         assert stored.current_attempt == ordinal
-        if ordinal == policy.max_failures:
-            assert stored.state == State.FAILED.value
-            assert stored.next_action_at is None
-            break
+        assert stored.recovery_deadline is not None
+        if original_deadline is None:
+            original_deadline = stored.recovery_deadline
+        assert stored.recovery_deadline == original_deadline
         assert stored.state == State.BACKOFF.value
         assert stored.next_action_at is not None
         due = stored.next_action_at.replace(tzinfo=UTC)
@@ -83,9 +85,15 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
     )
     reason_code = failure.error_code
     assert reason_code == FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE
+    assert original_deadline is not None
+    clock.now = original_deadline.replace(tzinfo=UTC)
     jobs = AgentJobService(sessions, clock=clock)
+    jobs.reconcile_orders()
     assert claim_agent(jobs, NODE_A, "serial-a") is None
-    assert _stored(sessions, operation.id).current_attempt == policy.max_failures
+    ended = _stored(sessions, operation.id)
+    assert ended.state == State.FAILED.value
+    assert ended.next_action_at is None
+    assert ended.current_attempt == policy.max_failures + 1
     assert job_state(sessions, operation.parent_job_id).state == State.FAILED.value
     fresh = jobs.enqueue(
         parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
@@ -151,10 +159,15 @@ def test_job_preparation_retries_without_replaying_an_uncertain_job(
         jobs.reconcile_orders()
         assert claim_agent(jobs, NODE_A, "serial-a") is None
     assert _stored(sessions, operation.id).state == State.FAILED.value
-    reason_code = ObservationCause(
-        fenced_attempt(sessions, next_claim).observation_cause
+    ended_attempt = fenced_attempt(sessions, next_claim)
+    # Reconciliation may replace the report cause when it lapses the fence.
+    # Validate the retained diagnostic, and prove that the fence cannot own work.
+    from vonk_control.agent_operation_facts import attempt_is_live
+
+    ObservationCause(ended_attempt.observation_cause)
+    assert not attempt_is_live(
+        _stored(sessions, operation.id), ended_attempt, clock.now
     )
-    assert reason_code is ObservationCause.REPORTED_UNKNOWN
     fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     assert _stored(sessions, fresh.id).current_attempt == 1

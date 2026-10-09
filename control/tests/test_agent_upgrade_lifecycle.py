@@ -304,11 +304,19 @@ def test_package_preparation_dependency_retries_same_package_across_restart_then
         assert operation.parent_job_id == fresh_job.id
         return operation
 
+    def assert_typed_reason(_operation: AgentOperation) -> None:
+        failure = AgentFailureResult.model_validate_json(
+            json.dumps(fenced_attempt(sessions, claim).result)
+        )
+        assert failure.error_code is not None
+        FailureCode(failure.error_code)
+
     with sessions() as session:
         assert_ended_without_blocking(
             session,
             ended,
             end=lambda operation: operation,
             fresh=admit_fresh,
+            assert_reason=assert_typed_reason,
             request_key=lambda operation: operation.id,
         )

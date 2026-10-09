@@ -1087,7 +1087,8 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
     assert original is not None
     from vonk_control.lifecycle.core import RECOVERY
 
-    attempts = RECOVERY.max_failures if exhausted else 1
+    attempts = RECOVERY.max_failures + 1 if exhausted else 1
+    original_deadline = None
     claim = original
     for number in range(1, attempts + 1):
         first.record_result(
@@ -1106,6 +1107,14 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
                 ),
             )
         )
+        if exhausted:
+            with sessions() as session:
+                pending = session.get(AgentOperation, operation.id)
+                assert pending is not None and pending.recovery_deadline is not None
+                if original_deadline is None:
+                    original_deadline = pending.recovery_deadline
+                assert pending.recovery_deadline == original_deadline
+                assert pending.state == LifecycleState.BACKOFF.value
         if number < attempts:
             with sessions() as session:
                 scheduled = session.get(AgentOperation, operation.id)
@@ -1116,7 +1125,12 @@ def test_postgres_terminal_request_stays_ended_and_fresh_request_has_one_claim_w
             following = claim_agent(first, NODE_A, "serial-a")
             assert following is not None
             claim = following
-    clock.advance(seconds=31)
+    if exhausted:
+        assert original_deadline is not None
+        clock.now = original_deadline.replace(tzinfo=UTC)
+        first.reconcile_orders()
+    else:
+        clock.advance(seconds=31)
     assert claim_agent(first, NODE_A, "serial-a") is None
     with sessions.begin() as session:
         parked = session.get(AgentOperation, operation.id)
