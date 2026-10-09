@@ -491,6 +491,8 @@ mod host_helper_reconciliation_identity_tests {
             operation: HostHelperOperation::ExecuteContainerRuntimeRequestOperation(
                 generated::ExecuteContainerRuntimeRequestOperation {
                     type_: "execute-container-runtime-request".into(),
+                    installation_intent_nonce: None,
+                    installation_intent_ordinal: Some(1),
                     action: HostHelperContainerRuntimeAction::InstallationCleanup,
                     fence: Uuid::new_v4(),
                     request_sha256: "e".repeat(64),

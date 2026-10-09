@@ -194,6 +194,35 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_package_preparation_allows_a_fresh_upgrade_handoff() {
+        use crate::agent_upgrade::AgentUpgradeError;
+        use vonk_agent_protocol::generated::{AgentResultResult, HelperErrorCode};
+
+        // Preparation loss is recoverable bookkeeping, not a permanent refusal.
+        let unavailable = upgrade_outcome(Err(AgentUpgradeError::HelperRejectedWithCode {
+            code: HelperErrorCode::PackagePreparationUnavailable,
+            exit_code: None,
+            diagnostic: None,
+        }))
+        .finish_for(&AgentOperation::AgentUpgradeV1);
+        assert!(matches!(
+            unavailable.result,
+            AgentResultResult::OutcomeUnknown(_)
+        ));
+        let fresh = upgrade_outcome(Ok(())).finish_for(&AgentOperation::AgentUpgradeV1);
+        assert!(matches!(fresh.result, AgentResultResult::OutcomeUnknown(_)));
+
+        // The same dispatch still refuses unverified package bytes at ingress.
+        let unverified = upgrade_outcome(Err(AgentUpgradeError::HelperRejectedWithCode {
+            code: HelperErrorCode::PackageVerificationFailed,
+            exit_code: None,
+            diagnostic: None,
+        }));
+        assert!(matches!(unverified, ExecutionResult::Failed(_)));
+        assert!(matches!(upgrade_outcome(Ok(())), ExecutionResult::Unknown(_)));
+    }
+
+    #[test]
     fn helper_install_and_response_loss_reach_unknown_wire_then_accept_a_fresh_handoff() {
         use std::io::{Read, Write};
         use std::os::unix::net::UnixListener;
