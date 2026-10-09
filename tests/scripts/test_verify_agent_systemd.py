@@ -47,8 +47,9 @@ def test_agent_unit_has_notify_watchdog_and_unsafe_recovery_alert_contract() -> 
 
     assert "Type=notify" in agent
     assert "WatchdogSec=15min" in agent
+    assert "TimeoutStartSec=5min" in agent
     assert "OnFailure=vonk-forge-package-upgrade-alert@%n.service" in recovery
-    assert "RestartPreventExitStatus=78" in recovery
+    assert "RestartPreventExitStatus=" not in recovery
     assert "package-upgrade.status" in alert
 
 
@@ -70,7 +71,7 @@ def test_verifier_analyzes_the_packaged_rust_agent_units() -> None:
     assert report["verify"] == "passed"
     assert report["units"] == PACKAGED_UNITS
     assert report["agent_boot_recovery"] == {
-        "restart": "on-failure",
+        "restart": "always",
         "restart_delay": "30s",
         "start_limit_interval": "0",
         "private_devices": "no",
@@ -114,6 +115,6 @@ def test_agent_orders_driver_without_udevadm_and_allows_namespace_recovery() -> 
     assert unit["Unit"]["StartLimitIntervalSec"] == "0"
     assert unit["Service"]["PrivateDevices"] == "no"
     assert unit["Service"]["DevicePolicy"] == "closed"
-    assert unit["Service"]["Restart"] == "on-failure"
+    assert unit["Service"]["Restart"] == "always"
     assert unit["Service"]["RestartSec"] == "30s"
-    assert unit["Service"]["RestartPreventExitStatus"] == "78"
+    assert "RestartPreventExitStatus" not in unit["Service"]

@@ -59,6 +59,7 @@ MODES = (
     "remedies",
     "retention",
     "tests",
+    "noexit",
 )
 # Authority and byte-verification owners; not arbitrary operation modules.
 SECURITY_EDGES = frozenset(
@@ -177,6 +178,46 @@ def check_source(
             ("/tests.rs", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )
     )
+    noexit_hits: list[str] = []
+    if "noexit" in modes and not is_test:
+        test_lines = rust_test_lines(source) if path.endswith(".rs") else set()
+        patterns = [
+            r"^\s*RestartPreventExitStatus\s*=",
+            r"^\s*TimeoutStartSec\s*=\s*(?:0|infinity)\s*$",
+            r"^\s*StartLimit(?:IntervalSec|Interval|Burst)\s*=\s*(?!0(?:\s|$))\S+",
+        ]
+        if path.endswith(".rs"):
+            patterns.extend(
+                [
+                    r"(?:std::)?process::(?:exit|abort)\s*\(",
+                    r"ExitCode::(?:from|FAILURE)",
+                    r"\b(?:panic!|unreachable!)\s*\(",
+                    r"\.expect\s*\(",
+                ]
+            )
+        if path.startswith(("packaging/", "deploy/")):
+            patterns.extend(
+                [r"\bexit\s+(?:78|\$EX_CONFIG)\b", r"^\s*Restart\s*=\s*no\b"]
+            )
+        for line, text in enumerate(source.splitlines(), 1):
+            if (
+                line in added
+                and line not in test_lines
+                and any(re.search(pattern, text) for pattern in patterns)
+            ):
+                noexit_hits.append(f"{path}:{line}: permanent process stop")
+    if "noexit" in modes and not is_test and path.endswith(".service"):
+        restart = re.search(r"^Restart=(.+)$", source, re.MULTILINE)
+        oneshot = re.search(r"^Type=oneshot$", source, re.MULTILINE)
+        if (restart is not None or not oneshot) and (
+            restart is None
+            or restart[1] not in {"always", "on-failure"}
+            or not re.search(r"^RestartSec=(?!0(?:s)?$).+$", source, re.MULTILINE)
+            or not re.search(r"^StartLimitIntervalSec=0$", source, re.MULTILINE)
+        ):
+            noexit_hits.append(
+                f"{path}:{min(added)}: service without bounded perpetual recovery"
+            )
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]
     )
@@ -294,7 +335,10 @@ def check_source(
             )
             for line, kind in hits
         ]
-    return sorted({f"{path}:{line}: {kind}" for line, kind in hits if line in added})
+    return sorted(
+        set(noexit_hits)
+        | {f"{path}:{line}: {kind}" for line, kind in hits if line in added}
+    )
 
 
 def main(*, modes: Sequence[str] = MODES) -> int:

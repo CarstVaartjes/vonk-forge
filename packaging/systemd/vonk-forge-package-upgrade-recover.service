@@ -10,7 +10,6 @@ Type=oneshot
 ExecStart=/usr/lib/vonk-forge/vonk-forge-package-upgrade-recover recover
 Restart=on-failure
 RestartSec=10s
-RestartPreventExitStatus=78
 TimeoutStartSec=600s
 UMask=0077
 User=root

@@ -2,8 +2,7 @@
 Description=Vonk Forge Spark monitor
 Wants=network-online.target
 After=network-online.target vonk-forge-agent.service
-StartLimitIntervalSec=300
-StartLimitBurst=5
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -14,7 +13,7 @@ Environment=HOME=/var/lib/vonk-forge-agent
 Environment=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config
 Environment=XDG_DATA_HOME=/var/lib/vonk-forge-agent
 Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp
-Restart=on-failure
+Restart=always
 RestartSec=5s
 TimeoutStartSec=30s
 TimeoutStopSec=30s

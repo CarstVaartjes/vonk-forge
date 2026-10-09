@@ -241,17 +241,20 @@ atomic local publication follow the normal rotation path. A lost response does
 not require a new enrollment. Provider uncertainty retries with bounded backoff;
 the certificate expiry fixes the recovery deadline across agent restarts.
 
-Grace exhaustion returns `agent.expired_renewal_grace_exhausted`. A Controller
-security refusal or local grace exhaustion exits with status 78; the packaged
-unit prevents restart for that status. Re-enrollment requires new authority.
-The proof endpoint is rate limited and accepts only a bounded canonical request;
-ordinary work endpoints still require valid mTLS.
+Grace exhaustion returns `agent.expired_renewal_grace_exhausted`. Refused
+mTLS authority (401/403, including revocation), an unusable TLS identity or CA
+pin, and an invalid issued credential prevent authenticated effects. They end
+the current session, never the daemon: it reports degraded status and reloads
+configuration and credentials on a new observation after 1–60 seconds. This
+allows fresh authorized enrollment to take effect without resetting systemd.
+Local configuration, storage and renewal bookkeeping faults use the same
+bounded observation path. Ordinary work still requires valid mTLS; retry does
+not grant authority or accept unverified certificates.
 
-The agent starts after NVIDIA persistence and udev coldplug, then performs a
-bounded udev settle before constructing its serving process. NVIDIA device-unit
-ordering applies where the distribution tags those devices for systemd; the
-unit avoids pulling in device jobs that may never activate. PrivateDevices,
-DevicePolicy and the explicit device grants remain enabled. Inventory failure
-for five minutes exits nonzero, and systemd restarts after 30 seconds to rebuild
-its private device namespace. The restart rate is bounded without a start-limit
-latch that could permanently strand a recovering host.
+The agent orders itself after NVIDIA persistence and observes live device
+availability without a private device namespace. DevicePolicy and explicit
+device grants remain enforced. Inventory has its own bounded observation lane;
+failed GPU probes do not stop control or renewal. Agent and monitor services
+restart after crashes or unexpected successful exits, with fixed delays and
+no start-limit latch. Helper, firewall and package recovery services also have
+restart delays and disabled start limits. No unit suppresses exit 78.
