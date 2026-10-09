@@ -452,7 +452,12 @@ fn image_pull_helper_protocol_cause_survives_normalization() {
             panic!("an unavailable helper observation must remain unknown");
         };
         assert_eq!(
-            unknown.evidence.as_ref().unwrap().helper_error_code.as_deref(),
+            unknown
+                .evidence
+                .as_ref()
+                .unwrap()
+                .helper_error_code
+                .as_deref(),
             Some(code.as_str()),
             "{code} must survive unknown-outcome normalization independently of diagnostic redaction"
         );
