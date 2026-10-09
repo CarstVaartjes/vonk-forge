@@ -142,8 +142,9 @@ def test_transport_error_does_not_swallow_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Exercise the real bounded retry loop without spending its deadline asleep.
-    now = [0.0]
+    now = [100.0]
     delays: list[float] = []
+    attempts = 0
 
     def sleep(seconds: float) -> None:
         delays.append(seconds)
@@ -155,6 +156,8 @@ def test_transport_error_does_not_swallow_source(
     )
 
     def opener(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
         raise urllib.error.URLError(socket.gaierror(-2, "no such host"))
 
     client = ControlClient(
@@ -165,6 +168,7 @@ def test_transport_error_does_not_swallow_source(
     assert raised.value.context is not None
     assert raised.value.context.transport == "dns"
     assert raised.value.context.decision == "retry"
-    assert now[0] == 15.0
+    assert attempts > 1
+    assert now[0] == pytest.approx(100.0 + client.request_timeout_seconds)
     assert len(delays) > 1
     assert all(delay > 0 for delay in delays)

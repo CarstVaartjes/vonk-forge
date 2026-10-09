@@ -1,4 +1,4 @@
-// Generated from canonical OpenAPI SHA256 8b866bb5c32c5dd7ed0a4bad9dd84fda11cc95e59ced367a236fdb8dcd432d84. Do not edit.
+// Generated from canonical OpenAPI SHA256 307c26482675f0255ede379ca396931a564611e04cb37c7a7d92826863ea70a4. Do not edit.
 import type {ExactNumber} from "./contract-numeric";
 export interface paths {
     "/api/artifact-jobs/capabilities": {
@@ -1647,7 +1647,7 @@ export interface components {
             operation_id?: string | null;
             /** Output Files */
             output_files: components["schemas"]["ArtifactOutputFile"][];
-            output_limits: components["schemas"]["OutputLimits"];
+            output_limits: components["schemas"]["OutputLimits"] | null;
             /** Output Manifest Sha256 */
             output_manifest_sha256?: string | null;
             /** Preparation */

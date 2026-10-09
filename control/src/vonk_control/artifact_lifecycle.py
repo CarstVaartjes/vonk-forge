@@ -22,8 +22,6 @@ from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     InvalidRequestReason,
     LifecycleState,
-    SecurityRefusalError,
-    SecurityRefusalReason,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -80,7 +78,7 @@ def retryable_artifact_database_error(
     if state in _RETRYABLE_SQLSTATES:
         return ArtifactReferenceUnsettled(
             ArtifactLifecycleCode.REFERENCE_BUSY,
-            f"artifact reference transaction conflicted with PostgreSQL ({state}); retry the operation",
+            f"artifact reference transaction conflicted with PostgreSQL ({state})",
             retryable=True,
         )
     if state == "57014":
@@ -89,7 +87,7 @@ def retryable_artifact_database_error(
         if isinstance(primary, str) and "statement timeout" in primary.lower():
             return ArtifactReferenceUnsettled(
                 ArtifactLifecycleCode.REFERENCE_TIMEOUT,
-                "artifact reference SQL exceeded the caller's statement time budget; retry the operation",
+                "artifact reference SQL exceeded the caller's statement time budget",
                 retryable=True,
             )
     return None
@@ -103,7 +101,12 @@ def _reference_sql[Result](query: Callable[[], Result]) -> Result:
     except DBAPIError as error:
         translated = retryable_artifact_database_error(error)
         if translated is None:
-            raise
+            # A missing table or unavailable connection is an unknown reference
+            # observation. Retain bytes; the caller rolls back before retrying.
+            translated = ArtifactReferenceUnverified(
+                ArtifactLifecycleCode.REFERENCE_UNAVAILABLE,
+                "artifact reference observation is unavailable",
+            )
         raise translated from error
 
 
@@ -167,21 +170,6 @@ class ArtifactReferenceIdentityStale(UnknownOutcomeError, ArtifactLifecycleError
         self.typed_reason = reason
 
 
-class ArtifactRemovalFenceLost(SecurityRefusalError, ArtifactLifecycleError):
-    """The removal fence is no longer this owner's: it must not release it."""
-
-    def __init__(
-        self,
-        code: str,
-        detail: str,
-        *,
-        retryable: bool = False,
-        reason: SecurityRefusalReason = SecurityRefusalReason.STALE_FENCE,
-    ) -> None:
-        ArtifactLifecycleError.__init__(self, code, detail, retryable=retryable)
-        self.typed_reason = reason
-
-
 def lock_reference_gates(
     session: Session,
     identities: Iterable[ArtifactIdentity],
@@ -213,7 +201,7 @@ def lock_reference_gates(
             if acquired is not True:
                 raise ArtifactReferenceUnsettled(
                     ArtifactLifecycleCode.REFERENCE_BUSY,
-                    "artifact reference ownership is changing; retry the operation",
+                    "artifact reference ownership is changing",
                     retryable=True,
                 )
 
@@ -699,10 +687,9 @@ def clear_removal(
             or row.removal_owner_id != owner_id
             or row.removal_fence != fence
         ):
-            raise ArtifactRemovalFenceLost(
-                ArtifactLifecycleCode.DELETION_FENCE_LOST,
-                "artifact removal fence changed before it could be released",
-            )
+            # A newer owner won. Completion of the old owner cannot release the
+            # newer deletion authorization, nor make that owner wait on history.
+            continue
         row.removal_owner_kind = None
         row.removal_owner_id = None
         row.removal_fence = None
@@ -716,7 +703,6 @@ __all__ = [
     "ArtifactReferenceIdentityStale",
     "ArtifactReferenceUnsettled",
     "ArtifactReferenceUnverified",
-    "ArtifactRemovalFenceLost",
     "RemovalOwnerKind",
     "check_removal_fence_nowait",
     "clear_removal",

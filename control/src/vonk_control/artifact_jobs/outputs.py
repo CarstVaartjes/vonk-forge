@@ -16,7 +16,6 @@ from vonk_agent_protocol import (
     AgentResultState,
     InvalidRequestReason,
     RecipeJobFile,
-    RecipeJobOutputLimits,
     RecipeJobRunResult,
     SecurityRefusalReason,
     UnknownOutcomeError,
@@ -33,11 +32,10 @@ from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..models import AgentOperation, ArtifactJob, ArtifactJobBlob, ArtifactJobFile, Job
+from ..models import AgentOperation, ArtifactJob, ArtifactJobFile, Job
 from .contracts import (
     ArtifactJobInvalid,
     ArtifactJobUnavailableError,
-    ArtifactResultInvalid,
     ArtifactResultRefused,
     _translate_blob_error,
     _validate_outputs_against_contract,
@@ -49,44 +47,47 @@ class ArtifactJobService(InputService):
     def input_blob(
         self, job_id: str, sha256: str, *, node_id: str
     ) -> tuple[Path, str, int]:
-        with self._sessions() as session:
-            job = self._authorized_agent_job(session, job_id, node_id)
-            row = session.scalar(
-                select(ArtifactJobFile).where(
-                    ArtifactJobFile.artifact_job_id == job.id,
-                    ArtifactJobFile.direction == "input",
-                    ArtifactJobFile.blob_sha256 == sha256,
+        for _attempt in bounded_attempts():
+            with self._sessions.begin() as session:
+                job = self._authorized_agent_job(session, job_id, node_id)
+                manifest = self._stored_input_manifest(session, job)
+                declaration = (
+                    None
+                    if isinstance(manifest, Residue)
+                    else next(
+                        (item for item in manifest.files if item.sha256 == sha256),
+                        None,
+                    )
                 )
-            )
-            if row is None:
-                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
-            blob = session.get(ArtifactJobBlob, sha256)
-            if blob is None:
-                # The file row has no blob row: the bytes are unknown, not a
-                # refusal. The reader is told "not found" and re-uploads.
-                retire_as_unknown(
-                    "artifact-job.blob",
-                    sha256,
-                    BookkeepingReason.ROW_INCOMPLETE,
-                    "stored input has no blob row",
-                )
-                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
-            try:
-                path = self._blob_store.resolve(
-                    blob.storage_key, sha256, blob.size_bytes
-                )
-            except UnknownOutcomeError:
-                raise
-            except ArtifactBlobStoreError as error:
-                _translate_blob_error(error)
-            if path is None:
-                # Bytes the store no longer holds are unknown, not a refusal: the
-                # reader is told "not found" and the content is re-uploaded.
-                retire_as_unknown(
-                    "artifact-job.blob", sha256, note="stored bytes are absent"
-                )
-                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
-            return path, row.media_type, row.size_bytes
+                if declaration is not None:
+                    path = self._blob_store.resolve(
+                        f"{sha256[:2]}/{sha256}",
+                        sha256,
+                        declaration.size_bytes,
+                    )
+                    if path is not None:
+                        self._put_blob_in_session(
+                            session,
+                            StoredArtifactBlob(
+                                sha256=sha256,
+                                size_bytes=declaration.size_bytes,
+                                storage_key=f"{sha256[:2]}/{sha256}",
+                                path=path,
+                            ),
+                            self._clock(),
+                        )
+                        return path, declaration.media_type, declaration.size_bytes
+        with self._sessions.begin() as session:
+            job = session.get(ArtifactJob, job_id, with_for_update=True)
+            if job is not None:
+                adapter = ArtifactJobAdapter(session, clock=self._clock)
+                parent, operation, _attempt = adapter.order_of(session, job)
+                if parent is not None and operation is not None:
+                    self._observe_result(adapter, operation, parent, job, self._clock())
+        raise ArtifactJobUnavailableError(
+            "artifact input observation is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
 
     def put_output(
         self,
@@ -107,10 +108,10 @@ class ArtifactJobService(InputService):
             },
             maximum_bytes=1024**3,
         )
-        self._validate_output_upload(job_id, node_id=node_id, parsed=parsed)
         unavailable: UnknownOutcomeError | None = None
         for _attempt in bounded_attempts():
             try:
+                self._validate_output_upload(job_id, node_id=node_id, parsed=parsed)
                 with self._blob_store.reference_attachment():
                     try:
                         stored = self._blob_store.put_bytes(
@@ -169,8 +170,20 @@ class ArtifactJobService(InputService):
     ) -> None:
         with self._sessions() as session:
             job = self._authorized_agent_job(session, job_id, node_id)
-            limits = RecipeJobOutputLimits.parse(job.output_limits)
+            limits = self._stored_output_limits(session, job, repair=True)
+            if isinstance(limits, Residue):
+                raise ArtifactJobUnavailableError(
+                    "artifact output limit observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             existing = self._files_in_session(session, job_id, "output")
+            if any(
+                item.name == parsed.name and item.blob_sha256 != parsed.sha256
+                for item in existing
+            ):
+                raise ArtifactJobInvalid(
+                    "artifact output changed", reason=InvalidRequestReason.CONFLICT
+                )
             projected = tuple(
                 self._output_file(item) for item in existing if item.name != parsed.name
             ) + (parsed,)
@@ -219,11 +232,16 @@ class ArtifactJobService(InputService):
         now = self._clock()
         with self._sessions.begin() as session:
             job = self._authorized_agent_job(session, job_id, node_id, lock=True)
-            limits = RecipeJobOutputLimits.parse(job.output_limits)
+            limits = self._stored_output_limits(session, job, repair=True)
+            if isinstance(limits, Residue):
+                raise ArtifactJobUnavailableError(
+                    "artifact output limit observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
             if parsed.media_type not in limits.allowed_media_types:
-                raise ArtifactJobInvalid(
+                raise ArtifactJobUnavailableError(
                     "artifact output media type is not allowed",
-                    reason=InvalidRequestReason.UNSUPPORTED,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             existing = self._files_in_session(session, job_id, "output")
             same_name = next(
@@ -231,8 +249,9 @@ class ArtifactJobService(InputService):
             )
             if same_name is not None:
                 if same_name.blob_sha256 != parsed.sha256:
-                    raise ArtifactJobInvalid(
-                        "artifact output changed", reason=InvalidRequestReason.CONFLICT
+                    raise ArtifactJobUnavailableError(
+                        "artifact output changed",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     )
                 return
             projected = tuple(self._output_file(item) for item in existing) + (parsed,)
@@ -242,20 +261,26 @@ class ArtifactJobService(InputService):
                     "artifact contract evidence is unavailable",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            _validate_outputs_against_contract(contract, projected, terminal=False)
+            try:
+                _validate_outputs_against_contract(contract, projected, terminal=False)
+            except ArtifactJobInvalid as error:
+                raise ArtifactJobUnavailableError(
+                    "artifact output projection changed during attachment",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
             if len(existing) + 1 > limits.max_files:
-                raise ArtifactJobInvalid(
+                raise ArtifactJobUnavailableError(
                     "artifact output file count exceeds the limit",
-                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             if (
                 parsed.size_bytes > limits.max_file_bytes
                 or sum(item.size_bytes for item in existing) + parsed.size_bytes
                 > limits.max_total_bytes
             ):
-                raise ArtifactJobInvalid(
+                raise ArtifactJobUnavailableError(
                     "artifact output bytes exceed the limit",
-                    reason=InvalidRequestReason.LIMIT_EXCEEDED,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             self._put_blob_in_session(session, stored, now)
             session.add(
@@ -275,42 +300,57 @@ class ArtifactJobService(InputService):
     def result_blob(
         self, job_id: str, name: str, sha256: str
     ) -> tuple[Path, str, str, int]:
+        unavailable: ArtifactJobUnavailableError | None = None
+        for _attempt in bounded_attempts():
+            try:
+                return self._result_blob_once(job_id, name, sha256)
+            except ArtifactJobUnavailableError as error:
+                unavailable = error
+        assert unavailable is not None
+        raise unavailable
+
+    def _result_blob_once(
+        self, job_id: str, name: str, sha256: str
+    ) -> tuple[Path, str, str, int]:
         with self._sessions() as session:
             job = session.get(ArtifactJob, job_id)
             if job is None:
                 raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             if ajs.state_of(job) != ajs.SUCCEEDED:
-                raise ArtifactJobInvalid(
-                    "artifact job result is not available",
-                    reason=InvalidRequestReason.NOT_READY,
+                raise ArtifactJobUnavailableError(
+                    "artifact result observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-            row = session.scalar(
-                select(ArtifactJobFile).where(
-                    ArtifactJobFile.artifact_job_id == job_id,
-                    ArtifactJobFile.direction == "output",
-                    ArtifactJobFile.name == name,
-                    ArtifactJobFile.blob_sha256 == sha256,
+            row = self._file_in_session(session, job.id, "output", name)
+            file = None
+            if row is not None and row.blob_sha256 == sha256:
+                try:
+                    file = self._output_file(row)
+                except (TypeError, ValueError):
+                    pass
+            receipt = self._stored_result(session, job)
+            if receipt is not None:
+                file = next(
+                    (
+                        item
+                        for item in receipt.outputs
+                        if item.name == name and item.sha256 == sha256
+                    ),
+                    None,
                 )
+            if file is None:
+                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
+            path = self._blob_store.resolve(
+                f"{sha256[:2]}/{sha256}",
+                sha256,
+                file.size_bytes,
             )
-            blob = session.get(ArtifactJobBlob, sha256) if row is not None else None
-            if row is None or blob is None:
-                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
-            try:
-                path = self._blob_store.resolve(
-                    blob.storage_key, sha256, blob.size_bytes
-                )
-            except UnknownOutcomeError:
-                raise
-            except ArtifactBlobStoreError as error:
-                _translate_blob_error(error)
             if path is None:
-                # Bytes the store no longer holds are unknown, not a refusal: the
-                # reader is told "not found" and the content is re-uploaded.
-                retire_as_unknown(
-                    "artifact-job.blob", sha256, note="stored bytes are absent"
+                raise ArtifactJobUnavailableError(
+                    "artifact result bytes observation is unavailable",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
-                raise MissingRecord(sha256, reason=InvalidRequestReason.NOT_FOUND)
-            return path, row.media_type, row.name, row.size_bytes
+            return path, file.media_type, file.name, file.size_bytes
 
     @staticmethod
     def _end_unverified_result(
@@ -377,46 +417,6 @@ class ArtifactJobService(InputService):
         raw_result = getattr(message, "result", None)
         now = self._clock()
         adapter = ArtifactJobAdapter(session, clock=self._clock)
-        if state == agent_operation_states.WIRE_UNKNOWN:
-            try:
-                waiting_result = RecipeJobRunResult.parse(raw_result)
-                if (
-                    waiting_result.job_id != artifact_job.id
-                    or waiting_result.run_id != artifact_job.run_id
-                    or waiting_result.exit_code != 130
-                    or waiting_result.outputs
-                ):
-                    raise ArtifactResultInvalid(
-                        "waiting artifact result identity or output is invalid",
-                        reason=InvalidRequestReason.MALFORMED,
-                    )
-            except (AgentProtocolError, TypeError, ValueError) as error:
-                self._reject_result(
-                    adapter, operation, parent, artifact_job, error, now
-                )
-                return
-            # The agent could not confirm that the job stopped.  The core has
-            # already decided the order (an uncertain report under a cancel is
-            # stopped and observed, and ends ``cancelled`` with the effect unknown
-            # after its stop budget); the job mirrors that decision and keeps the
-            # report as evidence.  It never waits for an operator on its own.
-            adapter.project(
-                artifact_job,
-                now,
-                reason=(
-                    waiting_result.reason
-                    if waiting_result.reason
-                    else "artifact cancellation could not safely stop the active scope"
-                ),
-                evidence=ArtifactJobResultEvidence(
-                    failure_kind="cancellation-stop-uncertain",
-                    recoverable=True,
-                    active_scope_may_remain=True,
-                    elapsed_milliseconds=waiting_result.elapsed_milliseconds,
-                    peak_memory_bytes=waiting_result.peak_memory_bytes,
-                ),
-            )
-            return
         try:
             result = RecipeJobRunResult.parse(raw_result)
             if result.job_id != artifact_job.id or result.run_id != artifact_job.run_id:
@@ -424,6 +424,24 @@ class ArtifactJobService(InputService):
                     "artifact result identity does not match",
                     reason=SecurityRefusalReason.AGENT_IDENTITY_MISMATCH,
                 )
+            if state == agent_operation_states.WIRE_UNKNOWN:
+                if result.exit_code != 130 or result.outputs:
+                    self._observe_result(adapter, operation, parent, artifact_job, now)
+                    return
+                adapter.project(
+                    artifact_job,
+                    now,
+                    reason=(
+                        result.reason or "artifact cancellation stop is unconfirmed"
+                    ),
+                    evidence=ArtifactJobResultEvidence(
+                        recoverable=True,
+                        active_scope_may_remain=True,
+                        elapsed_milliseconds=result.elapsed_milliseconds,
+                        peak_memory_bytes=result.peak_memory_bytes,
+                    ),
+                )
+                return
             succeeded = state == AgentResultState.SUCCEEDED and result.exit_code == 0
             failed = state == AgentResultState.FAILED and result.exit_code != 0
             cancelled = bool(
@@ -434,13 +452,14 @@ class ArtifactJobService(InputService):
                 and parent.result.get("cancel_requested") is True
             )
             if not (succeeded or failed or cancelled):
-                raise ArtifactResultInvalid(
-                    "artifact result state and exit code disagree",
-                    reason=InvalidRequestReason.MALFORMED,
-                )
+                self._observe_result(adapter, operation, parent, artifact_job, now)
+                return
             uploaded = self._files_in_session(session, artifact_job.id, "output")
             observed = tuple(self._output_file(item) for item in uploaded)
-            limits = RecipeJobOutputLimits.parse(artifact_job.output_limits)
+            limits = self._stored_output_limits(session, artifact_job)
+            if isinstance(limits, Residue):
+                self._observe_result(adapter, operation, parent, artifact_job, now)
+                return
             if tuple(result.outputs) != observed:
                 self._end_unverified_result(
                     session, adapter, operation, parent, artifact_job, result, now
@@ -450,19 +469,15 @@ class ArtifactJobService(InputService):
                 item.media_type not in limits.allowed_media_types
                 for item in result.outputs
             ):
-                raise ArtifactResultInvalid(
-                    "artifact result media type is not allowed",
-                    reason=InvalidRequestReason.MALFORMED,
-                )
+                self._observe_result(adapter, operation, parent, artifact_job, now)
+                return
             if (
                 len(result.outputs) > limits.max_files
                 or sum(item.size_bytes for item in result.outputs)
                 > limits.max_total_bytes
             ):
-                raise ArtifactResultInvalid(
-                    "artifact result exceeds output limits",
-                    reason=InvalidRequestReason.MALFORMED,
-                )
+                self._observe_result(adapter, operation, parent, artifact_job, now)
+                return
             if succeeded:
                 result_contract = self._stored_contract(session, artifact_job)
                 if isinstance(result_contract, Residue):
@@ -470,11 +485,20 @@ class ArtifactJobService(InputService):
                         session, adapter, operation, parent, artifact_job, result, now
                     )
                     return
-                _validate_outputs_against_contract(
-                    result_contract, result.outputs, terminal=True
-                )
-        except (AgentProtocolError, TypeError, ValueError) as error:
+                try:
+                    _validate_outputs_against_contract(
+                        result_contract, result.outputs, terminal=True
+                    )
+                except ArtifactJobInvalid:
+                    self._end_unverified_result(
+                        session, adapter, operation, parent, artifact_job, result, now
+                    )
+                    return
+        except ArtifactResultRefused as error:
             self._reject_result(adapter, operation, parent, artifact_job, error, now)
+            return
+        except (AgentProtocolError, TypeError, ValueError):
+            self._observe_result(adapter, operation, parent, artifact_job, now)
             return
         adapter.settle(
             artifact_job,

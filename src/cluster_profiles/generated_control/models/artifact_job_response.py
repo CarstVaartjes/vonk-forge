@@ -48,7 +48,7 @@ class ArtifactJobResponse:
             input_total_bytes (int):
             interface (ArtifactJobResponseInterface):
             output_files (list[ArtifactOutputFile]):
-            output_limits (OutputLimits):
+            output_limits (None | OutputLimits):
             run_id (str):
             state (ArtifactJobResponseStateType0 | None):
             timeout_seconds (int):
@@ -73,7 +73,7 @@ class ArtifactJobResponse:
     input_total_bytes: int
     interface: ArtifactJobResponseInterface
     output_files: list[ArtifactOutputFile]
-    output_limits: OutputLimits
+    output_limits: None | OutputLimits
     run_id: str
     state: ArtifactJobResponseStateType0 | None
     timeout_seconds: int
@@ -140,7 +140,11 @@ class ArtifactJobResponse:
 
 
 
-        output_limits = self.output_limits.to_dict()
+        output_limits: dict[str, Any] | None
+        if isinstance(self.output_limits, OutputLimits):
+            output_limits = self.output_limits.to_dict()
+        else:
+            output_limits = self.output_limits
 
         run_id = self.run_id
 
@@ -336,9 +340,22 @@ class ArtifactJobResponse:
             output_files.append(output_files_item)
 
 
-        output_limits = OutputLimits.from_dict(d.pop("output_limits"))
+        def _parse_output_limits(data: object) -> None | OutputLimits:
+            if data is None:
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                output_limits_type_0 = OutputLimits.from_dict(data)
 
 
+
+                return output_limits_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(None | OutputLimits, data)
+
+        output_limits = _parse_output_limits(d.pop("output_limits"))
 
 
         run_id = d.pop("run_id")
