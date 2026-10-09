@@ -52,7 +52,9 @@ def test_crl_reader_keeps_its_independently_configured_limit(tmp_path: Path) -> 
         )
 
     provider, material = _provider(tmp_path, transport, max_response_bytes=1024)
-    assert provider.revocation_bundle(NOW).startswith(b"-----BEGIN X509 CRL-----")
+    bundle = provider.revocation_bundle(NOW)
+    assert isinstance(bundle, bytes)
+    assert bundle.startswith(b"-----BEGIN X509 CRL-----")
 
 
 def test_largest_supported_response_metadata_fits_before_provider_effect(tmp_path):

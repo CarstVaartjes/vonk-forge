@@ -304,6 +304,17 @@ bind(
     "run_switch_journal_repair_pending", "progress", RunSwitchJournalRepairPendingState
 )
 
+bind(
+    "agent_issued_certificate_revocations",
+    "provider_request",
+    CertificateIssuanceBinding,
+    nullable=True,
+)
+
+bind(
+    "agent_certificates", "provider_request", CertificateIssuanceBinding, nullable=True
+)
+
 
 bind(
     "run_switch_journal_repair_pending",

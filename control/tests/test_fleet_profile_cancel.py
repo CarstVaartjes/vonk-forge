@@ -28,6 +28,7 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationView,
     FleetProfileChildOperation,
     FleetProfileInput,
 )
@@ -1039,7 +1040,8 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         json={"profile_number": profile.number, "request_key": _uuid(982)},
         headers=_headers(tokens, "administrator"),
     )
-    assert conflict.status_code == 409
+    assert conflict.status_code == 202
+    assert conflict.json()["cancellation"]["request_key"] == key
 
     # Request identity includes the current actor. Another administrator
     # cannot replay the accepted key on this application.
@@ -1054,6 +1056,16 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         headers={"Authorization": f"Bearer {other_admin}"},
     )
     assert other_actor.status_code == 409
+    replay_after_conflict = api.post(
+        path, json=body, headers=_headers(tokens, "administrator")
+    )
+    assert replay_after_conflict.status_code == 202
+    assert (
+        FleetProfileApplicationView.model_validate_json(
+            replay_after_conflict.content
+        ).cancellation
+        == FleetProfileApplicationView.model_validate_json(replay.content).cancellation
+    )
     other_owner_lookup = api.get(
         lookup_path,
         headers={"Authorization": f"Bearer {other_admin}"},
@@ -1112,6 +1124,9 @@ def test_profile_cancel_api_is_exact_authorized_and_stops_before_dispatch(
         )
         assert released_claims
         assert all(claim.state == "released" for claim in released_claims)
+
+    fresh = service.apply(profile.id, request_key=_uuid(983), actor="second-admin")
+    assert fresh.id != application.id
 
 
 def test_pending_profile_cancellation_is_visible_and_filterable_in_activity(

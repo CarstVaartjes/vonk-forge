@@ -24,6 +24,16 @@ from ..models.blocker_category import BlockerCategory
 from ..models.blocker_category import check_blocker_category
 from ..models.catalog_sync_state import CatalogSyncState
 from ..models.catalog_sync_state import check_catalog_sync_state
+from ..models.certificate_issuance_purpose import CertificateIssuancePurpose
+from ..models.certificate_issuance_purpose import check_certificate_issuance_purpose
+from ..models.certificate_journal_state import CertificateJournalState
+from ..models.certificate_journal_state import check_certificate_journal_state
+from ..models.certificate_record_state import CertificateRecordState
+from ..models.certificate_record_state import check_certificate_record_state
+from ..models.certificate_request_mode import CertificateRequestMode
+from ..models.certificate_request_mode import check_certificate_request_mode
+from ..models.certificate_rotation_state import CertificateRotationState
+from ..models.certificate_rotation_state import check_certificate_rotation_state
 from ..models.certificate_state import CertificateState
 from ..models.certificate_state import check_certificate_state
 from ..models.desired_assignment_state import check_desired_assignment_state
@@ -34,6 +44,12 @@ from ..models.endpoint_state import check_endpoint_state
 from ..models.endpoint_state import EndpointState
 from ..models.enrollment_grant_state import check_enrollment_grant_state
 from ..models.enrollment_grant_state import EnrollmentGrantState
+from ..models.enrollment_profile_state import check_enrollment_profile_state
+from ..models.enrollment_profile_state import EnrollmentProfileState
+from ..models.enrollment_purpose import check_enrollment_purpose
+from ..models.enrollment_purpose import EnrollmentPurpose
+from ..models.enrollment_record_state import check_enrollment_record_state
+from ..models.enrollment_record_state import EnrollmentRecordState
 from ..models.error_category import check_error_category
 from ..models.error_category import ErrorCategory
 from ..models.failure_code import check_failure_code
@@ -64,6 +80,8 @@ from ..models.model_cache_operator_status import check_model_cache_operator_stat
 from ..models.model_cache_operator_status import ModelCacheOperatorStatus
 from ..models.model_file_state import check_model_file_state
 from ..models.model_file_state import ModelFileState
+from ..models.node_identity_state import check_node_identity_state
+from ..models.node_identity_state import NodeIdentityState
 from ..models.observation_cause import check_observation_cause
 from ..models.observation_cause import ObservationCause
 from ..models.observed_assignment_state import check_observed_assignment_state
@@ -174,6 +192,11 @@ class LifecycleVocabulary:
             asset_availability (AssetAvailability): What is known about a model asset on a Spark's disk.
             blocker_category (BlockerCategory): The categories of the blocker allowlist (fail-closed raises).
             catalog_sync_state (CatalogSyncState): The outcome of a catalog synchronization, as the catalog shows it.
+            certificate_issuance_purpose (CertificateIssuancePurpose):
+            certificate_journal_state (CertificateJournalState):
+            certificate_record_state (CertificateRecordState):
+            certificate_request_mode (CertificateRequestMode):
+            certificate_rotation_state (CertificateRotationState):
             certificate_state (CertificateState): The standing of a node's client certificate, as the fleet projection shows
                 it.
             desired_assignment_state (DesiredAssignmentState): What a fleet-profile assignment is asked to become on its
@@ -183,6 +206,9 @@ class LifecycleVocabulary:
             effect (LifecycleEffect): What is known about the real-world effect of the work.
             endpoint_state (EndpointState): Whether the endpoint of a fleet-profile assignment can be reached.
             enrollment_grant_state (EnrollmentGrantState): The standing of an enrollment grant.
+            enrollment_profile_state (EnrollmentProfileState):
+            enrollment_purpose (EnrollmentPurpose):
+            enrollment_record_state (EnrollmentRecordState):
             error_category (ErrorCategory): The only three things a lifecycle adapter may raise or report.
 
                 ``security-refusal`` and ``invalid-request`` are decided at submit time and
@@ -212,6 +238,7 @@ class LifecycleVocabulary:
                 an operator sees is a :class:`~vonk_agent_protocol.LifecycleState` (a cancel
                 under way is ``observing`` with its cancellation intent).
             model_file_state (ModelFileState): The condition of one model file a node holds.
+            node_identity_state (NodeIdentityState):
             observation_cause (ObservationCause): Why an attempt is being observed rather than settled.
 
                 An attempt that ended without a definite answer is ``observing``; this says
@@ -306,12 +333,20 @@ class LifecycleVocabulary:
     asset_availability: AssetAvailability
     blocker_category: BlockerCategory
     catalog_sync_state: CatalogSyncState
+    certificate_issuance_purpose: CertificateIssuancePurpose
+    certificate_journal_state: CertificateJournalState
+    certificate_record_state: CertificateRecordState
+    certificate_request_mode: CertificateRequestMode
+    certificate_rotation_state: CertificateRotationState
     certificate_state: CertificateState
     desired_assignment_state: DesiredAssignmentState
     distribution_assignment_state: DistributionAssignmentState
     effect: LifecycleEffect
     endpoint_state: EndpointState
     enrollment_grant_state: EnrollmentGrantState
+    enrollment_profile_state: EnrollmentProfileState
+    enrollment_purpose: EnrollmentPurpose
+    enrollment_record_state: EnrollmentRecordState
     error_category: ErrorCategory
     event_kind: LifecycleEventKind
     failure_code: FailureCode
@@ -325,6 +360,7 @@ class LifecycleVocabulary:
     migration_step: MigrationStep
     model_cache_operator_status: ModelCacheOperatorStatus
     model_file_state: ModelFileState
+    node_identity_state: NodeIdentityState
     observation_cause: ObservationCause
     observed_assignment_state: ObservedAssignmentState
     oci_failure_category: OciFailureCategory
@@ -384,6 +420,16 @@ class LifecycleVocabulary:
 
         catalog_sync_state: str = self.catalog_sync_state
 
+        certificate_issuance_purpose: str = self.certificate_issuance_purpose
+
+        certificate_journal_state: str = self.certificate_journal_state
+
+        certificate_record_state: str = self.certificate_record_state
+
+        certificate_request_mode: str = self.certificate_request_mode
+
+        certificate_rotation_state: str = self.certificate_rotation_state
+
         certificate_state: str = self.certificate_state
 
         desired_assignment_state: str = self.desired_assignment_state
@@ -395,6 +441,12 @@ class LifecycleVocabulary:
         endpoint_state: str = self.endpoint_state
 
         enrollment_grant_state: str = self.enrollment_grant_state
+
+        enrollment_profile_state: str = self.enrollment_profile_state
+
+        enrollment_purpose: str = self.enrollment_purpose
+
+        enrollment_record_state: str = self.enrollment_record_state
 
         error_category: str = self.error_category
 
@@ -421,6 +473,8 @@ class LifecycleVocabulary:
         model_cache_operator_status: str = self.model_cache_operator_status
 
         model_file_state: str = self.model_file_state
+
+        node_identity_state: str = self.node_identity_state
 
         observation_cause: str = self.observation_cause
 
@@ -508,12 +562,20 @@ class LifecycleVocabulary:
             "asset_availability": asset_availability,
             "blocker_category": blocker_category,
             "catalog_sync_state": catalog_sync_state,
+            "certificate_issuance_purpose": certificate_issuance_purpose,
+            "certificate_journal_state": certificate_journal_state,
+            "certificate_record_state": certificate_record_state,
+            "certificate_request_mode": certificate_request_mode,
+            "certificate_rotation_state": certificate_rotation_state,
             "certificate_state": certificate_state,
             "desired_assignment_state": desired_assignment_state,
             "distribution_assignment_state": distribution_assignment_state,
             "effect": effect,
             "endpoint_state": endpoint_state,
             "enrollment_grant_state": enrollment_grant_state,
+            "enrollment_profile_state": enrollment_profile_state,
+            "enrollment_purpose": enrollment_purpose,
+            "enrollment_record_state": enrollment_record_state,
             "error_category": error_category,
             "event_kind": event_kind,
             "failure_code": failure_code,
@@ -527,6 +589,7 @@ class LifecycleVocabulary:
             "migration_step": migration_step,
             "model_cache_operator_status": model_cache_operator_status,
             "model_file_state": model_file_state,
+            "node_identity_state": node_identity_state,
             "observation_cause": observation_cause,
             "observed_assignment_state": observed_assignment_state,
             "oci_failure_category": oci_failure_category,
@@ -613,6 +676,31 @@ class LifecycleVocabulary:
 
 
 
+        certificate_issuance_purpose = check_certificate_issuance_purpose(d.pop("certificate_issuance_purpose"))
+
+
+
+
+        certificate_journal_state = check_certificate_journal_state(d.pop("certificate_journal_state"))
+
+
+
+
+        certificate_record_state = check_certificate_record_state(d.pop("certificate_record_state"))
+
+
+
+
+        certificate_request_mode = check_certificate_request_mode(d.pop("certificate_request_mode"))
+
+
+
+
+        certificate_rotation_state = check_certificate_rotation_state(d.pop("certificate_rotation_state"))
+
+
+
+
         certificate_state = check_certificate_state(d.pop("certificate_state"))
 
 
@@ -639,6 +727,21 @@ class LifecycleVocabulary:
 
 
         enrollment_grant_state = check_enrollment_grant_state(d.pop("enrollment_grant_state"))
+
+
+
+
+        enrollment_profile_state = check_enrollment_profile_state(d.pop("enrollment_profile_state"))
+
+
+
+
+        enrollment_purpose = check_enrollment_purpose(d.pop("enrollment_purpose"))
+
+
+
+
+        enrollment_record_state = check_enrollment_record_state(d.pop("enrollment_record_state"))
 
 
 
@@ -704,6 +807,11 @@ class LifecycleVocabulary:
 
 
         model_file_state = check_model_file_state(d.pop("model_file_state"))
+
+
+
+
+        node_identity_state = check_node_identity_state(d.pop("node_identity_state"))
 
 
 
@@ -902,12 +1010,20 @@ class LifecycleVocabulary:
             asset_availability=asset_availability,
             blocker_category=blocker_category,
             catalog_sync_state=catalog_sync_state,
+            certificate_issuance_purpose=certificate_issuance_purpose,
+            certificate_journal_state=certificate_journal_state,
+            certificate_record_state=certificate_record_state,
+            certificate_request_mode=certificate_request_mode,
+            certificate_rotation_state=certificate_rotation_state,
             certificate_state=certificate_state,
             desired_assignment_state=desired_assignment_state,
             distribution_assignment_state=distribution_assignment_state,
             effect=effect,
             endpoint_state=endpoint_state,
             enrollment_grant_state=enrollment_grant_state,
+            enrollment_profile_state=enrollment_profile_state,
+            enrollment_purpose=enrollment_purpose,
+            enrollment_record_state=enrollment_record_state,
             error_category=error_category,
             event_kind=event_kind,
             failure_code=failure_code,
@@ -921,6 +1037,7 @@ class LifecycleVocabulary:
             migration_step=migration_step,
             model_cache_operator_status=model_cache_operator_status,
             model_file_state=model_file_state,
+            node_identity_state=node_identity_state,
             observation_cause=observation_cause,
             observed_assignment_state=observed_assignment_state,
             oci_failure_category=oci_failure_category,

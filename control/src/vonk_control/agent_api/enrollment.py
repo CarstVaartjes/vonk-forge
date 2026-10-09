@@ -8,6 +8,7 @@ import re
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
+from vonk_agent_protocol import UnknownError
 from vonk_agent_protocol.enrollment import (
     EnrollmentBootstrapResponse,
     EnrollmentSubmitRequest,
@@ -18,12 +19,14 @@ from ..contract_graph import raw_json_body
 from ..enrollment import (
     EnrollmentDenied,
     EnrollmentIssuanceUncertain,
+    RenewalIssuanceUncertain,
 )
+from ..enrollment.responses import unknown_response
 from ..enrollment_body import (
     _bounded_enrollment_body,
-    _consume_enrollment_denial,
     _scan_enrollment_grants,
 )
+from ..enrollment_contract import EnrollmentObservationReply
 from ..operation_api import bounded_error_responses
 from .common import (
     AgentApiServices,
@@ -78,7 +81,11 @@ def install_enrollment_routes(
             )
         )
 
-    @agent.post("/enroll", response_model=IssuedCertificateResponse)
+    @agent.post(
+        "/enroll",
+        response_model=IssuedCertificateResponse,
+        responses={503: {"model": EnrollmentObservationReply}},
+    )
     @raw_json_body(EnrollmentSubmitRequest)
     async def enroll(request: Request) -> Response:
         required = _require_services(services)
@@ -134,9 +141,12 @@ def install_enrollment_routes(
                 csr_bytes,
                 submitted.evidence.model_dump(),
             )
-        except EnrollmentIssuanceUncertain as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
+        except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
+            return unknown_response(error)
         except EnrollmentDenied as error:
-            _consume_enrollment_denial(required, (submitted.grant_token,))
             raise HTTPException(status_code=403, detail=str(error)) from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        if isinstance(outcome, UnknownError):
+            return unknown_response(outcome)
         return _json_response(_issued_response(outcome))

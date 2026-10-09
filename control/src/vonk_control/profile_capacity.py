@@ -17,8 +17,8 @@ unassigned claims, and the same application returning to work (its live child
 resumed) takes them back. A disk claim is bookkeeping for a promise, never a
 precondition of the work: a live application whose disk claim is absent,
 released or stale reserves again under the reservation locks and the ordinary
-capacity check instead of failing. Port and memory promises are exact-plan
-authority and stay strict.
+capacity check instead of failing. Port and memory promises are reconstructed only from the exact accepted
+requirements; changed or unknown consumers are reconciled by their owner.
 """
 
 from collections.abc import Mapping, Sequence
@@ -33,6 +33,16 @@ from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.inventory import MemoryPool
 
 from . import job_states
+from .content_identity import same_image
+from .fleet_profile_capacity_repair import (
+    capacity_document as _capacity_document,
+)
+from .fleet_profile_capacity_repair import (
+    memory_claim as _memory_claim,
+)
+from .fleet_profile_capacity_repair import (
+    memory_claim_id as _memory_claim_id,
+)
 from .fleet_profile_contract import (
     FLEET_PROFILE_ENDED_STATES,
     FleetProfileApplicationProgress,
@@ -50,7 +60,6 @@ from .models import (
 from .preparation_contract import RuntimeImageIdentity
 from .resource_planning import memory_reservation_kind
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan, StopImpact
-from .strict_json import read_stored_model
 
 
 def reservation_visible(
@@ -89,7 +98,10 @@ def reserve_profile_disk(
             continue
         for node in decision.requirements:
             if node.disk_required_bytes is None:
-                raise ValueError("profile disk requirement is unavailable")
+                raise UnknownOutcomeError(
+                    "profile disk requirement is unavailable",
+                    reason=WaitReason.SCOPE_CHANGED,
+                )
             session.add(
                 ResourceReservation(
                     id=_disk_claim_id(
@@ -125,14 +137,6 @@ def _port_claim_id(
     )
 
 
-def _memory_claim_id(application_id: str, assignment_id: str, node_id: str) -> str:
-    return str(
-        uuid5(
-            UUID(application_id), f"profile-capacity:memory:{assignment_id}:{node_id}"
-        )
-    )
-
-
 def reserve_profile_memory(
     session: Session,
     application: FleetProfileApplication,
@@ -150,7 +154,10 @@ def reserve_profile_memory(
                 or node.memory_kind is None
                 or node.memory_pool is None
             ):
-                raise ValueError("profile memory requirement is unavailable")
+                raise UnknownOutcomeError(
+                    "profile memory requirement is unavailable",
+                    reason=WaitReason.SCOPE_CHANGED,
+                )
             session.add(
                 ResourceReservation(
                     id=_memory_claim_id(
@@ -190,7 +197,10 @@ def _validate_memory_claim(
         or claim.state != ReservationState.PROMISED
         or claim.plan_digest != application.plan_digest
     ):
-        raise ValueError("profile memory claim is missing or changed")
+        raise UnknownOutcomeError(
+            "profile memory claim is missing or changed",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
 
 
 def inherited_profile_memory(
@@ -213,7 +223,9 @@ def inherited_profile_memory(
         assignment.desired_state != DesiredAssignmentState.RUNNING
         or assignment.alias != alias
     ):
-        raise ValueError("run is outside the profile memory claim")
+        raise UnknownOutcomeError(
+            "run is outside the profile memory claim", reason=WaitReason.SCOPE_CHANGED
+        )
     claims = {}
     for requirement in requirements:
         if node_memory[requirement.node_id] != (
@@ -221,13 +233,18 @@ def inherited_profile_memory(
             requirement.memory_required_bytes,
             requirement.memory_pool,
         ):
-            raise ValueError("run memory changed after profile review")
-        claim = session.get(
-            ResourceReservation,
-            _memory_claim_id(application_id, assignment.id, requirement.node_id),
+            raise UnknownOutcomeError(
+                "run memory changed after profile review",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+        claim = _memory_claim(
+            session, application, assignment.id, requirement, repair=True
         )
         if claim is None:
-            raise ValueError("profile memory claim is missing or changed")
+            raise UnknownOutcomeError(
+                "profile memory claim is missing or changed",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
         _validate_memory_claim(claim, application, assignment.id, requirement)
         claims[requirement.node_id] = claim
     return claims
@@ -238,52 +255,58 @@ def profile_memory_replacements(
     claim: ResourceReservation,
 ) -> tuple[StopImpact, ...]:
     """Only exact reviewed run generations may overlap a future memory claim."""
-    application = session.get(FleetProfileApplication, claim.owner_id)
-    if application is None:
-        raise ValueError("profile memory claim owner is missing")
-    review = read_stored_model(
-        FleetProfilePreview,
-        canonical_message(application.plan),
-        strict=True,
-        from_json=True,
-    )
-    progress = read_stored_model(
-        FleetProfileApplicationProgress,
-        canonical_message(application.progress),
-        strict=True,
-        from_json=True,
-    )
-    decision = next(
-        (
-            item
-            for item in review.admission_decisions
-            if item.assignment_id == claim.resource_key
-        ),
-        None,
-    )
-    requirement = (
-        next(
-            (item for item in decision.requirements if item.node_id == claim.node_id),
-            None,
+    try:
+        application = session.get(FleetProfileApplication, claim.owner_id)
+        if application is None:
+            return ()
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
         )
-        if decision is not None
-        else None
-    )
-    if decision is None or requirement is None:
-        raise ValueError("profile memory requirement is missing or changed")
-    _validate_memory_claim(claim, application, decision.assignment_id, requirement)
-    node = session.get(AgentNode, claim.node_id)
-    if (
-        application.state
-        not in job_states.words(
-            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
+        progress = _capacity_document(
+            FleetProfileApplicationProgress,
+            canonical_message(application.progress),
+            strict=True,
+            from_json=True,
         )
-        or node is None
-        or progress.workload_intent_ordinal is None
-        or node.workload_intent_ordinal != progress.workload_intent_ordinal
-    ):
+        decisions = {item.assignment_id: item for item in review.admission_decisions}
+        decision = decisions.get(claim.resource_key)
+        requirement = (
+            next(
+                (
+                    item
+                    for item in decision.requirements
+                    if item.node_id == claim.node_id
+                ),
+                None,
+            )
+            if decision is not None
+            else None
+        )
+        if decision is None or requirement is None:
+            raise UnknownOutcomeError(
+                "profile memory requirement is missing or changed",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+        _validate_memory_claim(claim, application, decision.assignment_id, requirement)
+        node = session.get(AgentNode, claim.node_id)
+        if (
+            application.state
+            not in job_states.words(
+                LifecycleState.QUEUED,
+                LifecycleState.RUNNING,
+                LifecycleState.NEEDS_OPERATOR,
+            )
+            or node is None
+            or progress.workload_intent_ordinal is None
+            or node.workload_intent_ordinal != progress.workload_intent_ordinal
+        ):
+            return ()
+        return tuple(stop for stop in decision.stops if claim.node_id in stop.node_ids)
+    except (UnknownOutcomeError, TypeError, ValueError):
         return ()
-    return tuple(stop for stop in decision.stops if claim.node_id in stop.node_ids)
 
 
 def profile_build_memory_claims(
@@ -305,7 +328,8 @@ def profile_build_memory_claims(
         select(Job)
         .where(
             Job.kind == "recipe.run-switch.v2",
-            Job.payload["plan"]["build"]["build_id"].as_string() == build.id,
+            Job.payload["plan"]["build"]["build_input_sha256"].as_string()
+            == build.build_input_sha256,
         )
         .order_by(Job.id)
     )
@@ -329,7 +353,7 @@ def profile_build_memory_claims(
             claim = _profile_build_memory_claim(
                 session, job, build, memory_pool=memory_pool, lock=lock
             )
-        except ValueError:
+        except (UnknownOutcomeError, ValueError, KeyError, TypeError):
             if request_id is not None:
                 raise
             # Invalid/stale consumer evidence cannot discount capacity. A
@@ -349,15 +373,15 @@ def _profile_build_memory_claim(
     memory_pool: MemoryPool | None,
     lock: bool,
 ) -> ResourceReservation | None:
-    if job.state not in {"queued", "running"}:
-        raise ValueError("profile build consumer is no longer active")
-    plan = read_stored_model(
+    if job.state not in job_states.words(LifecycleState.QUEUED, LifecycleState.RUNNING):
+        return None
+    plan = _capacity_document(
         RunSwitchPlan,
         canonical_message(job.payload["plan"]),
         strict=True,
         from_json=True,
     )
-    progress = read_stored_model(
+    progress = _capacity_document(
         RunSwitchOperationResult,
         canonical_message(job.result),
         strict=True,
@@ -365,25 +389,28 @@ def _profile_build_memory_claim(
     )
     if progress.profile_application_id is None:
         return None
-    if progress.cancellation is not None:
-        raise ValueError("profile build consumer was cancelled")
-    if progress.phase_index >= len(plan.phases):
-        raise ValueError("profile build consumer phase is complete")
+    if progress.cancellation is not None or progress.phase_index >= len(plan.phases):
+        return None
     phase = plan.phases[progress.phase_index]
     if (phase.kind, phase.subphase, phase.state) != (
         "prepare",
         "container-build",
         "planned",
     ):
-        raise ValueError("profile build consumer is outside preparation")
+        return None
     if plan.recipe_revision_id is None:
-        raise ValueError("profile build consumer revision is unavailable")
+        raise UnknownOutcomeError(
+            "profile build consumer revision is unavailable",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     if (
-        plan.recipe_build_id != build.id
-        or plan.build.build_input_sha256 != build.build_input_sha256
+        plan.build.build_input_sha256 != build.build_input_sha256
         or plan.build.builder_node_id != build.builder_node_id
     ):
-        raise ValueError("profile build identity changed after review")
+        raise UnknownOutcomeError(
+            "profile build identity changed after review",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     nodes = tuple(node.node_id for node in plan.spark_group.nodes)
     if build.builder_node_id not in nodes:
         return None
@@ -404,52 +431,83 @@ def _profile_build_memory_claim(
     image = accepted_profile_runtime_image(
         session, application.id, plan.recipe_revision_id, nodes
     )
-    if image.build_id != build.id or assignment.alias != plan.alias:
-        raise ValueError("build is outside the reviewed profile preparation")
+    reviewed_build = (
+        session.get(RecipeBuild, image.build_id) if image.build_id else None
+    )
+    if assignment.alias != plan.alias or not (
+        same_image(image, build)
+        or (
+            build.image_digest is None
+            and build.oci_layout_sha256 is None
+            and reviewed_build is not None
+            and reviewed_build.build_input_sha256 == build.build_input_sha256
+            and reviewed_build.source_bundle_sha256 == build.source_bundle_sha256
+        )
+    ):
+        raise UnknownOutcomeError(
+            "build is outside the reviewed profile preparation",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     if assignment.desired_state != DesiredAssignmentState.RUNNING:
         return None
     requirement = next(
         item for item in requirements if item.node_id == build.builder_node_id
     )
     if requirement.memory_pool != memory_pool:
-        raise ValueError("profile build memory pool changed after review")
-    claim = session.get(
-        ResourceReservation,
-        _memory_claim_id(application.id, assignment.id, build.builder_node_id),
-        populate_existing=True,
-        with_for_update={"nowait": True} if lock else None,
-    )
+        raise UnknownOutcomeError(
+            "profile build memory pool changed after review",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
+    if lock:
+        session.get(
+            ResourceReservation,
+            _memory_claim_id(application.id, assignment.id, build.builder_node_id),
+            populate_existing=True,
+            with_for_update={"nowait": True},
+        )
+    claim = _memory_claim(session, application, assignment.id, requirement, repair=lock)
     if claim is None:
-        raise ValueError("profile build memory claim is missing")
+        raise UnknownOutcomeError(
+            "profile build memory claim is missing", reason=WaitReason.SCOPE_CHANGED
+        )
     _validate_memory_claim(claim, application, assignment.id, requirement)
     return claim
 
 
 def profile_memory_floor(session: Session, claim: ResourceReservation) -> int:
     """The accepted recipe reserve survives temporary preparation use."""
-    application = session.get(FleetProfileApplication, claim.owner_id)
-    if application is None:
-        raise ValueError("profile memory claim owner is missing")
-    review = read_stored_model(
-        FleetProfilePreview,
-        canonical_message(application.plan),
-        strict=True,
-        from_json=True,
-    )
-    requirement = next(
-        (
-            node
-            for decision in review.admission_decisions
-            if decision.assignment_id == claim.resource_key
-            for node in decision.requirements
-            if node.node_id == claim.node_id
-        ),
-        None,
-    )
-    if requirement is None or requirement.memory_floor_bytes is None:
-        raise ValueError("profile memory requirement is missing")
-    _validate_memory_claim(claim, application, claim.resource_key, requirement)
-    return requirement.memory_floor_bytes
+    try:
+        application = session.get(FleetProfileApplication, claim.owner_id)
+        if application is None:
+            return claim.amount_bytes
+        review = _capacity_document(
+            FleetProfilePreview,
+            canonical_message(application.plan),
+            strict=True,
+            from_json=True,
+        )
+        decisions = {item.assignment_id: item for item in review.admission_decisions}
+        decision = decisions.get(claim.resource_key)
+        requirement = (
+            next(
+                (
+                    node
+                    for node in decision.requirements
+                    if node.node_id == claim.node_id
+                ),
+                None,
+            )
+            if decision is not None
+            else None
+        )
+        if requirement is None or requirement.memory_floor_bytes is None:
+            raise UnknownOutcomeError(
+                "profile memory requirement is missing", reason=WaitReason.SCOPE_CHANGED
+            )
+        _validate_memory_claim(claim, application, claim.resource_key, requirement)
+        return requirement.memory_floor_bytes
+    except (UnknownOutcomeError, TypeError, ValueError):
+        return claim.amount_bytes
 
 
 def reserve_profile_ports(
@@ -504,7 +562,9 @@ def inherited_profile_ports(
         assignment.desired_state != DesiredAssignmentState.RUNNING
         or assignment.alias != alias
     ):
-        raise ValueError("run is outside the profile port claim")
+        raise UnknownOutcomeError(
+            "run is outside the profile port claim", reason=WaitReason.SCOPE_CHANGED
+        )
     expected = {
         (node.node_id, port) for node in requirements for port in node.ports_required
     }
@@ -512,7 +572,9 @@ def inherited_profile_ports(
         (node_id, port) for node_id, ports in node_ports.items() for port in ports
     }
     if actual != expected:
-        raise ValueError("run ports changed after profile review")
+        raise UnknownOutcomeError(
+            "run ports changed after profile review", reason=WaitReason.SCOPE_CHANGED
+        )
     ids = {
         _port_claim_id(application_id, assignment.id, node_id, port): (node_id, port)
         for node_id, port in expected
@@ -523,19 +585,28 @@ def inherited_profile_ports(
             select(ResourceReservation).where(ResourceReservation.id.in_(ids))
         )
     }
-    if set(claims) != set(ids) or any(
-        claim.owner_kind != "fleet-profile"
-        or claim.owner_id != application_id
-        or claim.kind != "port"
-        or claim.state != ReservationState.PROMISED
-        or claim.node_id != ids[claim.id][0]
-        or claim.resource_key != str(ids[claim.id][1])
-        or claim.plan_digest != application.plan_digest
-        or claim.amount_bytes != 0
-        for claim in claims.values()
-    ):
-        raise ValueError("profile port claim is missing or changed")
-    return {ids[claim_id]: claim for claim_id, claim in claims.items()}
+    inherited: dict[tuple[str, int], ResourceReservation] = {}
+    for claim_id, claim in claims.items():
+        if claim.owner_kind != "fleet-profile" or claim.owner_id != application_id:
+            raise UnknownOutcomeError(
+                "Profile port handoff is being observed",
+                reason=WaitReason.SCOPE_CHANGED,
+            )
+        if (
+            claim.kind == "port"
+            and claim.state == ReservationState.PROMISED
+            and claim.node_id == ids[claim.id][0]
+            and claim.resource_key == str(ids[claim.id][1])
+            and claim.plan_digest == application.plan_digest
+            and claim.amount_bytes == 0
+        ):
+            inherited[ids[claim_id]] = claim
+        elif claim.state == ReservationState.PROMISED:
+            # Only an unconsumed promise is disposable. The run's ordinary
+            # locked port admission creates the missing exact claim.
+            claim.state = ReservationState.RELEASED
+            claim.released_at = application.updated_at
+    return inherited
 
 
 def _profile_assignment(
@@ -554,14 +625,17 @@ def _profile_assignment(
     if application is None or application.state not in job_states.words(
         LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
     ):
-        raise ValueError("profile capacity owner is no longer active")
-    progress = read_stored_model(
+        raise UnknownOutcomeError(
+            "profile capacity owner is no longer active",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
+    progress = _capacity_document(
         FleetProfileApplicationProgress,
         canonical_message(application.progress),
         strict=True,
         from_json=True,
     )
-    review = read_stored_model(
+    review = _capacity_document(
         FleetProfilePreview,
         canonical_message(application.plan),
         strict=True,
@@ -571,7 +645,10 @@ def _profile_assignment(
         workload_intent_ordinal is None
         or progress.workload_intent_ordinal != workload_intent_ordinal
     ):
-        raise ValueError("profile capacity owner does not match workload intent")
+        raise UnknownOutcomeError(
+            "profile capacity owner does not match workload intent",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     nodes = tuple(sorted(node_ids))
     current = tuple(
         session.execute(
@@ -581,7 +658,9 @@ def _profile_assignment(
         )
     )
     if current != tuple((node_id, workload_intent_ordinal) for node_id in nodes):
-        raise ValueError("profile capacity intent was superseded")
+        raise UnknownOutcomeError(
+            "profile capacity intent was superseded", reason=WaitReason.SCOPE_CHANGED
+        )
     assignments = [
         item
         for item in review.resolved_assignments
@@ -589,7 +668,10 @@ def _profile_assignment(
         and tuple(sorted(node.node_id for node in item.nodes)) == nodes
     ]
     if len(assignments) != 1:
-        raise ValueError("installation is outside the profile capacity claim")
+        raise UnknownOutcomeError(
+            "installation is outside the profile capacity claim",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     assignment = assignments[0]
     requirements = tuple(
         node
@@ -598,7 +680,10 @@ def _profile_assignment(
         for node in item.requirements
     )
     if {node.node_id for node in requirements} != set(nodes):
-        raise ValueError("profile capacity requirement is missing or changed")
+        raise UnknownOutcomeError(
+            "profile capacity requirement is missing or changed",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     return application, assignment, requirements
 
 
@@ -620,8 +705,10 @@ def accepted_profile_runtime_image(
 
     application = session.get(FleetProfileApplication, application_id)
     if application is None:
-        raise ValueError("profile image owner is unavailable")
-    progress = read_stored_model(
+        raise UnknownOutcomeError(
+            "profile image owner is unavailable", reason=WaitReason.SCOPE_CHANGED
+        )
+    progress = _capacity_document(
         FleetProfileApplicationProgress,
         canonical_message(application.progress),
         strict=True,
@@ -637,16 +724,21 @@ def accepted_profile_runtime_image(
     try:
         intended = FleetProfileService._intended_profile(application, session=session)
     except FleetProfileConflict as error:
-        raise ValueError(str(error)) from error
+        raise UnknownOutcomeError(
+            str(error), reason=WaitReason.SCOPE_CHANGED
+        ) from error
     if isinstance(intended, Residue):
-        # (A ValueError like its siblings: the caller maps that to its own refusal.)
-        raise ValueError(  # noqa: TRY004
-            intended.note or "profile image intent is unavailable"
+        raise UnknownOutcomeError(
+            intended.note or "profile image intent is unavailable",
+            reason=WaitReason.SCOPE_CHANGED,
         )
     root = session.get(FleetProfileApplication, intended.reviewed_application_id)
     if root is None:
-        raise ValueError("profile image review source is unavailable")
-    review = read_stored_model(
+        raise UnknownOutcomeError(
+            "profile image review source is unavailable",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
+    review = _capacity_document(
         FleetProfilePreview, canonical_message(root.plan), strict=True, from_json=True
     )
     decisions = [
@@ -655,7 +747,10 @@ def accepted_profile_runtime_image(
         if item.assignment_id == assignment.id
     ]
     if len(decisions) != 1:
-        raise ValueError("profile image identity is missing or ambiguous")
+        raise UnknownOutcomeError(
+            "profile image identity is missing or ambiguous",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     return decisions[0].runtime_image
 
 

@@ -328,3 +328,52 @@ __all__ = [
     "machine_check",
     "machine_words",
 ]
+
+
+class EnrollmentRecordState(WireEnum):
+    ENDED = "ended"
+    ISSUING = "issuing"
+    CERTIFICATE_ISSUED = "certificate_issued"
+
+
+class CertificateRotationState(WireEnum):
+    ISSUING = "issuing"
+    MANUAL_RECOVERY = "manual-recovery"
+    REVOCATION_PENDING = "revocation-pending"
+    REVOKED = "revoked"
+
+
+class CertificateRecordState(WireEnum):
+    ACTIVE = "active"
+    STAGED = "staged"
+    REVOKED = "revoked"
+
+
+class NodeIdentityState(WireEnum):
+    ACTIVE = "active"
+    RETIRED = "retired"
+
+
+class EnrollmentPurpose(WireEnum):
+    NEW_NODE = "new-node"
+    RE_ENROLL = "re-enroll"
+
+
+class CertificateIssuancePurpose(WireEnum):
+    ENROLLMENT = "enrollment"
+    ROTATION = "rotation"
+
+
+class EnrollmentProfileState(WireEnum):
+    READY = "ready"
+
+
+class CertificateJournalState(WireEnum):
+    ISSUED = "issued"
+    PENDING = "pending"
+    ABSENT = "absent"
+
+
+class CertificateRequestMode(WireEnum):
+    ISSUE = "issue"
+    OBSERVE = "observe"

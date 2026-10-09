@@ -33,12 +33,18 @@ enum Action {
     ControllerReissues,
     /// The upgraded agent reports its new identity; the Controller observes it.
     ControllerObservesIdentity,
+    /// The agent retries the durable renewal CSR on its next bounded poll.
+    AgentRetriesRenewal,
     /// A job's process may still run: the stop route is the advertised action.
     OperatorStopRoute,
 }
 
 /// Every wait reason the agent constructs, and who resolves it.
 const ADVERTISED: &[(WaitReason, Action)] = &[
+    (
+        WaitReason::ObservationUnavailable,
+        Action::AgentRetriesRenewal,
+    ),
     (
         WaitReason::AgentUpgradeAwaitingIdentity,
         Action::ControllerObservesIdentity,

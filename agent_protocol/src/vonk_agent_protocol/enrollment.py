@@ -9,6 +9,8 @@ from pydantic import Field, field_validator, model_validator
 
 from .wire_model import WireModel
 
+CertificateGeneration = Annotated[int, Field(ge=1, le=2**64 - 1)]
+
 MAX_CSR_BYTES = 16 * 1024
 # Physical allocation budget for complete enrollment/bootstrap JSON bodies.
 # This includes UTF-8 encoding, JSON escapes, and every envelope field.
@@ -51,6 +53,12 @@ class EnrollmentSubmitRequest(WireModel):
     csr: str = Field(min_length=1, max_length=MAX_CSR_BYTES)
     evidence: EnrollmentEvidence
 
+    @field_validator("csr")
+    @classmethod
+    def ascii_csr(cls, value: str) -> str:
+        value.encode("ascii")
+        return value
+
 
 class EnrollmentBootstrapResponse(WireModel):
     controller_endpoint: str = Field(min_length=1, max_length=2048)
@@ -71,6 +79,12 @@ class RenewRequest(WireModel):
     csr: str = Field(min_length=1, max_length=MAX_CSR_BYTES)
     node_id: NodeId
 
+    @field_validator("csr")
+    @classmethod
+    def ascii_csr(cls, value: str) -> str:
+        value.encode("ascii")
+        return value
+
 
 class ExpiredRenewRequest(RenewRequest):
     """Proof of possession, bound to the exact durable replacement CSR."""
@@ -90,9 +104,7 @@ class ExpiredRenewRequest(RenewRequest):
 
 
 class ActivateRequest(WireModel):
-    # AgentCertificate and AgentCertificateRotation own this monotone identity
-    # in PostgreSQL INTEGER columns, whose domain is signed 32-bit.
-    generation: int = Field(ge=1, le=2**31 - 1)
+    generation: CertificateGeneration
     node_id: NodeId
 
 
@@ -104,7 +116,7 @@ class IssuedCertificateResponse(WireModel):
     fingerprint: Digest
     not_before: str = Field(min_length=1)
     not_after: str = Field(min_length=1)
-    generation: int = Field(ge=1, le=2**31 - 1)
+    generation: CertificateGeneration
 
     @model_validator(mode="after")
     def bounded_response(self) -> Self:
