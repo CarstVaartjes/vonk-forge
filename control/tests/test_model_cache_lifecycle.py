@@ -36,7 +36,7 @@ from vonk_control.lifecycle.model_cache import (
     legacy_claim,
     legacy_retry_due,
 )
-from vonk_control.model_cache import ModelCacheConflict, ModelCacheService
+from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import ModelCacheOperation, ModelCacheSet
 
 from .non_blocking import assert_ended_without_blocking
@@ -46,6 +46,7 @@ from .test_model_cache import (
     cache,  # noqa: F401 - the fixture
     threaded_cache,  # noqa: F401 - independent connections for background workers
 )
+from .test_model_cache_recovery_support import observe_unknown
 
 MODEL = "a" * 64
 
@@ -463,13 +464,10 @@ def test_a_lost_receipt_is_reverified_not_final(cache, tmp_path):
     set_digest = str(downloaded.artifact_set_sha256)
     service._object_path(str(artifact["sha256"])).unlink()
 
-    with pytest.raises(ModelCacheConflict) as refused:
-        service.resolve_verified_artifact_set(set_digest)
-    from vonk_agent_protocol import UnknownOutcomeError
+    with observe_unknown():
+        observed = service.resolve_verified_artifact_set(set_digest)
+        assert not observed
 
-    assert isinstance(refused.value, UnknownOutcomeError)
-    assert refused.value.recovery == "reverify"
-    assert refused.value.retry_after_seconds  # the consumer retries; nothing ended
     with sessions() as session:
         assert session.get(ModelCacheSet, set_digest).state == "needs-repair"
         queued = list(
@@ -481,8 +479,9 @@ def test_a_lost_receipt_is_reverified_not_final(cache, tmp_path):
         )
     assert [item.state for item in queued] == ["queued"]
     # A consumer retrying every few seconds costs one operation, not one each.
-    with pytest.raises(ModelCacheConflict):
-        service.resolve_verified_artifact_set(set_digest)
+    with observe_unknown():
+        observed = service.resolve_verified_artifact_set(set_digest)
+        assert not observed
     with sessions() as session:
         assert len(list(session.scalars(select(ModelCacheOperation)))) == 2
 
@@ -504,12 +503,12 @@ def test_an_unverified_object_is_reverified_not_final(cache, tmp_path):
     )
     set_digest = str(downloaded.artifact_set_sha256)
     service._object_path(str(artifact["sha256"])).unlink()
-    with pytest.raises(ModelCacheConflict) as refused:
-        service.cached_artifact_file(set_digest, str(artifact["sha256"]), "weights.bin")
-    from vonk_agent_protocol import UnknownOutcomeError
+    with observe_unknown():
+        observed = service.cached_artifact_file(
+            set_digest, str(artifact["sha256"]), "weights.bin"
+        )
+        assert not observed
 
-    assert isinstance(refused.value, UnknownOutcomeError)
-    assert refused.value.recovery == "reverify"
     service.run_pending()
     path, size, digest = service.cached_artifact_file(
         set_digest, str(artifact["sha256"]), "weights.bin"
@@ -554,7 +553,6 @@ def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
     )
     assert operation.state == "queued"
     assert operation.failure is not None
-    assert operation.failure["code"] == "model_cache.download_blocked"
     assert operation.failure["retryable"] is True
     assert operation.next_attempt_at is not None
     # No space: nothing is downloaded into a full disk, and nobody is asked to

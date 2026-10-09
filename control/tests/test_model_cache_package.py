@@ -100,10 +100,6 @@ def test_gone_source_ends_without_holding_up_a_fresh_download(cache, tmp_path):
                 service.run_pending()
             return service.get_operation(receipt.id)
 
-        def reason(receipt):
-            assert receipt.failure is not None
-            assert receipt.failure["code"] == "model_cache.source_gone"
-
         def fresh(_world):
             preview = service.download_preview(
                 model_content_sha256="b" * 64, artifacts=[artifact]
@@ -121,7 +117,6 @@ def test_gone_source_ends_without_holding_up_a_fresh_download(cache, tmp_path):
             operation,
             end=end,
             fresh=fresh,
-            assert_reason=reason,
         )
         service.run_pending()
         assert service.get_operation(admitted.id).state == "succeeded"

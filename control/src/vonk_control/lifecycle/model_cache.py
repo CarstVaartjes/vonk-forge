@@ -100,6 +100,8 @@ _MAX_REASON = 512
 #: How many active operations one sweep looks at.  Active cache operations number
 #: in the tens; the bound only keeps a runaway table from stalling the worker.
 SWEEP_LIMIT = 500
+# Maximum foreground request lifetime, including provider and ownership waits.
+RECOVERY_BUDGET = timedelta(hours=24)
 
 
 class CacheEffects(Protocol):
@@ -116,6 +118,10 @@ class CacheEffects(Protocol):
 
     def set_is_cached(self, set_digest: str | None) -> bool:
         """Whether the set's row already records the published, cached set."""
+        ...
+
+    def signal_stop(self, operation_id: str) -> None:
+        """Signal local transfers without taking an artifact lock."""
         ...
 
     def effects_settled(
@@ -318,6 +324,14 @@ class ModelCacheAdapter:
 
         return False
 
+    def recovery_deadline(self, row: Lifecycle) -> datetime | None:
+        """Creation is immutable durable request identity, never a retry clock."""
+        with self._scope() as session:
+            operation = session.get(ModelCacheOperation, row.id)
+            if operation is None or operation.kind == "remove":
+                return None
+            return aware(operation.created_at) + RECOVERY_BUDGET
+
     def retry_not_before(self, row: Lifecycle, now: datetime) -> datetime | None:
         """A provider cooldown the operation's sources are under."""
 
@@ -329,7 +343,10 @@ class ModelCacheAdapter:
             if payload is None:
                 return None
             cooldown = self._effects.cooldown_until(payload)
-        return None if cooldown is None else aware(cooldown)
+        deadline = self.recovery_deadline(row)
+        if deadline is None:
+            return None if cooldown is None else aware(cooldown)
+        return None if cooldown is None else min(aware(cooldown), deadline)
 
     def execute(self, row: Lifecycle, attempt: int) -> Dispatch:
         """The transfer pool claims its own work; a due retry is claimable as it is."""
@@ -478,6 +495,10 @@ class ModelCacheAdapter:
         if after.fence is not None:
             put("fence", after.fence)
         ended = after.state in TERMINAL_STATES
+        if after.state is State.FAILED and before.state not in TERMINAL_STATES:
+            # Signal any physical writer. Its lock still protects exact bytes;
+            # the terminal row fences publication and owns no execution claim.
+            self._effects.signal_stop(after.id)
         if ended:
             if operation.completed_at is None:
                 operation.completed_at = now
@@ -535,7 +556,17 @@ class ModelCacheAdapter:
             retry = retry.model_copy(
                 update={"automatic_attempts": after.retry_count + 1}
             )
+        failure = payload.failure
+        if after.state in TERMINAL_STATES and failure is not None:
+            failure = failure.model_copy(
+                update={
+                    "retryable": False,
+                    "retry_time": None,
+                    "retry_after_seconds": None,
+                }
+            )
         updated = payload.model_copy(update={"retry": retry, "claim": None})
+        updated = updated.model_copy(update={"failure": failure})
         if updated == payload:
             return False
         self._store_payload(operation, updated)
@@ -604,8 +635,20 @@ class ModelCacheAdapter:
 
         now = aware(now)
         row = self.lifecycle(operation, now)
+        deadline = self.recovery_deadline(row)
+        if deadline is not None and now >= deadline and not row.terminal:
+            self.settle(operation, Observed(self.observe(row).effect), now)
+            return False
         decide_at = (
-            max(now, row.next_action_at)
+            max(
+                now,
+                min(
+                    row.next_action_at,
+                    deadline - timedelta(microseconds=1)
+                    if deadline is not None
+                    else row.next_action_at,
+                ),
+            )
             if ignore_backoff and row.next_action_at is not None
             else now
         )
@@ -757,7 +800,18 @@ class ModelCacheStore:
             )
             for operation in rows:
                 row = self._adapter.lifecycle(operation, now)
-                if row.terminal or operation.id in here:
+                if row.terminal:
+                    continue
+                if (
+                    operation.kind != "remove"
+                    and not row.cancel_requested
+                    and now >= aware(operation.created_at) + RECOVERY_BUDGET
+                ):
+                    due.append(row)
+                    if len(due) >= limit:
+                        break
+                    continue
+                if operation.id in here:
                     continue
                 if operation.kind == "remove":
                     continue  # advanced step by step by the removal worker

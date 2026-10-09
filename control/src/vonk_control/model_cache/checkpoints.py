@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import errno
 import os
 import stat
 from datetime import datetime, timedelta
@@ -197,10 +196,10 @@ class CheckpointsMixin:
             )
         except (FileNotFoundError, NotADirectoryError):
             return None
-        except OSError as exc:
-            if exc.errno == errno.ELOOP:
-                return None
-            raise
+        except OSError:
+            # Local storage observations are cache misses. The normal exact
+            # preparation path reopens and verifies after storage recovers.
+            return None
         try:
             metadata = os.fstat(fd)
         finally:

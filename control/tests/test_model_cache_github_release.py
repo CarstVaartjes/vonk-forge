@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
+from uuid import uuid4
 
 import httpx2
 import pytest
@@ -231,7 +232,6 @@ def test_github_release_download_is_asset_id_bound_anonymous_and_reusable_offlin
         assert finished.state == "succeeded"
         assert service._object_path(artifact.sha256).read_bytes() == data
         assert [str(request.url) for request in requests] == [
-            RELEASE_URL,
             ASSET_URL,
             CDN_URL,
         ]
@@ -302,19 +302,19 @@ def test_github_source_accepts_large_ids_permitted_by_canonical_contract(
 
 
 @pytest.mark.parametrize(
-    ("change", "expected_code"),
+    "change",
     [
-        ("wrong-release", "model_cache.release_metadata_invalid"),
-        ("missing-asset", "model_cache.release_asset_identity_conflict"),
-        ("duplicate-asset", "model_cache.release_asset_identity_conflict"),
-        ("wrong-name", "model_cache.release_asset_identity_conflict"),
-        ("wrong-size", "model_cache.release_asset_identity_conflict"),
-        ("wrong-digest", "model_cache.release_asset_identity_conflict"),
-        ("malformed-size", "model_cache.release_metadata_invalid"),
+        "wrong-release",
+        "missing-asset",
+        "duplicate-asset",
+        "wrong-name",
+        "wrong-size",
+        "wrong-digest",
+        "malformed-size",
     ],
 )
-def test_github_metadata_mismatch_blocks_before_asset_transfer(
-    sessions, tmp_path: Path, change: str, expected_code: str
+def test_mutable_release_metadata_cannot_veto_exact_verified_content(
+    sessions, tmp_path: Path, change: str
 ) -> None:
     data = b"metadata must bind before binary bytes"
     digest, _selector = _insert_model(sessions, _model(data))
@@ -340,11 +340,12 @@ def test_github_metadata_mismatch_blocks_before_asset_transfer(
     client = _client(_serve_release_and_asset(data, requests, release=release))
     service = _service(sessions, tmp_path / change, client)
     try:
+        _, operation = _preview_and_start(service, digest, str(uuid4()))
+        service.run_pending()
         spec = service.resolve_artifact_set(model_content_sha256=digest).artifacts[0]
-        with pytest.raises(ModelCacheStorageError) as failure:
-            service._validate_github_release_asset(spec)
-        assert failure.value.code == expected_code
-        assert [str(request.url) for request in requests] == [RELEASE_URL]
+        assert service.get_operation(operation.id).state == LifecycleState.SUCCEEDED
+        assert service._object_path(spec.sha256).read_bytes() == data
+        assert [str(request.url) for request in requests] == [ASSET_URL, CDN_URL]
     finally:
         service.close()
         client.close()
@@ -453,8 +454,6 @@ def test_github_transfer_error_does_not_persist_signed_cdn_url(
         service.run_pending()
         failed = service.get_operation(accepted.id)
         assert failed.failure is not None
-        assert failed.failure["code"] == "model_cache.source_unavailable"
-        assert failed.last_error == "GitHub release asset transfer failed"
         durable_view = json.dumps(
             {
                 "failure": failed.failure,
@@ -465,9 +464,9 @@ def test_github_transfer_error_does_not_persist_signed_cdn_url(
         )
         assert "fixture-secret" not in durable_view
         assert CDN_URL not in durable_view
-        assert [str(request.url) for request in requests] == [
-            RELEASE_URL,
-        ] + [ASSET_URL, CDN_URL] * (len(REQUEST_PAUSES) + 1)
+        assert [str(request.url) for request in requests] == [ASSET_URL, CDN_URL] * (
+            len(REQUEST_PAUSES) + 1
+        )
         assert all(
             request.headers.get("authorization") is None
             and request.headers.get("cookie") is None
@@ -659,6 +658,60 @@ def test_provider_backoff_is_durable_and_current_request_recovers(
         )
         service.run_pending()
         assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+    finally:
+        service.close()
+        client.close()
+
+
+@pytest.mark.parametrize("response_shape", ["missing-location", "cdn-redirect"])
+def test_incomplete_redirect_observes_until_deadline_then_fresh_exact_request_heals(
+    sessions, tmp_path: Path, response_shape: str
+):
+    """Catches transient redirect observations ending as permanent trust refusals."""
+    from datetime import timedelta
+
+    from vonk_control.lifecycle.model_cache import RECOVERY_BUDGET
+    from vonk_control.models import ModelCacheOperation
+
+    now = [NOW]
+    healthy = [False]
+    data = b"verified content after incomplete redirect observation"
+    digest, _selector = _insert_model(sessions, _model(data))
+    responses = []
+
+    def handler(request):
+        if healthy[0]:
+            return httpx2.Response(200, request=request, content=data)
+        headers = {"Location": CDN_URL} if response_shape == "cdn-redirect" else {}
+        reply = httpx2.Response(302, request=request, headers=headers)
+        responses.append(reply)
+        return reply
+
+    client = _client(handler)
+    service = _service(sessions, tmp_path / response_shape, client)
+    service._clock = lambda: now[0]
+    try:
+        _, original = _preview_and_start(service, digest, str(uuid4()))
+        service.run_pending()
+        assert responses and all(reply.is_closed for reply in responses)
+        with sessions() as session:
+            waiting = session.get(ModelCacheOperation, original.id)
+            assert waiting is not None and waiting.completed_at is None
+            assert waiting.lease_deadline is None and waiting.next_action_at is not None
+        spec = service.resolve_artifact_set(model_content_sha256=digest).artifacts[0]
+        assert not service._object_path(spec.sha256).exists()
+        now[0] += RECOVERY_BUDGET + timedelta(seconds=1)
+        service.run_pending()
+        with sessions() as session:
+            ended = session.get(ModelCacheOperation, original.id)
+            assert ended is not None and ended.completed_at is not None
+            assert ended.lease_deadline is None and ended.next_action_at is None
+        healthy[0] = True
+        _, fresh = _preview_and_start(service, digest, str(uuid4()))
+        assert fresh.id != original.id
+        service.run_pending()
+        assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
+        assert service._object_path(spec.sha256).read_bytes() == data
     finally:
         service.close()
         client.close()

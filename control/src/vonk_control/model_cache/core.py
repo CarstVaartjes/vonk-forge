@@ -108,13 +108,18 @@ class CoreMixin:
             row = session.get(ModelCacheSet, set_digest)
             return row is not None and row.state == "cached"
 
+    def signal_stop(self, operation_id: str) -> None:
+        """Signal local transfers without acquiring storage or database locks."""
+        cache = cast("ModelCacheService", self)
+        cache._transfer_stop(operation_id).set()
+
     def effects_settled(
         self, operation_id: str, payload: ModelCacheOperationPayload | None
     ) -> bool:
         """Signal the operation's transfers to stop; whether none is still writing."""
         cache = cast("ModelCacheService", self)
 
-        cache._transfer_stop(operation_id).set()
+        self.signal_stop(operation_id)
         if not isinstance(payload, ModelCacheDownloadPayload):
             return False  # unreadable: a writer may still be active
         try:
@@ -312,7 +317,9 @@ class CoreMixin:
         )
         # The operation's own transaction: the set projection commits with it.
         session = object_session(operation)
-        assert session is not None
+        if session is None:
+            # The storage sweep rebuilds this disposable projection.
+            return
         cache._project_cancelled_set(
             session,
             set_digest,

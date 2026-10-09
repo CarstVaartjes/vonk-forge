@@ -12,10 +12,9 @@ seven rules of the blocker audit (section 5.2), each of which is a test in
    or a retryable failure of irreversible, possibly executed work is observed;
    an established effect succeeds, none retries, unknown is observed again at a
    bounded rate.
-3. **No operator wait without an advertised action.**  ``needs-operator`` is only
-   built by :func:`_park`, which requires an irreversible kind, an effect that is
-   still unknown after the observation budget, and a non-empty
-   ``adapter.actions(row)``.  Otherwise the row keeps observing.
+3. **Observation ends within its budget.** Unknown irreversible effects end
+   with their last observation after the budget; the request owns no operator
+   wait. Its exact effect remains available for subsequent reconciliation.
 4. **A cancel always completes.**  The request is monotonic.  Work that never ran
    is cancelled at once; other work is stopped (idempotently) and observed until
    stopped, and after ``STOP_BUDGET`` unconfirmed stops it is cancelled anyway
@@ -65,15 +64,14 @@ from .types import (
     Tick,
 )
 
-#: How many observations of an irreversible, unknown effect precede an operator
-#: wait (rule 3).  Idempotent kinds never wait: they are retried (rule 1).
+#: Maximum observations of an irreversible, unknown effect (rule 3).
 OBSERVE_BUDGET = 8
 #: How many stops of a cancelled row are issued before it is cancelled with a
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
 #: to ``STOP_BUDGET`` ticks.
 STOP_BUDGET = 6
 #: Stable jittered backoff, shared with the rest of the Controller.  The rate is
-#: bounded, not the lifetime: work with a current intent is always retried.
+#: bounded; lifetime is bounded by the adapter deadline or persisted attempts.
 RECOVERY = RecoveryPolicy()
 #: Operator actions that restart work, and the one that abandons the effect.
 _RESUME_ACTIONS = frozenset({ActionName.RESUME, ActionName.RETRY})
@@ -88,6 +86,39 @@ def transition(
         return Decision(row)
     if _stale(row, event):
         return Decision(row)
+    # Adapters may supply a request-owned absolute recovery deadline. Keeping
+    # this optional preserves continuing intent adapters; they bound each child.
+    deadline_reader = getattr(adapter, "recovery_deadline", None)
+    deadline = deadline_reader(row) if deadline_reader is not None else None
+    if (
+        deadline is not None
+        and now >= deadline
+        and not row.cancel_requested
+        and not isinstance(event, CancelRequested)
+    ):
+        if isinstance(event, Observed):
+            established = event.effect is Effect.ESTABLISHED
+            return Decision(
+                replace(
+                    row,
+                    state=State.SUCCEEDED if established else State.FAILED,
+                    effect=event.effect,
+                    next_action_at=None,
+                    lease_deadline=None,
+                    reason=event.reason or row.reason,
+                )
+            )
+        return Decision(
+            replace(
+                row,
+                state=State.OBSERVING,
+                next_action_at=now,
+                lease_deadline=None,
+                observe_count=row.observe_count + 1,
+                effect=Effect.UNKNOWN,
+            ),
+            (Observe(),),
+        )
     match event:
         case CancelRequested():
             return _cancel(row, event, now)
@@ -158,8 +189,10 @@ def _due(
     scheduled = RECOVERY.next_attempt(
         row.id, max(count, 1), now, retry_after=not_before, ongoing_intent=True
     )
-    assert scheduled is not None  # ongoing_intent never exhausts
-    return scheduled
+    scheduled = scheduled or now
+    deadline_reader = getattr(adapter, "recovery_deadline", None)
+    deadline = deadline_reader(row) if deadline_reader is not None else None
+    return scheduled if deadline is None else min(scheduled, deadline)
 
 
 def _retry(
@@ -174,6 +207,12 @@ def _retry(
     """Rule 1: schedule the next attempt; never an operator wait."""
 
     count = row.retry_count + 1
+    deadline_reader = getattr(adapter, "recovery_deadline", None)
+    deadline = deadline_reader(row) if deadline_reader is not None else None
+    if deadline is None and count >= RECOVERY.max_failures:
+        # Without a time budget, the persisted attempt count still bounds the
+        # request. Observe exact effects before ending the spent attempt.
+        return _observe(replace(row, retry_count=count), now, reason)
     return Decision(
         replace(
             row,
@@ -200,46 +239,6 @@ def _observe(row: Lifecycle, now: datetime, reason: str | None) -> Decision:
             next_action_at=_due(row, count, now),
             lease_deadline=None,
             effect=Effect.UNKNOWN if row.effect is Effect.NONE else row.effect,
-            reason=reason or row.reason,
-        ),
-        (Observe(),),
-    )
-
-
-def _park(
-    row: Lifecycle, adapter: KindAdapter, now: datetime, reason: str | None
-) -> Decision:
-    """The only constructor of ``needs-operator`` (rule 3).
-
-    An operator wait needs an irreversible kind, an effect that is still unknown
-    after the observation budget, and an advertised action.  Without one the
-    row keeps observing at a bounded rate.
-    """
-
-    waiting = replace(
-        row,
-        state=State.NEEDS_OPERATOR,
-        next_action_at=None,
-        lease_deadline=None,
-        effect=Effect.UNKNOWN,
-        reason=reason or row.reason,
-    )
-    if (
-        adapter.irreversible(row)
-        and not blind_retry_is_safe(row, adapter)
-        and row.observe_count >= OBSERVE_BUDGET
-        and adapter.actions(waiting)
-    ):
-        return Decision(waiting)
-    count = max(row.observe_count, 1)
-    return Decision(
-        replace(
-            row,
-            state=State.OBSERVING,
-            observe_count=count,
-            next_action_at=_due(row, count, now),
-            lease_deadline=None,
-            effect=Effect.UNKNOWN,
             reason=reason or row.reason,
         ),
         (Observe(),),
@@ -275,7 +274,16 @@ def _unknown_after_observation(
     if not adapter.irreversible(row) or blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=reason)
     if row.observe_count >= OBSERVE_BUDGET:
-        return _park(row, adapter, now, reason)
+        return Decision(
+            replace(
+                row,
+                state=State.FAILED,
+                effect=Effect.UNKNOWN,
+                next_action_at=None,
+                lease_deadline=None,
+                reason=reason or row.reason,
+            )
+        )
     return Decision(
         replace(
             row,
@@ -475,6 +483,23 @@ def _observed(
         )
     if row.state not in {State.OBSERVING, State.NEEDS_OPERATOR}:
         return Decision(row)
+    deadline_reader = getattr(adapter, "recovery_deadline", None)
+    deadline = deadline_reader(row) if deadline_reader is not None else None
+    if (
+        deadline is None
+        and row.retry_count >= RECOVERY.max_failures
+        and event.effect is not Effect.ESTABLISHED
+    ):
+        return Decision(
+            replace(
+                row,
+                state=State.FAILED,
+                effect=event.effect,
+                next_action_at=None,
+                lease_deadline=None,
+                reason=event.reason or row.reason,
+            )
+        )
     match event.effect:
         case Effect.ESTABLISHED:
             return Decision(
@@ -582,6 +607,4 @@ def _reevaluate_parked(row: Lifecycle, adapter: KindAdapter, now: datetime) -> D
         return _retry(row, now, adapter, effect=Effect.NONE, reason=row.reason)
     if blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=row.reason)
-    if not adapter.actions(row):
-        return _observe(replace(row, observe_count=0), now, row.reason)
-    return Decision(replace(row, next_action_at=None))
+    return _observe(row, now, row.reason)

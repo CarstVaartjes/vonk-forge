@@ -1,4 +1,4 @@
-"""An exact manifest resolves from the newest readable revision, not an old one."""
+"""Damaged catalog projections never substitute different requested content."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ from .test_canonical_cache_build_identity import (
     _recipe_document,
     _sessions,
 )
+from .test_model_cache_recovery_support import observe_unknown
 
 DOCUMENT = "00000000-0000-4000-8000-0000000000a1"
 MODEL_DOCUMENT = "00000000-0000-4000-8000-0000000000b1"
@@ -26,16 +27,14 @@ def _unreadable(revision: CatalogDocumentRevision) -> str:
     """Rewrite one new revision as written under an older contract."""
 
     revision.document = {"kind": "old"}
-    revision.content_digest = hashlib.sha256(
-        json.dumps(
-            revision.document, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
     return revision.content_digest
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_unreadable_recipe_revision_resolves_from_newest_readable(tmp_path: Path):
+@pytest.mark.parametrize("different_content", [False, True])
+def test_unreadable_recipe_revision_recovers_only_identical_content(
+    tmp_path: Path, different_content: bool
+):
     sessions = _sessions()
     file_digest = hashlib.sha256(b"model bytes!").hexdigest()
     model_document = _model_document(
@@ -63,7 +62,8 @@ def test_unreadable_recipe_revision_resolves_from_newest_readable(tmp_path: Path
             document=recipe_document,
         )
         edited = json.loads(json.dumps(recipe_document))
-        edited["metadata"]["description"] = "Updated release description."
+        if different_content:
+            edited["metadata"]["description"] = "different accepted content"
         current = _add_active(
             session,
             root_id=DOCUMENT,
@@ -77,17 +77,28 @@ def test_unreadable_recipe_revision_resolves_from_newest_readable(tmp_path: Path
         _unreadable(old)
         old_id, current_digest = old.id, current.content_digest
 
-    manifest = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0
-    ).resolve_artifact_set(recipe_revision_id=old_id)
-
-    assert manifest.recipe_revision_sha256 == current_digest
-    assert manifest.model_content_sha256 == model_digest
-    assert manifest.artifacts[0].expected_bytes == 12
+    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    try:
+        if different_content:
+            with observe_unknown():
+                observed = service.resolve_artifact_set(recipe_revision_id=old_id)
+                assert not observed
+            with sessions.begin() as session:
+                exact = session.get(CatalogDocumentRevision, old_id)
+                assert exact is not None
+                exact.document = recipe_document
+        manifest = service.resolve_artifact_set(recipe_revision_id=old_id)
+        assert manifest.recipe_revision_sha256 == _digest(recipe_document)
+        if different_content:
+            assert manifest.recipe_revision_sha256 != current_digest
+        assert manifest.model_content_sha256 == model_digest
+        assert manifest.artifacts[0].expected_bytes == 12
+    finally:
+        service.close()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_unreadable_model_revision_resolves_from_newest_readable(tmp_path: Path):
+def test_unreadable_model_revision_never_substitutes_new_content(tmp_path: Path):
     sessions = _sessions()
     file_digest = hashlib.sha256(b"model bytes!").hexdigest()
     old_model = _model_document(
@@ -129,13 +140,24 @@ def test_unreadable_model_revision_resolves_from_newest_readable(tmp_path: Path)
         )
         recipe_id = recipe.id
 
-    manifest = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0
-    ).resolve_artifact_set(recipe_revision_id=recipe_id)
-
-    assert manifest.model_content_sha256 == new_digest
-    assert manifest.model_content_digests == (new_digest,)
-    assert manifest.artifacts[0].path == "weights/new.safetensors"
+    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    try:
+        # The bounded request ends with no manifest; no new path is adopted.
+        with observe_unknown():
+            observed = service.resolve_artifact_set(recipe_revision_id=recipe_id)
+            assert not observed
+        with sessions.begin() as session:
+            exact = session.get(
+                CatalogDocumentRevision, "00000000-0000-4000-8000-0000000000b2"
+            )
+            assert exact is not None
+            exact.document = old_model
+        fresh = service.resolve_artifact_set(recipe_revision_id=recipe_id)
+        assert fresh.model_content_sha256 == pinned
+        assert fresh.model_content_sha256 != new_digest
+        assert fresh.artifacts[0].path == "weights/old.safetensors"
+    finally:
+        service.close()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -182,7 +204,6 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
             document=recipe_document,
         )
         edited = json.loads(json.dumps(recipe_document))
-        edited["metadata"]["description"] = "Updated release description."
         current = _add_active(
             session,
             root_id=DOCUMENT,
