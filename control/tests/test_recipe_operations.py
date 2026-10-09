@@ -5062,8 +5062,7 @@ def test_distributed_recovery_deadline_ends_attempt_and_retries_publication(
         run = _required(session.get(RecipeRun, started.owner_id))
         assert run.state == RunState.RUNNING
         assert run.route_state == RouteState.PUBLISHED
-        recovery = _required(session.get(Job, restart.id))
-        assert recovery.state == LifecycleState.FAILED
+        assert routes._recovery_job(session, run) is None
     # The expired request leaves no gate on a fresh authorized publication.
     fresh = routes.publish_run(started.owner_id)
     assert fresh.generation > generation.generation
@@ -5196,7 +5195,7 @@ def test_recovery_publication_crossing_deadline_retains_acknowledged_route(
         assert run.state == RunState.RUNNING
         assert run.route_state == RouteState.PUBLISHED
         assert run.route_generation == generation.generation
-        assert recovery.state == LifecycleState.FAILED
+        assert routes._recovery_job(session, run) is None
         recovery_result = RecipeOperationResult.model_validate_json(
             json.dumps(recovery.result)
         )
@@ -5276,7 +5275,7 @@ def test_expired_recovery_route_never_needs_compensating_withdrawal(
         publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
         assert run.state == RunState.RUNNING
         assert run.route_state == RouteState.PUBLISHED
-        assert recovery.state == LifecycleState.FAILED
+        assert routes._recovery_job(session, run) is None
         recovery_result = RecipeOperationResult.model_validate_json(
             json.dumps(recovery.result)
         )
@@ -5395,7 +5394,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
         publication = session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
         assert run.state == RunState.RUNNING
         assert run.route_state == RouteState.PUBLISHED
-        assert recovery.state == LifecycleState.FAILED
+        assert routes._recovery_job(session, run) is None
         recovery_result = RecipeOperationResult.model_validate_json(
             json.dumps(recovery.result)
         )

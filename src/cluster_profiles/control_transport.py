@@ -95,8 +95,9 @@ class HTTPSResponse(io.BufferedIOBase):
             async with asyncio.timeout_at(self._deadline):
                 return await work
 
+        attempt = bounded()
         try:
-            return self._runner.run(bounded())
+            return self._runner.run(attempt)
         except KeyboardInterrupt:
             # The runner's SIGINT handler can raise inside the loop's own
             # bookkeeping, leaving the loop unfit to drive more work.
@@ -105,6 +106,11 @@ class HTTPSResponse(io.BufferedIOBase):
         except (httpx2.HTTPError, OSError) as error:
             # Keep the typed cause for safe classification, never its raw text.
             raise urllib.error.URLError(error) from None
+        finally:
+            # SIGINT can arrive before Runner adopts either coroutine. Close
+            # both even when no task was created, then allow a fresh attempt.
+            attempt.close()
+            work.close()
 
     async def _open(
         self, request: urllib.request.Request, timeout: float, *, trust_env: bool

@@ -512,11 +512,15 @@ export class ApiClient implements ControlApi {
   }
 
   async revokeEnrollment(grantId: string): Promise<EnrollmentGrantStatus> {
-    return resultData(
+    const outcome = resultData(
       await this.generated.POST("/api/fleet/enrollments/{grant_id}/revoke", {
         params: { path: { grant_id: grantId } },
       }),
     );
+    if ("category" in outcome) {
+      throw new ApiError(503, outcome.reason);
+    }
+    return outcome;
   }
 
   async gatewayKeys(signal?: AbortSignal): Promise<GatewayKeyList> {

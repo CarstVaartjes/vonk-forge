@@ -7,6 +7,7 @@ import ssl
 import urllib.error
 from email.message import Message
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -137,7 +138,22 @@ def test_http_errors_keep_status_code_and_request_id(
     assert "private-token" not in str(raised.value)
 
 
-def test_transport_error_does_not_swallow_source(tmp_path: Path) -> None:
+def test_transport_error_does_not_swallow_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Exercise the real bounded retry loop without spending its deadline asleep.
+    now = [0.0]
+    delays: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        delays.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(
+        "cluster_profiles.control_client.client.time",
+        SimpleNamespace(monotonic=lambda: now[0], sleep=sleep),
+    )
+
     def opener(*_args, **_kwargs):
         raise urllib.error.URLError(socket.gaierror(-2, "no such host"))
 
@@ -149,3 +165,6 @@ def test_transport_error_does_not_swallow_source(tmp_path: Path) -> None:
     assert raised.value.context is not None
     assert raised.value.context.transport == "dns"
     assert raised.value.context.decision == "retry"
+    assert now[0] == 15.0
+    assert len(delays) > 1
+    assert all(delay > 0 for delay in delays)

@@ -13,6 +13,7 @@ from pathlib import Path
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
+from vonk_agent_protocol import UnknownError
 
 from .ca_issuance_contract import CertificateIssuanceBinding
 
@@ -82,7 +83,7 @@ class CertificateAuthority(ABC):
         """Rotate a node certificate after its authenticated renewal request."""
 
     @abstractmethod
-    def revocation_bundle(self, now: datetime) -> bytes:
+    def revocation_bundle(self, now: datetime) -> bytes | UnknownError:
         """Return the intermediate's current signed CRL."""
 
     @abstractmethod
