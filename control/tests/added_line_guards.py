@@ -6,6 +6,7 @@ import ast
 import re
 import sys
 from collections.abc import Sequence
+from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
@@ -103,36 +104,68 @@ def security_refusals() -> frozenset[str]:
 
 
 def added_lines(patch: str) -> dict[str, set[int]]:
-    """Parse zero-context or contextual hunks, including multiple hunks per file.
+    """Parse hunks, carrying unchanged relocated blocks without duplicating debt.
 
-    A line whose exact text is also removed somewhere in the same change was
-    moved (a module split or reorder), not added: it carries no new violation.
+    A deleted block may account for one identical added block in the same
+    language. Copies and changed lines remain additions. Matching includes
+    indentation and context, so a common isolated line cannot hide new work.
+    All evidence comes from the supplied patch, never repository history.
     """
     files: dict[str, set[int]] = {}
-    added: list[tuple[str, int, str]] = []
-    removed: set[str] = set()
+    additions: list[tuple[str, list[tuple[int, str]]]] = []
+    deletions: list[tuple[str, list[str]]] = []
     path = ""
+    old_path = ""
     line = 0
     in_hunk = False
+    added: list[tuple[int, str]] = []
+    deleted: list[str] = []
+
+    def finish() -> None:
+        if added:
+            additions.append((path, added.copy()))
+            added.clear()
+        if deleted:
+            deletions.append((old_path, deleted.copy()))
+            deleted.clear()
+
     for text in patch.splitlines():
         if text.startswith("diff --git "):
+            finish()
             in_hunk = False
+        elif text.startswith("--- a/") and not in_hunk:
+            old_path = text[6:]
         elif text.startswith("+++ b/") and not in_hunk:
             path = text[6:]
             files.setdefault(path, set())
         elif match := re.match(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", text):
+            finish()
             line = int(match.group(1))
             in_hunk = True
         elif in_hunk and text.startswith("+"):
-            added.append((path, line, text[1:].strip()))
+            files[path].add(line)
+            added.append((line, text[1:]))
             line += 1
         elif in_hunk and text.startswith("-"):
-            removed.add(text[1:].strip())
+            deleted.append(text[1:])
         elif in_hunk and text.startswith(" "):
+            finish()
             line += 1
-    for path, number, content in added:
-        if not content or content not in removed:
-            files[path].add(number)
+    finish()
+    for target, lines in additions:
+        for owner, removed in deletions:
+            if Path(owner).suffix != Path(target).suffix:
+                continue
+            matches = SequenceMatcher(
+                a=removed, b=[text for _, text in lines], autojunk=False
+            ).get_matching_blocks()
+            for old, new, size in matches:
+                if size < 3:
+                    continue
+                for offset in range(size):
+                    files[target].discard(lines[new + offset][0])
+                    # A second copy cannot spend the same deleted occurrence.
+                    removed[old + offset] = f"\0consumed:{old + offset}"
     return files
 
 

@@ -187,11 +187,25 @@ fn production() { let value = "running"; }
     )
 
 
-def test_a_moved_line_is_not_a_new_occurrence():
+def test_relocated_block_carries_debt_once_but_new_copy_and_change_fail():
+    removed = "def work():\n    value = 'running'\n    return value\n"
     patch = (
-        "diff --git a/old.py b/old.py\n--- a/old.py\n+++ b/old.py\n"
-        "@@ -3,1 +2,0 @@\n-    phase = 'running'\n"
-        "diff --git a/new.py b/new.py\n--- /dev/null\n+++ b/new.py\n"
-        "@@ -0,0 +1,2 @@\n+    phase = 'running'\n+    other = 'stopped'\n"
+        "diff --git a/old.py b/old.py\n--- a/old.py\n+++ /dev/null\n"
+        "@@ -1,3 +0,0 @@\n"
+        + "".join("-" + line + "\n" for line in removed.splitlines())
+        + "diff --git a/new.py b/new.py\n--- /dev/null\n+++ b/new.py\n"
+        "@@ -0,0 +1,7 @@\n"
+        + "".join("+" + line + "\n" for line in removed.splitlines())
+        + "+\n"
+        + "".join("+" + line + "\n" for line in removed.splitlines())
     )
-    assert added_lines(patch) == {"old.py": set(), "new.py": {2}}
+    assert added_lines(patch)["new.py"] == {4, 5, 6, 7}
+    assert check_source(
+        PATH,
+        removed + "\n" + removed,
+        added_lines(patch)["new.py"],
+        modes=("vocabulary",),
+        words=frozenset({"running"}),
+    ) == [f"{PATH}:6: contract literal"]
+    changed = patch.replace("+    value = 'running'", "+    value = 'failed'")
+    assert added_lines(changed)["new.py"] == set(range(1, 8))

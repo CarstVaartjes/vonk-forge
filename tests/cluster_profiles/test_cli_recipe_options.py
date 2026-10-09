@@ -51,9 +51,7 @@ class Fake:
                 "next_cursor": None,
             }
         if path.startswith("/api/recipe/vonk-forge"):
-            from library_route_fixtures import _recipe
-
-            document = _recipe("glm")
+            document = _recipe_projection(SELECTOR, "GLM")["document"]
             document["options"] = OPTIONS
             return {"selector": SELECTOR, "document": document}
         if method == "GET" and path.endswith("/definition"):
