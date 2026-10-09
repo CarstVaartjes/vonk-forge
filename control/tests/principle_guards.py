@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import gc
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -919,6 +920,23 @@ def source_files(mode: str) -> list[Path]:
 
 
 def scan_sites(mode: str) -> list[Site]:
+    """Avoid repeatedly traversing cached production ASTs while scanning tests.
+
+    Each parsed test tree is released as the finite inventory advances. Cyclic
+    collection otherwise repeatedly walks the retained production inventories
+    on every new tree allocation. Restore the caller's GC policy on every exit.
+    """
+    collecting = gc.isenabled()
+    if collecting:
+        gc.disable()
+    try:
+        return _scan_sites(mode)
+    finally:
+        if collecting:
+            gc.enable()
+
+
+def _scan_sites(mode: str) -> list[Site]:
     sites: list[Site] = []
     modules = []
     for path in source_files(mode):
@@ -947,7 +965,14 @@ def scan_sites(mode: str) -> list[Site]:
         if mode == "retention":
             modules.append((relative, parsed.tree))
         else:
-            sites.extend(
-                scan_source(parsed.source, path=relative, mode=mode, tree=parsed.tree)
-            )
+            try:
+                sites.extend(
+                    scan_source(
+                        parsed.source, path=relative, mode=mode, tree=parsed.tree
+                    )
+                )
+            finally:
+                if mode == "tests":
+                    del parsed
+                    gc.collect(0)
     return scan_retention(modules) if mode == "retention" else sites

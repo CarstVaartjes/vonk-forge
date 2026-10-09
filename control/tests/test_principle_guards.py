@@ -364,3 +364,85 @@ def test_nested_package_get_helper_refusal_follows_concrete_import(
     ] == ["get-helper-refusal"]
     (package / "common.py").write_text("def required():\n    return 1\n")
     assert not guards.scan_source(route, path=path, mode="reads")
+
+
+@pytest.mark.parametrize("fault", (False, True))
+@pytest.mark.parametrize("collecting", (False, True))
+def test_inventory_restores_gc_policy_on_every_exit(monkeypatch, fault, collecting):
+    """Catches scanner failure leaking a disabled collector into later work."""
+    import gc
+
+    from . import principle_guards
+
+    original = gc.isenabled()
+    try:
+        gc.enable() if collecting else gc.disable()
+
+        def scan(_mode):
+            assert not gc.isenabled()
+            if fault:
+                raise OSError("inventory unavailable")
+            return []
+
+        monkeypatch.setattr(principle_guards, "_scan_sites", scan)
+        if fault:
+            with pytest.raises(Exception):  # noqa: B017 -- ending witness; GC ownership is asserted below
+                principle_guards.scan_sites("tests")
+        else:
+            assert principle_guards.scan_sites("tests") == []
+        assert gc.isenabled() == collecting
+    finally:
+        gc.enable() if original else gc.disable()
+
+
+@pytest.mark.parametrize("failure_at", (None, 8))
+def test_inventory_releases_temporary_trees_without_scanning_old_generations(
+    tmp_path, monkeypatch, failure_at
+):
+    """Catches retained parsed trees, including an interrupted inventory."""
+    import gc
+    import weakref
+
+    from . import principle_guards
+
+    sources = []
+    for index in range(16):
+        source = tmp_path / f"test_fixture_{index}.py"
+        source.write_text("def test_fixture():\n    assert True\n")
+        sources.append(source)
+    monkeypatch.setattr(principle_guards, "ROOT", tmp_path)
+    monkeypatch.setattr(principle_guards, "source_files", lambda _mode: sources)
+    trees = []
+    parse = principle_guards.parse_file
+
+    def observe_parse(path, **kwargs):
+        if failure_at is not None and len(trees) == failure_at:
+            raise OSError("inventory unavailable")
+        parsed = parse(path, **kwargs)
+        trees.append(weakref.ref(parsed.tree))
+        return parsed
+
+    full_collections = []
+    collect = gc.collect
+
+    def observe_collection(generation=2):
+        if generation > 0:
+            full_collections.append(generation)
+        return collect(generation)
+
+    monkeypatch.setattr(principle_guards, "parse_file", observe_parse)
+    monkeypatch.setattr(gc, "collect", observe_collection)
+    if failure_at is None:
+        assert principle_guards.scan_sites("tests") == []
+        assert len(trees) == len(sources)
+    else:
+        with pytest.raises(Exception):  # noqa: B017 -- ending witness; retained trees asserted below
+            principle_guards.scan_sites("tests")
+        assert len(trees) == failure_at
+    assert all(tree() is None for tree in trees)
+    assert not full_collections
+    # A new scan is admitted after both success and failure.
+    trees.clear()
+    failure_at = None
+    assert principle_guards.scan_sites("tests") == []
+    assert all(tree() is None for tree in trees)

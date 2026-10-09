@@ -17,9 +17,6 @@ from .authority import ActivateRequest as ActivateRequest
 from .authority import AgentDirective as AgentDirective
 from .authority import AgentProgress as AgentProgress
 from .authority import AgentResult as AgentResult
-from .authority import (
-    CertificateResponseCapacityRefused as CertificateResponseCapacityRefused,
-)
 from .authority import Code as Code
 from .authority import ContainerRuntimeAction as ContainerRuntimeAction
 from .authority import EnrollmentDenied as EnrollmentDenied

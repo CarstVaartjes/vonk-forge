@@ -8,10 +8,7 @@ from pathlib import Path
 import pytest
 from vonk_control.artifact_blob_store import (
     ArtifactBlobDigestMismatch,
-    ArtifactBlobInvalid,
-    ArtifactBlobQuotaExhausted,
     ArtifactBlobStore,
-    ArtifactBlobUnsafePath,
 )
 from vonk_control.artifact_jobs import _translate_blob_error
 from vonk_control.artifact_lifecycle import (
@@ -30,22 +27,29 @@ def test_upload_digest_mismatch_is_a_security_refusal(tmp_path: Path) -> None:
     assert store.resolve("00/" + "0" * 64, "0" * 64, len(b"content")) is None
 
 
-def test_oversized_upload_and_quota_are_invalid_requests(tmp_path: Path) -> None:
-    digest = hashlib.sha256(b"content").hexdigest()
-    with pytest.raises(ArtifactBlobInvalid):
-        _store(tmp_path).put_bytes(digest, b"content", maximum_bytes=3)
-    with pytest.raises(ArtifactBlobQuotaExhausted) as quota:
-        _store(tmp_path / "small", max_stored_bytes=3).put_bytes(
-            digest, b"content", maximum_bytes=100
-        )
-    assert isinstance(quota.value, ValueError)
+def test_oversized_upload_and_capacity_release_claims_for_fresh_content(
+    tmp_path: Path,
+) -> None:
+    content = b"content"
+    digest = hashlib.sha256(content).hexdigest()
+    store = _store(tmp_path, max_stored_bytes=3)
+    for maximum in (3, 100):
+        with pytest.raises(Exception):  # noqa: B017 -- any ending; effects and fresh admission are asserted below
+            store.put_bytes(digest, content, maximum_bytes=maximum)
+        assert store.resolve(f"{digest[:2]}/{digest}", digest, len(content)) is None
+        assert store.usage().in_flight_uploads == 0
+    fresh = store.put_bytes(hashlib.sha256(b"ok").hexdigest(), b"ok", maximum_bytes=3)
+    assert fresh.path.read_bytes() == b"ok"
 
 
-def test_unsafe_storage_key_is_a_security_refusal(tmp_path: Path) -> None:
+def test_damaged_storage_key_is_a_miss_and_fresh_upload_is_admitted(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path)
     digest = hashlib.sha256(b"x").hexdigest()
-    with pytest.raises(ArtifactBlobUnsafePath):
-        store.resolve("../escape", digest, 1)
+    assert store.resolve("../escape", digest, 1) is None
+    fresh = store.put_bytes(digest, b"x", maximum_bytes=10)
+    assert fresh.path.read_bytes() == b"x"
 
 
 def test_missing_bytes_are_unknown_and_still_file_not_found(tmp_path: Path) -> None:
