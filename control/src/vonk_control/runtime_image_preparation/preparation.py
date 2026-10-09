@@ -9,6 +9,7 @@ from typing import Protocol
 
 from vonk_agent_protocol import (
     InvalidRequestReason,
+    LifecycleState,
     RuntimeImageCode,
     WaitReason,
 )
@@ -128,9 +129,11 @@ def make_runtime_image_receipt_preparer(
         before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
     ) -> RuntimeImageReceipt:
         if build is None:
-            raise InvalidValue(
+            raise RuntimeImagePreparationUnknown(
+                RuntimeImageCode.BUILD_INCOMPLETE,
                 "source build receipt is unavailable",
-                reason=InvalidRequestReason.NOT_FOUND,
+                retryable=True,
+                reason=WaitReason.RECEIPT_MISSING,
             )
         build_receipt = {
             "state": build.state,
@@ -156,7 +159,7 @@ def make_runtime_image_receipt_preparer(
 
 def stored_runtime_image_resolver(
     storage: RuntimeImageStorage,
-) -> Callable[[object, str, RuntimeSpec], RuntimeImageReceipt]:
+) -> Callable[[object, str, RuntimeSpec], RuntimeImageReceipt | None]:
     """Resolve a compiled image to the verified archive managed storage holds.
 
     The image is identified by its content: no recipe revision is consulted.
@@ -166,18 +169,13 @@ def stored_runtime_image_resolver(
 
     def resolve(
         _document: object, image_digest: str, runtime_spec: RuntimeSpec
-    ) -> RuntimeImageReceipt:
+    ) -> RuntimeImageReceipt | None:
         expectations = runtime_image_expectations(runtime_spec.runtime)
         receipt = storage.find_verified(
             image_digest,
             expected_architecture=expectations["architecture"],
             expected_runtime_interface=expectations["interface"],
         )
-        if receipt is None:
-            raise InvalidValue(
-                "runtime image preparation is required before compile/install",
-                reason=InvalidRequestReason.INCOMPLETE,
-            )
         return receipt
 
     return resolve
@@ -198,7 +196,7 @@ def _prepare_from_build(
     before_publish: Callable[[RuntimeImageReceipt], object] | None = None,
 ) -> RuntimeImageReceipt:
     value = _object_mapping(raw)
-    if value.get("state") != "succeeded":
+    if value.get("state") != LifecycleState.SUCCEEDED.value:
         # Not damage and not a recipe fault: the build has not finished (or its
         # row was read mid-update). The owner observes the build again.
         raise RuntimeImagePreparationUnknown(
@@ -444,8 +442,11 @@ def _object_mapping(value: Mapping[str, object] | object) -> Mapping[str, object
         if hasattr(value, name)
     }
     if not data:
-        raise RuntimeImagePreparationInvalid(
-            RuntimeImageCode.RECEIPT_INVALID, "source-build receipt is not readable"
+        raise RuntimeImagePreparationUnknown(
+            RuntimeImageCode.RECEIPT_INVALID,
+            "source-build receipt is not readable",
+            retryable=True,
+            reason=WaitReason.RECEIPT_MISSING,
         )
     return data
 

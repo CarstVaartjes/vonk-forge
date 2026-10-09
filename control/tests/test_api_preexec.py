@@ -210,3 +210,38 @@ def test_administrator_initialization_rejects_malformed_secret_before_db_access(
 
     with pytest.raises(RuntimeError, match="administrator password secret is invalid"):
         api_preexec.initialize_administrator("postgresql://unused", password_path)
+
+
+@pytest.mark.parametrize("fault", ["typed", "io"])
+def test_startup_storage_unknown_ends_and_fresh_startup_executes(monkeypatch, fault):
+    from vonk_agent_protocol import WaitReason
+    from vonk_control import api_preexec
+    from vonk_control.categorized_errors import UnsettledOutcome
+
+    observations = []
+    launches = []
+    unavailable = [True]
+
+    def observe():
+        observations.append(True)
+        if unavailable[0]:
+            if fault == "io":
+                raise OSError("startup volume observation unavailable")
+            raise UnsettledOutcome(
+                "storage unavailable", reason=WaitReason.OBSERVATION_UNAVAILABLE
+            )
+
+    monkeypatch.setattr(api_preexec, "prepare_owned_state", observe)
+    monkeypatch.setattr(api_preexec, "drop_privileges_and_exec", launches.append)
+    ended = False
+    try:
+        api_preexec.main(("python",))
+    except BaseException:  # noqa: BLE001 -- observe ending, not error taxonomy
+        ended = True
+    assert ended
+    assert len(observations) == 3
+    assert launches == []
+    unavailable[0] = False
+    api_preexec.main(("python",))
+    assert len(observations) == 4
+    assert launches == [("python",)]
