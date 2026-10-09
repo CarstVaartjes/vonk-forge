@@ -16,9 +16,6 @@ from .contracts import (
     _CLAIM_SCAN_WINDOW as _CLAIM_SCAN_WINDOW,
 )
 from .contracts import (
-    _DEPENDENCY_WAIT_CODES as _DEPENDENCY_WAIT_CODES,
-)
-from .contracts import (
     _INTEGRITY_FAILURE_CODES as _INTEGRITY_FAILURE_CODES,
 )
 from .contracts import (
@@ -26,9 +23,6 @@ from .contracts import (
 )
 from .contracts import (
     _MODEL_WAIT_POLL_SECONDS as _MODEL_WAIT_POLL_SECONDS,
-)
-from .contracts import (
-    _PREPARATION_CHAIN_LIMIT as _PREPARATION_CHAIN_LIMIT,
 )
 from .contracts import (
     _PREPARATION_RECHECK_QUIET as _PREPARATION_RECHECK_QUIET,
@@ -44,9 +38,6 @@ from .contracts import (
 )
 from .contracts import (
     _SUCCEEDED as _SUCCEEDED,
-)
-from .contracts import (
-    _TERMINAL_FAILURE_CODES as _TERMINAL_FAILURE_CODES,
 )
 from .contracts import (
     _WAITING as _WAITING,

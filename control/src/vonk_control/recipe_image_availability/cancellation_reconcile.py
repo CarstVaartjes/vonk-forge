@@ -8,10 +8,12 @@ from datetime import UTC
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from vonk_agent_protocol import (
     LifecycleState,
     RuntimeImageCode,
+    SecurityRefusalError,
+    UnknownOutcomeError,
 )
 
 from .. import job_states
@@ -19,9 +21,11 @@ from ..job_documents import (
     AvailabilityJobPayload,
 )
 from ..lifecycle.core import STOP_BUDGET
+from ..model_cache import ModelCacheError
 from ..models import (
     Job,
 )
+from ..operation_contract import AvailabilityOperationFailure
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
@@ -31,6 +35,8 @@ from .contracts import (
     OPERATION_KIND,
     RecipeImageAvailabilityClaim,
     _AvailabilityClaimLost,
+    _failure_code,
+    _failure_detail,
 )
 
 if TYPE_CHECKING:
@@ -121,8 +127,63 @@ def _release_cancelled_claim(
 def _reconcile_availability_cancellation(
     self: RecipeImageAvailabilityService, operation_id: str
 ) -> bool:
-    changed = self._reconcile_cancellation_pass(operation_id)
-    return self._end_spent_cancellation(operation_id) or changed
+    changed = False
+    try:
+        changed = self._reconcile_cancellation_pass(operation_id)
+    except SecurityRefusalError as error:
+        # Authority denial ends this exact cancellation, without authorizing a
+        # child effect or treating unobserved remote capacity as released.
+        with self._sessions.begin() as session:
+            operation = session.scalar(
+                select(Job)
+                .where(
+                    Job.id == operation_id,
+                    Job.kind == OPERATION_KIND,
+                    Job.state == LifecycleState.OBSERVING.value,
+                )
+                .with_for_update(skip_locked=True)
+            )
+            if operation is not None:
+                payload = self._payload(operation)
+                self._lifecycle.fail(
+                    operation,
+                    self._clock(),
+                    retryable=False,
+                    reason=_failure_detail(error),
+                )
+                if isinstance(payload, AvailabilityJobPayload):
+                    operation.payload = serialize_json_value(
+                        payload.model_copy(
+                            update={
+                                "claim_owner": None,
+                                "claim_until": None,
+                                "image_reference_intent": None,
+                                "failure": AvailabilityOperationFailure(
+                                    code=_failure_code(error),
+                                    detail=_failure_detail(error),
+                                    retryable=False,
+                                    recovery_actions=[],
+                                ),
+                            }
+                        )
+                    )
+                changed = True
+    except (
+        UnknownOutcomeError,
+        ModelCacheError,
+        SQLAlchemyError,
+        OSError,
+        TypeError,
+        ValueError,
+    ):
+        # A lost/unreadable child cannot bypass the persisted cancellation
+        # deadline or prevent another parent's reconciliation from running.
+        pass
+    try:
+        return self._end_spent_cancellation(operation_id) or changed
+    except SQLAlchemyError:
+        # The original cancellation clock survives storage/lock faults.
+        return changed
 
 
 def _end_spent_cancellation(

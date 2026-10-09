@@ -12,6 +12,7 @@ from sqlalchemy import func, or_, select
 from vonk_agent_protocol import (
     InvalidRequestReason,
     RecipeImageCode,
+    WaitReason,
     canonical_message,
 )
 
@@ -70,8 +71,8 @@ def _matching_request(
             payload.request if isinstance(payload, AvailabilityJobPayload) else None
         )
     except (TypeError, ValueError, ValidationError) as error:
-        # A stored request that does not parse cannot be the caller's request:
-        # it is recorded and the key reads as used by another operation.
+        # Unreadable stored intent is an unknown observation, not evidence
+        # that the caller reused a key for another operation.
         retire_as_unknown(
             "recipe-image.request",
             existing.id,
@@ -79,6 +80,12 @@ def _matching_request(
             f"{type(error).__name__}: {error}",
         )
         stored = None
+    if stored is None:
+        raise RecipeImageAvailabilityUnknown(
+            RecipeImageCode.OPERATION_INVALID,
+            "accepted request evidence is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
     if stored != intent:
         raise RecipeImageAvailabilityInvalid(
             RecipeImageCode.REQUEST_KEY_REUSED,

@@ -18,12 +18,14 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import RecipeDefinition
 
 from .. import job_states, model_cache_states
+from ..failure_classification import is_security_failure
 from ..job_documents import (
     AvailabilityJobPayload,
     AvailabilityJobResult,
     AvailabilityModelChild,
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
+from ..lifecycle.image_availability import PREPARATION_BUDGET
 from ..model_cache import (
     ModelCacheNotFound,
 )
@@ -60,6 +62,7 @@ from .contracts import (
     _AvailabilityClaimLost,
     _known_total,
     _read,
+    _same_preparation_content,
 )
 
 if TYPE_CHECKING:
@@ -141,11 +144,42 @@ def _claim_operation(
         or payload.removal_fence is not None
     ):
         return None
+    if operation.state == LifecycleState.RUNNING.value:
+        revision = session.get(CatalogDocumentRevision, operation.authority_revision)
+        if revision is not None:
+            newest = session.scalar(
+                select(Job)
+                .join(
+                    CatalogDocumentRevision,
+                    CatalogDocumentRevision.id == Job.authority_revision,
+                )
+                .where(
+                    Job.kind == OPERATION_KIND,
+                    CatalogDocumentRevision.document_id == revision.document_id,
+                )
+                .order_by(Job.created_at.desc(), Job.id.desc())
+                .limit(1)
+            )
+            if newest is not None and newest.id != operation.id:
+                latest = self._payload(newest)
+                if isinstance(latest, AvailabilityJobPayload) and (
+                    latest.force_rebuild
+                    or not _same_preparation_content(latest, payload)
+                ):
+                    self._cancel_superseded_operation(
+                        operation, newest.authority_revision, now=self._lifecycle.now()
+                    )
+                    return None
     if (
         operation.state in job_states.words(LifecycleState.OBSERVING)
         and self._stored_cancellation(operation) is None
     ):
         return None
+    if operation.state == LifecycleState.RUNNING.value:
+        created = operation.created_at
+        created = created if created.tzinfo else created.replace(tzinfo=UTC)
+        if self._lifecycle.now() >= created + PREPARATION_BUDGET:
+            return None
     until = payload.claim_until
     if until is None:
         return None
@@ -230,7 +264,19 @@ def _run(
                 model_failure = model_child.failure
         identity_key = payload.identity_key
         identity = identity_key if isinstance(identity_key, str) else None
-        with self._identity_lock(identity):
+        lock = self._identity_lock(identity)
+        if not lock.acquire(blocking=False):
+            self._fail(
+                claim,
+                BuildUnsettled(
+                    RecipeImageCode.BUILDER_BUSY,
+                    "Exact image content is being prepared by another owner",
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    retry_after_seconds=1,
+                ),
+            )
+            return
+        try:
             receipt = payload.image_result
             if receipt is None or not self._storage.build_archive_available(
                 receipt.oci_archive_sha256, receipt.image_bytes
@@ -248,6 +294,8 @@ def _run(
                 # a current authorization or operation result.
                 with self._removal_lock:
                     self._persist_receipt(claim, receipt)
+        finally:
+            lock.release()
         with self._sessions() as session:
             latest = session.get(Job, operation_id)
             if latest is not None:
@@ -392,6 +440,21 @@ def _current_model_child(
     child_id = child.id
     try:
         operation = self._model_cache.get_operation(child_id)
+        if actor is not None and parent_request_key is not None:
+            if operation.state == LifecycleState.CANCELLED.value:
+                return self._ensure_model_child(
+                    payload.recipe_revision_id,
+                    actor=actor,
+                    parent_request_key=f"{parent_request_key}:replacement:{child_id}",
+                )
+            if operation.state == LifecycleState.FAILED.value:
+                failure = _read(AvailabilityOperationFailure, operation.failure)
+                if not is_security_failure(
+                    failure.code if failure is not None else None
+                ):
+                    return self._resume_model_child(
+                        child, actor=actor, parent_request_key=parent_request_key
+                    )
         if (
             operation.state == "succeeded"
             and actor is not None
@@ -434,6 +497,12 @@ def _current_model_child(
                     ),
                 )
     except ModelCacheNotFound:
+        if actor is not None and parent_request_key is not None:
+            return self._ensure_model_child(
+                payload.recipe_revision_id,
+                actor=actor,
+                parent_request_key=parent_request_key,
+            )
         return child.model_copy(
             update={
                 "state": LifecycleState.FAILED,
@@ -467,7 +536,7 @@ def _update_model_progress(
                 raise RecipeImageAvailabilityUnknown(
                     RecipeImageCode.MODEL_CHILD_MISSING,
                     "durable ModelCache child operation is unavailable",
-                    retryable=False,
+                    retryable=True,
                     recovery_actions=(),
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
@@ -500,7 +569,7 @@ def _update_model_progress(
             raise RecipeImageAvailabilityUnknown(
                 RecipeImageCode.MODEL_CHILD_CANCELLED,
                 "ModelCache child was cancelled while joining the operation",
-                retryable=False,
+                retryable=True,
                 recovery_actions=(),
             )
         payload = self._payload(operation)

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select, true
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, object_session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     InvalidRequestReason,
@@ -28,7 +28,6 @@ from ..job_documents import (
     AvailabilityUnknownEnd,
 )
 from ..models import (
-    CatalogDocumentHead,
     CatalogDocumentRevision,
     Job,
 )
@@ -48,6 +47,8 @@ from .contracts import (
     REMOVE_OPERATION_KIND,
     SUPERSEDED_PREPARATION_CODE,
     RecipeImageAvailabilityClaim,
+    RecipeImageAvailabilityUnknown,
+    _same_preparation_content,
 )
 from .failure_projection import _OBSERVATION_BUDGET
 
@@ -127,14 +128,8 @@ def claim_pending(
     now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
     claims: list[RecipeImageAvailabilityClaim] = []
     with self._sessions.begin() as session:
-        # The dispatch boundary.  A queued preparation whose recipe has
-        # advanced to a newer active revision is cancelled here, before any
-        # claim is handed to a builder executor, so a superseded operation
-        # can never occupy the Spark the current revision needs.  Only
-        # not-yet-started operations are eligible; a running attempt with a
-        # live lease is left alone because the active revision may reuse its
-        # shared build inputs.
-        self._cancel_superseded_by_active_head(session, now=now)
+        # Publication never changes intent. Accepted requests fence obsolete
+        # claims; this scan only observes their durable preparation clocks.
         candidate_ids = list(
             session.scalars(
                 select(Job.id)
@@ -186,35 +181,19 @@ def claim_pending(
                     AvailabilityUnknownEnd(residue=payload.reason)
                 )
                 continue
-            if (
-                operation.state == "running"
-                and payload.claim_until is not None
-                and now < payload.claim_until
-            ):
+            if operation.state == LifecycleState.OBSERVING.value:
+                # Cancellation has its own immutable observation bound.
                 continue
             created = operation.created_at
             created = created if created.tzinfo else created.replace(tzinfo=UTC)
             if now >= created + _OBSERVATION_BUDGET:
-                self._lifecycle.fail(
-                    operation,
-                    now,
-                    retryable=False,
-                    reason=WaitReason.OBSERVATION_UNAVAILABLE.value,
-                )
-                operation.payload = serialize_json_value(
-                    payload.model_copy(
-                        update={
-                            "claim_owner": None,
-                            "claim_until": None,
-                            "image_reference_intent": None,
-                            "retry_after_at": None,
-                        }
-                    )
-                )
+                _expire_preparation(self, session, operation, payload, now)
                 continue
-            if operation.state == LifecycleState.OBSERVING.value:
-                # Effect reconciliation keeps its existing owner. Observation
-                # is never redispatched as preparation, but still expires.
+            if (
+                operation.state == LifecycleState.RUNNING.value
+                and payload.claim_until is not None
+                and now < payload.claim_until
+            ):
                 continue
             if not self._retry_due(payload, now):
                 continue
@@ -280,6 +259,38 @@ def claim_pending(
     return tuple(claims)
 
 
+def _expire_preparation(
+    self: RecipeImageAvailabilityService,
+    session: Session,
+    operation: Job,
+    payload: AvailabilityJobPayload,
+    now: datetime,
+) -> None:
+    """Fence publication, then let bounded cancellation reconcile exact children."""
+    operation.payload = serialize_json_value(
+        payload.model_copy(
+            update={
+                "failure": AvailabilityOperationFailure(
+                    code=RecipeImageCode.PREPARATION_EXHAUSTED,
+                    detail="Image preparation observation budget ended",
+                    retryable=False,
+                    recovery_actions=[],
+                ),
+            }
+        )
+    )
+    self._request_cancellation(
+        session,
+        operation,
+        actor=operation.actor,
+        request_id=str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"vonk:image-expiry:{operation.id}")
+        ),
+        reason=WaitReason.OBSERVATION_UNAVAILABLE.value,
+        authorize=False,
+    )
+
+
 def _park_for_model(
     self: RecipeImageAvailabilityService,
     operation: Job,
@@ -319,12 +330,6 @@ def _park_for_model(
     return True
 
 
-def _holds_live_lease(payload: AvailabilityJobPayload, now: datetime) -> bool:
-    return bool(payload.claim_owner) and (
-        payload.claim_until is None or now < payload.claim_until
-    )
-
-
 def _cancel_superseded_operation(
     self: RecipeImageAvailabilityService,
     operation: Job,
@@ -332,24 +337,24 @@ def _cancel_superseded_operation(
     *,
     now: datetime,
 ) -> bool:
-    """Cancel one not-yet-started operation superseded by newer intent.
-
-    The operation record is rewritten to a terminal ``cancelled`` state with
-    typed failure evidence that names the replacement, never to a success.
-    An operation that already holds a durable image result or a live lease
-    is left alone, and a state other than ``queued`` is never touched: a
-    running build may still produce an image the active revision reuses.
-    """
-    if operation.state != "queued":
-        return False
-    payload = self._payload(operation)
-    if (
-        isinstance(payload, Residue)
-        or payload.image_result is not None
-        or self._holds_live_lease(payload, now)
+    """Fence every obsolete preparation; cancellation observes its exact children."""
+    if operation.state not in job_states.words(
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.OBSERVING,
     ):
         return False
-    detail = f"superseded by newer recipe revision {newer_revision_id}"
+    payload = self._payload(operation)
+    if isinstance(payload, Residue):
+        self._lifecycle.fail(
+            operation, now, reason=payload.reason.value, retryable=False
+        )
+        operation.payload = serialize_json_value(
+            AvailabilityUnknownEnd(residue=payload.reason)
+        )
+        return True
+    detail = f"superseded by accepted preparation for {newer_revision_id}"
     failure = AvailabilityOperationFailure(
         code=SUPERSEDED_PREPARATION_CODE,
         detail=detail,
@@ -358,8 +363,6 @@ def _cancel_superseded_operation(
     )
     updated = payload.model_copy(
         update={
-            "claim_owner": None,
-            "claim_until": None,
             "retry_after_at": None,
             "failure": failure,
             "supersession": AvailabilitySupersession(
@@ -371,7 +374,28 @@ def _cancel_superseded_operation(
     )
     operation.payload = serialize_json_value(updated)
     operation.result = None
-    self._lifecycle.supersede(operation, detail[:512], now)
+    session = object_session(operation)
+    if session is None:
+        raise RecipeImageAvailabilityUnknown(
+            RecipeImageCode.OPERATION_INVALID,
+            "Accepted preparation ownership is unavailable",
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+        )
+    if self._stored_cancellation(operation) is not None:
+        return True
+    self._request_cancellation(
+        session,
+        operation,
+        actor=operation.actor,
+        request_id=str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"vonk:image-supersede:{operation.id}:{newer_revision_id}:{now.isoformat()}",
+            )
+        ),
+        reason=detail[:512],
+        authorize=False,
+    )
     return True
 
 
@@ -382,15 +406,12 @@ def _cancel_older_preparations(
     newer_revision: CatalogDocumentRevision,
     now: datetime,
     limit: int = 64,
+    current_operation_id: str | None = None,
 ) -> tuple[str, ...]:
-    """Cancel queued preparations older than a newer intent for the recipe.
-
-    ``newer_revision`` is the revision the caller is recording an intent
-    for.  Revisions are ordered by the monotonic ``revision_number`` within
-    one canonical recipe document, so a retained older digest that becomes
-    the head again does not fall into this older-than comparison.
-    """
+    """Fence prior requests of the recipe, joining identical content explicitly."""
     now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+    current = session.get(Job, current_operation_id) if current_operation_id else None
+    current_payload = self._payload(current) if current is not None else None
     candidates = tuple(
         session.scalars(
             select(Job)
@@ -400,68 +421,33 @@ def _cancel_older_preparations(
             )
             .where(
                 Job.kind == OPERATION_KIND,
-                Job.state == "queued",
-                Job.authority_revision != newer_revision.id,
+                Job.state.in_(
+                    job_states.words(
+                        LifecycleState.QUEUED,
+                        LifecycleState.RUNNING,
+                        LifecycleState.BACKOFF,
+                        LifecycleState.OBSERVING,
+                    )
+                ),
                 CatalogDocumentRevision.document_id == newer_revision.document_id,
-                CatalogDocumentRevision.revision_number
-                < newer_revision.revision_number,
+                Job.id != current_operation_id,
             )
             .order_by(Job.created_at, Job.id)
-            .limit(limit)
             .with_for_update(of=Job, skip_locked=True)
         )
     )
-    return tuple(
-        operation.id
-        for operation in candidates
-        if self._cancel_superseded_operation(operation, newer_revision.id, now=now)
-    )
-
-
-def _cancel_superseded_by_active_head(
-    self: RecipeImageAvailabilityService,
-    session: Session,
-    *,
-    now: datetime,
-    limit: int = 64,
-) -> tuple[str, ...]:
-    """Cancel queued preparations older than their recipe's active head.
-
-    This is the durable counterpart to the intent-time cancellation: it
-    catches a head that advanced without a fresh preparation request (for
-    example a managed-recipes sync).  Only strictly older revisions of the
-    same recipe are eligible, and only not-yet-started ones, so a running
-    build whose shared inputs the active revision can reuse is untouched.
-    """
-    now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
-    operation_revision = aliased(CatalogDocumentRevision)
-    head_revision = aliased(CatalogDocumentRevision)
-    rows = session.execute(
-        select(Job, head_revision.id)
-        .join(operation_revision, operation_revision.id == Job.authority_revision)
-        .join(
-            CatalogDocumentHead,
-            (CatalogDocumentHead.kind == operation_revision.kind)
-            & (CatalogDocumentHead.publisher == operation_revision.publisher)
-            & (CatalogDocumentHead.slug == operation_revision.slug),
-        )
-        .join(
-            head_revision,
-            head_revision.id == CatalogDocumentHead.active_revision_id,
-        )
-        .where(
-            Job.kind == OPERATION_KIND,
-            Job.state == "queued",
-            operation_revision.kind == "recipe",
-            head_revision.id != operation_revision.id,
-            head_revision.revision_number > operation_revision.revision_number,
-        )
-        .order_by(Job.created_at, Job.id)
-        .limit(limit)
-        .with_for_update(of=Job, skip_locked=True)
-    ).all()
-    return tuple(
-        operation.id
-        for operation, head_revision_id in rows
-        if self._cancel_superseded_operation(operation, str(head_revision_id), now=now)
-    )
+    cancelled: list[str] = []
+    for operation in candidates:
+        prior = self._payload(operation)
+        if (
+            isinstance(current_payload, AvailabilityJobPayload)
+            and isinstance(prior, AvailabilityJobPayload)
+            and not current_payload.force_rebuild
+            and _same_preparation_content(prior, current_payload)
+            and self._stored_cancellation(operation) is None
+        ):
+            # Separate consumers deliberately join the same accepted content.
+            continue
+        if self._cancel_superseded_operation(operation, newer_revision.id, now=now):
+            cancelled.append(operation.id)
+    return tuple(cancelled)

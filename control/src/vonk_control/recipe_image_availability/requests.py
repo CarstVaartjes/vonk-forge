@@ -5,15 +5,14 @@ from __future__ import annotations
 import hashlib
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
-    InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     RecipeImageCode,
@@ -37,6 +36,7 @@ from ..job_documents import (
 )
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..models import (
+    CatalogDocument,
     CatalogDocumentRevision,
     Job,
 )
@@ -61,13 +61,11 @@ from ..revision_images import revision_archives
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .contracts import (
-    _PREPARATION_CHAIN_LIMIT,
     _PREPARATION_RECHECK_QUIET,
     _PREPARATION_RETRY_QUIET,
     _SUCCEEDED,
     OPERATION_KIND,
     SCHEMA_VERSION,
-    RecipeImageAvailabilityError,
     RecipeImageAvailabilityInvalid,
     RecipeImageAvailabilityUnknown,
     _canonical_recipe,
@@ -78,7 +76,6 @@ from .contracts import (
     _progress,
     _read,
     _retry_after,
-    _retryable,
 )
 
 if TYPE_CHECKING:
@@ -127,6 +124,49 @@ def start(
     return self._start_request(intent, actor=actor, request_id=request_id)
 
 
+def _profile_preparation_request(
+    self: RecipeImageAvailabilityService,
+    recipe_revision_id: str,
+    application_id: str | None,
+) -> str:
+    """Find the chain tip in one finite snapshot, independent of history depth.
+
+    Request keys are the durable links. No arbitrary prefix limit can prevent
+    admission or cancellation of the current descendant.
+    """
+    namespace = uuid.NAMESPACE_URL
+    request_id = str(
+        uuid.uuid5(
+            namespace,
+            f"vonk-forge:profile-preparation:{recipe_revision_id}"
+            + (f":{application_id}" if application_id else ""),
+        )
+    )
+    with self._sessions() as session:
+        history = dict(
+            session.execute(
+                select(Job.request_id, Job.id).where(
+                    Job.kind == OPERATION_KIND,
+                    Job.authority_revision == recipe_revision_id,
+                )
+            ).all()
+        )
+    for _ in range(len(history)):
+        job_id = history.get(request_id)
+        if job_id is None:
+            break
+        successor = str(
+            uuid.uuid5(
+                namespace,
+                f"vonk-forge:profile-preparation:{recipe_revision_id}:{job_id}",
+            )
+        )
+        if successor not in history:
+            break
+        request_id = successor
+    return request_id
+
+
 def cancel_profile_preparation(
     self: RecipeImageAvailabilityService,
     recipe_revision_id: str,
@@ -143,15 +183,9 @@ def cancel_profile_preparation(
     """
 
     namespace = uuid.NAMESPACE_URL
-    request_id = str(
-        uuid.uuid5(
-            namespace,
-            f"vonk-forge:profile-preparation:{recipe_revision_id}"
-            + (f":{application_id}" if application_id else ""),
-        )
-    )
+    request_id = _profile_preparation_request(self, recipe_revision_id, application_id)
     cancelled: list[str] = []
-    for _ in range(_PREPARATION_CHAIN_LIMIT):
+    for _ in range(2):
         with self._sessions.begin() as session:
             job = session.scalar(
                 select(Job)
@@ -206,14 +240,8 @@ def ensure_preparation(
     """
 
     namespace = uuid.NAMESPACE_URL
-    request_id = str(
-        uuid.uuid5(
-            namespace,
-            f"vonk-forge:profile-preparation:{recipe_revision_id}"
-            + (f":{application_id}" if application_id else ""),
-        )
-    )
-    for _ in range(_PREPARATION_CHAIN_LIMIT):
+    request_id = _profile_preparation_request(self, recipe_revision_id, application_id)
+    for _ in range(2):
         view = self.start(recipe_revision_id, actor=actor, request_id=request_id)
         if view.state in _SUCCEEDED:
             # The caller asks only because its plan still lacks the image
@@ -294,15 +322,17 @@ def _refresh_authority(
         recipe, runtime = self._authority(recipe_revision_id, force=force)
         parsed = _read(AvailabilityRuntime, runtime, subject=recipe_revision_id)
         return _canonical_recipe(recipe), parsed
-    except (RecipeImageAvailabilityError, SecurityRefusalError, InvalidRequestError):
+    except SecurityRefusalError:
+        raise
+    except RecipeImageAvailabilityUnknown:
         raise
     except Exception as error:
         raise RecipeImageAvailabilityUnknown(
             RecipeImageCode.METADATA_REFRESH_FAILED,
             "latest recipe metadata could not be refreshed",
-            retryable=_retryable(error),
+            retryable=True,
             retry_after_seconds=_retry_after(error),
-            recovery_actions=("retry",) if _retryable(error) else ("inspect",),
+            recovery_actions=(),
         ) from error
 
 
@@ -333,9 +363,26 @@ def _start_request(
                 request_id=request_id,
                 update_claim=update_claim,
             )
+        except SQLAlchemyError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return _unaccepted_request_end(
+                    self,
+                    intent,
+                    actor=actor,
+                    request_id=request_id,
+                    error=RecipeImageAvailabilityUnknown(
+                        RecipeImageCode.DATABASE_BUSY,
+                        "Request ownership evidence is unavailable",
+                        reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                    ),
+                    attempts=attempts,
+                )
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2, 0.05)
         except RecipeImageAvailabilityUnknown as error:
             remaining = deadline - time.monotonic()
-            if not error.retryable or remaining <= 0:
+            if remaining <= 0:
                 return _unaccepted_request_end(
                     self,
                     intent,
@@ -423,10 +470,10 @@ def _start_request_once(
         force_rebuild = intent.force_rebuild
     force = intent.force
     if self._authority is None:
-        raise RecipeImageAvailabilityInvalid(
+        raise RecipeImageAvailabilityUnknown(
             RecipeImageCode.METADATA_REFRESH_UNAVAILABLE,
             "latest recipe metadata could not be refreshed",
-            reason=InvalidRequestReason.NOT_FOUND,
+            reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
     raw_recipe, runtime = self._refresh_authority(recipe_revision_id, force=force)
     if isinstance(intent, RecipeSelectorIntent):
@@ -462,11 +509,16 @@ def _start_request_once(
                 or revision.kind != "recipe"
                 or revision.state != "active"
             ):
-                raise RecipeImageAvailabilityInvalid(
+                raise RecipeImageAvailabilityUnknown(
                     RecipeImageCode.RECIPE_UNAVAILABLE,
                     "selected recipe revision is unavailable or inactive",
-                    reason=InvalidRequestReason.NOT_FOUND,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
+            # Serialize request ordering at the logical recipe owner. The
+            # durable timestamp orders requests, including same-revision force.
+            session.get(
+                CatalogDocument, revision.document_id, with_for_update={"nowait": True}
+            )
             if effective_execution_key is None:
                 effective_execution_key = revision.execution_key
             if effective_execution_key != revision.execution_key:
@@ -556,6 +608,25 @@ def _start_request_once(
             encoded = canonical_message(payload)
             self._lock_build_consumer(session, payload)
             now = self._clock()
+            prior_created = session.scalar(
+                select(func.max(Job.created_at))
+                .join(
+                    CatalogDocumentRevision,
+                    CatalogDocumentRevision.id == Job.authority_revision,
+                )
+                .where(
+                    Job.kind == OPERATION_KIND,
+                    CatalogDocumentRevision.document_id == revision.document_id,
+                )
+            )
+            now = now if now.tzinfo else now.replace(tzinfo=UTC)
+            if prior_created is not None:
+                prior_created = (
+                    prior_created
+                    if prior_created.tzinfo
+                    else prior_created.replace(tzinfo=UTC)
+                )
+                now = max(now, prior_created + timedelta(microseconds=1))
             operation = self._lifecycle.new_job(
                 id=str(uuid.uuid4()),
                 request_id=request_id,
@@ -572,7 +643,12 @@ def _start_request_once(
             )
             session.add(operation)
             session.flush()
-            self._cancel_older_preparations(session, newer_revision=revision, now=now)
+            self._cancel_older_preparations(
+                session,
+                newer_revision=revision,
+                now=now,
+                current_operation_id=operation.id,
+            )
             return self._view(operation)
     except IntegrityError:
         replay = self._request_replay(request_id, actor=actor, intent=intent)
@@ -588,6 +664,6 @@ def _lock_build_consumer(session: Session, payload: AvailabilityJobPayload) -> N
         raise RecipeImageAvailabilityUnknown(
             error.code,
             str(error),
-            retryable=error.retryable,
-            recovery_actions=("retry",) if error.retryable else (),
+            retryable=True,
+            recovery_actions=(),
         ) from error

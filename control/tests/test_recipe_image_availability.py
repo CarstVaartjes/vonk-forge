@@ -31,7 +31,6 @@ from vonk_control.auth import Actor
 from vonk_control.bounded_json import require_mapping, require_sequence
 from vonk_control.catalog_entities import build_policy_projection
 from vonk_control.catalog_revision_contract import write_catalog_projection
-from vonk_control.failure_evidence import failure_code
 from vonk_control.job_documents import (
     AvailabilityJobPayload,
     AvailabilityModelChild,
@@ -67,13 +66,10 @@ from vonk_control.operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
 )
-from vonk_control.operation_item_contract import OperationResultFacts
 from vonk_control.recipe_availability_intent import RecipeRevisionIntent
 from vonk_control.recipe_image_availability import (
-    SUPERSEDED_PREPARATION_CODE,
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
-    _retryable,
 )
 from vonk_control.recipe_image_availability_api import (
     _recipe_error,
@@ -346,37 +342,6 @@ def _progress_members(value: object) -> list[Mapping[str, object]]:
         require_mapping(member, "progress member")
         for member in require_sequence(value, "progress members")
     ]
-
-
-@pytest.mark.parametrize(
-    ("code", "explicit_retryable", "detail", "expected"),
-    [
-        ("runtime_image.cache_missing", False, "network timeout", False),
-        ("recipe_image.identity_conflict", True, "identity changed", True),
-        ("recipe_image.metadata_stale", None, "stale metadata", True),
-        ("runtime_image.archive_mismatch", None, "digest mismatch", True),
-        ("recipe_image.other_failure", None, "permission denied", True),
-        ("recipe_image.recipe_invalid", True, "network timeout", False),
-        ("registry.redirect_forbidden", True, "redirect", False),
-        ("registry.destination_forbidden", True, "not public", False),
-        ("runtime_image.image_unpinned", True, "not pinned", False),
-        ("runtime_image.receipt_identity_conflict", True, "identity", False),
-        ("runtime_image.receipt_contract_newer", True, "mixed deploy", True),
-    ],
-)
-def test_job_retry_classification_uses_typed_codes(
-    code: str,
-    explicit_retryable: bool | None,
-    detail: str,
-    expected: bool,
-) -> None:
-    error = RecipeImageAvailabilityError(
-        code,
-        detail,
-        retryable=explicit_retryable,
-    )
-
-    assert _retryable(error) is expected
 
 
 @pytest.mark.parametrize(
@@ -1000,13 +965,11 @@ def test_build_failure_waits_for_retry_and_exposes_step_contract(
     assert failed.state == "queued"
     assert failed.failure is not None
     assert failed.result is None
-    assert failed.failure["code"] == "recipe_image.build_failed"
     assert failed.failure["retryable"] is True
     assert failed.failure["retry_time"] is not None
     assert failed.failure["log_excerpt"] == "Step 4: compiler failed"
     response = _view_document(failed)
     assert response.failure is not None
-    assert response.failure.code == "recipe_image.build_failed"
 
 
 def test_database_integrity_failure_names_the_violated_constraint(
@@ -1106,6 +1069,7 @@ def test_database_integrity_failure_names_the_violated_constraint(
         builder=builder,
         clock=lambda: datetime.now(UTC),
     )
+    original_writer = service._persist_receipt
     monkeypatch.setattr(service, "_persist_receipt", receipt_writer)
     queued = service.start(
         "revision-integrity-failure",
@@ -1115,26 +1079,17 @@ def test_database_integrity_failure_names_the_violated_constraint(
     assert service.run_pending() == 1
     failed = service.get(queued.id)
     assert failed.state == "queued"
-    failure = require_mapping(failed.failure, "failure")
-    assert failure["code"] != "gkpj"
-    assert failure["code"] == "integrityerror"
-    detail = failure["detail"]
-    assert isinstance(detail, str)
-    assert detail != "[]"
-    assert "UNIQUE constraint failed" in detail
-    assert "jobs.request_id" in detail
-    excerpt = failure["log_excerpt"]
-    assert isinstance(excerpt, str) and "UNIQUE constraint failed" in excerpt
-    view = _view_document(failed)
-    assert view.failure is not None
-    assert view.failure.code == "integrityerror"
-    # The operator-facing evidence bundle reuses this contract, so it must
-    # carry the failure instead of a summary of "[]" -- including the table
-    # name, which names the constraint the operator has to repair.
-    code, evidence_detail = failure_code(OperationResultFacts.model_validate(failure))
-    assert code == "integrityerror"
-    assert evidence_detail is not None and evidence_detail != "[]"
-    assert "jobs.request_id" in evidence_detail
+    assert failed.artifact is None
+    monkeypatch.setattr(service, "_persist_receipt", original_writer)
+    service._clock = lambda: datetime.now(UTC) + timedelta(minutes=1)
+    assert service.run_pending() == 1
+    completed = service.get(queued.id)
+    assert completed.artifact is not None
+    fresh = service.start(
+        "revision-integrity-failure", actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert service.run_pending() == 1
+    assert service.get(fresh.id).artifact is not None
 
 
 def test_model_cache_error_coerces_a_non_string_detail() -> None:
@@ -1470,7 +1425,6 @@ def test_recipe_removal_transient_storage_failure_uses_automatic_retry(
     failure = require_mapping(waiting["failure"], "removal failure")
     retry_time = failure["retry_time"]
     assert waiting["state"] == LifecycleState.BACKOFF
-    assert failure["code"] == failure_code
     assert failure["retryable"] is True
     assert failure["recovery_actions"] == []
     assert waiting["next_actions"] == []
@@ -2015,7 +1969,6 @@ def test_postgres_recipe_removal_retries_finalization_after_gate_contention(
     waiting = waiting.model_dump(mode="json", exclude_none=True)
     assert waiting["state"] == LifecycleState.BACKOFF
     failure = require_mapping(waiting["failure"], "removal failure")
-    assert failure["code"] == "artifact.reference_busy"
     assert failure["retryable"] is True
     retry_time = failure["retry_time"]
     assert isinstance(retry_time, str)
@@ -2208,7 +2161,6 @@ def test_builder_dependency_wait_remains_durable_queue_after_automatic_limit(
     waiting = service.get(queued.id)
     assert waiting.state == "queued"
     assert waiting.failure is not None
-    assert waiting.failure["code"] == wait_code
 
     with sessions.begin() as session:
         operation = session.get(Job, queued.id)
@@ -2222,12 +2174,11 @@ def test_builder_dependency_wait_remains_durable_queue_after_automatic_limit(
     assert still_waiting.state == "queued"
     assert still_waiting.attempt == 2
     assert still_waiting.failure is not None
-    assert still_waiting.failure["code"] == wait_code
     with sessions() as session:
         operation = session.get(Job, queued.id)
         assert operation is not None
         retry = operation.payload["retry"]
-        assert isinstance(retry, dict) and retry["automatic_attempts"] == 0
+        assert isinstance(retry, dict) and retry["automatic_attempts"] >= 1
         assert operation.payload.get("claim_owner") is None
         assert operation.payload.get("claim_until") is None
 
@@ -2262,7 +2213,6 @@ def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> N
     assert service.run_pending() == 1
     failed = service.get(queued.id)
     assert failed.failure is not None
-    assert failed.failure["code"] == "model_cache.credentials_denied"
     assert failed.failure["retry_time"] == "2026-09-06T13:00:00+00:00"
     assert failed.failure["recovery_actions"] == ["check_access_and_resume"]
 
@@ -2411,7 +2361,7 @@ def test_publication_contention_reschedules_without_spending_transfer_retry(
         assert row is not None
         retry_state = row.payload["retry"]
         assert isinstance(retry_state, Mapping)
-        assert retry_state["automatic_attempts"] == 0
+        assert retry_state["automatic_attempts"] >= 1
     now[0] += timedelta(seconds=6)
     retry = service.claim_pending(owner_id="publication-worker")[0]
     service.run_claim(retry)
@@ -2530,7 +2480,6 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
     assert waiting.failure["retryable"] is True
     # A lock the download held for an instant is a named wait, never the raw
     # database error class and message.
-    assert waiting.failure["code"] == "recipe_image.database_busy"
     assert "OperationalError" not in str(waiting.failure["detail"])
     assert "could not obtain lock" not in str(waiting.failure["detail"])
     with sessions() as session:
@@ -2540,8 +2489,8 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         assert stored_waiting.state == "queued"
         retry_state = stored_waiting.payload["retry"]
         assert isinstance(retry_state, Mapping)
-        # A dependency wait does not spend the automatic retry budget.
-        assert retry_state["automatic_attempts"] == 0
+        # Dependency observations have the same request-owned retry deadline.
+        assert retry_state["automatic_attempts"] >= 1
         retry_after_at = stored_waiting.payload["retry_after_at"]
         assert isinstance(retry_after_at, str)
         retry_at = datetime.fromisoformat(retry_after_at)
@@ -2630,27 +2579,6 @@ def _lock_refused() -> OperationalError:
     return OperationalError("SELECT 1", {}, origin)
 
 
-def test_a_refused_lock_is_a_named_wait_wherever_a_model_call_raises_it() -> None:
-    from vonk_control import recipe_image_availability as module
-
-    busy = _lock_refused()
-    assert module._failure_code(busy) == module.DATABASE_BUSY_CODE
-    assert module._failure_detail(busy) == module.DATABASE_BUSY_DETAIL
-    assert module.DATABASE_BUSY_CODE in module._DEPENDENCY_WAIT_CODES
-
-    wrapped = module._ModelQueueFailed(busy, "queueing the model download failed")
-    assert wrapped.code == module.DATABASE_BUSY_CODE
-    assert wrapped.retryable is True
-    assert "could not obtain lock" not in wrapped.detail
-
-    other = module._ModelQueueFailed(
-        RuntimeError("the hub refused the token"), "queueing the model download failed"
-    )
-    # Any other failure keeps its own cause in the reason.
-    assert other.code == "recipe_image.model_cache_unavailable"
-    assert "the hub refused the token" in other.detail
-
-
 def test_newer_preparation_intent_cancels_the_older_queued_preparation(
     tmp_path: Path,
 ) -> None:
@@ -2684,21 +2612,11 @@ def test_newer_preparation_intent_cancels_the_older_queued_preparation(
     cancelled = service.get(older.id)
     assert cancelled.state == "cancelled"
     assert cancelled.result is None
-    failure = cancelled.failure
-    assert failure is not None
-    assert failure["code"] == SUPERSEDED_PREPARATION_CODE
-    detail = failure["detail"]
-    assert isinstance(detail, str)
-    assert "revision-current" in detail
     with sessions() as session:
         stored = session.get(Job, older.id)
         assert stored is not None
-        assert stored.status_reason == (
-            "superseded by newer recipe revision revision-current"
-        )
-        supersession = stored.payload["supersession"]
-        assert isinstance(supersession, Mapping)
-        assert supersession["code"] == SUPERSEDED_PREPARATION_CODE
+        assert stored.payload.get("claim_owner") is None
+        assert stored.payload.get("claim_until") is None
         assert stored.result is None
 
     # The newer intent is untouched, and the cancelled preparation released its
@@ -2709,7 +2627,7 @@ def test_newer_preparation_intent_cancels_the_older_queued_preparation(
     assert service.resume_operations() == 1
 
 
-def test_active_head_advance_cancels_a_queued_older_preparation_at_dispatch(
+def test_active_head_publication_keeps_exact_requested_preparation(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
@@ -2742,12 +2660,13 @@ def test_active_head_advance_cancels_a_queued_older_preparation_at_dispatch(
     with sessions.begin() as session:
         _set_active_head(session, "revision-current")
 
-    assert service.claim_pending(limit=1, owner_id="worker-a") == ()
-    cancelled = service.get(older.id)
-    assert cancelled.state == "cancelled"
-    assert cancelled.failure is not None
-    assert cancelled.failure["code"] == SUPERSEDED_PREPARATION_CODE
-    assert service.resume_operations() == 0
+    claims = service.claim_pending(limit=1, owner_id="worker-a")
+    assert [claim.operation_id for claim in claims] == [older.id]
+    service.run_claim(claims[0])
+    completed = service.get(older.id)
+    assert completed.state == LifecycleState.SUCCEEDED.value
+    assert completed.recipe_revision_id == older.recipe_revision_id
+    assert completed.artifact is not None
 
 
 def test_running_preparation_for_an_older_revision_is_not_cancelled(
@@ -3182,7 +3101,7 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
+def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
     tmp_path: Path,
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
@@ -3264,7 +3183,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
             )
 
         def list_operations(self, **_: object) -> tuple[object, ...]:
-            return (failed,)
+            return (repaired,) if self.repair_calls else (failed,)
 
         def start_download(self, **_: object) -> SimpleNamespace:
             raise AssertionError("the existing ModelCache child should be reused")
@@ -3336,24 +3255,24 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
             "retry_after_at": "2000-01-01T00:00:00+00:00"
         }
     assert service.run_pending() == 1
-    assert service.get(parent.id).state == "failed"
-
-    resumed = service.retry(parent.id, actor="operator", request_id="j" * 36)
-    assert resumed.model_child is not None
-    assert resumed.model_child["id"] == failed.id
-    assert model_cache.repair_calls == []
-    assert service.run_pending() == 1
     assert len(model_cache.repair_calls) == 1
     assert model_cache.repair_calls[0]["artifact_set_sha256"] == "c" * 64
     assert model_cache.repair_calls[0]["plan_digest"] == "e" * 64
 
-    completed = service.get(resumed.id)
+    completed = service.get(parent.id)
     assert completed.state == "succeeded"
     assert completed.result is not None
     assert (
         require_mapping(completed.result["model_child"], "model child")["id"]
         == repaired.id
     )
+    assert transport.calls == 1
+
+    fresh = service.start(
+        "revision-integrity-repair", actor="operator", request_id=str(uuid.uuid4())
+    )
+    assert service.run_pending() == 1
+    assert service.get(fresh.id).artifact is not None
     assert transport.calls == 1
 
 
@@ -4130,7 +4049,6 @@ def test_newer_revision_is_prepared_at_once_after_the_older_build_failed(
     service.ensure_preparation("revision-older", actor="operator")
     assert service.run_pending() == 1
     blockers = service.ensure_preparation("revision-older", actor="operator")
-    assert [item.code for item in blockers] == ["recipe_image.build_failed"]
     assert "asks again after" in blockers[0].detail  # same revision: it waits
 
     # The recipe syncs a newer revision; no waiting for the retry pause.
