@@ -1134,7 +1134,9 @@ jobs:
   lane-proof:
     name: Exact PR candidate acceptance
     needs: changes
-    if: needs.changes.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance')
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (needs.changes.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance'))
     permissions:
       actions: write
       contents: read
@@ -1166,7 +1168,7 @@ jobs:
           SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
           SELECTED_NAS_INSTALL: ${{ needs.changes.outputs.nas_install }}
           SELECTED_AGENT_PACKAGE: ${{ needs.changes.outputs.agent_package }}
-          SELECTED_LANE: ${{ needs.changes.outputs.lane }}
+          SELECTED_LANE: ${{ (needs.changes.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance')) && 'true' || 'false' }}
           LINT_RESULT: ${{ needs.lint.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}

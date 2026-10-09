@@ -234,3 +234,20 @@ def test_pr_candidates_cannot_acquire_production_publication_authority() -> None
     assert pr["setups"]["with"]["test_trust"] is True
     assert "openssl genpkey -algorithm ED25519" in str(pr["package"]["steps"])
     assert "secrets." not in str(pr)
+
+    assert "head.repo.full_name == github.repository" in pr["source"]["if"]
+    ci = load(WORKFLOWS / "ci.yml")["jobs"]
+    assert "head.repo.full_name == github.repository" in ci["lane-proof"]["if"]
+    setup = load(WORKFLOWS / "installer-setups.yml")["jobs"]["build-and-test"]
+    build = next(
+        step
+        for step in setup["steps"]
+        if step.get("name") == "Test and build exact native setup programs"
+    )
+    assert '"$TEST_TRUST" == true' in build["run"]
+    assert (
+        'cp "$RUNNER_TEMP/ephemeral-public/key.pem" install/installer-release-public.pem'
+        in build["run"]
+    )
+    assert "acceptance-test-trust" not in build["run"]
+    assert "ephemeral-installer-private" in str(candidate["steps"])

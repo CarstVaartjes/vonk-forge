@@ -5549,45 +5549,6 @@ impl ::std::convert::TryFrom<::std::string::String> for InstallerAcceptanceBasel
         value.parse()
     }
 }
-#[derive(::serde::Serialize, Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub enum InstallerAcceptanceNetworkMode {
-    #[serde(rename = "full")]
-    Full,
-    #[serde(rename = "disabled")]
-    Disabled,
-}
-impl ::std::fmt::Display for InstallerAcceptanceNetworkMode {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-        match *self {
-            Self::Full => f.write_str("full"),
-            Self::Disabled => f.write_str("disabled"),
-        }
-    }
-}
-impl ::std::str::FromStr for InstallerAcceptanceNetworkMode {
-    type Err = self::error::ConversionError;
-    fn from_str(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        match value {
-            "full" => Ok(Self::Full),
-            "disabled" => Ok(Self::Disabled),
-            _ => Err("invalid value".into()),
-        }
-    }
-}
-impl ::std::convert::TryFrom<&str> for InstallerAcceptanceNetworkMode {
-    type Error = self::error::ConversionError;
-    fn try_from(value: &str) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
-impl ::std::convert::TryFrom<::std::string::String> for InstallerAcceptanceNetworkMode {
-    type Error = self::error::ConversionError;
-    fn try_from(
-        value: ::std::string::String,
-    ) -> ::std::result::Result<Self, self::error::ConversionError> {
-        value.parse()
-    }
-}
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 #[derive(Eq)]
@@ -5699,14 +5660,6 @@ impl ::std::convert::TryFrom<::std::string::String> for InstallerCandidateReleas
     ) -> ::std::result::Result<Self, self::error::ConversionError> {
         value.parse()
     }
-}
-#[derive(::serde::Serialize, Clone, Debug, PartialEq)]
-#[serde(deny_unknown_fields)]
-#[derive(Eq)]
-pub struct InstallerNasAcceptanceModes {
-    #[serde(rename = "docker-29.4.3")]
-    pub docker_29_4_3: InstallerAcceptanceNetworkMode,
-    pub native: InstallerAcceptanceNetworkMode,
 }
 #[derive(::serde::Serialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -23221,62 +23174,6 @@ impl ::std::cmp::PartialEq<&str> for InstallerAcceptanceBaselineReleaseChannel {
         self.as_str() == *other
     }
 }
-impl InstallerAcceptanceNetworkMode {
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Full => "full",
-            Self::Disabled => "disabled",
-        }
-    }
-}
-impl ::std::ops::Deref for InstallerAcceptanceNetworkMode {
-    type Target = str;
-    fn deref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl ::std::cmp::PartialEq<str> for InstallerAcceptanceNetworkMode {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-impl ::std::cmp::PartialEq<&str> for InstallerAcceptanceNetworkMode {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for InstallerAcceptanceNetworkMode {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = crate::wire_schema::deserialize_wire_value(
-            deserializer,
-            Some("InstallerAcceptanceNetworkMode"),
-        )?;
-        #[derive(
-            ::serde::Deserialize,
-            ::serde::Serialize,
-            Clone,
-            Copy,
-            Debug,
-            Eq,
-            Hash,
-            Ord,
-            PartialEq,
-            PartialOrd,
-        )]
-        enum Raw {
-            #[serde(rename = "full")]
-            Full,
-            #[serde(rename = "disabled")]
-            Disabled,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(match raw {
-            Raw::Full => Self::Full,
-            Raw::Disabled => Self::Disabled,
-        })
-    }
-}
 impl<'de> ::serde::Deserialize<'de> for InstallerBaselineArtifacts {
     fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = crate::wire_schema::deserialize_wire_value(
@@ -23443,28 +23340,6 @@ impl ::std::cmp::PartialEq<str> for InstallerCandidateReleaseChannel {
 impl ::std::cmp::PartialEq<&str> for InstallerCandidateReleaseChannel {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
-    }
-}
-impl<'de> ::serde::Deserialize<'de> for InstallerNasAcceptanceModes {
-    fn deserialize<D: ::serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = crate::wire_schema::deserialize_wire_value(
-            deserializer,
-            Some("InstallerNasAcceptanceModes"),
-        )?;
-        #[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug, PartialEq)]
-        #[serde(deny_unknown_fields)]
-        #[derive(Eq)]
-        struct Raw {
-            #[serde(rename = "docker-29.4.3")]
-            pub docker_29_4_3: InstallerAcceptanceNetworkMode,
-            pub native: InstallerAcceptanceNetworkMode,
-        }
-        #[allow(unused_variables)]
-        let raw: Raw = ::serde_json::from_value(value).map_err(::serde::de::Error::custom)?;
-        Ok(Self {
-            docker_29_4_3: raw.docker_29_4_3,
-            native: raw.native,
-        })
     }
 }
 impl<'de> ::serde::Deserialize<'de> for InstallerPackageArtifact {

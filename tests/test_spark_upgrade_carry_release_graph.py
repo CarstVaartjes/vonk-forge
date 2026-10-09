@@ -77,7 +77,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     )
     fetched: list[str] = []
 
-    def fetch(url: str, destination: Path, *, decoder=None):
+    def fetch(url: str, destination: Path) -> None:
         fetched.append(url)
         if url.startswith("file://"):
             content = (tmp_path / "control/openapi.json").read_bytes()
@@ -97,7 +97,6 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         else:
             pytest.fail(f"unbound source input {url}")
         destination.write_bytes(content)
-        return decoder(content) if decoder is not None else None
 
     monkeypatch.setattr(carry, "REPOSITORY_ROOT", tmp_path)
     monkeypatch.setattr(carry, "_fetch", fetch)
@@ -150,44 +149,3 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         "https://install.example", "dev", GENERATION, tmp_path / "recovered"
     )
     assert recovered.overlay.read_bytes() == verified_overlay
-
-
-@pytest.mark.parametrize("exhausts", [False, True])
-def test_unreadable_peer_contract_is_reobserved_without_poisoning_fresh_input(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    exhausts: bool,
-) -> None:
-    """Catches treating an unreadable peer reply as a permanent refusal."""
-    import io
-
-    from tests.acceptance.controller_contract import ControllerContract
-
-    valid = b'{"paths":{},"components":{"schemas":{}}}'
-    target = tmp_path / "contract.json"
-    target.write_bytes(valid)
-    attempts = []
-    repaired = False
-
-    def reply(request, *, timeout):
-        attempts.append(request)
-        return io.BytesIO(
-            valid
-            if repaired or (not exhausts and len(attempts) > 1)
-            else b"unreadable peer reply"
-        )
-
-    monkeypatch.setattr(carry.urllib.request, "urlopen", reply)
-    monkeypatch.setattr(carry, "FETCH_OBSERVATION_SECONDS", 0.05)
-    decoder = lambda raw: ControllerContract(
-        json.loads(raw), label="observed Controller"
-    )
-    if exhausts:
-        with pytest.raises(LifecycleError):
-            carry._fetch("https://peer.example/contract", target, decoder=decoder)
-        assert target.read_bytes() == valid
-        repaired = True
-    observed = carry._fetch("https://peer.example/contract", target, decoder=decoder)
-    assert isinstance(observed, ControllerContract)
-    assert len(attempts) >= 2
-    assert target.read_bytes() == valid

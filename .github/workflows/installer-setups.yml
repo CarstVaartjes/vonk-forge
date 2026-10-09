@@ -93,6 +93,13 @@ jobs:
             exit 1
           fi
 
+      - name: Download this run's test-only installer trust root
+        if: inputs.test_trust
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ephemeral-installer-public
+          path: ${{ runner.temp }}/ephemeral-public
+
       - name: Test and build exact native setup programs
         shell: bash
         env:
@@ -117,11 +124,18 @@ jobs:
           done
           cargo test --locked --release "${package_args[@]}"
           for binary in "${binaries[@]}"; do
-            features=()
             if [[ "$binary" == vonk-spark-setup && "$TEST_TRUST" == true ]]; then
-              features=(--features acceptance-test-trust)
+              # include_bytes! embeds this root only in the PR artifact. Tests
+              # above still exercise the production root; shipped source stays intact.
+              cp install/installer-release-public.pem "$RUNNER_TEMP/production-public.pem"
+              trap 'cp "$RUNNER_TEMP/production-public.pem" install/installer-release-public.pem' EXIT
+              cp "$RUNNER_TEMP/ephemeral-public/key.pem" install/installer-release-public.pem
             fi
-            cargo build --locked --release --package "$binary" --bin "$binary" "${features[@]}"
+            cargo build --locked --release --package "$binary" --bin "$binary"
+            if [[ "$binary" == vonk-spark-setup && "$TEST_TRUST" == true ]]; then
+              cp "$RUNNER_TEMP/production-public.pem" install/installer-release-public.pem
+              trap - EXIT
+            fi
             install -m 0555 "target/release/$binary" "$output/$binary"
           done
           (

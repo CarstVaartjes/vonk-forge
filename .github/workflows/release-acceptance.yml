@@ -1,7 +1,7 @@
 name: Pre-merge release acceptance
 
 # PR acceptance has no release credentials or protected environments.
-# Each signer creates its own ephemeral key; candidates remain run-local.
+# Signing authority is ephemeral; candidates remain scoped to this run.
 on:
   workflow_call:
     inputs:
@@ -26,6 +26,11 @@ concurrency:
 
 jobs:
   source:
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event_name == 'merge_group' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       (github.workflow == 'CI' ||
+        contains(github.event.pull_request.labels.*.name, 'release-acceptance')))
     name: Bind candidate source
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -67,6 +72,37 @@ jobs:
               output.write(f"version={version}~dev.{int(time.time())}+g{sha[:12]}\n")
               output.write(f"baseline_version={major}.{minor}.{patch}~acceptance.1+g{sha[:12]}\n")
           PY
+
+
+      - name: Generate this run's installer signing authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ephemeral-private" "$RUNNER_TEMP/ephemeral-public"
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
+            -out "$RUNNER_TEMP/ephemeral-private/key.pem"
+          openssl pkey -in "$RUNNER_TEMP/ephemeral-private/key.pem" -pubout \
+            -out "$RUNNER_TEMP/ephemeral-public/key.pem"
+      # Run artifacts convey the disposable authority between isolated jobs.
+      # It signs no production objects and expires with this run's artifacts.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ephemeral-installer-private
+          path: ${{ runner.temp }}/ephemeral-private/key.pem
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ephemeral-installer-public
+          path: ${{ runner.temp }}/ephemeral-public/key.pem
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+      - name: Remove the local private key
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/ephemeral-private/key.pem"
 
   images:
     name: Candidate image (${{ matrix.role }})

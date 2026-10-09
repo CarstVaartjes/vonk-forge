@@ -27,22 +27,18 @@ import hashlib
 import itertools
 import json
 import os
-import random
 import re
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import cast
 
 import yaml
-from vonk_agent_protocol import WaitReason
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
@@ -54,7 +50,6 @@ from cluster_profiles.serving_execution import (
 from scripts.development_slice_client import SliceError, require_object
 from tests.acceptance.controller_contract import ControllerContract
 from tests.acceptance.ephemeral import (
-    installer_environment,
     release_public_key,
     test_mode,
 )
@@ -150,49 +145,16 @@ class CarryEvidence:
     observed: list[dict[str, object]] = field(default_factory=list)
 
 
-FETCH_OBSERVATION_SECONDS = 90
-
-
-def _fetch(
-    url: str,
-    destination: Path,
-    *,
-    decoder: Callable[[bytes], ControllerContract] | None = None,
-) -> ControllerContract | None:
-    # Transport and unreadable peer replies share this one bounded observer.
-    # Decode before publishing, preserving the last verified result on a miss.
-    deadline = time.monotonic() + FETCH_OBSERVATION_SECONDS
-    backoff = 0.1
-    while time.monotonic() < deadline:
-        request = urllib.request.Request(
-            url, headers={"User-Agent": "vonk-forge-acceptance/1"}
-        )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=min(60, max(0.001, deadline - time.monotonic()))
-            ) as response:
-                raw = response.read(16 * 1024 * 1024)
-            decoded = decoder(raw) if decoder is not None else None
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.TemporaryDirectory(
-                prefix=".peer-reply-", dir=destination.parent
-            ) as staging:
-                candidate = Path(staging) / "reply"
-                with candidate.open("wb") as output:
-                    output.write(raw)
-                    output.flush()
-                    os.fsync(output.fileno())
-                os.replace(candidate, destination)
-            return decoded
-        except (OSError, TypeError, ValueError) as error:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise LifecycleError(
-                    f"{WaitReason.OBSERVATION_UNAVAILABLE.value}: {url}: {error}"
-                ) from error
-            time.sleep(random.uniform(0, min(backoff, remaining)))
-            backoff = min(2, backoff * 2)
-    raise LifecycleError(f"{WaitReason.OBSERVATION_UNAVAILABLE.value}: {url}")
+def _fetch(url: str, destination: Path) -> None:
+    # The public origin refuses anonymous library user agents.
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "vonk-forge-acceptance/1"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            destination.write_bytes(response.read(16 * 1024 * 1024))
+    except urllib.error.URLError as error:
+        raise LifecycleError(f"release input {url} is unavailable: {error}") from error
 
 
 def resolve_release(
@@ -365,16 +327,16 @@ def resolve_release(
         else "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge/"
         f"{source_sha}/control/openapi.json"
     )
-    contract = cast(
-        ControllerContract,
-        _fetch(
-            contract_url,
-            openapi,
-            decoder=lambda raw: ControllerContract(
-                json.loads(raw), label=f"the Controller of release {generation[:12]}"
-            ),
-        ),
-    )
+    _fetch(contract_url, openapi)
+    try:
+        contract = ControllerContract(
+            json.loads(openapi.read_text(encoding="utf-8")),
+            label=f"the Controller of release {generation[:12]}",
+        )
+    except (TypeError, ValueError) as error:
+        raise LifecycleError(
+            f"release {generation} publishes no usable Controller contract: {error}"
+        ) from error
     return ReleaseInput(
         generation=generation,
         source_sha=source_sha,
@@ -580,7 +542,6 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         if test_mode() and release.release.parent.name == "acceptance-baseline":
             base += "/acceptance-baseline"
         return {
-            **installer_environment(),
             "HOME": os.environ.get("HOME", "/tmp"),
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",

@@ -4575,14 +4575,6 @@
       "title": "InstallerAcceptanceBaselineRelease",
       "type": "object"
     },
-    "InstallerAcceptanceNetworkMode": {
-      "enum": [
-        "full",
-        "disabled"
-      ],
-      "title": "InstallerAcceptanceNetworkMode",
-      "type": "string"
-    },
     "InstallerBaselineArtifacts": {
       "additionalProperties": false,
       "properties": {
@@ -4735,24 +4727,6 @@
         "bootstraps"
       ],
       "title": "InstallerCandidateRelease",
-      "type": "object"
-    },
-    "InstallerNasAcceptanceModes": {
-      "additionalProperties": false,
-      "description": "Truthful network proof scope for both candidate NAS lanes.",
-      "properties": {
-        "docker-29.4.3": {
-          "$ref": "#/$defs/InstallerAcceptanceNetworkMode"
-        },
-        "native": {
-          "$ref": "#/$defs/InstallerAcceptanceNetworkMode"
-        }
-      },
-      "required": [
-        "native",
-        "docker-29.4.3"
-      ],
-      "title": "InstallerNasAcceptanceModes",
       "type": "object"
     },
     "InstallerPackageArtifact": {
@@ -11946,7 +11920,6 @@
     "InstallerCandidateArtifacts": "vonk_agent_protocol.installer_release.InstallerCandidateArtifacts",
     "InstallerCandidateBootstraps": "vonk_agent_protocol.installer_release.InstallerCandidateBootstraps",
     "InstallerCandidateRelease": "vonk_agent_protocol.installer_release.InstallerCandidateRelease",
-    "InstallerNasAcceptanceModes": "vonk_agent_protocol.installer_release.InstallerNasAcceptanceModes",
     "InstallerPackageArtifact": "vonk_agent_protocol.installer_release.InstallerPackageArtifact",
     "InstallerReleaseIdentity": "vonk_agent_protocol.installer_release.InstallerReleaseIdentity",
     "InstallerReleaseImages": "vonk_agent_protocol.installer_release.InstallerReleaseImages",
@@ -12136,7 +12109,6 @@
     "InstallerCandidateArtifacts": "#/$defs/InstallerCandidateArtifacts",
     "InstallerCandidateBootstraps": "#/$defs/InstallerCandidateBootstraps",
     "InstallerCandidateRelease": "#/$defs/InstallerCandidateRelease",
-    "InstallerNasAcceptanceModes": "#/$defs/InstallerNasAcceptanceModes",
     "InstallerPackageArtifact": "#/$defs/InstallerPackageArtifact",
     "InstallerReleaseIdentity": "#/$defs/InstallerReleaseIdentity",
     "InstallerReleaseImages": "#/$defs/InstallerReleaseImages",

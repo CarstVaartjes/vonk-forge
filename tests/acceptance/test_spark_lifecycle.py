@@ -69,7 +69,6 @@ from scripts.spark_lifecycle_contract import (
     validate_lifecycle,
 )
 from tests.acceptance.controller_contract import ContractSkew, ControllerContract
-from tests.acceptance.ephemeral import installer_environment
 from tests.acceptance.ephemeral import test_mode as ephemeral_test_mode
 from tests.acceptance.runtime import (
     AcceptanceError,
@@ -2843,7 +2842,6 @@ class SparkLifecycle:
             "VONK_INSTALL_BASE_URL": base,
             "VONK_INSTALL_RELEASE_MANIFEST": os.fspath(local_release),
             "VONK_INSTALL_RELEASE_SIGNATURE": os.fspath(signature),
-            **installer_environment(),
         }
         environment.update(getattr(self, "firewall_environment", {}))
         return environment

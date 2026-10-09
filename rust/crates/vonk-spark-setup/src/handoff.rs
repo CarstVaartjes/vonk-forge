@@ -99,13 +99,6 @@ pub(super) fn root_handoff_script(
     if public_key.contains("VONK_INSTALLER_RELEASE_PUBLIC_KEY") {
         return Err(SetupError::ReleaseSignature);
     }
-    // The root-owned copy is the same authority that authenticated this setup.
-    // Only a test-feature binary can consume it; production invokes canonical apply.
-    let test_environment = if cfg!(feature = "acceptance-test-trust") {
-        "VONK_ACCEPTANCE_TEST_MODE=1 VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY=\"$public_key\" "
-    } else {
-        ""
-    };
     Ok(format!(
         r#"umask 077
 root=$(/usr/bin/mktemp -d '{staging_root}/vonk-spark-setup.XXXXXX')
@@ -125,7 +118,7 @@ public_key=$root/installer-release-public.pem
 [ "$(/usr/bin/stat -c %s "$signature")" -le 1024 ]
 /usr/bin/openssl dgst -sha256 -verify "$public_key" -signature "$signature" "$setup" >/dev/null 2>&1
 /usr/bin/install {install_owner}-m 0600 -- "$2" "$package"
-{test_environment}"$setup" __apply
+"$setup" __apply
 "#
     ))
 }

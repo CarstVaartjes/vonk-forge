@@ -20,7 +20,7 @@ import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlsplit
 
 from spark_lifecycle_contract import GATES as SPARK_GATES
@@ -29,11 +29,6 @@ from spark_lifecycle_contract import recompute_publication_graphs, validate_life
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent_protocol/src"))
-
-from vonk_agent_protocol.installer_release import (
-    InstallerAcceptanceNetworkMode,
-    InstallerNasAcceptanceModes,
-)
 
 NAS_PLATFORMS = (
     "linux-amd64",
@@ -86,22 +81,10 @@ NAS_GATES = {
 NAS_ACCEPTANCE_LANES = {"docker-29.4.3", "native"}
 
 
-def nas_acceptance_modes(test_mode: bool) -> InstallerNasAcceptanceModes:
-    return InstallerNasAcceptanceModes.model_validate(
-        {
-            "native": (
-                InstallerAcceptanceNetworkMode.DISABLED
-                if test_mode
-                else InstallerAcceptanceNetworkMode.FULL
-            ),
-            "docker-29.4.3": InstallerAcceptanceNetworkMode.DISABLED,
-        }
-    )
-
-
-NAS_ACCEPTANCE_LANE_TAILSCALE_MODES = nas_acceptance_modes(False).model_dump(
-    mode="json", by_alias=True
-)
+def nas_acceptance_modes(test_mode: bool) -> dict[str, str]:
+    # PR acceptance has no tailnet credentials. This only selects the evidence
+    # expected by the run-local signer; release acceptance still requires full.
+    return {"docker-29.4.3": "disabled", "native": "disabled" if test_mode else "full"}
 
 
 class PublicationError(RuntimeError):
@@ -1080,10 +1063,7 @@ def accept(arguments: argparse.Namespace) -> None:
             if (
                 lanes != sorted(NAS_ACCEPTANCE_LANES)
                 or not isinstance(tailscale_modes, dict)
-                or tailscale_modes
-                != nas_acceptance_modes(arguments.test_mode).model_dump(
-                    mode="json", by_alias=True
-                )
+                or tailscale_modes != nas_acceptance_modes(arguments.test_mode)
                 or any(gate.startswith("spark_") for gate in gates)
             ):
                 raise PublicationError("behavioral gate report is invalid")
@@ -1196,9 +1176,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
             or lane not in NAS_ACCEPTANCE_LANES
             or lane in lanes
             or report.get("tailscale_mode")
-            != nas_acceptance_modes(arguments.test_mode)
-            .model_dump(mode="json", by_alias=True)
-            .get(lane)
+            != nas_acceptance_modes(arguments.test_mode).get(lane)
         ):
             raise PublicationError(
                 "NAS acceptance lane report does not match the candidate"
@@ -1224,9 +1202,7 @@ def combine_nas_evidence(arguments: argparse.Namespace) -> None:
         "schema_version": INSTALLER_PUBLICATION_SCHEMA_VERSION,
         "source_sha": arguments.source_sha,
         "status": "passed",
-        "tailscale_modes": nas_acceptance_modes(arguments.test_mode).model_dump(
-            mode="json", by_alias=True
-        ),
+        "tailscale_modes": nas_acceptance_modes(arguments.test_mode),
         "version": arguments.version,
     }
     with tempfile.TemporaryDirectory(
@@ -2079,7 +2055,7 @@ def refresh(arguments: argparse.Namespace) -> None:
             source.write_bytes(refreshed)
             _rclone_copy(
                 source,
-                cast(str, remote),
+                remote,
                 {
                     "key": pointer_key,
                     "phase": "pointer",

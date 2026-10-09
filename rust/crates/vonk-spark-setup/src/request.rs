@@ -56,20 +56,6 @@ impl ReleaseAuthority {
         }
     }
 
-    /// Test authority is opt-in twice: a test-only binary and an explicit root.
-    /// Production builds never read a caller's alternate trust-root file.
-    pub fn for_installer(test_mode: bool, test_root: Option<&Path>) -> Result<Self, SetupError> {
-        if !test_mode && test_root.is_none() {
-            return Ok(Self::canonical());
-        }
-        #[cfg(feature = "acceptance-test-trust")]
-        if test_mode {
-            let root = test_root.ok_or(SetupError::ReleaseSignature)?;
-            return Self::from_pem(fs::read(root).map_err(|_| SetupError::ReleaseSignature)?);
-        }
-        Err(SetupError::ReleaseSignature)
-    }
-
     pub fn from_pem(public_key_pem: Vec<u8>) -> Result<Self, SetupError> {
         if public_key_pem.is_empty()
             || public_key_pem.len() > 16 * 1024
@@ -251,87 +237,5 @@ impl CallerIdentity {
             return Err(SetupError::CallerPhase);
         }
         Ok(())
-    }
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod ephemeral_tests {
-    use super::*;
-
-    #[test]
-    fn ephemeral_bytes_require_test_build_and_explicit_trust() {
-        let root = tempfile::tempdir().unwrap();
-        let private = root.path().join("private.pem");
-        let public = root.path().join("public.pem");
-        let payload = root.path().join("setup");
-        let signature = root.path().join("signature");
-        let encoded = root.path().join("signature.b64");
-        let run = |arguments: Vec<String>| {
-            assert!(
-                process::run_process(
-                    Command::new("/usr/bin/openssl", arguments),
-                    DEFAULT_COMMAND_TIMEOUT,
-                )
-                .unwrap()
-                .success
-            );
-        };
-        run(vec![
-            "genpkey".into(),
-            "-algorithm".into(),
-            "RSA".into(),
-            "-pkeyopt".into(),
-            "rsa_keygen_bits:2048".into(),
-            "-out".into(),
-            private.display().to_string(),
-        ]);
-        run(vec![
-            "pkey".into(),
-            "-in".into(),
-            private.display().to_string(),
-            "-pubout".into(),
-            "-out".into(),
-            public.display().to_string(),
-        ]);
-        let bytes = b"candidate setup bytes";
-        fs::write(&payload, bytes).unwrap();
-        run(vec![
-            "dgst".into(),
-            "-sha256".into(),
-            "-sign".into(),
-            private.display().to_string(),
-            "-out".into(),
-            signature.display().to_string(),
-            payload.display().to_string(),
-        ]);
-        run(vec![
-            "base64".into(),
-            "-A".into(),
-            "-in".into(),
-            signature.display().to_string(),
-            "-out".into(),
-            encoded.display().to_string(),
-        ]);
-        let mut encoded = fs::read(encoded).unwrap();
-        encoded.push(b'\n');
-        let production = ReleaseAuthority::for_installer(false, None).unwrap();
-        assert!(production.verify_setup(bytes, &encoded).is_err());
-        assert!(ReleaseAuthority::for_installer(false, Some(&public)).is_err());
-        assert!(ReleaseAuthority::for_installer(true, None).is_err());
-        #[cfg(not(feature = "acceptance-test-trust"))]
-        assert!(ReleaseAuthority::for_installer(true, Some(&public)).is_err());
-        #[cfg(feature = "acceptance-test-trust")]
-        {
-            let test = ReleaseAuthority::for_installer(true, Some(&public)).unwrap();
-            test.verify_setup(bytes, &encoded).unwrap();
-            assert!(
-                test.verify_setup(b"tampered setup bytes", &encoded)
-                    .is_err()
-            );
-            // A refused ingress holds no state: the next authenticated request succeeds.
-            test.verify_setup(bytes, &encoded).unwrap();
-        }
-        // Even after a test request, production trust is unchanged.
-        assert!(production.verify_setup(bytes, &encoded).is_err());
     }
 }

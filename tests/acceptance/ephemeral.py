@@ -14,12 +14,3 @@ def release_public_key() -> Path:
     if test_mode():
         return Path(os.environ["VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY"])
     return ROOT / "install/installer-release-public.pem"
-
-
-def installer_environment() -> dict[str, str]:
-    if test_mode():
-        return {
-            "VONK_ACCEPTANCE_TEST_MODE": "1",
-            "VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY": os.fspath(release_public_key()),
-        }
-    return {}
