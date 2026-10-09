@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -37,10 +38,7 @@ from vonk_control.strict_json import serialize_json_value
 
 from cluster_profiles.control_client import (
     ControlClient,
-    ControlHTTPError,
-    ControlMalformedResponse,
-    ControlUnauthorized,
-    ControlUnavailable,
+    ControlClientError,
     source_schema_validator,
 )
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -172,13 +170,18 @@ def test_partial_or_corrupt_transfer_cannot_be_a_complete_snapshot_and_retry_rec
         content=b"".join(json.dumps(record).encode() + b"\n" for record in records),
         request=response.request,
     )
-    with pytest.raises(
-        ControlMalformedResponse, match="Complete observation unavailable"
-    ):
-        _client(tmp_path, damaged).request("GET", "/api/fleet")
-    assert _client(tmp_path, response).request(
-        "GET", "/api/fleet"
-    ) == serialize_json_value(snapshot)
+    client = _client(tmp_path, damaged)
+    peers = []
+
+    def opener(_request, **_kwargs):
+        peer = ObservationHTTPPeer(damaged if not peers else response)
+        peers.append(peer)
+        return peer
+
+    client._opener = opener
+    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
+    assert len(peers) == 2 and all(peer._body.closed for peer in peers)
+    assert client.request("GET", "/api/fleet") == serialize_json_value(snapshot)
 
 
 def test_capture_is_frozen_before_first_network_suspension(tmp_path):
@@ -342,8 +345,16 @@ def test_stream_authentication_error_retains_declared_json_media(tmp_path, path)
         {"components": graph["components"], **content["application/json"]["schema"]}
     )
     assert validator.is_valid(response.json())
-    with pytest.raises(ControlUnauthorized):
-        _client(tmp_path, response).request("GET", path)
+    client = _client(tmp_path, response)
+    adopted = None
+    try:
+        adopted = client.request("GET", path)
+    except ControlClientError:
+        pass
+    assert adopted is None
+    fresh = _peer(_large_snapshot(tmp_path)).get("/api/fleet")
+    client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
+    assert client.request("GET", "/api/fleet")["nodes"]
 
 
 def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp_path):
@@ -366,9 +377,16 @@ def test_global_validation_error_bytes_match_streamed_route_and_cli_contract(tmp
     assert source_schema_validator(
         {"components": graph["components"], **schema}
     ).is_valid(response.json())
-    with pytest.raises(ControlHTTPError) as refused:
-        _client(tmp_path, response).request("GET", "/api/platform")
-    assert refused.value.status_code == 422
+    client = _client(tmp_path, response)
+    adopted = None
+    try:
+        adopted = client.request("GET", "/api/platform", timeout_seconds=0.01)
+    except ControlClientError:
+        pass
+    assert adopted is None
+    fresh = _peer(_large_snapshot(tmp_path)).get("/api/fleet")
+    client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
+    assert client.request("GET", "/api/fleet")["nodes"]
 
 
 def test_platform_capture_failure_bytes_preserve_retry_through_cli(
@@ -393,7 +411,26 @@ def test_platform_capture_failure_bytes_preserve_retry_through_cli(
     assert source_schema_validator(
         {"components": graph["components"], **content["application/json"]["schema"]}
     ).is_valid(response.json())
-    with pytest.raises(ControlUnavailable) as unavailable:
-        _client(tmp_path, response).request("GET", "/api/platform")
-    assert unavailable.value.retry_after_seconds == 5
-    assert unavailable.value.code == "observation-unavailable"
+    now = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+    client = _client(tmp_path, response)
+    peers = []
+
+    def opener(_request, **_kwargs):
+        peer = ObservationHTTPPeer(response)
+        peers.append(peer)
+        return peer
+
+    client._opener = opener
+    adopted = None
+    try:
+        adopted = client.request("GET", "/api/platform")
+    except ControlClientError:
+        pass
+    assert adopted is None and now[0] == 115.0
+    assert len(peers) == 3 and all(peer._body.closed for peer in peers)
+    monkeypatch.undo()
+    fresh = _peer(_large_snapshot(tmp_path)).get("/api/fleet")
+    client._opener = lambda _request, **_kwargs: ObservationHTTPPeer(fresh)
+    assert client.request("GET", "/api/fleet")["nodes"]

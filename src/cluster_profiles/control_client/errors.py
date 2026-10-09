@@ -134,14 +134,22 @@ class ControlClientError(RuntimeError):
 
 
 class ControlMalformedResponse(ControlClientError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        context: ErrorContext | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(message, context=context)
+
+
+class ControlResponseTooLarge(ControlMalformedResponse):
     pass
 
 
-class ControlResponseTooLarge(ControlClientError):
-    pass
-
-
-class ControlObservationUnavailable(ControlClientError):
+class ControlObservationUnavailable(ControlMalformedResponse):
     def __init__(
         self, reason_code: str, detail: str, *, context: ErrorContext | None = None
     ) -> None:
