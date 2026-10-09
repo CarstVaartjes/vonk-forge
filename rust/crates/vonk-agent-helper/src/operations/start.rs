@@ -16,6 +16,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let started_at = Instant::now();
         let (launch, active_start) = {
             let _installation_guard = self.lock_installation_runtime(&installation_id)?;
+            self.prepare_runtime_generation_fence(&identity)?;
             self.accept_installation_intent(
                 identity.installation_id,
                 binding.installation_intent_nonce,
@@ -216,18 +217,30 @@ impl<R: CommandRunner> OperationExecutor<R> {
         timeout_seconds: u16,
         started_at: Instant,
     ) -> Result<(Option<i32>, Option<Box<JobEvidence>>), OperationError> {
-        let remaining =
-            Duration::from_secs(u64::from(timeout_seconds)).saturating_sub(started_at.elapsed());
+        let deadline = started_at + Duration::from_secs(u64::from(timeout_seconds));
         let target = format!("vonk-{}", identity.runtime_id);
-        let waited = if remaining.is_zero() {
-            Err("runtime job deadline elapsed".to_owned())
-        } else {
-            self.runner.run_with_timeout(
+        let mut waited = Err("runtime job observation unavailable".to_owned());
+        for attempt in 0..3 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            waited = self.runner.run_with_timeout(
                 Path::new("/usr/bin/docker"),
-                &["wait".to_owned(), target],
+                &["wait".to_owned(), target.clone()],
                 remaining,
-            )
-        };
+            );
+            if matches!(
+                &waited,
+                Ok(output) if output.success && bounded_container_wait_exit_code(output).is_some()
+            ) {
+                break;
+            }
+            thread::sleep(
+                Duration::from_millis(50 * (attempt + 1))
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
         // The container is read before cleanup removes it: a job that exits
         // unsuccessfully or runs out of time keeps its own output and exit
         // account instead of only a status code.
@@ -244,9 +257,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 _ => None,
             }
         };
-        match waited {
-            Ok(output) if output.success => {
-                let exit_code = bounded_container_wait_exit_code(&output);
+        let measured_exit = waited
+            .as_ref()
+            .ok()
+            .filter(|output| output.success)
+            .and_then(bounded_container_wait_exit_code);
+        match (waited, measured_exit) {
+            (Ok(_), Some(exit_code)) => {
                 let evidence = if exit_code == 0 { None } else { capture(self) };
                 self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, false)?;
                 if self.job_cancellation.was_cancelled(identity)? {
@@ -255,7 +272,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     Ok((Some(exit_code), evidence))
                 }
             }
-            Ok(_) => {
+            (Ok(_), None) => {
                 let cancelled = self.job_cancellation.was_cancelled(identity)?;
                 let evidence = if cancelled { None } else { capture(self) };
                 self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, !cancelled)?;
@@ -265,8 +282,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     Err(OperationError::RuntimeJobWaitFailed { evidence })
                 }
             }
-            Err(_) => {
-                // A timeout: the job still runs, so its tail so far is read
+            (Err(_), _) => {
+                let expired = Instant::now() >= deadline;
+                // An unreadable wait remains unknown. Its tail so far is read
                 // before the stop that ends it.
                 let evidence = if self.job_cancellation.was_cancelled(identity)? {
                     None
@@ -274,7 +292,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     capture(self)
                 };
                 self.cleanup_runtime_after_job(identity, logical_run_id, plan_digest, true)?;
-                Ok((Some(124), evidence))
+                if expired {
+                    Ok((Some(124), evidence))
+                } else {
+                    Err(OperationError::RuntimeJobWaitFailed { evidence })
+                }
             }
         }
     }

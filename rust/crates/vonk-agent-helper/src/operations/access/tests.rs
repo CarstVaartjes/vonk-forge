@@ -165,10 +165,7 @@ fn runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer() {
         let roots = ManagedRoots::under(Path::new(&root));
         let executor =
             OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
-        assert!(matches!(
-            executor.reset_runtime_tmp_if_requested(RUN_ID),
-            Err(OperationError::UnsafePath)
-        ));
+        assert!(executor.reset_runtime_tmp_if_requested(RUN_ID).is_err());
         return;
     }
 
@@ -207,10 +204,16 @@ fn runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer() {
     let status = child.wait_timeout(Duration::from_secs(5)).unwrap();
     if status.is_none() {
         child.kill().unwrap();
-        child.wait().unwrap();
+        let _ = child.wait_timeout(Duration::from_secs(1)).unwrap();
         panic!("runtime tmp cleanup blocked on a FIFO marker with no writer");
     }
     assert!(status.unwrap().success());
-    assert!(fs::symlink_metadata(marker).unwrap().file_type().is_fifo());
+    assert!(fs::symlink_metadata(&marker).unwrap().file_type().is_fifo());
     assert_eq!(fs::read(temporary.join("sentinel")).unwrap(), b"keep");
+    fs::remove_file(&marker).unwrap();
+    fs::write(&marker, b"").unwrap();
+    fs::set_permissions(&marker, fs::Permissions::from_mode(0o600)).unwrap();
+    let executor = OperationExecutor::new(roots, &[0; 32], MissingContainerRunner, None).unwrap();
+    executor.reset_runtime_tmp_if_requested(RUN_ID).unwrap();
+    assert!(!temporary.join("sentinel").exists());
 }

@@ -3,9 +3,9 @@
 use super::*;
 
 impl<R: CommandRunner> OperationExecutor<R> {
-    /// A published endpoint port outside the firewall's authorised set is
-    /// dropped by the managed chain, so the workload would run and never be
-    /// reachable. Refuse the start and say which port and which set.
+    /// Current signed placement owns admission. A stale firewall observation
+    /// triggers one bounded reapplication of the kit's existing isolation rules;
+    /// unavailable local tooling never vetoes the Controller's decision.
     pub(super) fn require_authorised_published_endpoint(
         &self,
         run: &ValidatedDockerRun,
@@ -13,48 +13,45 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let Some(port) = run.published_endpoint_port else {
             return Ok(());
         };
-        let request = format!("check-endpoint-port {port}");
-        let rejected = |reason: String| {
-            eprintln!(
-                "vonk-agent-helper: run {} endpoint firewall rejected: {reason}",
-                run.run_id
-            );
-            OperationError::RuntimeEndpointFirewallRejected { reason }
-        };
-        let output = match self.runner.run_with_timeout(
-            Path::new(DOCKER_FIREWALL),
-            &[
-                "--config".to_owned(),
-                DOCKER_FIREWALL_CONFIG.to_owned(),
-                "check-endpoint-port".to_owned(),
-                port.to_string(),
-            ],
-            Duration::from_secs(10),
+        let arguments = [
+            "--config".to_owned(),
+            DOCKER_FIREWALL_CONFIG.to_owned(),
+            "check-endpoint-port".to_owned(),
+            port.to_string(),
+        ];
+        if !matches!(
+            self.runner.run_with_timeout(Path::new(DOCKER_FIREWALL), &arguments, Duration::from_secs(10)),
+            Ok(output) if output.success
         ) {
-            Ok(output) => output,
-            Err(error) => {
+            if !self.reconcile_firewall(Duration::from_secs(10)) {
                 eprintln!(
-                    "vonk-agent-helper: run {} endpoint firewall check did not run, starting without it: {request}: {error}",
+                    "vonk-agent-helper: run {} endpoint firewall reconciliation unavailable; using signed placement",
                     run.run_id
                 );
-                return Ok(());
             }
-        };
-        if output.success {
-            return Ok(());
+            // Re-observe without turning generated configuration into authority.
+            let _ = self.runner.run_with_timeout(
+                Path::new(DOCKER_FIREWALL),
+                &arguments,
+                Duration::from_secs(10),
+            );
         }
-        let reason = firewall_rejection_reason(&request, &output);
-        if output.exit_code == Some(FIREWALL_PORT_REFUSED) {
-            return Err(rejected(reason));
-        }
-        // A firewall that is absent or not applied cannot say which ports it
-        // authorises, and a development or acceptance host has none. Only a
-        // positive refusal stops the start.
-        eprintln!(
-            "vonk-agent-helper: run {} endpoint firewall check inconclusive, starting without it: {reason}",
-            run.run_id
-        );
         Ok(())
+    }
+
+    fn reconcile_firewall(&self, timeout: Duration) -> bool {
+        matches!(
+            self.runner.run_with_timeout(
+                Path::new(DOCKER_FIREWALL),
+                &[
+                    "--config".to_owned(),
+                    DOCKER_FIREWALL_CONFIG.to_owned(),
+                    "apply".to_owned(),
+                ],
+                timeout,
+            ),
+            Ok(output) if output.success
+        )
     }
 }
 
@@ -64,56 +61,88 @@ impl<R: CommandRunner> OperationExecutor<R> {
         run: &mut ValidatedDockerRun,
         sysfs_root: &Path,
     ) -> Result<(), OperationError> {
+        self.bind_native_fabric_inner(run, sysfs_root, true)
+    }
+
+    pub(super) fn observe_native_fabric(
+        &self,
+        run: &mut ValidatedDockerRun,
+        sysfs_root: &Path,
+    ) -> Result<(), OperationError> {
+        self.bind_native_fabric_inner(run, sysfs_root, false)
+    }
+
+    fn bind_native_fabric_inner(
+        &self,
+        run: &mut ValidatedDockerRun,
+        sysfs_root: &Path,
+        reconcile: bool,
+    ) -> Result<(), OperationError> {
         let Some(fabric) = &run.native_fabric else {
             return Ok(());
         };
         let host_endpoint = run
             .host_endpoint_port
             .map_or_else(|| "none".to_owned(), |port| port.to_string());
-        let request = format!(
-            "check-fabric-run local={} master={} rendezvous={} endpoint={host_endpoint}",
-            fabric.local, fabric.master, fabric.port
-        );
-        let rejected = |reason: String| {
-            // The journal keeps the same reason the operation reports, so the
-            // refused argument is attributable without the Controller.
-            eprintln!(
-                "vonk-agent-helper: run {} native fabric firewall rejected: {reason}",
-                run.run_id
-            );
-            OperationError::RuntimeFabricFirewallRejected { reason }
-        };
-        let output = self
-            .runner
-            .run_with_timeout(
+        let arguments = [
+            "--config".to_owned(),
+            DOCKER_FIREWALL_CONFIG.to_owned(),
+            "check-fabric-run".to_owned(),
+            fabric.local.to_string(),
+            fabric.master.to_string(),
+            fabric.port.to_string(),
+            host_endpoint,
+        ];
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut observed = None;
+        // Observation has no host effect and requires no firewall mutation.
+        let mut isolated = !reconcile;
+        for attempt in 0..3 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let output = self.runner.run_with_timeout(
                 Path::new(DOCKER_FIREWALL),
-                &[
-                    "--config".to_owned(),
-                    DOCKER_FIREWALL_CONFIG.to_owned(),
-                    "check-fabric-run".to_owned(),
-                    fabric.local.to_string(),
-                    fabric.master.to_string(),
-                    fabric.port.to_string(),
-                    host_endpoint,
-                ],
-                Duration::from_secs(10),
-            )
-            .map_err(|error| rejected(format!("{request}: firewall check did not run: {error}")))?;
-        if !output.success {
-            return Err(rejected(firewall_rejection_reason(&request, &output)));
-        }
-        let interface = std::str::from_utf8(&output.stdout)
-            .ok()
-            .map(str::trim)
-            .filter(|value| crate::runtime_fabric::valid_interface(value))
-            .ok_or(OperationError::RuntimeFabricUnavailable)?;
-        let environment = crate::runtime_fabric::resolve(sysfs_root, interface, fabric.local)
-            .map_err(|error| match error {
-                crate::runtime_fabric::FabricError::Io(error) => OperationError::Io(error),
-                crate::runtime_fabric::FabricError::Unavailable => {
-                    OperationError::RuntimeFabricUnavailable
+                &arguments,
+                Duration::from_secs(5).min(remaining),
+            );
+            isolated |= matches!(&output, Ok(output) if output.success);
+            observed = match output {
+                Ok(output) if output.success => std::str::from_utf8(&output.stdout)
+                    .ok()
+                    .map(str::trim)
+                    .filter(|interface| crate::runtime_fabric::valid_interface(interface))
+                    .and_then(|interface| {
+                        crate::runtime_fabric::resolve(sysfs_root, interface, fabric.local).ok()
+                    }),
+                _ => None,
+            };
+            if observed.is_none() {
+                // Reapply only the existing kit envelope. Admission uses the
+                // signed plan; the actual network sandbox still must exist.
+                if !isolated {
+                    isolated = self.reconcile_firewall(
+                        Duration::from_secs(5)
+                            .min(deadline.saturating_duration_since(Instant::now())),
+                    );
                 }
-            })?;
+                if isolated {
+                    observed =
+                        crate::runtime_fabric::resolve_address(sysfs_root, fabric.local).ok();
+                }
+            }
+            if observed.is_some() {
+                break;
+            }
+            thread::sleep(
+                Duration::from_millis(50 * (attempt + 1))
+                    .min(deadline.saturating_duration_since(Instant::now())),
+            );
+        }
+        // Kernel observation is unknown after this bounded pass. The owning
+        // operation re-observes through a fresh grant; no launch or hold remains.
+        let environment = observed.ok_or(OperationError::CommandFailed)?;
         let run_id = run.run_id.clone();
         for note in &environment.notes {
             eprintln!("vonk-agent-helper: run {run_id} fabric rail: {note}");

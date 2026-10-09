@@ -94,9 +94,6 @@ const LINUX_ARG_MAX_CEILING_BYTES: u64 = LINUX_STACK_LIMIT_BYTES / 4 * 3;
 
 const DOCKER_FIREWALL: &str = "/usr/lib/vonk-forge/vonk-forge-docker-firewall";
 
-/// The firewall's exit status for a port its policy positively refuses.
-const FIREWALL_PORT_REFUSED: i32 = 3;
-
 const DOCKER_FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
 
 const NATIVE_FABRIC_ROOT: &str = "/sys/class/infiniband";
@@ -165,18 +162,6 @@ pub enum OperationError {
     RuntimeRunMissing,
     #[error("native fabric is unavailable or ambiguous")]
     RuntimeFabricUnavailable,
-    #[error("native fabric firewall rejected the placement")]
-    RuntimeFabricFirewallRejected {
-        /// Which request argument the firewall refused and why, or why the
-        /// check could not run. Names only values from the signed plan.
-        reason: String,
-    },
-    #[error("endpoint firewall rejected the published port")]
-    RuntimeEndpointFirewallRejected {
-        /// The published host port the firewall refused and the set it
-        /// authorises, or why the check could not run.
-        reason: String,
-    },
     #[error("one-shot runtime could not be stopped safely")]
     StopUncertain,
     #[error("installation runtime reconciliation is busy")]
