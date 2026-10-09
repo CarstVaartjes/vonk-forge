@@ -419,9 +419,11 @@ def test_model_removal_review_preserves_unknown_storage_observation(
 
 
 def test_model_removal_applies_to_current_storage_after_an_old_review(
-    cache, tmp_path: Path
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     service, sessions = cache
+    now = NOW
+    monkeypatch.setattr(service, "_clock", lambda: now)
     data = b"review must not accept missing bytes"
     artifact = _artifact(tmp_path, data)
     downloaded = _download(
@@ -446,10 +448,16 @@ def test_model_removal_applies_to_current_storage_after_an_old_review(
         request_key="00000000-0000-4000-8000-000000001064",
     )
     for _ in range(10):
-        if service.get_operation(accepted.id).state == "succeeded":
+        observed = service.get_operation(accepted.id)
+        if observed.state == LifecycleState.SUCCEEDED:
             break
+        with sessions() as session:
+            stored = session.get(ModelCacheOperation, accepted.id)
+            assert stored is not None
+            if stored.next_action_at is not None:
+                now = stored.next_action_at.replace(tzinfo=UTC)
         service.advance_removals(limit=10)
-    assert service.get_operation(accepted.id).state == "succeeded"
+    assert service.get_operation(accepted.id).state == LifecycleState.SUCCEEDED
     with sessions() as session:
         assert session.get(ModelCacheSet, downloaded.artifact_set_sha256) is None
         assert all(
@@ -2368,7 +2376,9 @@ def test_distribution_manifest_uses_receipts_and_serves_without_hashing(
         model_content_sha256="a" * 64,
         request_key=str(uuid.uuid4()),
     )
-    assert fresh.state == LifecycleState.SUCCEEDED
+    # The read queued recovery first; drive both admitted requests.
+    service.run_pending(limit=16)
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
     available = source.open_object(digest, len(b"primary weights"))
     try:
         assert available.stream.read() == b"primary weights"
@@ -2603,7 +2613,9 @@ def test_serving_one_object_does_not_inspect_the_rest_of_the_set(cache, tmp_path
         model_content_sha256="a" * 64,
         request_key=str(uuid.uuid4()),
     )
-    assert fresh.state == LifecycleState.SUCCEEDED
+    # The read queued recovery first; drive both admitted requests.
+    service.run_pending(limit=16)
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
     assert (
         service.cached_artifact_file(digest, second["sha256"], "b.bin")[0].read_bytes()
         == b"other"
@@ -2691,7 +2703,9 @@ def test_reconciliation_and_serving_do_not_rehash_cached_objects(
         model_content_sha256="a" * 64,
         request_key=str(uuid.uuid4()),
     )
-    assert fresh.state == LifecycleState.SUCCEEDED
+    # The read queued recovery first; drive both admitted requests.
+    service.run_pending(limit=16)
+    assert service.get_operation(fresh.id).state == LifecycleState.SUCCEEDED
     assert (
         service.cached_artifact_file(
             downloaded.artifact_set_sha256, artifact["sha256"], "weights.bin"

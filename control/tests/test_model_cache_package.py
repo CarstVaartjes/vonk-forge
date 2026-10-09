@@ -3,12 +3,15 @@
 # ruff: noqa: F811 - pytest fixture is imported by name
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
+from vonk_agent_protocol import ModelCacheCode
 from vonk_control.model_cache.input_contracts import FixtureArtifact
+from vonk_control.operation_contract import AvailabilityOperationFailure
 
 from .non_blocking import assert_ended_without_blocking
 from .test_model_cache import (
@@ -112,11 +115,21 @@ def test_gone_source_ends_without_holding_up_a_fresh_download(cache, tmp_path):
                 artifacts=[artifact],
             )
 
+        def reason(receipt):
+            assert receipt.failure is not None
+            failure = AvailabilityOperationFailure.model_validate_json(
+                json.dumps(receipt.failure)
+            )
+            assert failure.code == ModelCacheCode.SOURCE_GONE
+            assert not failure.retryable
+            assert failure.retry_time is None
+
         _ended, admitted = assert_ended_without_blocking(
             SimpleNamespace(sessions=sessions),
             operation,
             end=end,
             fresh=fresh,
+            assert_reason=reason,
         )
         service.run_pending()
         assert service.get_operation(admitted.id).state == "succeeded"
