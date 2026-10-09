@@ -48,6 +48,25 @@ def test_control_contract_change_selects_backend_and_generation() -> None:
     assert selected["web"] is False
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "control/Dockerfile",
+        "control/src/vonk_control/runtime_init.py",
+        "control/src/vonk_control/runtime_asset_contract.py",
+        "control/src/vonk_control/api_preexec.py",
+        "scripts/render-dev-compose",
+    ],
+)
+def test_runtime_asset_producers_select_their_compose_consumers(
+    path: str, event: str
+) -> None:
+    # Wrong implementation: a producer-only PR passes without ever exercising
+    # the shell consumers or the real PostgreSQL restart recovery boundary.
+    assert _module().select([path], event)["compose"] is True
+
+
 def test_packaged_openapi_change_selects_generated_gate() -> None:
     selected = _module().select(
         ["src/cluster_profiles/schemas/control-openapi.json"], "pull_request"
