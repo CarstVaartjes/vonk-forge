@@ -114,7 +114,7 @@ fn busy_owner_ends_boundedly_and_next_request_acquires_it() {
 fn death_between_certificate_and_key_replays_verified_pair_before_validation() {
     let payload = parse_template_payload(br#"{
       "schema_version":2,"docker_compose_yaml":"services: {}\n",
-      "internal_values":[],"required_values":[],"secrets":[],
+      "internal_values":[],"required_values":[{"env":"VONK_CONTROL_HOSTNAME","prompt":"Control hostname","validation":"hostname"}],"secrets":[],
       "step_ca_controller":{
         "hostname_env":"VONK_CONTROL_HOSTNAME","provisioner_name":"vonk-forge-agent","password_bytes":32,
         "files":{
