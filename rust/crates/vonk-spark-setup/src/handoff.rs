@@ -18,13 +18,23 @@ pub(super) fn authenticate_sudo_foreground(sudo: &Path) -> Result<(), SetupError
         .write(true)
         .open("/dev/tty")
         .map_err(|_| SetupError::Command("sudo authentication requires a terminal".to_owned()))?;
-    let status = ProcessCommand::new(sudo)
+    let mut child = ProcessCommand::new(sudo)
         .arg("-v")
         .stdin(terminal)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .status()
+        .process_group(0)
+        .spawn()
         .map_err(|_| SetupError::Command("could not start sudo authentication".to_owned()))?;
+    let status = match child.wait_timeout(DEFAULT_COMMAND_TIMEOUT) {
+        Ok(Some(status)) => status,
+        _ => {
+            process::terminate_process_group(&mut child);
+            return Err(SetupError::ObservationUnavailable(
+                vonk_agent_protocol::generated::WaitReason::ObservationUnavailable,
+            ));
+        }
+    };
     if !status.success() {
         return Err(SetupError::Command("sudo authentication failed".to_owned()));
     }
@@ -57,8 +67,7 @@ pub fn handoff_to_root_with_authority(
     }
     if run_checked(runner, Command::new(&prepared.sudo, ["-n", "-v"])).is_err() {
         return Err(SetupError::Command(
-            "sudo authorization expired before privileged apply; rerun setup from a terminal"
-                .to_owned(),
+            "sudo authorization expired before privileged apply".to_owned(),
         ));
     }
     Err(SetupError::Command(

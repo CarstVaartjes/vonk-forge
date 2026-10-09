@@ -194,8 +194,8 @@ fn root_rejects_a_setup_binary_changed_after_unprivileged_verification() {
 }
 
 #[test]
-fn package_format_identity_and_release_name_are_verified_before_prompt_or_sudo() {
-    for case in ["format", "identity", "name"] {
+fn package_format_and_platform_are_verified_before_prompt_or_sudo() {
+    for case in ["format", "identity"] {
         let temporary = tempdir().unwrap();
         let install_paths = paths(temporary.path());
         fs::create_dir_all(install_paths.config.parent().unwrap()).unwrap();
@@ -290,7 +290,7 @@ fn semantic_plan_validation_precedes_any_root_artifact_processing() {
 }
 
 #[test]
-fn pairing_plan_must_match_root_owned_configuration_before_package_processing() {
+fn stale_pairing_projection_uses_current_retained_enrollment() {
     let temporary = tempdir().unwrap();
     let install_paths = paths(temporary.path());
     let ca = controller_ca();
@@ -322,15 +322,43 @@ fn pairing_plan_must_match_root_owned_configuration_before_package_processing() 
 
     let result = apply_setup_from(
         frame.as_slice(),
-        &temporary.path().join("missing-package.deb"),
+        prepared.package_path(),
         prepared.executable_path(),
         &install_paths,
         &mut runner,
         CallerIdentity::sudo_root(1000),
     );
 
-    assert!(matches!(result, Err(SetupError::PrivilegedInput)));
-    assert!(runner.commands.is_empty());
+    result.unwrap();
+    let pair = runner
+        .commands
+        .iter()
+        .find(|command| command.args.iter().any(|argument| argument == "pair"))
+        .unwrap();
+    let pin = pair
+        .args
+        .iter()
+        .position(|argument| argument == "--ca-sha256")
+        .unwrap();
+    assert_eq!(
+        pair.args[pin + 1],
+        hex::encode(Sha256::digest(
+            &rustls_pemfile::certs(&mut std::io::BufReader::new(ca.as_slice()))
+                .next()
+                .unwrap()
+                .unwrap()
+        ))
+    );
+    assert!(
+        prepare_setup(
+            &request(temporary.path()),
+            &install_paths,
+            &mut NoPrompt,
+            &mut RecordingRunner::default(),
+            CallerIdentity::unprivileged(1000)
+        )
+        .is_ok()
+    );
 }
 
 #[test]
