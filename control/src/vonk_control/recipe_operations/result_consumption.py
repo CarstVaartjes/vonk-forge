@@ -287,6 +287,33 @@ class ResultConsumptionMixin:
                 service._release_node_reservations(
                     session, owner_id, (operation.node_id,), now
                 )
+                if isinstance(target, RecipeStopPayload):
+                    # Earlier role phases may have succeeded before this rank
+                    # was cancelled. Their exact receipts must not leave claims
+                    # behind merely because the parent cannot finish successfully.
+                    for sibling in session.scalars(
+                        select(AgentOperation).where(
+                            AgentOperation.parent_job_id == job.id,
+                            AgentOperation.kind == WireAgentOperation.RECIPE_STOP,
+                            AgentOperation.state == LifecycleState.SUCCEEDED,
+                        )
+                    ):
+                        try:
+                            stopped = read_stored_model(
+                                RecipeStopPayload, sibling.payload, from_json=True
+                            )
+                        except (TypeError, ValueError):
+                            continue
+                        if (
+                            stopped.run_id == owner_id
+                            and stopped.run_generation == target.run_generation
+                            and stopped.plan_digest == target.plan_digest
+                            and stopped.recipe_content_sha256
+                            == target.recipe_content_sha256
+                        ):
+                            service._release_node_reservations(
+                                session, owner_id, (sibling.node_id,), now
+                            )
                 if node is not None:
                     node.state = RunState.STOPPED
                     node.updated_at = now

@@ -17,8 +17,10 @@ from vonk_agent_protocol import (
     AgentResultState,
     FailureCode,
     LifecycleState,
+    OutcomeDone,
     OutcomeFailed,
     OutcomeKind,
+    RecipeStopResult,
     ReservationState,
     RunState,
 )
@@ -675,6 +677,15 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         claim is not None
         and fenced_operation(sessions, claim).parent_job_id == stop_job_id
     )
+    # Stop roles dispatch sequentially. The first exact receipt makes the
+    # second rank claimable before cancellation and worker death.
+    agent_jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=OutcomeDone(kind=OutcomeKind.DONE, result=RecipeStopResult()),
+        )
+    )
     _, second_claim = _agent_service_and_target_claim(
         sessions, lifecycle, nodes[1], nodes, clock=lambda: now[0], jobs=agent_jobs
     )
@@ -708,7 +719,9 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         durable = session.get(FleetProfileApplication, application.id)
         parent_job = session.get(Job, child_id)
         stop_job = session.get(Job, stop_job_id)
-        operation = session.get(AgentOperation, fenced_operation(sessions, claim).id)
+        operation = session.get(
+            AgentOperation, fenced_operation(sessions, second_claim).id
+        )
         assert durable is not None
         assert durable.state == "running"
         cancellation_progress = durable.progress.get("cancellation")
@@ -731,20 +744,8 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
         )
         assert retained and all(item.state == "active" for item in retained)
 
-    # The exact stop owner supplies the result after the first worker dies.
-    assert agent_jobs.heartbeat(claim, None, 30).cancel_requested is True
-    agent_jobs.record_result(
-        _agent_result(
-            claim,
-            state="cancelled",
-            result={
-                "error_code": "operation_cancelled",
-                "reason": "profile cancellation reconciled after worker restart",
-            },
-        )
-    )
-    # Each rank needs its own authenticated exact Stop receipt; cancellation
-    # of an unissued Stop would leave that rank's runtime and capacity live.
+    # Worker death alone releases no claims. Each rank needs its own
+    # authenticated exact Stop receipt before cancellation can free capacity.
     with sessions() as session:
         retained_nodes = set(
             session.scalars(
@@ -754,7 +755,7 @@ def test_profile_cancel_pending_child_survives_os_worker_death_and_restarts(
                 )
             )
         )
-        assert retained_nodes == {nodes[1]}
+        assert retained_nodes == set(nodes)
     assert agent_jobs.heartbeat(second_claim, None, 30).cancel_requested is True
     agent_jobs.record_result(
         AgentResult(
